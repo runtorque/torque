@@ -2,199 +2,124 @@
 
 ## Project overview
 
-Torque is a local agent-orchestration workspace that manages AI agent and terminal sessions in a visual grid. The primary operator surfaces are now the standalone/browser and desktop app modes; the iTerm2 Toolbelt is a supported secondary integration for operators who want Torque embedded next to their terminal tabs. It's a Python daemon (aiohttp server) that communicates with the webview UI over a local WebSocket. The terminal backend is abstracted behind a `TerminalAdapter` protocol; the current implementation (`ITerm2Adapter` in `bridge.py`) controls iTerm2.
+Torque is a local agent-orchestration workspace: a long-running Python daemon, an iTerm2/PTY terminal adapter, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
+
+Primary operator surfaces are standalone/browser and desktop app modes. The iTerm2 Toolbelt remains a supported secondary integration.
 
 ## Key commands
 
 ```bash
-make deploy          # Primary: stop standalone/desktop daemon, install ~/.torque/app, refresh CLI
-make run             # Primary: launch the desktop app (standalone daemon, desktop profile)
-make standalone      # Primary browser mode: foreground standalone daemon (then make open)
-make deploy-toolbelt # Secondary: update iTerm2 Scripts Toolbelt install, then restart from Scripts menu
-make stop            # Kill running instance on TORQUE_PORT (18932 unless overridden)
-make check           # Show Python path, dep status, primary/toolbelt install status
-make open            # Open standalone/browser UI in default browser
+make deploy          # Primary install/update: ~/.torque/app + CLI refresh
+make run             # Launch the desktop app (standalone daemon, desktop profile)
+make standalone      # Foreground browser-only daemon (then make open)
+make deploy-toolbelt # Secondary iTerm2 Toolbelt install/update
+make stop            # Free TORQUE_PORT (18932 unless overridden)
+make check           # Python path, dependency, install status
+make open            # Open standalone/browser UI
+make test            # Full regression suite
 ```
 
-After `make deploy`, relaunch the primary surface with `make run` (desktop) or `make standalone` + `make open` (browser-only). After `make deploy-toolbelt`, restart the secondary Toolbelt integration from **iTerm2 → Scripts menu → torque** and enable it from **View → Show Toolbelt** if needed.
+After `make deploy`, relaunch with `make run` or `make standalone` + `make open`. After `make deploy-toolbelt`, restart from **iTerm2 → Scripts menu → torque** and enable **View → Show Toolbelt** if needed.
 
 ## Never deploy/stop mid-session
 
-If you are a Torque worker or engineer running **inside the live daemon's Python runtime**, do NOT run `make deploy`, `make deploy-toolbelt`, `make stop`, or `make restart` against the daemon that spawned you. `make stop` kills the daemon you are talking to, and the new boot inherits corrupted in-memory dispatch state (PTY subscriptions, pending-prompt queues, session cache). This applies to the primary standalone/desktop deploy path and to the secondary iTerm2 Toolbelt deploy path.
+If you are a Torque worker or engineer running inside the live daemon, do **not** run `make deploy`, `make deploy-toolbelt`, `make stop`, or `make restart` against the daemon that spawned you. Killing that daemon corrupts in-memory dispatch state (PTY subscriptions, pending-prompt queues, session cache) and can make subsequent workers boot DOA.
 
-**Symptom if you ignore this:** every subsequent worker dispatch goes DOA. `codex` workers boot but receive no prompt (0 tokens, 0 worktree diff, 1 boot-event then silence). `claude-code` workers boot but every mutating tool auto-denies. `engineer_agent_message` wakes a DOA worker for one sub-call then it re-sticks. Only a user-initiated full restart recovers — observed class-bug, 6 workers across 2 engineers + 2 providers (perf wave 2026-04-22→23, TORQUE:165/:166).
+The Makefile refuses `stop` / `deploy` / `deploy-toolbelt` / `restart` when `TORQUE_CELL_ID` is set or when pwd is under `.torque/worktrees/`; HTTP lifecycle commands reject worker-context requests unless `force=true`. Override (`FORCE=1` / `force=true`) only with a specific reason and explicit acceptance of the corruption risk.
 
-**Enforcement:** the Makefile refuses `make stop` / `make deploy` / `make deploy-toolbelt` / `make restart` when `TORQUE_CELL_ID` is set OR pwd is under `.torque/worktrees/`. The HTTP `/api/cmd` lifecycle path also rejects `restart` / `stop` / `deploy` from worker-context requests carrying `TORQUE_CELL_ID` unless `force=true` is set. Override with `FORCE=1 make <target>` or HTTP `force=true` only when you have a specific reason and accept the runtime-corruption risk.
+Safe alternatives:
 
-**Alternatives:**
-- (a) Commit your change to main (engineer_merge or git merge), then ask the user to deploy/relaunch from their own shell (`make deploy && make run` for primary desktop/standalone, or `make deploy-toolbelt` + Scripts-menu restart for the Toolbelt).
-- (b) Test against a separate instance on a different port: `make standalone-bg TORQUE_PORT=18933 TORQUE_PROFILE=desktop` — doesn't touch 18932.
-- (c) Ship observability-only changes (e.g. `log.warning` at silent-drop sites) that take effect on the next natural restart without requiring mid-session deploy.
+- Commit your change and ask the user to deploy/relaunch from their own shell.
+- Test on a different port/profile, e.g. `make standalone-bg TORQUE_PORT=18933 TORQUE_PROFILE=desktop`.
+- Ship code/logging and let it take effect on the next natural restart.
 
-## Architecture
+## Architecture map
 
-- **Entry point**: `torque.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main, retry=STANDALONE)`. In standalone mode, `retry=True` waits for iTerm2 and reconnects on restart.
-- **Python package** (`torque/`):
-  - `config.py` — env vars, paths (`STATE_FILE`, `DB_FILE`, `WEBVIEW_FILE`, `LOG_FILE`), mode flags (`STANDALONE`, `BIND_HOST`), logging setup
-  - `db.py` — `TorqueDB` (SQLite persistence layer, WAL mode, schema with 8 tables: `agents`, `groups`, `group_members`, `group_settings`, `board_tasks`, `board_lanes`, `ui_state`, `global_settings`). Targeted write methods (`save_agent`, `save_board_task`, `save_global_settings`, etc.), `load_all`, `migrate_from_json` (one-time state.json→SQLite migration), `save_all` (bulk write, used only by migration)
-  - `state.py` — `AgentCell` dataclass (with `slug` auto-generated from name, `parent_id` for terminal→agent hierarchy, `tasks_dispatched` counter for context preservation), `GroupSettings` dataclass (with `dispatch_lane`), `GlobalSettings` dataclass (app-wide: `default_command`, `filter_by_window`, `focus_new_tabs`, `default_lanes`, `keybindings`, `max_pipeline_depth`), `BoardTask` dataclass (with `slug` auto-generated from task text; task, group, action_name, action_vars, assignee, labels, agent_id, lane, position, parent_task_id, pipeline_depth, pipeline_root_id, status), `MatrixState` (SQLite persistence via `TorqueDB`, `group_slugs` dict, `_children` index, cascade delete, delta WS broadcast, `_slugify`/`_unique_slug` helpers for slug generation, `board_get_chain()` for pipeline queries). `get_default_command()` resolves boot command priority: global settings → `TORQUE_DEFAULT_CMD` env var → `"claude"`. Slugs are unique per resource type (agents+terminals share one namespace, groups another, tasks another). Agent slugs are derived from the agent name (e.g. `my-agent`). Terminal slugs are prefixed with their parent agent's slug using `:` separator (e.g. `my-agent:logs`); standalone terminals use the group slug as prefix. Slugs are regenerated on rename/reparent and cascaded to children when a parent agent is renamed. Reserved lanes (`Backlog`, `To Do`, `In Progress`, `Done`) are enforced — cannot be renamed or deleted. Delta accumulator (`_emit`, `_delta_ops`, `_seq`) tracks changes per mutation; `broadcast()` sends only deltas, `snapshot_msg()` sends full state on connect/resync.
-  - `actions.py` — `ActionManager` (Jinja2 rendering of the `prompt` field, variable auto-discovery from AST, lenient/strict parse modes, `render_action` returns flat dict with `prompt`, `group`, `labels`, `worktree`, `terminals`, `transitions`, `max_depth` + agent settings, `render_prompt` returns rendered prompt string for dispatch/preview, `validate_prompt` enforces `{{ TASK }}` requirement, `_coalesce_prompt` merges old-format fields into single prompt, `get_transitions` returns an action's valid transitions, `discover_pipelines` scans all actions and finds connected components in the transition graph, `TORQUE_CONTEXT_STUB` default dict for preview renders). Actions use `prompt:` for the main text field; only the `prompt` field is rendered through Jinja2. All actions must contain `{{ TASK }}` in their prompt. The `torque` variable name is reserved (rejected on save) — it's injected at render time with agent/context/worktree/task/terminal state (see `_build_torque_context` in `server.py`). Backward compat: old actions with `task:`+`instructions:`+`context:`+`criteria:` are auto-coalesced into `prompt` on load. Actions support **subdirectory namespaces**: `oneshot/feature.yaml` → action name `oneshot/feature`. `list_actions` uses `os.walk` to discover actions recursively; `_load_raw` resolves namespaced names via `os.path.join`. Actions can declare `transitions:` — a list of `{action: name, when: description, status: label}` entries defining valid next steps. The `status` field sets the parent task's status badge when the transition is taken (defaults to the target action name). The server enforces that `torque ai derive` can only transition to actions listed in the current action's `transitions` field.
-  - `roles.py` — `RoleManager` (primary role discovery/save/delete surface; reads role files only from `~/.torque/roles` and project `.torque/roles`, warns when legacy `.torque/agents/*.yaml` files are ignored, renders worker preamble blocks from `preamble` + `priorities`, and resolves dispatch-time agent defaults)
-  - `terminal_adapter.py` — `TerminalAdapter` Protocol defining the terminal backend interface. Implemented by `ITerm2Adapter`, `LocalPtyAdapter`, and `SupervisedPtyAdapter`; designed for future Ghostty adapter.
-  - `bridge.py` — `ITerm2Adapter` (implements `TerminalAdapter`; create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback). `send_text` splits trailing `\r`/`\n` from multi-line text and sends it after a 50ms delay so it lands outside bracketed paste mode (prevents Claude Code "[Pasted N lines]" without submitting).
-  - `local_pty.py` — **Standalone-mode only.** `LocalPtyAdapter` (legacy in-memory PTY ownership; fallback when the supervisor is unreachable) and `SupervisedPtyAdapter(LocalPtyAdapter)` (delegates PTY ownership to the sidecar process so sessions survive daemon restart — overrides `create_session`/`close_session`/`write_input`/`resize_session`/`reconnect_orphans`/`start`/`shutdown`; shares every helper with the base class). `SupervisedPtyAdapter.reconnect_orphans` reconciles persisted cells against `supervisor.list` — re-subscribes to surviving sessions, marks missing ones stopped, closes orphan supervisor sessions. `on_supervisor_event(kind, detail)` fires from the daemon: `fresh_instance` (supervisor respawned → tracked sessions finalized), `reconnected` (same instance, clear banner), `connect_failed` (degraded path).
-  - `pty_core.py` — PTY platform helpers shared by the adapter and the supervisor subprocess (PTY openpty/TIOCSCTTY/winsize, buffer/regex constants, UTF-8 incremental decoder). Dep-free so the supervisor can import it in isolation.
-  - `pty_supervisor.py` — **Standalone-mode sidecar process.** Detached via `spawn_detached` (subprocess.Popen + `start_new_session=True`), binds a unix-domain socket at `DATA_DIR/pty_supervisor.sock` (mode 0600) with pid file at `DATA_DIR/pty_supervisor.pid`. `ensure_running(data_dir)` is idempotent — pings existing socket, unlinks stale socket + pidfile, respawns if needed. Wire protocol: length-prefixed JSON (`PROTOCOL_VERSION=1`); ops: `ping`, `create`, `write`, `resize`, `close`, `list`, `subscribe`, `unsubscribe`; stream frames: `snapshot` (base64 buffer tail on subscribe), `output` (live PTY output), `exit`. The supervisor keeps sessions alive across daemon `execv` — next daemon boot re-uses the same socket + sessions.
-  - `pty_supervisor_client.py` — daemon-side client. One persistent unix-socket connection, one dispatch task that routes response frames (`ok`/`error`/`pong`/`list`) to the pending request future and stream frames to per-session callbacks. Auto-reconnects on drop and re-subscribes to every tracked session. `on_reconnect(info)` fires after a successful reconnect with `{"previous_pid", "supervisor_pid", "fresh"}`; `fresh=True` means the supervisor pid changed (crashed + respawned) — the adapter uses this to finalize now-dead sessions.
-  - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits/list_checkpoints/rollback, diff_summary, is_merged, check_base_advanced, .gitignore management). Worktrees live in `.torque/worktrees/` in the repo root, branches named `torque/{agent-name}-{short-id}`. The repo `.gitignore` ignores runtime `.torque/*` by default, then allow-lists versioned config dirs `.torque/actions/`, `.torque/roles/`, and `.torque/specializations/`; `.torque/worktrees/` remains ignored. Merge detection: `is_merged` uses ancestry check (regular merges) then `git merge-tree --write-tree` simulation (squash merges). `check_base_advanced` is a fallback for squash merges with overlapping changes — verifies the base branch advanced and its new commits touch all files the branch changed.
-  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), conditional toolbelt registration (skipped when `STANDALONE`), configurable bind address (`BIND_HOST`), all command dispatch, periodic worktree diff updater, `render_action` command (renders action for preview), `preview_prompt` command (renders full dispatch prompt for a task), `save_action` / `delete_action` commands (CRUD for action YAML files, scope-aware: project `.torque/actions/` or user `~/.torque/actions/`, creates parent dirs for namespaced actions, validates `{{ TASK }}` and rejects `torque` as variable name on save), `get_global_settings` / `update_global_settings` commands (keybinding changes trigger `keybindings.reinstall()` at runtime), `dispatch_task` command (creates or reuses an agent, links task, moves to dispatch lane — if task has `action_name`, renders action prompt with `{TASK: task.task, **action_vars}` + `torque` context namespace using `cell.directory` as primary `base_dir` for action discovery; `_build_torque_context` assembles agent/context/worktree/task/terminal state for Jinja2; increments `cell.tasks_dispatched` after send; if action missing, returns `dispatch_action_missing` warning; `force_no_action` flag bypasses; legacy fallback for old tasks with instructions/context/criteria — new agents get 2s boot delay before send; `_self_dispatch` flag adds 3s delay for derive-to-self; dynamic postscript generated from action transitions — full reference when `is_clean`, one-liner when agent has prior context; supports `inherit_worktree_from` for pipeline worktree inheritance and HITL worktree resolution via parent chain walk), `ai_report` command (single handler for all `torque ai` actions — updates agent cell ephemeral fields + linked board task labels/lane atomically; actions: done, blocked, error, progress, ready, derive, ask; derive supports `target_agent` and `reuse_self` for dispatching to existing agents), `_resolve_agent_id` helper (resolves agent by slug, name, ID, or prefix), `task_chain` command (returns all tasks in a pipeline chain by `pipeline_root_id`), `discover_pipelines` command (scans actions for `transitions` and returns connected components as pipeline graphs)
-  - `events.py` — `EventBus` (throttled broadcast, `on_session_end` callback for auto-checkpoint), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
-  - `notifications.py` — `NotificationManager` (macOS notifications via osascript, 5s batching window)
-  - `keybindings.py` — global iTerm2 key binding lifecycle (RPC registration, install/remove/reinstall bindings). Default bindings: Cmd+Option+Arrow for cell/agent nav, Cmd+Option+C to close cell, Cmd+Option+A to add agent, Cmd+Option+T to add terminal. Bindings are configurable via global settings (`_ACTION_DEFAULTS` dict, `_resolve_binding_specs` merges overrides). `reinstall()` swaps bindings at runtime when settings change. `get_default_bindings()` exports defaults for the frontend keybinding editor.
-  - `adapters/` — provider-agnostic agent awareness:
-    - `base.py` — `AgentEvent` dataclass, `AgentAdapter` base class
-    - `claude_code.py` — full integration: HTTP hooks (command hook for SessionStart), event parsing, activity inference, hook install/uninstall, session resume
-    - `codex.py` — full integration: command hooks (SessionStart/PreToolUse/PostToolUse/Stop), event parsing, activity inference, MCP config install, session resume
-    - `gemini_cli.py` — stub (process matching only)
-    - `generic.py` — fallback (process monitoring only)
-- **Webview** (`webview.html` + `static/`):
-  - `static/style.css` — all styles (dark theme, narrow toolbelt layout, responsive breakpoints at 400/600/900px for standalone/dual mode)
-  - `static/js/constants.js` — icon maps, process badge map, tab color presets, `getFilterByWindow()` (reads from `state.global_settings`, falls back to `true`), agent type labels
-  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages, delta patching (`_applyDelta`, `_rebuildChildren`, `_expectedSeq` sequence tracking, `resync` on gap)
-  - `static/js/render.js` — `render()`, agent cells (three-state status dot: gray/green/red, activity detail, type label, worktree branch badge with diff stats), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation, plus shared surface-state helpers for preserving scroll/focus/caret across rerenders
-  - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), right-click context menu (with worktree ops: Create/Checkpoint/Remove Worktree)
-  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, worktree config, session resume, idle timeout, notifications), global settings modal (tabbed: General/Keybindings; General has Server/Board sub-tabs; Keybindings tab has interactive key capture for rebinding), confirm dialog, color picker, hint tooltip popovers, task create/edit modal (auto-growing textarea for task, group, action picker, dynamic action variable textareas in fieldset, assignee, labels, preview prompt button), prompt preview modal (scrollable, max-height)
-  - `static/js/board.js` — board panel app (lane tabs, task cards with action badge, drag-and-drop reorder/move). Derived tasks render as subordinate cards (smaller, indented, nested under parent) with collapsible hierarchy; done subordinates are dimmed with checkmark. Status badges show pipeline stage (e.g. "On Review"). All four default lanes are reserved. Inline task creation: `+ Add task` row at top with auto-growing textarea (draft preserved across blur and WebSocket re-renders, Enter submits, Shift+Enter newline, Escape clears). Board rerenders must preserve operator context such as scroll position, hovered/focused card state, inline drafts, and selection unless a deliberate navigation resets the view. Card context menu with viewport overflow adjustment. Dispatch flow with missing-action warning dialog. "View pipeline" context menu opens a pipeline thread overlay showing the full task chain with status indicators and click-to-focus.
-  - `static/js/events.js`, `context.js`, `agent_panel.js` — live panels that rebuild from WebSocket updates (`agent_panel.js` renders the Agent panel). Preserve scroll anchors, focus/caret, inline drafts, expanded sections, and other in-progress operator context while updates stream in.
-  - `static/js/actions.js` — actions panel app (dropdown selector with Project/User optgroups, structured editor form with single `prompt` field with Jinja2 syntax highlighting, `{{ TASK }}` validation on save, save/duplicate/delete, scope picker, auto-discovered variables display, transitions editor with action picker dropdown and auto-growing "When" textarea). Action name sanitizer allows `/` for subdirectory namespaces. Editor/Pipelines view toggle — Pipelines view is a pannable/zoomable canvas (CSS transform, mouse drag + scroll wheel zoom) that renders action nodes with SVG bezier edges. BFS layout places entry nodes at top, terminals at bottom. Ask transitions render as small pill nodes snug to their source. Back-edges route via left or right side (closest to target) using quadratic S-curves. Pipeline data is re-fetched on each view switch.
-  - `static/js/main.js` — keyboard navigation (arrows within group, Tab/Shift+Tab between groups, Enter, Delete, N/G/T/R shortcuts), panel toggle (board + actions), boot, drag setup
-- **CLI** (`bin/torque`):
-  - Standalone Python script (stdlib + PyYAML). Talks to daemon via HTTP `POST /api/cmd` for writes, reads SQLite directly for read-only commands (task/board list, show, lanes).
-  - `get_state_local(port)` — tries SQLite first (profile data dirs under `~/.torque/profiles/<profile>/`, or the secondary iTerm2 Toolbelt DB when no standalone profile is selected), falls back to HTTP daemon. Used by all task/board commands.
-  - Task commands: `create` (with `--action`/`--var`), `dispatch`, `show`, `list`, `edit` (opens `$EDITOR` with YAML or inline flags; `--action`/`--var` replace old `-i`/`-x`/`-k`), `move`, `assign`
-  - Board commands: `list`, `add`, `move`, `remove`, `lanes`
-  - AI agent reporting (`torque ai`, **humans + offline scripts only** — workers go through MCP tools per TORQUE:238 cutover): `done` (mark task complete, move to Done, trigger cascade completion up parent chain), `blocked "reason"` (set needs_attention, add `blocked` label), `error "msg"` (set error_message, add `error` label), `progress "msg"` (update activity_detail), `ready` (done + unlink agent + cascade), `context` (read-only dump of agent/task info, works offline), `derive "desc" -a ACTION` (keep parent task in In Progress with status from transition, create derived task, dispatch new agent — validates transition against action's `transitions` list, inherits worktree from parent agent, enforces depth limit; `--agent <slug>` dispatches to a specific existing agent instead of creating a new one; `--self` dispatches to the calling agent with a 3s delay; status propagates to root task), `ask "question"` (keep parent task in In Progress with "Awaiting Input" status, create derived task in Backlog with `human` label for HITL review). All `torque ai` commands auto-detect the calling agent via `TORQUE_CELL_ID` env var and auto-resolve the linked board task. Server-side: single `ai_report` command handles all actions atomically (the worker MCP tools `mcp__torque__torque_*` route through the same `ai_report` codepath via `torque/mcp.py`). Label conventions: `blocked`, `error`, `derived`, `human`, `depth-limit`. Cascade completion: when `done`/`ready` is called, walks up parent chain — if all children of an ancestor are Done, that ancestor moves to Done too.
+See [docs/reference/architecture.md](docs/reference/architecture.md) for the detailed file-by-file reference. High-level map:
 
-**Worker dispatch (TORQUE:238):** dispatched workers report exclusively via MCP tools — `mcp__torque__torque_progress` / `_done` / `_blocked` / `_error` / `_ask` / `_derive` / `_ready` / `_verify` / `_name`. The dispatch postscript (`torque/server_prompts.py build_dispatch_postscript` + `build_torque_system_prompt`) lists these by name. The CLI `torque ai *` is preserved for human + offline-script use only. The `_maybe_torque_ai_mcp_tool_name` Bash-rewrite bridge from `:236` v1-v3 was removed; workers' MCP PostToolUse hooks now hit `/events` directly with the real `mcp__torque__torque_*` tool name, and the `/events` capture clause suppresses its `mcp_call_append` for tool names in `_TORQUE_AI_MCP_REPORT_TOOL_NAMES` so the ai_report `_append_mcp` synthesis isn't double-emitted (matches engineer/architect MCP-tool broadcast shape).
-  - Pipeline commands (`torque pipeline`): `list` (discover pipelines from action transitions), `show <name>` (display pipeline as adjacency list with transition descriptions).
-  - Task chain: `torque task chain <task>` shows the full derivation chain for a task.
-  - `resolve_cell(state_data, identifier)` — resolves agent/terminal by ID, slug, name (case-insensitive), or ID prefix. Slug match takes priority over name match.
-  - `resolve_group(state_data, identifier)` — resolves group by exact name, slug, or case-insensitive name
-  - `resolve_task(state_data, identifier)` — resolves task by ID, slug, ID prefix, or title match with ambiguity handling
+- `torque.py`: installed entrypoint; anchors runtime paths and starts iTerm2/standalone loop.
+- `torque/server.py`: aiohttp routes, command dispatch, agent launch/reuse, action rendering, worker/engineer/architect integration glue.
+- `torque/server_agent.py`, `server_dispatch.py`, `server_worktrees.py`, `server_artifacts.py`, `server_actions.py`: extracted helpers for server-heavy concerns.
+- `torque/state.py`: core dataclasses (`AgentCell`, `BoardTask`, settings) and `MatrixState` mutation/delta logic.
+- `torque/db*.py`: SQLite schema, persistence, board, and shared-memory helpers.
+- `torque/actions.py`: YAML action discovery plus Jinja2 `prompt` rendering; only `prompt` renders, `torque` is reserved, and `transitions` define valid derives.
+- `torque/templates.py`, `roles.py`, `specializations.py`: agent template/config discovery and role/specialization resolution.
+- `torque/worktree.py`, `worktree_boundaries.py`: git worktree lifecycle, checkpointing, merge/boundary safety.
+- `torque/mcp*.py`, `mcp_engineer_tools/`: worker, engineer, architect MCP tool surfaces and scoping.
+- `torque/engineer.py`, `architect.py`: persistent role prompts, journals/digests/decisions, orchestration behavior.
+- `torque/adapters/`: provider integrations (`claude-code`, `codex`, `gemini-cli`, generic).
+- `webview.html` + `static/js/*` + `static/style.css`: plain frontend; script load order is architectural.
+- `bin/torque`: CLI; writes go through HTTP, many reads go directly to SQLite.
 
-## Persistence
+## Persistence and state
 
-- **SQLite** (`torque.db`) is the persistence layer, using WAL mode for concurrent daemon writes + CLI reads.
-- **Ephemeral fields** (activity, activity_detail, last_event_at, session_tokens_in/out, error_message, needs_attention, last_summary, current_process, current_path, current_branch, git_root, worktree_dirty, worktree_diff, worktree_checkpoints) live in-memory only — not persisted to SQLite, cleared on restart.
-- **Delta broadcasts**: Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WS clients. Full state (`snapshot_msg()`) is sent only on initial WS connect or `resync` command. 12 delta op types: `agent_upsert`, `agent_remove`, `group_update`, `group_remove`, `group_rename`, `groups_reorder`, `group_settings_update`, `global_settings_update`, `task_upsert`, `task_remove`, `lanes_update`, `ui_update`, `focus_update`.
-- **Slugs**: Every agent, terminal, group, and board task has a `slug` column persisted in SQLite. Slugs are auto-generated from the resource name via `_slugify()` and are unique per resource type. On startup, any resource missing a slug (or a terminal with an old-format slug lacking `:`) gets one generated automatically. The CLI accepts slugs as identifiers everywhere IDs or names are accepted.
-- **Migration**: On first startup, if `torque.db` is empty but `state.json` exists, data is imported automatically and `state.json` is renamed to `state.json.bak`. Schema migrations (e.g. adding `slug`, `action_name`, `action_vars`, `tasks_dispatched` columns) use `ALTER TABLE ... ADD COLUMN` in `TorqueDB.init()`, guarded by try/except. `action_vars` is stored as JSON text in SQLite, decoded on load.
+- SQLite (`torque.db`) is the persistent source of truth and uses WAL mode for daemon writes plus CLI reads.
+- Web clients receive a snapshot on connect/resync and then WebSocket deltas from `MatrixState._emit()` / `broadcast()`.
+- CLI read paths must keep working offline against SQLite when the daemon is stopped.
+- Ephemeral agent fields (activity, current process/path/branch, token counts, needs_attention, live worktree diff, etc.) intentionally live only in memory and clear on restart.
+- Slugs are persisted for agents, terminals, groups, and board tasks; startup fills missing/legacy slugs. CLI identifiers accept slugs, IDs, prefixes, and names where supported.
+- Schema/state-shape changes usually require coordinated updates in dataclasses, SQLite serialization, server command/serialization, CLI read paths, frontend consumers, and tests.
+
 ### Kinds refactor invariants
-- Agent kinds are explicit and final: `architect`, `engineer`, `worker`, `terminal`.
-- Roles live only under `~/.torque/roles/` and project `.torque/roles/`. Legacy `.torque/agents/*.yaml` files are ignored and surfaced as warnings in logs / `torque doctor`.
-- Project-scoped roles and specializations are versioned Torque config. `.gitignore` must keep `.torque/actions/**`, `.torque/roles/**`, and `.torque/specializations/**` allow-listed while runtime `.torque/*` artifacts remain ignored.
-- The project role/specialization taxonomy is documented in `docs/reference/specializations.md`; keep the seven specialization slugs and matching worker roles in sync with `.torque/roles/*.yaml` and `.torque/specializations/*.yaml`.
-- Ownership is explicit: workers use `owner_engineer_id`; tasks use `assigned_engineer_id`; engineers may carry `hired_by_architect_id`; architect-created tasks carry `created_by_architect_id`.
-- Worker dispatch prepends role `preamble` / `priorities` unless the action sets `disable_role_preamble: true`.
-- The Jinja `torque` namespace includes `torque.agent.kind`, `torque.agent.role`, `torque.agent.owner_engineer`, and for architect-hired workers `torque.agent.hired_by_architect`.
-- MCP tool surfaces are final: `engineer_*`, `architect_*`, and worker-side `torque ai`. The legacy `engineer_*` alias surface is gone.
-- Engineer scoping is strict: an engineer sees only itself, its owned workers / terminals, and tasks assigned to it in-group. Engineer-created workers and tasks are auto-stamped with that engineer's ownership ids. Deleting an engineer transfers owned workers and assigned tasks back to the user by clearing those ids.
-- Architects are user-created only and are never hired. `TORQUE_ARCHITECT_ID` binds architect MCP sessions. Architects can create / reassign only their own architect-created tasks, and only to engineers they hired.
-- The decision log is per-architect and persisted in `decisions`; pending hires are user-approved and approval creates engineers with `hired_by_architect_id=<architect.id>`.
-- Architect ↔ engineer messaging is the only architect cross-kind channel. Engineers may message only their hiring architect. Workers report only through `torque ai` status / derive / ask flows, not direct messaging tools.
-- Worker worktrees use `torque/<engineer-slug>/<worker-slug>-<shortid>` or `torque/user/<worker-slug>-<shortid>`; engineer / architect worktrees stay flat under `torque/<slug>-<shortid>`, and grandfathered flat worker branches remain valid.
-- Review-cycle fixes must stay on the implementer's branch: when a `feature/review` task derives a `feature/implement` fix, the derived task is parented to the review's parent task so worktree inheritance skips the reviewer. Merge also refuses sibling `feature/review` / `feature/implement` branches with commits absent from the merge target unless `force=true` is explicitly used after diffing those branches.
-- `torque doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership / scope invariants.
-- The archived design / rollout record is [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
 
-- **Torque context namespace**: Action templates can reference a `torque` dict injected at render time containing agent identity (`torque.agent.*`), dispatch context (`torque.context.is_clean`, `torque.context.tasks_dispatched`, `torque.context.previous_tasks`), worktree state (`torque.worktree.*`), task metadata (`torque.task.*`), and child terminals (`torque.terminals`). `torque` is a reserved variable name — rejected on action save. Preview renders use `TORQUE_CONTEXT_STUB` (safe defaults with `is_clean=True`).
+- Agent kinds are explicit and final: `architect`, `engineer`, `worker`, `terminal`.
+- Roles live only under `~/.torque/roles/` and project `.torque/roles/`; legacy `.torque/agents/*.yaml` files are ignored and warned by logs / `torque doctor`.
+- Project `.torque/actions/**`, `.torque/roles/**`, and `.torque/specializations/**` are versioned config and must stay allow-listed while runtime `.torque/*` stays ignored.
+- Keep the seven specialization slugs and matching worker roles in sync with `.torque/roles/*.yaml`, `.torque/specializations/*.yaml`, and [docs/reference/specializations.md](docs/reference/specializations.md).
+- Ownership is explicit: workers use `owner_engineer_id`; tasks use `assigned_engineer_id`; engineers may carry `hired_by_architect_id`; architect-created tasks carry `created_by_architect_id`.
+- Worker dispatch prepends role `preamble` / `priorities` unless an action sets `disable_role_preamble: true`.
+- The Jinja `torque` namespace includes `torque.agent.kind`, `torque.agent.role`, `torque.agent.owner_engineer`, and `torque.agent.hired_by_architect` for architect-hired workers.
+- MCP surfaces are final: worker-side `torque_*`, engineer-side `engineer_*`, and architect-side `architect_*`; legacy aliases are gone.
+- Engineer scoping is strict: engineers see only themselves, owned workers/terminals, and in-group tasks assigned to them. Engineer-created workers/tasks are auto-stamped with ownership ids. Deleting an engineer clears those ids back to the user.
+- Architects are user-created only, never hired. `TORQUE_ARCHITECT_ID` binds architect MCP sessions. Architects can create/reassign only their own architect-created tasks, and only to engineers they hired.
+- Architect decisions are persisted in `decisions`; pending hires are user-approved and approval creates engineers with `hired_by_architect_id`.
+- Architect ↔ engineer messaging is the only architect cross-kind channel. Engineers may message only their hiring architect. Workers report only through `torque_*` status / derive / ask flows.
+- Worker worktrees use `torque/<engineer-slug>/<worker-slug>-<shortid>` or `torque/user/<worker-slug>-<shortid>`; engineer/architect worktrees stay flat; grandfathered flat worker branches remain valid.
+- Review-cycle fixes stay on the implementer's branch. A `feature/review` → `feature/implement` fix is parented to the review's parent so worktree inheritance skips the reviewer. Merge refuses sibling review/implement branches with unmerged commits unless `force=true` is explicit after diffing.
+- `torque doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership/scope invariants. Full design record: [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
+
+### Torque context namespace
+
+Action templates can reference the injected `torque` dict: `torque.agent.*`, `torque.context.*`, `torque.worktree.*`, `torque.task.*`, and `torque.terminals`. `torque` is a reserved variable name and is rejected on action save. Preview renders use safe `TORQUE_CONTEXT_STUB` defaults.
+
+## Worker dispatch and reporting
+
+Dispatched workers report through MCP tools only: `torque_progress`, `torque_done`, `torque_blocked`, `torque_error`, `torque_ask`, `torque_derive`, `torque_ready`, `torque_verify`, and related shared-memory/artifact tools. `build_torque_system_prompt()` and `build_dispatch_postscript()` list the current completion paths; `torque_derive` is restricted to the action's declared transitions. The CLI `torque ai *` remains for humans/offline scripts, not worker prompt guidance.
+
+Workers should not ask the user directly. Use `torque_ask` only for blocking human decisions or approvals so Torque can track the request.
 
 ## Code conventions
 
-- Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self._emit()` (to queue a delta) then targeted `self._db_save_*()` methods (to persist only the changed rows). External callers (bridge, events, server) that mutate cell fields directly must call `state._emit_agent(cell)` then `state._db_save_agent(cell)` — skip the DB write for ephemeral-only changes (activity, process, path). Every iTerm2 API error must be caught and logged (never bare `except: pass`).
-- JS: no build step, no framework. Eight plain script files loaded in order (constants → ws → render → commands → modals → board → actions → main). All functions are global. State is patched in-place from WebSocket delta messages, then re-rendered. Full state is only received on initial connect or after a resync.
-- Rerender guardrail: when a live panel rebuilds in response to WebSocket updates, preserve operator state before paint unless the UI is intentionally navigating away. Do not rely on raw `scrollTop` alone when content can be inserted above the viewport — preserve an anchor item plus relative offset. Prefer the shared capture/restore helpers in `static/js/render.js` and pair panel changes with frontend regression tests that use the real selectors/markup patterns from production.
-- **Surface-invalidation discipline (TORQUE:236 v4-v14)**: every WS delta op that calls `_markSurface(flags, 'engineer')` (or any non-trivial surface) must scope the invalidation to whether the focused panel actually displays the affected data. Unconditional `_markSurface` for ops in a switch case is the prevailing footgun pattern — it produces the appearance of working code while burning hundreds of full panel rebuilds per second under normal worker activity. Concrete rules:
-  - **Per-cell ops** (`event_append`, `mcp_call_append`, `agent_digest_update`): mark engineer only when `op.cell_id === focused agent id`.
-  - **Per-agent ops** (`agent_upsert`, `agent_remove`): mark engineer only when the upserted agent matches the focused agent OR (focused is engineer/architect AND agent.owner_engineer_id === focused.id). Beware dead-code fallthroughs after focused-id checks — `if (focused === agent) return true; return true;` looks correct but the trailing return makes the conditional pointless.
-  - **Per-group ops** (`engineer_streams*`, `engineer_buffer_stats`, `engineer_sent_events`, `engineer_worklog_append`, `digest_*`, `journal_append`, `journal_delete`): mark engineer only when `focused engineer.group === op.group`.
-  - **Per-architect ops** (`architect_journal_append`, `decision_*`, `pending_hire_*`): mark engineer only when `focused.id === op.architect_id`. For `_remove`/`_resolve` ops missing architect_id, resolve via the cached record before falling back to legacy refresh.
-  - **iTerm2 focus ops** (`focus_update`): NEVER mark engineer. This op carries iTerm2 session/window focus, not agent panel focus. The engineer panel renders from `focusedItemId` / `selectedAgentId` (client-side); `active_session_id` is a deep-fallback consumer in `_agentPanelCurrentGroup()` only.
-  - **Render-call discipline**: every callsite that calls `renderAgentPanel()` from delta-driven paths (`render()`, `_renderSurface('engineer')`, etc.) must route through `_agentPanelRefreshCurrentTab()` first — surgical in-place refresh of `.agent-panel-content` (with capture/restore around it) that preserves the panel shell + tab chrome. Full `renderAgentPanel()` is for first paint / structural changes / shell mismatch only. Do NOT call `renderAgentPanel()` redundantly from `render()` when the engineer flag wasn't actually invalidated; pass `{ skipPanelRefresh: true }` on the delta path so the surfaces dispatch loop is the sole authority on engineer-surface refresh.
-  - **Investigation pattern**: any UI-flicker / textbox-deselect / scroll-yank bug that doesn't crack on the first-fix attempt → ship `console.warn` instrumentation at the suspected sink (renderAgentPanel + the in-place renderer + `_deltaSurfaceInvalidations` per-op flag-flip) behind `window.__torqueDebugRender`. The caller-stack trace + per-op log identifies the actual trigger in one user reload — speculative gates without evidence will burn many redeploy cycles. The flag-gated instrumentation is shipped in `agent_panel.js` + `ws.js` and stays in tree as ongoing observability.
-- CSS: single file, CSS custom properties for theming, monospace font throughout.
-- `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView — use the custom `showConfirm()` modal instead.
+- Python: no framework beyond aiohttp + iterm2. State mutations should go through `MatrixState` methods, which emit deltas and targeted DB writes. Direct cell mutations from bridge/events/server must call `state._emit_agent(cell)` and `state._db_save_agent(cell)` unless only ephemeral fields changed. Catch and log iTerm2 API errors; never use bare `except: pass`.
+- JS: no framework, no TypeScript, no build step. `webview.html` script order matters (core globals first, then board/modal submodules, then feature panels). State is patched in place from WS deltas.
+- Live frontend panels must preserve operator state across routine rerenders: scroll/viewport anchor, hover/focus/caret, inline drafts, expanded sections, and selection. Prefer shared capture/restore helpers in `static/js/render.js` and add Node frontend regression coverage for rerender-stability fixes.
+- CSS: single stylesheet, CSS custom properties for theming, monospace throughout.
+- `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView; use custom modal/context-menu flows.
 
-## iTerm2 API gotchas
+### Surface-invalidation discipline
 
-- **Tab color**: Must set all three variants (`set_tab_color`, `set_tab_color_light`, `set_tab_color_dark`) plus their `set_use_tab_color*` flags — otherwise color won't show depending on user's light/dark mode settings.
-- **Tab reorder**: Use `window.async_set_tabs(list)` with the full tab list in desired order. No per-tab move API.
-- **PromptMonitor**: Only fires when shell integration is active. For TUI apps (Claude Code, vim), the prompt won't fire until the app exits.
-- **VariableMonitor**: `jobName` and `path` are session-scoped variables. Monitor triggers on change, not on initial value — seed with `async_get_variable()` first.
-- **Port conflicts**: If the daemon crashes on start, an old instance is likely still holding port 18932. Run `make stop` first.
-- **Restart**: `os.execv(sys.executable, [sys.executable] + sys.argv)` replaces the process in-place. Must set `reuse_address=True` on the TCPSite so the new process can bind immediately.
-- **Global key bindings**: `async_set_global_key_bindings` is replace-all — must read→merge→write. Displaced user bindings are saved and restored on shutdown. On crash, stale `torque_*` bindings are cleaned up on next startup. Bindings are configurable via global settings — `keybindings.reinstall()` swaps them at runtime without re-registering RPCs.
-- **RPC invocation**: `INVOKE_SCRIPT_FUNCTION` param format is `"function_name()"`. RPCs are registered via `@iterm2.RPC` decorator + `async_register(connection)`. Arrow key bindings require the `FUNCTION` modifier flag alongside other modifiers.
-- **Menu shortcut precedence**: iTerm2's built-in menu shortcuts (e.g., Cmd+Shift+Left/Right for Move Tab) override global key bindings. Use Cmd+Option for arrow bindings to avoid conflicts.
-- **Right-click menus**: `window.confirm()` and native context menus don't work in WKWebView — use custom `contextmenu` event handlers with positioned `<div>` elements instead.
+For WS delta handling, mark expensive surfaces only when the focused panel actually displays the affected data. The common footgun is unconditional `_markSurface(flags, 'engineer')`, which causes high-frequency full panel rebuilds under normal worker activity.
 
-## Claude Code hooks gotchas
+Rules of thumb:
 
-- **SessionStart only supports command hooks**: `SessionStart`, `WorktreeCreate`, and `WorktreeRemove` events only work with `type: "command"` hooks. HTTP hooks (`type: "http"`) are silently ignored for these events. Use a `curl`-based command hook instead.
-- **allowedEnvVars required for HTTP headers**: HTTP hooks that interpolate env vars in headers (e.g., `"X-Torque-Cell-Id": "$TORQUE_CELL_ID"`) must list those vars in `allowedEnvVars`. Without it, the variable is not interpolated and the header is empty.
-- **Hook config location**: Claude Code reads `.claude/settings.local.json` relative to the project root (git root). Torque writes hooks there using a merge strategy — Torque hooks are identified by their URL (`localhost:18932/events`) and can be added/removed without affecting user hooks.
-- **Session ID**: Available in all hook payloads as the top-level `session_id` field. Persisted by Torque for `claude --resume` on relaunch. A `/clear` command generates a new session ID.
+- Per-cell ops (`event_append`, `mcp_call_append`, `agent_digest_update`) affect engineer panel only when `op.cell_id` is the focused agent.
+- Per-agent ops affect engineer panel only when the changed agent is focused or is owned by the focused engineer/architect.
+- Per-group engineer/digest/journal ops affect engineer panel only when the focused engineer is in that group.
+- Per-architect ops affect engineer panel only when the focused architect id matches the op (resolve cached records for remove/resolve ops when needed).
+- `focus_update` is iTerm2 session/window focus, not agent-panel focus; do not mark engineer from it.
+- Delta-driven callsites should route through `_agentPanelRefreshCurrentTab()` before falling back to full `renderAgentPanel()`.
+- For stubborn flicker/textbox/scroll bugs, use existing `window.__torqueDebugRender` instrumentation before adding speculative gates.
 
-## Testing changes
+## Testing
 
-Run the automated regression suite with `make test`; the target self-sanitizes
-`TORQUE_*` runtime variables inherited from worker/standalone shells.
+Run `make test`; it self-sanitizes inherited `TORQUE_*` runtime variables. Use targeted tests first when practical, but keep the full suite green before finishing. Manual runtime/deploy recipes live in [docs/operate/manual-testing.md](docs/operate/manual-testing.md) and must be run only from a non-worker shell.
 
-For manual runtime testing:
-1. From a non-worker shell, `make deploy`
-2. Relaunch the primary app with `make run` (desktop) or `make standalone` + `make open` (browser)
-3. Check `torque.log` in the active profile data dir for errors:
-   ```
-   ~/.torque/profiles/desktop/torque.log      # make run / desktop profile
-   ~/.torque/profiles/standalone/torque.log   # make standalone
-   ```
-4. Test in the primary desktop/browser UI: create groups, add agents, click agent to select → add child terminals, drag terminals between drawer and standalone, remove agent (cascade), relaunch, right-click → edit name/color, keyboard nav (arrows within group, Tab between groups, Cmd+Option+Arrows from terminal)
-5. Test global settings: click gear icon → Settings modal. General > Server: change default command, toggle filter by window, toggle focus new tabs (uncheck → create agent → verify previous tab keeps focus). General > Board: edit default lanes. Keybindings: rebind a key combo, verify it takes effect immediately. Save → restart daemon → confirm settings persist.
-   - Test inline task creation: click `+ Add task` → auto-growing textarea appears. Type and Enter → task created. Escape → clears draft. Blur → draft preserved, clicking `+ Add task` again restores text.
-   - Test task modal: task textarea auto-grows. Action variable textareas auto-grow. Edit task → action picker pre-selects stored action, vars pre-filled.
-   - Test dispatch: task with action → agent receives rendered prompt. Delete action → dispatch → warning dialog → dispatch without action works.
-   - Test action editor: open Actions panel → old-format actions should show coalesced `prompt` field. Create new action → `{{ TASK }}` validation on save. Edit prompt → variables auto-discovered below.
-6. Verify SQLite persistence: restart daemon, confirm state survives. Check `torque.db` exists in the active profile data dir.
-7. Verify delta sync: open browser devtools → Network → WS tab, confirm messages are `type: "delta"` (not full state) after initial connect.
-8. Verify CLI offline reads: `make stop`, then `torque task list` — should work without daemon running.
-9. Test secondary Toolbelt mode only when touching iTerm2 integration: `make deploy-toolbelt`, restart from Scripts menu, then `make open` → browser window should show the same state as the Toolbelt. Actions in either UI should be reflected in both.
-10. Test standalone browser mode: `make stop`, then `make standalone` → `make open` → daemon runs with no Toolbelt panel registered. Check log for "Standalone mode — toolbelt registration skipped" and "using PTY supervisor at <sock path>".
-11. Test PTY supervisor survival (standalone only): with a standalone daemon and an open xterm.js terminal, trigger a restart via the header's ↻ button or `POST /api/cmd {"cmd":"restart"}`. The browser's terminal WS should reconnect within ~15s and the shell should still be alive (its state preserved). Check `~/.torque/profiles/<profile>/pty_supervisor.log` for supervisor-side traces, and `pty_supervisor.pid` for the running supervisor pid. Recovery if the supervisor dies: `kill $(cat pty_supervisor.pid)` → `rm pty_supervisor.sock pty_supervisor.pid` → relaunch Torque; a red banner at the top of the UI reports `supervisor_unavailable` until it comes back.
+## Reference docs
 
-## Install location
+Moved reference material lives here to keep boot context small:
 
-Primary standalone/desktop app files are installed to:
-```
-~/.torque/app/
-```
-Primary runtime data is profile-scoped:
-```
-~/.torque/profiles/desktop/torque.db       # make run / desktop profile
-~/.torque/profiles/desktop/torque.log
-~/.torque/profiles/standalone/torque.db    # make standalone
-~/.torque/profiles/standalone/torque.log
-```
-
-Secondary iTerm2 Toolbelt files are installed by `make deploy-toolbelt` to:
-```
-~/Library/Application Support/iTerm2/Scripts/torque/torque/
-```
-Toolbelt runtime data (created by the daemon, not installed by `make deploy-toolbelt`):
-```
-~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db    # SQLite state
-~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log   # daemon log
-```
-This is an iTerm2 "full environment" script project with its own bundled Python 3.14 at:
-```
-~/Library/Application Support/iTerm2/Scripts/torque/iterm2env/versions/3.14.0/bin/python3
-```
+- [Detailed architecture reference](docs/reference/architecture.md)
+- [iTerm2 API gotchas](docs/reference/iterm2-gotchas.md)
+- [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
+- [Install locations](docs/reference/install-locations.md)
+- [Manual testing](docs/operate/manual-testing.md)
