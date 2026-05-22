@@ -167,8 +167,15 @@ _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
     "context_decision_ids",
 )
 _AGENT_PEER_MESSAGE_DELIVERY_STATES = {"buffered", "delivered", "failed"}
-_AGENT_PEER_MESSAGE_NON_USER_WHERE = "(sender_kind!='user' AND recipient_kind!='user')"
-_AGENT_PEER_MESSAGE_USER_WHERE = "(sender_kind='user' OR recipient_kind='user')"
+_AGENT_PEER_MESSAGE_NON_USER_WHERE = (
+    "(sender_kind!='user' AND recipient_kind!='user' "
+    "AND message_type='message' AND blocking=0)"
+)
+_AGENT_DIRECT_MESSAGE_WHERE = (
+    "(sender_kind='user' OR recipient_kind='user' "
+    "OR message_type!='message' OR blocking!=0)"
+)
+_AGENT_PEER_MESSAGE_USER_WHERE = _AGENT_DIRECT_MESSAGE_WHERE
 
 
 def _json_text_list(value) -> list[str]:
@@ -3720,7 +3727,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "(sender_id=? AND recipient_id=?))"
             )
             params.extend([agent_id, peer_id, peer_id, agent_id])
-        elif peer_kind:
+        elif peer_kind and peer_kind != "user":
             where.append(
                 "((sender_id=? AND recipient_kind=?) OR "
                 "(recipient_id=? AND sender_kind=?))"

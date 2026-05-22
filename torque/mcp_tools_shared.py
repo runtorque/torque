@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
+from .direct_message_mirrors import save_direct_ask_mirror
 from .mcp_retry import (
     derive_idempotency_key,
     is_mcp_pr_phase,
@@ -5879,6 +5880,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         question = str(args.get("question", "") or "").strip()
         if not question:
             return "Question is required", True
+        architect = real_state.agents.get(str(caller_id or "").strip())
 
         create_result = await handle_command({
             "cmd": "board_add_task",
@@ -5907,6 +5909,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         })
         if update_result and update_result.get("type") == "error":
             return update_result.get("message", "Unknown error"), True
+        save_direct_ask_mirror(
+            real_state,
+            architect,
+            question,
+            source_task_id=task_id,
+        )
 
         return json.dumps({
             "type": "ok",

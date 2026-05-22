@@ -34,6 +34,11 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import capture_deploy_boot_state
+from .direct_message_mirrors import (
+    direct_ask_mirror_source_key,
+    save_direct_ask_mirror,
+    save_direct_ask_reply_mirror,
+)
 from .doctor import build_doctor_report
 from dataclasses import asdict
 from .state import (
@@ -4540,6 +4545,13 @@ async def _resolve_architect_ask_task(
     if not task_is_closed(task):
         state.board_move_task(task.id, "Done")
     state.board_update_task(task.id, status="", messages=messages)
+    save_direct_ask_reply_mirror(
+        state,
+        architect,
+        answer,
+        question=question,
+        source_task_id=str(getattr(task, "id", "") or ""),
+    )
 
     if panel_event:
         panel_event(
