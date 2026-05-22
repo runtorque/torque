@@ -2082,6 +2082,228 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_user_agent_message_persists_and_queues_wrapped_prompt(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': 'Can you summarize your current plan?',
+                'idempotency_key': 'browser-submit-1',
+            },
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertTrue(result['delivered'])
+        self.assertFalse(result['buffered'])
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][0], worker.id)
+        prompt = sent[0][1]
+        self.assertIn('## Message from the User', prompt)
+        self.assertIn(f"Message ID: {result['message_id']}", prompt)
+        self.assertIn(f"Thread ID: {result['thread_id']}", prompt)
+        self.assertIn('Can you summarize your current plan?', prompt)
+        self.assertIn(
+            'mcp__torque__torque_message_user(thread_id=',
+            prompt,
+        )
+        self.assertIn(
+            'Do not rely on free-text terminal output',
+            prompt,
+        )
+        self.assertTrue(sent[0][2].get('background'))
+        self.assertTrue(sent[0][2].get('prime_input_ready'))
+        self.assertTrue(sent[0][2].get('settled_submit'))
+
+        persisted = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(persisted['sender_kind'], 'user')
+        self.assertEqual(persisted['recipient_id'], worker.id)
+        self.assertEqual(persisted['recipient_kind'], 'worker')
+        self.assertEqual(persisted['delivery_state'], 'delivered')
+        self.assertEqual(persisted['delivery_reason'], '')
+        self.assertEqual(
+            state.direct_messages_by_agent[worker.id][0]['delivery_state'],
+            'delivered',
+        )
+
+    async def test_user_agent_message_buffers_down_agent_and_replays_on_wake(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='arch-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'] = [architect.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': architect.id,
+                'message': 'I left context while you were offline.',
+                'idempotency_key': 'offline-submit',
+            },
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(result['delivery_state'], 'buffered')
+        self.assertEqual(result['delivery_reason'], 'no_session')
+        self.assertEqual(sent, [])
+        persisted = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(persisted['delivery_state'], 'buffered')
+        self.assertEqual(persisted['delivery_reason'], 'no_session')
+
+        architect.session_id = 'session-arch'
+
+        class NoRawBridge:
+            def prime_input_ready(self, _session_id):
+                raise AssertionError('direct replay must not prime bridge raw')
+
+            async def send_text(self, _session_id, _text):
+                raise AssertionError('direct replay must not use bridge.send_text')
+
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            NoRawBridge(),
+            architect,
+            send_prompt=fake_send_prompt,
+        )
+
+        self.assertEqual(replayed, 1)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][0], architect.id)
+        self.assertIn(
+            'mcp__torque__architect_message_user(thread_id=',
+            sent[0][1],
+        )
+        replayed_row = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(replayed_row['delivery_state'], 'delivered')
+        self.assertEqual(replayed_row['delivery_reason'], '')
+
+    async def test_user_agent_message_send_failure_stays_buffered_with_reason(self):
+        state = self._make_state()
+        engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Engineer',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+            session_id='session-eng',
+        )
+        state.agents[engineer.id] = engineer
+        state.groups['g'] = [engineer.id]
+
+        async def failing_send_prompt(*_args, **_kwargs):
+            raise RuntimeError('terminal unavailable')
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': engineer.id,
+                'message': 'This should retry later.',
+                'idempotency_key': 'failure-submit',
+            },
+            state,
+            failing_send_prompt,
+        )
+
+        self.assertEqual(result['delivery_state'], 'buffered')
+        self.assertEqual(result['delivery_reason'], 'terminal unavailable')
+        persisted = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(persisted['delivery_state'], 'buffered')
+        self.assertEqual(persisted['delivery_reason'], 'terminal unavailable')
+        self.assertEqual(
+            state.direct_messages_by_agent[engineer.id][0]['delivery_reason'],
+            'terminal unavailable',
+        )
+
+    async def test_user_agent_message_idempotency_dedupes_browser_retry(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        payload = {
+            'cmd': 'user_agent_message',
+            'agent_id': worker.id,
+            'message': 'Please acknowledge this once.',
+            'reply_to_id': 'agent-msg-1',
+            'idempotency_key': 'same-browser-submit',
+        }
+        first = await self.server_mod._handle_user_agent_message_command(
+            dict(payload),
+            state,
+            fake_send_prompt,
+        )
+        second = await self.server_mod._handle_user_agent_message_command(
+            dict(payload),
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(first['message_id'], second['message_id'])
+        self.assertFalse(first['deduped'])
+        self.assertTrue(second['deduped'])
+        self.assertEqual(len(sent), 1)
+        count = self.db._conn.execute(
+            "SELECT COUNT(*) FROM agent_peer_messages WHERE sender_kind='user' "
+            "AND recipient_id=?",
+            (worker.id,),
+        ).fetchone()[0]
+        self.assertEqual(count, 1)
+
     async def test_replay_buffered_architect_peer_messages_reads_db_after_cache_loss(self):
         state = self._make_state()
         sender = self.state_mod.AgentCell(
