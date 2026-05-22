@@ -109,6 +109,8 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
 
     async def _handle_command(self, payload):
         self.handle_calls.append(dict(payload))
+        if payload["cmd"] == "inject_mcp_message":
+            return {"type": "ok", "delivered": True}
         if payload["cmd"] == "engineer_message":
             return {"type": "ok", "agent_id": payload["agent_id"]}
         self.fail(f"Unexpected command: {payload}")
@@ -269,3 +271,95 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.handle_calls[-1]["agent_id"], worker.id)
         self.assertFalse(self.handle_calls[-1]["reply_required"])
         self.assertEqual(self.handle_calls[-1]["sender_agent_id"], engineer.id)
+
+    async def test_architect_engineer_messages_persist_without_pollution_or_duplicates(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-1",
+            "Engineer",
+            hired_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call_architect(
+            "architect_engineer_message",
+            {"engineer_id": engineer.id, "message": "Please coordinate."},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        persisted = self.db.load_agent_peer_message(payload["message_id"])
+        self.assertIsNotNone(persisted)
+        self.assertEqual(persisted["thread_id"], payload["thread_id"])
+        self.assertEqual(persisted["sender_id"], architect.id)
+        self.assertEqual(persisted["sender_kind"], "architect")
+        self.assertEqual(persisted["sender_name"], "Architect")
+        self.assertEqual(persisted["recipient_id"], engineer.id)
+        self.assertEqual(persisted["recipient_kind"], "engineer")
+        self.assertEqual(persisted["recipient_name"], "Engineer")
+        self.assertEqual(persisted["delivery_state"], "delivered")
+        self.assertEqual(
+            [row["id"] for row in self.db.load_direct_messages_for_agent(architect.id)],
+            [],
+        )
+        self.assertEqual(
+            [row["id"] for row in self.db.load_direct_messages_for_agent(engineer.id)],
+            [],
+        )
+        self.assertEqual(
+            [row["id"] for row in self.db.load_recent_agent_peer_chat_messages()],
+            [payload["message_id"]],
+        )
+        self.assertEqual(len(architect.mcp_messages), 1)
+        self.assertEqual(len(engineer.mcp_messages), 1)
+        self.assertEqual(architect.mcp_messages[0]["id"], payload["message_id"])
+        self.assertEqual(engineer.mcp_messages[0]["id"], payload["message_id"])
+        self.assertEqual(
+            [
+                call
+                for call in self.handle_calls
+                if call["cmd"] == "inject_mcp_message"
+            ],
+            [{
+                "cmd": "inject_mcp_message",
+                "agent_id": engineer.id,
+                "message": "Please coordinate.",
+                "sender_name": "Architect",
+                "sender_kind": "architect",
+                "message_id": payload["message_id"],
+            }],
+        )
+        self.assertIn(payload["thread_id"], self.state.agent_peer_threads)
+        thread = self.state.agent_peer_threads[payload["thread_id"]]
+        self.assertEqual(thread["last_message_id"], payload["message_id"])
+        self.assertEqual(thread["pending_delivery_count"], 0)
+        self.assertEqual(thread["messages"][0]["action"], "architect_message")
+        ops = [op["op"] for op in self.state._delta_ops]
+        self.assertEqual(ops.count("agent_upsert"), 2)
+        self.assertEqual(ops.count("agent_peer_thread_upsert"), 2)
+
+        reply_text, reply_error = await self._call_engineer(
+            "engineer_message_architect",
+            {
+                "architect_id": architect.id,
+                "message": "Acknowledged.",
+                "ack_required": True,
+            },
+            engineer.id,
+        )
+
+        self.assertFalse(reply_error, reply_text)
+        reply_payload = json.loads(reply_text)
+        reply = self.db.load_agent_peer_message(reply_payload["message_id"])
+        self.assertIsNotNone(reply)
+        self.assertEqual(reply["sender_kind"], "engineer")
+        self.assertEqual(reply["recipient_kind"], "architect")
+        self.assertTrue(reply["ack_required"])
+        self.assertEqual(
+            len([
+                call
+                for call in self.handle_calls
+                if call["cmd"] == "inject_mcp_message"
+            ]),
+            2,
+        )

@@ -176,6 +176,12 @@ _AGENT_DIRECT_MESSAGE_WHERE = (
     "OR message_type!='message' OR blocking!=0)"
 )
 _AGENT_PEER_MESSAGE_USER_WHERE = _AGENT_DIRECT_MESSAGE_WHERE
+_AGENT_PEER_CHAT_WHERE = (
+    f"({_AGENT_PEER_MESSAGE_NON_USER_WHERE} "
+    "AND sender_kind IN ('architect','engineer') "
+    "AND recipient_kind IN ('architect','engineer') "
+    "AND (sender_kind='architect' OR recipient_kind='architect'))"
+)
 
 
 def _json_text_list(value) -> list[str]:
@@ -3784,6 +3790,79 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             tuple(params),
         ).fetchall()
         return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_recent_agent_peer_chat_messages(
+        self,
+        *,
+        group_name: str = "",
+        limit: int = 5000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent V1 agent↔agent chat rows, newest first.
+
+        V1 chat is the Architect-centered subset of non-user peer messages:
+        Architect↔Engineer plus Architect↔Architect only.  User/direct rows,
+        worker traffic, Engineer↔Engineer anomalies, non-message rows, and
+        blocking ask mirrors are intentionally excluded.
+        """
+        limit = max(1, min(int(limit or 5000), 10000))
+        where = [_AGENT_PEER_CHAT_WHERE]
+        params: list = []
+        group_name = str(group_name or "").strip()
+        if group_name:
+            where.append("group_name=?")
+            params.append(group_name)
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_agent_peer_chat_messages_for_thread(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 5000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load one V1 agent↔agent chat thread oldest first."""
+        thread_id = str(thread_id or "").strip()
+        if not thread_id:
+            return []
+        limit = max(1, min(int(limit or 5000), 10000))
+        where = ["thread_id=?", _AGENT_PEER_CHAT_WHERE]
+        params: list = [thread_id]
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at ASC, id ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_agent_peer_chat_thread(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 5000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Compatibility alias for the V1 chat thread loader."""
+        return self.load_agent_peer_chat_messages_for_thread(
+            thread_id,
+            limit=limit,
+            include_archived=include_archived,
+        )
 
     def load_direct_messages_for_thread(
         self,

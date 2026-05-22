@@ -1825,11 +1825,13 @@ def _agent_peer_message_row_to_entry(row: dict, agent_id: str) -> dict:
     peer_kind = recipient_kind if direction == "sent" else sender_kind
     created_at = float(row.get("created_at", row.get("timestamp", 0)) or 0)
     delivery_state = str(row.get("delivery_state", "") or "").strip() or "buffered"
-    action = (
-        "architect_peer_reply"
-        if str(row.get("reply_to_id", "") or "").strip()
-        else "architect_peer_message"
-    )
+    has_reply = bool(str(row.get("reply_to_id", "") or "").strip())
+    if sender_kind == "architect" and recipient_kind == "engineer":
+        action = "architect_reply" if has_reply else "architect_message"
+    elif sender_kind == "engineer" and recipient_kind == "architect":
+        action = "engineer_reply" if has_reply else "engineer_message_architect"
+    else:
+        action = "architect_peer_reply" if has_reply else "architect_peer_message"
     context = {
         "task_ids": list(row.get("context_task_ids", []) or []),
         "engineer_ids": list(row.get("context_engineer_ids", []) or []),
@@ -1962,6 +1964,13 @@ def _architect_peer_inbox_json(
 def _append_cross_kind_message(cell, entry: dict) -> None:
     if not cell:
         return
+    message_id = str((entry or {}).get("id", "") or "").strip()
+    if message_id:
+        cell.mcp_messages[:] = [
+            dict(item)
+            for item in (cell.mcp_messages or [])
+            if str((item or {}).get("id", "") or "").strip() != message_id
+        ]
     cell.mcp_messages.insert(0, dict(entry))
     if len(cell.mcp_messages) > 20:
         cell.mcp_messages[:] = cell.mcp_messages[:20]
@@ -2083,6 +2092,48 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     message_id = "msg-" + uuid.uuid4().hex[:12]
     conversation_id = str(thread_id or "").strip() or message_id
     reply_to = str(reply_to_id or "").strip()
+    sender_kind = str(getattr(sender, "kind", "") or "").strip()
+    recipient_kind = str(getattr(recipient, "kind", "") or "").strip()
+    sender_name = str(getattr(sender, "name", "") or "").strip()
+    recipient_name = str(getattr(recipient, "name", "") or "").strip()
+    group_name = str(getattr(sender, "group", "") or "").strip() or str(
+        getattr(recipient, "group", "") or ""
+    ).strip()
+
+    saved = None
+    if getattr(state, "db", None):
+        row = {
+            "id": message_id,
+            "thread_id": conversation_id,
+            "reply_to_id": reply_to,
+            "group_name": group_name,
+            "sender_id": sender.id,
+            "sender_kind": sender_kind,
+            "sender_name": sender_name,
+            "recipient_id": recipient.id,
+            "recipient_kind": recipient_kind,
+            "recipient_name": recipient_name,
+            "message": message_text,
+            "message_type": "message",
+            "created_at": timestamp,
+            "ack_required": bool(ack_required),
+            "blocking": False,
+            "delivery_state": "buffered",
+            "delivery_reason": "",
+            "delivered_at": 0,
+        }
+        save_peer = getattr(state, "save_peer_message", None)
+        if callable(save_peer):
+            saved = save_peer(row, cache_participants=False)
+        else:
+            saved = state.db.save_agent_peer_message(row)
+    if saved:
+        message_id = str(saved.get("id", message_id) or message_id)
+        conversation_id = str(
+            saved.get("thread_id", conversation_id) or conversation_id
+        )
+        timestamp = float(saved.get("created_at", timestamp) or timestamp)
+
     shared = {
         "id": message_id,
         "thread_id": conversation_id,
@@ -2090,25 +2141,27 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         "action": action,
         "message": message_text,
         "timestamp": timestamp,
+        "group": group_name,
         "sender_id": sender.id,
-        "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
+        "sender_kind": sender_kind,
+        "sender_name": sender_name,
+        "recipient_id": recipient.id,
+        "recipient_kind": recipient_kind,
+        "recipient_name": recipient_name,
+        "delivery_state": "buffered",
+        "delivered": False,
+        "buffered": True,
     }
-    if (
-        str(getattr(sender, "kind", "") or "").strip() == "engineer"
-        and str(getattr(recipient, "kind", "") or "").strip() == "architect"
-    ):
+    if sender_kind == "engineer" and recipient_kind == "architect":
         shared["ack_required"] = bool(ack_required)
     sender_entry = dict(shared)
     sender_entry.update({
         "peer_id": recipient.id,
-        "peer_kind": str(getattr(recipient, "kind", "") or "").strip(),
+        "peer_kind": recipient_kind,
         "direction": "sent",
     })
     recipient_entry = dict(shared)
-    if (
-        str(getattr(sender, "kind", "") or "").strip() == "architect"
-        and str(getattr(recipient, "kind", "") or "").strip() == "engineer"
-    ):
+    if sender_kind == "architect" and recipient_kind == "engineer":
         body = message_text
         awareness = _deliverable_awareness_for_referenced_tasks(
             state, message_text
@@ -2121,7 +2174,7 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         )
     recipient_entry.update({
         "peer_id": sender.id,
-        "peer_kind": str(getattr(sender, "kind", "") or "").strip(),
+        "peer_kind": sender_kind,
         "direction": "received",
     })
     log.debug(
@@ -2145,9 +2198,9 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         message_text,
         mark_progress=False,
     )
-    if str(getattr(recipient, "kind", "") or "").strip() == "engineer":
+    if recipient_kind == "engineer":
         recipient.pending_engineer_message = True
-    if str(getattr(sender, "kind", "") or "").strip() == "engineer":
+    if sender_kind == "engineer":
         sender.pending_engineer_message = False
     state._emit_agent(sender)
     state._emit_agent(recipient)
@@ -2526,11 +2579,33 @@ async def _inject_architect_peer_message(handle_command, state, sender,
     }
 
 
-async def _inject_mcp_message(handle_command, sender, recipient,
+def _update_cross_kind_peer_delivery(state, message_id: str, *,
+                                     delivered: bool,
+                                     reason: str = "",
+                                     failed: bool = False) -> None:
+    updater = getattr(state, "update_peer_message_delivery", None)
+    if not callable(updater):
+        return
+    message_id = str(message_id or "").strip()
+    if not message_id:
+        return
+    if delivered:
+        updater(message_id, "delivered", cache_participants=False)
+    else:
+        updater(
+            message_id,
+            "failed" if failed else "buffered",
+            reason=str(reason or ""),
+            cache_participants=False,
+        )
+
+
+async def _inject_mcp_message(handle_command, state, sender, recipient,
                               delivered: dict, message: str) -> None:
     """Ask the server to type the message into the recipient's terminal."""
     if not recipient or not handle_command:
         return
+    message_id = str(delivered.get("id", "") or "")
     try:
         payload = {
             "cmd": "inject_mcp_message",
@@ -2538,7 +2613,7 @@ async def _inject_mcp_message(handle_command, sender, recipient,
             "message": message,
             "sender_name": str(getattr(sender, "name", "") or "").strip(),
             "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
-            "message_id": str(delivered.get("id", "") or ""),
+            "message_id": message_id,
         }
         if "ack_required" in delivered:
             payload["ack_required"] = bool(delivered.get("ack_required", False))
@@ -2547,16 +2622,29 @@ async def _inject_mcp_message(handle_command, sender, recipient,
         reason = str((result or {}).get("reason", "") or "")
         mark_cross_kind_message_delivery(
             recipient,
-            str(delivered.get("id", "") or ""),
+            message_id,
             delivered=was_delivered,
             reason=reason,
+        )
+        _update_cross_kind_peer_delivery(
+            state,
+            message_id,
+            delivered=was_delivered,
+            reason=reason or "no_session",
         )
     except Exception:
         mark_cross_kind_message_delivery(
             recipient,
-            str(delivered.get("id", "") or ""),
+            message_id,
             delivered=False,
             reason="inject_failed",
+        )
+        _update_cross_kind_peer_delivery(
+            state,
+            message_id,
+            delivered=False,
+            reason="inject_failed",
+            failed=True,
         )
         log.exception(
             "Failed to inject MCP message into agent %s",
@@ -5638,7 +5726,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             message=message,
         )
         await _inject_mcp_message(
-            handle_command, architect, engineer, delivered, message
+            handle_command, real_state, architect, engineer, delivered, message
         )
         return json.dumps({
             "type": "ok",
@@ -5740,7 +5828,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             ack_required=ack_required,
         )
         await _inject_mcp_message(
-            handle_command, engineer, architect, delivered, message
+            handle_command, real_state, engineer, architect, delivered, message
         )
         return json.dumps({
             "type": "ok",
@@ -5839,7 +5927,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             ack_required=ack_required,
         )
         await _inject_mcp_message(
-            handle_command, caller, peer, delivered, message
+            handle_command, real_state, caller, peer, delivered, message
         )
         return json.dumps({
             "type": "ok",

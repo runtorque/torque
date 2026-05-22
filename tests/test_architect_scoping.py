@@ -2489,9 +2489,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(hired.pending_engineer_message)
         self.assertEqual(
-            [op["op"] for op in self.state._delta_ops[-2:]],
-            ["agent_upsert", "agent_upsert"],
+            [op["op"] for op in self.state._delta_ops[-4:]],
+            [
+                "agent_peer_thread_upsert",
+                "agent_upsert",
+                "agent_upsert",
+                "agent_peer_thread_upsert",
+            ],
         )
+        self.assertIsNotNone(self.db.load_agent_peer_message(delivered["message_id"]))
 
         denied_text, denied_error = await self._call(
             "architect_engineer_message",

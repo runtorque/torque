@@ -53,6 +53,8 @@ AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 AGENT_MESSAGE_HISTORY_LIMIT = 100
 PEER_MESSAGE_CACHE_LIMIT = 20
 DIRECT_MESSAGE_CACHE_LIMIT = 100
+AGENT_PEER_THREAD_MESSAGE_LIMIT = 100
+AGENT_PEER_THREAD_SEED_ROW_LIMIT = 5000
 ENGINEER_DISPATCH_SHAPE_EVENT_LIMIT = 100
 _ENGINEER_DISPATCH_SHAPE_ORDER = ("serial", "batch", "warm_cluster")
 _ENGINEER_DISPATCH_SHAPES = set(_ENGINEER_DISPATCH_SHAPE_ORDER)
@@ -1043,6 +1045,62 @@ def _peer_message_action(row: dict) -> str:
     )
 
 
+def _agent_peer_message_action(row: dict) -> str:
+    """Return the legacy MCP/action label for one canonical peer row."""
+    sender_kind = str((row or {}).get("sender_kind", "") or "").strip()
+    recipient_kind = str((row or {}).get("recipient_kind", "") or "").strip()
+    has_reply = bool(str((row or {}).get("reply_to_id", "") or "").strip())
+    if sender_kind == "architect" and recipient_kind == "engineer":
+        return "architect_reply" if has_reply else "architect_message"
+    if sender_kind == "engineer" and recipient_kind == "architect":
+        return "engineer_reply" if has_reply else "engineer_message_architect"
+    return _peer_message_action(row or {})
+
+
+def _is_agent_peer_thread_row(row: dict) -> bool:
+    """True when a row belongs to the read-only V1 agent↔agent Chat panel."""
+    if not isinstance(row, dict) or _is_user_direct_message_row(row):
+        return False
+    sender_kind = str(row.get("sender_kind", "") or "").strip()
+    recipient_kind = str(row.get("recipient_kind", "") or "").strip()
+    allowed = {"architect", "engineer"}
+    return (
+        sender_kind in allowed
+        and recipient_kind in allowed
+        and "architect" in {sender_kind, recipient_kind}
+    )
+
+
+def _agent_peer_thread_message_entry(row: dict) -> dict:
+    delivery_state = str(row.get("delivery_state", "") or "").strip()
+    if not delivery_state:
+        delivery_state = "buffered"
+    return {
+        "id": str(row.get("id", "") or "").strip(),
+        "thread_id": str(row.get("thread_id", "") or "").strip(),
+        "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "action": _agent_peer_message_action(row),
+        "message": str(row.get("message", "") or ""),
+        "timestamp": _peer_message_timestamp(row),
+        "group": str(row.get("group_name", row.get("group", "")) or ""),
+        "sender_id": str(row.get("sender_id", "") or "").strip(),
+        "sender_kind": str(row.get("sender_kind", "") or "").strip(),
+        "sender_name": str(row.get("sender_name", "") or ""),
+        "recipient_id": str(row.get("recipient_id", "") or "").strip(),
+        "recipient_kind": str(row.get("recipient_kind", "") or "").strip(),
+        "recipient_name": str(row.get("recipient_name", "") or ""),
+        "ack_required": bool(row.get("ack_required", False)),
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+        "delivered_at": _safe_float(row.get("delivered_at", 0)),
+        "context_task_ids": list(row.get("context_task_ids", []) or []),
+        "context_engineer_ids": list(row.get("context_engineer_ids", []) or []),
+        "context_decision_ids": list(row.get("context_decision_ids", []) or []),
+        "context_summary": str(row.get("context_summary", "") or ""),
+        "context_snapshot": dict(row.get("context_snapshot", {}) or {}),
+    }
+
+
 def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
     """Project a canonical peer-message row into AgentCell.mcp_messages."""
     if not isinstance(row, dict):
@@ -1075,7 +1133,7 @@ def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
         "id": str(row.get("id", "") or "").strip(),
         "thread_id": str(row.get("thread_id", "") or "").strip(),
         "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
-        "action": _peer_message_action(row),
+        "action": _agent_peer_message_action(row),
         "message": str(row.get("message", "") or ""),
         "timestamp": _peer_message_timestamp(row),
         "group": str(row.get("group_name", row.get("group", "")) or ""),
@@ -1894,6 +1952,10 @@ class MatrixState:
         # below-terminal panel. The durable source of truth is SQLite; this
         # read model is bounded and replayed through direct_message_* deltas.
         self.direct_messages_by_agent: dict[str, list[dict]] = {}
+        # Newest-first thread aggregate for the read-only agent↔agent Chat
+        # panel. Keyed strictly by canonical agent_peer_messages.thread_id;
+        # messages inside each thread are oldest-first and tail-capped.
+        self.agent_peer_threads: dict[str, dict] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -3083,6 +3145,7 @@ class MatrixState:
             },
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
+            "agent_peer_threads": self.agent_peer_threads_snapshot(),
             # Engineer journal rows are stored with author_cell_id; expose the
             # UI snapshot cache with the same author key so focusing one
             # engineer never renders another engineer's group-mate entries.
@@ -3384,6 +3447,7 @@ class MatrixState:
             },
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
+            "agent_peer_threads": self.agent_peer_threads_snapshot(),
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -3961,13 +4025,16 @@ class MatrixState:
         row: dict,
         *,
         emit: bool = True,
+        cache_participants: bool = True,
     ) -> dict | None:
-        """Persist a peer message and update bounded live UI caches."""
+        """Persist a peer message and update bounded live UI/read-model caches."""
         if not self.db:
             return None
         saved = self.db.save_agent_peer_message(row)
         if saved:
-            self.append_peer_message_to_caches(saved, emit=emit)
+            if cache_participants:
+                self.append_peer_message_to_caches(saved, emit=emit)
+            self.upsert_agent_peer_thread(saved, emit=emit)
         return saved
 
     def load_peer_messages_for_architect(
@@ -3999,6 +4066,7 @@ class MatrixState:
         reason: str = "",
         delivered_at: float | None = None,
         emit: bool = True,
+        cache_participants: bool = True,
     ) -> dict | None:
         """Persist delivery state and update participant cache entries."""
         if not self.db:
@@ -4011,7 +4079,9 @@ class MatrixState:
         )
         if not saved:
             return None
-        self.append_peer_message_to_caches(saved, emit=emit)
+        if cache_participants:
+            self.append_peer_message_to_caches(saved, emit=emit)
+        self.upsert_agent_peer_thread(saved, emit=emit)
         return saved
 
     def update_peer_message_delivery(
@@ -4022,6 +4092,7 @@ class MatrixState:
         reason: str = "",
         delivered_at: float | None = None,
         emit: bool = True,
+        cache_participants: bool = True,
     ) -> dict | None:
         """Persist an explicit peer-message delivery state in participant caches."""
         if not self.db:
@@ -4034,8 +4105,261 @@ class MatrixState:
         )
         if not saved:
             return None
-        self.append_peer_message_to_caches(saved, emit=emit)
+        if cache_participants:
+            self.append_peer_message_to_caches(saved, emit=emit)
+        self.upsert_agent_peer_thread(saved, emit=emit)
         return saved
+
+    # -- Agent peer thread aggregate helpers --------------------------------
+
+    def _agent_peer_thread_participant(self, row: dict, field: str) -> dict:
+        agent_id = str((row or {}).get(f"{field}_id", "") or "").strip()
+        row_group = str(
+            (row or {}).get("group_name", (row or {}).get("group", "")) or ""
+        )
+        cell = self.agents.get(agent_id)
+        kind = (
+            str(getattr(cell, "kind", "") or "").strip()
+            if cell else ""
+        ) or str((row or {}).get(f"{field}_kind", "") or "").strip()
+        name = (
+            str(getattr(cell, "name", "") or "").strip()
+            if cell else ""
+        ) or str((row or {}).get(f"{field}_name", "") or "").strip() or agent_id
+        group = (
+            str(getattr(cell, "group", "") or "").strip()
+            if cell else ""
+        ) or row_group
+        return {
+            "id": agent_id,
+            "kind": kind,
+            "name": name,
+            "group": group,
+        }
+
+    def _build_agent_peer_thread(
+        self,
+        rows: list[dict],
+        *,
+        message_limit: int = AGENT_PEER_THREAD_MESSAGE_LIMIT,
+    ) -> dict | None:
+        scoped = [
+            dict(row)
+            for row in (rows or [])
+            if _is_agent_peer_thread_row(row)
+        ]
+        if not scoped:
+            return None
+        scoped.sort(
+            key=lambda row: (
+                _peer_message_timestamp(row),
+                str((row or {}).get("id", "") or ""),
+            )
+        )
+        first = scoped[0]
+        thread_id = str(first.get("thread_id", "") or "").strip()
+        if not thread_id:
+            thread_id = str(first.get("id", "") or "").strip()
+        participant_ids: list[str] = []
+        participants: list[dict] = []
+        for row in scoped:
+            for field in ("sender", "recipient"):
+                participant = self._agent_peer_thread_participant(row, field)
+                pid = participant["id"]
+                if pid and pid not in participant_ids:
+                    participant_ids.append(pid)
+                    participants.append(participant)
+
+        messages = [_agent_peer_thread_message_entry(row) for row in scoped]
+        last_row = max(
+            scoped,
+            key=lambda row: (
+                _peer_message_timestamp(row),
+                str((row or {}).get("id", "") or ""),
+            ),
+        )
+        last_message = _agent_peer_thread_message_entry(last_row)
+        group = str(last_row.get("group_name", last_row.get("group", "")) or "")
+        if not group:
+            for row in scoped:
+                group = str(row.get("group_name", row.get("group", "")) or "")
+                if group:
+                    break
+        ack_required_count = sum(
+            1 for row in scoped if bool(row.get("ack_required", False))
+        )
+        pending_delivery_count = sum(
+            1 for row in scoped
+            if str(row.get("delivery_state", "") or "buffered").strip()
+            == "buffered"
+        )
+        requires_reply_participant_ids: list[str] = []
+        for row in scoped:
+            if not bool(row.get("ack_required", False)):
+                continue
+            recipient_id = str(row.get("recipient_id", "") or "").strip()
+            if recipient_id and recipient_id not in requires_reply_participant_ids:
+                requires_reply_participant_ids.append(recipient_id)
+        names = [
+            str((participant or {}).get("name", "") or "").strip()
+            or str((participant or {}).get("id", "") or "").strip()
+            for participant in participants
+        ]
+        if len(names) >= 2:
+            title = f"{names[0]} ↔ {names[1]}"
+            if len(names) > 2:
+                title += f" +{len(names) - 2}"
+        elif names:
+            title = names[0]
+        else:
+            title = thread_id
+
+        limit = max(1, int(message_limit or AGENT_PEER_THREAD_MESSAGE_LIMIT))
+        truncated = len(messages) > limit
+        return {
+            "thread_id": thread_id,
+            "group": group,
+            "title": title,
+            "participants": participants,
+            "participant_ids": participant_ids,
+            "last_activity_at": _peer_message_timestamp(last_row),
+            "last_message_id": last_message["id"],
+            "last_message": last_message,
+            "message_count": len(messages),
+            "ack_required_count": ack_required_count,
+            "pending_delivery_count": pending_delivery_count,
+            "requires_reply_participant_ids": requires_reply_participant_ids,
+            "messages": messages[-limit:],
+            "truncated": truncated,
+        }
+
+    def _sorted_agent_peer_threads(self, threads: dict[str, dict]) -> dict[str, dict]:
+        return dict(sorted(
+            ((str(tid or ""), dict(thread)) for tid, thread in threads.items()
+             if tid and thread),
+            key=lambda item: (
+                _safe_float((item[1] or {}).get("last_activity_at", 0)),
+                str((item[1] or {}).get("last_message_id", "") or ""),
+                item[0],
+            ),
+            reverse=True,
+        ))
+
+    def agent_peer_threads_snapshot(
+        self,
+        *,
+        message_limit: int = AGENT_PEER_THREAD_MESSAGE_LIMIT,
+    ) -> dict[str, dict]:
+        """Return an ordered, bounded copy of the agent↔agent thread aggregate."""
+        snapshot: dict[str, dict] = {}
+        limit = max(1, int(message_limit or AGENT_PEER_THREAD_MESSAGE_LIMIT))
+        for thread_id, thread in self._sorted_agent_peer_threads(
+                self.agent_peer_threads).items():
+            item = copy.deepcopy(thread)
+            messages = list(item.get("messages", []) or [])
+            item["messages"] = messages[-limit:]
+            item["truncated"] = bool(item.get("truncated", False)) or (
+                int(item.get("message_count", len(messages)) or 0) > len(
+                    item["messages"]
+                )
+            )
+            snapshot[thread_id] = item
+        return snapshot
+
+    def seed_agent_peer_threads(
+        self,
+        *,
+        limit: int = AGENT_PEER_THREAD_SEED_ROW_LIMIT,
+        emit: bool = False,
+    ) -> int:
+        """Seed the read-only Chat panel thread aggregate from SQLite."""
+        if not self.db:
+            return 0
+        loader = getattr(self.db, "load_recent_agent_peer_chat_messages", None)
+        if not callable(loader):
+            return 0
+        by_thread: dict[str, list[dict]] = {}
+        for row in loader(limit=limit):
+            if not _is_agent_peer_thread_row(row):
+                continue
+            thread_id = str(row.get("thread_id", "") or "").strip()
+            if not thread_id:
+                thread_id = str(row.get("id", "") or "").strip()
+            if not thread_id:
+                continue
+            by_thread.setdefault(thread_id, []).append(row)
+        threads: dict[str, dict] = {}
+        for thread_id, rows in by_thread.items():
+            thread = self._build_agent_peer_thread(rows)
+            if thread:
+                threads[thread_id] = thread
+        self.agent_peer_threads = self._sorted_agent_peer_threads(threads)
+        if emit:
+            for thread_id, thread in self.agent_peer_threads.items():
+                self._emit(
+                    "agent_peer_thread_upsert",
+                    thread_id=thread_id,
+                    group=thread.get("group", ""),
+                    thread=copy.deepcopy(thread),
+                )
+        return len(self.agent_peer_threads)
+
+    def upsert_agent_peer_thread(
+        self,
+        row: dict,
+        *,
+        emit: bool = True,
+    ) -> dict | None:
+        """Refresh and optionally emit a complete thread replacement."""
+        if not _is_agent_peer_thread_row(row or {}):
+            return None
+        thread_id = str((row or {}).get("thread_id", "") or "").strip()
+        if not thread_id:
+            thread_id = str((row or {}).get("id", "") or "").strip()
+        if not thread_id:
+            return None
+        rows: list[dict]
+        loader = (
+            getattr(self.db, "load_agent_peer_chat_messages_for_thread", None)
+            if self.db else None
+        )
+        if callable(loader):
+            rows = loader(
+                thread_id,
+                limit=AGENT_PEER_THREAD_SEED_ROW_LIMIT,
+            )
+        else:
+            rows = [dict(row)]
+        thread = self._build_agent_peer_thread(rows)
+        if not thread:
+            self.remove_agent_peer_thread(thread_id, emit=emit)
+            return None
+        self.agent_peer_threads[thread_id] = thread
+        self.agent_peer_threads = self._sorted_agent_peer_threads(
+            self.agent_peer_threads
+        )
+        if emit:
+            self._emit(
+                "agent_peer_thread_upsert",
+                thread_id=thread_id,
+                group=thread.get("group", ""),
+                thread=copy.deepcopy(thread),
+            )
+        return thread
+
+    def remove_agent_peer_thread(
+        self,
+        thread_id: str,
+        *,
+        emit: bool = True,
+    ) -> bool:
+        tid = str(thread_id or "").strip()
+        if not tid or tid not in self.agent_peer_threads:
+            return False
+        self.agent_peer_threads.pop(tid, None)
+        if emit:
+            self._emit("agent_peer_thread_remove", thread_id=tid)
+        return True
 
     # -- Direct message cache helpers ---------------------------------------
 
@@ -4705,6 +5029,7 @@ class MatrixState:
                 )
             self.seed_peer_message_caches(emit=False)
             self.seed_direct_message_caches(emit=False)
+            self.seed_agent_peer_threads(emit=False)
             reconciled_history = self.history_reconcile_tombstoned_agents()
             if reconciled_history:
                 log.info(
