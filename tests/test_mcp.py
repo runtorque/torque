@@ -350,6 +350,195 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_torque_message_user_persists_worker_direct_message(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            worker = self.state_mod.AgentCell(
+                id="worker-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+            )
+            state.agents[worker.id] = worker
+            state.groups["g"] = [worker.id]
+
+            calls = []
+
+            async def fake_handle_command(payload):
+                calls.append(dict(payload))
+                return {"type": "ok"}
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_message_user",
+                {
+                    "message": "I have a user-visible update.",
+                    "thread_id": "client-thread-is-normalized",
+                },
+                worker.id,
+                fake_handle_command,
+                state,
+            )
+
+            self.assertFalse(is_error)
+            payload = json.loads(text)
+            row = db.load_direct_message(payload["message_id"])
+            self.assertIsNotNone(row)
+            self.assertEqual(row["sender_id"], worker.id)
+            self.assertEqual(row["sender_kind"], "worker")
+            self.assertEqual(row["sender_name"], "Worker")
+            self.assertEqual(row["recipient_id"], "user")
+            self.assertEqual(row["recipient_kind"], "user")
+            self.assertEqual(row["recipient_name"], "User")
+            self.assertEqual(row["message_type"], "message")
+            self.assertFalse(row["blocking"])
+            self.assertEqual(row["delivery_state"], "delivered")
+            self.assertEqual(row["read_at"], 0)
+            self.assertEqual(
+                row["thread_id"],
+                db_mod.canonical_user_agent_thread_id(worker.id),
+            )
+            self.assertEqual(payload["thread_id"], row["thread_id"])
+            self.assertEqual(payload["delivery"]["state"], "delivered")
+            self.assertFalse(payload["deduped"])
+            self.assertEqual(calls, [])
+            self.assertEqual(len(state.board_tasks), 0)
+            self.assertEqual(
+                state.direct_messages_by_agent[worker.id][0]["id"],
+                row["id"],
+            )
+            db.close()
+
+    async def test_architect_and_engineer_message_user_persist_direct_rows(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            architect = self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            engineer = self.state_mod.AgentCell(
+                id="eng-1",
+                name="Engineer",
+                group="g",
+                cell_type="agent",
+                kind="engineer",
+                hired_by_architect_id=architect.id,
+            )
+            state.agents[architect.id] = architect
+            state.agents[engineer.id] = engineer
+            state.groups["g"] = [architect.id, engineer.id]
+            state.board_add_task(
+                "Visible task",
+                "g",
+                lane="Backlog",
+                id="task-1",
+                assigned_engineer_id=engineer.id,
+            )
+
+            notifications = []
+            state.on_direct_user_message = lambda row: notifications.append(
+                dict(row)
+            )
+            calls = []
+
+            async def fake_handle_command(payload):
+                calls.append(dict(payload))
+                return {"type": "ok"}
+
+            arch_body = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_message_user",
+                    "arguments": {
+                        "message": "Architect update for the user.",
+                        "context_task_ids": ["task-1"],
+                    },
+                },
+            }
+            arch_result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                arch_body,
+                cell_id=architect.id,
+                handle_command=fake_handle_command,
+                state=state,
+            )
+            self.assertEqual(status, 200)
+            self.assertFalse(arch_result["result"]["isError"])
+            arch_payload = json.loads(
+                arch_result["result"]["content"][0]["text"]
+            )
+            arch_row = db.load_direct_message(arch_payload["message_id"])
+            self.assertEqual(arch_row["sender_kind"], "architect")
+            self.assertEqual(arch_row["recipient_kind"], "user")
+            self.assertEqual(arch_row["context_task_ids"], ["task-1"])
+            self.assertEqual(arch_row["delivery_state"], "delivered")
+
+            eng_body = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "engineer_message_user",
+                    "arguments": {
+                        "message": "Engineer update for the user.",
+                        "context_task_ids": ["task-1"],
+                    },
+                },
+            }
+            eng_result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                eng_body,
+                cell_id=engineer.id,
+                handle_command=fake_handle_command,
+                state=state,
+            )
+            self.assertEqual(status, 200)
+            self.assertFalse(eng_result["result"]["isError"])
+            eng_payload = json.loads(
+                eng_result["result"]["content"][0]["text"]
+            )
+            eng_row = db.load_direct_message(eng_payload["message_id"])
+            self.assertEqual(eng_row["sender_kind"], "engineer")
+            self.assertEqual(eng_row["recipient_kind"], "user")
+            self.assertEqual(eng_row["context_task_ids"], ["task-1"])
+            self.assertEqual(eng_row["message_type"], "message")
+            self.assertFalse(eng_row["blocking"])
+            self.assertEqual(calls, [])
+            self.assertEqual(len(state.board_tasks), 1)
+            self.assertEqual(len(notifications), 2)
+            db.close()
+
+    async def test_message_user_rejects_empty_message(self):
+        state = self.state_mod.MatrixState()
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[worker.id] = worker
+
+        async def fake_handle_command(_payload):
+            return {"type": "ok"}
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "torque_message_user",
+            {"message": "   "},
+            worker.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertTrue(is_error)
+        self.assertEqual(text, "message is required")
+
     async def test_create_mcp_handler_exposes_only_current_mcp_surfaces(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(
@@ -439,6 +628,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"] for tool in listed_worker.payload["result"]["tools"]
         ]
         self.assertIn("torque_progress", worker_tool_names)
+        self.assertIn("torque_message_user", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
@@ -475,6 +665,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_peer_inbox", architect_tool_names)
         self.assertIn("architect_engineer_journal_read", architect_tool_names)
         self.assertIn("architect_engineer_pending_question", architect_tool_names)
+        self.assertIn("architect_message_user", architect_tool_names)
         self.assertIn("architect_ask", architect_tool_names)
         self.assertNotIn("engineer_board_summary", architect_tool_names)
         self.assertNotIn("engineer_board_summary", architect_tool_names)
@@ -491,6 +682,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_tool_search", engineer_tool_names)
         self.assertIn("engineer_board_summary", engineer_tool_names)
         self.assertIn("engineer_task_verify", engineer_tool_names)
+        self.assertIn("engineer_message_user", engineer_tool_names)
         self.assertNotIn("engineer_message_architect", engineer_tool_names)
         self.assertNotIn("engineer_reply", engineer_tool_names)
         self.assertNotIn("engineer_task_reassign", engineer_tool_names)

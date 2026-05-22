@@ -415,6 +415,62 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_message_user",
+        "description": (
+            "Send a non-blocking durable direct message to the user-facing "
+            "conversation panel. Use this for status/context or to reply to "
+            "a `## Message from the User` injection. Use architect_ask "
+            "instead when the work should block on a user decision."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Message content for the user.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional direct-message thread id. V1 normalizes "
+                        "user↔agent lanes to one thread per agent."
+                    ),
+                },
+                "reply_to_id": {
+                    "type": "string",
+                    "description": "Optional message id this is replying to.",
+                },
+                "context_task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional same-group task ids/aliases to snapshot.",
+                },
+                "context_engineer_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional visible same-group Engineer ids/slugs/names to snapshot.",
+                },
+                "context_decision_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional caller-owned decision ids to snapshot.",
+                },
+                "context_summary": {
+                    "type": "string",
+                    "description": "Optional concise context summary.",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": (
+                        "Optional retry key; omit unless explicitly retrying "
+                        "the same message."
+                    ),
+                },
+            },
+            "required": ["message"],
+        },
+    },
+    {
         "name": "architect_engineer_list",
         "description": (
             "List engineers visible to this architect, marking each as hired "

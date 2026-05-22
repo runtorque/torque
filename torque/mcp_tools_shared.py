@@ -1750,6 +1750,46 @@ def _normalize_architect_peer_context(
     }, ""
 
 
+def _normalize_agent_user_message_context(
+        state,
+        caller_kind: str,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[dict, str]:
+    if caller_kind == "architect":
+        return _normalize_architect_peer_context(
+            state,
+            caller_id,
+            caller_group,
+            args,
+        )
+    if caller_kind != "engineer":
+        return {}, ""
+    visible_tasks = _filter_tasks_for_caller(state, "engineer", caller_id)
+    task_ids = []
+    task_snapshots = []
+    for task_ident in _dedupe_strings(args.get("context_task_ids", [])):
+        task_id = _resolve_task(state, task_ident)
+        if not task_id or task_id not in visible_tasks:
+            return {}, f"Task not found: {task_ident}"
+        task = state.board_tasks.get(task_id)
+        if not task or str(getattr(task, "group", "") or "").strip() != caller_group:
+            return {}, f"Task not found: {task_ident}"
+        task_ids.append(task_id)
+        task_snapshots.append(_peer_context_task_snapshot(task))
+    return {
+        "context_task_ids": task_ids,
+        "context_engineer_ids": [],
+        "context_decision_ids": [],
+        "context_summary": str(args.get("context_summary", "") or "").strip(),
+        "context_snapshot": {
+            "tasks": task_snapshots,
+            "engineers": [],
+            "decisions": [],
+        },
+    }, ""
+
+
 def _validate_architect_peer_message_length(
         message: str,
         context_summary: str = "") -> str:
@@ -2118,6 +2158,233 @@ def _load_existing_peer_message_for_idempotency(state, message_id: str) -> dict 
     if not message_id or not getattr(state, "db", None):
         return None
     return state.db.load_agent_peer_message(message_id)
+
+
+def _agent_user_direct_message_id_from_idempotency_key(
+        idempotency_key: str) -> str:
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return ""
+    digest = hashlib.sha256(
+        ("agent-user-message\0" + key).encode("utf-8")
+    ).hexdigest()
+    return "msg-" + digest[:12]
+
+
+def _direct_message_agent_kind(cell) -> str:
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind in {"architect", "engineer", "worker"}:
+        return kind
+    return "worker"
+
+
+def _load_existing_agent_user_direct_message_for_idempotency(
+        state,
+        message_id: str) -> dict | None:
+    message_id = str(message_id or "").strip()
+    db = getattr(state, "db", None)
+    if not message_id or not db:
+        return None
+    loader = getattr(db, "load_direct_message", None)
+    if callable(loader):
+        return loader(message_id)
+    return db.load_agent_peer_message(message_id)
+
+
+def _agent_user_direct_message_conflicts_with_existing(
+        existing: dict,
+        sender,
+        *,
+        message: str,
+        reply_to_id: str) -> bool:
+    if not existing or not sender:
+        return False
+    if str(existing.get("sender_id", "") or "").strip() != str(
+            getattr(sender, "id", "") or "").strip():
+        return True
+    if str(existing.get("sender_kind", "") or "").strip() != (
+            _direct_message_agent_kind(sender)):
+        return True
+    if str(existing.get("recipient_kind", "") or "").strip() != "user":
+        return True
+    if str(existing.get("recipient_id", "") or "").strip() != "user":
+        return True
+    if str(existing.get("message", "") or "") != str(message or ""):
+        return True
+    if str(existing.get("reply_to_id", "") or "").strip() != str(
+            reply_to_id or "").strip():
+        return True
+    return False
+
+
+def _agent_user_direct_message_reply_thread_id(
+        state,
+        reply_to_id: str,
+        sender_id: str) -> str:
+    reply_to_id = str(reply_to_id or "").strip()
+    sender_id = str(sender_id or "").strip()
+    if not reply_to_id or not sender_id:
+        return ""
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_direct_message", None) if db else None
+    parent = loader(reply_to_id) if callable(loader) else None
+    if not parent:
+        return ""
+    kinds = {
+        str(parent.get("sender_kind", "") or "").strip(),
+        str(parent.get("recipient_kind", "") or "").strip(),
+    }
+    if "user" not in kinds:
+        return ""
+    if sender_id not in {
+        str(parent.get("sender_id", "") or "").strip(),
+        str(parent.get("recipient_id", "") or "").strip(),
+    }:
+        return ""
+    return str(parent.get("thread_id", "") or "").strip()
+
+
+def _direct_user_message_response(row: dict, *,
+                                  deduped: bool = False) -> dict:
+    row = row or {}
+    delivery_state = str(row.get("delivery_state", "") or "").strip() \
+        or "delivered"
+    return {
+        "type": "ok",
+        "message_id": str(row.get("id", "") or "").strip(),
+        "thread_id": str(row.get("thread_id", "") or "").strip(),
+        "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "agent_id": str(row.get("sender_id", "") or "").strip(),
+        "sender_id": str(row.get("sender_id", "") or "").strip(),
+        "sender_kind": str(row.get("sender_kind", "") or "").strip(),
+        "recipient_id": str(row.get("recipient_id", "") or "").strip(),
+        "recipient_kind": str(row.get("recipient_kind", "") or "").strip(),
+        "message_type": str(row.get("message_type", "message") or "message"),
+        "blocking": bool(row.get("blocking", False)),
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+        "delivery": {
+            "state": delivery_state,
+            "reason": str(row.get("delivery_reason", "") or ""),
+        },
+        "delivered": delivery_state == "delivered",
+        "read_at": float(row.get("read_at", 0) or 0),
+        "deduped": bool(deduped),
+    }
+
+
+def _notify_agent_user_direct_message(state, row: dict) -> None:
+    """Best-effort notification hook for agent→user direct messages.
+
+    Slice 3 owns the MCP write path; Slice 5 wires a concrete
+    NotificationManager method.  Keep this hook optional so the durable
+    message write never depends on notification delivery.
+    """
+    manager = getattr(state, "notification_manager", None)
+    callback = getattr(manager, "on_direct_user_message", None)
+    if not callable(callback):
+        callback = getattr(state, "on_direct_user_message", None)
+    if not callable(callback):
+        return
+    try:
+        callback(row)
+    except Exception:
+        log.exception("Failed to notify for direct user message")
+
+
+def save_agent_user_direct_message_from_mcp(
+        state,
+        sender,
+        *,
+        message: str,
+        thread_id: str = "",
+        reply_to_id: str = "",
+        context: dict | None = None,
+        idempotency_key: str = "",
+        notify: bool = True) -> tuple[dict, bool]:
+    """Persist one agent→user direct message from an MCP tool call.
+
+    Returns ``(row, created)``.  Idempotency-derived duplicates return the
+    existing row and do not re-notify.
+    """
+    message_text = str(message or "").strip()
+    if not message_text:
+        raise ValueError("message is required")
+    if not sender or getattr(sender, "cell_type", "") != "agent":
+        raise ValueError("agent not found")
+    if not getattr(state, "db", None):
+        raise ValueError("Direct message store is unavailable")
+
+    reply_to = str(reply_to_id or "").strip()
+    message_id = _agent_user_direct_message_id_from_idempotency_key(
+        idempotency_key
+    )
+    created = False
+    if not message_id:
+        message_id = "msg-" + uuid.uuid4().hex[:12]
+        created = True
+    existing = _load_existing_agent_user_direct_message_for_idempotency(
+        state,
+        message_id,
+    )
+    if existing:
+        if _agent_user_direct_message_conflicts_with_existing(
+                existing,
+                sender,
+                message=message_text,
+                reply_to_id=reply_to):
+            raise ValueError(
+                "idempotency key was reused for a different message_user call"
+            )
+        append_direct = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append_direct):
+            append_direct(existing)
+        return existing, False
+    if not created:
+        created = True
+
+    context = dict(context or {})
+    requested_thread_id = str(thread_id or "").strip()
+    if not requested_thread_id:
+        requested_thread_id = _agent_user_direct_message_reply_thread_id(
+            state,
+            reply_to,
+            str(getattr(sender, "id", "") or "").strip(),
+        )
+    now = time.time()
+    row = {
+        "id": message_id,
+        "thread_id": requested_thread_id,
+        "reply_to_id": reply_to,
+        "group_name": str(getattr(sender, "group", "") or "").strip(),
+        "sender_id": sender.id,
+        "sender_kind": _direct_message_agent_kind(sender),
+        "sender_name": str(getattr(sender, "name", "") or "").strip(),
+        "recipient_id": "user",
+        "recipient_kind": "user",
+        "recipient_name": "User",
+        "message": message_text,
+        "message_type": "message",
+        "created_at": now,
+        "ack_required": False,
+        "blocking": False,
+        "source_task_id": "",
+        "context_task_ids": list(context.get("context_task_ids", []) or []),
+        "context_engineer_ids": list(context.get("context_engineer_ids", []) or []),
+        "context_decision_ids": list(context.get("context_decision_ids", []) or []),
+        "context_summary": str(context.get("context_summary", "") or ""),
+        "context_snapshot": dict(context.get("context_snapshot", {}) or {}),
+        "delivery_state": "delivered",
+        "delivery_reason": "",
+        "delivered_at": now,
+        "read_at": 0,
+    }
+    saved = state.save_direct_message(row) if getattr(state, "db", None) else None
+    if not saved:
+        raise ValueError("failed to save direct message")
+    if notify:
+        _notify_agent_user_direct_message(state, saved)
+    return saved, created
 
 
 def _save_architect_peer_message(state, sender, recipient, *,
@@ -5310,6 +5577,43 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps({"type": "journal", "entries": entries}), False
 
     # -- Interaction tools --------------------------------------------------
+
+    if tool_name == "message_user" and caller_kind in {"architect", "engineer"}:
+        sender = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        context, context_error = _normalize_agent_user_message_context(
+            real_state,
+            caller_kind,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+        if context_error:
+            return context_error, True
+        length_error = _validate_architect_peer_message_length(
+            message,
+            context.get("context_summary", ""),
+        )
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = save_agent_user_direct_message_from_mcp(
+                real_state,
+                sender,
+                message=message,
+                thread_id=str(args.get("thread_id", "") or "").strip(),
+                reply_to_id=str(args.get("reply_to_id", "") or "").strip(),
+                context=context,
+                idempotency_key=idempotency_key,
+                notify=True,
+            )
+        except ValueError as exc:
+            return str(exc), True
+        return json.dumps(
+            _direct_user_message_response(saved, deduped=not created)
+        ), False
 
     if tool_name == "engineer_message" and caller_kind == "architect":
         engineer_ident = str(args.get("engineer_id", "") or "").strip()

@@ -163,7 +163,7 @@ engineer_stream_show
 engineer_task_dispatch, engineer_batch_dispatch, engineer_task_resolve
 **Events**: engineer_events, engineer_notifications, engineer_resume
 **Journal**: engineer_journal, engineer_journal_read
-**Interaction**: engineer_agent_message, engineer_note, engineer_ask, engineer_agent_close, \
+**Interaction**: engineer_agent_message, engineer_message_user, engineer_note, engineer_ask, engineer_agent_close, \
 engineer_agent_relaunch
 **Worktree**: engineer_merge (default GitHub PR/squash path), \
 engineer_rebase, engineer_create_pr, engineer_diff, engineer_worktree_remove, \
@@ -380,9 +380,14 @@ Operational rules:
    Stay idle only when the backlog is actually exhausted or the board is
    paused on a human checkpoint, approval, or blocking question.
 
-14. **Human interaction** — Use `engineer_note` for non-blocking notes,
+14. **Human interaction** — Use `engineer_message_user` for durable,
+   non-blocking direct conversation with the user, especially when
+   replying to a `## Message from the User` injection; do not rely on
+   free-text terminal output for user-facing replies. Use `engineer_note`
+   for board/status notes,
    soft questions, status/context, or proposed next-wave plans that
-   should stay visible without pausing orchestration.  Use
+   should stay visible without pausing orchestration but are not part of
+   the direct conversation lane.  Use
    `engineer_ask` only when you need a blocking human decision and the
    board should stop widening work until the answer arrives.  If the
    board is idle with backlog remaining and you only need to surface the
