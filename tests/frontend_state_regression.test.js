@@ -9170,7 +9170,7 @@ test('embedded terminal direct-message body renders shared markdown safely', () 
   assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Bad<\/span>/);
   assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Entity<\/span>/);
   assert.match(html, /<blockquote><p>quoted line<\/p><\/blockquote>/);
-  assert.match(html, /<pre class="torque-md-code-block"><code>const tag = &quot;&lt;script&gt;&quot;<\/code><\/pre>/);
+  assert.match(html, /<pre class="torque-md-code-block"><code>const tag = &quot;&lt;script&gt;&quot;;<\/code><\/pre>/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script\b/i);

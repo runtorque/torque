@@ -74,7 +74,7 @@
         i = open + 1;
         continue;
       }
-      var end = text.indexOf(')', close + 2);
+      var end = _torqueMarkdownFindLinkEnd(text, close + 1);
       if (end < 0) {
         out += text.slice(i, open + 1);
         i = open + 1;
@@ -97,6 +97,20 @@
     return out;
   }
 
+  function _torqueMarkdownFindLinkEnd(text, openParenIndex) {
+    var depth = 0;
+    for (var i = openParenIndex; i < text.length; i++) {
+      var ch = text.charAt(i);
+      if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
   function _torqueMarkdownInline(escapedText) {
     var tokens = [];
     var text = _torqueMarkdownExtractCode(escapedText, tokens);
@@ -112,7 +126,7 @@
 
   function _torqueMarkdownIsBlockStart(line) {
     return /^ {0,3}#{1,6}\s+/.test(line)
-      || /^ {0,3}> ?/.test(line)
+      || /^ {0,3}(?:>|&gt;) ?/.test(line)
       || /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line)
       || !!_torqueMarkdownIsFence(line);
   }
@@ -156,10 +170,10 @@
         continue;
       }
 
-      if (/^ {0,3}> ?/.test(line)) {
+      if (/^ {0,3}(?:>|&gt;) ?/.test(line)) {
         var quoteLines = [];
-        while (i < lines.length && /^ {0,3}> ?/.test(lines[i])) {
-          quoteLines.push(String(lines[i]).replace(/^ {0,3}> ?/, ''));
+        while (i < lines.length && /^ {0,3}(?:>|&gt;) ?/.test(lines[i])) {
+          quoteLines.push(String(lines[i]).replace(/^ {0,3}(?:>|&gt;) ?/, ''));
           i += 1;
         }
         html.push('<blockquote>' + _torqueMarkdownParagraph(quoteLines) + '</blockquote>');
