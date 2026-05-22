@@ -5,7 +5,7 @@ The community daemon can optionally import this package through
 ``ee/`` so this module is absent from the open build.
 """
 
-from .connector import EnterpriseConnector, create_connector
+from .connector import ConnectorConfig, EnterpriseConnector, create_connector
 
-__all__ = ["EnterpriseConnector", "create_connector"]
+__all__ = ["ConnectorConfig", "EnterpriseConnector", "create_connector"]
 __version__ = "0.1.0"

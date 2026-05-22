@@ -54,6 +54,14 @@ CLOUD_CONNECTOR_MODULE: str = (
     os.environ.get("TORQUE_CLOUD_CONNECTOR_MODULE", "").strip()
     or "torque_ee_connector"
 )
+CLOUD_RELAY_URL: str = (
+    os.environ.get("TORQUE_CLOUD_RELAY_URL", "").strip()
+    or os.environ.get("TORQUE_EE_RELAY_URL", "").strip()
+)
+CLOUD_DAEMON_ID: str = (
+    os.environ.get("TORQUE_CLOUD_DAEMON_ID", "").strip()
+    or os.environ.get("TORQUE_EE_DAEMON_ID", "").strip()
+)
 
 
 def _profile_enabled_env() -> bool:

@@ -16645,6 +16645,8 @@ async def main(connection=None):
             config={
                 "module": torque_config.CLOUD_CONNECTOR_MODULE,
                 "enabled": torque_config.CLOUD_CONNECTOR_ENABLED,
+                "relay_url": torque_config.CLOUD_RELAY_URL,
+                "daemon_id": torque_config.CLOUD_DAEMON_ID,
             },
         )
     )
