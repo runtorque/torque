@@ -667,6 +667,68 @@ function _agentPanelMessageContextPreview(message) {
   return html;
 }
 
+function _agentPanelMessageCardHtml(agent, message, index, options) {
+  message = message || {};
+  options = options || {};
+  var action = String(message.action || 'progress');
+  var direction = String(options.direction || '').trim();
+  if (direction !== 'in' && direction !== 'out') {
+    direction = _agentPanelMessageDirection(agent, message);
+  }
+  if (direction !== 'in' && direction !== 'out') direction = 'in';
+  var senderKind = String(options.senderKind || '').trim()
+    || _agentPanelMessageSenderKind(agent, message, direction);
+  var body = options.body != null
+    ? String(options.body)
+    : String(message.message || action || '');
+  var anchorKey = options.anchorKey != null
+    ? String(options.anchorKey || '')
+    : _agentPanelMessageKey(message, index);
+  var anchorAttr = String(options.anchorAttr || 'data-agent-panel-anchor')
+    .replace(/[^a-zA-Z0-9_:-]/g, '');
+  if (!anchorAttr) anchorAttr = 'data-agent-panel-anchor';
+  var extraAttrs = String(options.extraAttrs || '');
+  var rowHtml = '<div class="agent-panel-message-card agent-panel-message-' + _agentPanelAttr(direction)
+    + '" ' + anchorAttr + '="' + _agentPanelAttr(anchorKey) + '"'
+    + (extraAttrs ? ' ' + extraAttrs : '') + '>';
+  rowHtml += '<div class="agent-panel-message-card-header">';
+  rowHtml += '<div class="agent-panel-message-meta">';
+  if (options.attributionHtml !== undefined) {
+    rowHtml += String(options.attributionHtml || '');
+  } else {
+    rowHtml += _agentPanelMessageAttributionHtml(agent, message, direction, senderKind);
+  }
+  rowHtml += '<span class="agent-panel-message-sender">'
+    + _agentPanelEsc(_agentPanelMessageKindLabel(senderKind)) + '</span>';
+  if (options.showDirection !== false) {
+    rowHtml += '<span class="agent-panel-message-direction">'
+      + _agentPanelEsc(direction === 'in' ? 'In' : 'Out') + '</span>';
+  }
+  rowHtml += '<span class="agent-panel-message-action">'
+    + _agentPanelEsc(_agentPanelMessageActionLabel(action)) + '</span>';
+  if (options.peerAffordancesHtml !== undefined) {
+    rowHtml += String(options.peerAffordancesHtml || '');
+  } else if (options.showPeerAffordances !== false) {
+    rowHtml += _agentPanelMessagePeerAffordances(agent, message);
+  }
+  if (options.metaHtml) rowHtml += String(options.metaHtml || '');
+  rowHtml += '</div>';
+  var timeLabel = options.timeLabel !== undefined
+    ? String(options.timeLabel || '')
+    : _agentPanelTimestamp(message.timestamp);
+  rowHtml += '<span class="agent-panel-message-time">'
+    + _agentPanelEsc(timeLabel) + '</span>';
+  rowHtml += '</div>';
+  rowHtml += '<div class="agent-panel-message-body">' + _agentPanelEsc(body) + '</div>';
+  if (options.contextHtml !== undefined) {
+    rowHtml += String(options.contextHtml || '');
+  } else {
+    rowHtml += _agentPanelMessageContextPreview(message);
+  }
+  rowHtml += '</div>';
+  return rowHtml;
+}
+
 function _agentPanelAnchorItems(container) {
   if (!container || typeof container.querySelectorAll !== 'function') return [];
   var results = [];
@@ -3213,31 +3275,7 @@ function _agentPanelMessagesHtml(agent, messages, note, options) {
     scrollSelector: '.agent-panel-message-list',
     renderItem: function(index) {
       var message = messages[index] || {};
-      var action = String(message.action || 'progress');
-      var direction = _agentPanelMessageDirection(agent, message);
-      var senderKind = _agentPanelMessageSenderKind(agent, message, direction);
-      var body = String(message.message || action || '');
-      var anchorKey = _agentPanelMessageKey(message, index);
-      var rowHtml = '<div class="agent-panel-message-card agent-panel-message-' + _agentPanelAttr(direction)
-        + '" data-agent-panel-anchor="' + _agentPanelAttr(anchorKey) + '">';
-      rowHtml += '<div class="agent-panel-message-card-header">';
-      rowHtml += '<div class="agent-panel-message-meta">';
-      rowHtml += _agentPanelMessageAttributionHtml(agent, message, direction, senderKind);
-      rowHtml += '<span class="agent-panel-message-sender">'
-        + _agentPanelEsc(_agentPanelMessageKindLabel(senderKind)) + '</span>';
-      rowHtml += '<span class="agent-panel-message-direction">'
-        + _agentPanelEsc(direction === 'in' ? 'In' : 'Out') + '</span>';
-      rowHtml += '<span class="agent-panel-message-action">'
-        + _agentPanelEsc(_agentPanelMessageActionLabel(action)) + '</span>';
-      rowHtml += _agentPanelMessagePeerAffordances(agent, message);
-      rowHtml += '</div>';
-      rowHtml += '<span class="agent-panel-message-time">'
-        + _agentPanelEsc(_agentPanelTimestamp(message.timestamp)) + '</span>';
-      rowHtml += '</div>';
-      rowHtml += '<div class="agent-panel-message-body">' + _agentPanelEsc(body) + '</div>';
-      rowHtml += _agentPanelMessageContextPreview(message);
-      rowHtml += '</div>';
-      return rowHtml;
+      return _agentPanelMessageCardHtml(agent, message, index);
     },
   });
   html += '</div>';
