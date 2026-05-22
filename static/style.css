@@ -4111,6 +4111,7 @@ body.runtime-embedded #standalone-right-rail {
   visibility: hidden;
 }
 body.runtime-embedded .standalone-panel-zone-body > #panel-board,
+body.runtime-embedded .standalone-panel-zone-body > #panel-chat,
 body.runtime-embedded .standalone-panel-zone-body > #panel-actions,
 body.runtime-embedded .standalone-panel-zone-body > #panel-templates,
 body.runtime-embedded .standalone-panel-zone-body > #panel-history,
@@ -4120,6 +4121,7 @@ body.runtime-embedded .standalone-panel-zone-body > #panel-agent,
 body.runtime-embedded .standalone-panel-zone-body > #panel-supervisor,
 body.runtime-embedded .standalone-panel-zone-body > #panel-health,
 body.runtime-embedded .standalone-float-body > #panel-board,
+body.runtime-embedded .standalone-float-body > #panel-chat,
 body.runtime-embedded .standalone-float-body > #panel-actions,
 body.runtime-embedded .standalone-float-body > #panel-templates,
 body.runtime-embedded .standalone-float-body > #panel-history,
@@ -4307,6 +4309,222 @@ body.runtime-embedded .panel-resize-handle::after {
   display: flex; flex-direction: column;
   height: calc(100% - 5px); /* minus resize handle */
   min-height: 0; /* allow flex child to shrink so board-cards scrolls */
+}
+
+/* ------------------------------------------------------------------ */
+/* Chat panel                                                          */
+/* ------------------------------------------------------------------ */
+#panel-chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 5px);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 32%) minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--bg-surface);
+}
+.chat-thread-pane,
+.chat-message-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.chat-thread-pane {
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-hover) 46%, var(--bg-surface));
+}
+.chat-panel-header,
+.chat-message-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+  flex-shrink: 0;
+}
+.chat-panel-title,
+.chat-message-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.chat-panel-subtitle,
+.chat-message-subtitle,
+.chat-thread-participants,
+.chat-thread-last,
+.chat-thread-time {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.chat-panel-summary,
+.chat-thread-badges,
+.chat-message-header-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chat-message-header-meta {
+  justify-content: flex-end;
+  min-width: 180px;
+}
+.chat-thread-list,
+.chat-message-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.chat-thread-list {
+  padding: 6px;
+}
+.chat-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+.chat-thread-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  cursor: pointer;
+  user-select: none;
+}
+.chat-thread-row:hover,
+.chat-thread-row:focus {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-cell));
+  outline: none;
+}
+.chat-thread-row.selected {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 78%, transparent);
+}
+.chat-thread-row-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-thread-title {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-thread-time {
+  flex-shrink: 0;
+  text-align: right;
+}
+.chat-thread-last {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.chat-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.45;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.chat-badge-ack {
+  border-color: color-mix(in srgb, var(--amber) 32%, var(--border));
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  color: var(--amber);
+  font-weight: 700;
+}
+.chat-badge-pending {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.chat-participant-list {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chat-participant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--bg-cell);
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 1px 6px;
+}
+.chat-participant-kind {
+  color: var(--accent);
+  font-weight: 700;
+}
+.chat-older-affordance {
+  flex-shrink: 0;
+  border: 1px dashed color-mix(in srgb, var(--amber) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 7px 9px;
+  text-align: center;
+}
+.chat-message-context {
+  margin-top: 7px;
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+.chat-message-context > summary {
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+.chat-empty-state {
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 16px 10px;
+  text-align: center;
+}
+.chat-empty-state-wide {
+  margin: auto;
+}
+@media (max-width: 780px) {
+  .chat-panel {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(150px, 34%) minmax(0, 1fr);
+  }
+  .chat-thread-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 /* Lane tabs */

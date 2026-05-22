@@ -1374,6 +1374,7 @@
 <div id="bottom-panel" class="collapsed">
   <div class="panel-resize-handle" id="panel-resize-handle"></div>
   <div id="panel-board"></div>
+  <div id="panel-chat" class="panel-hidden"></div>
   <div id="panel-actions" class="panel-hidden"></div>
   <div id="panel-templates" class="panel-hidden"></div>
   <div id="panel-history" class="panel-hidden"></div>
@@ -1387,6 +1388,7 @@
 <!-- Taskbar (dock for panel apps) -->
 <div id="taskbar">
   <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
+  <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
   <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
   <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
   <button class="taskbar-app" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
@@ -1539,6 +1541,7 @@
 <script src="/static/js/events.js"></script>
 <script src="/static/js/context.js"></script>
 <script src="/static/js/agent_panel.js"></script>
+<script src="/static/js/chat.js"></script>
 <script src="/static/js/supervisor.js"></script>
 <script src="/static/js/health.js"></script>
 <script src="/static/js/panel_manager.js"></script>

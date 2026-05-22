@@ -296,6 +296,7 @@ class FakeDocument {
 
 const PANEL_ROOT_IDS = [
   'panel-board',
+  'panel-chat',
   'panel-actions',
   'panel-templates',
   'panel-history',
@@ -776,6 +777,111 @@ function createEngineerWsHarness() {
   return { context, document, sandbox };
 }
 
+function makeChatThread(id, options = {}) {
+  const ts = options.ts || 100;
+  const messageId = options.messageId || `${id}-msg`;
+  const sender = options.sender || {
+    id: 'arch-1',
+    kind: 'architect',
+    name: 'Architect One',
+    group: options.group || 'alpha',
+  };
+  const recipient = options.recipient || {
+    id: 'eng-1',
+    kind: 'engineer',
+    name: 'Engineer One',
+    group: options.group || 'alpha',
+  };
+  const message = Object.assign({
+    id: messageId,
+    thread_id: id,
+    action: options.action || 'architect_message',
+    message: options.message || `Message for ${id}`,
+    timestamp: ts,
+    group: options.group || 'alpha',
+    sender_id: sender.id,
+    sender_kind: sender.kind,
+    sender_name: sender.name,
+    recipient_id: recipient.id,
+    recipient_kind: recipient.kind,
+    recipient_name: recipient.name,
+    ack_required: !!options.ack,
+    delivery_state: options.deliveryState || 'delivered',
+    context_task_ids: options.contextTaskIds || [],
+    context_engineer_ids: options.contextEngineerIds || [],
+    context_decision_ids: options.contextDecisionIds || [],
+    context_summary: options.contextSummary || '',
+  }, options.messagePatch || {});
+  return {
+    thread_id: id,
+    group: options.group || 'alpha',
+    title: options.title || `${sender.name} ↔ ${recipient.name}`,
+    participants: [sender, recipient],
+    participant_ids: [sender.id, recipient.id],
+    last_activity_at: ts,
+    last_message_id: message.id,
+    last_message: message,
+    message_count: options.messageCount || (options.messages ? options.messages.length : 1),
+    ack_required_count: options.ackCount != null ? options.ackCount : (options.ack ? 1 : 0),
+    pending_delivery_count: options.pendingCount || 0,
+    requires_reply_participant_ids: options.ack ? [recipient.id] : [],
+    messages: options.messages || [message],
+    truncated: !!options.truncated,
+  };
+}
+
+function createChatHarness() {
+  const { sandbox, document } = createSandbox({
+    _cachedProviders: [],
+    _esc(value) { return String(value); },
+  });
+  sandbox.renderCalls = {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+    chat: 0,
+  };
+  document.register('main');
+  document.register('bottom-panel');
+  document.register('panel-chat');
+  document.register('conn-dot');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/chat.js');
+  runInContext(context, `
+    send = function(message) { sendCalls.push(message); };
+    render = function() { renderCalls.main++; };
+    renderBoard = function() { renderCalls.board++; };
+    renderTemplatesPanel = function() { renderCalls.actions++; };
+    renderContextPanel = function() { renderCalls.context++; };
+    renderEvents = function() { renderCalls.events++; };
+    renderAgentPanel = function() { renderCalls.engineer++; };
+    renderAgentTemplatesPanel = function() { renderCalls.templates++; };
+    var _realRenderChatPanel = renderChatPanel;
+    renderChatPanel = function() {
+      renderCalls.chat++;
+      return _realRenderChatPanel();
+    };
+    updateEventsAttentionBadge = function() {};
+    _activePanelApp = 'chat';
+    _panelStateRestored = true;
+    _expectedSeq = 1;
+  `);
+  return { context, document, sandbox };
+}
+
+function setChatThreads(context, threads) {
+  context.__chatThreads = threads;
+  runInContext(context, `state.agent_peer_threads = __chatThreads;`);
+  delete context.__chatThreads;
+}
+
 function createAgentHistoryHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -902,7 +1008,7 @@ function createMainHarness(overrides = {}) {
   const harnessOptions = overrides.__mainHarnessOptions || {};
   const sandboxOverrides = Object.assign({}, overrides);
   delete sandboxOverrides.__mainHarnessOptions;
-  const taskbarButtons = ['board', 'actions', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health'].map((app) => {
+  const taskbarButtons = ['board', 'chat', 'actions', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health'].map((app) => {
     const button = new FakeElement();
     button.dataset.app = app;
     return button;
@@ -945,6 +1051,7 @@ function createMainHarness(overrides = {}) {
     'bottom-panel',
     'panel-resize-handle',
     'panel-board',
+    'panel-chat',
     'panel-actions',
     'panel-templates',
     'panel-history',
@@ -16069,14 +16176,221 @@ test('standalone panel titles use current operator-facing names', () => {
   const { context } = createPanelHarness();
   assert.equal(jsonValue(context, `_standalonePanelTitle('templates')`), 'Library');
   assert.equal(jsonValue(context, `_standalonePanelTitle('history')`), 'History');
+  assert.equal(jsonValue(context, `_standalonePanelTitle('chat')`), 'Chat');
   assert.equal(jsonValue(context, `_standalonePanelTitle('engineer')`), 'Agent');
 });
 
 test('taskbar labels the selected-agent panel as Agent', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /data-app="board"[\s\S]*data-app="chat"[\s\S]*data-app="actions"/);
+  assert.match(html, /<button class="taskbar-app" data-app="chat" onclick="togglePanel\('chat'\)">&#9993; Chat<\/button>/);
   assert.match(html, /<button class="taskbar-app" data-app="engineer" onclick="togglePanel\('engineer'\)">&#x2696; Agent<\/button>/);
   assert.match(html, /<button class="taskbar-app" data-app="history" onclick="togglePanel\('history'\)">&#8635; History<\/button>/);
   assert.doesNotMatch(html, /&#x2696; Architects<\/button>/);
+});
+
+test('chat panel renders snapshot threads and selected read-only message tail', () => {
+  const { context, document, sandbox } = createChatHarness();
+  const older = makeChatThread('thread-old', {
+    ts: 100,
+    title: 'Older Architect ↔ Engineer',
+    message: 'Older message',
+  });
+  const newer = makeChatThread('thread-new', {
+    ts: 250,
+    title: 'Architect One ↔ Engineer One',
+    message: 'Newest message with context',
+    ack: true,
+    ackCount: 1,
+    pendingCount: 1,
+    deliveryState: 'buffered',
+    truncated: true,
+    contextTaskIds: ['TORQUE:1'],
+    contextSummary: 'Decision context',
+    messageCount: 120,
+  });
+  setChatThreads(context, {
+    'thread-old': older,
+    'thread-new': newer,
+  });
+
+  context.renderChatPanel();
+
+  const panel = document.getElementById('panel-chat');
+  const parts = panel._chatShell._chatParts;
+  assert.equal(sandbox.renderCalls.chat, 1);
+  assert.ok(parts.list.innerHTML.indexOf('Architect One ↔ Engineer One') < parts.list.innerHTML.indexOf('Older Architect ↔ Engineer'));
+  assert.match(parts.list.innerHTML, /Ack required/);
+  assert.match(parts.list.innerHTML, /Pending/);
+  assert.match(parts.messages.innerHTML, /Newest message with context/);
+  assert.match(parts.messages.innerHTML, /Older messages exist outside this loaded tail/);
+  assert.match(parts.messages.innerHTML, /Context details/);
+  assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-new');
+});
+
+test('chat panel is read-only and exposes no compose or mutation controls', () => {
+  const { context, document } = createChatHarness();
+  setChatThreads(context, {
+    'thread-new': makeChatThread('thread-new', {
+      ts: 250,
+      message: 'Inspect only',
+      ack: true,
+    }),
+  });
+
+  context.renderChatPanel();
+
+  const parts = document.getElementById('panel-chat')._chatShell._chatParts;
+  const html = [
+    parts.listHeader.innerHTML,
+    parts.list.innerHTML,
+    parts.messageHeader.innerHTML,
+    parts.messages.innerHTML,
+  ].join('\n');
+  assert.doesNotMatch(html, /<(?:form|textarea|input|button)\b/i);
+  assert.doesNotMatch(html, /\b(?:compose|send|archive|mark read|mark-read)\b/i);
+});
+
+test('chat thread delta upsert sorts newest first and invalidates only chat surface', () => {
+  const { context, document, sandbox } = createChatHarness();
+  setChatThreads(context, {
+    'thread-old': makeChatThread('thread-old', {
+      ts: 100,
+      title: 'Old Thread',
+      message: 'Old message',
+    }),
+  });
+  context.renderChatPanel();
+  const parts = document.getElementById('panel-chat')._chatShell._chatParts;
+  const threadAnchor = new FakeElement();
+  threadAnchor.setAttribute('data-chat-thread-id', 'thread-old');
+  threadAnchor.offsetTop = 90;
+  threadAnchor.offsetHeight = 28;
+  const messageAnchor = new FakeElement();
+  messageAnchor.setAttribute('data-chat-message-id', 'thread-old-msg');
+  messageAnchor.offsetTop = 180;
+  messageAnchor.offsetHeight = 80;
+  parts.list.setQuerySelectorAll('[data-chat-thread-id]', [threadAnchor]);
+  parts.messages.setQuerySelectorAll('[data-chat-message-id]', [messageAnchor]);
+  parts.list.scrollTop = 84;
+  parts.list.clientHeight = 80;
+  parts.list.scrollHeight = 420;
+  parts.messages.scrollTop = 150;
+  parts.messages.clientHeight = 100;
+  parts.messages.scrollHeight = 520;
+  sandbox.renderCalls = {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+    chat: 0,
+  };
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'agent_peer_thread_upsert',
+        thread_id: 'thread-new',
+        group: 'alpha',
+        thread: makeChatThread('thread-new', {
+          ts: 300,
+          title: 'New Thread',
+          message: 'New message',
+        }),
+      },
+    ],
+  });
+
+  assert.deepEqual(jsonValue(context, 'Object.keys(state.agent_peer_threads)'), ['thread-new', 'thread-old']);
+  assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-old');
+  assert.equal(parts.list.scrollTop, 84);
+  assert.equal(parts.messages.scrollTop, 150);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+    chat: 1,
+  });
+});
+
+test('chat selection and scroll anchors survive unrelated websocket deltas', () => {
+  const { context, document, sandbox } = createChatHarness();
+  setChatThreads(context, {
+    'thread-new': makeChatThread('thread-new', {
+      ts: 300,
+      title: 'New Thread',
+      message: 'New message',
+    }),
+    'thread-old': makeChatThread('thread-old', {
+      ts: 100,
+      title: 'Old Thread',
+      message: 'Old message',
+    }),
+  });
+  context.renderChatPanel();
+  context.chatSelectThread('thread-old');
+  const parts = document.getElementById('panel-chat')._chatShell._chatParts;
+  const threadAnchor = new FakeElement();
+  threadAnchor.setAttribute('data-chat-thread-id', 'thread-old');
+  threadAnchor.offsetTop = 160;
+  threadAnchor.offsetHeight = 28;
+  const messageAnchor = new FakeElement();
+  messageAnchor.setAttribute('data-chat-message-id', 'thread-old-msg');
+  messageAnchor.offsetTop = 240;
+  messageAnchor.offsetHeight = 80;
+  parts.list.setQuerySelectorAll('[data-chat-thread-id]', [threadAnchor]);
+  parts.messages.setQuerySelectorAll('[data-chat-message-id]', [messageAnchor]);
+  parts.list.scrollTop = 150;
+  parts.list.clientHeight = 80;
+  parts.list.scrollHeight = 420;
+  parts.messages.scrollTop = 220;
+  parts.messages.clientHeight = 100;
+  parts.messages.scrollHeight = 620;
+  sandbox.renderCalls = {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+    chat: 0,
+  };
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'task_upsert',
+        id: 'TORQUE:unrelated',
+        group: 'alpha',
+        lane: 'Backlog',
+        task: 'Unrelated task',
+      },
+    ],
+  });
+
+  assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-old');
+  assert.equal(parts.list.scrollTop, 150);
+  assert.equal(parts.messages.scrollTop, 220);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+    chat: 0,
+  });
 });
 
 test('renderAgentPanel shows the focused-agent empty state when nothing is focused', () => {
@@ -16102,7 +16416,7 @@ test('opening History panel requests history while Library requests roles', () =
   assert.equal(sandbox._activePanelApp, 'history');
   assert.equal(sandbox.historyLoads, 1);
   assert.equal(sandbox.templateLoads, 0);
-  assert.equal(taskbarButtons[3].classList.contains('active'), true);
+  assert.equal(taskbarButtons.find((button) => button.dataset.app === 'history').classList.contains('active'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     { cmd: 'board_set_panel', active: 'history' },
   ]);
@@ -16112,7 +16426,7 @@ test('opening History panel requests history while Library requests roles', () =
   assert.equal(sandbox._activePanelApp, 'templates');
   assert.equal(sandbox.historyLoads, 1);
   assert.equal(sandbox.templateLoads, 1);
-  assert.equal(taskbarButtons[2].classList.contains('active'), true);
+  assert.equal(taskbarButtons.find((button) => button.dataset.app === 'templates').classList.contains('active'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     { cmd: 'board_set_panel', active: 'history' },
     { cmd: 'board_set_panel', active: 'templates' },
@@ -21692,7 +22006,9 @@ test('standalone panel defaults place Context in the bottom dock and Agent in th
   `);
 
   assert.equal(jsonValue(context, `_standalonePanelDefaults.context`), 'bottom');
+  assert.equal(jsonValue(context, `_standalonePanelDefaults.chat`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelDefaults.engineer`), 'right');
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('chat')`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelPlacement('context')`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelPlacement('engineer')`), 'right');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
@@ -21716,7 +22032,7 @@ test('standalone restore includes Supervisor panel in the bottom dock by default
   context.togglePanel('supervisor');
 
   assert.equal(jsonValue(context, `_standalonePanelPlacement('supervisor')`), 'bottom');
-  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'context', 'supervisor']);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'chat', 'context', 'supervisor']);
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'supervisor');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs.includes('supervisor')`), false);
   assert.equal(sandbox.sendCalls.length, 1);
@@ -21897,7 +22213,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
     cmd: 'standalone_set_panel_layout',
     layout: {
       version: 1,
-      bottom: { open: true, size: 306, tabs: ['board', 'context', 'supervisor'], active: 'context' },
+      bottom: { open: true, size: 306, tabs: ['board', 'chat', 'context', 'supervisor'], active: 'context' },
       right: {
         open: true,
         size: 320,
@@ -22053,7 +22369,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,
-    bottom: { open: true, size: 306, tabs: ['board', 'context', 'supervisor'], active: 'context' },
+    bottom: { open: true, size: 306, tabs: ['board', 'chat', 'context', 'supervisor'], active: 'context' },
     right: {
       open: true,
       size: 320,
@@ -22065,7 +22381,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   });
   assert.deepEqual(
     jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs.concat(_standalonePanelCurrentLayout().right.tabs).sort()`),
-    ['actions', 'board', 'context', 'engineer', 'events', 'health', 'history', 'supervisor', 'templates']
+    ['actions', 'board', 'chat', 'context', 'engineer', 'events', 'health', 'history', 'supervisor', 'templates']
   );
   assert.deepEqual(jsonValue(context, `sendCalls`), [
     {
@@ -22076,7 +22392,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
       cmd: 'standalone_set_panel_layout',
       layout: {
         version: 1,
-        bottom: { open: true, size: 306, tabs: ['board', 'context', 'supervisor'], active: 'context' },
+        bottom: { open: true, size: 306, tabs: ['board', 'chat', 'context', 'supervisor'], active: 'context' },
         right: {
           open: true,
           size: 320,
@@ -22553,6 +22869,7 @@ test('standalone full-state rerender keeps panel roots attached', () => {
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
   assert.deepEqual(parkedStandalonePanelIds(document), [
+    'panel-chat',
     'panel-templates',
     'panel-history',
     'panel-events',
@@ -22644,6 +22961,7 @@ test('standalone layout ui_update keeps panel roots attached across rerenders', 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
   assert.deepEqual(parkedStandalonePanelIds(document), [
+    'panel-chat',
     'panel-templates',
     'panel-history',
     'panel-events',
