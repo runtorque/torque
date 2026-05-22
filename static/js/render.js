@@ -1637,6 +1637,152 @@ function _renderAgentProviderBadge(provider, extraClass) {
     + '</span>';
 }
 
+function _agentContextWindowInfo(agentOrContext) {
+  const context = agentOrContext && agentOrContext.context_window !== undefined
+    ? agentOrContext.context_window
+    : agentOrContext;
+  if (!context || typeof context !== 'object') return null;
+  if (Object.keys(context).length === 0) return null;
+
+  let pct = Number(context.used_pct);
+  if (!Number.isFinite(pct)) {
+    const used = Number(context.used_tokens);
+    const limit = Number(context.limit_tokens);
+    if (Number.isFinite(used) && Number.isFinite(limit) && limit > 0) {
+      pct = (used / limit) * 100;
+    }
+  }
+  if (!Number.isFinite(pct)) return null;
+
+  const displayPct = Math.max(0, Math.round(pct));
+  let level = 'normal';
+  if (displayPct >= 90) level = 'danger';
+  else if (displayPct >= 70) level = 'warn';
+  return {
+    pct,
+    displayPct,
+    level,
+    label: 'ctx ' + displayPct + '%',
+  };
+}
+
+function _agentContextMeterClasses(info) {
+  const level = info && info.level ? info.level : 'normal';
+  return [
+    'agent-context-meter',
+    'agent-context-meter--' + level,
+  ];
+}
+
+function _renderAgentContextMeter(agent) {
+  const info = _agentContextWindowInfo(agent);
+  if (!info) return '';
+  const classes = _agentContextMeterClasses(info);
+  return '<div class="' + esc(classes.join(' ')) + '"'
+    + ' data-agent-context-meter'
+    + ' data-context-level="' + esc(info.level) + '"'
+    + ' data-context-pct="' + esc(String(info.displayPct)) + '">'
+    + esc(info.label)
+    + '</div>';
+}
+
+function _agentGridCardSelector(agentId) {
+  const raw = String(agentId || '');
+  if (!raw) return '';
+  const escaped = (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function')
+    ? CSS.escape(raw)
+    : raw.replace(/["\\]/g, '\\$&');
+  return '[data-drag-id="' + escaped + '"][data-drag-type="agent"]';
+}
+
+function _findAgentGridCard(agentId) {
+  const selector = _agentGridCardSelector(agentId);
+  if (!selector || typeof document === 'undefined' || !document.querySelector) return null;
+  return document.querySelector(selector);
+}
+
+function _applyAgentContextMeterElement(el, info) {
+  if (!el || !info) return;
+  const classes = _agentContextMeterClasses(info).join(' ');
+  if ('className' in el) el.className = classes;
+  if (typeof el.setAttribute === 'function') {
+    el.setAttribute('class', classes);
+    el.setAttribute('data-context-level', info.level);
+    el.setAttribute('data-context-pct', String(info.displayPct));
+    el.setAttribute('data-agent-context-meter', '');
+  }
+  if (el.dataset) {
+    el.dataset.contextLevel = info.level;
+    el.dataset.contextPct = String(info.displayPct);
+  }
+  el.textContent = info.label;
+}
+
+function _createAgentContextMeterElement(info) {
+  if (typeof document === 'undefined' || !document.createElement || !info) return null;
+  const el = document.createElement('div');
+  _applyAgentContextMeterElement(el, info);
+  return el;
+}
+
+function _invalidateAgentGridMemoAfterCardSurgery() {
+  const main = (typeof document !== 'undefined' && document.getElementById)
+    ? document.getElementById('main')
+    : null;
+  if (!main) return;
+  // The grid shell memoizes the HTML fragment. A surgical child mutation must
+  // invalidate those snapshots so the next ordinary render reconciles against
+  // state instead of trusting a pre-surgery string cache.
+  main._torqueLastGridHtml = null;
+  main._torqueLastHtml = null;
+}
+
+function updateAgentContextMeter(agentId) {
+  const id = String(agentId || '').trim();
+  if (!id || !state || !state.agents) return false;
+  const agent = state.agents[id];
+  if (!agent) return false;
+  const card = _findAgentGridCard(id);
+  if (!card || !card.querySelector) return false;
+  const existing = card.querySelector('[data-agent-context-meter]');
+  const info = _agentContextWindowInfo(agent);
+
+  if (!info) {
+    if (!existing) return false;
+    if (typeof existing.remove === 'function') existing.remove();
+    else if (existing.parentNode && Array.isArray(existing.parentNode.children)) {
+      existing.parentNode.children = existing.parentNode.children.filter(function(child) {
+        return child !== existing;
+      });
+      existing.parentNode = null;
+    }
+    _invalidateAgentGridMemoAfterCardSurgery();
+    return true;
+  }
+
+  if (existing) {
+    const nextText = info.label;
+    const nextLevel = info.level;
+    const nextPct = String(info.displayPct);
+    const same = existing.textContent === nextText
+      && (!existing.dataset || (
+        existing.dataset.contextLevel === nextLevel
+        && existing.dataset.contextPct === nextPct
+      ));
+    if (same) return false;
+    _applyAgentContextMeterElement(existing, info);
+    _invalidateAgentGridMemoAfterCardSurgery();
+    return true;
+  }
+
+  if (typeof card.appendChild !== 'function') return false;
+  const el = _createAgentContextMeterElement(info);
+  if (!el) return false;
+  card.appendChild(el);
+  _invalidateAgentGridMemoAfterCardSurgery();
+  return true;
+}
+
 function _agentKindBadgeLabel(kind, dismissed) {
   if (dismissed) return 'Dismissed';
   if (kind === 'architect') return 'Architect';
@@ -3968,6 +4114,7 @@ function renderAgentCell(a, options) {
   else if (_isArchitect) h += _renderArchitectCellBody(a);
   else h += _renderGenericAgentCardBody(a);
   h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
+  h += _renderAgentContextMeter(a);
   const badgeLabel = _agentKindBadgeLabel(a.kind || '', _isDismissed);
   const badgeClass = _agentKindBadgeClass(a.kind || '', _isDismissed);
   h += '<div class="agent-card-kind ' + esc(badgeClass) + '"'
