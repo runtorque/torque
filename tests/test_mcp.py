@@ -411,6 +411,102 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             )
             db.close()
 
+    async def test_torque_message_user_notifies_user_best_effort(self):
+        db_mod = importlib.import_module("torque.db")
+        notifications_mod = importlib.import_module("torque.notifications")
+        notifications_mod = importlib.reload(notifications_mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            worker = self.state_mod.AgentCell(
+                id="worker-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+            )
+            state.agents[worker.id] = worker
+            state.groups["g"] = [worker.id]
+            state.group_settings["g"] = self.state_mod.GroupSettings(
+                notifications=True,
+                notify_on_attention=True,
+            )
+            manager = notifications_mod.NotificationManager(state)
+            state.notification_manager = manager
+            manager.start()
+
+            async def fake_handle_command(_payload):
+                return {"type": "ok"}
+
+            sent = []
+            orig_send = notifications_mod._send_notification
+
+            async def fake_send(title, body):
+                sent.append((title, body))
+
+            notifications_mod._send_notification = fake_send
+            try:
+                text, is_error = await self.mcp_mod._dispatch_tool(
+                    "torque_message_user",
+                    {"message": "Visible update\nMore detail"},
+                    worker.id,
+                    fake_handle_command,
+                    state,
+                )
+                await asyncio.sleep(0)
+            finally:
+                notifications_mod._send_notification = orig_send
+
+            self.assertFalse(is_error, text)
+            payload = json.loads(text)
+            self.assertIsNotNone(db.load_direct_message(payload["message_id"]))
+            self.assertEqual(
+                sent,
+                [("Torque message from Worker", "Worker: Visible update")],
+            )
+
+            state.group_settings["g"].notifications = False
+            notifications_mod._send_notification = fake_send
+            try:
+                text, is_error = await self.mcp_mod._dispatch_tool(
+                    "torque_message_user",
+                    {"message": "Suppressed while disabled"},
+                    worker.id,
+                    fake_handle_command,
+                    state,
+                )
+                await asyncio.sleep(0)
+            finally:
+                notifications_mod._send_notification = orig_send
+
+            self.assertFalse(is_error, text)
+            self.assertEqual(len(sent), 1)
+
+            state.group_settings["g"].notifications = True
+
+            async def failing_send(_title, _body):
+                raise RuntimeError("notification unavailable")
+
+            notifications_mod._send_notification = failing_send
+            try:
+                with self.assertLogs("torque", level="ERROR"):
+                    text, is_error = await self.mcp_mod._dispatch_tool(
+                        "torque_message_user",
+                        {"message": "Persist despite notification failure"},
+                        worker.id,
+                        fake_handle_command,
+                        state,
+                    )
+                    await asyncio.sleep(0)
+            finally:
+                notifications_mod._send_notification = orig_send
+
+            self.assertFalse(is_error, text)
+            payload = json.loads(text)
+            self.assertIsNotNone(db.load_direct_message(payload["message_id"]))
+            db.close()
+
     async def test_architect_and_engineer_message_user_persist_direct_rows(self):
         db_mod = importlib.import_module("torque.db")
         with tempfile.TemporaryDirectory() as tmp:

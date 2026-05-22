@@ -8370,6 +8370,7 @@ async def main(connection=None):
         max_size=state.global_settings.max_event_log, db=db)
     state.panel_log = panel_log
     notifier = NotificationManager(state)
+    state.notification_manager = notifier
     notifier.start()
     event_bus = EventBus(state, event_log, notifier, panel_log=panel_log)
     event_bus.start()
