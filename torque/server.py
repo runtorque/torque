@@ -3506,6 +3506,168 @@ def _agent_has_open_assigned_tasks(state: MatrixState, agent_id: str) -> bool:
     return False
 
 
+_WORKTREE_REMOVAL_FRESH_AGENT_SECONDS = 5 * 60
+
+
+def _timestamp_to_unix(value) -> float:
+    if isinstance(value, (int, float)):
+        return float(value or 0.0)
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        pass
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _worktree_path_contains(path: str, candidate: str) -> bool:
+    path = str(path or "").strip()
+    candidate = str(candidate or "").strip()
+    if not path or not candidate:
+        return False
+    try:
+        root = os.path.realpath(os.path.expanduser(path))
+        child = os.path.realpath(os.path.expanduser(candidate))
+        return os.path.commonpath([root, child]) == root
+    except Exception:
+        return path == candidate or candidate.startswith(path.rstrip("/") + "/")
+
+
+def _worktree_entry_matches_agent(repo_root: str, path: str, agent) -> bool:
+    """Best-effort match from a git worktree entry to a live Torque agent.
+
+    The primary key is ``agent.worktree_path``, but cleanup safety must still
+    recognize an active worker whose tracking was partially cleared by a prior
+    failed cleanup. In that case the terminal's current/directory/git_root and
+    Torque's default worktree path basename (<agent id>) still identify the
+    attached worktree.
+    """
+    if not agent or getattr(agent, "cell_type", "") != "agent":
+        return False
+    path = str(path or "").strip()
+    if not path:
+        return False
+
+    agent_repo = str(
+        getattr(agent, "worktree_repo_root", "")
+        or getattr(agent, "git_root", "")
+        or ""
+    ).strip()
+    if agent_repo == repo_root:
+        if _worktree_path_contains(path, getattr(agent, "worktree_path", "")):
+            return True
+    else:
+        # Linked worktrees report their own path as git_root from inside the
+        # worker terminal, not the main repo root.
+        git_root = str(getattr(agent, "git_root", "") or "").strip()
+        if git_root and _worktree_path_contains(path, git_root):
+            return True
+
+    for attr in ("worktree_path", "directory", "current_path"):
+        value = str(getattr(agent, attr, "") or "").strip()
+        if value and _worktree_path_contains(path, value):
+            return True
+
+    try:
+        basename = os.path.basename(os.path.realpath(path))
+    except Exception:
+        basename = os.path.basename(path)
+    agent_id = str(getattr(agent, "id", "") or "").strip()
+    return bool(agent_id and basename == agent_id)
+
+
+def _fresh_assigned_task_for_agent(
+        state: MatrixState,
+        agent_id: str,
+        *,
+        now: float,
+        threshold: float = _WORKTREE_REMOVAL_FRESH_AGENT_SECONDS):
+    if not agent_id:
+        return None
+    newest = None
+    newest_ts = 0.0
+    for task in state.board_tasks.values():
+        if getattr(task, "agent_id", "") != agent_id:
+            continue
+        if task_is_closed(task):
+            continue
+        ts = (
+            _timestamp_to_unix(getattr(task, "lane_entered_at", ""))
+            or _timestamp_to_unix(getattr(task, "updated_at", ""))
+            or _timestamp_to_unix(getattr(task, "created_at", ""))
+        )
+        if ts and now - ts <= threshold and ts >= newest_ts:
+            newest = task
+            newest_ts = ts
+    return newest
+
+
+def _worktree_removal_refusal_reason(
+        state: MatrixState,
+        cell,
+        *,
+        now: float | None = None,
+        threshold: float = _WORKTREE_REMOVAL_FRESH_AGENT_SECONDS) -> str:
+    """Return a hard-refusal reason for active/fresh worktree removal."""
+    if not state or not cell or not getattr(cell, "worktree_path", ""):
+        return ""
+    if state.agent_is_tombstoned(cell):
+        return ""
+
+    status = str(getattr(cell, "status", "") or "").strip().lower()
+    non_stopped = status not in {"", "stopped", "error"}
+    now = float(now if now is not None else time.time())
+    name = str(getattr(cell, "name", "") or getattr(cell, "id", "") or "agent")
+
+    if getattr(cell, "session_id", None) and status != "stopped":
+        return (
+            "skipped: worktree belongs to active/fresh agent "
+            f"'{name}' (attached session)"
+        )
+    if status == "running":
+        return (
+            "skipped: worktree belongs to active/fresh agent "
+            f"'{name}' (running)"
+        )
+    if non_stopped and _agent_has_open_assigned_tasks(state, cell.id):
+        return (
+            "skipped: worktree belongs to active/fresh agent "
+            f"'{name}' (open assigned task)"
+        )
+
+    latest_activity = max(
+        _timestamp_to_unix(getattr(cell, "last_progress_at", 0.0)),
+        _timestamp_to_unix(getattr(cell, "last_heartbeat_at", 0.0)),
+        _timestamp_to_unix(getattr(cell, "last_activity_at", 0.0)),
+        _timestamp_to_unix(getattr(cell, "last_event_at", 0.0)),
+    )
+    if non_stopped and latest_activity and now - latest_activity <= threshold:
+        return (
+            "skipped: worktree belongs to active/fresh agent "
+            f"'{name}' (recent activity)"
+        )
+
+    fresh_task = _fresh_assigned_task_for_agent(
+        state,
+        cell.id,
+        now=now,
+        threshold=threshold,
+    )
+    if non_stopped and fresh_task:
+        return (
+            "skipped: worktree belongs to active/fresh agent "
+            f"'{name}' (recently dispatched task {fresh_task.id})"
+        )
+    return ""
+
+
 def _agent_has_targeted_auto_dispatch_work(state: MatrixState,
                                            agent_id: str) -> bool:
     """Return whether a queued auto-dispatch entry is pinned to this agent."""
@@ -8476,25 +8638,137 @@ async def main(connection=None):
     log.info("Engineer event buffer started")
 
 
-    async def _safe_remove_worktree(cell):
-        """Remove a worktree only if no other agent shares it."""
-        if not cell.worktree_path:
-            return True
-        other_users = [a for a in state.agents.values()
-                       if a.id != cell.id
-                       and a.worktree_path == cell.worktree_path]
-        if other_users:
-            log.info("Skipping worktree removal for '%s' — shared with %s",
-                     cell.name,
-                     ", ".join(a.name for a in other_users))
-            cell.worktree_path = ""
-            cell.worktree_branch = ""
-            cell.worktree_base_branch = ""
-            cell.worktree_repo_root = ""
-            cell.worktree_checkpoints = 0
-            return True
+    def _worktree_remove_skip_result(cell, reason: str, *,
+                                     shared_with: list | None = None) -> dict:
+        return {
+            "ok": False,
+            "worktree_removed": False,
+            "branch_deleted": False,
+            "skipped": True,
+            "reason": reason,
+            "message": reason,
+            "agent_id": getattr(cell, "id", ""),
+            "agent_name": getattr(cell, "name", ""),
+            "path": getattr(cell, "worktree_path", ""),
+            "branch": getattr(cell, "worktree_branch", ""),
+            "shared_with": [
+                {
+                    "id": getattr(agent, "id", ""),
+                    "name": getattr(agent, "name", ""),
+                }
+                for agent in (shared_with or [])
+            ],
+            "mismatches": [],
+        }
+
+    def _clear_worktree_tracking(cell) -> None:
+        cell.worktree_path = ""
+        cell.worktree_branch = ""
+        cell.worktree_base_branch = ""
+        cell.worktree_repo_root = ""
+        cell.worktree_dirty = False
+        cell.worktree_diff = {}
+        cell.worktree_changed_files = []
+        cell.worktree_checkpoints = 0
+        cell.worktree_ahead = 0
+        cell.worktree_behind = 0
+        cell.worktree_merged = False
+
+    async def _safe_remove_worktree_result(cell) -> dict:
+        """Remove a worktree only when it is not active/shared, then verify."""
+        if not cell or not cell.worktree_path:
+            return {
+                "ok": True,
+                "worktree_removed": True,
+                "branch_deleted": True,
+                "skipped": True,
+                "message": "No worktree path configured",
+                "mismatches": [],
+            }
+
+        refusal = _worktree_removal_refusal_reason(state, cell)
+        if refusal:
+            log.info("Skipping worktree removal for '%s' — %s",
+                     cell.name, refusal)
+            return _worktree_remove_skip_result(cell, refusal)
+
+        same_path = str(cell.worktree_path or "")
+        other_users = [
+            a for a in state.agents.values()
+            if a.id != cell.id
+            and not state.agent_is_tombstoned(a)
+            and (
+                _worktree_path_contains(same_path, getattr(a, "worktree_path", ""))
+                or _worktree_path_contains(same_path, getattr(a, "directory", ""))
+                or _worktree_path_contains(same_path, getattr(a, "current_path", ""))
+                or _worktree_path_contains(same_path, getattr(a, "git_root", ""))
+            )
+        ]
+        active_other_users = []
+        for other in other_users:
+            other_reason = _worktree_removal_refusal_reason(state, other)
+            status = str(getattr(other, "status", "") or "").strip().lower()
+            non_stopped = status not in {"", "stopped", "error"}
+            latest_activity = max(
+                _timestamp_to_unix(getattr(other, "last_progress_at", 0.0)),
+                _timestamp_to_unix(getattr(other, "last_heartbeat_at", 0.0)),
+                _timestamp_to_unix(getattr(other, "last_activity_at", 0.0)),
+                _timestamp_to_unix(getattr(other, "last_event_at", 0.0)),
+            )
+            if other_reason or (
+                getattr(other, "session_id", None) and status != "stopped"
+            ) or status == "running" or (
+                non_stopped and _agent_has_open_assigned_tasks(state, other.id)
+            ) or (
+                non_stopped
+                and latest_activity
+                and time.time() - latest_activity <= (
+                    _WORKTREE_REMOVAL_FRESH_AGENT_SECONDS
+                )
+            ):
+                active_other_users.append(other)
+        if active_other_users:
+            names = ", ".join(a.name for a in active_other_users)
+            reason = (
+                "skipped: worktree belongs to active/fresh agent "
+                f"shared with {names}"
+            )
+            log.info("Skipping worktree removal for '%s' — %s",
+                     cell.name, reason)
+            return _worktree_remove_skip_result(
+                cell,
+                reason,
+                shared_with=active_other_users,
+            )
+
+        if hasattr(worktree_mgr, "remove_result"):
+            result = await worktree_mgr.remove_result(cell)
         else:
-            return await worktree_mgr.remove(cell)
+            ok = await worktree_mgr.remove(cell)
+            result = {
+                "ok": bool(ok),
+                "worktree_removed": bool(ok),
+                "branch_deleted": bool(ok),
+                "skipped": False,
+                "message": (
+                    "Worktree removed" if ok
+                    else "Worktree removal failed"
+                ),
+                "mismatches": [],
+            }
+
+        if result.get("worktree_removed"):
+            # If inactive/tombstoned cells shared the same worktree metadata,
+            # reconcile their Torque tracking with the verified git state too.
+            for other in other_users:
+                _clear_worktree_tracking(other)
+                state._emit_agent(other)
+                state._db_save_agent(other)
+        return result
+
+    async def _safe_remove_worktree(cell):
+        result = await _safe_remove_worktree_result(cell)
+        return bool(result.get("ok"))
 
     async def _cleanup_after_merge(cell, *,
                                    close_agent: bool = False,
@@ -8521,27 +8795,40 @@ async def main(connection=None):
                 for c in removed:
                     if not c.worktree_path:
                         continue
-                    ok = await _safe_remove_worktree(c)
-                    if ok:
+                    remove_result = await _safe_remove_worktree_result(c)
+                    if remove_result.get("worktree_removed"):
                         removed_worktree = True
-                    else:
+                    if not remove_result.get("ok"):
                         cleanup["errors"].append(
-                            f"Failed to remove worktree for '{c.name}'."
+                            remove_result.get("message")
+                            or f"Failed to remove worktree for '{c.name}'."
+                        )
+                    for mismatch in remove_result.get("mismatches", []) or []:
+                        cleanup["errors"].append(
+                            f"Worktree removal mismatch for '{c.name}': "
+                            f"{mismatch}"
                         )
                 cleanup["worktree_removed"] = removed_worktree
             return cleanup
 
         repo_root = cell.worktree_repo_root
-        ok = await _safe_remove_worktree(cell)
-        if ok:
+        remove_result = await _safe_remove_worktree_result(cell)
+        ok = bool(remove_result.get("ok"))
+        if remove_result.get("worktree_removed"):
             cleanup["worktree_removed"] = True
-        else:
+        if not ok:
             cleanup["errors"].append(
-                f"Failed to remove worktree for '{cell.name}'."
+                remove_result.get("message")
+                or f"Failed to remove worktree for '{cell.name}'."
+            )
+        for mismatch in remove_result.get("mismatches", []) or []:
+            cleanup["errors"].append(
+                f"Worktree removal mismatch for '{cell.name}': {mismatch}"
             )
         if repo_root:
             cell.directory = repo_root
-        if ok and cell.cell_type == "agent" and cell.session_id:
+        if remove_result.get("worktree_removed") \
+                and cell.cell_type == "agent" and cell.session_id:
             await _relaunch_agent_after_worktree_removal(
                 cell,
                 bridge=bridge,
@@ -9222,11 +9509,7 @@ async def main(connection=None):
         if not repo_root or not path:
             return None
         for agent in state.iter_active_agents():
-            if agent.cell_type != "agent":
-                continue
-            if (agent.worktree_repo_root or agent.git_root or "") != repo_root:
-                continue
-            if (agent.worktree_path or "") == path:
+            if _worktree_entry_matches_agent(repo_root, path, agent):
                 return agent
         return None
 
@@ -10919,11 +11202,14 @@ async def main(connection=None):
                 if cell and cell.worktree_path:
                     # Restore directory to original repo root
                     repo_root = cell.worktree_repo_root
-                    await _safe_remove_worktree(cell)
-                    if repo_root:
+                    remove_result = await _safe_remove_worktree_result(cell)
+                    if repo_root and remove_result.get("worktree_removed"):
                         cell.directory = repo_root
                     # Relaunch if requested by the UI
-                    if data.get("relaunch") and cell.cell_type == "agent":
+                    if (
+                            remove_result.get("worktree_removed")
+                            and data.get("relaunch")
+                            and cell.cell_type == "agent"):
                         await _relaunch_agent_after_worktree_removal(
                             cell,
                             bridge=bridge,
@@ -10940,6 +11226,27 @@ async def main(connection=None):
                     else:
                         state._emit_agent(cell)
                         state._db_save_agent(cell)
+                    result = {
+                        "type": "worktree_remove",
+                        "id": cell.id,
+                        **remove_result,
+                    }
+                    if not remove_result.get("worktree_removed"):
+                        result = {
+                            "type": "error",
+                            "message": (
+                                remove_result.get("message")
+                                or "Worktree removal failed"
+                            ),
+                            "id": cell.id,
+                            "worktree_remove": remove_result,
+                        }
+                elif cell:
+                    result = {
+                        "type": "error",
+                        "message": "Agent has no worktree",
+                        "id": cell.id,
+                    }
 
             elif cmd == "worktree_list":
                 requested_root = str(data.get("repo_root", "") or "").strip()
@@ -10986,23 +11293,60 @@ async def main(connection=None):
                     for item in candidates:
                         if item.get("admin_stale"):
                             continue
-                        ok = await worktree_mgr.remove_path(
-                            repo_root,
-                            item.get("path", ""),
-                            branch=item.get("branch", ""),
-                            name=item.get("branch", "") or item.get("path", ""),
-                        )
-                        if ok:
-                            removed.append({
+                        if hasattr(worktree_mgr, "remove_path_result"):
+                            remove_result = await worktree_mgr.remove_path_result(
+                                repo_root,
+                                item.get("path", ""),
+                                branch=item.get("branch", ""),
+                                name=item.get("branch", "") or item.get("path", ""),
+                            )
+                        else:
+                            ok = await worktree_mgr.remove_path(
+                                repo_root,
+                                item.get("path", ""),
+                                branch=item.get("branch", ""),
+                                name=(
+                                    item.get("branch", "")
+                                    or item.get("path", "")
+                                ),
+                            )
+                            remove_result = {
+                                "ok": ok,
+                                "worktree_removed": ok,
+                                "branch_deleted": ok,
+                                "mismatches": [],
+                                "message": (
+                                    "Worktree removed" if ok
+                                    else "remove_failed"
+                                ),
+                            }
+                        if remove_result.get("worktree_removed"):
+                            entry = {
                                 "path": item.get("path", ""),
                                 "branch": item.get("branch", ""),
                                 "prune_reason": item.get("prune_reason", ""),
-                            })
+                            }
+                            if not remove_result.get("ok"):
+                                entry["warning"] = remove_result.get(
+                                    "message",
+                                    "Worktree removed but cleanup was incomplete",
+                                )
+                            if remove_result.get("mismatches"):
+                                entry["mismatches"] = remove_result.get(
+                                    "mismatches"
+                                )
+                            removed.append(entry)
                         else:
                             skipped.append({
                                 "path": item.get("path", ""),
                                 "branch": item.get("branch", ""),
-                                "prune_reason": "remove_failed",
+                                "prune_reason": (
+                                    remove_result.get("message")
+                                    or "remove_failed"
+                                ),
+                                "mismatches": remove_result.get(
+                                    "mismatches", []
+                                ),
                             })
 
                     prune_ran = False

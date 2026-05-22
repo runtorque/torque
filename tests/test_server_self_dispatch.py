@@ -1125,6 +1125,56 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("still unresolved", rejected["message"])
         self.assertIsNone(allowed)
 
+    def test_worktree_removal_refuses_attached_agent(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="20d95b63",
+            name="Active Worker",
+            group="g",
+            cell_type="agent",
+            status="idle",
+            session_id="session-1",
+            worktree_path="/repo/.torque/worktrees/20d95b63",
+            worktree_branch="torque/panelsmith/chat-panel-20d95b6",
+            worktree_repo_root="/repo",
+            worktree_base_branch="main",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        reason = self.server_mod._worktree_removal_refusal_reason(
+            state,
+            worker,
+            now=1_779_000_000,
+        )
+
+        self.assertIn("active/fresh agent", reason)
+        self.assertIn("attached session", reason)
+
+    def test_worktree_entry_matches_active_agent_after_tracking_was_cleared(self):
+        worker = self.state_mod.AgentCell(
+            id="20d95b63",
+            name="Active Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="",
+            worktree_branch="",
+            worktree_repo_root="",
+            directory="/repo/.torque/worktrees/20d95b63",
+            current_path="/repo/.torque/worktrees/20d95b63/subdir",
+            git_root="/repo/.torque/worktrees/20d95b63",
+        )
+
+        self.assertTrue(
+            self.server_mod._worktree_entry_matches_agent(
+                "/repo",
+                "/repo/.torque/worktrees/20d95b63",
+                worker,
+            )
+        )
+
 
 class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

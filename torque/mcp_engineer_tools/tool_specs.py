@@ -1297,7 +1297,9 @@ ENGINEER_TOOLS = [
             "Remove an agent's worktree from disk. Use after merging "
             "to clean up. The agent's directory reverts to the "
             "original repo root. When owned-agent restriction is enabled, "
-            "only agents created by this Engineer can be targeted."
+            "only agents created by this Engineer can be targeted. Refuses "
+            "active/fresh attached agents and verifies git post-state before "
+            "reporting success."
         ),
         "inputSchema": {
             "type": "object",

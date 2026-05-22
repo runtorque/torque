@@ -1386,10 +1386,101 @@ class WorktreeManager:
                           name: str = "",
                           force: bool = True) -> bool:
         """Remove a git worktree path and optionally delete its branch."""
+        result = await self.remove_path_result(
+            repo_root,
+            worktree_path,
+            branch=branch,
+            name=name,
+            force=force,
+        )
+        return bool(result.get("worktree_removed"))
+
+    @staticmethod
+    def _same_worktree_path(left: str, right: str) -> bool:
+        if not left or not right:
+            return False
+        try:
+            return os.path.realpath(os.path.expanduser(left)) == os.path.realpath(
+                os.path.expanduser(right)
+            )
+        except Exception:
+            return str(left or "") == str(right or "")
+
+    async def removal_state(self, repo_root: str, worktree_path: str, *,
+                            branch: str = "") -> dict:
+        """Return verified on-disk/git state for a worktree removal target."""
+        path_exists = bool(worktree_path) and os.path.lexists(worktree_path)
+        entries = await self.list_worktrees(repo_root)
+        listed_entries = [
+            entry for entry in entries
+            if self._same_worktree_path(
+                str(entry.get("path", "") or ""),
+                worktree_path,
+            )
+        ]
+        branch_entries = [
+            entry for entry in entries
+            if branch and str(entry.get("branch", "") or "") == branch
+        ]
+        branch_exists = False
+        if branch:
+            branch_exists = await self._branch_exists(repo_root, branch)
+        return {
+            "path": worktree_path,
+            "path_exists": path_exists,
+            "listed": bool(listed_entries),
+            "listed_entries": listed_entries,
+            "branch": branch,
+            "branch_exists": branch_exists,
+            "branch_worktree_entries": branch_entries,
+        }
+
+    async def remove_path_result(self, repo_root: str, worktree_path: str, *,
+                                 branch: str = "",
+                                 name: str = "",
+                                 force: bool = True) -> dict:
+        """Remove a git worktree and verify the real post-state.
+
+        ``git worktree remove`` can fail or, in some busy/attached cases,
+        appear to succeed without the worktree disappearing. Treat the git
+        subprocess return code as an input, not as ground truth: after the
+        command finishes, re-read ``git worktree list`` plus path/branch state
+        and report any mismatch explicitly.
+        """
         if not worktree_path:
-            return True
-        success = True
+            return {
+                "ok": True,
+                "worktree_removed": True,
+                "branch_deleted": not bool(branch),
+                "skipped": True,
+                "message": "No worktree path configured",
+                "pre_state": {},
+                "post_state": {},
+                "mismatches": [],
+            }
         display_name = name or branch or worktree_path
+        result = {
+            "ok": False,
+            "worktree_removed": False,
+            "branch_deleted": not bool(branch),
+            "skipped": False,
+            "path": worktree_path,
+            "branch": branch,
+            "git_returncode": None,
+            "git_stdout": "",
+            "git_stderr": "",
+            "branch_delete_returncode": None,
+            "branch_delete_stderr": "",
+            "pre_state": {},
+            "post_state": {},
+            "mismatches": [],
+            "message": "",
+        }
+        result["pre_state"] = await self.removal_state(
+            repo_root,
+            worktree_path,
+            branch=branch,
+        )
         try:
             cmd = ["git", "-C", repo_root,
                    "worktree", "remove", worktree_path]
@@ -1400,36 +1491,107 @@ class WorktreeManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            stdout, stderr = await proc.communicate()
+            result["git_returncode"] = proc.returncode
+            result["git_stdout"] = stdout.decode(errors="replace").strip()
+            result["git_stderr"] = stderr.decode(errors="replace").strip()
             if proc.returncode != 0:
                 log.warning("git worktree remove failed for '%s': %s",
-                            display_name, stderr.decode().strip())
-                success = False
+                            display_name, result["git_stderr"])
             else:
                 log.info("Removed worktree for '%s': %s",
                          display_name, worktree_path)
         except Exception:
             log.exception("Failed to remove worktree for '%s'", display_name)
-            success = False
+            result["git_returncode"] = -1
 
-        if branch:
+        mid_state = await self.removal_state(
+            repo_root,
+            worktree_path,
+            branch=branch,
+        )
+        worktree_removed = (
+            not bool(mid_state.get("path_exists"))
+            and not bool(mid_state.get("listed"))
+        )
+
+        if branch and worktree_removed:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     "git", "-C", repo_root,
                     "branch", "-d", branch,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-                await proc.communicate()
+                _, stderr = await proc.communicate()
+                result["branch_delete_returncode"] = proc.returncode
+                result["branch_delete_stderr"] = (
+                    stderr.decode(errors="replace").strip()
+                )
+                if proc.returncode != 0:
+                    log.warning(
+                        "git branch -d failed for '%s' after worktree removal: %s",
+                        branch,
+                        result["branch_delete_stderr"],
+                    )
             except Exception:
                 log.debug("Could not delete branch %s", branch)
+                result["branch_delete_returncode"] = -1
             try:
                 from .worktree_streams import invalidate_branch_exists_cache
                 invalidate_branch_exists_cache(repo_root, branch)
             except Exception:
                 log.debug("Failed to invalidate branch cache", exc_info=True)
 
-        return success
+        result["post_state"] = await self.removal_state(
+            repo_root,
+            worktree_path,
+            branch=branch,
+        )
+        result["worktree_removed"] = (
+            not bool(result["post_state"].get("path_exists"))
+            and not bool(result["post_state"].get("listed"))
+        )
+        result["branch_deleted"] = (
+            not bool(branch)
+            or not bool(result["post_state"].get("branch_exists"))
+        )
+
+        git_succeeded = result["git_returncode"] == 0
+        if git_succeeded and not result["worktree_removed"]:
+            result["mismatches"].append("reported_removed_but_present")
+            log.warning(
+                "git worktree remove reported success for '%s' but post-state "
+                "still has path/list entry: path_exists=%s listed=%s",
+                display_name,
+                result["post_state"].get("path_exists"),
+                result["post_state"].get("listed"),
+            )
+        if not git_succeeded and result["worktree_removed"]:
+            result["mismatches"].append("reported_failed_but_gone")
+            log.warning(
+                "git worktree remove reported failure for '%s' but post-state "
+                "shows the worktree is gone",
+                display_name,
+            )
+        if branch and result["worktree_removed"] and not result["branch_deleted"]:
+            result["mismatches"].append("branch_delete_failed")
+
+        result["ok"] = bool(
+            result["worktree_removed"] and result["branch_deleted"]
+        )
+        if result["ok"]:
+            result["message"] = "Worktree removed"
+        elif result["worktree_removed"]:
+            result["message"] = (
+                "Worktree removed, but branch deletion did not complete"
+            )
+        else:
+            result["message"] = (
+                "Worktree removal did not take; path or git worktree entry "
+                "is still present"
+            )
+        return result
 
     async def prune_admin(self, repo_root: str) -> bool:
         """Prune stale git-worktree admin records for a repository."""
@@ -1448,18 +1610,28 @@ class WorktreeManager:
             log.debug("Could not prune worktree admin for %s", repo_root)
             return False
 
-    async def remove(self, cell, force: bool = True) -> bool:
-        """Remove the git worktree and branch associated with a cell.
+    async def remove_result(self, cell, force: bool = True) -> dict:
+        """Remove the git worktree/branch for a cell and verify post-state.
 
         Args:
             cell: AgentCell whose worktree to remove.
             force: If True, force-remove even with uncommitted changes.
 
         Returns:
-            True if successfully removed, False otherwise.
+            Structured removal status. ``worktree_removed`` reflects verified
+            ground truth; ``ok`` additionally requires requested branch cleanup.
         """
         if not cell.worktree_path:
-            return True
+            return {
+                "ok": True,
+                "worktree_removed": True,
+                "branch_deleted": True,
+                "skipped": True,
+                "message": "No worktree path configured",
+                "pre_state": {},
+                "post_state": {},
+                "mismatches": [],
+            }
 
         # Resolve repo root — needed for git commands
         repo_root = cell.worktree_repo_root
@@ -1470,7 +1642,7 @@ class WorktreeManager:
                         "trying parent directory", cell.name)
             repo_root = os.path.dirname(cell.worktree_path)
 
-        success = await self.remove_path(
+        result = await self.remove_path_result(
             repo_root,
             cell.worktree_path,
             branch=cell.worktree_branch,
@@ -1478,7 +1650,7 @@ class WorktreeManager:
             force=force,
         )
 
-        if success:
+        if result.get("worktree_removed"):
             cell.worktree_path = ""
             cell.worktree_branch = ""
             cell.worktree_repo_root = ""
@@ -1487,8 +1659,24 @@ class WorktreeManager:
             cell.worktree_diff = {}
             cell.worktree_changed_files = []
             cell.worktree_checkpoints = 0
+            cell.worktree_ahead = 0
+            cell.worktree_behind = 0
+            cell.worktree_merged = False
 
-        return success
+        return result
+
+    async def remove(self, cell, force: bool = True) -> bool:
+        """Remove the git worktree and branch associated with a cell.
+
+        Args:
+            cell: AgentCell whose worktree to remove.
+            force: If True, force-remove even with uncommitted changes.
+
+        Returns:
+            True if successfully removed, False otherwise.
+        """
+        result = await self.remove_result(cell, force=force)
+        return bool(result.get("worktree_removed"))
 
     async def validate(self, cell) -> bool:
         """Check that a cell's worktree_path exists and is a valid worktree."""
