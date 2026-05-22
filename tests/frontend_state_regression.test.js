@@ -864,11 +864,11 @@ function makeChatThread(id, options = {}) {
   };
 }
 
-function createChatHarness() {
-  const { sandbox, document } = createSandbox({
+function createChatHarness(overrides = {}) {
+  const { sandbox, document } = createSandbox(Object.assign({
     _cachedProviders: [],
     _esc(value) { return String(value); },
-  });
+  }, overrides));
   sandbox.renderCalls = {
     main: 0,
     board: 0,
@@ -16547,6 +16547,109 @@ test('chat panel renders snapshot threads and selected read-only message tail', 
   assert.match(parts.messages.innerHTML, /Older messages exist outside this loaded tail/);
   assert.match(parts.messages.innerHTML, /Context details/);
   assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-new');
+});
+
+test('chat panel stacks panes from the panel width, not the viewport width', () => {
+  const { context, document, sandbox } = createChatHarness({
+    window: { innerWidth: 1600, open() {} },
+  });
+  const panel = document.getElementById('panel-chat');
+  panel.clientWidth = 420;
+  panel.offsetWidth = 420;
+  panel.getBoundingClientRect = () => ({ width: 420, height: 700 });
+  setChatThreads(context, {
+    'thread-new': makeChatThread('thread-new', { ts: 250, message: 'Narrow panel' }),
+  });
+
+  context.renderChatPanel();
+
+  const shell = panel._chatShell;
+  assert.equal(shell.getAttribute('data-chat-layout'), 'narrow');
+  assert.equal(shell.classList.contains('chat-panel-narrow'), true);
+
+  sandbox.window.innerWidth = 360;
+  panel.clientWidth = 900;
+  panel.offsetWidth = 900;
+  panel.getBoundingClientRect = () => ({ width: 900, height: 320 });
+  context._chatEnsureResponsiveLayout(shell, panel);
+
+  assert.equal(shell.getAttribute('data-chat-layout'), 'wide');
+  assert.equal(shell.classList.contains('chat-panel-narrow'), false);
+});
+
+test('chat responsive width switch preserves selected thread and scroll anchors', () => {
+  const rafCallbacks = [];
+  let resizeObserver = null;
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      resizeObserver = this;
+    }
+
+    observe(target) {
+      this.target = target;
+    }
+
+    disconnect() {}
+  }
+  const { context, document } = createChatHarness({
+    ResizeObserver: FakeResizeObserver,
+    requestAnimationFrame(fn) {
+      rafCallbacks.push(fn);
+      return rafCallbacks.length;
+    },
+  });
+  const panel = document.getElementById('panel-chat');
+  panel.clientWidth = 900;
+  panel.offsetWidth = 900;
+  panel.getBoundingClientRect = () => ({ width: 900, height: 720 });
+  setChatThreads(context, {
+    'thread-new': makeChatThread('thread-new', { ts: 300, title: 'New Thread', message: 'New message' }),
+    'thread-old': makeChatThread('thread-old', { ts: 100, title: 'Old Thread', message: 'Old message' }),
+  });
+  context.renderChatPanel();
+  while (rafCallbacks.length) rafCallbacks.shift()();
+  context.chatSelectThread('thread-old');
+  while (rafCallbacks.length) rafCallbacks.shift()();
+
+  const shell = panel._chatShell;
+  const parts = shell._chatParts;
+  assert.ok(resizeObserver);
+  assert.equal(resizeObserver.target, panel);
+  const threadAnchor = new FakeElement();
+  threadAnchor.setAttribute('data-chat-thread-id', 'thread-old');
+  threadAnchor.offsetTop = 160;
+  threadAnchor.offsetHeight = 28;
+  const messageAnchor = new FakeElement();
+  messageAnchor.setAttribute('data-chat-message-id', 'thread-old-msg');
+  messageAnchor.offsetTop = 340;
+  messageAnchor.offsetHeight = 80;
+  parts.list.setQuerySelectorAll('[data-chat-thread-id]', [threadAnchor]);
+  parts.messages.setQuerySelectorAll('[data-chat-message-id]', [messageAnchor]);
+  parts.list.scrollTop = 150;
+  parts.list.clientHeight = 80;
+  parts.list.scrollHeight = 420;
+  parts.messages.scrollTop = 320;
+  parts.messages.clientHeight = 100;
+  parts.messages.scrollHeight = 420;
+  parts.messages.listeners.scroll();
+  assert.equal(shell._chatMessagesPinnedToTail, true);
+
+  panel.clientWidth = 420;
+  panel.offsetWidth = 420;
+  panel.getBoundingClientRect = () => ({ width: 420, height: 720 });
+  parts.messages.scrollHeight = 960;
+  resizeObserver.callback([{ contentRect: { width: 420 } }]);
+  assert.equal(shell.getAttribute('data-chat-layout'), 'narrow');
+  assert.equal(parts.list.scrollTop, 150);
+  assert.equal(parts.messages.scrollTop, 320);
+
+  threadAnchor.offsetTop = 184;
+  while (rafCallbacks.length) rafCallbacks.shift()();
+
+  assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-old');
+  assert.equal(parts.list.scrollTop, 174);
+  assert.equal(parts.messages.scrollTop, 960);
 });
 
 test('chat panel is read-only and exposes no compose or mutation controls', () => {

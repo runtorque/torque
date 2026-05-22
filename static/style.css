@@ -4516,15 +4516,23 @@ body.runtime-embedded .panel-resize-handle::after {
 .chat-empty-state-wide {
   margin: auto;
 }
-@media (max-width: 780px) {
-  .chat-panel {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(150px, 34%) minmax(0, 1fr);
-  }
-  .chat-thread-pane {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
+.chat-panel[data-chat-layout="narrow"] {
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(150px, 34%) minmax(0, 1fr);
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-pane {
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+.chat-panel[data-chat-layout="narrow"] .chat-panel-header,
+.chat-panel[data-chat-layout="narrow"] .chat-message-header {
+  flex-direction: column;
+  align-items: stretch;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-panel-summary,
+.chat-panel[data-chat-layout="narrow"] .chat-message-header-meta {
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 /* Lane tabs */
