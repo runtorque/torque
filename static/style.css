@@ -4393,8 +4393,11 @@ body.runtime-embedded .panel-resize-handle::after {
 .chat-message-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: 9px;
+  padding: 12px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 5%, transparent), transparent 34%),
+    var(--bg-surface);
 }
 .chat-thread-row {
   display: flex;
@@ -4440,6 +4443,100 @@ body.runtime-embedded .panel-resize-handle::after {
 .chat-thread-last {
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+.chat-message-row {
+  display: flex;
+  flex-shrink: 0;
+  width: 100%;
+}
+.chat-message-row-left {
+  justify-content: flex-start;
+}
+.chat-message-row-right {
+  justify-content: flex-end;
+}
+.chat-message-bubble {
+  box-sizing: border-box;
+  max-width: min(78%, 760px);
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 14px;
+  background: var(--bg-cell);
+  box-shadow: 0 1px 0 rgba(255,255,255,.03);
+}
+.chat-message-bubble-left {
+  border-bottom-left-radius: 5px;
+  border-color: color-mix(in srgb, var(--amber) 25%, var(--border));
+  background: color-mix(in srgb, var(--bg-cell) 88%, var(--amber));
+}
+.chat-message-bubble-right {
+  border-bottom-right-radius: 5px;
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-cell));
+}
+.chat-message-bubble-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 5px;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.chat-message-sender {
+  color: var(--text);
+  font-weight: 750;
+}
+.chat-message-kind,
+.chat-message-action,
+.chat-message-recipient,
+.chat-message-time {
+  color: var(--text-dim);
+}
+.chat-message-kind,
+.chat-message-action,
+.chat-message-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 999px;
+  background: rgba(255,255,255,.035);
+  padding: 0 5px;
+}
+.chat-message-kind {
+  color: var(--accent);
+  font-weight: 700;
+}
+.chat-message-time {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.chat-message-badge {
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chat-message-badge-ack {
+  border-color: color-mix(in srgb, var(--amber) 34%, rgba(255,255,255,.08));
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  color: var(--amber);
+}
+.chat-message-badge-pending {
+  border-color: color-mix(in srgb, var(--accent) 32%, rgba(255,255,255,.08));
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--accent);
+}
+.chat-message-body {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-message-recipient {
+  margin-top: 6px;
+  font-size: 9px;
 }
 .chat-badge {
   display: inline-flex;
@@ -4534,6 +4631,54 @@ body.runtime-embedded .panel-resize-handle::after {
 .chat-panel[data-chat-layout="narrow"] .chat-message-header-meta {
   justify-content: flex-start;
   min-width: 0;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-list {
+  padding: 4px 6px;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: start;
+  gap: 3px 8px;
+  padding: 6px 7px;
+  margin-bottom: 4px;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-row-top {
+  grid-column: 1;
+  min-width: 0;
+  gap: 6px;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-participants {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-last {
+  display: none;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-thread-badges {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 3px;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-badge {
+  font-size: 8.5px;
+  line-height: 1.25;
+  padding: 1px 5px;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-message-list {
+  padding: 9px;
+}
+.chat-panel[data-chat-layout="narrow"] .chat-message-bubble {
+  max-width: 86%;
 }
 
 /* Lane tabs */
