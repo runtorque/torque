@@ -945,6 +945,24 @@ class TorqueDBTests(unittest.TestCase):
             "pr",
         )
 
+    def test_guidance_hint_cadence_round_trips_and_defaults_to_four(self):
+        self.db.save_groups({"g": [], "h": []}, {"g": "g", "h": "h"})
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(guidance_hint_cadence=0),
+        )
+        self.db.save_group_settings("h", GroupSettings())
+
+        loaded = self.db.load_all()
+        self.assertEqual(
+            loaded["group_settings"]["g"]["guidance_hint_cadence"],
+            0,
+        )
+        self.assertEqual(
+            loaded["group_settings"]["h"]["guidance_hint_cadence"],
+            4,
+        )
+
     def test_default_engineer_specializations_migration_adds_column(self):
         # Simulate an older DB by dropping the column then re-running init.
         legacy_path = Path(self.tmp.name) / "legacy-default-specs.db"
@@ -998,6 +1016,39 @@ class TorqueDBTests(unittest.TestCase):
             )
         }
         self.assertIn("engineer_merge_mode", columns)
+
+    def test_guidance_hint_cadence_migration_adds_column_and_default(self):
+        legacy_path = Path(self.tmp.name) / "legacy-guidance-cadence.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        legacy._conn.execute("DROP TABLE group_settings")
+        legacy._conn.execute(
+            "CREATE TABLE group_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "engineer_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        legacy._conn.execute(
+            "INSERT INTO group_settings (group_name, engineer_agent_id) "
+            "VALUES ('g', 'eng-1')"
+        )
+        legacy._conn.commit()
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(group_settings)"
+            )
+        }
+        self.assertIn("guidance_hint_cadence", columns)
+        row = migrated._conn.execute(
+            "SELECT guidance_hint_cadence FROM group_settings "
+            "WHERE group_name='g'"
+        ).fetchone()
+        self.assertEqual(row[0], 4)
 
     def test_board_sync_schema_migration_adds_columns(self):
         legacy_path = Path(self.tmp.name) / "legacy-board-sync.db"

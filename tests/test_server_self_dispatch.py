@@ -3513,6 +3513,91 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "You are Panelsmith (worker, id=worker-1).\n\nDispatch task body",
         )
 
+    async def test_identity_anchor_cadence_launch_dispatch_split_and_session_reset(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            guidance_hint_cadence=4,
+        )
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Panelsmith",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            session_id="session-1",
+        )
+
+        launch_due = state.should_show_guidance_hint(
+            self.server_mod.GUIDANCE_HINT_IDENTITY_LAUNCH,
+            cell,
+        )
+        launch_prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": "Template intro"},
+            startup_prompt="Persistent worker prompt",
+            cell=cell,
+            include_identity_anchor=launch_due,
+        )
+        self.assertTrue(launch_due)
+        self.assertIn("You are Panelsmith", launch_prompts[0][0])
+        self.assertIn("You are Panelsmith", launch_prompts[1][0])
+
+        launch_due = state.should_show_guidance_hint(
+            self.server_mod.GUIDANCE_HINT_IDENTITY_LAUNCH,
+            cell,
+        )
+        launch_prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": "Template intro"},
+            startup_prompt="Persistent worker prompt",
+            cell=cell,
+            include_identity_anchor=launch_due,
+        )
+        self.assertFalse(launch_due)
+        self.assertNotIn("You are Panelsmith", launch_prompts[0][0])
+        self.assertNotIn("You are Panelsmith", launch_prompts[1][0])
+
+        dispatch_due = state.should_show_guidance_hint(
+            self.server_mod.GUIDANCE_HINT_IDENTITY_DISPATCH,
+            cell,
+        )
+        dispatch_prompt = self.server_mod._assemble_worker_prompt(
+            role_mgr=None,
+            cell=cell,
+            prompt_body="Implement feature",
+            postscript="TORQUE POSTSCRIPT",
+            include_identity_anchor=dispatch_due,
+        )
+        self.assertTrue(dispatch_due)
+        self.assertTrue(dispatch_prompt.startswith("You are Panelsmith"))
+
+        dispatch_due = state.should_show_guidance_hint(
+            self.server_mod.GUIDANCE_HINT_IDENTITY_DISPATCH,
+            cell,
+        )
+        dispatch_prompt = self.server_mod._assemble_worker_prompt(
+            role_mgr=None,
+            cell=cell,
+            prompt_body="Implement feature",
+            postscript="TORQUE POSTSCRIPT",
+            include_identity_anchor=dispatch_due,
+        )
+        self.assertFalse(dispatch_due)
+        self.assertEqual(dispatch_prompt, "Implement feature\n\nTORQUE POSTSCRIPT\n")
+
+        cell.session_id = "session-2"
+        self.assertTrue(
+            state.should_show_guidance_hint(
+                self.server_mod.GUIDANCE_HINT_IDENTITY_LAUNCH,
+                cell,
+            )
+        )
+        self.assertTrue(
+            state.should_show_guidance_hint(
+                self.server_mod.GUIDANCE_HINT_IDENTITY_DISPATCH,
+                cell,
+            )
+        )
+
     async def test_new_agent_prompt_sequence_uses_default_nudge_when_initial_prompt_empty(self):
         """TORQUE:263 — empty initial_prompt + default_boot_nudge synthesizes the
         default kickoff so architect/engineer agents don't sit idle on boot."""

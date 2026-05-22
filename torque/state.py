@@ -187,6 +187,9 @@ _ENGINEER_MERGE_MODES = {
     "engineer-choice",
 }
 _DEFAULT_ENGINEER_MERGE_MODE = "pr"
+_DEFAULT_GUIDANCE_HINT_CADENCE = 4
+_MIN_GUIDANCE_HINT_CADENCE = 0
+_MAX_GUIDANCE_HINT_CADENCE = 100
 _ENGINEER_WORKLOG_LIMIT = 200
 _ENGINEER_STREAM_CARD_LIMIT = 10
 _ENGINEER_STREAM_CONTEXT_LIMIT = 5
@@ -586,6 +589,33 @@ def normalize_engineer_merge_mode(value) -> str:
     if value in _ENGINEER_MERGE_MODES:
         return value
     return _DEFAULT_ENGINEER_MERGE_MODE
+
+
+def normalize_guidance_hint_cadence(value) -> int:
+    """Return the group-level recurring guidance-hint cadence.
+
+    ``0`` preserves the legacy "show every time" behavior. Positive values
+    show a hint on the first occurrence for an agent/session and then when the
+    occurrence count is divisible by the configured cadence.
+    """
+    try:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not re.fullmatch(r"[+-]?\d+", stripped):
+                raise ValueError
+            parsed = int(stripped)
+        elif isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError
+            parsed = int(value)
+        else:
+            parsed = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_GUIDANCE_HINT_CADENCE
+    return min(
+        _MAX_GUIDANCE_HINT_CADENCE,
+        max(_MIN_GUIDANCE_HINT_CADENCE, parsed),
+    )
 
 
 def merge_cleanup_flags(mode: str) -> tuple[bool, bool]:
@@ -1660,6 +1690,7 @@ class GroupSettings:
     worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
+    guidance_hint_cadence: int = _DEFAULT_GUIDANCE_HINT_CADENCE  # 0=every time; otherwise 1st, then every N
     # Agent notifications
     notifications: bool = False
     notify_on_finish: bool = True
@@ -1952,6 +1983,11 @@ class MatrixState:
         # below-terminal panel. The durable source of truth is SQLite; this
         # read model is bounded and replayed through direct_message_* deltas.
         self.direct_messages_by_agent: dict[str, list[dict]] = {}
+        # In-memory-only counters for recurring, non-load-bearing guidance
+        # hints. Keyed by hint type + agent id + provider session id so a
+        # fresh boot/session sees the first occurrence again. Daemon restart
+        # reset is acceptable and intentionally not persisted.
+        self.guidance_hint_counters: dict[str, int] = {}
         # Newest-first thread aggregate for the read-only agent↔agent Chat
         # panel. Keyed strictly by canonical agent_peer_messages.thread_id;
         # messages inside each thread are oldest-first and tail-capped.
@@ -4912,6 +4948,11 @@ class MatrixState:
                             normalize_engineer_merge_mode(
                                 filtered["engineer_merge_mode"])
                         )
+                    if "guidance_hint_cadence" in filtered:
+                        filtered["guidance_hint_cadence"] = (
+                            normalize_guidance_hint_cadence(
+                                filtered["guidance_hint_cadence"])
+                        )
                     if "board_sync_provider" in filtered:
                         filtered["board_sync_provider"] = (
                             _normalize_board_sync_provider(
@@ -5255,6 +5296,37 @@ class MatrixState:
         """Return group settings, creating defaults if group has none."""
         return self.group_settings.get(name, GroupSettings())
 
+    def should_show_guidance_hint(self, hint_type: str, cell) -> bool:
+        """Return whether a recurring soft guidance hint should be shown.
+
+        Counters are ephemeral and scoped to a specific hint, agent, and
+        provider session. ``guidance_hint_cadence=0`` preserves legacy
+        every-time behavior; positive values show on the first occurrence and
+        then every Nth occurrence.
+        """
+        hint_type = str(hint_type or "").strip()
+        if not hint_type or not cell:
+            return True
+        agent_id = str(getattr(cell, "id", "") or "").strip()
+        session_id = str(getattr(cell, "session_id", "") or "").strip()
+        if not agent_id or not session_id:
+            return True
+
+        group = str(getattr(cell, "group", "") or "").strip()
+        cadence = normalize_guidance_hint_cadence(
+            getattr(
+                self.get_group_settings(group),
+                "guidance_hint_cadence",
+                _DEFAULT_GUIDANCE_HINT_CADENCE,
+            )
+        )
+        key = f"{hint_type}:{agent_id}:{session_id}"
+        count = int(self.guidance_hint_counters.get(key, 0) or 0) + 1
+        self.guidance_hint_counters[key] = count
+        if cadence == 0:
+            return True
+        return count == 1 or count % cadence == 0
+
     def _normalize_architect_settings_mapping(
             self, fields: dict, *, strict: bool) -> dict:
         if "architect_autonomy_mode" in fields:
@@ -5424,6 +5496,8 @@ class MatrixState:
                     value = normalize_worktree_merge_cleanup(value)
                 elif key == "engineer_merge_mode":
                     value = normalize_engineer_merge_mode(value)
+                elif key == "guidance_hint_cadence":
+                    value = normalize_guidance_hint_cadence(value)
                 elif key == "board_sync_provider":
                     value = _normalize_board_sync_provider(value)
                 elif key == "board_sync_enabled":

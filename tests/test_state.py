@@ -2252,6 +2252,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             worktree_merge_cleanup="???",
             worktree_merge_preserve_diff=True,
             engineer_merge_mode="direct",
+            guidance_hint_cadence=150,
         )
 
         ws = state.engineer_settings["g"]
@@ -2266,9 +2267,12 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(gs.worktree_merge_cleanup, "keep")
         self.assertTrue(gs.worktree_merge_preserve_diff)
         self.assertEqual(gs.engineer_merge_mode, "direct")
+        self.assertEqual(gs.guidance_hint_cadence, 100)
 
         state.update_group_settings("g", engineer_merge_mode="not-real")
         self.assertEqual(state.group_settings["g"].engineer_merge_mode, "pr")
+        state.update_group_settings("g", guidance_hint_cadence="not-an-int")
+        self.assertEqual(state.group_settings["g"].guidance_hint_cadence, 4)
 
     def test_group_settings_engineer_merge_mode_defaults_and_snapshots(self):
         state = self.state_mod.MatrixState()
@@ -2278,11 +2282,59 @@ class MatrixStateCleanupTests(unittest.TestCase):
             self.state_mod.GroupSettings().engineer_merge_mode,
             "pr",
         )
-        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
+        self.assertEqual(
+            self.state_mod.GroupSettings().guidance_hint_cadence,
+            4,
+        )
+        state.update_group_settings(
+            "g",
+            engineer_merge_mode="engineer-choice",
+            guidance_hint_cadence="0",
+        )
 
         self.assertEqual(
             state.to_dict()["group_settings"]["g"]["engineer_merge_mode"],
             "engineer-choice",
+        )
+        self.assertEqual(
+            state.to_dict()["group_settings"]["g"]["guidance_hint_cadence"],
+            0,
+        )
+
+    def test_guidance_hint_cadence_sequence_and_session_reset(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            guidance_hint_cadence=4,
+        )
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            session_id="session-1",
+        )
+
+        self.assertEqual(
+            [
+                state.should_show_guidance_hint("soft.hint", worker)
+                for _ in range(5)
+            ],
+            [True, False, False, True, False],
+        )
+
+        worker.session_id = "session-2"
+        self.assertTrue(state.should_show_guidance_hint("soft.hint", worker))
+
+        state.group_settings["g"].guidance_hint_cadence = 0
+        worker.session_id = "session-3"
+        self.assertEqual(
+            [
+                state.should_show_guidance_hint("soft.hint", worker)
+                for _ in range(3)
+            ],
+            [True, True, True],
         )
 
     def test_history_record_dispatch_persists_engineer_worklog_and_survives_reload(self):

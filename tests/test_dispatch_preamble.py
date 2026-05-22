@@ -154,6 +154,28 @@ class DispatchPreambleTests(unittest.TestCase):
             "Implement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
+    def test_identity_anchor_can_be_omitted_without_dropping_preamble(self):
+        self.role_mgr.save_role(
+            "reviewer",
+            {"name": "reviewer", "preamble": "Be careful."},
+            scope="project",
+            base_dir=str(self.project),
+        )
+
+        prompt = self.server_mod._assemble_worker_prompt(
+            role_mgr=self.role_mgr,
+            cell=self.worker,
+            base_dir=str(self.project),
+            prompt_body="Implement feature",
+            postscript="TORQUE POSTSCRIPT",
+            include_identity_anchor=False,
+        )
+
+        self.assertEqual(
+            prompt,
+            "Be careful.\n\nImplement feature\n\nTORQUE POSTSCRIPT\n",
+        )
+
     def test_disable_role_preamble_omits_preamble_even_for_worker(self):
         self.role_mgr.save_role(
             "reviewer",

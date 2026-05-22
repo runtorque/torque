@@ -115,6 +115,8 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
                                cell=None,
                                default_boot_nudge: str = "",
                                task_id: str = "",
+                               include_identity_anchor: bool = True,
+                               include_final_identity_anchor: bool | None = None,
                                ) -> list[tuple[str, dict]]:
     """Return prompts to send to a brand-new agent in order.
 
@@ -126,19 +128,24 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
     """
     startup_len = len(startup_prompt or "")
     final_len = len(final_prompt or "")
+    if include_final_identity_anchor is None:
+        include_final_identity_anchor = include_identity_anchor
     prompts = []
     if startup_prompt:
-        startup_prompt = prepend_agent_identity_anchor(startup_prompt, cell)
+        if include_identity_anchor:
+            startup_prompt = prepend_agent_identity_anchor(startup_prompt, cell)
         prompts.append((startup_prompt, {}))
     initial_prompt = launch_cfg.get("initial_prompt", "") or ""
     initial_len = len(initial_prompt or "")
     if not initial_prompt.strip() and default_boot_nudge:
         initial_prompt = default_boot_nudge
     if initial_prompt:
-        initial_prompt = prepend_agent_identity_anchor(initial_prompt, cell)
+        if include_identity_anchor:
+            initial_prompt = prepend_agent_identity_anchor(initial_prompt, cell)
         prompts.append((initial_prompt, {}))
     if final_prompt:
-        final_prompt = prepend_agent_identity_anchor(final_prompt, cell)
+        if include_final_identity_anchor:
+            final_prompt = prepend_agent_identity_anchor(final_prompt, cell)
         prompts.append((final_prompt, {"background": True}))
     if not prompts:
         context = "dispatch_task" if task_id else "new_agent_prompt_sequence"
