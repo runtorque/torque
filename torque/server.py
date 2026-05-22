@@ -937,6 +937,35 @@ def _worktree_merge_requested_cleanup(
     }
 
 
+def _auto_force_push_metadata(push_result: dict | None) -> dict:
+    push_result = push_result or {}
+    if not push_result.get("auto_force_push"):
+        return {}
+    metadata = {
+        "auto_force_push": True,
+        "force_with_lease": bool(push_result.get("force_with_lease")),
+        "reason": str(push_result.get("auto_force_reason") or "").strip(),
+        "remote": str(push_result.get("remote") or "").strip(),
+        "branch": str(push_result.get("branch") or "").strip(),
+        "base_branch": str(push_result.get("base_branch") or "").strip(),
+        "remote_sha": str(push_result.get("remote_sha") or "").strip(),
+        "local_sha": str(push_result.get("local_sha") or "").strip(),
+        "base_sha": str(push_result.get("base_sha") or "").strip(),
+        "force_lease_ref": str(push_result.get("force_lease_ref") or "").strip(),
+        "force_lease_sha": str(push_result.get("force_lease_sha") or "").strip(),
+    }
+    return {key: value for key, value in metadata.items() if value}
+
+
+def _attach_auto_force_push_metadata(result: dict,
+                                     push_result: dict | None) -> dict:
+    metadata = _auto_force_push_metadata(push_result)
+    if metadata:
+        result["auto_force_push"] = True
+        result["push"] = metadata
+    return result
+
+
 async def _finalize_successful_worktree_merge(
     *,
     state: MatrixState,
@@ -1334,15 +1363,37 @@ async def _run_pr_worktree_merge(
 
     pushed = await worktree_mgr.github_push_branch(wt, remote, branch)
     if not pushed.get("ok"):
-        result = _worktree_merge_error(
-            aid,
-            pushed.get("error", "Failed to push worktree branch."),
-            mode="pull_request",
-            phase=pushed.get("phase", "push_branch"),
+        force_retry = getattr(
+            worktree_mgr,
+            "github_force_push_branch_with_lease_if_safe",
+            None,
         )
-        if gates.get("workflow_breach"):
-            result["workflow_breach"] = gates["workflow_breach"]
-        return result
+        if callable(force_retry):
+            retried = await force_retry(
+                wt,
+                remote,
+                branch,
+                base_branch=base_branch,
+                push_error=pushed,
+            )
+            if retried.get("ok") or retried.get("safety_gate_passed"):
+                pushed = retried
+            elif retried.get("non_fast_forward"):
+                pushed["non_fast_forward"] = True
+                if isinstance(retried.get("auto_force_safety"), dict):
+                    pushed["auto_force_safety"] = retried["auto_force_safety"]
+        if not pushed.get("ok"):
+            result = _worktree_merge_error(
+                aid,
+                pushed.get("error", "Failed to push worktree branch."),
+                mode="pull_request",
+                phase=pushed.get("phase", "push_branch"),
+            )
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+
+    push_metadata_result = pushed
 
     pr_result = await worktree_mgr.github_create_or_reuse_pr(
         wt,
@@ -1358,6 +1409,7 @@ async def _run_pr_worktree_merge(
             mode="pull_request",
             phase=pr_result.get("phase", "pr_create"),
         )
+        _attach_auto_force_push_metadata(result, push_metadata_result)
         if gates.get("workflow_breach"):
             result["workflow_breach"] = gates["workflow_breach"]
         return result
@@ -1392,6 +1444,7 @@ async def _run_pr_worktree_merge(
                     url=pr_result.get("url", ""),
                     pr_url=pr_result.get("url", ""),
                 )
+                _attach_auto_force_push_metadata(result, push_metadata_result)
                 if gates.get("workflow_breach"):
                     result["workflow_breach"] = gates["workflow_breach"]
                 return result
@@ -1482,6 +1535,7 @@ async def _run_pr_worktree_merge(
             "pr": pr_metadata,
             "message": "Pull request is open with auto-merge pending.",
         }
+        _attach_auto_force_push_metadata(result, push_metadata_result)
         _attach_stale_base(result, gates.get("stale_base"))
         if gates.get("workflow_breach"):
             result["workflow_breach"] = gates["workflow_breach"]
@@ -1497,6 +1551,7 @@ async def _run_pr_worktree_merge(
             pr_url=pr_metadata.get("url", ""),
             pr=pr_metadata,
         )
+        _attach_auto_force_push_metadata(result, push_metadata_result)
         _attach_stale_base(result, gates.get("stale_base"))
         if gates.get("workflow_breach"):
             result["workflow_breach"] = gates["workflow_breach"]
@@ -1515,6 +1570,7 @@ async def _run_pr_worktree_merge(
             pr_url=pr_metadata.get("url", ""),
             pr=pr_metadata,
         )
+        _attach_auto_force_push_metadata(result, push_metadata_result)
         if gates.get("workflow_breach"):
             result["workflow_breach"] = gates["workflow_breach"]
         return result
@@ -1540,6 +1596,7 @@ async def _run_pr_worktree_merge(
             sha=merge_sha,
             remote_base_sync=post_merge_sync,
         )
+        _attach_auto_force_push_metadata(result, push_metadata_result)
         if gates.get("workflow_breach"):
             result["workflow_breach"] = gates["workflow_breach"]
         return result
@@ -1572,6 +1629,7 @@ async def _run_pr_worktree_merge(
         "pr_url": pr_metadata.get("url", ""),
         "pr": pr_metadata,
     })
+    _attach_auto_force_push_metadata(result, push_metadata_result)
     if gates.get("workflow_breach"):
         result["workflow_breach"] = gates["workflow_breach"]
     return result

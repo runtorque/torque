@@ -274,6 +274,27 @@ def _decode_process_output(raw: bytes | str | None) -> str:
     return str(raw).strip()
 
 
+def _push_result_text(result: dict | None) -> str:
+    result = result or {}
+    return str(
+        result.get("error")
+        or result.get("stderr")
+        or result.get("stdout")
+        or ""
+    ).strip()
+
+
+def _is_non_fast_forward_push_error(text: str) -> bool:
+    lower = str(text or "").lower()
+    if not lower:
+        return False
+    return (
+        "non-fast-forward" in lower
+        or ("[rejected]" in lower and "fetch first" in lower)
+        or ("updates were rejected" in lower and "behind" in lower)
+    )
+
+
 def _extract_pr_number_from_url(url: str) -> int | None:
     match = _PR_NUMBER_RE.search(str(url or "").strip())
     if not match:
@@ -2876,6 +2897,253 @@ class WorktreeManager:
                 branch=branch,
             )
         return _worktree_ok(phase, remote=remote, branch=branch)
+
+    async def _github_push_branch_force_safety(
+        self,
+        worktree_path: str,
+        remote: str,
+        branch: str,
+        base_branch: str,
+    ) -> dict:
+        """Validate whether a non-FF branch push can be retried with a lease."""
+        phase = "push_branch_safety"
+        worktree_path = str(worktree_path or "").strip()
+        remote = str(remote or "").strip()
+        branch = str(branch or "").strip()
+        base_branch = str(base_branch or "").strip()
+        if not worktree_path or not remote or not branch or not base_branch:
+            return _worktree_error(
+                phase,
+                "Worktree path, remote, branch, and base branch are required.",
+                safe=False,
+            )
+
+        status = await self._run_capture(
+            "git", "-C", worktree_path,
+            "status", "--porcelain",
+        )
+        if status.get("returncode") != 0:
+            err = status.get("stderr") or status.get("stdout") \
+                or "git status failed"
+            return _worktree_error(
+                phase,
+                f"Cannot verify clean worktree before force-push: {err}",
+                safe=False,
+            )
+        if str(status.get("stdout") or "").strip():
+            return _worktree_error(
+                phase,
+                "Worktree has uncommitted changes; refusing auto force-push.",
+                safe=False,
+            )
+
+        remote_ref = f"refs/remotes/{remote}/{branch}"
+        base_ref = f"refs/remotes/{remote}/{base_branch}"
+        fetch_branch = await self._run_capture(
+            "git", "-C", worktree_path,
+            "fetch", "--no-tags", remote,
+            f"+refs/heads/{branch}:{remote_ref}",
+        )
+        if fetch_branch.get("returncode") != 0:
+            err = fetch_branch.get("stderr") or fetch_branch.get("stdout") \
+                or "git fetch failed"
+            return _worktree_error(
+                phase,
+                f"Cannot fetch remote branch {remote}/{branch}: {err}",
+                safe=False,
+            )
+        fetch_base = await self._run_capture(
+            "git", "-C", worktree_path,
+            "fetch", "--no-tags", remote,
+            f"+refs/heads/{base_branch}:{base_ref}",
+        )
+        if fetch_base.get("returncode") != 0:
+            err = fetch_base.get("stderr") or fetch_base.get("stdout") \
+                or "git fetch failed"
+            return _worktree_error(
+                phase,
+                f"Cannot fetch remote base {remote}/{base_branch}: {err}",
+                safe=False,
+            )
+
+        async def rev(ref: str) -> str:
+            resolved = await self._run_capture(
+                "git", "-C", worktree_path,
+                "rev-parse", "--verify", f"{ref}^{{commit}}",
+            )
+            if resolved.get("returncode") != 0:
+                return ""
+            return str(resolved.get("stdout") or "").splitlines()[0].strip()
+
+        remote_sha = await rev(remote_ref)
+        local_sha = await rev(branch)
+        base_sha = await rev(base_ref)
+        if not remote_sha or not local_sha or not base_sha:
+            return _worktree_error(
+                phase,
+                "Cannot resolve local branch, remote branch, or remote base.",
+                safe=False,
+                remote_ref=remote_ref,
+                base_ref=base_ref,
+                remote_sha=remote_sha,
+                local_sha=local_sha,
+                base_sha=base_sha,
+            )
+
+        base_in_local = await self._run_capture(
+            "git", "-C", worktree_path,
+            "merge-base", "--is-ancestor", base_sha, local_sha,
+        )
+        local_includes_base = base_in_local.get("returncode") == 0
+        if not local_includes_base:
+            return _worktree_error(
+                phase,
+                "Local branch does not include the current remote base tip; "
+                "refusing auto force-push.",
+                safe=False,
+                remote_ref=remote_ref,
+                base_ref=base_ref,
+                remote_sha=remote_sha,
+                local_sha=local_sha,
+                base_sha=base_sha,
+                local_includes_base=False,
+            )
+
+        remote_in_local = await self._run_capture(
+            "git", "-C", worktree_path,
+            "merge-base", "--is-ancestor", remote_sha, local_sha,
+        )
+        remote_ancestor_of_local = remote_in_local.get("returncode") == 0
+        remote_merged_to_base = False
+        reason = ""
+        if remote_ancestor_of_local:
+            reason = "remote_ancestor_of_local"
+        else:
+            remote_merged_to_base = await self.is_branch_merged(
+                worktree_path,
+                branch=remote_ref,
+                base_branch=base_ref,
+            )
+            if remote_merged_to_base:
+                reason = "remote_merged_to_base"
+
+        if not reason:
+            return _worktree_error(
+                phase,
+                "Remote branch is neither an ancestor of the local branch nor "
+                "already incorporated into the current remote base; refusing "
+                "auto force-push.",
+                safe=False,
+                remote_ref=remote_ref,
+                base_ref=base_ref,
+                remote_sha=remote_sha,
+                local_sha=local_sha,
+                base_sha=base_sha,
+                local_includes_base=True,
+                remote_ancestor_of_local=False,
+                remote_merged_to_base=False,
+            )
+
+        return _worktree_ok(
+            phase,
+            safe=True,
+            reason=reason,
+            remote=remote,
+            branch=branch,
+            base_branch=base_branch,
+            remote_ref=remote_ref,
+            base_ref=base_ref,
+            remote_sha=remote_sha,
+            local_sha=local_sha,
+            base_sha=base_sha,
+            local_includes_base=True,
+            remote_ancestor_of_local=remote_ancestor_of_local,
+            remote_merged_to_base=remote_merged_to_base,
+        )
+
+    async def github_force_push_branch_with_lease_if_safe(
+        self,
+        worktree_path: str,
+        remote: str,
+        branch: str,
+        *,
+        base_branch: str,
+        push_error: dict | None = None,
+    ) -> dict:
+        """Retry a rejected PR branch push using --force-with-lease if safe."""
+        phase = "push_branch"
+        initial_error = _push_result_text(push_error)
+        if not _is_non_fast_forward_push_error(initial_error):
+            return _worktree_error(
+                phase,
+                "Auto force-with-lease not attempted: initial push failure "
+                "was not a non-fast-forward rejection.",
+                non_fast_forward=False,
+                auto_force_push=False,
+                safety_gate_passed=False,
+            )
+
+        safety = await self._github_push_branch_force_safety(
+            worktree_path,
+            remote,
+            branch,
+            base_branch,
+        )
+        if not safety.get("ok"):
+            return _worktree_error(
+                phase,
+                safety.get("error", "Auto force-with-lease safety gate failed."),
+                non_fast_forward=True,
+                auto_force_push=False,
+                safety_gate_passed=False,
+                auto_force_safety=safety,
+                remote=remote,
+                branch=branch,
+                base_branch=base_branch,
+            )
+
+        lease_ref = f"refs/heads/{branch}"
+        lease_sha = str(safety.get("remote_sha") or "").strip()
+        force_push = await self._run_capture(
+            "git", "-C", worktree_path,
+            "push",
+            f"--force-with-lease={lease_ref}:{lease_sha}",
+            "-u", remote, branch,
+        )
+        if force_push.get("returncode") != 0:
+            err = force_push.get("stderr") or force_push.get("stdout") \
+                or "git push --force-with-lease failed"
+            return _worktree_error(
+                phase,
+                f"Failed to force-push branch with lease: {err}",
+                non_fast_forward=True,
+                auto_force_push=False,
+                force_with_lease=True,
+                safety_gate_passed=True,
+                auto_force_safety=safety,
+                remote=remote,
+                branch=branch,
+                base_branch=base_branch,
+            )
+
+        return _worktree_ok(
+            phase,
+            remote=remote,
+            branch=branch,
+            base_branch=base_branch,
+            non_fast_forward=True,
+            auto_force_push=True,
+            force_with_lease=True,
+            safety_gate_passed=True,
+            auto_force_reason=safety.get("reason", ""),
+            force_lease_ref=lease_ref,
+            force_lease_sha=lease_sha,
+            remote_sha=lease_sha,
+            local_sha=safety.get("local_sha", ""),
+            base_sha=safety.get("base_sha", ""),
+            auto_force_safety=safety,
+            initial_push_error=initial_error,
+        )
 
     async def github_pr_view(self, worktree_path: str,
                              selector: str | int) -> dict:
