@@ -38,13 +38,56 @@ function _chatMeasuredPanelWidth(shell, root) {
   return 0;
 }
 
+function _chatScrollAtTail(container) {
+  if (!container || typeof container.scrollTop !== 'number') return false;
+  var scrollTop = Number(container.scrollTop || 0);
+  var clientHeight = Number(container.clientHeight || 0);
+  var scrollHeight = Number(container.scrollHeight || 0);
+  return scrollHeight > 0 && (scrollTop + clientHeight >= scrollHeight - 12);
+}
+
+function _chatCurrentRenderedThreadId(shell) {
+  var root = shell && (shell._chatResponsiveRoot || shell.parentNode);
+  if (!root || !root.getAttribute) return '';
+  return String(root.getAttribute('data-chat-rendered-thread-id') || '');
+}
+
+function _chatUpdateMessageTailState(shell) {
+  if (!shell) return false;
+  var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  var atTail = _chatScrollAtTail(messages);
+  shell._chatMessagesPinnedToTail = atTail;
+  shell._chatMessagesPinnedThreadId = _chatCurrentRenderedThreadId(shell);
+  return atTail;
+}
+
+function _chatStoredMessageTailPinned(shell) {
+  if (!shell || !shell._chatMessagesPinnedToTail) return false;
+  var threadId = _chatCurrentRenderedThreadId(shell);
+  return !threadId || !shell._chatMessagesPinnedThreadId || shell._chatMessagesPinnedThreadId === threadId;
+}
+
+function _chatAttachMessageTailTracker(shell) {
+  if (!shell) return;
+  var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  if (!messages || messages._chatTailTrackerShell === shell) return;
+  messages._chatTailTrackerShell = shell;
+  if (typeof messages.addEventListener === 'function') {
+    messages.addEventListener('scroll', function() {
+      _chatUpdateMessageTailState(shell);
+    });
+  }
+}
+
 function _chatCaptureLayoutScroll(shell) {
   if (!shell) return null;
   var list = _chatShellPart(shell, '[data-chat-thread-list]', 'list');
   var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  var messageCapture = _chatCaptureScrollAnchor(messages, 'data-chat-message-id');
   return {
     thread: _chatCaptureScrollAnchor(list, 'data-chat-thread-id'),
-    messages: _chatCaptureScrollAnchor(messages, 'data-chat-message-id'),
+    messages: messageCapture,
+    messagesPinTail: _chatStoredMessageTailPinned(shell) || !!(messageCapture && messageCapture.atTail),
   };
 }
 
@@ -53,7 +96,10 @@ function _chatRestoreLayoutScroll(shell, capture) {
   var list = _chatShellPart(shell, '[data-chat-thread-list]', 'list');
   var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
   _chatRestoreScrollAnchor(list, 'data-chat-thread-id', capture.thread);
-  _chatRestoreScrollAnchor(messages, 'data-chat-message-id', capture.messages);
+  _chatRestoreScrollAnchor(messages, 'data-chat-message-id', capture.messages, {
+    pinTail: !!capture.messagesPinTail,
+  });
+  _chatUpdateMessageTailState(shell);
 }
 
 function _chatScheduleLayoutScrollRestore(shell, capture) {
@@ -369,6 +415,7 @@ function _chatEnsurePanelShell(root) {
   };
   root._chatShell = shell;
   root.appendChild(shell);
+  _chatAttachMessageTailTracker(shell);
   _chatEnsureResponsiveLayout(shell, root);
   return (root.querySelector ? root.querySelector('[data-chat-panel]') : null) || shell;
 }
@@ -640,6 +687,7 @@ function renderChatPanel() {
   var list = _chatShellPart(shell, '[data-chat-thread-list]', 'list');
   var messageHeader = _chatShellPart(shell, '[data-chat-message-header]', 'messageHeader');
   var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  _chatAttachMessageTailTracker(shell);
 
   var threadCapture = _chatCaptureScrollAnchor(list, 'data-chat-thread-id');
   var preserveMessages = previouslyRenderedThread && previouslyRenderedThread === selectedId;
@@ -659,5 +707,6 @@ function renderChatPanel() {
     messages.scrollTop = Math.max(0, Number(messages.scrollHeight || 0));
   }
   if (root.setAttribute) root.setAttribute('data-chat-rendered-thread-id', selectedId || '');
+  _chatUpdateMessageTailState(shell);
   _chatEnsureResponsiveLayout(shell, root);
 }

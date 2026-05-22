@@ -16579,7 +16579,21 @@ test('chat panel stacks panes from the panel width, not the viewport width', () 
 
 test('chat responsive width switch preserves selected thread and scroll anchors', () => {
   const rafCallbacks = [];
+  let resizeObserver = null;
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      resizeObserver = this;
+    }
+
+    observe(target) {
+      this.target = target;
+    }
+
+    disconnect() {}
+  }
   const { context, document } = createChatHarness({
+    ResizeObserver: FakeResizeObserver,
     requestAnimationFrame(fn) {
       rafCallbacks.push(fn);
       return rafCallbacks.length;
@@ -16600,6 +16614,8 @@ test('chat responsive width switch preserves selected thread and scroll anchors'
 
   const shell = panel._chatShell;
   const parts = shell._chatParts;
+  assert.ok(resizeObserver);
+  assert.equal(resizeObserver.target, panel);
   const threadAnchor = new FakeElement();
   threadAnchor.setAttribute('data-chat-thread-id', 'thread-old');
   threadAnchor.offsetTop = 160;
@@ -16616,14 +16632,19 @@ test('chat responsive width switch preserves selected thread and scroll anchors'
   parts.messages.scrollTop = 320;
   parts.messages.clientHeight = 100;
   parts.messages.scrollHeight = 420;
+  parts.messages.listeners.scroll();
+  assert.equal(shell._chatMessagesPinnedToTail, true);
 
-  context._chatApplyResponsiveLayout(shell, 420);
+  panel.clientWidth = 420;
+  panel.offsetWidth = 420;
+  panel.getBoundingClientRect = () => ({ width: 420, height: 720 });
+  parts.messages.scrollHeight = 960;
+  resizeObserver.callback([{ contentRect: { width: 420 } }]);
   assert.equal(shell.getAttribute('data-chat-layout'), 'narrow');
   assert.equal(parts.list.scrollTop, 150);
   assert.equal(parts.messages.scrollTop, 320);
 
   threadAnchor.offsetTop = 184;
-  parts.messages.scrollHeight = 960;
   while (rafCallbacks.length) rafCallbacks.shift()();
 
   assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-old');
