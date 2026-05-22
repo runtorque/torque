@@ -32,7 +32,7 @@ from .config import (
     DATA_DIR,
     log,
 )
-from .db import TorqueDB
+from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import capture_deploy_boot_state
 from .doctor import build_doctor_report
 from dataclasses import asdict
@@ -3802,11 +3802,195 @@ def _is_canonical_peer_replay_entry(entry: dict) -> bool:
     }
 
 
+def _user_direct_message_id_from_idempotency_key(idempotency_key: str) -> str:
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return ""
+    digest = hashlib.sha256(
+        ("user-agent-message\0" + key).encode("utf-8")
+    ).hexdigest()
+    return "msg-" + digest[:12]
+
+
+def _user_agent_message_idempotency_key(data: dict) -> str:
+    """Return the browser/API idempotency key for user→agent sends."""
+    data = data or {}
+    for key in (
+        "idempotency_key",
+        "idempotencyKey",
+        "client_message_id",
+        "clientMessageId",
+    ):
+        value = str(data.get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _user_direct_message_reply_tool(recipient_kind: str) -> str:
+    kind = str(recipient_kind or "").strip()
+    if kind == "architect":
+        return "architect_message_user"
+    if kind == "engineer":
+        return "engineer_message_user"
+    return "torque_message_user"
+
+
+def _format_user_direct_message_prompt(row: dict, recipient_kind: str) -> str:
+    """Format a durable user→agent message as an injected agent prompt."""
+    row = row or {}
+    message_id = str(row.get("id", "") or "").strip()
+    thread_id = str(row.get("thread_id", "") or "").strip()
+    try:
+        created_at = float(row.get("created_at", row.get("timestamp", 0)) or 0)
+    except (TypeError, ValueError):
+        created_at = 0.0
+    if created_at > 0:
+        sent = datetime.fromtimestamp(created_at, timezone.utc).isoformat()
+    else:
+        sent = "unknown"
+    message = str(row.get("message", "") or "").strip("\n")
+    tool_name = _user_direct_message_reply_tool(recipient_kind)
+    thread_arg = json.dumps(thread_id)
+    parts = [
+        "## Message from the User",
+        f"Message ID: {message_id}",
+        f"Thread ID: {thread_id}",
+        f"Sent: {sent}",
+        "",
+    ]
+    if message:
+        parts.extend([message, ""])
+    parts.extend([
+        "Reply to this user-facing thread with:",
+        f"  mcp__torque__{tool_name}(thread_id={thread_arg}, message=\"...\")",
+        "",
+        "Do not rely on free-text terminal output for the user-facing reply.",
+        "---",
+    ])
+    return "\n".join(parts) + "\n"
+
+
+def _direct_message_delivery_response(row: dict | None, *,
+                                      deduped: bool = False) -> dict:
+    row = row or {}
+    delivery_state = str(row.get("delivery_state", "") or "").strip() \
+        or "buffered"
+    return {
+        "type": "ok",
+        "message_id": str(row.get("id", "") or "").strip(),
+        "thread_id": str(row.get("thread_id", "") or "").strip(),
+        "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "agent_id": str(row.get("recipient_id", "") or "").strip()
+        if str(row.get("sender_kind", "") or "").strip() == "user"
+        else str(row.get("sender_id", "") or "").strip(),
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+        "delivered": delivery_state == "delivered",
+        "buffered": delivery_state == "buffered",
+        "deduped": bool(deduped),
+    }
+
+
+def _user_agent_message_conflicts_with_existing(existing: dict,
+                                                target,
+                                                *,
+                                                message: str,
+                                                reply_to_id: str) -> bool:
+    if not existing or not target:
+        return False
+    if str(existing.get("sender_kind", "") or "").strip() != "user":
+        return True
+    if str(existing.get("recipient_id", "") or "").strip() != str(
+            getattr(target, "id", "") or "").strip():
+        return True
+    if str(existing.get("message", "") or "") != str(message or ""):
+        return True
+    if str(existing.get("reply_to_id", "") or "").strip() != str(
+            reply_to_id or "").strip():
+        return True
+    return False
+
+
+async def _queue_user_direct_message_to_agent(
+        state: MatrixState,
+        target,
+        row: dict,
+        send_prompt,
+        *,
+        emit: bool = True) -> dict | None:
+    """Queue a persisted user→agent direct message into a live session."""
+    message_id = str((row or {}).get("id", "") or "").strip()
+    if not message_id:
+        return row
+    if not target or _agent_dismissed_at(target):
+        return state.update_direct_message_delivery(
+            message_id,
+            "buffered",
+            reason="agent_dismissed",
+            emit=emit,
+        ) or row
+    if not getattr(target, "session_id", ""):
+        return state.update_direct_message_delivery(
+            message_id,
+            "buffered",
+            reason="no_session",
+            emit=emit,
+        ) or row
+    if not send_prompt:
+        return state.update_direct_message_delivery(
+            message_id,
+            "buffered",
+            reason="send_prompt_unavailable",
+            emit=emit,
+        ) or row
+    prompt = _format_user_direct_message_prompt(
+        row,
+        str(getattr(target, "kind", "") or "worker").strip() or "worker",
+    )
+    try:
+        queued = await _queue_cell_prompt_send(
+            target,
+            prompt,
+            send_prompt,
+            prime_input_ready=True,
+            settled_submit=True,
+            wait_for_delivery=True,
+        )
+    except Exception as exc:
+        reason = str(exc).strip() or type(exc).__name__ or "delivery_failed"
+        log.exception(
+            "Failed to deliver direct user message %s to %s",
+            message_id,
+            getattr(target, "id", ""),
+        )
+        return state.update_direct_message_delivery(
+            message_id,
+            "buffered",
+            reason=reason,
+            emit=emit,
+        ) or row
+    if not queued:
+        return state.update_direct_message_delivery(
+            message_id,
+            "buffered",
+            reason="no_session",
+            emit=emit,
+        ) or row
+    return state.update_direct_message_delivery(
+        message_id,
+        "delivered",
+        emit=emit,
+    ) or row
+
+
 async def _replay_buffered_cross_kind_messages(
         state: MatrixState,
         bridge,
-        target) -> int:
-    """Replay architect/engineer inbox entries that buffered while dismissed."""
+        target,
+        *,
+        send_prompt=None) -> int:
+    """Replay buffered peer/direct inbox entries after a session wakes."""
     if not target or not getattr(target, "session_id", ""):
         return 0
     replayed = 0
@@ -3835,6 +4019,13 @@ async def _replay_buffered_cross_kind_messages(
             append_to_caches = getattr(state, "append_peer_message_to_caches", None)
             if callable(append_to_caches):
                 append_to_caches(row, emit=False)
+
+    direct_rows: list[dict] = []
+    if db and hasattr(db, "load_buffered_direct_messages"):
+        direct_rows = list(db.load_buffered_direct_messages(
+            target.id,
+            limit=1000,
+        ))
 
     entries = sorted(
         replay_candidates.values(),
@@ -3908,6 +4099,33 @@ async def _replay_buffered_cross_kind_messages(
         else:
             _mark_cross_kind_message_delivery(target, message_id, delivered=True)
         replayed += 1
+
+    direct_rows.sort(
+        key=lambda item: (
+            float((item or {}).get("created_at", item.get("timestamp", 0)) or 0),
+            str((item or {}).get("id", "") or ""),
+        )
+    )
+    for row in direct_rows:
+        message_id = str((row or {}).get("id", "") or "").strip()
+        message_text = str((row or {}).get("message", "") or "")
+        if not message_id or not message_text:
+            continue
+        append_direct = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append_direct):
+            append_direct(row, emit=False)
+        updated = await _queue_user_direct_message_to_agent(
+            state,
+            target,
+            row,
+            send_prompt,
+            emit=True,
+        )
+        if (
+            str((updated or {}).get("delivery_state", "") or "").strip()
+            == "delivered"
+        ):
+            replayed += 1
     if replayed:
         state._emit_agent(target)
     return replayed
@@ -4779,6 +4997,98 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     await bridge.send_text(cell.session_id, text)
     state.record_message_history(cell.id, text)
     return True
+
+
+async def _handle_user_agent_message_command(data, state: MatrixState,
+                                             send_prompt) -> dict:
+    """Persist and non-interruptively deliver a user→agent direct message."""
+    target_ident = str(
+        data.get("agent_id")
+        or data.get("cell_id")
+        or data.get("target_agent_id")
+        or ""
+    ).strip()
+    target_id = _resolve_agent_id(state, target_ident)
+    target = state.get_active_agent(target_id) if target_id else None
+    if not target or getattr(target, "cell_type", "") != "agent":
+        return {
+            "type": "error",
+            "message": f"Agent not found: {target_ident}",
+        }
+    message_text = str(data.get("message") or data.get("text") or "")
+    if not message_text.strip():
+        return {"type": "error", "message": "Message is required"}
+    if not getattr(state, "db", None):
+        return {
+            "type": "error",
+            "message": "Direct message store is unavailable",
+        }
+
+    idempotency_key = _user_agent_message_idempotency_key(data)
+    message_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
+    if not message_id:
+        message_id = "msg-" + uuid.uuid4().hex[:12]
+    reply_to_id = str(data.get("reply_to_id", "") or "").strip()
+    requested_thread_id = str(data.get("thread_id", "") or "").strip()
+    thread_id = requested_thread_id or canonical_user_agent_thread_id(target.id)
+    recipient_kind = str(getattr(target, "kind", "") or "").strip() or "worker"
+    recipient_name = str(getattr(target, "name", "") or "").strip()
+
+    existing = (
+        state.db.load_direct_message(message_id)
+        if idempotency_key and getattr(state, "db", None)
+        else None
+    )
+    if existing:
+        if _user_agent_message_conflicts_with_existing(
+                existing,
+                target,
+                message=message_text,
+                reply_to_id=reply_to_id):
+            return {
+                "type": "error",
+                "message": (
+                    "idempotency key was reused for a different "
+                    "user_agent_message"
+                ),
+            }
+        append_direct = getattr(state, "append_direct_message_to_caches", None)
+        if callable(append_direct):
+            append_direct(existing)
+        return _direct_message_delivery_response(existing, deduped=True)
+
+    row = {
+        "id": message_id,
+        "thread_id": thread_id,
+        "reply_to_id": reply_to_id,
+        "group_name": str(getattr(target, "group", "") or "").strip(),
+        "sender_id": "user",
+        "sender_kind": "user",
+        "sender_name": "User",
+        "recipient_id": target.id,
+        "recipient_kind": recipient_kind,
+        "recipient_name": recipient_name,
+        "message": message_text,
+        "message_type": "message",
+        "created_at": time.time(),
+        "blocking": False,
+        "delivery_state": "buffered",
+        "delivery_reason": "",
+    }
+    saved = state.save_direct_message(row)
+    if not saved:
+        return {
+            "type": "error",
+            "message": "Failed to save direct message",
+        }
+    delivered = await _queue_user_direct_message_to_agent(
+        state,
+        target,
+        saved,
+        send_prompt,
+        emit=True,
+    )
+    return _direct_message_delivery_response(delivered or saved)
 
 
 async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
@@ -7079,7 +7389,7 @@ async def _handle_engineer_rehire_command(
         state._emit_agent(engineer)
         state._db_save_agent(engineer)
         replayed = await _replay_buffered_cross_kind_messages(
-            state, bridge, engineer)
+            state, bridge, engineer, send_prompt=send_agent_prompt)
         if panel_event:
             panel_event(
                 "engineer_rehired",
@@ -7150,7 +7460,7 @@ async def _handle_engineer_rehire_command(
     state._emit_agent(engineer)
     state._db_save_agent(engineer)
     replayed = await _replay_buffered_cross_kind_messages(
-        state, bridge, engineer)
+        state, bridge, engineer, send_prompt=send_agent_prompt)
     if panel_event:
         panel_event(
             "engineer_rehired",
@@ -7283,7 +7593,7 @@ async def _handle_architect_rehire_command(
         state._emit_agent(architect)
         state._db_save_agent(architect)
         replayed = await _replay_buffered_cross_kind_messages(
-            state, bridge, architect)
+            state, bridge, architect, send_prompt=send_agent_prompt)
         state._emit(
             "architect_rehired",
             architect_id=architect.id,
@@ -7360,7 +7670,7 @@ async def _handle_architect_rehire_command(
     state._emit_agent(architect)
     state._db_save_agent(architect)
     replayed = await _replay_buffered_cross_kind_messages(
-        state, bridge, architect)
+        state, bridge, architect, send_prompt=send_agent_prompt)
     state._emit(
         "architect_rehired",
         architect_id=architect.id,
@@ -8426,24 +8736,30 @@ async def main(connection=None):
         bridge.on_supervisor_event = _on_supervisor_event
 
     def _on_agent_session_start(cell):
-        """Signal terminal readiness and recover buffered Architect peers."""
+        """Signal terminal readiness and recover buffered direct/peer messages."""
         bridge.signal_input_ready(cell.id)
         if (
-            str(getattr(cell, "kind", "") or "").strip() != "architect"
+            str(getattr(cell, "cell_type", "") or "") != "agent"
             or _agent_dismissed_at(cell)
         ):
             return
 
-        async def _recover_architect_peer_messages():
+        async def _recover_buffered_messages():
             try:
-                await _replay_buffered_cross_kind_messages(state, bridge, cell)
+                await _replay_buffered_cross_kind_messages(
+                    state,
+                    bridge,
+                    cell,
+                    send_prompt=_send_agent_prompt,
+                )
+                await state.broadcast()
             except Exception:
                 log.exception(
-                    "Failed to recover buffered Architect peer messages for %s",
+                    "Failed to recover buffered messages for %s",
                     getattr(cell, "id", ""),
                 )
 
-        asyncio.create_task(_recover_architect_peer_messages())
+        asyncio.create_task(_recover_buffered_messages())
 
     # Signal bridge when agent TUI is ready (hook-based session_start)
     event_bus.on_session_start = _on_agent_session_start
@@ -10438,6 +10754,13 @@ async def main(connection=None):
 
             elif cmd == "send_user_message":
                 await _handle_send_user_message_command(data, state, bridge)
+
+            elif cmd == "user_agent_message":
+                result = await _handle_user_agent_message_command(
+                    data,
+                    state,
+                    _send_agent_prompt,
+                )
 
             elif cmd == "relaunch_agent":
                 result = await _handle_relaunch_agent_command(
