@@ -28,6 +28,7 @@ from .config import (
     DEFAULT_ENGINEER_BOOT_NUDGE,
     log,
 )
+from . import cloud_hooks
 from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import TorqueDB
@@ -4617,6 +4618,11 @@ class MatrixState:
         saved = self.db.save_direct_message(row)
         if saved:
             self.append_direct_message_to_caches(saved, emit=emit)
+            cloud_hooks.notify_direct_message_observers(
+                "direct_message_saved",
+                saved,
+                state=self,
+            )
         return saved
 
     def update_direct_message_delivery(
@@ -4640,6 +4646,11 @@ class MatrixState:
         if not saved:
             return None
         self.append_direct_message_to_caches(saved, emit=emit)
+        cloud_hooks.notify_direct_message_observers(
+            "direct_message_delivery_updated",
+            saved,
+            state=self,
+        )
         return saved
 
     def mark_direct_message_delivered(
@@ -4695,6 +4706,11 @@ class MatrixState:
                     read_at=entry.get("read_at", 0),
                     message=dict(entry),
                 )
+        cloud_hooks.notify_direct_message_observers(
+            "direct_message_read",
+            saved,
+            state=self,
+        )
         return saved
 
     # -- Agent history helpers -----------------------------------------------

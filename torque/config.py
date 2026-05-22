@@ -46,6 +46,16 @@ def _truthy_env(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes")
 
 
+CLOUD_CONNECTOR_ENABLED: bool = any(_truthy_env(name) for name in (
+    "TORQUE_CLOUD_CONNECTOR_ENABLED",
+    "TORQUE_EE_CONNECTOR_ENABLED",
+))
+CLOUD_CONNECTOR_MODULE: str = (
+    os.environ.get("TORQUE_CLOUD_CONNECTOR_MODULE", "").strip()
+    or "torque_ee_connector"
+)
+
+
 def _profile_enabled_env() -> bool:
     """Return whether profile-only instrumentation/endpoints are enabled.
 
