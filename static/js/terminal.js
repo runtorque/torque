@@ -428,7 +428,7 @@ function _terminalDirectMessageStopEvent(event) {
 function _terminalDirectMessageMarkdownLinkTarget(event) {
   const target = event && event.target;
   if (!target || typeof target.closest !== 'function') return null;
-  return target.closest('a[data-torque-markdown-link]');
+  return target.closest('[data-torque-markdown-link]');
 }
 
 function terminalDirectMessageMouseDown(event) {
