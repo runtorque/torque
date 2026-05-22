@@ -17,6 +17,7 @@ let state = {
   context_panel_split_ratio: 0.38,
   supervisor_panel_state: {},
   agent_message_history: {},
+  direct_messages_by_agent: {},
 };
 let dragInProgress = false;
 let selectedAgentId = null;
@@ -690,6 +691,7 @@ function _handleFullState(msg) {
   if (!state.engineer_session_maps) state.engineer_session_maps = {};
   if (!state.mcp_calls) state.mcp_calls = {};
   if (!state.agent_message_history) state.agent_message_history = {};
+  if (!state.direct_messages_by_agent) state.direct_messages_by_agent = {};
   if (typeof state.active_group !== 'string') {
     state.active_group = '';
   }
@@ -1126,7 +1128,9 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         break;
       }
-      case 'peer_message_upsert': {
+      case 'peer_message_upsert':
+      case 'direct_message_upsert':
+      case 'direct_message_read': {
         const _pmFocused = _focusedEngineerAgent();
         const _pmIds = _peerMessageDeltaAgentIds(op);
         if (_pmFocused && _pmIds.indexOf(String(_pmFocused.id || '')) >= 0) {
@@ -1844,6 +1848,8 @@ function _collectSessionMapInvalidationGroups(ops, hints) {
       case 'agent_digest_update':
       case 'engineer_settings_update':
       case 'peer_message_upsert':
+      case 'direct_message_upsert':
+      case 'direct_message_read':
         group = op.group || '';
         break;
       case 'agent_remove':
@@ -1958,6 +1964,8 @@ function _opTouchesGroup(op, group, hint) {
     case 'engineer_streams_update':
     case 'engineer_settings_update':
     case 'peer_message_upsert':
+    case 'direct_message_upsert':
+    case 'direct_message_read':
       return (op.group || '') === group;
     default:
       return true;
@@ -2009,6 +2017,7 @@ function _applyDelta(ops) {
         if (state.digest_buffer_stats) delete state.digest_buffer_stats[op.id];
         if (state.digest_sent_events) delete state.digest_sent_events[op.id];
         if (state.agent_message_history) delete state.agent_message_history[op.id];
+        if (state.direct_messages_by_agent) delete state.direct_messages_by_agent[op.id];
         // Selection/focus globals are browser-local — the server doesn't know
         // about them. Selections can be cleared immediately; focusedItemId is
         // left intact until render() can use previous grid-row metadata to pick
@@ -2075,6 +2084,55 @@ function _applyDelta(ops) {
           if (peerAgent.mcp_messages.length > 50) peerAgent.mcp_messages.length = 50;
           if (typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
             _agentPanelInvalidateArchitectMessageCache(peerAgentId);
+          }
+        }
+        break;
+      }
+
+      case 'direct_message_upsert':
+      case 'direct_message_read': {
+        var directMessage = Object.assign({}, op.message || op.entry || {});
+        delete directMessage.op;
+        var directAgentIds = String(op.agent_id || '').trim()
+          ? [String(op.agent_id || '').trim()]
+          : _peerMessageDeltaAgentIds(op);
+        if (!state.direct_messages_by_agent) state.direct_messages_by_agent = {};
+        for (var dmi = 0; dmi < directAgentIds.length; dmi++) {
+          var directAgentId = String(directAgentIds[dmi] || '').trim();
+          if (!directAgentId) continue;
+          if (!Array.isArray(state.direct_messages_by_agent[directAgentId])) {
+            state.direct_messages_by_agent[directAgentId] = [];
+          }
+          var directMessageId = String(directMessage.id || op.id || '');
+          var replacedDirectMessage = false;
+          if (directMessageId) {
+            for (var dmj = 0; dmj < state.direct_messages_by_agent[directAgentId].length; dmj++) {
+              if (String((state.direct_messages_by_agent[directAgentId][dmj] || {}).id || '') === directMessageId) {
+                state.direct_messages_by_agent[directAgentId][dmj] = Object.assign(
+                  {},
+                  state.direct_messages_by_agent[directAgentId][dmj],
+                  directMessage,
+                  op.op === 'direct_message_read' ? { read_at: op.read_at || directMessage.read_at || 0 } : {}
+                );
+                replacedDirectMessage = true;
+                break;
+              }
+            }
+          }
+          if (!replacedDirectMessage && directMessageId) {
+            state.direct_messages_by_agent[directAgentId].push(Object.assign({}, directMessage));
+          }
+          state.direct_messages_by_agent[directAgentId].sort(function(a, b) {
+            var at = Number((a && (a.timestamp || a.created_at)) || 0);
+            var bt = Number((b && (b.timestamp || b.created_at)) || 0);
+            if (at !== bt) return at - bt;
+            return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+          });
+          var directLimit = Number(op.limit || 100);
+          if (!Number.isFinite(directLimit) || directLimit < 1) directLimit = 100;
+          if (state.direct_messages_by_agent[directAgentId].length > directLimit) {
+            state.direct_messages_by_agent[directAgentId] =
+              state.direct_messages_by_agent[directAgentId].slice(-directLimit);
           }
         }
         break;

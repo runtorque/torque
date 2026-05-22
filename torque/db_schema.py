@@ -293,11 +293,16 @@ CREATE TABLE IF NOT EXISTS agent_peer_messages (
     group_name           TEXT NOT NULL DEFAULT '',
     sender_id            TEXT NOT NULL,
     sender_kind          TEXT NOT NULL,
+    sender_name          TEXT NOT NULL DEFAULT '',
     recipient_id         TEXT NOT NULL,
     recipient_kind       TEXT NOT NULL,
+    recipient_name       TEXT NOT NULL DEFAULT '',
     message              TEXT NOT NULL,
+    message_type         TEXT NOT NULL DEFAULT 'message',
     created_at           REAL NOT NULL,
     ack_required         INTEGER NOT NULL DEFAULT 0,
+    blocking             INTEGER NOT NULL DEFAULT 0,
+    source_task_id       TEXT NOT NULL DEFAULT '',
     context_task_ids     TEXT NOT NULL DEFAULT '[]',
     context_engineer_ids TEXT NOT NULL DEFAULT '[]',
     context_decision_ids TEXT NOT NULL DEFAULT '[]',
@@ -306,6 +311,7 @@ CREATE TABLE IF NOT EXISTS agent_peer_messages (
     delivery_state       TEXT NOT NULL DEFAULT 'buffered',
     delivery_reason      TEXT NOT NULL DEFAULT '',
     delivered_at         REAL NOT NULL DEFAULT 0,
+    read_at              REAL NOT NULL DEFAULT 0,
     archived_at          REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_recipient_recent

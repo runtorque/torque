@@ -319,6 +319,18 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "context_task_ids": ["TORQUE:1"],
             "context_snapshot": {"tasks": [{"id": "TORQUE:1"}]},
         })
+        db.save_direct_message({
+            "id": "direct-user-arch-a",
+            "thread_id": "caller-thread-is-normalized",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": arch_a.id,
+            "recipient_kind": "architect",
+            "message": "direct user note",
+            "created_at": 124.0,
+            "delivery_state": "buffered",
+        })
 
         state = self.state_mod.MatrixState(db=db)
         state.load()
@@ -336,6 +348,18 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(
             recipient_entry["context"]["snapshot"]["tasks"][0]["id"],
             "TORQUE:1",
+        )
+        self.assertEqual(
+            [entry["id"] for entry in state.agents[arch_a.id].mcp_messages],
+            ["msg-peer-1"],
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[arch_a.id][0]["id"],
+            "direct-user-arch-a",
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[arch_a.id][0]["thread_id"],
+            "user-agent:user:arch-a",
         )
 
     def test_save_peer_message_updates_caches_and_delivery_deltas(self):
@@ -399,6 +423,139 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertTrue(sender_entry["delivered"])
         self.assertFalse(sender_entry["buffered"])
         self.assertEqual(sender_entry["delivered_at"], 250.0)
+
+    def test_load_seeds_direct_message_caches_from_db(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            kind="worker",
+            cell_type="agent",
+        )
+        arch = self.state_mod.AgentCell(
+            id="arch-a",
+            name="Architect A",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        db.save_groups_and_members({"g": [worker.id, arch.id]}, {"g": "g"})
+        db.save_agent(worker)
+        db.save_agent(arch)
+        db.save_direct_message({
+            "id": "direct-1",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": worker.id,
+            "recipient_kind": "worker",
+            "message": "first",
+            "created_at": 1.0,
+        })
+        db.save_direct_message({
+            "id": "direct-2",
+            "group_name": "g",
+            "sender_id": worker.id,
+            "sender_kind": "worker",
+            "recipient_id": "user",
+            "recipient_kind": "user",
+            "message": "second",
+            "created_at": 2.0,
+            "delivery_state": "delivered",
+            "read_at": 3.0,
+        })
+        db.save_agent_peer_message({
+            "id": "peer-only",
+            "thread_id": "peer-only",
+            "group_name": "g",
+            "sender_id": arch.id,
+            "sender_kind": "architect",
+            "recipient_id": worker.id,
+            "recipient_kind": "worker",
+            "message": "not a user direct message",
+            "created_at": 4.0,
+        })
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        cached = state.direct_messages_by_agent[worker.id]
+        self.assertEqual([entry["id"] for entry in cached], ["direct-1", "direct-2"])
+        self.assertEqual(cached[0]["direction"], "received")
+        self.assertTrue(cached[0]["unread"])
+        self.assertEqual(cached[1]["direction"], "sent")
+        self.assertFalse(cached[1]["unread"])
+        self.assertNotIn("peer-only", [entry["id"] for entry in cached])
+        self.assertEqual(
+            state.to_dict()["direct_messages_by_agent"][worker.id][0]["id"],
+            "direct-1",
+        )
+        self.assertEqual(
+            state.to_dict_compact()["direct_messages_by_agent"][worker.id][1]["id"],
+            "direct-2",
+        )
+
+    def test_save_direct_message_updates_cache_and_read_deltas(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.agents["worker-1"] = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            kind="worker",
+            cell_type="agent",
+        )
+
+        saved = state.save_direct_message({
+            "id": "direct-state-1",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": "worker-1",
+            "recipient_kind": "worker",
+            "message": "Ping",
+            "created_at": 100.0,
+        })
+
+        self.assertEqual(saved["id"], "direct-state-1")
+        cached = state.direct_messages_by_agent["worker-1"][0]
+        self.assertEqual(cached["direction"], "received")
+        self.assertTrue(cached["unread"])
+        self.assertEqual(
+            [op["op"] for op in state._delta_ops],
+            ["direct_message_upsert"],
+        )
+
+        updated = state.mark_direct_message_read(
+            "direct-state-1",
+            read_at=150.0,
+            reader_id="worker-1",
+        )
+
+        self.assertEqual(updated["read_at"], 150.0)
+        self.assertEqual(updated["delivery_state"], "buffered")
+        cached = state.direct_messages_by_agent["worker-1"][0]
+        self.assertEqual(cached["read_at"], 150.0)
+        self.assertFalse(cached["unread"])
+        self.assertEqual(
+            [op["op"] for op in state._delta_ops],
+            ["direct_message_upsert", "direct_message_read"],
+        )
 
     def test_sync_ui_selection_to_session_selects_parent_agent_and_group(self):
         state = self.state_mod.MatrixState()

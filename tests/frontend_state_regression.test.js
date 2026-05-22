@@ -11364,6 +11364,88 @@ test('agent_message_history_append delta updates recall cache without rerenderin
   });
 });
 
+test('direct message deltas update per-agent cache without peer-message state', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'direct_message_upsert',
+      id: 'direct-1',
+      agent_id: 'arch-1',
+      group: 'alpha',
+      message: {
+        id: 'direct-1',
+        thread_id: 'user-agent:user:arch-1',
+        message: 'direct hello',
+        timestamp: 20,
+        sender_id: 'user',
+        sender_kind: 'user',
+        recipient_id: 'arch-1',
+        recipient_kind: 'architect',
+        direction: 'received',
+        read_at: 0,
+        unread: true,
+      },
+      limit: 100,
+    }],
+  });
+  flushRaf();
+
+  assert.equal(
+    jsonValue(context, `state.direct_messages_by_agent['arch-1'][0].message`),
+    'direct hello',
+  );
+  assert.equal(
+    jsonValue(context, `state.direct_messages_by_agent['arch-1'][0].unread`),
+    true,
+  );
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'direct_message_read',
+      id: 'direct-1',
+      agent_id: 'arch-1',
+      group: 'alpha',
+      read_at: 30,
+      message: {
+        id: 'direct-1',
+        thread_id: 'user-agent:user:arch-1',
+        message: 'direct hello',
+        timestamp: 20,
+        sender_id: 'user',
+        sender_kind: 'user',
+        recipient_id: 'arch-1',
+        recipient_kind: 'architect',
+        direction: 'received',
+        read_at: 30,
+        unread: false,
+      },
+    }],
+  });
+  flushRaf();
+
+  assert.equal(
+    jsonValue(context, `state.direct_messages_by_agent['arch-1'][0].read_at`),
+    30,
+  );
+  assert.equal(
+    jsonValue(context, `state.direct_messages_by_agent['arch-1'][0].unread`),
+    false,
+  );
+  assert.equal(runInContext(context, `state.agents['arch-1']`), undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+  });
+});
+
 test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v4)', () => {
   // P0 TORQUE:236 final fix: cross-agent MCP traffic used to clobber the
   // focused engineer panel via _renderSurface('engineer') -> renderAgentPanel(),

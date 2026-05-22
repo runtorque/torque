@@ -3812,6 +3812,11 @@ async def _replay_buffered_cross_kind_messages(
     replayed = 0
     replay_candidates: dict[str, dict] = {}
     for entry in list(getattr(target, "mcp_messages", []) or []):
+        if "user" in {
+            str((entry or {}).get("sender_kind", "") or "").strip(),
+            str((entry or {}).get("recipient_kind", "") or "").strip(),
+        }:
+            continue
         if str((entry or {}).get("direction", "") or "") != "received":
             continue
         if entry.get("delivered") is not False:

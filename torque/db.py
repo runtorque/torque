@@ -140,11 +140,16 @@ _AGENT_PEER_MESSAGE_COLUMNS = [
     "group_name",
     "sender_id",
     "sender_kind",
+    "sender_name",
     "recipient_id",
     "recipient_kind",
+    "recipient_name",
     "message",
+    "message_type",
     "created_at",
     "ack_required",
+    "blocking",
+    "source_task_id",
     "context_task_ids",
     "context_engineer_ids",
     "context_decision_ids",
@@ -153,6 +158,7 @@ _AGENT_PEER_MESSAGE_COLUMNS = [
     "delivery_state",
     "delivery_reason",
     "delivered_at",
+    "read_at",
     "archived_at",
 ]
 _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
@@ -161,6 +167,8 @@ _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
     "context_decision_ids",
 )
 _AGENT_PEER_MESSAGE_DELIVERY_STATES = {"buffered", "delivered", "failed"}
+_AGENT_PEER_MESSAGE_NON_USER_WHERE = "(sender_kind!='user' AND recipient_kind!='user')"
+_AGENT_PEER_MESSAGE_USER_WHERE = "(sender_kind='user' OR recipient_kind='user')"
 
 
 def _json_text_list(value) -> list[str]:
@@ -214,6 +222,37 @@ def _peer_bool(value) -> bool:
         return bool(value)
 
 
+def canonical_user_agent_thread_id(agent_id: str, *, user_id: str = "user") -> str:
+    """Return the canonical V1 thread id for one user↔agent lane.
+
+    The V1 direct-message panel renders one conversation per viewed agent.
+    Rows involving the synthetic user participant are therefore grouped under
+    this stable thread id.  Agent↔agent peer messages keep their existing
+    caller-supplied/default message-id threads.
+    """
+    aid = str(agent_id or "").strip()
+    uid = str(user_id or "user").strip() or "user"
+    if not aid:
+        return ""
+    return f"user-agent:{uid}:{aid}"
+
+
+def _direct_message_thread_id_for_participants(source: dict) -> str:
+    sender_kind = str(source.get("sender_kind", "") or "").strip()
+    recipient_kind = str(source.get("recipient_kind", "") or "").strip()
+    if sender_kind == "user" and recipient_kind != "user":
+        return canonical_user_agent_thread_id(
+            source.get("recipient_id", ""),
+            user_id=str(source.get("sender_id", "") or "user"),
+        )
+    if recipient_kind == "user" and sender_kind != "user":
+        return canonical_user_agent_thread_id(
+            source.get("sender_id", ""),
+            user_id=str(source.get("recipient_id", "") or "user"),
+        )
+    return ""
+
+
 def _normalize_agent_peer_message_record(record: dict) -> dict:
     source = dict(record or {})
     message_id = str(source.get("id", "") or "").strip()
@@ -237,7 +276,10 @@ def _normalize_agent_peer_message_record(record: dict) -> dict:
     ).strip()
     if delivery_state not in _AGENT_PEER_MESSAGE_DELIVERY_STATES:
         delivery_state = "buffered"
-    thread_id = str(source.get("thread_id", "") or "").strip() or message_id
+    direct_thread_id = _direct_message_thread_id_for_participants(source)
+    thread_id = direct_thread_id or str(source.get("thread_id", "") or "").strip()
+    if not thread_id:
+        thread_id = message_id
     group_name = str(
         source.get("group_name", source.get("group", "")) or ""
     ).strip()
@@ -251,13 +293,20 @@ def _normalize_agent_peer_message_record(record: dict) -> dict:
         "sender_kind": str(
             source.get("sender_kind", "architect") or "architect"
         ).strip(),
+        "sender_name": str(source.get("sender_name", "") or ""),
         "recipient_id": recipient_id,
         "recipient_kind": str(
             source.get("recipient_kind", "architect") or "architect"
         ).strip(),
+        "recipient_name": str(source.get("recipient_name", "") or ""),
         "message": message,
+        "message_type": str(
+            source.get("message_type", "message") or "message"
+        ).strip() or "message",
         "created_at": created_at,
         "ack_required": _peer_bool(source.get("ack_required", False)),
+        "blocking": _peer_bool(source.get("blocking", False)),
+        "source_task_id": str(source.get("source_task_id", "") or "").strip(),
         "context_task_ids": _json_text_list(
             source.get("context_task_ids", [])
         ),
@@ -272,6 +321,7 @@ def _normalize_agent_peer_message_record(record: dict) -> dict:
         "delivery_state": delivery_state,
         "delivery_reason": str(source.get("delivery_reason", "") or ""),
         "delivered_at": _peer_float(source.get("delivered_at", 0), 0),
+        "read_at": _peer_float(source.get("read_at", 0), 0),
         "archived_at": _peer_float(source.get("archived_at", 0), 0),
     }
 
@@ -285,7 +335,7 @@ def _agent_peer_message_insert_values(record: dict) -> tuple:
             value = json.dumps(value, separators=(",", ":"))
         elif column == "context_snapshot":
             value = json.dumps(value, separators=(",", ":"), sort_keys=True)
-        elif column == "ack_required":
+        elif column in {"ack_required", "blocking"}:
             value = int(bool(value))
         values.append(value)
     return tuple(values)
@@ -300,8 +350,10 @@ def _decode_agent_peer_message_row(row, cols=None) -> dict:
         decoded.get("context_snapshot", "{}")
     )
     decoded["ack_required"] = _peer_bool(decoded.get("ack_required", 0))
+    decoded["blocking"] = _peer_bool(decoded.get("blocking", 0))
     decoded["created_at"] = _peer_float(decoded.get("created_at", 0), 0)
     decoded["delivered_at"] = _peer_float(decoded.get("delivered_at", 0), 0)
+    decoded["read_at"] = _peer_float(decoded.get("read_at", 0), 0)
     decoded["archived_at"] = _peer_float(decoded.get("archived_at", 0), 0)
     decoded["timestamp"] = decoded["created_at"]
     return decoded
@@ -769,11 +821,16 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 group_name           TEXT NOT NULL DEFAULT '',
                 sender_id            TEXT NOT NULL,
                 sender_kind          TEXT NOT NULL,
+                sender_name          TEXT NOT NULL DEFAULT '',
                 recipient_id         TEXT NOT NULL,
                 recipient_kind       TEXT NOT NULL,
+                recipient_name       TEXT NOT NULL DEFAULT '',
                 message              TEXT NOT NULL,
+                message_type         TEXT NOT NULL DEFAULT 'message',
                 created_at           REAL NOT NULL,
                 ack_required         INTEGER NOT NULL DEFAULT 0,
+                blocking             INTEGER NOT NULL DEFAULT 0,
+                source_task_id       TEXT NOT NULL DEFAULT '',
                 context_task_ids     TEXT NOT NULL DEFAULT '[]',
                 context_engineer_ids TEXT NOT NULL DEFAULT '[]',
                 context_decision_ids TEXT NOT NULL DEFAULT '[]',
@@ -782,6 +839,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 delivery_state       TEXT NOT NULL DEFAULT 'buffered',
                 delivery_reason      TEXT NOT NULL DEFAULT '',
                 delivered_at         REAL NOT NULL DEFAULT 0,
+                read_at              REAL NOT NULL DEFAULT 0,
                 archived_at          REAL NOT NULL DEFAULT 0
             )
             """
@@ -798,11 +856,16 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "group_name": "TEXT NOT NULL DEFAULT ''",
             "sender_id": "TEXT NOT NULL DEFAULT ''",
             "sender_kind": "TEXT NOT NULL DEFAULT 'architect'",
+            "sender_name": "TEXT NOT NULL DEFAULT ''",
             "recipient_id": "TEXT NOT NULL DEFAULT ''",
             "recipient_kind": "TEXT NOT NULL DEFAULT 'architect'",
+            "recipient_name": "TEXT NOT NULL DEFAULT ''",
             "message": "TEXT NOT NULL DEFAULT ''",
+            "message_type": "TEXT NOT NULL DEFAULT 'message'",
             "created_at": "REAL NOT NULL DEFAULT 0",
             "ack_required": "INTEGER NOT NULL DEFAULT 0",
+            "blocking": "INTEGER NOT NULL DEFAULT 0",
+            "source_task_id": "TEXT NOT NULL DEFAULT ''",
             "context_task_ids": "TEXT NOT NULL DEFAULT '[]'",
             "context_engineer_ids": "TEXT NOT NULL DEFAULT '[]'",
             "context_decision_ids": "TEXT NOT NULL DEFAULT '[]'",
@@ -811,6 +874,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "delivery_state": "TEXT NOT NULL DEFAULT 'buffered'",
             "delivery_reason": "TEXT NOT NULL DEFAULT ''",
             "delivered_at": "REAL NOT NULL DEFAULT 0",
+            "read_at": "REAL NOT NULL DEFAULT 0",
             "archived_at": "REAL NOT NULL DEFAULT 0",
         }
         for column in _AGENT_PEER_MESSAGE_COLUMNS:
@@ -3523,6 +3587,15 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Compatibility alias for durable peer-message persistence."""
         return self.save_agent_peer_message(record)
 
+    def save_direct_message(self, record: dict) -> dict:
+        """Persist one direct/conversation message.
+
+        V1 stores direct messages in the existing agent_peer_messages table.
+        This named helper is the preferred API for user↔agent rows; legacy
+        peer helpers remain wrappers over the same physical store.
+        """
+        return self.save_agent_peer_message(record)
+
     def load_agent_peer_message(self, message_id: str) -> dict | None:
         """Load one canonical peer message by ID."""
         message_id = str(message_id or "").strip()
@@ -3541,6 +3614,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Compatibility alias for loading one peer message."""
         return self.load_agent_peer_message(message_id)
 
+    def load_direct_message(self, message_id: str) -> dict | None:
+        """Load one direct/conversation message by ID."""
+        return self.load_agent_peer_message(message_id)
+
     def load_agent_peer_messages_for_agent(
         self,
         agent_id: str,
@@ -3556,7 +3633,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not agent_id:
             return []
         limit = max(1, min(int(limit or 100), 1000))
-        where = ["(sender_id=? OR recipient_id=?)"]
+        where = [
+            "(sender_id=? OR recipient_id=?)",
+            _AGENT_PEER_MESSAGE_NON_USER_WHERE,
+        ]
         params: list = [agent_id, agent_id]
         peer_id = str(peer_id or "").strip()
         if peer_id:
@@ -3605,6 +3685,67 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             include_archived=include_archived,
         )
 
+    def load_direct_messages_for_agent(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 100,
+        since: float = 0,
+        peer_id: str = "",
+        peer_kind: str = "user",
+        thread_id: str = "",
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent direct messages involving one agent, newest first.
+
+        By default this returns the V1 user↔agent lane: rows involving the
+        given agent whose opposite participant has kind ``user``.  ``peer_id``
+        can narrow this to a specific synthetic user id, while ``thread_id``
+        keeps future multi-thread callers possible without changing storage.
+        """
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        where = [
+            "(sender_id=? OR recipient_id=?)",
+            _AGENT_PEER_MESSAGE_USER_WHERE,
+        ]
+        params: list = [agent_id, agent_id]
+        peer_id = str(peer_id or "").strip()
+        peer_kind = str(peer_kind or "").strip()
+        if peer_id:
+            where.append(
+                "((sender_id=? AND recipient_id=?) OR "
+                "(sender_id=? AND recipient_id=?))"
+            )
+            params.extend([agent_id, peer_id, peer_id, agent_id])
+        elif peer_kind:
+            where.append(
+                "((sender_id=? AND recipient_kind=?) OR "
+                "(recipient_id=? AND sender_kind=?))"
+            )
+            params.extend([agent_id, peer_kind, agent_id, peer_kind])
+        thread_id = str(thread_id or "").strip()
+        if thread_id:
+            where.append("thread_id=?")
+            params.append(thread_id)
+        since_value = _peer_float(since, 0)
+        if since_value > 0:
+            where.append("created_at>?")
+            params.append(since_value)
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
     def load_agent_peer_messages_for_thread(
         self,
         thread_id: str,
@@ -3618,7 +3759,38 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not thread_id:
             return []
         limit = max(1, min(int(limit or 1000), 5000))
-        where = ["thread_id=?"]
+        where = ["thread_id=?", _AGENT_PEER_MESSAGE_NON_USER_WHERE]
+        params: list = [thread_id]
+        agent_id = str(agent_id or "").strip()
+        if agent_id:
+            where.append("(sender_id=? OR recipient_id=?)")
+            params.extend([agent_id, agent_id])
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at ASC, id ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_direct_messages_for_thread(
+        self,
+        thread_id: str,
+        *,
+        agent_id: str = "",
+        limit: int = 1000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load one direct-message thread oldest first."""
+        thread_id = str(thread_id or "").strip()
+        if not thread_id:
+            return []
+        limit = max(1, min(int(limit or 1000), 5000))
+        where = ["thread_id=?", _AGENT_PEER_MESSAGE_USER_WHERE]
         params: list = [thread_id]
         agent_id = str(agent_id or "").strip()
         if agent_id:
@@ -3651,6 +3823,29 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
             "FROM agent_peer_messages "
             "WHERE recipient_id=? AND delivery_state='buffered' "
+            f"AND {_AGENT_PEER_MESSAGE_NON_USER_WHERE} "
+            "AND archived_at=0 "
+            "ORDER BY created_at ASC, id ASC LIMIT ?",
+            (recipient_id, limit),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_buffered_direct_messages(
+        self,
+        recipient_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Load buffered direct messages for one recipient, oldest first."""
+        recipient_id = str(recipient_id or "").strip()
+        if not recipient_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages "
+            "WHERE recipient_id=? AND delivery_state='buffered' "
+            f"AND {_AGENT_PEER_MESSAGE_USER_WHERE} "
             "AND archived_at=0 "
             "ORDER BY created_at ASC, id ASC LIMIT ?",
             (recipient_id, limit),
@@ -3669,7 +3864,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not group_name:
             return []
         limit = max(1, min(int(limit or 100), 1000))
-        where = ["group_name=?"]
+        where = ["group_name=?", _AGENT_PEER_MESSAGE_NON_USER_WHERE]
         params: list = [group_name]
         if not include_archived:
             where.append("archived_at=0")
@@ -3725,6 +3920,67 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             reason="" if delivered else reason,
             delivered_at=delivered_at,
         )
+
+    def update_direct_message_delivery(
+        self,
+        message_id: str,
+        delivery_state: str,
+        *,
+        reason: str = "",
+        delivered_at: float | None = None,
+    ) -> dict | None:
+        """Persist transport delivery state for one direct message."""
+        return self.update_agent_peer_message_delivery(
+            message_id,
+            delivery_state,
+            reason=reason,
+            delivered_at=delivered_at,
+        )
+
+    def mark_direct_message_delivered(
+        self,
+        message_id: str,
+        *,
+        delivered: bool = True,
+        reason: str = "",
+        delivered_at: float | None = None,
+    ) -> dict | None:
+        """Convenience wrapper for delivered/failed direct-message states."""
+        return self.update_direct_message_delivery(
+            message_id,
+            "delivered" if delivered else "failed",
+            reason="" if delivered else reason,
+            delivered_at=delivered_at,
+        )
+
+    def mark_direct_message_read(
+        self,
+        message_id: str,
+        *,
+        read_at: float | None = None,
+        reader_id: str = "",
+    ) -> dict | None:
+        """Persist UI read state for one direct message.
+
+        This intentionally does not alter delivery_state; transport delivery
+        and UI read/unread are separate concepts.
+        """
+        message_id = str(message_id or "").strip()
+        if not message_id:
+            return None
+        reader = str(reader_id or "").strip()
+        existing = self.load_agent_peer_message(message_id)
+        if not existing:
+            return None
+        if reader and reader != str(existing.get("recipient_id", "") or ""):
+            return existing
+        read_value = _peer_float(read_at, 0) if read_at is not None else time.time()
+        self._conn.execute(
+            "UPDATE agent_peer_messages SET read_at=? WHERE id=?",
+            (read_value, message_id),
+        )
+        self._conn.commit()
+        return self.load_agent_peer_message(message_id)
 
     def save_agent_message_history(self, record: dict) -> dict:
         """Insert a persisted user-message recall entry for one agent."""

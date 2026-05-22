@@ -52,6 +52,7 @@ _DEFAULT_LANES = list(_RESERVED_LANES)
 AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 AGENT_MESSAGE_HISTORY_LIMIT = 100
 PEER_MESSAGE_CACHE_LIMIT = 20
+DIRECT_MESSAGE_CACHE_LIMIT = 100
 ENGINEER_DISPATCH_SHAPE_EVENT_LIMIT = 100
 _ENGINEER_DISPATCH_SHAPE_ORDER = ("serial", "batch", "warm_cluster")
 _ENGINEER_DISPATCH_SHAPES = set(_ENGINEER_DISPATCH_SHAPE_ORDER)
@@ -1046,6 +1047,8 @@ def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
     """Project a canonical peer-message row into AgentCell.mcp_messages."""
     if not isinstance(row, dict):
         return None
+    if _is_user_direct_message_row(row):
+        return None
     agent_id = str(agent_id or "").strip()
     sender_id = str(row.get("sender_id", "") or "").strip()
     recipient_id = str(row.get("recipient_id", "") or "").strip()
@@ -1099,11 +1102,82 @@ def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
     }
 
 
+def _is_user_direct_message_row(row: dict) -> bool:
+    sender_kind = str((row or {}).get("sender_kind", "") or "").strip()
+    recipient_kind = str((row or {}).get("recipient_kind", "") or "").strip()
+    return sender_kind == "user" or recipient_kind == "user"
+
+
+def _direct_message_cache_entry(row: dict, agent_id: str) -> dict | None:
+    """Project a canonical direct-message row for the below-terminal cache."""
+    if not isinstance(row, dict) or not _is_user_direct_message_row(row):
+        return None
+    agent_id = str(agent_id or "").strip()
+    sender_id = str(row.get("sender_id", "") or "").strip()
+    recipient_id = str(row.get("recipient_id", "") or "").strip()
+    if not agent_id or agent_id not in {sender_id, recipient_id}:
+        return None
+    sender_kind = str(row.get("sender_kind", "") or "").strip()
+    recipient_kind = str(row.get("recipient_kind", "") or "").strip()
+    direction = "sent" if agent_id == sender_id else "received"
+    peer_id = recipient_id if direction == "sent" else sender_id
+    peer_kind = recipient_kind if direction == "sent" else sender_kind
+    peer_name = (
+        str(row.get("recipient_name", "") or "")
+        if direction == "sent"
+        else str(row.get("sender_name", "") or "")
+    )
+    delivery_state = str(row.get("delivery_state", "") or "").strip()
+    if not delivery_state:
+        delivery_state = "buffered"
+    read_at = _safe_float(row.get("read_at", 0))
+    return {
+        "id": str(row.get("id", "") or "").strip(),
+        "thread_id": str(row.get("thread_id", "") or "").strip(),
+        "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "message": str(row.get("message", "") or ""),
+        "message_type": str(row.get("message_type", "message") or "message"),
+        "timestamp": _peer_message_timestamp(row),
+        "group": str(row.get("group_name", row.get("group", "")) or ""),
+        "sender_id": sender_id,
+        "sender_kind": sender_kind,
+        "sender_name": str(row.get("sender_name", "") or ""),
+        "recipient_id": recipient_id,
+        "recipient_kind": recipient_kind,
+        "recipient_name": str(row.get("recipient_name", "") or ""),
+        "peer_id": peer_id,
+        "peer_kind": peer_kind,
+        "peer_name": peer_name,
+        "direction": direction,
+        "ack_required": bool(row.get("ack_required", False)),
+        "blocking": bool(row.get("blocking", False)),
+        "source_task_id": str(row.get("source_task_id", "") or ""),
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+        "delivered": delivery_state == "delivered",
+        "buffered": delivery_state == "buffered",
+        "delivered_at": _safe_float(row.get("delivered_at", 0)),
+        "read_at": read_at,
+        "unread": read_at <= 0 and direction == "received",
+        "archived_at": _safe_float(row.get("archived_at", 0)),
+    }
+
+
 def _is_peer_message_cache_entry(entry: dict) -> bool:
     return str((entry or {}).get("action", "") or "").strip() in {
         "architect_peer_message",
         "architect_peer_reply",
     }
+
+
+def _sort_direct_message_cache(entries: list[dict]) -> list[dict]:
+    return sorted(
+        entries,
+        key=lambda item: (
+            _safe_float((item or {}).get("timestamp", 0)),
+            str((item or {}).get("id", "") or ""),
+        ),
+    )
 
 
 def _sort_mcp_message_cache(entries: list[dict]) -> list[dict]:
@@ -1808,6 +1882,10 @@ class MatrixState:
         # of truth is SQLite; this cache is intentionally bounded for live
         # deltas and snapshot assembly.
         self.agent_message_history: dict[str, list[dict]] = {}
+        # Oldest-first per-agent direct-message cache for the user↔agent
+        # below-terminal panel. The durable source of truth is SQLite; this
+        # read model is bounded and replayed through direct_message_* deltas.
+        self.direct_messages_by_agent: dict[str, list[dict]] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -2993,6 +3071,7 @@ class MatrixState:
                 for agent_id, settings in self.agent_digest_settings.items()
             },
             "agent_message_history": self.agent_message_history_snapshot(),
+            "direct_messages_by_agent": self.direct_messages_snapshot(),
             # Engineer journal rows are stored with author_cell_id; expose the
             # UI snapshot cache with the same author key so focusing one
             # engineer never renders another engineer's group-mate entries.
@@ -3290,6 +3369,7 @@ class MatrixState:
                 for agent_id, settings in self.agent_digest_settings.items()
             },
             "agent_message_history": self.agent_message_history_snapshot(),
+            "direct_messages_by_agent": self.direct_messages_snapshot(),
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -3943,6 +4023,252 @@ class MatrixState:
         self.append_peer_message_to_caches(saved, emit=emit)
         return saved
 
+    # -- Direct message cache helpers ---------------------------------------
+
+    def _direct_message_agent_ids(self, row: dict) -> list[str]:
+        ids: list[str] = []
+        for field in ("sender", "recipient"):
+            kind = str((row or {}).get(f"{field}_kind", "") or "").strip()
+            agent_id = str((row or {}).get(f"{field}_id", "") or "").strip()
+            if kind == "user" or not agent_id or agent_id in ids:
+                continue
+            ids.append(agent_id)
+        return ids
+
+    def _upsert_direct_message_cache_entry(
+        self,
+        agent_id: str,
+        entry: dict,
+        *,
+        limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
+    ) -> bool:
+        aid = str(agent_id or "").strip()
+        if not aid or not entry or not entry.get("id"):
+            return False
+        message_id = str(entry.get("id", "") or "").strip()
+        before = [
+            dict(item)
+            for item in self.direct_messages_by_agent.get(aid, [])
+        ]
+        kept = [
+            dict(item)
+            for item in self.direct_messages_by_agent.get(aid, [])
+            if str((item or {}).get("id", "") or "").strip() != message_id
+        ]
+        kept.append(dict(entry))
+        sorted_entries = _sort_direct_message_cache(kept)
+        if len(sorted_entries) > max(1, limit):
+            sorted_entries = sorted_entries[-max(1, limit):]
+        self.direct_messages_by_agent[aid] = sorted_entries
+        return before != sorted_entries
+
+    def refresh_direct_message_cache_for_agent(
+        self,
+        agent_id: str,
+        *,
+        limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
+        emit: bool = True,
+    ) -> list[dict]:
+        """Rebuild one agent's bounded direct-message cache from SQLite."""
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return []
+        cell = self.agents.get(aid)
+        if not cell:
+            return []
+        if not self.db:
+            return [
+                dict(entry)
+                for entry in self.direct_messages_by_agent.get(aid, [])
+            ][:limit]
+        rows = self.db.load_direct_messages_for_agent(aid, limit=limit)
+        entries = [
+            entry
+            for entry in (
+                _direct_message_cache_entry(row, aid) for row in rows
+            )
+            if entry
+        ]
+        entries = _sort_direct_message_cache(entries)
+        before = [
+            dict(item)
+            for item in self.direct_messages_by_agent.get(aid, [])
+        ]
+        self.direct_messages_by_agent[aid] = entries[-max(1, limit):]
+        if emit and before != self.direct_messages_by_agent[aid]:
+            for entry in self.direct_messages_by_agent[aid]:
+                self._emit(
+                    "direct_message_upsert",
+                    id=entry["id"],
+                    agent_id=aid,
+                    group=str(getattr(cell, "group", "") or ""),
+                    message=dict(entry),
+                    limit=limit,
+                )
+        return self.direct_messages_by_agent[aid]
+
+    def seed_direct_message_caches(
+        self,
+        *,
+        limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
+        emit: bool = False,
+    ) -> int:
+        """Seed recent user↔agent direct messages after restart/load."""
+        seeded = 0
+        for cell in list(self.agents.values()):
+            if str(getattr(cell, "cell_type", "") or "") != "agent":
+                continue
+            entries = self.refresh_direct_message_cache_for_agent(
+                cell.id,
+                limit=limit,
+                emit=emit,
+            )
+            if entries:
+                seeded += 1
+        return seeded
+
+    def direct_messages_snapshot(
+        self,
+        *,
+        limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
+    ) -> dict[str, list[dict]]:
+        """Return a bounded copy of the per-agent direct-message cache."""
+        snapshot: dict[str, list[dict]] = {}
+        for agent_id, entries in self.direct_messages_by_agent.items():
+            aid = str(agent_id or "").strip()
+            if not aid:
+                continue
+            bounded = _sort_direct_message_cache([
+                dict(entry) for entry in (entries or [])
+            ])[-max(1, limit):]
+            snapshot[aid] = bounded
+        return snapshot
+
+    def append_direct_message_to_caches(
+        self,
+        row: dict,
+        *,
+        emit: bool = True,
+        limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
+    ) -> list[str]:
+        """Project a canonical direct-message row into participant caches."""
+        if not _is_user_direct_message_row(row or {}):
+            return []
+        changed: list[str] = []
+        for agent_id in self._direct_message_agent_ids(row or {}):
+            cell = self.agents.get(agent_id)
+            entry = _direct_message_cache_entry(row or {}, agent_id)
+            if not cell or not entry:
+                continue
+            if self._upsert_direct_message_cache_entry(
+                agent_id,
+                entry,
+                limit=limit,
+            ):
+                changed.append(agent_id)
+                if emit:
+                    self._emit(
+                        "direct_message_upsert",
+                        id=entry["id"],
+                        agent_id=agent_id,
+                        group=entry.get("group", ""),
+                        message=dict(entry),
+                        limit=limit,
+                    )
+        return changed
+
+    def save_direct_message(
+        self,
+        row: dict,
+        *,
+        emit: bool = True,
+    ) -> dict | None:
+        """Persist a direct message and update bounded live UI caches."""
+        if not self.db:
+            return None
+        saved = self.db.save_direct_message(row)
+        if saved:
+            self.append_direct_message_to_caches(saved, emit=emit)
+        return saved
+
+    def update_direct_message_delivery(
+        self,
+        message_id: str,
+        delivery_state: str,
+        *,
+        reason: str = "",
+        delivered_at: float | None = None,
+        emit: bool = True,
+    ) -> dict | None:
+        """Persist direct-message delivery state and update live caches."""
+        if not self.db:
+            return None
+        saved = self.db.update_direct_message_delivery(
+            message_id,
+            delivery_state,
+            reason=reason,
+            delivered_at=delivered_at,
+        )
+        if not saved:
+            return None
+        self.append_direct_message_to_caches(saved, emit=emit)
+        return saved
+
+    def mark_direct_message_delivered(
+        self,
+        message_id: str,
+        *,
+        delivered: bool = True,
+        reason: str = "",
+        delivered_at: float | None = None,
+        emit: bool = True,
+    ) -> dict | None:
+        """Convenience wrapper for delivered/failed direct messages."""
+        return self.update_direct_message_delivery(
+            message_id,
+            "delivered" if delivered else "failed",
+            reason="" if delivered else reason,
+            delivered_at=delivered_at,
+            emit=emit,
+        )
+
+    def mark_direct_message_read(
+        self,
+        message_id: str,
+        *,
+        read_at: float | None = None,
+        reader_id: str = "",
+        emit: bool = True,
+    ) -> dict | None:
+        """Persist direct-message UI read state without changing delivery."""
+        if not self.db:
+            return None
+        saved = self.db.mark_direct_message_read(
+            message_id,
+            read_at=read_at,
+            reader_id=reader_id,
+        )
+        if not saved:
+            return None
+        changed = []
+        for agent_id in self._direct_message_agent_ids(saved):
+            entry = _direct_message_cache_entry(saved, agent_id)
+            if not entry:
+                continue
+            if self._upsert_direct_message_cache_entry(agent_id, entry):
+                changed.append((agent_id, entry))
+        if emit:
+            for agent_id, entry in changed:
+                self._emit(
+                    "direct_message_read",
+                    id=entry["id"],
+                    agent_id=agent_id,
+                    group=entry.get("group", ""),
+                    read_at=entry.get("read_at", 0),
+                    message=dict(entry),
+                )
+        return saved
+
     # -- Agent history helpers -----------------------------------------------
 
     def _normalize_agent_message_history_entry(self, entry: dict) -> dict:
@@ -4364,6 +4690,7 @@ class MatrixState:
                     self.agent_pending_engineer_reply_tasks(aid)
                 )
             self.seed_peer_message_caches(emit=False)
+            self.seed_direct_message_caches(emit=False)
             reconciled_history = self.history_reconcile_tombstoned_agents()
             if reconciled_history:
                 log.info(
