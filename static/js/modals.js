@@ -1993,7 +1993,7 @@ function _showGroupSettings(group, data) {
   _gsColor = s.tab_color || '';
   _renderSwatches('gs-color-swatches', _gsColor, 'selectGsColor');
 
-  /* -- Group > Worker defaults + Workers tab -- */
+  /* -- Group > Agents (worker defaults) + Workers tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);

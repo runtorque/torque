@@ -721,6 +721,8 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
     html,
     /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-terminals"[\s\S]*?data-subtab="group-advanced"/,
   );
+  assert.match(html, /data-subtab="group-worker-defaults"[^>]*>Agents<\/button>/);
+  assert.doesNotMatch(html, /data-subtab="group-worker-defaults"[^>]*>Worker defaults<\/button>/);
   assert.match(html, /data-subpane="group-general"/);
   assert.match(html, /data-subpane="group-worker-defaults"/);
   assert.match(html, /data-subpane="group-terminals"/);
@@ -812,6 +814,8 @@ test('group settings places worker policy defaults and terminals under Group, le
   assert.match(workersPane, /id="gs-worktree"/);
   assert.match(workersPane, /id="gs-notifications"/);
   assert.match(workersPane, /Enable macOS worker notifications/);
+  assert.match(workersPane, /Group → Agents/);
+  assert.doesNotMatch(workersPane, /Group → Worker defaults/);
   assert.doesNotMatch(workersPane, /id="gs-agent-provider"/);
   assert.doesNotMatch(workersPane, /id="gs-agent-model"/);
   assert.doesNotMatch(workersPane, /id="gs-terminal-prefix"/);
