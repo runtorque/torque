@@ -63,14 +63,19 @@ export async function createStandaloneRelayServer(
     coordinator,
     runtime,
     listen: () => new Promise<void>((resolve) => {
-      server.listen(options.port || Number(process.env.PORT || 8787), options.host || "127.0.0.1", resolve);
+      server.listen(options.port ?? Number(process.env.PORT || 8787), options.host || "127.0.0.1", resolve);
     }),
     close: () => new Promise<void>((resolve, reject) => {
-      wss.close();
-      server.close((error) => {
-        void store.close();
-        if (error) reject(error);
-        else resolve();
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+      wss.close((wssError) => {
+        server.close((serverError) => {
+          void store.close();
+          const error = wssError || serverError;
+          if (error) reject(error);
+          else resolve();
+        });
       });
     }),
   };

@@ -85,6 +85,19 @@ export class RelayRuntime {
       return { direction: "to_daemon", inserted: false, idempotent: false, acked };
     }
     const append = await this.store.appendMessageResult(envelope, "to_daemon");
+    if (append.idempotent && append.message.delivery_state === "acked") {
+      return {
+        stored: append.message,
+        direction: "to_daemon",
+        inserted: false,
+        idempotent: true,
+        delivery: {
+          delivered: false,
+          reason: "already_acked",
+          epoch: append.message.last_delivery_epoch,
+        },
+      };
+    }
     const delivery = await this.coordinator.sendToDaemon(envelope.daemon_id, envelope);
     if (delivery.delivered) {
       await this.store.markDeliveryAttempt(envelope.id, delivery.epoch || 0);
@@ -107,6 +120,20 @@ export class RelayRuntime {
       return { direction: "from_daemon", inserted: false, idempotent: false, acked };
     }
     const append = await this.store.appendMessageResult(envelope, "from_daemon");
+    if (append.idempotent && append.message.delivery_state === "acked") {
+      return {
+        stored: append.message,
+        direction: "from_daemon",
+        inserted: false,
+        idempotent: true,
+        delivery: {
+          delivered: 0,
+          connectionIds: [],
+          reason: "already_acked",
+          epoch: append.message.last_delivery_epoch || epoch || 0,
+        },
+      };
+    }
     const delivery = await this.coordinator.broadcastToClients(envelope.daemon_id, envelope);
     if (delivery.delivered > 0) {
       await this.store.markDeliveryAttempt(envelope.id, delivery.epoch || epoch || 0);
