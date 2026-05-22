@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import unittest
 
@@ -139,6 +140,144 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.on_health_alert(cell.id, "stuck")
 
         self.assertEqual(manager._pending, [])
+
+    async def test_direct_user_message_sends_attention_notification(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Alpha",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+
+        manager = self.notifications_mod.NotificationManager(state)
+        manager.start()
+        sent = []
+        orig_send = self.notifications_mod._send_notification
+
+        async def fake_send(title, body):
+            sent.append((title, body))
+
+        self.notifications_mod._send_notification = fake_send
+        try:
+            queued = manager.on_direct_user_message({
+                "id": "msg-1",
+                "group_name": "g",
+                "sender_id": cell.id,
+                "sender_kind": "worker",
+                "sender_name": cell.name,
+                "recipient_id": "user",
+                "recipient_kind": "user",
+                "message": "First line\nSecond line",
+                "message_type": "message",
+            })
+            await asyncio.sleep(0)
+        finally:
+            self.notifications_mod._send_notification = orig_send
+
+        self.assertTrue(queued)
+        self.assertEqual(
+            sent,
+            [("Torque message from Alpha", "Alpha: First line")],
+        )
+
+    async def test_direct_user_message_respects_attention_notification_settings(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Alpha",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+        manager = self.notifications_mod.NotificationManager(state)
+        manager.start()
+        row = {
+            "id": "msg-1",
+            "group_name": "g",
+            "sender_id": cell.id,
+            "sender_kind": "worker",
+            "sender_name": cell.name,
+            "recipient_id": "user",
+            "recipient_kind": "user",
+            "message": "Update",
+            "message_type": "message",
+        }
+
+        state.group_settings["g"].notifications = False
+        self.assertFalse(manager.on_direct_user_message(row))
+
+        state.group_settings["g"].notifications = True
+        state.group_settings["g"].notify_on_attention = False
+        self.assertFalse(manager.on_direct_user_message(row))
+
+    async def test_direct_user_message_ignores_user_to_agent_rows(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Alpha",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+        manager = self.notifications_mod.NotificationManager(state)
+        manager.start()
+
+        self.assertFalse(manager.on_direct_user_message({
+            "id": "msg-1",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": cell.id,
+            "recipient_kind": "worker",
+            "message": "Please check this",
+            "message_type": "message",
+        }))
+
+    async def test_direct_user_message_notification_failure_is_best_effort(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Alpha",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+        manager = self.notifications_mod.NotificationManager(state)
+        manager.start()
+        orig_send = self.notifications_mod._send_notification
+
+        async def failing_send(_title, _body):
+            raise RuntimeError("notification unavailable")
+
+        self.notifications_mod._send_notification = failing_send
+        try:
+            with self.assertLogs("torque", level="ERROR") as logs:
+                queued = manager.on_direct_user_message({
+                    "id": "msg-1",
+                    "group_name": "g",
+                    "sender_id": cell.id,
+                    "sender_kind": "worker",
+                    "sender_name": cell.name,
+                    "recipient_id": "user",
+                    "recipient_kind": "user",
+                    "message": "Update",
+                    "message_type": "message",
+                })
+                await asyncio.sleep(0)
+        finally:
+            self.notifications_mod._send_notification = orig_send
+
+        self.assertTrue(queued)
+        self.assertTrue(any(
+            "Failed to send direct user message notification" in message
+            for message in logs.output
+        ))
 
     async def test_task_health_alerts_batch_with_task_noun(self):
         state = self._make_state()

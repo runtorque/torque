@@ -81,6 +81,46 @@ class NotificationManager:
             return
         asyncio.create_task(_send_notification(title, body))
 
+    def on_direct_user_message(self, row: dict) -> bool:
+        """Notify for agent→user direct messages.
+
+        This is the concrete implementation behind the optional
+        ``state.notification_manager.on_direct_user_message`` hook used by
+        the MCP ``*_message_user`` tools.  It is intentionally best-effort:
+        notification failures are logged from the background task and never
+        fail durable message persistence.
+        """
+        row = row or {}
+        if not _is_agent_to_user_direct_message(row):
+            return False
+
+        sender_id = str(row.get("sender_id", "") or "").strip()
+        cell = self._state.agents.get(sender_id)
+        group = (
+            str(row.get("group_name", "") or "").strip()
+            or str(getattr(cell, "group", "") or "").strip()
+        )
+        if not group:
+            return False
+        gs = self._state.get_group_settings(group)
+        if not gs.notifications or not gs.notify_on_attention:
+            return False
+
+        agent_name = (
+            str(row.get("sender_name", "") or "").strip()
+            or str(getattr(cell, "name", "") or "").strip()
+            or sender_id
+            or "agent"
+        )
+        first_line = _first_line(row.get("message", ""))
+        title = f"Torque message from {agent_name}"
+        body = f"{agent_name}: {first_line}"
+        return self._send_immediate_best_effort(
+            title,
+            body,
+            error_message="Failed to send direct user message notification",
+        )
+
     def on_task_health_alert(self, task_id: str, health_state: str):
         """Queue a task-health notification when a task becomes risky."""
         task = self._state.board_tasks.get(task_id)
@@ -117,6 +157,31 @@ class NotificationManager:
         self._pending.clear()
         if pending:
             asyncio.create_task(self._flush(pending))
+
+    def _send_immediate_best_effort(
+            self,
+            title: str,
+            body: str,
+            *,
+            error_message: str) -> bool:
+        loop = self._loop
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return False
+            self._loop = loop
+        if loop.is_closed():
+            return False
+
+        async def _send():
+            try:
+                await _send_notification(title, body)
+            except Exception:
+                log.exception(error_message)
+
+        loop.create_task(_send())
+        return True
 
     async def _flush(self, items: list[dict]):
         """Combine and send notifications."""
@@ -163,6 +228,26 @@ def _health_notification_kind(health_state: str) -> str:
     if health_state in ("stalled", "thrashing"):
         return health_state
     return ""
+
+
+def _is_agent_to_user_direct_message(row: dict) -> bool:
+    sender_kind = str((row or {}).get("sender_kind", "") or "").strip()
+    recipient_kind = str((row or {}).get("recipient_kind", "") or "").strip()
+    recipient_id = str((row or {}).get("recipient_id", "") or "").strip()
+    message_type = str((row or {}).get("message_type", "message") or "message")
+    return (
+        sender_kind in {"architect", "engineer", "worker"}
+        and recipient_kind == "user"
+        and recipient_id == "user"
+        and message_type == "message"
+    )
+
+
+def _first_line(message: str) -> str:
+    text = str(message or "").strip()
+    if not text:
+        return ""
+    return text.splitlines()[0].strip()
 
 
 def _task_subject(title: str) -> str:

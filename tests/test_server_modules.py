@@ -2129,6 +2129,13 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         state.agents[worker.id] = worker
         state.groups['g'] = [worker.id]
         sent = []
+        direct_notifications = []
+
+        class FakeNotifier:
+            def on_direct_user_message(self, row):
+                direct_notifications.append(dict(row))
+
+        state.notification_manager = FakeNotifier()
 
         async def fake_send_prompt(cell, prompt, **kwargs):
             sent.append((cell.id, prompt, kwargs))
@@ -2181,6 +2188,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             state.direct_messages_by_agent[worker.id][0]['delivery_state'],
             'delivered',
         )
+        self.assertEqual(direct_notifications, [])
 
     async def test_user_agent_message_buffers_down_agent_and_replays_on_wake(self):
         state = self._make_state()
