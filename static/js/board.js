@@ -3271,6 +3271,20 @@ function boardDoLinkAgent(taskId, agentId) {
   send({ cmd: 'board_update_task', id: taskId, agent_id: agentId });
 }
 
+function _boardSyncForEditedExternalLink(task) {
+  var sync = _boardTaskSync(task);
+  if (!sync.github || typeof sync.github !== 'object') return null;
+  var cleaned = Object.assign({}, sync);
+  delete cleaned.github;
+  delete cleaned.last_synced_hash;
+  delete cleaned.last_seen_provider_updated_at;
+  delete cleaned.last_push_at;
+  delete cleaned.last_pull_at;
+  cleaned.version = cleaned.version || 1;
+  cleaned.provider = cleaned.provider || 'github';
+  return cleaned;
+}
+
 function boardLinkExternal(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
@@ -3280,14 +3294,20 @@ function boardLinkExternal(taskId) {
     ? (task.provider + ':' + task.external_id) : (task.external_id || ''));
   var ref = window.prompt('External reference or URL', refDefault);
   if (ref === null) return;
-  send({
+  var trimmedRef = ref.trim();
+  var payload = {
     cmd: 'external_link_task',
     id: taskId,
-    ref: ref.trim(),
+    ref: trimmedRef,
     provider: task.provider || '',
     external_id: task.external_id || '',
     external_url: task.external_url || '',
-  });
+  };
+  if (trimmedRef) {
+    var boardSync = _boardSyncForEditedExternalLink(task);
+    if (boardSync) payload.board_sync = boardSync;
+  }
+  send(payload);
 }
 
 function boardClearExternal(taskId) {
