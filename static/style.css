@@ -1267,16 +1267,17 @@ main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
-  padding: 0 8px;
+  width: 24px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 999px;
+  border-radius: 8px;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--bg-surface) 74%, transparent);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: .02em;
   line-height: 1;
 }
 .agent-focus-collapse-btn:hover,
