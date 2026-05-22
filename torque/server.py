@@ -3844,24 +3844,12 @@ def _user_direct_message_reply_tool(recipient_kind: str) -> str:
 def _format_user_direct_message_prompt(row: dict, recipient_kind: str) -> str:
     """Format a durable user→agent message as an injected agent prompt."""
     row = row or {}
-    message_id = str(row.get("id", "") or "").strip()
     thread_id = str(row.get("thread_id", "") or "").strip()
-    try:
-        created_at = float(row.get("created_at", row.get("timestamp", 0)) or 0)
-    except (TypeError, ValueError):
-        created_at = 0.0
-    if created_at > 0:
-        sent = datetime.fromtimestamp(created_at, timezone.utc).isoformat()
-    else:
-        sent = "unknown"
     message = str(row.get("message", "") or "").strip("\n")
     tool_name = _user_direct_message_reply_tool(recipient_kind)
     thread_arg = json.dumps(thread_id)
     parts = [
         "## Message from the User",
-        f"Message ID: {message_id}",
-        f"Thread ID: {thread_id}",
-        f"Sent: {sent}",
         "",
     ]
     if message:

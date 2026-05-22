@@ -2163,11 +2163,15 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][0], worker.id)
         prompt = sent[0][1]
         self.assertIn('## Message from the User', prompt)
-        self.assertIn(f"Message ID: {result['message_id']}", prompt)
-        self.assertIn(f"Thread ID: {result['thread_id']}", prompt)
+        self.assertNotIn('Message ID:', prompt)
+        self.assertNotIn('Thread ID:', prompt)
+        self.assertNotIn('Sent:', prompt)
         self.assertIn('Can you summarize your current plan?', prompt)
         self.assertIn(
-            'mcp__torque__torque_message_user(thread_id=',
+            (
+                'mcp__torque__torque_message_user('
+                f'thread_id="{result["thread_id"]}", message="...")'
+            ),
             prompt,
         )
         self.assertIn(
@@ -2249,9 +2253,16 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replayed, 1)
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0][0], architect.id)
+        prompt = sent[0][1]
+        self.assertNotIn('Message ID:', prompt)
+        self.assertNotIn('Thread ID:', prompt)
+        self.assertNotIn('Sent:', prompt)
         self.assertIn(
-            'mcp__torque__architect_message_user(thread_id=',
-            sent[0][1],
+            (
+                'mcp__torque__architect_message_user('
+                f'thread_id="{result["thread_id"]}", message="...")'
+            ),
+            prompt,
         )
         replayed_row = self.db.load_direct_message(result['message_id'])
         self.assertEqual(replayed_row['delivery_state'], 'delivered')
