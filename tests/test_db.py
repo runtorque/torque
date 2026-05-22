@@ -549,6 +549,21 @@ class TorqueDBTests(unittest.TestCase):
             "created_at": 11.0,
             "delivery_state": "buffered",
         })
+        self.db.save_direct_message({
+            "id": "direct-ask-display",
+            "thread_id": canonical_user_agent_thread_id("worker-1"),
+            "group_name": "g",
+            "sender_id": "worker-1",
+            "sender_kind": "worker",
+            "recipient_id": "arch-a",
+            "recipient_kind": "architect",
+            "message": "display-only ask mirror",
+            "message_type": "ask",
+            "created_at": 12.0,
+            "blocking": True,
+            "source_task_id": "ask-task-1",
+            "delivery_state": "delivered",
+        })
 
         self.assertEqual(
             [
@@ -576,7 +591,7 @@ class TorqueDBTests(unittest.TestCase):
                 row["id"]
                 for row in self.db.load_direct_messages_for_agent("arch-a")
             ],
-            ["direct-buffered"],
+            ["direct-ask-display", "direct-buffered"],
         )
         self.assertEqual(
             [

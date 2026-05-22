@@ -34,6 +34,11 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import capture_deploy_boot_state
+from .direct_message_mirrors import (
+    direct_ask_mirror_source_key,
+    save_direct_ask_mirror,
+    save_direct_ask_reply_mirror,
+)
 from .doctor import build_doctor_report
 from dataclasses import asdict
 from .state import (
@@ -4540,6 +4545,13 @@ async def _resolve_architect_ask_task(
     if not task_is_closed(task):
         state.board_move_task(task.id, "Done")
     state.board_update_task(task.id, status="", messages=messages)
+    save_direct_ask_reply_mirror(
+        state,
+        architect,
+        answer,
+        question=question,
+        source_task_id=str(getattr(task, "id", "") or ""),
+    )
 
     if panel_event:
         panel_event(
@@ -5142,6 +5154,21 @@ async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
                 question_timestamp,
                 question,
             ),
+        )
+        asking_agent = state.agents.get(author_cell_id) or engineer
+        source_key = direct_ask_mirror_source_key(
+            group=group,
+            agent_id=author_cell_id or str(getattr(engineer, "id", "") or ""),
+            timestamp=question_timestamp,
+            question=question,
+        )
+        save_direct_ask_reply_mirror(
+            state,
+            asking_agent,
+            answer,
+            question=question,
+            source_key=source_key,
+            created_at=time.time(),
         )
     state.journal_append(
         group,
@@ -12900,6 +12927,13 @@ async def main(connection=None):
                                                 **asdict(root))
                                     state._db_save_task(root)
 
+                            save_direct_ask_reply_mirror(
+                                state,
+                                agent,
+                                answer,
+                                question=str(getattr(task, "task", "") or ""),
+                                source_task_id=str(getattr(task, "id", "") or ""),
+                            )
                             _panel_event(
                                 "ask_resolved", agent.id,
                                 agent.name, agent.group,
@@ -15008,6 +15042,12 @@ async def main(connection=None):
                                 result = {
                                     "type": "ok",
                                     "task_id": new_task.id}
+                                save_direct_ask_mirror(
+                                    state,
+                                    cell,
+                                    message,
+                                    source_task_id=new_task.id,
+                                )
                                 _panel_event(
                                     "ask_created", cell.id,
                                     cell.name, cell.group,
@@ -15560,16 +15600,39 @@ async def main(connection=None):
                         or data.get("cell_id", "")
                         or ""
                     ).strip()
+                    engineer = None
                     if not engineer_id:
                         engineer = state.get_engineer_for_group(group)
                         engineer_id = str(
                             getattr(engineer, "id", "") or ""
                         ).strip()
+                    else:
+                        engineer = state.agents.get(engineer_id)
                     await state.update_engineer_settings_async(
                         group,
                         pending_question=question,
                         paused=True,
                         _pending_question_actor_id=engineer_id)
+                    ws = state.get_engineer_settings(group)
+                    try:
+                        question_ts = float(
+                            getattr(ws, "pending_question_set_at", 0) or 0
+                        )
+                    except (TypeError, ValueError):
+                        question_ts = 0.0
+                    source_key = direct_ask_mirror_source_key(
+                        group=group,
+                        agent_id=engineer_id,
+                        timestamp=question_ts,
+                        question=question,
+                    )
+                    save_direct_ask_mirror(
+                        state,
+                        engineer,
+                        question,
+                        source_key=source_key,
+                        created_at=question_ts or None,
+                    )
                     log.info(
                         "engineer_ask persisted pending question for group=%s "
                         "pending_question_len=%d paused=True",

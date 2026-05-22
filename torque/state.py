@@ -1105,7 +1105,14 @@ def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
 def _is_user_direct_message_row(row: dict) -> bool:
     sender_kind = str((row or {}).get("sender_kind", "") or "").strip()
     recipient_kind = str((row or {}).get("recipient_kind", "") or "").strip()
-    return sender_kind == "user" or recipient_kind == "user"
+    message_type = str((row or {}).get("message_type", "message") or "message").strip()
+    blocking = bool((row or {}).get("blocking", False))
+    return (
+        sender_kind == "user"
+        or recipient_kind == "user"
+        or message_type != "message"
+        or blocking
+    )
 
 
 def _direct_message_cache_entry(row: dict, agent_id: str) -> dict | None:
@@ -4113,7 +4120,7 @@ class MatrixState:
         limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
         emit: bool = False,
     ) -> int:
-        """Seed recent user↔agent direct messages after restart/load."""
+        """Seed recent direct-message/display rows after restart/load."""
         seeded = 0
         for cell in list(self.agents.values()):
             if str(getattr(cell, "cell_type", "") or "") != "agent":
