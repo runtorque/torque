@@ -14,6 +14,9 @@ let _terminalComposeDrafts = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
 let _terminalComposeHistoryOpenCellId = '';
+let _terminalDirectMessageSelectedByAgent = Object.create(null);
+let _terminalDirectMessageReplyToByAgent = Object.create(null);
+let _terminalDirectMessageIdempotencyCounter = 0;
 let _lastAppliedXtermScrollback = null;
 
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -96,6 +99,303 @@ function _terminalTargetAgent(cell) {
     return state.agents[cell.parent_id];
   }
   return null;
+}
+
+function _terminalDirectMessageAgent(cell) {
+  const agent = _terminalTargetAgent(cell);
+  if (!agent || agent.cell_type !== 'agent') return null;
+  const kind = String(agent.kind || '').trim().toLowerCase();
+  if (!kind) return agent;
+  return (kind === 'architect' || kind === 'engineer' || kind === 'worker')
+    ? agent
+    : null;
+}
+
+function _terminalDirectMessageId(row) {
+  return String((row && (row.message_id || row.id)) || '').trim();
+}
+
+function _terminalDirectMessageTimestamp(row) {
+  const value = row && (row.created_at || row.timestamp || row.sent_at);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return value > 100000000000 ? value / 1000 : value;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && String(value || '').trim() !== '') {
+    if (numeric <= 0) return 0;
+    return numeric > 100000000000 ? numeric / 1000 : numeric;
+  }
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed / 1000 : 0;
+}
+
+function _terminalDirectMessagesForAgent(agentId) {
+  const id = String(agentId || '').trim();
+  const rows = state && state.direct_messages_by_agent && Array.isArray(state.direct_messages_by_agent[id])
+    ? state.direct_messages_by_agent[id].slice()
+    : [];
+  rows.sort(function(a, b) {
+    const at = _terminalDirectMessageTimestamp(a);
+    const bt = _terminalDirectMessageTimestamp(b);
+    if (at !== bt) return at - bt;
+    return _terminalDirectMessageId(a).localeCompare(_terminalDirectMessageId(b));
+  });
+  return rows;
+}
+
+function _terminalDirectMessageText(row) {
+  return String((row && (row.message || row.text || row.body)) || '');
+}
+
+function _terminalDirectMessageType(row) {
+  return String((row && row.message_type) || 'message').trim().toLowerCase() || 'message';
+}
+
+function _terminalDirectMessageDirection(row, agent) {
+  const type = _terminalDirectMessageType(row);
+  if (type === 'system') return 'system';
+  const senderKind = String((row && row.sender_kind) || '').trim().toLowerCase();
+  const recipientKind = String((row && row.recipient_kind) || '').trim().toLowerCase();
+  const senderId = String((row && row.sender_id) || '').trim();
+  const agentId = String((agent && agent.id) || '').trim();
+  if (senderKind === 'user') return 'user-to-agent';
+  if (recipientKind === 'user') return 'agent-to-user';
+  if (agentId && senderId === agentId) return 'agent-to-user';
+  return 'user-to-agent';
+}
+
+function _terminalDirectMessageSenderLabel(row, agent) {
+  const direction = _terminalDirectMessageDirection(row, agent);
+  if (direction === 'system') return 'System';
+  if (direction === 'user-to-agent') {
+    return (row && row.sender_name) || 'You';
+  }
+  return (row && row.sender_name) || (agent && agent.name) || 'Agent';
+}
+
+function _terminalDirectMessageTimeLabel(row) {
+  const ts = _terminalDirectMessageTimestamp(row);
+  if (!ts) return '';
+  try {
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (_e) {
+    return '';
+  }
+}
+
+function _terminalDirectMessageTypeLabel(row) {
+  const type = _terminalDirectMessageType(row);
+  if (type === 'ask') {
+    return (row && (row.blocking || row.ack_required)) ? 'Blocking ask' : 'Ask';
+  }
+  if (type === 'ask_reply') return 'Ask reply';
+  if (type === 'system') return 'System';
+  if (type !== 'message') return type.replace(/_/g, ' ');
+  return '';
+}
+
+function _terminalDirectMessagePreview(row) {
+  const text = _terminalDirectMessageText(row).replace(/\s+/g, ' ').trim();
+  if (!text) return 'message';
+  return text.length > 80 ? text.slice(0, 77) + '\u2026' : text;
+}
+
+function _terminalDirectMessageById(agentId, messageId) {
+  const target = String(messageId || '').trim();
+  if (!target) return null;
+  const rows = _terminalDirectMessagesForAgent(agentId);
+  for (let i = 0; i < rows.length; i++) {
+    if (_terminalDirectMessageId(rows[i]) === target) return rows[i];
+  }
+  return null;
+}
+
+function _renderTerminalDirectMessageRow(row, agent) {
+  const id = _terminalDirectMessageId(row);
+  if (!id) return '';
+  const type = _terminalDirectMessageType(row);
+  const direction = _terminalDirectMessageDirection(row, agent);
+  const selected = _terminalDirectMessageSelectedByAgent[String((agent && agent.id) || '')] === id;
+  const typeLabel = _terminalDirectMessageTypeLabel(row);
+  const timeLabel = _terminalDirectMessageTimeLabel(row);
+  const askReply = type === 'ask'
+    ? '<button type="button" class="terminal-direct-message-reply"'
+      + ' onclick="return terminalDirectMessageReply(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')">'
+      + 'Reply</button>'
+    : '';
+  return ''
+    + '<div class="terminal-direct-message terminal-direct-message--' + esc(direction)
+    + ' terminal-direct-message--' + esc(type.replace(/[^a-z0-9_-]+/g, '-'))
+    + (selected ? ' selected' : '')
+    + '" data-direct-message-id="' + esc(id) + '"'
+    + ' data-terminal-dm-anchor="' + esc(id) + '"'
+    + ' role="button" tabindex="0"'
+    + ' onclick="terminalDirectMessageSelect(\'' + esc(agent.id) + '\', \'' + esc(id) + '\')"'
+    + ' onkeydown="terminalDirectMessageKeydown(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')">'
+    + '  <div class="terminal-direct-message-meta">'
+    + '    <span class="terminal-direct-message-sender">' + esc(_terminalDirectMessageSenderLabel(row, agent)) + '</span>'
+    + (typeLabel
+      ? '    <span class="terminal-direct-message-badge">' + esc(typeLabel) + '</span>'
+      : '')
+    + (timeLabel
+      ? '    <span class="terminal-direct-message-time">' + esc(timeLabel) + '</span>'
+      : '')
+    + '  </div>'
+    + '  <div class="terminal-direct-message-body">' + esc(_terminalDirectMessageText(row)).replace(/\n/g, '<br>') + '</div>'
+    + (askReply ? '  <div class="terminal-direct-message-actions">' + askReply + '</div>' : '')
+    + '</div>';
+}
+
+function _renderTerminalDirectMessagesHtml(agent) {
+  const agentId = String((agent && agent.id) || '');
+  const rows = _terminalDirectMessagesForAgent(agentId);
+  let body = '';
+  if (!rows.length) {
+    body = '<div class="terminal-direct-messages-empty">No direct messages yet.</div>';
+  } else {
+    for (let i = 0; i < rows.length; i++) {
+      body += _renderTerminalDirectMessageRow(rows[i], agent);
+    }
+  }
+  return ''
+    + '<section class="terminal-direct-messages" data-agent-id="' + esc(agentId) + '"'
+    + ' aria-label="Direct messages with ' + esc((agent && agent.name) || 'agent') + '">'
+    + '  <div class="terminal-direct-messages-header">'
+    + '    <span class="terminal-direct-messages-title">Direct messages</span>'
+    + '    <span class="terminal-direct-messages-peer">' + esc((agent && agent.name) || 'Agent') + '</span>'
+    + '  </div>'
+    + '  <div class="terminal-direct-messages-list" role="log" aria-live="polite" data-agent-id="' + esc(agentId) + '">'
+    + body
+    + '  </div>'
+    + '</section>';
+}
+
+function _renderTerminalDirectMessages(root, cell) {
+  if (!root) return;
+  const agent = _terminalDirectMessageAgent(cell);
+  if (!agent) {
+    if (root.innerHTML !== '') root.innerHTML = '';
+    root._torqueLastHtml = '';
+    root.hidden = true;
+    if (root.dataset) root.dataset.agentId = '';
+    return;
+  }
+  const html = _renderTerminalDirectMessagesHtml(agent);
+  root.hidden = false;
+  if (root.dataset) root.dataset.agentId = String(agent.id || '');
+  if (root._torqueLastHtml !== html || root.innerHTML !== html) {
+    root.innerHTML = html;
+    root._torqueLastHtml = html;
+  }
+}
+
+function _terminalDirectMessagesList(root) {
+  if (!root || typeof root.querySelector !== 'function') return null;
+  return root.querySelector('.terminal-direct-messages-list');
+}
+
+function _terminalDirectMessageAnchorItems(list) {
+  if (!list || typeof list.querySelectorAll !== 'function') return [];
+  return Array.prototype.slice.call(list.querySelectorAll('[data-terminal-dm-anchor]') || []);
+}
+
+function _terminalDirectMessagesAtTail(list) {
+  if (!list) return true;
+  const scrollTop = Number(list.scrollTop) || 0;
+  const clientHeight = Number(list.clientHeight) || 0;
+  const scrollHeight = Number(list.scrollHeight) || 0;
+  return scrollHeight <= clientHeight || (scrollHeight - scrollTop - clientHeight) <= 4;
+}
+
+function _captureTerminalDirectMessagesState(root) {
+  const list = _terminalDirectMessagesList(root);
+  if (!list) return null;
+  const scrollTop = Number(list.scrollTop) || 0;
+  const items = _terminalDirectMessageAnchorItems(list);
+  let anchorId = '';
+  let anchorOffset = 0;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item || !item.dataset) continue;
+    const bottom = (Number(item.offsetTop) || 0) + (Number(item.offsetHeight) || 0);
+    if (bottom >= scrollTop) {
+      anchorId = String(item.dataset.terminalDmAnchor || '');
+      anchorOffset = (Number(item.offsetTop) || 0) - scrollTop;
+      break;
+    }
+  }
+  return {
+    agentId: String((list.dataset && list.dataset.agentId) || ''),
+    atTail: _terminalDirectMessagesAtTail(list),
+    scrollTop: scrollTop,
+    anchorId: anchorId,
+    anchorOffset: anchorOffset,
+  };
+}
+
+function _restoreTerminalDirectMessagesState(root, snapshot) {
+  if (!snapshot || !snapshot.terminalDirectMessages) return;
+  const saved = snapshot.terminalDirectMessages;
+  const list = _terminalDirectMessagesList(root);
+  if (!list) return;
+  if (saved.agentId && list.dataset && String(list.dataset.agentId || '') !== saved.agentId) return;
+  if (saved.atTail) {
+    list.scrollTop = Math.max(0, (Number(list.scrollHeight) || 0) - (Number(list.clientHeight) || 0));
+    return;
+  }
+  const items = _terminalDirectMessageAnchorItems(list);
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item && item.dataset && String(item.dataset.terminalDmAnchor || '') === saved.anchorId) {
+      list.scrollTop = Math.max(0, (Number(item.offsetTop) || 0) - (Number(saved.anchorOffset) || 0));
+      return;
+    }
+  }
+  if (typeof saved.scrollTop === 'number') list.scrollTop = saved.scrollTop;
+}
+
+function terminalDirectMessageSelect(agentId, messageId) {
+  const aid = String(agentId || '').trim();
+  const mid = String(messageId || '').trim();
+  if (!aid || !mid) return false;
+  _terminalDirectMessageSelectedByAgent[aid] = mid;
+  const root = document.getElementById ? document.getElementById('terminal-workspace') : null;
+  const slot = root && root.querySelector ? root.querySelector('.terminal-direct-messages-slot') : null;
+  const cell = _resolveTerminalWorkspaceCell();
+  if (slot) _renderTerminalDirectMessages(slot, cell);
+  return false;
+}
+
+function terminalDirectMessageKeydown(evt, agentId, messageId) {
+  if (!evt) return;
+  if (evt.key !== 'Enter' && evt.key !== ' ') return;
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  terminalDirectMessageSelect(agentId, messageId);
+}
+
+function terminalDirectMessageReply(evt, agentId, messageId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const aid = String(agentId || '').trim();
+  const mid = String(messageId || '').trim();
+  if (!aid || !mid) return false;
+  _terminalDirectMessageSelectedByAgent[aid] = mid;
+  _terminalDirectMessageReplyToByAgent[aid] = mid;
+  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+  const root = document.getElementById ? document.getElementById('terminal-workspace') : null;
+  const input = root && root.querySelector ? root.querySelector('.terminal-compose-input') : null;
+  if (input && typeof input.focus === 'function') input.focus();
+  return false;
+}
+
+function terminalDirectMessageCancelReply(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const aid = String(agentId || '').trim();
+  if (aid) delete _terminalDirectMessageReplyToByAgent[aid];
+  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+  return false;
 }
 
 function _terminalGroupCells(group) {
@@ -244,10 +544,25 @@ function _ensureTerminalWorkspaceDom(root) {
       + '  <div class="terminal-topbar"></div>'
       + '  <div class="terminal-tabs"></div>'
       + '  <div class="terminal-stage"></div>'
+      + '  <div class="terminal-direct-messages-slot"></div>'
       + '  <div class="terminal-compose-slot"></div>'
       + '  <div class="terminal-statusbar"></div>'
       + '</div>';
     shell = root.querySelector('.terminal-shell');
+  }
+  let directMessages = shell.querySelector('.terminal-direct-messages-slot');
+  if (!directMessages && document.createElement) {
+    directMessages = document.createElement('div');
+    directMessages.className = 'terminal-direct-messages-slot';
+    const composeSlot = shell.querySelector('.terminal-compose-slot');
+    const stage = shell.querySelector('.terminal-stage');
+    if (composeSlot && typeof shell.insertBefore === 'function') {
+      shell.insertBefore(directMessages, composeSlot);
+    } else if (stage && stage.nextElementSibling && typeof shell.insertBefore === 'function') {
+      shell.insertBefore(directMessages, stage.nextElementSibling);
+    } else if (typeof shell.appendChild === 'function') {
+      shell.appendChild(directMessages);
+    }
   }
   let compose = shell.querySelector('.terminal-compose-slot');
   if (!compose && document.createElement) {
@@ -265,6 +580,7 @@ function _ensureTerminalWorkspaceDom(root) {
     topbar: shell.querySelector('.terminal-topbar'),
     tabs: shell.querySelector('.terminal-tabs'),
     stage: shell.querySelector('.terminal-stage'),
+    directMessages: directMessages,
     compose: compose,
     statusbar: shell.querySelector('.terminal-statusbar'),
   };
@@ -776,6 +1092,7 @@ function _captureTerminalWorkspaceState(root, cell) {
       && cell && active.dataset.cellId !== String(cell.id || '')) {
     snapshot.focus = null;
   }
+  if (snapshot) snapshot.terminalDirectMessages = _captureTerminalDirectMessagesState(root);
   return snapshot;
 }
 
@@ -783,6 +1100,7 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(root, snapshot);
   }
+  _restoreTerminalDirectMessagesState(root, snapshot);
   const input = _terminalComposeTextarea(root);
   if (!input) return;
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
@@ -801,11 +1119,13 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
 
 function _renderTerminalCompose(root, cell) {
   if (!root) return;
-  if (!cell || !cell.session_id) {
+  const directAgent = _terminalDirectMessageAgent(cell);
+  if (!cell || (!cell.session_id && !directAgent)) {
     if (root.innerHTML !== '') root.innerHTML = '';
     return;
   }
   const cellId = String(cell.id || '');
+  const directAgentId = directAgent ? String(directAgent.id || '') : '';
   const inputId = _terminalComposeInputId(cellId);
   const buttonId = _terminalComposeButtonId(cellId);
   const historyButtonId = _terminalComposeHistoryButtonId(cellId);
@@ -817,7 +1137,19 @@ function _renderTerminalCompose(root, cell) {
     ? _terminalComposeErrors[cellId]
     : '';
   const disabled = !String(draft || '').trim();
-  const placeholder = 'Send a message to ' + (cell.name || 'terminal') + '\u2026';
+  const placeholder = 'Send a message to ' + ((directAgent && directAgent.name) || cell.name || 'terminal') + '\u2026';
+  const replyToId = directAgentId
+    ? String(_terminalDirectMessageReplyToByAgent[directAgentId] || '')
+    : '';
+  const replyRow = replyToId ? _terminalDirectMessageById(directAgentId, replyToId) : null;
+  const replyHtml = replyToId
+    ? '<div class="terminal-compose-reply" data-reply-to-id="' + esc(replyToId) + '">'
+      + '<span>Replying to ' + esc(replyRow ? _terminalDirectMessagePreview(replyRow) : replyToId) + '</span>'
+      + '<button type="button" class="terminal-compose-reply-cancel"'
+      + ' onclick="return terminalDirectMessageCancelReply(event, \'' + esc(directAgentId) + '\')"'
+      + ' aria-label="Cancel reply">×</button>'
+      + '</div>'
+    : '';
 
   // Idempotent path: if the form already exists for this cell, update only
   // the dynamic bits (placeholder, error, button disabled, draft value if it
@@ -827,7 +1159,16 @@ function _renderTerminalCompose(root, cell) {
   const existingCellId = existingForm && existingForm.dataset
     ? String(existingForm.dataset.cellId || '')
     : '';
-  if (existingForm && existingCellId === cellId) {
+  const existingReplyToId = existingForm && existingForm.dataset
+    ? String(existingForm.dataset.replyToId || '')
+    : '';
+  const existingDirectAgentId = existingForm && existingForm.dataset
+    ? String(existingForm.dataset.agentId || '')
+    : '';
+  if (existingForm
+      && existingCellId === cellId
+      && existingReplyToId === replyToId
+      && existingDirectAgentId === directAgentId) {
     const input = _terminalComposeTextarea(root);
     if (input) {
       if (input.placeholder !== placeholder) input.placeholder = placeholder;
@@ -848,10 +1189,15 @@ function _renderTerminalCompose(root, cell) {
   }
 
   root.innerHTML = ''
-    + '<form class="terminal-compose" data-cell-id="' + esc(cellId) + '" onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
+    + '<form class="terminal-compose" data-cell-id="' + esc(cellId) + '"'
+    + (directAgentId ? ' data-agent-id="' + esc(directAgentId) + '"' : '')
+    + (replyToId ? ' data-reply-to-id="' + esc(replyToId) + '"' : '')
+    + ' onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
     + '  <div class="terminal-compose-input-wrap">'
+    + replyHtml
     + '  <textarea id="' + esc(inputId) + '" class="terminal-compose-input" rows="1"'
     + ' data-cell-id="' + esc(cellId) + '"'
+    + (directAgentId ? ' data-agent-id="' + esc(directAgentId) + '"' : '')
     + ' placeholder="' + esc(placeholder) + '"'
     + ' oninput="terminalComposeInput(this)"'
     + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
@@ -972,6 +1318,22 @@ function _terminalComposeScrollToBottom(cellId) {
   }
 }
 
+function _terminalComposeDirectAgentForCellId(cellId) {
+  const id = String(cellId || '').trim();
+  const cell = id && state && state.agents ? state.agents[id] : null;
+  return _terminalDirectMessageAgent(cell);
+}
+
+function _terminalComposeNextIdempotencyKey(agentId) {
+  _terminalDirectMessageIdempotencyCounter += 1;
+  return [
+    'terminal-direct',
+    String(agentId || 'agent'),
+    Date.now(),
+    _terminalDirectMessageIdempotencyCounter,
+  ].join(':');
+}
+
 function terminalComposeSubmit(evt, cellId) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -989,9 +1351,26 @@ function terminalComposeSubmit(evt, cellId) {
     terminalComposeClear(id);
     return false;
   }
-  send({ cmd: 'send_user_message', cell_id: id, text: text });
+  const directAgent = _terminalComposeDirectAgentForCellId(id);
+  if (directAgent && directAgent.id) {
+    const directAgentId = String(directAgent.id || '');
+    const replyToId = String(_terminalDirectMessageReplyToByAgent[directAgentId] || '');
+    const payload = {
+      cmd: 'user_agent_message',
+      agent_id: directAgentId,
+      message: text,
+      thread_id: 'user-agent:user:' + directAgentId,
+      idempotency_key: _terminalComposeNextIdempotencyKey(directAgentId),
+    };
+    if (replyToId) payload.reply_to_id = replyToId;
+    send(payload);
+    if (replyToId) delete _terminalDirectMessageReplyToByAgent[directAgentId];
+  } else {
+    send({ cmd: 'send_user_message', cell_id: id, text: text });
+  }
   _terminalComposeScrollToBottom(id);
   terminalComposeClear(id);
+  if (directAgent && typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
   return false;
 }
 
@@ -1764,6 +2143,7 @@ function renderTerminalWorkspace() {
   }
 
   if (!cell) {
+    _renderTerminalDirectMessages(dom.directMessages, null);
     _renderTerminalCompose(dom.compose, null);
     const emptyHtml = ''
       + '<div class="terminal-empty">'
@@ -1788,7 +2168,8 @@ function renderTerminalWorkspace() {
 
   const sessionKey = cell.id + ':' + (cell.session_id || '');
   if (!cell.session_id) {
-    _renderTerminalCompose(dom.compose, null);
+    _renderTerminalDirectMessages(dom.directMessages, cell);
+    _renderTerminalCompose(dom.compose, cell);
     const stoppedHtml = ''
       + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
       + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
@@ -1829,6 +2210,7 @@ function renderTerminalWorkspace() {
   // re-renders the empty placeholder.
   dom.stage._torqueLastHtml = null;
 
+  _renderTerminalDirectMessages(dom.directMessages, cell);
   _renderTerminalCompose(dom.compose, cell);
   const statusText = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
   if (dom.statusbar.textContent !== statusText) dom.statusbar.textContent = statusText;

@@ -996,6 +996,54 @@ function _peerMessageDeltaAgentIds(op) {
   return ids;
 }
 
+function _directMessageDeltaMessageId(op, message) {
+  return String(
+    (message && (message.message_id || message.id))
+      || (op && (op.message_id || op.id))
+      || ''
+  ).trim();
+}
+
+function _deltaTimestampValue(value) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return value > 100000000000 ? value / 1000 : value;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && String(value || '').trim() !== '') {
+    if (numeric <= 0) return 0;
+    return numeric > 100000000000 ? numeric / 1000 : numeric;
+  }
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed / 1000 : 0;
+}
+
+function _terminalWorkspaceViewedAgentIdBeforeDelta() {
+  if (!state || !state.agents) return '';
+  let cell = null;
+  if (selectedTerminalId && state.agents[selectedTerminalId]) {
+    cell = state.agents[selectedTerminalId];
+  }
+  if (!cell && state.active_session_id) {
+    for (const id in state.agents) {
+      const candidate = state.agents[id];
+      if (candidate && candidate.session_id === state.active_session_id) {
+        cell = candidate;
+        break;
+      }
+    }
+  }
+  if (!cell && selectedAgentId && state.agents[selectedAgentId]) {
+    cell = state.agents[selectedAgentId];
+  }
+  if (!cell) return '';
+  if (cell.cell_type === 'terminal') {
+    const parentId = String(cell.parent_id || '').trim();
+    return parentId && state.agents[parentId] ? parentId : '';
+  }
+  return cell.cell_type === 'agent' ? String(cell.id || '') : '';
+}
+
 function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
   // TORQUE:236 v13 instrumentation: when window.__torqueDebugRender is true,
@@ -1133,6 +1181,12 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'direct_message_read': {
         const _pmFocused = _focusedEngineerAgent();
         const _pmIds = _peerMessageDeltaAgentIds(op);
+        if (op.op !== 'peer_message_upsert') {
+          const _terminalViewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
+          if (_terminalViewedAgentId && _pmIds.indexOf(_terminalViewedAgentId) >= 0) {
+            _markSurface(flags, 'main');
+          }
+        }
         if (_pmFocused && _pmIds.indexOf(String(_pmFocused.id || '')) >= 0) {
           _markSurface(flags, 'focus', 'engineer');
         }
@@ -2103,11 +2157,19 @@ function _applyDelta(ops) {
           if (!Array.isArray(state.direct_messages_by_agent[directAgentId])) {
             state.direct_messages_by_agent[directAgentId] = [];
           }
-          var directMessageId = String(directMessage.id || op.id || '');
+          var directMessageId = _directMessageDeltaMessageId(op, directMessage);
+          if (directMessageId) {
+            if (!directMessage.id) directMessage.id = directMessageId;
+            if (!directMessage.message_id) directMessage.message_id = directMessageId;
+          }
           var replacedDirectMessage = false;
           if (directMessageId) {
             for (var dmj = 0; dmj < state.direct_messages_by_agent[directAgentId].length; dmj++) {
-              if (String((state.direct_messages_by_agent[directAgentId][dmj] || {}).id || '') === directMessageId) {
+              var existingDirectId = _directMessageDeltaMessageId(
+                {},
+                state.direct_messages_by_agent[directAgentId][dmj] || {}
+              );
+              if (existingDirectId === directMessageId) {
                 state.direct_messages_by_agent[directAgentId][dmj] = Object.assign(
                   {},
                   state.direct_messages_by_agent[directAgentId][dmj],
@@ -2123,10 +2185,12 @@ function _applyDelta(ops) {
             state.direct_messages_by_agent[directAgentId].push(Object.assign({}, directMessage));
           }
           state.direct_messages_by_agent[directAgentId].sort(function(a, b) {
-            var at = Number((a && (a.timestamp || a.created_at)) || 0);
-            var bt = Number((b && (b.timestamp || b.created_at)) || 0);
+            var at = _deltaTimestampValue(a && (a.created_at || a.timestamp || a.sent_at));
+            var bt = _deltaTimestampValue(b && (b.created_at || b.timestamp || b.sent_at));
             if (at !== bt) return at - bt;
-            return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+            return _directMessageDeltaMessageId({}, a || {}).localeCompare(
+              _directMessageDeltaMessageId({}, b || {})
+            );
           });
           var directLimit = Number(op.limit || 100);
           if (!Number.isFinite(directLimit) || directLimit < 1) directLimit = 100;

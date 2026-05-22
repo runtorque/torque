@@ -384,7 +384,7 @@ body.runtime-embedded .group-body-inner {
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto auto auto;
   grid-template-columns: minmax(0, 1fr);
 }
 .terminal-topbar,
@@ -614,6 +614,139 @@ body.runtime-embedded .group-body-inner {
   border-color: var(--accent);
   color: var(--text);
 }
+.terminal-direct-messages-slot {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+}
+.terminal-direct-messages-slot[hidden] {
+  display: none !important;
+}
+.terminal-direct-messages {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+  background: rgba(13,17,23,.42);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  overflow: hidden;
+}
+.terminal-direct-messages-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.055);
+}
+.terminal-direct-messages-title {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.terminal-direct-messages-peer {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.terminal-direct-messages-list {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.terminal-direct-messages-empty {
+  padding: 8px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.terminal-direct-message {
+  box-sizing: border-box;
+  max-width: min(78%, 720px);
+  padding: 7px 9px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 11px;
+  background: rgba(255,255,255,.035);
+  outline: none;
+}
+.terminal-direct-message:focus-visible,
+.terminal-direct-message.selected {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border) 44%);
+  box-shadow: 0 0 0 1px rgba(88,166,255,.16);
+}
+.terminal-direct-message--user-to-agent {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, rgba(255,255,255,.08));
+}
+.terminal-direct-message--agent-to-user {
+  align-self: flex-start;
+}
+.terminal-direct-message--system {
+  align-self: center;
+  max-width: 92%;
+  color: var(--text-dim);
+  background: rgba(255,255,255,.025);
+}
+.terminal-direct-message--ask {
+  border-color: color-mix(in srgb, var(--amber) 42%, rgba(255,255,255,.08));
+  background: color-mix(in srgb, var(--amber) 10%, rgba(255,255,255,.025));
+}
+.terminal-direct-message--ask_reply {
+  border-color: color-mix(in srgb, var(--green) 34%, rgba(255,255,255,.08));
+}
+.terminal-direct-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.terminal-direct-message-sender {
+  color: var(--text);
+  font-weight: 700;
+}
+.terminal-direct-message-time {
+  margin-left: auto;
+}
+.terminal-direct-message-badge {
+  padding: 1px 5px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--amber) 82%, white);
+  background: rgba(255,255,255,.045);
+  font-weight: 750;
+}
+.terminal-direct-message-body {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+.terminal-direct-message-actions {
+  margin-top: 7px;
+}
+.terminal-direct-message-reply {
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--border) 58%);
+  border-radius: 999px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.terminal-direct-message-reply:hover,
+.terminal-direct-message-reply:focus-visible {
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 20%, transparent);
+}
 .terminal-compose-slot {
   display: none;
 }
@@ -626,6 +759,40 @@ body.runtime-embedded .group-body-inner {
 .terminal-compose-input-wrap {
   flex: 1;
   min-width: 0;
+}
+.terminal-compose-reply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border) 74%);
+  border-radius: 9px;
+  background: rgba(88,166,255,.08);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.terminal-compose-reply span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-compose-reply-cancel {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: rgba(255,255,255,.06);
+}
+.terminal-compose-reply-cancel:hover,
+.terminal-compose-reply-cancel:focus-visible {
+  color: var(--text);
+  background: rgba(255,255,255,.1);
 }
 .terminal-compose-input {
   box-sizing: border-box;
@@ -776,7 +943,7 @@ body.runtime-embedded .group-body-inner {
 body.runtime-embedded .terminal-shell {
   padding: 10px 12px 0;
   gap: 8px;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
 }
 body.runtime-embedded .terminal-topbar,
 body.runtime-embedded .terminal-statusbar {
@@ -807,6 +974,9 @@ body.runtime-embedded .terminal-stage {
   padding: 0;
 }
 body.runtime-embedded .terminal-compose-slot {
+  display: block;
+}
+body.runtime-embedded .terminal-direct-messages-slot {
   display: block;
 }
 body.runtime-embedded .terminal-surface {
