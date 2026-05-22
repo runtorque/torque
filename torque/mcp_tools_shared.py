@@ -6342,6 +6342,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "cmd": "worktree_remove",
             "id": agent_id,
         })
+        if result and result.get("type") == "error" \
+                and isinstance(result.get("worktree_remove"), dict):
+            payload = {
+                "type": "error",
+                "message": result.get("message", "Unknown error"),
+                "worktree_remove": result.get("worktree_remove"),
+            }
+            return json.dumps(payload), True
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         if result and not result.get("worktree_removed", False):

@@ -321,15 +321,26 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             calls.append(dict(payload))
             self.assertEqual(payload["cmd"], "worktree_remove")
             return {
-                "type": "worktree_remove",
-                "id": worker.id,
-                "ok": False,
-                "worktree_removed": False,
+                "type": "error",
                 "message": (
                     "Worktree removal did not take; path or git worktree "
                     "entry is still present"
                 ),
-                "mismatches": ["reported_removed_but_present"],
+                "worktree_remove": {
+                    "type": "worktree_remove",
+                    "id": worker.id,
+                    "ok": False,
+                    "worktree_removed": False,
+                    "message": (
+                        "Worktree removal did not take; path or git "
+                        "worktree entry is still present"
+                    ),
+                    "mismatches": ["reported_removed_but_present"],
+                    "post_state": {
+                        "path_exists": True,
+                        "worktree_listed": True,
+                    },
+                },
             }
 
         text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
@@ -347,6 +358,10 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             payload["worktree_remove"]["mismatches"],
             ["reported_removed_but_present"],
+        )
+        self.assertEqual(
+            payload["worktree_remove"]["post_state"],
+            {"path_exists": True, "worktree_listed": True},
         )
         self.assertEqual(calls, [{"cmd": "worktree_remove", "id": worker.id}])
 

@@ -1175,6 +1175,81 @@ class ServerSelfDispatchTests(unittest.TestCase):
             )
         )
 
+    def test_merge_cleanup_preserves_directory_when_remove_is_skipped(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worktree_path = "/repo/.torque/worktrees/20d95b63"
+        worker = self.state_mod.AgentCell(
+            id="20d95b63",
+            name="Active Worker",
+            group="g",
+            cell_type="agent",
+            directory=worktree_path,
+            worktree_path=worktree_path,
+            worktree_branch="torque/panelsmith/chat-panel-20d95b6",
+            worktree_repo_root="/repo",
+            worktree_base_branch="main",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        main_code = self.server_mod.main.__code__
+        cleanup_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "_cleanup_after_merge"
+        )
+
+        async def close_agent_session_only(*_args, **_kwargs):
+            return []
+
+        async def safe_remove_worktree_result(cell):
+            self.assertIs(cell, worker)
+            return {
+                "ok": False,
+                "worktree_removed": False,
+                "branch_deleted": False,
+                "skipped": True,
+                "message": "skipped: worktree belongs to active/fresh agent",
+                "mismatches": [],
+            }
+
+        closure_values = {
+            name: (lambda *args, **kwargs: None)
+            for name in cleanup_code.co_freevars
+        }
+        closure_values.update({
+            "_close_agent_session_only": close_agent_session_only,
+            "_safe_remove_worktree_result": safe_remove_worktree_result,
+            "bridge": types.SimpleNamespace(),
+            "state": state,
+        })
+        closure = tuple(
+            (lambda x: lambda: x)(closure_values[name]).__closure__[0]
+            for name in cleanup_code.co_freevars
+        )
+        cleanup_after_merge = types.FunctionType(
+            cleanup_code,
+            self.server_mod.__dict__,
+            "_cleanup_after_merge",
+            None,
+            closure,
+        )
+
+        cleanup = asyncio.run(
+            cleanup_after_merge(
+                worker,
+                close_agent=False,
+                remove_worktree=True,
+            )
+        )
+
+        self.assertFalse(cleanup["worktree_removed"])
+        self.assertIn("skipped: worktree belongs", cleanup["errors"][0])
+        self.assertEqual(worker.directory, worktree_path)
+        self.assertEqual(worker.worktree_path, worktree_path)
+
 
 class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

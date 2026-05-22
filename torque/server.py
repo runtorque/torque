@@ -8825,7 +8825,7 @@ async def main(connection=None):
             cleanup["errors"].append(
                 f"Worktree removal mismatch for '{cell.name}': {mismatch}"
             )
-        if repo_root:
+        if remove_result.get("worktree_removed") and repo_root:
             cell.directory = repo_root
         if remove_result.get("worktree_removed") \
                 and cell.cell_type == "agent" and cell.session_id:
