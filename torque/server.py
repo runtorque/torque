@@ -137,6 +137,10 @@ from .identity import (
     prepend_agent_identity_anchor,
 )
 
+GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
+GUIDANCE_HINT_IDENTITY_DISPATCH = "agent_identity_anchor.dispatch"
+GUIDANCE_HINT_IDENTITY_LAUNCH = "agent_identity_anchor.launch"
+
 from .server_actions import _action_to_yaml
 from .server_agent import (
     AgentLaunchService,
@@ -4003,7 +4007,29 @@ def _user_direct_message_reply_tool(recipient_kind: str) -> str:
     return "torque_message_user"
 
 
-def _format_user_direct_message_prompt(row: dict, recipient_kind: str) -> str:
+def _should_show_guidance_hint(state: MatrixState | None,
+                               cell,
+                               hint_type: str) -> bool:
+    """Delegate recurring soft-hint cadence to state when available."""
+    checker = getattr(state, "should_show_guidance_hint", None)
+    if not callable(checker):
+        return True
+    try:
+        return bool(checker(hint_type, cell))
+    except Exception:
+        log.exception(
+            "Failed to evaluate guidance hint cadence for hint=%s cell=%s",
+            hint_type,
+            getattr(cell, "id", ""),
+        )
+        return True
+
+
+def _format_user_direct_message_prompt(
+        row: dict,
+        recipient_kind: str,
+        *,
+        include_free_text_reply_hint: bool = True) -> str:
     """Format a durable user→agent message as an injected agent prompt."""
     row = row or {}
     thread_id = str(row.get("thread_id", "") or "").strip()
@@ -4020,9 +4046,12 @@ def _format_user_direct_message_prompt(row: dict, recipient_kind: str) -> str:
         "Reply to this user-facing thread with:",
         f"  mcp__torque__{tool_name}(thread_id={thread_arg}, message=\"...\")",
         "",
-        "Do not rely on free-text terminal output for the user-facing reply.",
-        "---",
     ])
+    if include_free_text_reply_hint:
+        parts.append(
+            "Do not rely on free-text terminal output for the user-facing reply."
+        )
+    parts.append("---")
     return "\n".join(parts) + "\n"
 
 
@@ -4102,6 +4131,11 @@ async def _queue_user_direct_message_to_agent(
     prompt = _format_user_direct_message_prompt(
         row,
         str(getattr(target, "kind", "") or "worker").strip() or "worker",
+        include_free_text_reply_hint=_should_show_guidance_hint(
+            state,
+            target,
+            GUIDANCE_HINT_USER_DIRECT_REPLY,
+        ),
     )
     try:
         queued = await _queue_cell_prompt_send(
@@ -5782,7 +5816,8 @@ def _normalize_prompt_block(text: str) -> str:
 
 def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
                             prompt_body: str = "", postscript: str = "",
-                            disable_role_preamble: bool = False) -> str:
+                            disable_role_preamble: bool = False,
+                            include_identity_anchor: bool = True) -> str:
     """Assemble the final worker prompt with optional role preamble.
 
     The final shape is:
@@ -5799,9 +5834,10 @@ def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
     """
     blocks = []
 
-    identity_anchor = agent_identity_anchor(cell)
-    if identity_anchor:
-        blocks.append(identity_anchor)
+    if include_identity_anchor:
+        identity_anchor = agent_identity_anchor(cell)
+        if identity_anchor:
+            blocks.append(identity_anchor)
 
     if role_mgr and cell and not disable_role_preamble \
             and _agent_is_worker_for_role_preamble(cell):
@@ -6236,7 +6272,12 @@ async def _relaunch_agent_after_worktree_removal(
         )
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg, startup_prompt=startup_prompt, cell=cell,
-                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
+                default_boot_nudge=resolve_default_boot_nudge(state, cell),
+                include_identity_anchor=_should_show_guidance_hint(
+                    state,
+                    cell,
+                    GUIDANCE_HINT_IDENTITY_LAUNCH,
+                )):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
 
 
@@ -6761,7 +6802,12 @@ async def _handle_add_engineer_command(
                 launch_cfg,
                 startup_prompt=startup_prompt,
                 cell=cell,
-                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
+                default_boot_nudge=resolve_default_boot_nudge(state, cell),
+                include_identity_anchor=_should_show_guidance_hint(
+                    state,
+                    cell,
+                    GUIDANCE_HINT_IDENTITY_LAUNCH,
+                )):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return {
         "id": cell.id,
@@ -6843,7 +6889,12 @@ async def _handle_add_architect_command(
                 launch_cfg,
                 startup_prompt=startup_prompt,
                 cell=cell,
-                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
+                default_boot_nudge=resolve_default_boot_nudge(state, cell),
+                include_identity_anchor=_should_show_guidance_hint(
+                    state,
+                    cell,
+                    GUIDANCE_HINT_IDENTITY_LAUNCH,
+                )):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return {
         "id": cell.id,
@@ -8349,7 +8400,12 @@ async def _handle_relaunch_agent_command(
         )
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg, startup_prompt=startup_prompt, cell=cell,
-                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
+                default_boot_nudge=resolve_default_boot_nudge(state, cell),
+                include_identity_anchor=_should_show_guidance_hint(
+                    state,
+                    cell,
+                    GUIDANCE_HINT_IDENTITY_LAUNCH,
+                )):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
@@ -8497,7 +8553,12 @@ async def _handle_restart_agent_command(
                 launch_cfg,
                 startup_prompt=startup_prompt,
                 cell=cell,
-                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
+                default_boot_nudge=resolve_default_boot_nudge(state, cell),
+                include_identity_anchor=_should_show_guidance_hint(
+                    state,
+                    cell,
+                    GUIDANCE_HINT_IDENTITY_LAUNCH,
+                )):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
@@ -10948,7 +11009,13 @@ async def main(connection=None):
                                         cell=cell,
                                         default_boot_nudge=
                                         resolve_default_boot_nudge(
-                                            state, cell)):
+                                            state, cell),
+                                        include_identity_anchor=
+                                        _should_show_guidance_hint(
+                                            state,
+                                            cell,
+                                            GUIDANCE_HINT_IDENTITY_LAUNCH,
+                                        )):
                                 await _send_agent_prompt(
                                     cell, prompt_text, **send_kwargs)
 
@@ -12954,12 +13021,17 @@ async def main(connection=None):
                                 task=task,
                             )
                             if data.get("_self_dispatch"):
-                                final_prompt = prepend_agent_identity_anchor(
-                                    _build_self_dispatch_prompt(
-                                        shared_context_block,
-                                    ),
-                                    cell,
+                                final_prompt = _build_self_dispatch_prompt(
+                                    shared_context_block,
                                 )
+                                if _should_show_guidance_hint(
+                                        state,
+                                        cell,
+                                        GUIDANCE_HINT_IDENTITY_DISPATCH):
+                                    final_prompt = prepend_agent_identity_anchor(
+                                        final_prompt,
+                                        cell,
+                                    )
                             else:
                                 # Build torque context for template rendering
                                 torque_ctx = _build_torque_context(
@@ -13043,6 +13115,12 @@ async def main(connection=None):
                                         postscript=postscript,
                                         disable_role_preamble=
                                         disable_role_preamble,
+                                        include_identity_anchor=
+                                        _should_show_guidance_hint(
+                                            state,
+                                            cell,
+                                            GUIDANCE_HINT_IDENTITY_DISPATCH,
+                                        ),
                                     )
 
                             if not result and not final_prompt:
@@ -13143,7 +13221,14 @@ async def main(connection=None):
                                             startup_prompt,
                                             final_prompt=final_prompt,
                                             cell=cell,
-                                            task_id=task.id):
+                                            task_id=task.id,
+                                            include_identity_anchor=
+                                            _should_show_guidance_hint(
+                                                state,
+                                                cell,
+                                                GUIDANCE_HINT_IDENTITY_LAUNCH,
+                                            ),
+                                            include_final_identity_anchor=False):
                                     await _send_agent_prompt(
                                         cell,
                                         prompt_text,

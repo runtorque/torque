@@ -2194,6 +2194,152 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(direct_notifications, [])
 
+    async def test_user_agent_message_reply_hint_cadence_and_replay(self):
+        state = self._make_state()
+        state.group_settings['g'] = self.state_mod.GroupSettings(
+            guidance_hint_cadence=4,
+        )
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        results = []
+        for idx in range(1, 4):
+            results.append(
+                await self.server_mod._handle_user_agent_message_command(
+                    {
+                        'cmd': 'user_agent_message',
+                        'agent_id': worker.id,
+                        'message': f'Message {idx}',
+                        'idempotency_key': f'cadence-live-{idx}',
+                    },
+                    state,
+                    fake_send_prompt,
+                )
+            )
+
+        self.assertEqual([r['delivery_state'] for r in results], [
+            'delivered',
+            'delivered',
+            'delivered',
+        ])
+        self.assertEqual(len(sent), 3)
+
+        worker.session_id = ''
+        buffered = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': 'Message 4 via replay',
+                'idempotency_key': 'cadence-buffered-4',
+            },
+            state,
+            fake_send_prompt,
+        )
+        self.assertEqual(buffered['delivery_state'], 'buffered')
+        self.assertEqual(buffered['delivery_reason'], 'no_session')
+        self.assertEqual(len(sent), 3)
+
+        worker.session_id = 'session-1'
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            bridge=None,
+            target=worker,
+            send_prompt=fake_send_prompt,
+        )
+        self.assertEqual(replayed, 1)
+
+        result5 = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': 'Message 5',
+                'idempotency_key': 'cadence-live-5',
+            },
+            state,
+            fake_send_prompt,
+        )
+        self.assertEqual(result5['delivery_state'], 'delivered')
+        self.assertEqual(len(sent), 5)
+
+        hint = 'Do not rely on free-text terminal output'
+        self.assertEqual(
+            [hint in prompt for _agent_id, prompt, _kwargs in sent],
+            [True, False, False, True, False],
+        )
+        reply_snippet = (
+            'mcp__torque__torque_message_user('
+            f'thread_id="{results[0]["thread_id"]}", message="...")'
+        )
+        for _agent_id, prompt, _kwargs in sent:
+            self.assertIn(reply_snippet, prompt)
+            self.assertNotIn('Message ID:', prompt)
+            self.assertNotIn('Thread ID:', prompt)
+            self.assertNotIn('Sent:', prompt)
+
+    async def test_user_agent_message_reply_hint_cadence_zero_is_legacy(self):
+        state = self._make_state()
+        state.group_settings['g'] = self.state_mod.GroupSettings(
+            guidance_hint_cadence=0,
+        )
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append(prompt)
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        for idx in range(1, 4):
+            await self.server_mod._handle_user_agent_message_command(
+                {
+                    'cmd': 'user_agent_message',
+                    'agent_id': worker.id,
+                    'message': f'Legacy cadence {idx}',
+                    'idempotency_key': f'cadence-zero-{idx}',
+                },
+                state,
+                fake_send_prompt,
+            )
+
+        self.assertEqual(len(sent), 3)
+        self.assertTrue(
+            all('Do not rely on free-text terminal output' in p for p in sent)
+        )
+        self.assertTrue(
+            all('mcp__torque__torque_message_user(' in p for p in sent)
+        )
+
     async def test_user_agent_message_buffers_down_agent_and_replays_on_wake(self):
         state = self._make_state()
         architect = self.state_mod.AgentCell(
