@@ -4120,7 +4120,7 @@ class MatrixState:
         limit: int = DIRECT_MESSAGE_CACHE_LIMIT,
         emit: bool = False,
     ) -> int:
-        """Seed recent user↔agent direct messages after restart/load."""
+        """Seed recent direct-message/display rows after restart/load."""
         seeded = 0
         for cell in list(self.agents.values()):
             if str(getattr(cell, "cell_type", "") or "") != "agent":

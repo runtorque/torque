@@ -3703,12 +3703,13 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         thread_id: str = "",
         include_archived: bool = False,
     ) -> list[dict]:
-        """Load recent direct messages involving one agent, newest first.
+        """Load recent direct/display messages involving one agent.
 
-        By default this returns the V1 user↔agent lane: rows involving the
-        given agent whose opposite participant has kind ``user``.  ``peer_id``
-        can narrow this to a specific synthetic user id, while ``thread_id``
-        keeps future multi-thread callers possible without changing storage.
+        Direct rows include ordinary user↔agent messages and display-only ask
+        mirrors (``message_type!='message'``/``blocking``) whose owner-aware
+        recipient can be another agent.  ``peer_id``/``peer_kind`` can narrow
+        the opposite participant, while ``thread_id`` keeps future
+        multi-thread callers possible without changing storage.
         """
         agent_id = str(agent_id or "").strip()
         if not agent_id:

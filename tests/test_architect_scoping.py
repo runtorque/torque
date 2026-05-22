@@ -2102,6 +2102,22 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.reply_agent_id, architect.id)
         self.assertEqual(task.assigned_engineer_id, "")
         self.assertEqual(task.agent_id, "")
+        direct_rows = self.db.load_direct_messages_for_agent(architect.id)
+        ask_rows = [
+            row for row in direct_rows
+            if row["source_task_id"] == task.id and row["message_type"] == "ask"
+        ]
+        self.assertEqual(len(ask_rows), 1)
+        self.assertEqual(ask_rows[0]["sender_id"], architect.id)
+        self.assertEqual(ask_rows[0]["sender_kind"], "architect")
+        self.assertEqual(ask_rows[0]["recipient_id"], "user")
+        self.assertEqual(ask_rows[0]["recipient_kind"], "user")
+        self.assertTrue(ask_rows[0]["blocking"])
+        self.assertEqual(
+            self.state.direct_messages_by_agent[architect.id][0]["id"],
+            ask_rows[0]["id"],
+        )
+        self.assertEqual(architect.mcp_messages, [])
 
         summary_text, summary_error = await self._call(
             "architect_board_summary",

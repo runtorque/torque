@@ -331,6 +331,21 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "created_at": 124.0,
             "delivery_state": "buffered",
         })
+        db.save_direct_message({
+            "id": "direct-ask-arch-a",
+            "thread_id": "user-agent:user:arch-a",
+            "group_name": "g",
+            "sender_id": arch_a.id,
+            "sender_kind": "architect",
+            "recipient_id": arch_b.id,
+            "recipient_kind": "architect",
+            "message": "display-only owner ask",
+            "message_type": "ask",
+            "created_at": 125.0,
+            "blocking": True,
+            "source_task_id": "ask-task-1",
+            "delivery_state": "delivered",
+        })
 
         state = self.state_mod.MatrixState(db=db)
         state.load()
@@ -354,12 +369,20 @@ class MatrixStateCleanupTests(unittest.TestCase):
             ["msg-peer-1"],
         )
         self.assertEqual(
-            state.direct_messages_by_agent[arch_a.id][0]["id"],
-            "direct-user-arch-a",
+            [entry["id"] for entry in state.direct_messages_by_agent[arch_a.id]],
+            ["direct-user-arch-a", "direct-ask-arch-a"],
         )
         self.assertEqual(
             state.direct_messages_by_agent[arch_a.id][0]["thread_id"],
             "user-agent:user:arch-a",
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[arch_b.id][0]["id"],
+            "direct-ask-arch-a",
+        )
+        self.assertEqual(
+            [entry["id"] for entry in state.agents[arch_b.id].mcp_messages],
+            ["msg-peer-1"],
         )
 
     def test_save_peer_message_updates_caches_and_delivery_deltas(self):

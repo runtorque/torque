@@ -84,12 +84,13 @@ def resolve_ask_owner_recipient(state, asking_agent) -> DirectMessageParticipant
     return user_direct_message_participant()
 
 
-def direct_ask_mirror_source_key(*,
-                                 source_task_id: str = "",
-                                 group: str = "",
-                                 agent_id: str = "",
-                                 timestamp: float = 0,
-                                 question: str = "") -> str:
+def direct_ask_mirror_source_key(
+        *,
+        source_task_id: str = "",
+        group: str = "",
+        agent_id: str = "",
+        timestamp: float = 0,
+        question: str = "") -> str:
     task_id = str(source_task_id or "").strip()
     if task_id:
         return f"task:{task_id}"
@@ -134,13 +135,14 @@ def _load_direct_message(state, message_id: str) -> dict | None:
     return loader(str(message_id or "").strip())
 
 
-def save_direct_ask_mirror(state,
-                           asking_agent,
-                           question: str,
-                           *,
-                           source_task_id: str = "",
-                           source_key: str = "",
-                           created_at: float | None = None) -> dict | None:
+def save_direct_ask_mirror(
+        state,
+        asking_agent,
+        question: str,
+        *,
+        source_task_id: str = "",
+        source_key: str = "",
+        created_at: float | None = None) -> dict | None:
     """Persist or return a display-only ``message_type='ask'`` mirror row."""
     if not state or not getattr(state, "db", None) or not asking_agent:
         return None
@@ -192,14 +194,15 @@ def save_direct_ask_mirror(state,
         return None
 
 
-def save_direct_ask_reply_mirror(state,
-                                 asking_agent,
-                                 answer: str,
-                                 *,
-                                 question: str = "",
-                                 source_task_id: str = "",
-                                 source_key: str = "",
-                                 created_at: float | None = None) -> dict | None:
+def save_direct_ask_reply_mirror(
+        state,
+        asking_agent,
+        answer: str,
+        *,
+        question: str = "",
+        source_task_id: str = "",
+        source_key: str = "",
+        created_at: float | None = None) -> dict | None:
     """Persist or return a display-only ``message_type='ask_reply'`` row."""
     if not state or not getattr(state, "db", None) or not asking_agent:
         return None

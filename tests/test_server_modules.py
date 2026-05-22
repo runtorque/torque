@@ -1320,7 +1320,14 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         await queued_tasks[0]
 
     async def test_deliver_engineer_reply_waits_for_prompt_before_resuming_delivery(self):
-        state = self.state_mod.MatrixState()
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / 'torque.db')
+        db.init()
+        self.addCleanup(db.close)
+        state = self.state_mod.MatrixState(db=db)
         state.add_group('g')
         state.update_engineer_settings(
             'g',
@@ -1334,8 +1341,20 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
             name='Engineer',
             group='g',
             cell_type='agent',
+            kind='engineer',
+            hired_by_architect_id='arch-1',
             session_id='session-1',
         )
+        architect = self.state_mod.AgentCell(
+            id='arch-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+        )
+        state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
+        state.groups['g'] = [architect.id, engineer.id]
         state._delta_ops.clear()
         sequence = []
         started = asyncio.Event()
@@ -1393,6 +1412,20 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(qa_ops[0]['author_cell_id'], 'engineer-1')
         self.assertIn('Question:\nNeed approval', qa_ops[0]['entry'])
         self.assertIn('Answer:\nShip it', qa_ops[0]['entry'])
+        direct_rows = db.load_direct_messages_for_agent(engineer.id)
+        direct_by_type = {row['message_type']: row for row in direct_rows}
+        self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
+        self.assertEqual(direct_by_type['ask']['sender_id'], engineer.id)
+        self.assertEqual(direct_by_type['ask']['recipient_id'], architect.id)
+        self.assertEqual(direct_by_type['ask']['recipient_kind'], 'architect')
+        self.assertTrue(direct_by_type['ask']['blocking'])
+        self.assertEqual(direct_by_type['ask_reply']['sender_id'], architect.id)
+        self.assertEqual(direct_by_type['ask_reply']['recipient_id'], engineer.id)
+        self.assertFalse(direct_by_type['ask_reply']['blocking'])
+        self.assertEqual(
+            direct_by_type['ask_reply']['reply_to_id'],
+            direct_by_type['ask']['id'],
+        )
 
     def test_pending_question_reply_target_prefers_actor_owner(self):
         state = self.state_mod.MatrixState()
@@ -2612,6 +2645,27 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             events,
             [('ask_resolved', architect.id, architect.name, architect.group,
               'Resolved: Should we defer reporting?', ask.id)],
+        )
+        direct_rows = self.db.load_direct_messages_for_agent(architect.id)
+        direct_by_type = {
+            row['message_type']: row
+            for row in direct_rows
+            if row['source_task_id'] == ask.id
+        }
+        self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
+        self.assertEqual(direct_by_type['ask']['sender_id'], architect.id)
+        self.assertEqual(direct_by_type['ask']['recipient_id'], 'user')
+        self.assertTrue(direct_by_type['ask']['blocking'])
+        self.assertEqual(direct_by_type['ask_reply']['sender_id'], 'user')
+        self.assertEqual(direct_by_type['ask_reply']['recipient_id'], architect.id)
+        self.assertFalse(direct_by_type['ask_reply']['blocking'])
+        self.assertEqual(
+            direct_by_type['ask_reply']['reply_to_id'],
+            direct_by_type['ask']['id'],
+        )
+        self.assertEqual(
+            [entry['id'] for entry in state.direct_messages_by_agent[architect.id]],
+            [direct_by_type['ask']['id'], direct_by_type['ask_reply']['id']],
         )
 
 
