@@ -300,12 +300,21 @@ function _renderTerminalDirectMessageRow(row, agent) {
 function _renderTerminalDirectMessagesHtml(agent) {
   const agentId = String((agent && agent.id) || '');
   const rows = _terminalDirectMessagesForAgent(agentId);
+  const visibleCount = _terminalDirectMessagesVisibleCount(agentId, rows.length);
+  const start = Math.max(0, rows.length - visibleCount);
+  const visibleRows = rows.slice(start);
   let body = '';
   if (!rows.length) {
     body = '<div class="terminal-direct-messages-empty">No direct messages yet.</div>';
   } else {
-    for (let i = 0; i < rows.length; i++) {
-      body += _renderTerminalDirectMessageRow(rows[i], agent);
+    if (start > 0) {
+      body += '<div class="terminal-direct-messages-window-affordance"'
+        + ' data-terminal-dm-window-affordance="1">'
+        + 'Scroll up to load older messages'
+        + '</div>';
+    }
+    for (let i = 0; i < visibleRows.length; i++) {
+      body += _renderTerminalDirectMessageRow(visibleRows[i], agent);
     }
   }
   return ''
@@ -338,14 +347,26 @@ function _renderTerminalDirectMessages(root, cell) {
     if (root.dataset) root.dataset.agentId = '';
     return;
   }
+  const previous = _captureTerminalDirectMessagesState(root);
   const html = _renderTerminalDirectMessagesHtml(agent);
   root.hidden = false;
   if (root.dataset) root.dataset.agentId = String(agent.id || '');
+  let changed = false;
   if (root._torqueLastHtml !== html || root.innerHTML !== html) {
     root.innerHTML = html;
     root._torqueLastHtml = html;
+    changed = true;
   }
+  _terminalDirectMessagesAttachPagination(root);
   _terminalDirectMessagesApplyPersistedHeight(root);
+  if (previous) {
+    _restoreTerminalDirectMessagesState(root, { terminalDirectMessages: previous });
+  } else if (changed) {
+    const list = _terminalDirectMessagesList(root);
+    if (list && typeof list.scrollTop === 'number') {
+      list.scrollTop = Math.max(0, (Number(list.scrollHeight) || 0) - (Number(list.clientHeight) || 0));
+    }
+  }
 }
 
 function _terminalDirectMessagesList(root) {
@@ -597,6 +618,44 @@ function _terminalDirectMessagesAtTail(list) {
   const clientHeight = Number(list.clientHeight) || 0;
   const scrollHeight = Number(list.scrollHeight) || 0;
   return scrollHeight <= clientHeight || (scrollHeight - scrollTop - clientHeight) <= 4;
+}
+
+function _terminalDirectMessagesLoadOlder(root) {
+  if (!root) return false;
+  const list = _terminalDirectMessagesList(root);
+  const agentId = String((list && list.dataset && list.dataset.agentId)
+    || (root.dataset && root.dataset.agentId)
+    || '').trim();
+  if (!agentId) return false;
+  const rows = _terminalDirectMessagesForAgent(agentId);
+  const current = _terminalDirectMessagesVisibleCount(agentId, rows.length);
+  if (current >= rows.length) return false;
+  const next = Math.min(rows.length, current + _terminalDirectMessagesWindowSize());
+  _terminalDirectMessagesSetVisibleCount(agentId, next, rows.length);
+  const agent = state && state.agents ? state.agents[agentId] : null;
+  if (!agent) return false;
+  _renderTerminalDirectMessages(root, agent);
+  return true;
+}
+
+function terminalDirectMessagesScroll(event) {
+  const list = event && (event.currentTarget || event.target);
+  if (!list || typeof list.scrollTop !== 'number') return;
+  if (Number(list.scrollTop || 0) > TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD) return;
+  const root = list._terminalDirectMessagesRoot
+    || (typeof list.closest === 'function' ? list.closest('.terminal-direct-messages-slot') : null);
+  _terminalDirectMessagesLoadOlder(root);
+}
+
+function _terminalDirectMessagesAttachPagination(root) {
+  const list = _terminalDirectMessagesList(root);
+  if (!list) return;
+  list._terminalDirectMessagesRoot = root;
+  if (list._terminalDirectMessagesPaginationAttached) return;
+  list._terminalDirectMessagesPaginationAttached = true;
+  if (typeof list.addEventListener === 'function') {
+    list.addEventListener('scroll', terminalDirectMessagesScroll);
+  }
 }
 
 function _captureTerminalDirectMessagesState(root) {

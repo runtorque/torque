@@ -9231,6 +9231,191 @@ test('embedded terminal direct-message body renders shared markdown safely', () 
   assert.doesNotMatch(html, /href="(?:javascript|data):/i);
 });
 
+test('embedded terminal direct-message panel renders 20 messages and prepends older without jumping', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  const rows = [];
+  for (let i = 0; i < 45; i++) {
+    rows.push({
+      message_id: `dm-${String(i).padStart(2, '0')}`,
+      message_type: 'message',
+      message: `Direct message ${String(i).padStart(2, '0')}`,
+      sender_id: i % 2 ? 'user' : 'agent-1',
+      sender_kind: i % 2 ? 'user' : 'worker',
+      recipient_id: i % 2 ? 'agent-1' : 'user',
+      recipient_kind: i % 2 ? 'worker' : 'user',
+      created_at: 100 + i,
+    });
+  }
+  sandbox.state.direct_messages_by_agent = { 'agent-1': rows };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    _terminalDirectMessageSelectedByAgent['agent-1'] = 'dm-30';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal((dom.directMessages.innerHTML.match(/data-direct-message-id="/g) || []).length, 20);
+  assert.doesNotMatch(dom.directMessages.innerHTML, /data-direct-message-id="dm-24"/);
+  assert.match(dom.directMessages.innerHTML, /data-direct-message-id="dm-25"/);
+  assert.match(dom.directMessages.innerHTML, /data-direct-message-id="dm-44"/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message--message selected" data-direct-message-id="dm-30"/);
+  assert.match(dom.directMessages.innerHTML, /Scroll up to load older messages/);
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.tagName = 'TEXTAREA';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = 'draft body';
+  input.selectionStart = 2;
+  input.selectionEnd = 7;
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+
+  const list = new FakeElement('dm-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  list.scrollTop = 24;
+  list.clientHeight = 120;
+  list.scrollHeight = 900;
+  const anchor = new FakeElement('dm-anchor');
+  anchor.dataset.terminalDmAnchor = 'dm-25';
+  anchor.offsetTop = 40;
+  anchor.offsetHeight = 24;
+  list.setQuerySelectorAll('[data-terminal-dm-anchor]', [anchor]);
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  dom.workspace.setQuerySelector('.terminal-direct-messages-list', list);
+  context.__dmSlot = dom.directMessages;
+  runInContext(context, `_terminalDirectMessagesAttachPagination(__dmSlot);`);
+
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML;
+    },
+    set(value) {
+      this._innerHTML = String(value);
+      anchor.offsetTop = 240;
+    },
+  });
+
+  list.listeners.scroll({ currentTarget: list });
+
+  assert.equal((dom.directMessages.innerHTML.match(/data-direct-message-id="/g) || []).length, 40);
+  assert.doesNotMatch(dom.directMessages.innerHTML, /data-direct-message-id="dm-04"/);
+  assert.match(dom.directMessages.innerHTML, /data-direct-message-id="dm-05"/);
+  assert.match(dom.directMessages.innerHTML, /data-direct-message-id="dm-44"/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message--message selected" data-direct-message-id="dm-30"/);
+  assert.equal(list.scrollTop, 224);
+  assert.equal(document.activeElement, input);
+  assert.equal(input.value, 'draft body');
+  assert.equal(input.selectionStart, 2);
+  assert.equal(input.selectionEnd, 7);
+});
+
+test('embedded terminal direct-message window stays tail-pinned as new messages arrive', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  function makeRows(count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      rows.push({
+        message_id: `dm-tail-${String(i).padStart(2, '0')}`,
+        message_type: 'message',
+        message: `Tail direct ${String(i).padStart(2, '0')}`,
+        sender_id: 'agent-1',
+        sender_kind: 'worker',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+        created_at: 100 + i,
+      });
+    }
+    return rows;
+  }
+  sandbox.state.direct_messages_by_agent = { 'agent-1': makeRows(25) };
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+  assert.equal((dom.directMessages.innerHTML.match(/data-direct-message-id="/g) || []).length, 20);
+
+  const list = new FakeElement('dm-tail-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  list.scrollTop = 780;
+  list.clientHeight = 120;
+  list.scrollHeight = 900;
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  context.__dmSlot = dom.directMessages;
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML;
+    },
+    set(value) {
+      this._innerHTML = String(value);
+      list.scrollHeight = 1040;
+    },
+  });
+  sandbox.state.direct_messages_by_agent['agent-1'] = makeRows(26);
+  runInContext(context, `_renderTerminalDirectMessages(__dmSlot, state.agents['agent-1']);`);
+
+  assert.equal((dom.directMessages.innerHTML.match(/data-direct-message-id="/g) || []).length, 20);
+  assert.doesNotMatch(dom.directMessages.innerHTML, /data-direct-message-id="dm-tail-05"/);
+  assert.match(dom.directMessages.innerHTML, /data-direct-message-id="dm-tail-06"/);
+  assert.match(dom.directMessages.innerHTML, /data-direct-message-id="dm-tail-25"/);
+  assert.equal(list.scrollTop, 920);
+});
+
 function setupTerminalDirectMessageClickHarness() {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
@@ -17026,6 +17211,126 @@ test('chat panel opens at the message tail and follows while tail-pinned', () =>
     ],
   });
   assert.equal(parts.messages.scrollTop, 180);
+});
+
+test('chat panel renders a 20-message window and prepends older messages without jumping', () => {
+  const { context, document } = createChatHarness();
+  const base = makeChatThread('thread-page', {
+    ts: 100,
+    title: 'Paginated Thread',
+    message: 'Seed',
+    truncated: true,
+  });
+  const messages = [];
+  for (let i = 0; i < 45; i++) {
+    messages.push(Object.assign({}, base.messages[0], {
+      id: `thread-page-msg-${String(i).padStart(2, '0')}`,
+      message: `Message ${String(i).padStart(2, '0')}`,
+      timestamp: 100 + i,
+    }));
+  }
+  base.messages = messages;
+  base.message_count = messages.length;
+  base.last_message = messages.at(-1);
+  base.last_message_id = messages.at(-1).id;
+  base.last_activity_at = messages.at(-1).timestamp;
+  setChatThreads(context, { 'thread-page': base });
+
+  context.renderChatPanel();
+
+  const panel = document.getElementById('panel-chat');
+  const shell = panel._chatShell;
+  const parts = shell._chatParts;
+  assert.equal((parts.messages.innerHTML.match(/data-chat-message-id="/g) || []).length, 20);
+  assert.doesNotMatch(parts.messages.innerHTML, /thread-page-msg-24/);
+  assert.match(parts.messages.innerHTML, /thread-page-msg-25/);
+  assert.match(parts.messages.innerHTML, /thread-page-msg-44/);
+  assert.match(parts.messages.innerHTML, /Scroll up to load older messages/);
+
+  const anchor = new FakeElement();
+  anchor.setAttribute('data-chat-message-id', 'thread-page-msg-25');
+  anchor.offsetTop = 40;
+  anchor.offsetHeight = 24;
+  parts.messages.setQuerySelectorAll('[data-chat-message-id]', [anchor]);
+  parts.messages.scrollTop = 24;
+  parts.messages.clientHeight = 120;
+  parts.messages.scrollHeight = 900;
+
+  Object.defineProperty(parts.messages, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML;
+    },
+    set(value) {
+      this._innerHTML = String(value);
+      anchor.offsetTop = 240;
+    },
+  });
+
+  parts.messages.listeners.scroll({ currentTarget: parts.messages });
+
+  assert.equal((parts.messages.innerHTML.match(/data-chat-message-id="/g) || []).length, 40);
+  assert.doesNotMatch(parts.messages.innerHTML, /thread-page-msg-04/);
+  assert.match(parts.messages.innerHTML, /thread-page-msg-05/);
+  assert.match(parts.messages.innerHTML, /thread-page-msg-44/);
+  assert.equal(parts.messages.scrollTop, 224);
+  assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-page');
+});
+
+test('chat message window stays tail-pinned as new messages arrive', () => {
+  const { context, document } = createChatHarness();
+  const base = makeChatThread('thread-tail-page', {
+    ts: 100,
+    title: 'Tail Window Thread',
+    message: 'Seed',
+  });
+  function messages(count) {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      out.push(Object.assign({}, base.messages[0], {
+        id: `thread-tail-page-msg-${String(i).padStart(2, '0')}`,
+        message: `Tail message ${String(i).padStart(2, '0')}`,
+        timestamp: 100 + i,
+      }));
+    }
+    return out;
+  }
+  function threadWith(count) {
+    const rows = messages(count);
+    return Object.assign({}, base, {
+      messages: rows,
+      message_count: rows.length,
+      last_message: rows.at(-1),
+      last_message_id: rows.at(-1).id,
+      last_activity_at: rows.at(-1).timestamp,
+    });
+  }
+  setChatThreads(context, { 'thread-tail-page': threadWith(25) });
+  context.renderChatPanel();
+
+  const parts = document.getElementById('panel-chat')._chatShell._chatParts;
+  assert.equal((parts.messages.innerHTML.match(/data-chat-message-id="/g) || []).length, 20);
+  parts.messages.scrollTop = 800;
+  parts.messages.clientHeight = 120;
+  parts.messages.scrollHeight = 900;
+  parts.messages.listeners.scroll({ currentTarget: parts.messages });
+
+  parts.messages.scrollHeight = 1040;
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_peer_thread_upsert',
+      thread_id: 'thread-tail-page',
+      group: 'alpha',
+      thread: threadWith(26),
+    }],
+  });
+
+  assert.equal((parts.messages.innerHTML.match(/data-chat-message-id="/g) || []).length, 20);
+  assert.doesNotMatch(parts.messages.innerHTML, /thread-tail-page-msg-05/);
+  assert.match(parts.messages.innerHTML, /thread-tail-page-msg-06/);
+  assert.match(parts.messages.innerHTML, /thread-tail-page-msg-25/);
+  assert.equal(parts.messages.scrollTop, 1040);
 });
 
 test('chat responsive width switch preserves selected thread and scroll anchors', () => {

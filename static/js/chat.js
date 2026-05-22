@@ -2,8 +2,11 @@
 
 var _chatSelectedThreadId = '';
 var _chatExpandedContextById = {};
+var _chatVisibleMessageCountByThread = {};
 
 var _CHAT_RESPONSIVE_NARROW_MAX_WIDTH = 640;
+var _CHAT_MESSAGE_WINDOW_SIZE = 20;
+var _CHAT_MESSAGE_SCROLL_TOP_THRESHOLD = 36;
 
 function _chatResponsiveEntryWidth(entry) {
   if (!entry) return 0;
@@ -75,6 +78,7 @@ function _chatAttachMessageTailTracker(shell) {
   if (typeof messages.addEventListener === 'function') {
     messages.addEventListener('scroll', function() {
       _chatUpdateMessageTailState(shell);
+      _chatLoadOlderMessagesIfNeeded(shell);
     });
   }
 }
@@ -231,6 +235,52 @@ function _chatThreadById(threadId) {
   if (!threadId) return null;
   var map = _chatThreadMap();
   return map[threadId] || null;
+}
+
+function _chatMessageWindowSize() {
+  var size = Number(_CHAT_MESSAGE_WINDOW_SIZE || 20);
+  return Number.isFinite(size) && size > 0 ? Math.floor(size) : 20;
+}
+
+function _chatVisibleMessageCount(threadId, total) {
+  threadId = String(threadId || '').trim();
+  total = Math.max(0, Math.floor(Number(total || 0) || 0));
+  if (!total) return 0;
+  var windowSize = _chatMessageWindowSize();
+  var base = Math.min(total, windowSize);
+  var stored = threadId ? Number(_chatVisibleMessageCountByThread[threadId] || 0) : 0;
+  var count = stored > 0 ? stored : base;
+  return Math.max(base, Math.min(total, Math.floor(count)));
+}
+
+function _chatSetVisibleMessageCount(threadId, count, total) {
+  threadId = String(threadId || '').trim();
+  if (!threadId) return 0;
+  total = Math.max(0, Math.floor(Number(total || 0) || 0));
+  count = Math.max(0, Math.floor(Number(count || 0) || 0));
+  var next = Math.min(total, Math.max(Math.min(total, _chatMessageWindowSize()), count));
+  if (!total || next <= _chatMessageWindowSize()) {
+    delete _chatVisibleMessageCountByThread[threadId];
+  } else {
+    _chatVisibleMessageCountByThread[threadId] = next;
+  }
+  return next;
+}
+
+function _chatLoadOlderMessagesIfNeeded(shell) {
+  if (!shell) return false;
+  var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  if (!messages || typeof messages.scrollTop !== 'number') return false;
+  if (Number(messages.scrollTop || 0) > _CHAT_MESSAGE_SCROLL_TOP_THRESHOLD) return false;
+  var threadId = _chatCurrentRenderedThreadId(shell) || _chatSelectedThreadId;
+  var thread = _chatThreadById(threadId);
+  var rows = Array.isArray(thread && thread.messages) ? thread.messages : [];
+  var current = _chatVisibleMessageCount(threadId, rows.length);
+  if (current >= rows.length) return false;
+  var next = Math.min(rows.length, current + _chatMessageWindowSize());
+  _chatSetVisibleMessageCount(threadId, next, rows.length);
+  renderChatPanel();
+  return true;
 }
 
 function _chatEnsureSelectedThread(items) {
@@ -716,15 +766,22 @@ function _chatMessagesHtml(thread) {
     return '<div class="chat-empty-state chat-empty-state-wide">No thread selected.</div>';
   }
   var messages = Array.isArray(thread.messages) ? thread.messages : [];
+  var threadId = _chatThreadId(thread, _chatSelectedThreadId);
+  var visibleCount = _chatVisibleMessageCount(threadId, messages.length);
+  var start = Math.max(0, messages.length - visibleCount);
   var html = '';
-  if (thread.truncated) {
+  if (start > 0) {
+    html += '<div class="chat-older-affordance" data-chat-window-affordance="1">'
+      + 'Scroll up to load older messages'
+      + '</div>';
+  } else if (thread.truncated) {
     html += '<div class="chat-older-affordance">Older messages exist outside this loaded tail.</div>';
   }
   if (!messages.length) {
     html += '<div class="chat-empty-state chat-empty-state-wide">No messages in this thread yet.</div>';
     return html;
   }
-  for (var i = 0; i < messages.length; i++) {
+  for (var i = start; i < messages.length; i++) {
     html += _chatMessageCardHtml(messages[i], i, thread);
   }
   return html;
