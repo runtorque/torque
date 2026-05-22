@@ -64,9 +64,17 @@ function createSandbox() {
     JSON,
     Math,
     location: { host: 'localhost:18933' },
-    window: { open(url) { sandbox.openedUrls.push(url); } },
+    window: {
+      open(url) { sandbox.openedUrls.push(url); },
+      prompt(message, defaultValue) {
+        sandbox.promptCalls.push({ message, defaultValue });
+        return sandbox.promptResponses.length ? sandbox.promptResponses.shift() : null;
+      },
+    },
     navigator: { clipboard: { writeText() {} } },
     openedUrls: [],
+    promptCalls: [],
+    promptResponses: [],
     sendCalls: [],
     toastCalls: [],
     state: {
@@ -180,10 +188,14 @@ test('Group Settings Use current repo consumes board_sync_preflight repo respons
   loadBoardSyncScripts(context);
 
   ensure('gs-board-sync-provider').value = 'github';
+  ensure('gs-board-sync-enabled').checked = false;
+  ensure('gs-board-sync-github-repo').value = 'draft/widgets';
   vm.runInContext('_settingsGroup = "alpha"; gsBoardSyncUseCurrentRepo();', context);
   assert.equal(lastCall(sandbox).cmd, 'board_sync_preflight');
   assert.equal(lastCall(sandbox).provider, 'github');
   assert.equal(lastCall(sandbox).args.group, 'alpha');
+  assert.equal(lastCall(sandbox).settings.board_sync_enabled, false);
+  assert.equal(lastCall(sandbox).settings.board_sync_github.github_repo, 'draft/widgets');
 
   vm.runInContext(`_handleBoardSyncPreflight({
     type: 'board_sync_preflight',
@@ -306,6 +318,53 @@ test('board sync-only GitHub links can be unlinked and opt out of tracking', () 
     ref: '',
     board_sync: { version: 1, enabled: false },
   });
+});
+
+test('editing a board sync-only GitHub link clears stale sync metadata', () => {
+  const { sandbox } = createSandbox();
+  sandbox.promptResponses.push('https://github.com/acme/widgets/issues/789');
+  sandbox.state.board_tasks['sync-only'] = {
+    id: 'sync-only',
+    group: 'alpha',
+    lane: 'Backlog',
+    task: 'Sync-created link',
+    board_sync: {
+      version: 1,
+      provider: 'github',
+      enabled: true,
+      sync_state: 'idle',
+      last_synced_hash: 'old-hash',
+      last_push_at: '2026-05-01T00:00:00+00:00',
+      github: {
+        issue_repo: 'acme/widgets',
+        issue_number: 456,
+        issue_url: 'https://github.com/acme/widgets/issues/456',
+      },
+    },
+  };
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+
+  vm.runInContext('boardLinkExternal("sync-only");', context);
+  const payload = lastCall(sandbox);
+
+  assert.deepEqual(sandbox.promptCalls[0], {
+    message: 'External reference or URL',
+    defaultValue: 'https://github.com/acme/widgets/issues/456',
+  });
+  assert.equal(payload.cmd, 'external_link_task');
+  assert.equal(payload.id, 'sync-only');
+  assert.equal(payload.ref, 'https://github.com/acme/widgets/issues/789');
+  assert.equal(payload.provider, '');
+  assert.equal(payload.external_id, '');
+  assert.equal(payload.external_url, '');
+  assert.equal(payload.board_sync.version, 1);
+  assert.equal(payload.board_sync.provider, 'github');
+  assert.equal(payload.board_sync.enabled, true);
+  assert.equal(payload.board_sync.sync_state, 'idle');
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.board_sync, 'github'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.board_sync, 'last_synced_hash'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.board_sync, 'last_push_at'), false);
 });
 
 test('board_sync_task responses toast success and route errors to retry toast', () => {

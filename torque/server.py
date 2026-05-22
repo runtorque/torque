@@ -12465,19 +12465,18 @@ async def main(connection=None):
                         "external_id": link["external_id"],
                         "external_url": link["external_url"],
                     }
-                    if (
+                    board_sync = data.get("board_sync", None)
+                    if isinstance(board_sync, dict):
+                        update_fields["board_sync"] = board_sync
+                    elif (
                             not link["provider"]
                             and not link["external_id"]
                             and not link["external_url"]
                     ):
-                        board_sync = data.get("board_sync", None)
-                        if isinstance(board_sync, dict):
-                            update_fields["board_sync"] = board_sync
-                        else:
-                            update_fields["board_sync"] = {
-                                "version": 1,
-                                "enabled": False,
-                            }
+                        update_fields["board_sync"] = {
+                            "version": 1,
+                            "enabled": False,
+                        }
                     state.board_update_task(tid, **update_fields)
                     if board_sync_manager:
                         board_sync_manager.enqueue_task(
