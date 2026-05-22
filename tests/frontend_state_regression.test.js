@@ -420,6 +420,12 @@ function createEmbeddedTerminalHarness(overrides = {}) {
       this.writes = [];
       this.resetCount = 0;
       this.options = Object.assign({}, options);
+      this.buffer = {
+        active: {
+          viewportY: 0,
+          baseY: 0,
+        },
+      };
       terminals.push(this);
     }
 
@@ -444,8 +450,24 @@ function createEmbeddedTerminalHarness(overrides = {}) {
       this.customKeyEventHandler = handler;
     }
 
-    write(data) {
+    write(data, callback) {
       this.writes.push(data);
+      const growth = Number(this.writeBaseGrowth) || 0;
+      if (growth && this.buffer && this.buffer.active) {
+        this.buffer.active.baseY += growth;
+      }
+      if (this.deferWriteCallback && typeof callback === 'function') {
+        this.deferredWriteCallbacks = this.deferredWriteCallbacks || [];
+        this.deferredWriteCallbacks.push(callback);
+        return;
+      }
+      if (typeof callback === 'function') callback();
+    }
+
+    flushWriteCallbacks() {
+      const callbacks = this.deferredWriteCallbacks || [];
+      this.deferredWriteCallbacks = [];
+      callbacks.forEach((callback) => callback());
     }
 
     writeln(data) {
@@ -467,6 +489,18 @@ function createEmbeddedTerminalHarness(overrides = {}) {
 
     scrollToBottom() {
       this.scrollToBottomCount = (this.scrollToBottomCount || 0) + 1;
+      if (this.buffer && this.buffer.active) {
+        this.buffer.active.viewportY = this.buffer.active.baseY;
+      }
+      const viewport = this.surface && typeof this.surface.querySelector === 'function'
+        ? this.surface.querySelector('.xterm-viewport')
+        : null;
+      if (viewport) {
+        viewport.scrollTop = Math.max(
+          0,
+          (Number(viewport.scrollHeight) || 0) - (Number(viewport.clientHeight) || 0)
+        );
+      }
     }
   }
 
@@ -8763,6 +8797,92 @@ test('terminal workspace stays inert when embedded runtime is disabled', () => {
   assert.equal(jsonValue(context, '!!_embeddedTerminal'), false);
   assert.equal(jsonValue(context, '!!_embeddedTerminalWs'), false);
   assert.equal(jsonValue(context, '_embeddedTerminalSessionKey'), '');
+});
+
+function setupEmbeddedTerminalOutputHarness() {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-1': {
+      id: 'term-1',
+      name: 'Live shell',
+      group: 'alpha',
+      cell_type: 'terminal',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  runInContext(context, `
+    selectedTerminalId = 'term-1';
+    _embeddedTerminalSessionKey = 'term-1:sess-1';
+    renderTerminalWorkspace();
+  `);
+  assert.equal(dom.stage.querySelector('.terminal-surface'), dom.surface);
+  assert.equal(sockets.length, 1);
+  assert.equal(terminals.length, 1);
+  return { context, document, dom, sockets, terminals };
+}
+
+test('embedded terminal output auto-follows when xterm viewport is pinned to tail', () => {
+  const { sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.writeBaseGrowth = 7;
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'new line\r\n' }),
+  });
+
+  assert.deepEqual(term.writes, ['new line\r\n']);
+  assert.equal(term.buffer.active.baseY, 49);
+  assert.equal(term.buffer.active.viewportY, 49);
+  assert.equal(term.scrollToBottomCount, 1);
+});
+
+test('embedded terminal output preserves viewport when user has scrolled up', () => {
+  const { sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 30;
+  term.writeBaseGrowth = 7;
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'new line\r\n' }),
+  });
+
+  assert.deepEqual(term.writes, ['new line\r\n']);
+  assert.equal(term.buffer.active.baseY, 49);
+  assert.equal(term.buffer.active.viewportY, 30);
+  assert.equal(term.scrollToBottomCount || 0, 0);
+});
+
+test('embedded terminal output does not refollow when user scrolls up during async write', () => {
+  const { sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.writeBaseGrowth = 7;
+  term.deferWriteCallback = true;
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'new line\r\n' }),
+  });
+  assert.equal(term.buffer.active.baseY, 49);
+  assert.equal(term.buffer.active.viewportY, 42);
+
+  term.buffer.active.viewportY = 30;
+  term.flushWriteCallbacks();
+
+  assert.equal(term.buffer.active.viewportY, 30);
+  assert.equal(term.scrollToBottomCount || 0, 0);
 });
 
 test('embedded terminal keeps visual inset on xterm so FitAddon rows match the visible viewport', () => {

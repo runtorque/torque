@@ -2044,6 +2044,94 @@ function _writeEmbeddedTerminalSessionRestartedSeparator(entry) {
   }
 }
 
+function _embeddedTerminalViewport(entry) {
+  const surface = entry && entry.surface;
+  return surface && typeof surface.querySelector === 'function'
+    ? surface.querySelector('.xterm-viewport')
+    : null;
+}
+
+function _embeddedTerminalViewportAtTail(viewport) {
+  if (!viewport) return true;
+  const scrollTop = Number(viewport.scrollTop) || 0;
+  const clientHeight = Number(viewport.clientHeight) || 0;
+  const scrollHeight = Number(viewport.scrollHeight) || 0;
+  return scrollHeight <= clientHeight || (scrollHeight - scrollTop - clientHeight) <= 4;
+}
+
+function _embeddedTerminalAtTail(entry) {
+  const term = entry && entry.terminal;
+  const buffer = term && term.buffer && term.buffer.active;
+  if (buffer) {
+    const viewportY = Number(buffer.viewportY);
+    const baseY = Number(buffer.baseY);
+    if (Number.isFinite(viewportY) && Number.isFinite(baseY)) {
+      return baseY <= viewportY;
+    }
+  }
+  return _embeddedTerminalViewportAtTail(_embeddedTerminalViewport(entry));
+}
+
+function _embeddedTerminalTailSnapshot(entry) {
+  const term = entry && entry.terminal;
+  const buffer = term && term.buffer && term.buffer.active;
+  const viewportY = buffer ? Number(buffer.viewportY) : NaN;
+  const viewport = _embeddedTerminalViewport(entry);
+  return {
+    atTail: _embeddedTerminalAtTail(entry),
+    viewportY: Number.isFinite(viewportY) ? viewportY : null,
+    scrollTop: viewport ? (Number(viewport.scrollTop) || 0) : null,
+  };
+}
+
+function _embeddedTerminalStillPinned(entry, snapshot) {
+  if (!snapshot || !snapshot.atTail) return false;
+  const term = entry && entry.terminal;
+  const buffer = term && term.buffer && term.buffer.active;
+  if (buffer && snapshot.viewportY !== null) {
+    const viewportY = Number(buffer.viewportY);
+    if (Number.isFinite(viewportY)) return viewportY >= snapshot.viewportY;
+  }
+  const viewport = _embeddedTerminalViewport(entry);
+  if (viewport && snapshot.scrollTop !== null) {
+    return (Number(viewport.scrollTop) || 0) >= snapshot.scrollTop;
+  }
+  return true;
+}
+
+function _embeddedTerminalScrollToTail(entry) {
+  const term = entry && entry.terminal;
+  if (term && typeof term.scrollToBottom === 'function') {
+    term.scrollToBottom();
+    return;
+  }
+  const viewport = _embeddedTerminalViewport(entry);
+  if (viewport) {
+    viewport.scrollTop = Math.max(
+      0,
+      (Number(viewport.scrollHeight) || 0) - (Number(viewport.clientHeight) || 0)
+    );
+  }
+}
+
+function _writeEmbeddedTerminalData(entry, data) {
+  const term = entry && entry.terminal;
+  if (!term || !data || typeof term.write !== 'function') return;
+  const tailSnapshot = _embeddedTerminalTailSnapshot(entry);
+  let restored = false;
+  function restoreTailIfPinned() {
+    if (restored) return;
+    restored = true;
+    if (_embeddedTerminalStillPinned(entry, tailSnapshot)) {
+      _embeddedTerminalScrollToTail(entry);
+    }
+  }
+  term.write(data, restoreTailIfPinned);
+  if (term.write.length < 2 && typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(restoreTailIfPinned);
+  }
+}
+
 function _sanitizeEmbeddedTerminalRekeySnapshot(data) {
   return String(data || '')
     // TUIs often start a fresh session with a hard reset and display-clear
@@ -2225,13 +2313,13 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
       } else {
         entry.terminal.reset();
       }
-      if (msg.data) entry.terminal.write(msg.data);
+      if (msg.data) _writeEmbeddedTerminalData(entry, msg.data);
       if (_isEmbeddedTerminalEntryActive(entry)) {
         _scheduleEmbeddedTerminalFit(entry);
         focusEmbeddedTerminalWorkspace(false);
       }
     } else if (msg.type === 'output' && msg.data) {
-      entry.terminal.write(msg.data);
+      _writeEmbeddedTerminalData(entry, msg.data);
     }
   };
   socket.onclose = function() {
