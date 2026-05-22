@@ -1,0 +1,18 @@
+name = "torque-ee-relay-spike"
+main = "src/adapters/cloudflare/worker.ts"
+compatibility_date = "2026-05-22"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "RELAY_DB"
+database_name = "torque-ee-relay-spike"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "RENDEZVOUS"
+class_name = "DaemonRendezvousDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DaemonRendezvousDurableObject"]

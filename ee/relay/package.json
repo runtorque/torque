@@ -1,0 +1,29 @@
+{
+  "name": "@torque/ee-relay",
+  "version": "0.1.0-phase.1",
+  "private": true,
+  "type": "module",
+  "description": "Enterprise Channels relay package: dual-target ports, versioned wire protocol, storage, rendezvous, and entrypoints for remote Torque operation.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "start": "node dist/src/adapters/standalone/server.js",
+    "dev": "npm run build && node dist/src/adapters/standalone/server.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250525.0",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.50.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
