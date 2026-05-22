@@ -16,10 +16,13 @@ let _terminalComposeRecall = Object.create(null);
 let _terminalComposeHistoryOpenCellId = '';
 let _terminalDirectMessageSelectedByAgent = Object.create(null);
 let _terminalDirectMessageReplyToByAgent = Object.create(null);
+let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
 let _terminalDirectMessageIdempotencyCounter = 0;
 let _terminalDirectMessagesResizeDrag = null;
 let _lastAppliedXtermScrollback = null;
 
+var TERMINAL_DIRECT_MESSAGES_WINDOW_SIZE = 20;
+var TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD = 36;
 var TERMINAL_DIRECT_MESSAGES_MIN_HEIGHT = 112;
 var TERMINAL_DIRECT_MESSAGES_DEFAULT_HEIGHT = 190;
 var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
@@ -147,6 +150,38 @@ function _terminalDirectMessagesForAgent(agentId) {
     return _terminalDirectMessageId(a).localeCompare(_terminalDirectMessageId(b));
   });
   return rows;
+}
+
+function _terminalDirectMessagesWindowSize() {
+  const size = Number(TERMINAL_DIRECT_MESSAGES_WINDOW_SIZE || 20);
+  return Number.isFinite(size) && size > 0 ? Math.floor(size) : 20;
+}
+
+function _terminalDirectMessagesVisibleCount(agentId, total) {
+  const id = String(agentId || '').trim();
+  total = Math.max(0, Math.floor(Number(total || 0) || 0));
+  if (!total) return 0;
+  const windowSize = _terminalDirectMessagesWindowSize();
+  const base = Math.min(total, windowSize);
+  const stored = id
+    ? Number(_terminalDirectMessageVisibleCountByAgent[id] || 0)
+    : 0;
+  const count = stored > 0 ? stored : base;
+  return Math.max(base, Math.min(total, Math.floor(count)));
+}
+
+function _terminalDirectMessagesSetVisibleCount(agentId, count, total) {
+  const id = String(agentId || '').trim();
+  if (!id) return 0;
+  total = Math.max(0, Math.floor(Number(total || 0) || 0));
+  count = Math.max(0, Math.floor(Number(count || 0) || 0));
+  const next = Math.min(total, Math.max(Math.min(total, _terminalDirectMessagesWindowSize()), count));
+  if (!total || next <= _terminalDirectMessagesWindowSize()) {
+    delete _terminalDirectMessageVisibleCountByAgent[id];
+  } else {
+    _terminalDirectMessageVisibleCountByAgent[id] = next;
+  }
+  return next;
 }
 
 function _terminalDirectMessageText(row) {
