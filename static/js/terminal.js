@@ -19,6 +19,7 @@ let _terminalDirectMessageReplyToByAgent = Object.create(null);
 let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
 let _terminalDirectMessageIdempotencyCounter = 0;
 let _terminalDirectMessagesResizeDrag = null;
+let _terminalDirectMessagePointerDown = null;
 let _lastAppliedXtermScrollback = null;
 
 var TERMINAL_DIRECT_MESSAGES_WINDOW_SIZE = 20;
@@ -26,6 +27,8 @@ var TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD = 36;
 var TERMINAL_DIRECT_MESSAGES_MIN_HEIGHT = 112;
 var TERMINAL_DIRECT_MESSAGES_DEFAULT_HEIGHT = 190;
 var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
+var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_THRESHOLD_PX = 4;
+var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_DURATION_MS = 650;
 
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
@@ -278,9 +281,11 @@ function _renderTerminalDirectMessageRow(row, agent) {
     + ' terminal-direct-message--' + esc(type.replace(/[^a-z0-9_-]+/g, '-'))
     + (selected ? ' selected' : '')
     + '" data-direct-message-id="' + esc(id) + '"'
+    + ' data-direct-message-agent-id="' + esc((agent && agent.id) || '') + '"'
     + ' data-terminal-dm-anchor="' + esc(id) + '"'
     + ' role="button" tabindex="0"'
     + ' onmousedown="return terminalDirectMessageMouseDown(event)"'
+    + ' oncontextmenu="return terminalDirectMessageContextMenu(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')"'
     + ' onclick="return terminalDirectMessageSelect(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')"'
     + ' onkeydown="terminalDirectMessageKeydown(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')">'
     + '  <div class="terminal-direct-message-meta">'
@@ -492,13 +497,163 @@ function _terminalDirectMessageMarkdownLinkTarget(event) {
   return target.closest('[data-torque-markdown-link]');
 }
 
+function _terminalDirectMessageRowFromEvent(event) {
+  const current = event && event.currentTarget;
+  if (current && current.classList && current.classList.contains('terminal-direct-message')) {
+    return current;
+  }
+  const target = (event && event.target) || current;
+  if (target && typeof target.closest === 'function') {
+    return target.closest('.terminal-direct-message');
+  }
+  return null;
+}
+
+function _terminalDirectMessageEventPoint(event) {
+  const x = event && Number(event.clientX);
+  const y = event && Number(event.clientY);
+  return {
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+  };
+}
+
+function _terminalDirectMessageSelectionText(row) {
+  let selection = null;
+  if (typeof window !== 'undefined' && window && typeof window.getSelection === 'function') {
+    selection = window.getSelection();
+  } else if (typeof document !== 'undefined' && document && typeof document.getSelection === 'function') {
+    selection = document.getSelection();
+  }
+  if (!selection || typeof selection.toString !== 'function') return '';
+  const text = String(selection.toString() || '');
+  if (!text) return '';
+  const anchor = selection.anchorNode || null;
+  const focus = selection.focusNode || null;
+  if (row && typeof row.contains === 'function' && (anchor || focus)) {
+    if ((anchor && row.contains(anchor)) || (focus && row.contains(focus))) return text;
+    return '';
+  }
+  return text;
+}
+
+function _terminalDirectMessageClickIsSelectionDrag(event, messageId) {
+  if (!event) return false;
+  if (event && (event.type === 'keydown' || event.key)) return false;
+  const row = _terminalDirectMessageRowFromEvent(event);
+  if (_terminalDirectMessageSelectionText(row)) return true;
+  const down = _terminalDirectMessagePointerDown;
+  if (!down) return false;
+  const point = _terminalDirectMessageEventPoint(event);
+  const dx = point.x - down.x;
+  const dy = point.y - down.y;
+  const distanceSq = (dx * dx) + (dy * dy);
+  const threshold = Number(TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_THRESHOLD_PX) || 4;
+  if (distanceSq > threshold * threshold) return true;
+  const elapsed = Date.now() - Number(down.time || 0);
+  const duration = Number(TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_DURATION_MS) || 650;
+  if (elapsed > duration && distanceSq > 1) return true;
+  const mid = String(messageId || '').trim();
+  if (down.messageId && mid && down.messageId !== mid) return true;
+  return false;
+}
+
 function terminalDirectMessageMouseDown(event) {
   if (event && typeof event.button === 'number' && event.button !== 0) return true;
   if (_terminalDirectMessageMarkdownLinkTarget(event)) {
     if (typeof event.stopPropagation === 'function') event.stopPropagation();
     return true;
   }
-  _terminalDirectMessageStopEvent(event);
+  const row = _terminalDirectMessageRowFromEvent(event);
+  const point = _terminalDirectMessageEventPoint(event);
+  _terminalDirectMessagePointerDown = {
+    x: point.x,
+    y: point.y,
+    time: Date.now(),
+    messageId: row && row.dataset ? String(row.dataset.directMessageId || '') : '',
+  };
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  return true;
+}
+
+function _terminalDirectMessageCloseContextMenu() {
+  if (typeof _closeCtxMenu === 'function') {
+    _closeCtxMenu();
+    return;
+  }
+  if (typeof closeContextMenu === 'function') {
+    closeContextMenu();
+    return;
+  }
+  const menu = (typeof document !== 'undefined' && document && document.getElementById)
+    ? document.getElementById('ctx-menu')
+    : null;
+  if (menu && menu.classList) menu.classList.remove('open');
+}
+
+function _terminalDirectMessageAdjustContextMenu(menu) {
+  if (!menu) return;
+  if (typeof _adjustCtxMenuOverflow === 'function') {
+    _adjustCtxMenuOverflow();
+    return;
+  }
+  const adjust = function() {
+    if (!menu || typeof menu.getBoundingClientRect !== 'function') return;
+    const rect = menu.getBoundingClientRect();
+    const viewportWidth = (typeof window !== 'undefined' && window) ? Number(window.innerWidth || 0) : 0;
+    const viewportHeight = (typeof window !== 'undefined' && window) ? Number(window.innerHeight || 0) : 0;
+    if (viewportWidth && rect.right > viewportWidth) {
+      menu.style.left = Math.max(0, viewportWidth - rect.width - 4) + 'px';
+    }
+    if (viewportHeight && rect.bottom > viewportHeight) {
+      menu.style.top = Math.max(0, viewportHeight - rect.height - 4) + 'px';
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(adjust);
+  else adjust();
+}
+
+function terminalDirectMessageContextMenu(event, agentId, messageId) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const aid = String(agentId || '').trim();
+  const mid = String(messageId || '').trim();
+  const menu = (typeof document !== 'undefined' && document && document.getElementById)
+    ? document.getElementById('ctx-menu')
+    : null;
+  if (!aid || !mid || !menu) return false;
+  const action = 'terminalDirectMessageCopy(' + JSON.stringify(aid) + ',' + JSON.stringify(mid) + ')';
+  menu.innerHTML = '<button onclick="event.stopPropagation();' + esc(action) + '">Copy</button>';
+  menu.style.top = ((event && Number.isFinite(Number(event.clientY))) ? Number(event.clientY) : 0) + 'px';
+  const x = (event && Number.isFinite(Number(event.clientX))) ? Number(event.clientX) : 0;
+  const viewportWidth = (typeof window !== 'undefined' && window) ? Number(window.innerWidth || 0) : 0;
+  menu.style.left = Math.max(0, viewportWidth ? Math.min(x, viewportWidth - 140) : x) + 'px';
+  if (menu.classList) menu.classList.add('open');
+  _terminalDirectMessageAdjustContextMenu(menu);
+  return false;
+}
+
+function terminalDirectMessageCopy(agentId, messageId) {
+  const row = _terminalDirectMessageById(agentId, messageId);
+  const text = _terminalDirectMessageText(row);
+  const clipboard = (typeof navigator !== 'undefined' && navigator) ? navigator.clipboard : null;
+  const close = function() { _terminalDirectMessageCloseContextMenu(); };
+  if (clipboard && typeof clipboard.writeText === 'function') {
+    let result = null;
+    try {
+      result = clipboard.writeText(text);
+    } catch (_e) {
+      close();
+      return false;
+    }
+    if (result && typeof result.then === 'function') {
+      result.then(close, close);
+    } else {
+      close();
+    }
+  } else {
+    close();
+  }
   return false;
 }
 
@@ -731,8 +886,15 @@ function terminalDirectMessageSelect(agentId, messageId) {
   }
   if (_terminalDirectMessageMarkdownLinkTarget(event)) {
     if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    _terminalDirectMessagePointerDown = null;
     return true;
   }
+  if (_terminalDirectMessageClickIsSelectionDrag(event, messageId)) {
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    _terminalDirectMessagePointerDown = null;
+    return true;
+  }
+  _terminalDirectMessagePointerDown = null;
   _terminalDirectMessageStopEvent(event);
   const aid = String(agentId || '').trim();
   const mid = String(messageId || '').trim();
@@ -760,6 +922,12 @@ function terminalDirectMessageKeydown(evt, agentId, messageId) {
 }
 
 function terminalDirectMessageReply(evt, agentId, messageId) {
+  if (_terminalDirectMessageClickIsSelectionDrag(evt, messageId)) {
+    if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    _terminalDirectMessagePointerDown = null;
+    return true;
+  }
+  _terminalDirectMessagePointerDown = null;
   _terminalDirectMessageStopEvent(evt);
   const aid = String(agentId || '').trim();
   const mid = String(messageId || '').trim();
