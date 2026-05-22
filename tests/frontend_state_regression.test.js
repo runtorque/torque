@@ -8999,6 +8999,7 @@ function setupTerminalDirectMessageClickHarness() {
   askItem.offsetHeight = 24;
   list.setQuerySelectorAll('[data-terminal-dm-anchor]', [oldItem, anchorItem, askItem]);
   dom.directMessages.appendChild(list);
+  dom.workspace.setQuerySelector('.terminal-direct-messages-slot', dom.directMessages);
   dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
   dom.workspace.setQuerySelector('.terminal-direct-messages-list', list);
   dom.workspace.setQuerySelector('.terminal-stage', dom.stage);
