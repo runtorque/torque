@@ -658,6 +658,26 @@ function _boardAgentCountsFromTasks(pool) {
   return counts;
 }
 
+function _boardAgentIsTombstoned(agent) {
+  if (!agent) return false;
+  if (typeof _isTombstonedAgent === 'function') return _isTombstonedAgent(agent);
+  var value = Number(agent.deleted_at || 0);
+  return Number.isFinite(value) && value > 0;
+}
+
+function _boardAgentDismissedAt(agent) {
+  if (!agent) return 0;
+  var value = Number(agent.dismissed_at || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function _boardAgentIsLive(agent) {
+  return !!(agent
+    && agent.cell_type === 'agent'
+    && !_boardAgentIsTombstoned(agent)
+    && !_boardAgentDismissedAt(agent));
+}
+
 function _boardHealthCountsFromTasks(pool) {
   var counts = {};
   for (var hi = 0; hi < _boardHealthOrder.length; hi++) {
@@ -2583,7 +2603,7 @@ function boardToggleAgentDropdown() {
     var aids = state.groups[grp];
     for (var i = 0; i < aids.length; i++) {
       var a = state.agents[aids[i]];
-      if (a && a.cell_type === 'agent') agents.push(a);
+      if (_boardAgentIsLive(a)) agents.push(a);
     }
   }
   var listEl = document.createElement('div');
@@ -2678,7 +2698,7 @@ function _boardBatchEditAgents() {
   var out = [];
   for (var id in state.agents) {
     var agent = state.agents[id];
-    if (agent.cell_type !== 'agent' || agent.group !== group) continue;
+    if (!_boardAgentIsLive(agent) || agent.group !== group) continue;
     out.push(agent);
   }
   out.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
@@ -3039,7 +3059,7 @@ function _boardShowBulkDispatchDialog(assigned, unassigned) {
     var aids = state.groups[grp];
     for (var i = 0; i < aids.length; i++) {
       var a = state.agents[aids[i]];
-      if (a && a.cell_type === 'agent') agents.push(a);
+      if (_boardAgentIsLive(a)) agents.push(a);
     }
   }
   var total = assigned.length + unassigned.length;
@@ -3249,7 +3269,7 @@ function boardLinkAgent(taskId) {
     var count = 0;
     for (var id in agents) {
       var a = agents[id];
-      if (a.cell_type === 'agent') {
+      if (_boardAgentIsLive(a)) {
         html += '<button onclick="boardDoLinkAgent(\'' + taskId + '\',\'' + id + '\')">'
           + esc(a.name) + ' <span style="color:var(--text-dim);font-size:9px">'
           + esc(a.group) + '</span></button>';
@@ -3570,8 +3590,8 @@ function boardDispatchTask(taskId) {
   var task = tasks[taskId];
   if (!task) return;
 
-  // If task already has an assigned agent that still exists, dispatch directly
-  if (task.agent_id && state.agents[task.agent_id]) {
+  // If task already has an assigned live agent, dispatch directly.
+  if (task.agent_id && _boardAgentIsLive(state.agents[task.agent_id])) {
     boardDispatchToExisting(taskId, task.agent_id);
     return;
   }
@@ -3587,7 +3607,7 @@ function boardDispatchTask(taskId) {
     var agents = state.agents;
     for (var id in agents) {
       var a = agents[id];
-      if (a.cell_type === 'agent' && a.group === task.group) {
+      if (_boardAgentIsLive(a) && a.group === task.group) {
         html += '<button onclick="boardDispatchToExisting(\'' + taskId + '\',\'' + id + '\')">'
           + esc(a.name) + '</button>';
       }

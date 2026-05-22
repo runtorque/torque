@@ -60,7 +60,7 @@ function _boardQuickEditAgents(task) {
   if (!state || !state.agents) return out;
   for (var id in state.agents) {
     var agent = state.agents[id];
-    if (agent.cell_type !== 'agent') continue;
+    if (!_boardAgentIsLive(agent)) continue;
     if (task.group && agent.group !== task.group) continue;
     out.push(agent);
   }
@@ -397,12 +397,12 @@ function boardNavigateToTask(taskId) {
       && _currentGroup() !== task.group
       && typeof selectedAgentId !== 'undefined'
       && state && state.agents) {
-    if (task.agent_id && state.agents[task.agent_id]) {
+    if (task.agent_id && _boardAgentIsLive(state.agents[task.agent_id])) {
       selectedAgentId = task.agent_id;
     } else {
       for (var agentId in state.agents) {
         var agent = state.agents[agentId];
-        if (agent && agent.cell_type === 'agent' && agent.group === task.group) {
+        if (_boardAgentIsLive(agent) && agent.group === task.group) {
           selectedAgentId = agentId;
           break;
         }
