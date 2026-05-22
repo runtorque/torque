@@ -1101,6 +1101,28 @@ def _is_agent_peer_thread_row(row: dict) -> bool:
     )
 
 
+def _agent_peer_thread_pair_ids(row: dict) -> tuple[str, str]:
+    """Return the canonical unordered participant-pair for one chat row."""
+    if not _is_agent_peer_thread_row(row or {}):
+        return ("", "")
+    ids: list[str] = []
+    for field in ("sender", "recipient"):
+        agent_id = str((row or {}).get(f"{field}_id", "") or "").strip()
+        if agent_id and agent_id not in ids:
+            ids.append(agent_id)
+    if len(ids) != 2:
+        return ("", "")
+    ordered = sorted(ids)
+    return (ordered[0], ordered[1])
+
+
+def _agent_peer_thread_pair_key(row: dict) -> str:
+    first, second = _agent_peer_thread_pair_ids(row or {})
+    if not first or not second:
+        return ""
+    return f"agent-pair:{first}:{second}"
+
+
 def _agent_peer_thread_message_entry(row: dict) -> dict:
     delivery_state = str(row.get("delivery_state", "") or "").strip()
     if not delivery_state:
@@ -4193,18 +4215,39 @@ class MatrixState:
             )
         )
         first = scoped[0]
-        thread_id = str(first.get("thread_id", "") or "").strip()
+        thread_id = _agent_peer_thread_pair_key(first)
         if not thread_id:
-            thread_id = str(first.get("id", "") or "").strip()
-        participant_ids: list[str] = []
-        participants: list[dict] = []
+            return None
+        pair_ids = list(_agent_peer_thread_pair_ids(first))
+        if not pair_ids[0] or not pair_ids[1]:
+            return None
+        scoped = [
+            row for row in scoped
+            if list(_agent_peer_thread_pair_ids(row)) == pair_ids
+        ]
+        if not scoped:
+            return None
+        participants_by_id: dict[str, dict] = {}
         for row in scoped:
             for field in ("sender", "recipient"):
                 participant = self._agent_peer_thread_participant(row, field)
-                pid = participant["id"]
-                if pid and pid not in participant_ids:
-                    participant_ids.append(pid)
-                    participants.append(participant)
+                pid = str(participant.get("id", "") or "").strip()
+                if not pid or pid not in pair_ids:
+                    continue
+                existing = participants_by_id.get(pid, {})
+                merged = dict(existing)
+                for key, value in participant.items():
+                    if str(value or "").strip():
+                        merged[key] = value
+                    elif key not in merged:
+                        merged[key] = value
+                participants_by_id[pid] = merged
+        participants: list[dict] = [
+            participants_by_id.get(pid)
+            or {"id": pid, "kind": "", "name": pid, "group": ""}
+            for pid in pair_ids
+        ]
+        participant_ids = list(pair_ids)
 
         messages = [_agent_peer_thread_message_entry(row) for row in scoped]
         last_row = max(
@@ -4236,10 +4279,20 @@ class MatrixState:
             recipient_id = str(row.get("recipient_id", "") or "").strip()
             if recipient_id and recipient_id not in requires_reply_participant_ids:
                 requires_reply_participant_ids.append(recipient_id)
+        title_participants = sorted(
+            participants,
+            key=lambda participant: (
+                (
+                    str((participant or {}).get("name", "") or "").strip()
+                    or str((participant or {}).get("id", "") or "").strip()
+                ).casefold(),
+                str((participant or {}).get("id", "") or "").strip(),
+            ),
+        )
         names = [
             str((participant or {}).get("name", "") or "").strip()
             or str((participant or {}).get("id", "") or "").strip()
-            for participant in participants
+            for participant in title_participants
         ]
         if len(names) >= 2:
             title = f"{names[0]} ↔ {names[1]}"
@@ -4314,27 +4367,25 @@ class MatrixState:
         loader = getattr(self.db, "load_recent_agent_peer_chat_messages", None)
         if not callable(loader):
             return 0
-        by_thread: dict[str, list[dict]] = {}
+        by_pair: dict[str, list[dict]] = {}
         for row in loader(limit=limit):
             if not _is_agent_peer_thread_row(row):
                 continue
-            thread_id = str(row.get("thread_id", "") or "").strip()
-            if not thread_id:
-                thread_id = str(row.get("id", "") or "").strip()
-            if not thread_id:
+            pair_key = _agent_peer_thread_pair_key(row)
+            if not pair_key:
                 continue
-            by_thread.setdefault(thread_id, []).append(row)
+            by_pair.setdefault(pair_key, []).append(row)
         threads: dict[str, dict] = {}
-        for thread_id, rows in by_thread.items():
+        for pair_key, rows in by_pair.items():
             thread = self._build_agent_peer_thread(rows)
             if thread:
-                threads[thread_id] = thread
+                threads[pair_key] = thread
         self.agent_peer_threads = self._sorted_agent_peer_threads(threads)
         if emit:
-            for thread_id, thread in self.agent_peer_threads.items():
+            for pair_key, thread in self.agent_peer_threads.items():
                 self._emit(
                     "agent_peer_thread_upsert",
-                    thread_id=thread_id,
+                    thread_id=pair_key,
                     group=thread.get("group", ""),
                     thread=copy.deepcopy(thread),
                 )
@@ -4349,35 +4400,35 @@ class MatrixState:
         """Refresh and optionally emit a complete thread replacement."""
         if not _is_agent_peer_thread_row(row or {}):
             return None
-        thread_id = str((row or {}).get("thread_id", "") or "").strip()
-        if not thread_id:
-            thread_id = str((row or {}).get("id", "") or "").strip()
-        if not thread_id:
+        pair_key = _agent_peer_thread_pair_key(row or {})
+        first_id, second_id = _agent_peer_thread_pair_ids(row or {})
+        if not pair_key or not first_id or not second_id:
             return None
         rows: list[dict]
         loader = (
-            getattr(self.db, "load_agent_peer_chat_messages_for_thread", None)
+            getattr(self.db, "load_agent_peer_chat_messages_for_pair", None)
             if self.db else None
         )
         if callable(loader):
             rows = loader(
-                thread_id,
+                first_id,
+                second_id,
                 limit=AGENT_PEER_THREAD_SEED_ROW_LIMIT,
             )
         else:
             rows = [dict(row)]
         thread = self._build_agent_peer_thread(rows)
         if not thread:
-            self.remove_agent_peer_thread(thread_id, emit=emit)
+            self.remove_agent_peer_thread(pair_key, emit=emit)
             return None
-        self.agent_peer_threads[thread_id] = thread
+        self.agent_peer_threads[pair_key] = thread
         self.agent_peer_threads = self._sorted_agent_peer_threads(
             self.agent_peer_threads
         )
         if emit:
             self._emit(
                 "agent_peer_thread_upsert",
-                thread_id=thread_id,
+                thread_id=pair_key,
                 group=thread.get("group", ""),
                 thread=copy.deepcopy(thread),
             )

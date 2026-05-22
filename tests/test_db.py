@@ -718,6 +718,29 @@ class TorqueDBTests(unittest.TestCase):
             ],
             ["chat-arch-eng", "chat-eng-arch"],
         )
+        self.db.save_agent_peer_message({
+            "id": "chat-pair-reply",
+            "thread_id": "thread-chat-reply",
+            "group_name": "g",
+            "sender_id": "engineer-chat-arch-eng",
+            "sender_kind": "engineer",
+            "sender_name": "Engineer",
+            "recipient_id": "architect-chat-arch-eng",
+            "recipient_kind": "architect",
+            "recipient_name": "Architect",
+            "message": "same pair, different raw thread",
+            "created_at": 19.0,
+        })
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_agent_peer_chat_messages_for_pair(
+                    "engineer-chat-arch-eng",
+                    "architect-chat-arch-eng",
+                )
+            ],
+            ["chat-arch-eng", "chat-pair-reply"],
+        )
         self.assertEqual(
             [
                 row["id"]
