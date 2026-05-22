@@ -833,6 +833,9 @@ function _handleDelta(msg) {
   _expectedSeq = msg.seq + 1;
   _selectedAgentGroupSyncedDuringDelta = false;
   _applyDelta(msg.ops);
+  _applyContextMeterDeltaUpdates(
+    _collectContextMeterDeltaAgentIds(msg.ops, opGroupHints)
+  );
   const selectedAgentGroupSynced = _selectedAgentGroupSyncedDuringDelta;
   _selectedAgentGroupSyncedDuringDelta = false;
   const taskDeltaChanges = _collectBoardTaskDeltaChanges(msg.ops, opGroupHints);
@@ -989,6 +992,58 @@ function _markSurface(flags) {
   }
 }
 
+function _contextDeltaAgentId(op) {
+  return String(
+    (op && (op.cell_id || op.agent_id || op.id))
+      || ''
+  ).trim();
+}
+
+function _contextWindowPayloadFromOp(op) {
+  if (!op || typeof op !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(op, 'context_window')) {
+    return op.context_window;
+  }
+  const data = op.data && typeof op.data === 'object' ? op.data : null;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'context_window')) {
+    return data.context_window;
+  }
+  return undefined;
+}
+
+function _applyContextMeterDeltaUpdates(agentIds) {
+  if (!Array.isArray(agentIds) || !agentIds.length) return;
+  if (typeof updateAgentContextMeter !== 'function') return;
+  const seen = {};
+  for (let i = 0; i < agentIds.length; i++) {
+    const id = String(agentIds[i] || '').trim();
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    updateAgentContextMeter(id);
+  }
+}
+
+function _collectContextMeterDeltaAgentIds(ops, hints) {
+  const ids = [];
+  const add = function(value) {
+    value = String(value || '').trim();
+    if (value && ids.indexOf(value) < 0) ids.push(value);
+  };
+  for (let i = 0; i < (ops || []).length; i++) {
+    const op = ops[i] || {};
+    if (op.op === 'context_update') {
+      add(_contextDeltaAgentId(op));
+      continue;
+    }
+    if (op.op !== 'agent_upsert') continue;
+    const hint = hints && hints[i] ? hints[i] : {};
+    const previous = hint && hint.agent ? hint.agent : null;
+    const next = _agentNextFromDelta(op, previous);
+    if (_agentDeltaIsContextWindowOnly(previous, next, op)) add(op.id);
+  }
+  return ids;
+}
+
 function _peerMessageDeltaAgentIds(op) {
   const ids = [];
   const add = function(value) {
@@ -1092,6 +1147,11 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'agent_upsert':
       case 'agent_remove':
         _applyAgentSurfaceInvalidation(flags, op, hint);
+        break;
+      case 'context_update':
+        // High-frequency token telemetry updates only the affected card's
+        // micro-meter via `_applyContextMeterDeltaUpdates()` after state is
+        // patched. Never invalidate broad surfaces for this op.
         break;
       case 'group_update':
       case 'group_remove':
@@ -1316,6 +1376,39 @@ function _agentNextFromDelta(op, previous) {
   const next = Object.assign({}, previous || {}, op || {});
   delete next.op;
   return next;
+}
+
+function _agentDeltaChangedFields(previous, next, op) {
+  const fields = {};
+  const keys = {};
+  for (const key in (previous || {})) keys[key] = true;
+  for (const key in (next || {})) keys[key] = true;
+  for (const key in (op || {})) keys[key] = true;
+  delete keys.op;
+  for (const key in keys) {
+    const a = previous ? previous[key] : undefined;
+    const b = next ? next[key] : undefined;
+    if (!_deltaValuesEqual(a, b)) fields[key] = true;
+  }
+  return fields;
+}
+
+function _agentDeltaIsContextWindowOnly(previous, next, op) {
+  if (!op || op.op !== 'agent_upsert') return false;
+  if (!previous || !next) return false;
+  if (!Object.prototype.hasOwnProperty.call(op, 'context_window')) return false;
+  const changed = _agentDeltaChangedFields(previous, next, op);
+  const allowed = {
+    context_window: true,
+    last_heartbeat_at: true,
+    last_activity_at: true,
+    last_event_at: true,
+    last_event_text: true,
+  };
+  for (const key in changed) {
+    if (!allowed[key]) return false;
+  }
+  return true;
 }
 
 function _stableDeltaValue(value) {
@@ -1878,6 +1971,9 @@ function _agentDeltaInvalidatesEngineer(previous, next, op) {
 function _applyAgentSurfaceInvalidation(flags, op, hint) {
   const previous = hint && hint.agent ? hint.agent : null;
   const next = _agentNextFromDelta(op, previous);
+  if (_agentDeltaIsContextWindowOnly(previous, next, op)) {
+    return;
+  }
   if (!_standaloneDeltaOptimizationsEnabled()) {
     _markSurface(flags, 'main', 'context', 'events', 'engineer');
     if (_agentDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
@@ -2104,6 +2200,16 @@ function _applyDelta(ops) {
             _agentPanelInvalidateArchitectPeerListCache();
           }
         }
+        break;
+      }
+      case 'context_update': {
+        const id = _contextDeltaAgentId(op);
+        if (!id || !state.agents || !state.agents[id]) break;
+        const payload = _contextWindowPayloadFromOp(op);
+        if (payload === undefined) break;
+        state.agents[id].context_window = (payload && typeof payload === 'object')
+          ? Object.assign({}, payload)
+          : {};
         break;
       }
       case 'agent_remove':

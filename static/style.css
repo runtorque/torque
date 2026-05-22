@@ -1714,6 +1714,35 @@ body.runtime-embedded .agent-focus-header {
 .agent-card-provider--unknown {
   color: var(--text-dim);
 }
+.agent-context-meter {
+  position: absolute;
+  left: 34px;
+  right: 34px;
+  bottom: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 6.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .01em;
+  text-align: center;
+  opacity: .72;
+}
+.agent-context-meter--normal {
+  color: var(--text-dim);
+}
+.agent-context-meter--warn {
+  color: color-mix(in srgb, var(--amber) 76%, var(--text-dim));
+}
+.agent-context-meter--danger {
+  color: color-mix(in srgb, var(--red) 82%, var(--text-dim));
+}
 .agent-card-tooltip {
   position: relative;
   display: block;

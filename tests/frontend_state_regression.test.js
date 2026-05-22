@@ -15948,6 +15948,63 @@ test('renderAgentCell status dot follows running/idle/error status for awareness
   assert.match(errorHtml, /class="cell-status disconnected"/);
 });
 
+test('renderAgentCell shows context-window meter only when usage is available with thresholds', () => {
+  const { context } = createMainRenderHarness();
+  context.state.children = {};
+  context.state.board_tasks = {};
+
+  const baseAgent = {
+    id: 'worker-context',
+    name: 'Worker Context',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+    agent_type: 'codex',
+    status: 'running',
+  };
+
+  const hiddenHtml = context.renderAgentCell({
+    ...baseAgent,
+    context_window: {},
+  });
+  assert.doesNotMatch(hiddenHtml, /data-agent-context-meter/);
+
+  const normalHtml = context.renderAgentCell({
+    ...baseAgent,
+    context_window: {
+      used_tokens: 57,
+      limit_tokens: 100,
+    },
+  });
+  assert.match(normalHtml, /data-agent-context-meter/);
+  assert.match(normalHtml, /agent-context-meter--normal/);
+  assert.match(normalHtml, /data-context-pct="57"/);
+  assert.match(normalHtml, />ctx 57%<\/div>/);
+  assert.doesNotMatch(normalHtml, /data-agent-context-meter[^>]*(?:onclick|tabindex|role=|title=)/);
+
+  const warnHtml = context.renderAgentCell({
+    ...baseAgent,
+    context_window: {
+      used_pct: 70,
+      used_tokens: 70,
+      limit_tokens: 100,
+    },
+  });
+  assert.match(warnHtml, /agent-context-meter--warn/);
+  assert.match(warnHtml, />ctx 70%<\/div>/);
+
+  const dangerHtml = context.renderAgentCell({
+    ...baseAgent,
+    context_window: {
+      used_pct: 90,
+      used_tokens: 90,
+      limit_tokens: 100,
+    },
+  });
+  assert.match(dangerHtml, /agent-context-meter--danger/);
+  assert.match(dangerHtml, />ctx 90%<\/div>/);
+});
+
 test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
   const { context } = createEngineerHarness();
   context.state.group_settings = {
@@ -16349,6 +16406,161 @@ test('agent digest deltas rerender the main grid for engineer card pause state u
     engineer: 0,
     templates: 0,
   });
+});
+
+test('context_update delta updates only the affected grid card context meter', () => {
+  const { context, document, sandbox } = createWsRenderHarness();
+  const main = document.getElementById('main');
+  main._torqueLastGridHtml = '<div>cached grid</div>';
+  main._torqueLastHtml = '<div>cached shell</div>';
+
+  const cardA = new FakeElement('agent-a-card');
+  cardA.setAttribute('data-drag-id', 'agent-a');
+  cardA.setAttribute('data-drag-type', 'agent');
+  cardA.classList.add('cell');
+  cardA.classList.add('selected');
+  cardA.classList.add('focused');
+  const meterA = new FakeElement('agent-a-meter');
+  meterA.setAttribute('data-agent-context-meter', '');
+  meterA.setAttribute('data-context-level', 'normal');
+  meterA.setAttribute('data-context-pct', '57');
+  meterA.textContent = 'ctx 57%';
+  cardA.appendChild(meterA);
+  cardA.setQuerySelector('[data-agent-context-meter]', meterA);
+
+  const cardB = new FakeElement('agent-b-card');
+  cardB.setAttribute('data-drag-id', 'agent-b');
+  cardB.setAttribute('data-drag-type', 'agent');
+  const meterB = new FakeElement('agent-b-meter');
+  meterB.setAttribute('data-agent-context-meter', '');
+  meterB.setAttribute('data-context-level', 'normal');
+  meterB.setAttribute('data-context-pct', '33');
+  meterB.textContent = 'ctx 33%';
+  cardB.appendChild(meterB);
+  cardB.setQuerySelector('[data-agent-context-meter]', meterB);
+
+  document.setSelector('[data-drag-id="agent-a"][data-drag-type="agent"]', cardA);
+  document.setSelector('[data-drag-id="agent-b"][data-drag-type="agent"]', cardB);
+  document.activeElement = cardA;
+
+  runInContext(context, `
+    state.agents = {
+      'agent-a': {
+        id: 'agent-a',
+        name: 'Agent A',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        context_window: { used_pct: 57, used_tokens: 57, limit_tokens: 100 }
+      },
+      'agent-b': {
+        id: 'agent-b',
+        name: 'Agent B',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        context_window: { used_pct: 33, used_tokens: 33, limit_tokens: 100 }
+      }
+    };
+    selectedAgentId = 'agent-a';
+    focusedItemId = 'agent-a';
+    _expectedSeq = 1;
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'context_update',
+      cell_id: 'agent-a',
+      group: 'alpha',
+      context_window: {
+        used_pct: 72.4,
+        used_tokens: 724,
+        limit_tokens: 1000,
+      },
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+  });
+  assert.equal(meterA.textContent, 'ctx 72%');
+  assert.match(meterA.getAttribute('class'), /agent-context-meter--warn/);
+  assert.equal(meterA.dataset.contextPct, '72');
+  assert.equal(meterB.textContent, 'ctx 33%');
+  assert.equal(document.activeElement, cardA);
+  assert.equal(cardA.classList.contains('selected'), true);
+  assert.equal(cardA.classList.contains('focused'), true);
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-a');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-a');
+  assert.equal(jsonValue(context, 'state.agents["agent-a"].context_window.used_pct'), 72.4);
+  assert.equal(main._torqueLastGridHtml, null);
+  assert.equal(main._torqueLastHtml, null);
+});
+
+test('agent_upsert carrying only context_window skips full grid rebuild and patches meter', () => {
+  const { context, document, sandbox } = createWsRenderHarness();
+  const card = new FakeElement('agent-a-card');
+  card.setAttribute('data-drag-id', 'agent-a');
+  card.setAttribute('data-drag-type', 'agent');
+  const meter = new FakeElement('agent-a-meter');
+  meter.setAttribute('data-agent-context-meter', '');
+  meter.setAttribute('data-context-level', 'normal');
+  meter.setAttribute('data-context-pct', '57');
+  meter.textContent = 'ctx 57%';
+  card.appendChild(meter);
+  card.setQuerySelector('[data-agent-context-meter]', meter);
+  document.setSelector('[data-drag-id="agent-a"][data-drag-type="agent"]', card);
+
+  runInContext(context, `
+    state.agents = {
+      'agent-a': {
+        id: 'agent-a',
+        name: 'Agent A',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        last_heartbeat_at: 10,
+        last_activity_at: 10,
+        last_event_at: 10,
+        last_event_text: '',
+        context_window: { used_pct: 57, used_tokens: 57, limit_tokens: 100 }
+      }
+    };
+    _expectedSeq = 1;
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-a',
+      name: 'Agent A',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      last_heartbeat_at: 11,
+      last_activity_at: 11,
+      last_event_at: 11,
+      last_event_text: 'Context usage updated',
+      context_window: {
+        used_pct: 91,
+        used_tokens: 91,
+        limit_tokens: 100,
+      },
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'renderCalls.main'), 0);
+  assert.equal(jsonValue(context, 'renderCalls.engineer'), 0);
+  assert.equal(meter.textContent, 'ctx 91%');
+  assert.match(meter.getAttribute('class'), /agent-context-meter--danger/);
 });
 
 test('engineer sent-event deltas rerender only the active agent panel surface', () => {
