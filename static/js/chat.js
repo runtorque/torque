@@ -43,7 +43,7 @@ function _chatScrollAtTail(container) {
   var scrollTop = Number(container.scrollTop || 0);
   var clientHeight = Number(container.clientHeight || 0);
   var scrollHeight = Number(container.scrollHeight || 0);
-  return scrollHeight > 0 && (scrollTop + clientHeight >= scrollHeight - 12);
+  return scrollHeight <= clientHeight || (scrollHeight > 0 && scrollTop + clientHeight >= scrollHeight - 12);
 }
 
 function _chatCurrentRenderedThreadId(shell) {
@@ -511,47 +511,102 @@ function _chatMessageMetaHtml(message) {
   message = message || {};
   var html = '';
   if (message.ack_required) {
-    html += '<span class="agent-panel-message-ack">Ack required</span>';
+    html += '<span class="chat-message-badge chat-message-badge-ack">Ack required</span>';
   }
   var deliveryState = String(message.delivery_state || '').trim();
   if (deliveryState && deliveryState !== 'delivered') {
-    html += '<span class="chat-badge chat-badge-pending">' + _chatEsc(deliveryState) + '</span>';
+    html += '<span class="chat-message-badge chat-message-badge-pending">' + _chatEsc(deliveryState) + '</span>';
   }
   return html;
 }
 
-function _chatMessageCardHtml(message, index) {
+function _chatMessageActionLabel(action) {
+  action = String(action || 'message').trim();
+  if (!action) return 'message';
+  if (typeof _agentPanelMessageActionLabel === 'function') {
+    return _agentPanelMessageActionLabel(action);
+  }
+  return action.replace(/[_-]+/g, ' ');
+}
+
+function _chatMessageSenderLabel(message) {
+  message = message || {};
+  return String(message.sender_name || message.sender_id || '').trim()
+    || _chatParticipantKind({ kind: message.sender_kind })
+    || 'Unknown';
+}
+
+function _chatMessageRecipientLabel(message) {
+  message = message || {};
+  return String(message.recipient_name || message.recipient_id || '').trim();
+}
+
+function _chatStablePairIds(thread, message) {
+  var ids = [];
+  var participants = Array.isArray(thread && thread.participants) ? thread.participants : [];
+  for (var i = 0; i < participants.length; i++) {
+    var pid = String((participants[i] && participants[i].id) || '').trim();
+    if (pid && ids.indexOf(pid) < 0) ids.push(pid);
+  }
+  message = message || {};
+  var senderId = String(message.sender_id || '').trim();
+  var recipientId = String(message.recipient_id || '').trim();
+  if (senderId && ids.indexOf(senderId) < 0) ids.push(senderId);
+  if (recipientId && ids.indexOf(recipientId) < 0) ids.push(recipientId);
+  ids.sort();
+  return ids;
+}
+
+function _chatMessageSide(message, thread) {
+  message = message || {};
+  var senderKind = String(message.sender_kind || '').trim().toLowerCase();
+  var recipientKind = String(message.recipient_kind || '').trim().toLowerCase();
+  var senderId = String(message.sender_id || '').trim();
+  if (senderKind === 'architect' && recipientKind === 'architect') {
+    var pairIds = _chatStablePairIds(thread, message);
+    if (pairIds.length >= 2 && senderId) {
+      return senderId === pairIds[0] ? 'left' : 'right';
+    }
+    return 'right';
+  }
+  if (senderKind === 'architect') return 'right';
+  if (senderKind === 'engineer' || senderKind === 'worker') return 'left';
+  if (recipientKind === 'architect') return 'left';
+  var fallbackIds = _chatStablePairIds(thread, message);
+  if (fallbackIds.length >= 2 && senderId) {
+    return senderId === fallbackIds[0] ? 'left' : 'right';
+  }
+  return 'left';
+}
+
+function _chatMessageCardHtml(message, index, thread) {
   message = message || {};
   var messageId = _chatMessageKey(message, index);
   var senderKind = String(message.sender_kind || '').trim() || 'agent';
-  var direction = senderKind === 'architect' ? 'out' : 'in';
+  var side = _chatMessageSide(message, thread);
   var timestamp = _chatTimestamp(message.timestamp || message.created_at || message.sent_at);
-  var options = {
-    anchorAttr: 'data-chat-message-id',
-    anchorKey: messageId,
-    direction: direction,
-    senderKind: senderKind,
-    attributionHtml: _chatMessageAttributionHtml(message),
-    showDirection: false,
-    peerAffordancesHtml: '',
-    metaHtml: _chatMessageMetaHtml(message),
-    contextHtml: _chatMessageContextHtml(message, messageId),
-    timeLabel: _chatExactTimestamp(timestamp),
-  };
-  if (typeof _agentPanelMessageCardHtml === 'function') {
-    return _agentPanelMessageCardHtml(null, message, index, options);
+  var recipient = _chatMessageRecipientLabel(message);
+  var meta = _chatMessageMetaHtml(message);
+  var timeLabel = _chatExactTimestamp(timestamp);
+  var html = '<div class="chat-message-row chat-message-row-' + _chatAttr(side)
+    + '" data-chat-message-id="' + _chatAttr(messageId) + '"'
+    + ' data-chat-message-side="' + _chatAttr(side) + '"'
+    + ' data-chat-sender-kind="' + _chatAttr(senderKind) + '">';
+  html += '<div class="chat-message-bubble chat-message-bubble-' + _chatAttr(side) + '">';
+  html += '<div class="chat-message-bubble-meta">';
+  html += '<span class="chat-message-sender">' + _chatEsc(_chatMessageSenderLabel(message)) + '</span>';
+  html += '<span class="chat-message-kind">' + _chatEsc(_chatParticipantKind({ kind: senderKind })) + '</span>';
+  html += '<span class="chat-message-action">' + _chatEsc(_chatMessageActionLabel(message.action)) + '</span>';
+  if (meta) html += meta;
+  if (timeLabel) html += '<span class="chat-message-time">' + _chatEsc(timeLabel) + '</span>';
+  html += '</div>';
+  html += '<div class="chat-message-body">' + _chatEsc(_chatMessageText(message)) + '</div>';
+  if (recipient) {
+    html += '<div class="chat-message-recipient">To ' + _chatEsc(recipient) + '</div>';
   }
-  return '<div class="agent-panel-message-card agent-panel-message-' + _chatAttr(direction)
-    + '" data-chat-message-id="' + _chatAttr(messageId) + '">'
-    + '<div class="agent-panel-message-card-header"><div class="agent-panel-message-meta">'
-    + options.attributionHtml
-    + '<span class="agent-panel-message-sender">' + _chatEsc(_chatParticipantKind({ kind: senderKind })) + '</span>'
-    + '<span class="agent-panel-message-action">' + _chatEsc(String(message.action || 'message').replace(/_/g, ' ')) + '</span>'
-    + options.metaHtml
-    + '</div><span class="agent-panel-message-time">' + _chatEsc(options.timeLabel) + '</span></div>'
-    + '<div class="agent-panel-message-body">' + _chatEsc(_chatMessageText(message)) + '</div>'
-    + options.contextHtml
-    + '</div>';
+  html += _chatMessageContextHtml(message, messageId);
+  html += '</div></div>';
+  return html;
 }
 
 function _chatThreadRowHtml(item, selectedId) {
@@ -658,7 +713,7 @@ function _chatMessagesHtml(thread) {
     return html;
   }
   for (var i = 0; i < messages.length; i++) {
-    html += _chatMessageCardHtml(messages[i], i);
+    html += _chatMessageCardHtml(messages[i], i, thread);
   }
   return html;
 }
@@ -691,6 +746,7 @@ function renderChatPanel() {
 
   var threadCapture = _chatCaptureScrollAnchor(list, 'data-chat-thread-id');
   var preserveMessages = previouslyRenderedThread && previouslyRenderedThread === selectedId;
+  var messagesPinTail = preserveMessages && _chatStoredMessageTailPinned(shell);
   var messageCapture = preserveMessages
     ? _chatCaptureScrollAnchor(messages, 'data-chat-message-id')
     : null;
@@ -702,7 +758,9 @@ function renderChatPanel() {
 
   _chatRestoreScrollAnchor(list, 'data-chat-thread-id', threadCapture || { scrollTop: 0 });
   if (messageCapture) {
-    _chatRestoreScrollAnchor(messages, 'data-chat-message-id', messageCapture);
+    _chatRestoreScrollAnchor(messages, 'data-chat-message-id', messageCapture, {
+      pinTail: !!messagesPinTail,
+    });
   } else if (messages && typeof messages.scrollTop === 'number') {
     messages.scrollTop = Math.max(0, Number(messages.scrollHeight || 0));
   }
