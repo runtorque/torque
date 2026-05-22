@@ -31,6 +31,7 @@ var _eventsDefaultDateHeight = 22;
 var _eventsDefaultEmptyHeight = 52;
 var _eventsDefaultLoadingHeight = 30;
 var _eventsVirtualOverscanPx = 240;
+var _eventsNonUserAskLabel = 'torque:non-user-ask';
 
 function _eventsDismissedMap() {
   if (!state.events_dismissed_attention
@@ -38,6 +39,11 @@ function _eventsDismissedMap() {
     state.events_dismissed_attention = {};
   }
   return state.events_dismissed_attention;
+}
+
+function _eventsTaskSuppressesUserAttention(task) {
+  var labels = task && Array.isArray(task.labels) ? task.labels : [];
+  return labels.indexOf(_eventsNonUserAskLabel) >= 0;
 }
 
 function _eventsDismissedTimestamp(id) {
@@ -278,6 +284,7 @@ function _eventsGetAttentionItems() {
     var _parentsToHydrate = {};
     _compactHydrateTasksMatching(function(t) {
       if (!t || !t.labels || t.labels.indexOf('torque:human') < 0) return false;
+      if (_eventsTaskSuppressesUserAttention(t)) return false;
       if (t.lane === 'Done') return false;
       if (grp && t.group !== grp) return false;
       if (t.parent_task_id) _parentsToHydrate[t.parent_task_id] = true;
@@ -288,6 +295,7 @@ function _eventsGetAttentionItems() {
   for (var id in tasks) {
     var t = tasks[id];
     if (!t.labels || t.labels.indexOf('torque:human') < 0) continue;
+    if (_eventsTaskSuppressesUserAttention(t)) continue;
     if (t.lane === 'Done') continue;
     if (grp && t.group !== grp) continue;
     var parent = _eventsAskParentTask(t);

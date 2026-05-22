@@ -6969,6 +6969,16 @@ test('events attention items include active asks and blocked agents for the curr
       created_by_architect_id: 'arch-1',
       created_at: '2099-01-03T00:00:00Z',
     },
+    ownerAsk: {
+      id: 'ownerAsk',
+      group: 'alpha',
+      task: 'Ask owning engineer',
+      description: 'Backend resolved this ask to an engineer, not the user.',
+      labels: ['torque:human', 'torque:derived', 'torque:non-user-ask'],
+      parent_task_id: 'parent',
+      lane: 'Backlog',
+      created_at: '2099-01-04T00:00:00Z',
+    },
     doneAsk: {
       id: 'doneAsk',
       group: 'alpha',
@@ -7029,6 +7039,68 @@ test('events attention items include active asks and blocked agents for the curr
   assert.match(
     runInContext(context, `_renderAttentionCard(_eventsGetAttentionItems()[0])`),
     /Architect asks/,
+  );
+});
+
+test('events attention badge ignores owner-routed asks but lights for architect asks', () => {
+  const { context, document } = createEventsHarness();
+  const badge = new FakeElement('events-badge');
+  document.setSelector('.taskbar-app[data-app="events"]', badge);
+
+  context.state.board_tasks = {
+    parent: {
+      id: 'parent',
+      group: 'alpha',
+      task: 'Engineer-owned worker task',
+      agent_id: 'worker-1',
+    },
+    ownerAsk: {
+      id: 'ownerAsk',
+      group: 'alpha',
+      task: 'Ask owning engineer',
+      labels: ['torque:human', 'torque:derived', 'torque:non-user-ask'],
+      parent_task_id: 'parent',
+      lane: 'Backlog',
+      created_at: '2099-01-04T00:00:00Z',
+    },
+  };
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      needs_attention: false,
+    },
+  };
+
+  context.updateEventsAttentionBadge();
+  assert.equal(badge.classList.contains('panel-attention'), false);
+  assert.deepEqual(jsonValue(context, '_eventsGetAttentionItems()'), []);
+
+  context.state.board_tasks.archAsk = {
+    id: 'archAsk',
+    group: 'alpha',
+    task: 'Architect asks the user',
+    labels: ['torque:human', 'architect-ask'],
+    lane: 'Backlog',
+    reply_agent_id: 'arch-1',
+    created_by_architect_id: 'arch-1',
+    created_at: '2099-01-05T00:00:00Z',
+  };
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    kind: 'architect',
+  };
+
+  context.updateEventsAttentionBadge();
+  assert.equal(badge.classList.contains('panel-attention'), true);
+  assert.deepEqual(
+    jsonValue(context, '_eventsGetAttentionItems().map(function(item) { return item.id; })'),
+    ['archAsk'],
   );
 });
 
@@ -13372,6 +13444,21 @@ test('standalone ask task and attention agent deltas narrow events invalidation'
     seq: 2,
     ops: [{
       op: 'task_upsert',
+      id: 'owner-ask-1',
+      task: 'Owner-routed question',
+      group: 'alpha',
+      lane: 'In Progress',
+      parent_task_id: 'parent-1',
+      labels: ['torque:human', 'torque:derived', 'torque:non-user-ask'],
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.events, 0);
+
+  context._handleDelta({
+    seq: 3,
+    ops: [{
+      op: 'task_upsert',
       id: 'ask-1',
       task: 'Updated question',
       group: 'alpha',
@@ -13384,7 +13471,7 @@ test('standalone ask task and attention agent deltas narrow events invalidation'
   assert.equal(sandbox.renderCalls.events, 1);
 
   context._handleDelta({
-    seq: 3,
+    seq: 4,
     ops: [{
       op: 'agent_upsert',
       id: 'agent-1',

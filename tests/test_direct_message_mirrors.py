@@ -9,6 +9,9 @@ except ModuleNotFoundError:
 
 from torque.db import TorqueDB, canonical_user_agent_thread_id
 from torque.direct_message_mirrors import (
+    NON_USER_ASK_LABEL,
+    ask_owner_recipient_is_user,
+    ask_task_labels_for_owner_recipient,
     resolve_ask_owner_recipient,
     save_direct_ask_mirror,
     save_direct_ask_reply_mirror,
@@ -94,6 +97,42 @@ class DirectMessageMirrorTests(unittest.TestCase):
         )
         self.assertEqual(fallthrough_worker.id, "user")
         self.assertEqual(fallthrough_worker.kind, "user")
+
+    def test_ask_user_attention_labels_follow_owner_aware_recipient(self):
+        architect = self._add_agent("arch-1", "architect", "Architect")
+        engineer = self._add_agent(
+            "eng-1",
+            "engineer",
+            "Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_agent(
+            "worker-1",
+            "worker",
+            "Worker",
+            owner_engineer_id=engineer.id,
+        )
+        user_owned_worker = self._add_agent(
+            "worker-user",
+            "worker",
+            "User Owned Worker",
+        )
+
+        self.assertTrue(ask_owner_recipient_is_user(self.state, architect))
+        self.assertTrue(
+            ask_owner_recipient_is_user(self.state, user_owned_worker)
+        )
+        self.assertFalse(ask_owner_recipient_is_user(self.state, worker))
+
+        base = ["torque:human", "torque:derived"]
+        self.assertEqual(
+            ask_task_labels_for_owner_recipient(self.state, architect, base),
+            base,
+        )
+        self.assertEqual(
+            ask_task_labels_for_owner_recipient(self.state, worker, base),
+            ["torque:human", "torque:derived", NON_USER_ASK_LABEL],
+        )
 
     def test_worker_ask_mirror_seeds_direct_cache_not_peer_cache(self):
         engineer = self._add_agent("eng-1", "engineer", "Engineer")

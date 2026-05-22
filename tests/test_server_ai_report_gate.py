@@ -7,6 +7,8 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
+from torque.direct_message_mirrors import NON_USER_ASK_LABEL
+
 
 class FakeActionManager:
     def __init__(self, actions=None):
@@ -197,6 +199,49 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             "action": "done",
             "message": "Implementation complete",
         })
+
+    async def _ai_ask(self, state, cell, question):
+        handle_command = self._extract_handle_command(state)
+        return await handle_command({
+            "cmd": "ai_report",
+            "cell_id": cell.id,
+            "action": "ask",
+            "message": question,
+        })
+
+    async def test_ai_ask_marks_user_attention_for_architect_owned_ask(self):
+        state, cell, task = self._state_cell_task(kind="architect")
+
+        result = await self._ai_ask(state, cell, "Should we ship?")
+
+        self.assertEqual(result["type"], "ok")
+        ask = state.board_tasks[result["task_id"]]
+        self.assertIn("torque:human", ask.labels)
+        self.assertNotIn(NON_USER_ASK_LABEL, ask.labels)
+        self.assertTrue(cell.needs_attention)
+        self.assertEqual(task.status, "Awaiting Input")
+
+    async def test_ai_ask_suppresses_user_attention_for_engineer_owned_worker(self):
+        state, worker, task = self._state_cell_task(kind="worker")
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"].append(engineer.id)
+        worker.owner_engineer_id = engineer.id
+
+        result = await self._ai_ask(state, worker, "Can I use the fallback?")
+
+        self.assertEqual(result["type"], "ok")
+        ask = state.board_tasks[result["task_id"]]
+        self.assertIn("torque:human", ask.labels)
+        self.assertIn(NON_USER_ASK_LABEL, ask.labels)
+        self.assertFalse(worker.needs_attention)
+        self.assertEqual(task.status, "Awaiting Input")
 
     async def test_worker_feature_implement_without_ship_review_is_rejected(self):
         state, cell, task = self._state_cell_task()
