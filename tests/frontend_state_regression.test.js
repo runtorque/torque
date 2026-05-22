@@ -8914,6 +8914,204 @@ test('embedded terminal direct-message panel renders blocking asks, ask replies,
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--ask selected/);
 });
 
+function setupTerminalDirectMessageClickHarness() {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [
+      {
+        message_id: 'dm-old',
+        message_type: 'message',
+        message: 'Older message',
+        sender_id: 'agent-1',
+        sender_kind: 'worker',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+        created_at: 10,
+      },
+      {
+        message_id: 'dm-anchor',
+        message_type: 'message',
+        message: 'Anchored message',
+        sender_id: 'user',
+        sender_kind: 'user',
+        recipient_id: 'agent-1',
+        recipient_kind: 'worker',
+        created_at: 11,
+      },
+      {
+        message_id: 'dm-ask',
+        message_type: 'ask',
+        blocking: true,
+        ack_required: true,
+        message: 'Need approval?',
+        sender_id: 'agent-1',
+        sender_kind: 'worker',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+        created_at: 12,
+      },
+    ],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    _embeddedTerminalSessionKey = 'agent-1:sess-1';
+    renderTerminalWorkspace();
+  `);
+
+  const list = new FakeElement('dm-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  list.scrollTop = 100;
+  list.clientHeight = 100;
+  list.scrollHeight = 500;
+  const oldItem = new FakeElement('dm-old');
+  oldItem.dataset.terminalDmAnchor = 'dm-old';
+  oldItem.offsetTop = 40;
+  oldItem.offsetHeight = 24;
+  const anchorItem = new FakeElement('dm-anchor');
+  anchorItem.dataset.terminalDmAnchor = 'dm-anchor';
+  anchorItem.offsetTop = 140;
+  anchorItem.offsetHeight = 24;
+  const askItem = new FakeElement('dm-ask');
+  askItem.dataset.terminalDmAnchor = 'dm-ask';
+  askItem.offsetTop = 210;
+  askItem.offsetHeight = 24;
+  list.setQuerySelectorAll('[data-terminal-dm-anchor]', [oldItem, anchorItem, askItem]);
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  dom.workspace.setQuerySelector('.terminal-direct-messages-list', list);
+  dom.workspace.setQuerySelector('.terminal-stage', dom.stage);
+  dom.workspace.setQuerySelector('.terminal-surface', dom.surface);
+  document.register('terminal-surface', dom.surface);
+
+  let terminalFocusCalls = 0;
+  dom.surface.focus = function focus() {
+    terminalFocusCalls += 1;
+    this.focused = true;
+  };
+
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML;
+    },
+    set(value) {
+      this._innerHTML = String(value);
+      list.scrollTop = 0;
+      this.children.forEach((child) => {
+        child.parentNode = null;
+      });
+      this.children = [];
+    },
+  });
+
+  return {
+    context,
+    document,
+    dom,
+    list,
+    terminalFocusCalls: () => terminalFocusCalls,
+  };
+}
+
+function terminalClickEvent() {
+  return {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+}
+
+test('embedded terminal direct-message click preserves list scroll and does not refocus terminal', () => {
+  const { context, document, dom, list, terminalFocusCalls } = setupTerminalDirectMessageClickHarness();
+  document.activeElement = dom.surface;
+
+  assert.match(dom.directMessages.innerHTML, /class="terminal-direct-messages-list"/);
+  assert.match(dom.directMessages.innerHTML, /onmousedown="return terminalDirectMessageMouseDown\(event\)"/);
+  assert.match(dom.directMessages.innerHTML, /onclick="return terminalDirectMessageSelect\(event, 'agent-1', 'dm-anchor'\)"/);
+
+  const downEvt = terminalClickEvent();
+  context.__downEvt = downEvt;
+  runInContext(context, 'terminalDirectMessageMouseDown(__downEvt);');
+  assert.equal(downEvt.preventDefaultCalled, true);
+  assert.equal(downEvt.stopPropagationCalled, true);
+
+  const clickEvt = terminalClickEvent();
+  context.__clickEvt = clickEvt;
+  runInContext(context, `terminalDirectMessageSelect(__clickEvt, 'agent-1', 'dm-anchor');`);
+
+  assert.equal(clickEvt.preventDefaultCalled, true);
+  assert.equal(clickEvt.stopPropagationCalled, true);
+  assert.equal(list.scrollTop, 100);
+  assert.equal(terminalFocusCalls(), 0);
+  assert.equal(jsonValue(context, `_terminalDirectMessageSelectedByAgent['agent-1']`), 'dm-anchor');
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message--message selected/);
+});
+
+test('embedded terminal direct-message reply click preserves list scroll and focuses compose without terminal flash', () => {
+  const { context, document, dom, list, terminalFocusCalls } = setupTerminalDirectMessageClickHarness();
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.tagName = 'TEXTAREA';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = 'draft reply';
+  input.selectionStart = 5;
+  input.selectionEnd = 5;
+  let inputFocusCalls = 0;
+  input.focus = function focus() {
+    inputFocusCalls += 1;
+    this.focused = true;
+    document.activeElement = this;
+  };
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = dom.surface;
+
+  const replyEvt = terminalClickEvent();
+  context.__replyEvt = replyEvt;
+  runInContext(context, `terminalDirectMessageReply(__replyEvt, 'agent-1', 'dm-ask');`);
+
+  assert.equal(replyEvt.preventDefaultCalled, true);
+  assert.equal(replyEvt.stopPropagationCalled, true);
+  assert.equal(list.scrollTop, 100);
+  assert.equal(terminalFocusCalls(), 0);
+  assert.equal(inputFocusCalls, 1);
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'draft reply');
+  assert.equal(jsonValue(context, `_terminalDirectMessageSelectedByAgent['agent-1']`), 'dm-ask');
+  assert.equal(jsonValue(context, `_terminalDirectMessageReplyToByAgent['agent-1']`), 'dm-ask');
+});
+
 test('embedded terminal direct-message scroll restore uses anchor item unless already at live tail', () => {
   const { context, document } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,

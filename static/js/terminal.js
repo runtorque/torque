@@ -236,7 +236,8 @@ function _renderTerminalDirectMessageRow(row, agent) {
     + '" data-direct-message-id="' + esc(id) + '"'
     + ' data-terminal-dm-anchor="' + esc(id) + '"'
     + ' role="button" tabindex="0"'
-    + ' onclick="terminalDirectMessageSelect(\'' + esc(agent.id) + '\', \'' + esc(id) + '\')"'
+    + ' onmousedown="return terminalDirectMessageMouseDown(event)"'
+    + ' onclick="return terminalDirectMessageSelect(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')"'
     + ' onkeydown="terminalDirectMessageKeydown(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')">'
     + '  <div class="terminal-direct-message-meta">'
     + '    <span class="terminal-direct-message-sender">' + esc(_terminalDirectMessageSenderLabel(row, agent)) + '</span>'
@@ -409,6 +410,41 @@ function _terminalDirectMessagesApplyResizeHeight(root, height) {
   return applied;
 }
 
+function _terminalDirectMessageStopEvent(event) {
+  if (!event) return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+}
+
+function terminalDirectMessageMouseDown(event) {
+  if (event && typeof event.button === 'number' && event.button !== 0) return true;
+  _terminalDirectMessageStopEvent(event);
+  return false;
+}
+
+function _terminalDirectMessageFocusIsTerminal(root) {
+  if (!root || typeof document === 'undefined') return false;
+  const active = document.activeElement;
+  if (!active) return false;
+  if (active.classList && active.classList.contains('terminal-compose-input')) return false;
+  if (typeof active.closest === 'function') {
+    if (active.closest('.terminal-compose')) return false;
+    if (active.closest('.terminal-stage') || active.closest('.terminal-surface')) return true;
+  }
+  const stage = root.querySelector ? root.querySelector('.terminal-stage') : null;
+  if (stage && typeof stage.contains === 'function' && stage.contains(active)) return true;
+  const surface = root.querySelector ? root.querySelector('.terminal-surface') : null;
+  return !!(surface && typeof surface.contains === 'function' && surface.contains(active));
+}
+
+function _captureTerminalDirectMessageInteractionState(root, cell) {
+  const snapshot = root ? _captureTerminalWorkspaceState(root, cell) : null;
+  if (snapshot && snapshot.focus && _terminalDirectMessageFocusIsTerminal(root)) {
+    snapshot.focus = null;
+  }
+  return snapshot;
+}
+
 function terminalDirectMessagesResizeStart(event) {
   if (!event || (typeof event.button === 'number' && event.button !== 0)) return false;
   const root = _terminalDirectMessagesSlotFromEvent(event);
@@ -557,14 +593,23 @@ function _restoreTerminalDirectMessagesState(root, snapshot) {
 }
 
 function terminalDirectMessageSelect(agentId, messageId) {
+  let event = null;
+  if (agentId && typeof agentId === 'object') {
+    event = agentId;
+    agentId = messageId;
+    messageId = arguments.length > 2 ? arguments[2] : '';
+  }
+  _terminalDirectMessageStopEvent(event);
   const aid = String(agentId || '').trim();
   const mid = String(messageId || '').trim();
   if (!aid || !mid) return false;
-  _terminalDirectMessageSelectedByAgent[aid] = mid;
   const root = document.getElementById ? document.getElementById('terminal-workspace') : null;
-  const slot = root && root.querySelector ? root.querySelector('.terminal-direct-messages-slot') : null;
   const cell = _resolveTerminalWorkspaceCell();
+  const snapshot = _captureTerminalDirectMessageInteractionState(root, cell);
+  _terminalDirectMessageSelectedByAgent[aid] = mid;
+  const slot = root && root.querySelector ? root.querySelector('.terminal-direct-messages-slot') : null;
   if (slot) _renderTerminalDirectMessages(slot, cell);
+  if (root) _restoreTerminalWorkspaceState(root, snapshot, cell);
   return false;
 }
 
@@ -572,19 +617,24 @@ function terminalDirectMessageKeydown(evt, agentId, messageId) {
   if (!evt) return;
   if (evt.key !== 'Enter' && evt.key !== ' ') return;
   if (typeof evt.preventDefault === 'function') evt.preventDefault();
-  terminalDirectMessageSelect(agentId, messageId);
+  if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  terminalDirectMessageSelect(evt, agentId, messageId);
 }
 
 function terminalDirectMessageReply(evt, agentId, messageId) {
-  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
-  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  _terminalDirectMessageStopEvent(evt);
   const aid = String(agentId || '').trim();
   const mid = String(messageId || '').trim();
   if (!aid || !mid) return false;
+  const root = document.getElementById ? document.getElementById('terminal-workspace') : null;
+  const cell = _resolveTerminalWorkspaceCell();
+  const snapshot = _captureTerminalDirectMessageInteractionState(root, cell);
   _terminalDirectMessageSelectedByAgent[aid] = mid;
   _terminalDirectMessageReplyToByAgent[aid] = mid;
-  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
-  const root = document.getElementById ? document.getElementById('terminal-workspace') : null;
+  if (typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ suppressTerminalFocus: true });
+  }
+  if (root) _restoreTerminalWorkspaceState(root, snapshot, cell);
   const input = root && root.querySelector ? root.querySelector('.terminal-compose-input') : null;
   if (input && typeof input.focus === 'function') input.focus();
   return false;
@@ -2289,7 +2339,8 @@ function _renderEmbeddedTerminalStagePlaceholder(stage, html) {
   stage._torqueLastHtml = html;
 }
 
-function renderTerminalWorkspace() {
+function renderTerminalWorkspace(opts) {
+  opts = opts || {};
   const root = document.getElementById('terminal-workspace');
   if (!root) return;
   _terminalComposePersistFromDom(root);
@@ -2316,6 +2367,10 @@ function renderTerminalWorkspace() {
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);
+  if (opts.suppressTerminalFocus && workspaceState && workspaceState.focus
+      && _terminalDirectMessageFocusIsTerminal(root)) {
+    workspaceState.focus = null;
+  }
   const title = cell && cell.name ? cell.name : 'Terminal';
   // Idempotent topbar/tabs: skip the innerHTML clobber when the rendered
   // HTML hasn't changed. Under multi-agent activity `renderTerminalWorkspace`
