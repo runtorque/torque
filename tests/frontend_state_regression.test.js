@@ -9098,6 +9098,8 @@ test('embedded terminal direct-message reply click preserves list scroll and foc
   dom.workspace.setQuerySelector('.terminal-compose-input', input);
   document.activeElement = dom.surface;
 
+  assert.match(dom.directMessages.innerHTML, /class="terminal-direct-message-reply" onmousedown="return terminalDirectMessageMouseDown\(event\)"/);
+
   const replyEvt = terminalClickEvent();
   context.__replyEvt = replyEvt;
   runInContext(context, `terminalDirectMessageReply(__replyEvt, 'agent-1', 'dm-ask');`);

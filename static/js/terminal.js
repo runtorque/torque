@@ -226,6 +226,7 @@ function _renderTerminalDirectMessageRow(row, agent) {
   const timeLabel = _terminalDirectMessageTimeLabel(row);
   const askReply = type === 'ask'
     ? '<button type="button" class="terminal-direct-message-reply"'
+      + ' onmousedown="return terminalDirectMessageMouseDown(event)"'
       + ' onclick="return terminalDirectMessageReply(event, \'' + esc(agent.id) + '\', \'' + esc(id) + '\')">'
       + 'Reply</button>'
     : '';
