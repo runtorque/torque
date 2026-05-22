@@ -16,10 +16,13 @@ let _terminalComposeRecall = Object.create(null);
 let _terminalComposeHistoryOpenCellId = '';
 let _terminalDirectMessageSelectedByAgent = Object.create(null);
 let _terminalDirectMessageReplyToByAgent = Object.create(null);
+let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
 let _terminalDirectMessageIdempotencyCounter = 0;
 let _terminalDirectMessagesResizeDrag = null;
 let _lastAppliedXtermScrollback = null;
 
+var TERMINAL_DIRECT_MESSAGES_WINDOW_SIZE = 20;
+var TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD = 36;
 var TERMINAL_DIRECT_MESSAGES_MIN_HEIGHT = 112;
 var TERMINAL_DIRECT_MESSAGES_DEFAULT_HEIGHT = 190;
 var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
@@ -149,6 +152,38 @@ function _terminalDirectMessagesForAgent(agentId) {
   return rows;
 }
 
+function _terminalDirectMessagesWindowSize() {
+  const size = Number(TERMINAL_DIRECT_MESSAGES_WINDOW_SIZE || 20);
+  return Number.isFinite(size) && size > 0 ? Math.floor(size) : 20;
+}
+
+function _terminalDirectMessagesVisibleCount(agentId, total) {
+  const id = String(agentId || '').trim();
+  total = Math.max(0, Math.floor(Number(total || 0) || 0));
+  if (!total) return 0;
+  const windowSize = _terminalDirectMessagesWindowSize();
+  const base = Math.min(total, windowSize);
+  const stored = id
+    ? Number(_terminalDirectMessageVisibleCountByAgent[id] || 0)
+    : 0;
+  const count = stored > 0 ? stored : base;
+  return Math.max(base, Math.min(total, Math.floor(count)));
+}
+
+function _terminalDirectMessagesSetVisibleCount(agentId, count, total) {
+  const id = String(agentId || '').trim();
+  if (!id) return 0;
+  total = Math.max(0, Math.floor(Number(total || 0) || 0));
+  count = Math.max(0, Math.floor(Number(count || 0) || 0));
+  const next = Math.min(total, Math.max(Math.min(total, _terminalDirectMessagesWindowSize()), count));
+  if (!total || next <= _terminalDirectMessagesWindowSize()) {
+    delete _terminalDirectMessageVisibleCountByAgent[id];
+  } else {
+    _terminalDirectMessageVisibleCountByAgent[id] = next;
+  }
+  return next;
+}
+
 function _terminalDirectMessageText(row) {
   return String((row && (row.message || row.text || row.body)) || '');
 }
@@ -265,12 +300,21 @@ function _renderTerminalDirectMessageRow(row, agent) {
 function _renderTerminalDirectMessagesHtml(agent) {
   const agentId = String((agent && agent.id) || '');
   const rows = _terminalDirectMessagesForAgent(agentId);
+  const visibleCount = _terminalDirectMessagesVisibleCount(agentId, rows.length);
+  const start = Math.max(0, rows.length - visibleCount);
+  const visibleRows = rows.slice(start);
   let body = '';
   if (!rows.length) {
     body = '<div class="terminal-direct-messages-empty">No direct messages yet.</div>';
   } else {
-    for (let i = 0; i < rows.length; i++) {
-      body += _renderTerminalDirectMessageRow(rows[i], agent);
+    if (start > 0) {
+      body += '<div class="terminal-direct-messages-window-affordance"'
+        + ' data-terminal-dm-window-affordance="1">'
+        + 'Scroll up to load older messages'
+        + '</div>';
+    }
+    for (let i = 0; i < visibleRows.length; i++) {
+      body += _renderTerminalDirectMessageRow(visibleRows[i], agent);
     }
   }
   return ''
@@ -303,14 +347,31 @@ function _renderTerminalDirectMessages(root, cell) {
     if (root.dataset) root.dataset.agentId = '';
     return;
   }
+  const previous = _captureTerminalDirectMessagesState(root);
   const html = _renderTerminalDirectMessagesHtml(agent);
   root.hidden = false;
   if (root.dataset) root.dataset.agentId = String(agent.id || '');
+  let changed = false;
   if (root._torqueLastHtml !== html || root.innerHTML !== html) {
     root.innerHTML = html;
     root._torqueLastHtml = html;
+    changed = true;
   }
+  _terminalDirectMessagesAttachPagination(root);
   _terminalDirectMessagesApplyPersistedHeight(root);
+  const canRestorePrevious = previous
+    && (!previous.agentId || previous.agentId === String(agent.id || ''));
+  if (canRestorePrevious) {
+    const restorePrevious = root._terminalDirectMessagesLoadingOlder
+      ? Object.assign({}, previous, { atTail: false })
+      : previous;
+    _restoreTerminalDirectMessagesState(root, { terminalDirectMessages: restorePrevious });
+  } else if (changed) {
+    const list = _terminalDirectMessagesList(root);
+    if (list && typeof list.scrollTop === 'number') {
+      list.scrollTop = Math.max(0, (Number(list.scrollHeight) || 0) - (Number(list.clientHeight) || 0));
+    }
+  }
 }
 
 function _terminalDirectMessagesList(root) {
@@ -562,6 +623,56 @@ function _terminalDirectMessagesAtTail(list) {
   const clientHeight = Number(list.clientHeight) || 0;
   const scrollHeight = Number(list.scrollHeight) || 0;
   return scrollHeight <= clientHeight || (scrollHeight - scrollTop - clientHeight) <= 4;
+}
+
+function _terminalDirectMessagesLoadOlder(root) {
+  if (!root) return false;
+  if (root._terminalDirectMessagesSuppressOlderLoad || root._terminalDirectMessagesLoadingOlder) return false;
+  const list = _terminalDirectMessagesList(root);
+  const agentId = String((list && list.dataset && list.dataset.agentId)
+    || (root.dataset && root.dataset.agentId)
+    || '').trim();
+  if (!agentId) return false;
+  const rows = _terminalDirectMessagesForAgent(agentId);
+  const current = _terminalDirectMessagesVisibleCount(agentId, rows.length);
+  if (current >= rows.length) return false;
+  const agent = state && state.agents ? state.agents[agentId] : null;
+  if (!agent) return false;
+  const next = Math.min(rows.length, current + _terminalDirectMessagesWindowSize());
+  _terminalDirectMessagesSetVisibleCount(agentId, next, rows.length);
+  root._terminalDirectMessagesSuppressOlderLoad = true;
+  root._terminalDirectMessagesLoadingOlder = true;
+  try {
+    _renderTerminalDirectMessages(root, agent);
+  } finally {
+    root._terminalDirectMessagesLoadingOlder = false;
+    if (typeof setTimeout === 'function') {
+      setTimeout(function() { root._terminalDirectMessagesSuppressOlderLoad = false; }, 100);
+    } else {
+      root._terminalDirectMessagesSuppressOlderLoad = false;
+    }
+  }
+  return true;
+}
+
+function terminalDirectMessagesScroll(event) {
+  const list = event && (event.currentTarget || event.target);
+  if (!list || typeof list.scrollTop !== 'number') return;
+  if (Number(list.scrollTop || 0) > TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD) return;
+  const root = list._terminalDirectMessagesRoot
+    || (typeof list.closest === 'function' ? list.closest('.terminal-direct-messages-slot') : null);
+  _terminalDirectMessagesLoadOlder(root);
+}
+
+function _terminalDirectMessagesAttachPagination(root) {
+  const list = _terminalDirectMessagesList(root);
+  if (!list) return;
+  list._terminalDirectMessagesRoot = root;
+  if (list._terminalDirectMessagesPaginationAttached) return;
+  list._terminalDirectMessagesPaginationAttached = true;
+  if (typeof list.addEventListener === 'function') {
+    list.addEventListener('scroll', terminalDirectMessagesScroll);
+  }
 }
 
 function _captureTerminalDirectMessagesState(root) {
