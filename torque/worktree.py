@@ -1209,6 +1209,7 @@ class WorktreeManager:
                      base_dir: str = ".torque/worktrees",
                      base_branch: str = "",
                      symlinks: list[str] | None = None,
+                     include_gitignored_symlinks: bool = False,
                      worktree_name: str = "",
                      state=None) -> Optional[str]:
         """Create a git worktree for the cell.
@@ -1220,6 +1221,10 @@ class WorktreeManager:
             base_branch: Branch to fork from (empty = current HEAD).
             symlinks: Relative paths or glob patterns to symlink from repo
                 root into worktree.
+            include_gitignored_symlinks: When true, use git ignore rules to
+                symlink ignored files/directories from the repo root into the
+                worktree. This is opt-in and intentionally skips Torque's
+                runtime directory.
             worktree_name: Optional custom name for the worktree folder and
                 branch suffix.
             state: MatrixState-like object used to resolve owner engineer
@@ -1282,9 +1287,22 @@ class WorktreeManager:
             # Torque agent worktrees; the file is covered by git exclude.
             _configure_claude_code_worktree_settings(cell, wt_path)
 
-            # Create configured symlinks
+            # Create configured symlinks. Explicit paths are applied first;
+            # optional gitignored paths are additive and deduped below.
+            symlink_paths: list[str] = []
             if symlinks:
-                self._create_symlinks(wt_path, repo_root, symlinks)
+                symlink_paths.extend(
+                    self._expand_symlink_paths(repo_root, symlinks)
+                )
+            if include_gitignored_symlinks:
+                symlink_paths.extend(
+                    await self._expand_gitignored_symlink_paths(
+                        repo_root,
+                        base_dir,
+                    )
+                )
+            if symlink_paths:
+                self._create_symlink_paths(wt_path, repo_root, symlink_paths)
 
             return wt_path
         except Exception:
@@ -1359,23 +1377,232 @@ class WorktreeManager:
 
         return expanded
 
+    @staticmethod
+    def _split_git_nul_output(data: bytes) -> list[str]:
+        """Return NUL-delimited git path output as text paths."""
+        if not data:
+            return []
+        text = data.decode("utf-8", "surrogateescape")
+        return [item for item in text.split("\0") if item]
+
+    async def _git_ls_ignored_candidates(self, repo_root: str) -> list[str]:
+        """Ask git for ignored/untracked path candidates."""
+        cmd = [
+            "git",
+            "-C",
+            repo_root,
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.warning(
+                "Failed to enumerate gitignored symlink candidates in %s: %s",
+                repo_root,
+                stderr.decode("utf-8", "replace").strip(),
+            )
+            return []
+        return self._split_git_nul_output(stdout)
+
+    async def _git_check_ignored_paths(self, repo_root: str,
+                                       paths: list[str]) -> list[str]:
+        """Filter candidate paths through git's ignore engine."""
+        if not paths:
+            return []
+        payload = ("\0".join(paths) + "\0").encode(
+            "utf-8",
+            "surrogateescape",
+        )
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            repo_root,
+            "check-ignore",
+            "-z",
+            "--stdin",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate(payload)
+        if proc.returncode == 1:
+            return []
+        if proc.returncode != 0:
+            log.warning(
+                "Failed to filter gitignored symlink candidates in %s: %s",
+                repo_root,
+                stderr.decode("utf-8", "replace").strip(),
+            )
+            return []
+        return self._split_git_nul_output(stdout)
+
+    def _repo_relative_worktree_base_dir(self, repo_root: str,
+                                         base_dir: str) -> str:
+        """Return configured worktree base dir relative to repo, if inside."""
+        repo_abs = os.path.realpath(os.path.expanduser(repo_root))
+        base_abs = _resolve_worktree_base_path(repo_abs, base_dir)
+        try:
+            if os.path.commonpath([repo_abs, base_abs]) != repo_abs:
+                return ""
+        except ValueError:
+            return ""
+        rel_path = os.path.relpath(base_abs, repo_abs)
+        return _normalize_repo_rel_path(rel_path)
+
+    @staticmethod
+    def _is_dot_git_path(rel_path: str) -> bool:
+        return rel_path == ".git" or rel_path.startswith(".git/")
+
+    @staticmethod
+    def _is_torque_runtime_path(rel_path: str) -> bool:
+        return rel_path == ".torque" or rel_path.startswith(".torque/")
+
+    @staticmethod
+    def _is_same_ancestor_or_descendant(path: str, other: str) -> bool:
+        if not path or not other:
+            return False
+        return (
+            path == other
+            or path.startswith(other + "/")
+            or other.startswith(path + "/")
+        )
+
+    def _normalize_gitignored_symlink_candidate(self, raw_path: str) -> str:
+        """Normalize a git-reported ignored path without parsing ignores."""
+        raw_path = str(raw_path or "")
+        if not raw_path:
+            return ""
+        if os.path.isabs(raw_path):
+            log.warning("Skipping absolute gitignored symlink path: %s",
+                        raw_path)
+            return ""
+        trimmed = raw_path.strip("/")
+        if not trimmed:
+            return ""
+        parts = [part for part in trimmed.split("/") if part]
+        if any(part == ".." for part in parts):
+            log.warning("Skipping invalid gitignored symlink path: %s",
+                        raw_path)
+            return ""
+        normalized = os.path.normpath(trimmed).replace(os.sep, "/")
+        if normalized in {"", "."}:
+            return ""
+        return normalized
+
+    def _filter_gitignored_symlink_candidates(
+            self, repo_root: str, base_dir: str,
+            paths: list[str]) -> list[str]:
+        """Apply Torque safety rules to gitignored symlink candidates."""
+        repo_abs = os.path.abspath(os.path.expanduser(repo_root))
+        base_rel = self._repo_relative_worktree_base_dir(repo_abs, base_dir)
+        filtered: list[str] = []
+        seen: set[str] = set()
+
+        for raw_path in paths:
+            rel_path = self._normalize_gitignored_symlink_candidate(raw_path)
+            if not rel_path or rel_path in seen:
+                continue
+            if self._is_dot_git_path(rel_path):
+                log.debug("Skipping .git symlink candidate: %s", rel_path)
+                continue
+            if self._is_torque_runtime_path(rel_path):
+                log.debug(
+                    "Skipping Torque runtime symlink candidate: %s",
+                    rel_path,
+                )
+                continue
+            if self._is_same_ancestor_or_descendant(rel_path, base_rel):
+                log.debug(
+                    "Skipping worktree base symlink candidate: %s",
+                    rel_path,
+                )
+                continue
+            target = os.path.abspath(os.path.join(repo_abs, rel_path))
+            try:
+                if os.path.commonpath([repo_abs, target]) != repo_abs:
+                    log.warning(
+                        "Skipping gitignored symlink target outside repo: %s",
+                        target,
+                    )
+                    continue
+            except ValueError:
+                log.warning(
+                    "Skipping invalid gitignored symlink target: %s",
+                    target,
+                )
+                continue
+            seen.add(rel_path)
+            filtered.append(rel_path)
+
+        return filtered
+
+    async def _expand_gitignored_symlink_paths(
+            self, repo_root: str, base_dir: str) -> list[str]:
+        """Return ignored paths to symlink, resolved by git ignore rules."""
+        candidates = await self._git_ls_ignored_candidates(repo_root)
+        if not candidates:
+            return []
+        ignored_paths = await self._git_check_ignored_paths(
+            repo_root,
+            candidates,
+        )
+        return self._filter_gitignored_symlink_candidates(
+            repo_root,
+            base_dir,
+            ignored_paths,
+        )
+
     def _create_symlinks(self, wt_path: str, repo_root: str,
                          symlinks: list[str]) -> None:
         """Create symlinks in worktree pointing to repo root paths."""
+        self._create_symlink_paths(
+            wt_path,
+            repo_root,
+            self._expand_symlink_paths(repo_root, symlinks),
+        )
+
+    def _create_symlink_paths(self, wt_path: str, repo_root: str,
+                              rel_paths: list[str]) -> None:
+        """Create symlinks in worktree for normalized repo-relative paths."""
         created = []
-        for rel_path in self._expand_symlink_paths(repo_root, symlinks):
+        seen: set[str] = set()
+        for rel_path in rel_paths:
+            rel_path = self._normalize_symlink_pattern(rel_path)
+            if not rel_path or rel_path in seen:
+                continue
+            seen.add(rel_path)
+            if self._is_dot_git_path(rel_path):
+                log.warning("Skipping .git symlink path: %s", rel_path)
+                continue
             target = os.path.join(repo_root, rel_path)
             link = os.path.join(wt_path, rel_path)
             if not os.path.exists(target):
                 log.warning("Symlink target does not exist, skipping: %s",
                             target)
                 continue
-            if os.path.exists(link) or os.path.islink(link):
+            if os.path.lexists(link):
                 log.debug("Path already exists in worktree, skipping "
                           "symlink: %s", link)
                 continue
-            os.makedirs(os.path.dirname(link), exist_ok=True)
+            parent = os.path.dirname(link)
+            if os.path.lexists(parent) and not os.path.isdir(parent):
+                log.debug(
+                    "Symlink parent exists and is not a directory, "
+                    "skipping: %s",
+                    parent,
+                )
+                continue
             try:
+                os.makedirs(parent, exist_ok=True)
                 os.symlink(target, link)
                 log.info("Created symlink %s → %s", link, target)
                 created.append(rel_path)

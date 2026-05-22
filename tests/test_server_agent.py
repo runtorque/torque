@@ -47,6 +47,7 @@ class _FakeState:
             checkpoint_on_progress=False,
             worktree_merge_squash=True,
             worktree_symlinks=[],
+            worktree_symlink_gitignored_paths=False,
         )
         self._engineer_settings = types.SimpleNamespace(
             engineer_provider=engineer_provider,

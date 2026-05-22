@@ -253,6 +253,127 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lines.count("etl/service-a/node_modules"), 1)
         self.assertEqual(lines.count("etl/service-b/node_modules"), 1)
 
+    async def test_create_worktree_symlinks_gitignored_paths(self):
+        (self.repo_root / ".gitignore").write_text(
+            "\n".join([
+                ".env",
+                "node_modules/",
+                "build/",
+                "**/node_modules/",
+                "*.log",
+                "!keep.log",
+                ".torque/*",
+                "!.torque/actions/",
+                "!.torque/actions/**",
+                "",
+            ])
+        )
+        (self.repo_root / ".env").write_text("TOKEN=secret\n")
+        (self.repo_root / "node_modules" / "pkg").mkdir(parents=True)
+        (self.repo_root / "node_modules" / "pkg" / "index.js").write_text("")
+        (self.repo_root / "build" / "cache").mkdir(parents=True)
+        (self.repo_root / "build" / "cache" / "artifact").write_text("")
+        nested = self.repo_root / "src" / "app" / "node_modules" / "pkg"
+        nested.mkdir(parents=True)
+        (nested / "index.js").write_text("")
+        (self.repo_root / "scratch").mkdir()
+        (self.repo_root / "scratch" / "output.log").write_text("debug\n")
+        (self.repo_root / "keep.log").write_text("tracked\n")
+        (self.repo_root / ".torque" / "actions").mkdir(parents=True)
+        (self.repo_root / ".torque" / "actions" / "demo.yaml").write_text(
+            "name: demo\n"
+        )
+        (self.repo_root / ".torque" / "logs").mkdir(parents=True)
+        (self.repo_root / ".torque" / "logs" / "daemon.log").write_text("")
+        (self.repo_root / ".torque" / "torque.db").write_text("db\n")
+        (self.repo_root / ".torque" / "torque.db-wal").write_text("wal\n")
+        await self._git("add", ".gitignore", "keep.log",
+                        ".torque/actions/demo.yaml")
+        await self._git("commit", "-m", "Add ignore fixtures")
+
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            include_gitignored_symlinks=True,
+        )
+
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        self.assertTrue((wt / ".env").is_symlink())
+        self.assertEqual((wt / ".env").resolve(),
+                         (self.repo_root / ".env").resolve())
+        self.assertTrue((wt / "node_modules").is_symlink())
+        self.assertTrue((wt / "build").is_symlink())
+        self.assertFalse((wt / "build" / "cache").is_symlink())
+        self.assertTrue((wt / "src" / "app" / "node_modules").is_symlink())
+        self.assertFalse((wt / "src").is_symlink())
+        self.assertFalse((wt / "src" / "app").is_symlink())
+        self.assertTrue((wt / "scratch" / "output.log").is_symlink())
+        self.assertFalse((wt / "scratch").is_symlink())
+        self.assertFalse((wt / "keep.log").is_symlink())
+
+        # The auto-gitignore path must never expose Torque runtime state,
+        # even when .torque/ is partially ignored and git enumerates children.
+        self.assertFalse((wt / ".torque" / "torque.db").exists())
+        self.assertFalse((wt / ".torque" / "torque.db-wal").exists())
+        self.assertFalse((wt / ".torque" / "logs").exists())
+        self.assertFalse((wt / ".torque" / "worktrees").exists())
+        self.assertTrue((wt / ".torque" / "actions" / "demo.yaml").exists())
+        self.assertFalse(
+            (wt / ".torque" / "actions" / "demo.yaml").is_symlink()
+        )
+
+        exclude = self._worktree_gitdir(wt_path) / "info" / "exclude"
+        lines = exclude.read_text().splitlines()
+        self.assertIn(".env", lines)
+        self.assertIn("node_modules", lines)
+        self.assertIn("build", lines)
+        self.assertIn("src/app/node_modules", lines)
+        self.assertIn("scratch/output.log", lines)
+        self.assertNotIn(".torque/torque.db", lines)
+        self.assertNotIn(".torque/logs", lines)
+
+    async def test_gitignored_symlinks_do_not_clobber_explicit_links(self):
+        (self.repo_root / ".gitignore").write_text("local-only/\n")
+        await self._git("add", ".gitignore")
+        await self._git("commit", "-m", "Ignore local fixtures")
+
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            symlinks=["local-only/config.json"],
+            include_gitignored_symlinks=True,
+        )
+
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        self.assertFalse((wt / "local-only").is_symlink())
+        self.assertTrue((wt / "local-only" / "config.json").is_symlink())
+        self.assertEqual(
+            (wt / "local-only" / "config.json").resolve(),
+            (self.repo_root / "local-only" / "config.json").resolve(),
+        )
+
+    def test_gitignored_symlink_filter_skips_dot_git_and_torque_runtime(self):
+        filtered = self.mgr._filter_gitignored_symlink_candidates(
+            str(self.repo_root),
+            ".torque/worktrees",
+            [
+                ".git",
+                ".git/config",
+                ".torque/torque.db",
+                ".torque/logs/",
+                ".torque/worktrees/",
+                "node_modules/",
+            ],
+        )
+
+        self.assertEqual(filtered, ["node_modules"])
+
     async def test_get_repo_root_returns_common_root_for_linked_worktree(self):
         cell = self._make_cell()
 

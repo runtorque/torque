@@ -8415,6 +8415,8 @@ async def _handle_relaunch_agent_command(
                     base_dir=cell.worktree_base_dir or ".torque/worktrees",
                     base_branch=launch_cfg.get("worktree_base_branch", "") or "",
                     symlinks=launch_cfg.get("worktree_symlinks", []),
+                    include_gitignored_symlinks=launch_cfg.get(
+                        "worktree_symlink_gitignored_paths", False),
                     state=state,
                 )
                 if wt_path:
@@ -11273,6 +11275,11 @@ async def main(connection=None):
                             base_branch=cell.worktree_base_branch
                                 or gs.worktree_base_branch or "",
                             symlinks=gs.worktree_symlinks,
+                            include_gitignored_symlinks=getattr(
+                                gs,
+                                "worktree_symlink_gitignored_paths",
+                                False,
+                            ),
                             state=state,
                         )
                         if wt_path:

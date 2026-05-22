@@ -349,6 +349,9 @@ class AgentLaunchService:
                 "worktree_merge_squash", gs.worktree_merge_squash),
             "worktree_symlinks": resolved.get(
                 "worktree_symlinks", gs.worktree_symlinks),
+            "worktree_symlink_gitignored_paths": resolved.get(
+                "worktree_symlink_gitignored_paths",
+                getattr(gs, "worktree_symlink_gitignored_paths", False)),
             "terminals": resolved.get("terminals", []),
         }
 
@@ -591,6 +594,8 @@ class AgentLaunchService:
                     base_dir=cell.worktree_base_dir or ".torque/worktrees",
                     base_branch=launch_cfg.get("worktree_base_branch", ""),
                     symlinks=launch_cfg.get("worktree_symlinks", []),
+                    include_gitignored_symlinks=launch_cfg.get(
+                        "worktree_symlink_gitignored_paths", False),
                     worktree_name=launch_cfg.get("worktree_name", ""),
                     state=self.state,
                 )
