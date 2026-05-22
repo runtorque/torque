@@ -157,6 +157,14 @@ function _terminalDirectMessageType(row) {
   return String((row && row.message_type) || 'message').trim().toLowerCase() || 'message';
 }
 
+function _terminalDirectMessageBodyHtml(row) {
+  const text = _terminalDirectMessageText(row);
+  if (typeof torqueRenderMarkdownMessage === 'function') {
+    return torqueRenderMarkdownMessage(text);
+  }
+  return esc(text).replace(/\n/g, '<br>');
+}
+
 function _terminalDirectMessageDirection(row, agent) {
   const type = _terminalDirectMessageType(row);
   if (type === 'system') return 'system';
@@ -249,7 +257,7 @@ function _renderTerminalDirectMessageRow(row, agent) {
       ? '    <span class="terminal-direct-message-time">' + esc(timeLabel) + '</span>'
       : '')
     + '  </div>'
-    + '  <div class="terminal-direct-message-body">' + esc(_terminalDirectMessageText(row)).replace(/\n/g, '<br>') + '</div>'
+    + '  <div class="terminal-direct-message-body torque-markdown">' + _terminalDirectMessageBodyHtml(row) + '</div>'
     + (askReply ? '  <div class="terminal-direct-message-actions">' + askReply + '</div>' : '')
     + '</div>';
 }
@@ -417,8 +425,18 @@ function _terminalDirectMessageStopEvent(event) {
   if (typeof event.stopPropagation === 'function') event.stopPropagation();
 }
 
+function _terminalDirectMessageMarkdownLinkTarget(event) {
+  const target = event && event.target;
+  if (!target || typeof target.closest !== 'function') return null;
+  return target.closest('a[data-torque-markdown-link]');
+}
+
 function terminalDirectMessageMouseDown(event) {
   if (event && typeof event.button === 'number' && event.button !== 0) return true;
+  if (_terminalDirectMessageMarkdownLinkTarget(event)) {
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    return true;
+  }
   _terminalDirectMessageStopEvent(event);
   return false;
 }
@@ -600,6 +618,10 @@ function terminalDirectMessageSelect(agentId, messageId) {
     agentId = messageId;
     messageId = arguments.length > 2 ? arguments[2] : '';
   }
+  if (_terminalDirectMessageMarkdownLinkTarget(event)) {
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    return true;
+  }
   _terminalDirectMessageStopEvent(event);
   const aid = String(agentId || '').trim();
   const mid = String(messageId || '').trim();
@@ -616,6 +638,10 @@ function terminalDirectMessageSelect(agentId, messageId) {
 
 function terminalDirectMessageKeydown(evt, agentId, messageId) {
   if (!evt) return;
+  if (_terminalDirectMessageMarkdownLinkTarget(evt)) {
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    return;
+  }
   if (evt.key !== 'Enter' && evt.key !== ' ') return;
   if (typeof evt.preventDefault === 'function') evt.preventDefault();
   if (typeof evt.stopPropagation === 'function') evt.stopPropagation();

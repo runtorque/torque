@@ -279,8 +279,20 @@ function _chatParticipantsText(thread) {
   return names.join(' · ');
 }
 
+function _chatMessageRawText(message) {
+  return String((message && (message.message || message.content || message.text)) || '');
+}
+
 function _chatMessageText(message) {
-  return String((message && (message.message || message.content || message.text)) || '').trim();
+  return _chatMessageRawText(message).trim();
+}
+
+function _chatMessageBodyHtml(message) {
+  var text = _chatMessageRawText(message);
+  if (typeof torqueRenderMarkdownMessage === 'function') {
+    return torqueRenderMarkdownMessage(text);
+  }
+  return _chatEsc(text);
 }
 
 function _chatFirstLine(value, limit) {
@@ -600,7 +612,7 @@ function _chatMessageCardHtml(message, index, thread) {
   if (meta) html += meta;
   if (timeLabel) html += '<span class="chat-message-time">' + _chatEsc(timeLabel) + '</span>';
   html += '</div>';
-  html += '<div class="chat-message-body">' + _chatEsc(_chatMessageText(message)) + '</div>';
+  html += '<div class="chat-message-body torque-markdown">' + _chatMessageBodyHtml(message) + '</div>';
   if (recipient) {
     html += '<div class="chat-message-recipient">To ' + _chatEsc(recipient) + '</div>';
   }
