@@ -8,7 +8,7 @@ Phase 1 hardens the original spike while staying isolated under `ee/relay/`:
 - **Storage port** (`RelayStore` in `src/core/ports.ts`): shared schema/migration SQL in `src/core/sql.ts`, idempotent append by envelope id, delivery state, bounded pending-list/replay, and SQLite/D1 adapters.
 - **Coordination port** (`RelayCoordinator` in `src/core/ports.ts`): single-owner daemon rendezvous with monotonic epoch/fencing, standalone registry adapter, and Durable Object adapter using hibernated WebSocket attachments.
 - **Entrypoint seam**: standalone Node `http`+`ws` server plus Cloudflare Worker fetch/DO routing scaffold.
-- **Runtime** (`src/core/runtime.ts`): shared offline queue, replay, delivery-attempt marking, and ack handling used by entrypoints.
+- **Runtime** (`src/core/runtime.ts`): shared offline queue, replay, delivery-attempt marking, and ack handling used by the standalone entrypoint and intended as the common behavior contract for Cloudflare follow-up hardening.
 
 > Security boundary: Phase 1 intentionally does **not** implement auth. Standalone/relay attach remains unauthenticated for local/dev only. Auth, pairing, and owner-hijack protection are Phase 4 and required before any remote exposure.
 
@@ -39,6 +39,8 @@ npm run dev
 ## Cloudflare scaffold
 
 `wrangler.toml` declares a D1 binding and a Durable Object namespace. Replace `REPLACE_WITH_D1_DATABASE_ID` after creating a D1 database, then use Wrangler with the user's Cloudflare account. Phase 1 type-checks and tests the adapter shape locally, but intentionally does **not** validate a live deploy.
+
+Cloudflare Phase 1 limitation: the Worker/DO path is still a scaffold for account-gated deployment. It persists HTTP enqueue rows in D1 and routes active sockets through the Durable Object, but full Cloudflare replay/ack orchestration is not yet wired through `RelayRuntime`; that belongs with the later daemon connector/auth/productionization slices before exposure.
 
 ## Protocol routes
 

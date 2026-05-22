@@ -44,14 +44,14 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
     daemonId: "daemon-1",
     clientId: "",
     connectionId: "daemon-old",
-    epoch: 0,
+    epoch: 1,
   });
   const newDaemon = new FakeCfWebSocket({
     role: "daemon",
     daemonId: "daemon-1",
     clientId: "",
     connectionId: "daemon-new",
-    epoch: 0,
+    epoch: 2,
   });
   const client = new FakeCfWebSocket({
     role: "client",
@@ -66,6 +66,8 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
   await durableObject.rehydrateHibernatedSocketsForTest();
 
   assert.equal(oldDaemon.closes.some((close) => close.code === 4000 && close.reason === "replaced_by_new_daemon_connection"), true);
+  assert.equal(newDaemon.envelopes().find((envelope) => envelope.kind === "ready")?.target.kind, "daemon");
+  assert.equal(client.envelopes().find((envelope) => envelope.kind === "ready")?.target.kind, "remote-client");
   const snapshot = await durableObject.snapshotForTest("daemon-1");
   assert.equal(snapshot.daemon_online, true);
   assert.equal(snapshot.daemon_connection_id, "daemon-new");
@@ -109,4 +111,31 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
   });
   await durableObject.webSocketMessage(newDaemon as unknown as WebSocket, JSON.stringify(currentDaemonMessage));
   assert.equal(client.envelopes().some((envelope) => envelope.id === "msg-current"), true);
+});
+
+test("Durable Object rehydrate preserves latest daemon owner when Cloudflare returns sockets in reverse epoch order", async () => {
+  const currentDaemon = new FakeCfWebSocket({
+    role: "daemon",
+    daemonId: "daemon-1",
+    clientId: "",
+    connectionId: "daemon-current",
+    epoch: 2,
+  });
+  const staleDaemon = new FakeCfWebSocket({
+    role: "daemon",
+    daemonId: "daemon-1",
+    clientId: "",
+    connectionId: "daemon-stale",
+    epoch: 1,
+  });
+  const state = new FakeDurableObjectState([currentDaemon, staleDaemon]);
+  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, {});
+
+  await durableObject.rehydrateHibernatedSocketsForTest();
+
+  const snapshot = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(snapshot.daemon_connection_id, "daemon-current");
+  assert.equal(snapshot.epoch, 2);
+  assert.equal(staleDaemon.closes.some((close) => close.code === 4000), true);
+  assert.equal(currentDaemon.closes.some((close) => close.code === 4000), false);
 });

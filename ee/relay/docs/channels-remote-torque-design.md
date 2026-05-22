@@ -1,7 +1,7 @@
 # Channels / Remote Torque — design artifact + dual-target relay spike
 
-Task: `TORQUE:544`  
-Date: 2026-05-22  
+Task: `TORQUE:544`
+Date: 2026-05-22
 Status: design + de-risking spike ready for human approval gate
 
 ## 1. Executive summary

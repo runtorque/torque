@@ -43,6 +43,8 @@ test("standalone Node entrypoint accepts HTTP enqueue, replays over daemon WS, a
     assert.ok(ready);
     assert.ok(replayed);
     assert.equal(ready.kind, "ready");
+    assert.equal(ready.target.kind, "daemon");
+    assert.equal(ready.target.id, "daemon-1");
     assert.equal(ready.payload.replayed, 1);
     assert.equal(replayed.id, "msg-http-queued");
     assert.equal(replayed.payload.message, "from http");

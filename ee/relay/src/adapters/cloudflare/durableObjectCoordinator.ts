@@ -1,4 +1,5 @@
 import {
+  type RelayEndpoint,
   makeErrorEnvelope,
   makeRelayEnvelope,
   parseRelayEnvelope,
@@ -110,7 +111,12 @@ export class DaemonRendezvousDurableObject {
   }
 
   private async attachSocket(ws: WebSocket, attachment: DurableObjectSessionAttachment): Promise<void> {
-    const socket = new CloudflareRelaySocket(attachment.connectionId, ws);
+    const socket = new CloudflareRelaySocket(
+      attachment.connectionId,
+      ws,
+      attachment.daemonId,
+      controlTargetForAttachment(attachment),
+    );
     if (attachment.role === "daemon") {
       const result = await this.registry.attachDaemon({ daemonId: attachment.daemonId, socket });
       attachment.epoch = result.epoch;
@@ -131,29 +137,31 @@ export class DaemonRendezvousDurableObject {
   private async rehydrateFromHibernatedSockets(): Promise<void> {
     if (this.rehydrated) return;
     this.rehydrated = true;
-    for (const ws of this.state.getWebSockets()) {
-      const attachment = socketAttachment(ws);
-      if (!attachment) continue;
+    for (const { ws, attachment } of hibernatedSocketEntries(this.state.getWebSockets())) {
       await this.attachSocket(ws, attachment);
     }
   }
 }
 
 class CloudflareRelaySocket implements RelaySocket {
-  constructor(readonly id: string, private readonly ws: WebSocket) {}
+  constructor(
+    readonly id: string,
+    private readonly ws: WebSocket,
+    private readonly daemonId: string,
+    private readonly controlTarget: RelayEndpoint,
+  ) {}
 
   sendEnvelope(envelope: RelayEnvelope): void {
     this.ws.send(JSON.stringify(envelope));
   }
 
   sendControl(kind: "ready" | "error", payload: object): void {
-    const payloadRecord = payload as Record<string, unknown>;
     this.sendEnvelope(makeRelayEnvelope({
-      daemon_id: String(payloadRecord.daemonId || payloadRecord.daemon_id || "relay"),
+      daemon_id: this.daemonId || "relay",
       source: { kind: "relay", id: "cloudflare-do" },
-      target: { kind: "remote-client", id: this.id },
+      target: this.controlTarget,
       kind,
-      payload: toJsonObject(payloadRecord),
+      payload: toJsonObject(payload as Record<string, unknown>),
     }));
   }
 
@@ -182,6 +190,41 @@ function socketAttachment(ws: WebSocket): DurableObjectSessionAttachment | null 
   const value = ws.deserializeAttachment?.() as DurableObjectSessionAttachment | undefined;
   if (!value || !value.role || !value.daemonId || !value.connectionId) return null;
   return value;
+}
+
+function hibernatedSocketEntries(
+  sockets: WebSocket[],
+): Array<{ ws: WebSocket; attachment: DurableObjectSessionAttachment }> {
+  return sockets
+    .map((ws) => ({ ws, attachment: socketAttachment(ws) }))
+    .filter((entry): entry is { ws: WebSocket; attachment: DurableObjectSessionAttachment } => Boolean(entry.attachment))
+    .sort((left, right) => {
+      // Rehydrate daemon owners in serialized epoch order so a stale hibernated
+      // socket cannot replace the newer owner just because Cloudflare returned
+      // getWebSockets() in reverse order. Clients attach after daemon election
+      // so their ready payload observes the restored owner epoch.
+      const roleOrder = rolePriority(left.attachment.role) - rolePriority(right.attachment.role);
+      if (roleOrder) return roleOrder;
+      const daemonOrder = left.attachment.daemonId.localeCompare(right.attachment.daemonId);
+      if (daemonOrder) return daemonOrder;
+      if (left.attachment.role === "daemon" && right.attachment.role === "daemon") {
+        const epochOrder = Number(left.attachment.epoch || 0) - Number(right.attachment.epoch || 0);
+        if (epochOrder) return epochOrder;
+      }
+      const clientOrder = left.attachment.clientId.localeCompare(right.attachment.clientId);
+      if (clientOrder) return clientOrder;
+      return left.attachment.connectionId.localeCompare(right.attachment.connectionId);
+    });
+}
+
+function rolePriority(role: DurableObjectSessionAttachment["role"]): number {
+  return role === "daemon" ? 0 : 1;
+}
+
+function controlTargetForAttachment(attachment: DurableObjectSessionAttachment): RelayEndpoint {
+  return attachment.role === "daemon"
+    ? { kind: "daemon", id: attachment.daemonId }
+    : { kind: "remote-client", id: attachment.clientId || attachment.connectionId };
 }
 
 function withSuppressedSend(ws: WebSocket, envelope: RelayEnvelope): void {

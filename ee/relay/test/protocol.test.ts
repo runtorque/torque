@@ -59,6 +59,30 @@ test("parseRelayEnvelope validates version, kind, endpoints, JSON payload and ti
     () => parseRelayEnvelope({ ...envelope, payload: [] }),
     RelayProtocolError,
   );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, id: {} }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, trace_id: {} }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, created_at: 1779480000 }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, source: { ...envelope.source, id: {} } }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, source: { ...envelope.source, user_id: {} } }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, source: { ...envelope.source, platform: {} } }),
+    RelayProtocolError,
+  );
 });
 
 test("ack envelopes require payload.ack_id", () => {
@@ -76,6 +100,43 @@ test("ack envelopes require payload.ack_id", () => {
 
   assert.throws(
     () => parseRelayEnvelope({ ...ack, payload: {} }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...ack, payload: { ack_id: {} } }),
+    RelayProtocolError,
+  );
+});
+
+test("error envelopes reject non-string protocol fields", () => {
+  const errorEnvelope = makeRelayEnvelope({
+    id: "err-1",
+    daemon_id: "daemon-1",
+    source: { kind: "relay", id: "relay" },
+    target: { kind: "daemon", id: "daemon-1" },
+    kind: "error",
+    created_at: "2026-05-22T00:00:02.000Z",
+    payload: {
+      code: "bad_request",
+      message: "bad request",
+      ref_id: "msg-1",
+    },
+  });
+  assert.equal(parseRelayEnvelope(errorEnvelope).payload.code, "bad_request");
+  assert.throws(
+    () => parseRelayEnvelope({ ...errorEnvelope, payload: { ...errorEnvelope.payload, code: {} } }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...errorEnvelope, payload: { ...errorEnvelope.payload, message: {} } }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...errorEnvelope, payload: { ...errorEnvelope.payload, ref_id: {} } }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...errorEnvelope, payload: { ...errorEnvelope.payload, retryable: "true" } }),
     RelayProtocolError,
   );
 });

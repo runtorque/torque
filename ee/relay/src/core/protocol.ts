@@ -109,12 +109,12 @@ export function makeRelayEnvelope<Payload extends JsonObject = JsonObject>(
 ): RelayEnvelope<Payload> {
   const daemonId = cleanRequiredString(args.daemon_id, "daemon_id");
   const kind = normalizeMessageKind(args.kind);
-  const createdAt = cleanOptionalString(args.created_at) || new Date().toISOString();
+  const createdAt = cleanOptionalString(args.created_at, "created_at") || new Date().toISOString();
   validateTimestamp(createdAt, "created_at");
   const envelope: RelayEnvelope<Payload> = {
     v: RELAY_PROTOCOL_VERSION,
-    id: cleanOptionalString(args.id) || newRelayId(kind === "ack" ? "ack" : "msg"),
-    trace_id: cleanOptionalString(args.trace_id) || undefined,
+    id: cleanOptionalString(args.id, "id") || newRelayId(kind === "ack" ? "ack" : "msg"),
+    trace_id: cleanOptionalString(args.trace_id, "trace_id") || undefined,
     daemon_id: daemonId,
     source: normalizeEndpoint(args.source, "source"),
     target: normalizeEndpoint(args.target, "target"),
@@ -143,7 +143,8 @@ export function makeAckEnvelope(args: {
   };
   if (args.ack_kind) payload.ack_kind = normalizeMessageKind(args.ack_kind);
   if (args.delivery_state) payload.delivery_state = args.delivery_state;
-  if (args.reason) payload.reason = String(args.reason || "");
+  const reason = cleanOptionalString(args.reason, "reason");
+  if (reason) payload.reason = reason;
   return makeRelayEnvelope({
     daemon_id: args.daemon_id,
     source: args.source,
@@ -173,7 +174,8 @@ export function makeErrorEnvelope(args: {
     message: cleanRequiredString(args.message, "message"),
   };
   if (typeof args.retryable === "boolean") payload.retryable = args.retryable;
-  if (args.ref_id) payload.ref_id = String(args.ref_id || "");
+  const refId = cleanOptionalString(args.ref_id, "ref_id");
+  if (refId) payload.ref_id = refId;
   return makeRelayEnvelope({
     daemon_id: args.daemon_id,
     source: args.source,
@@ -199,7 +201,7 @@ export function parseRelayEnvelope(input: unknown): RelayEnvelope {
   const envelope: RelayEnvelope = {
     v: RELAY_PROTOCOL_VERSION,
     id: cleanRequiredString(raw.id, "id"),
-    trace_id: cleanOptionalString(raw.trace_id) || undefined,
+    trace_id: cleanOptionalString(raw.trace_id, "trace_id") || undefined,
     daemon_id: cleanRequiredString(raw.daemon_id, "daemon_id"),
     source: normalizeEndpoint(raw.source, "source"),
     target: normalizeEndpoint(raw.target, "target"),
@@ -227,7 +229,7 @@ export function isRelayMessageKind(value: unknown): value is RelayMessageKind {
 
 export function ackIdFromEnvelope(envelope: RelayEnvelope): string {
   if (envelope.kind !== "ack") return "";
-  return cleanOptionalString((envelope.payload as AckPayload).ack_id) || "";
+  return cleanOptionalString((envelope.payload as AckPayload).ack_id, "ack.payload.ack_id") || "";
 }
 
 export function endpointToJson(endpoint: RelayEndpoint): JsonObject {
@@ -253,8 +255,8 @@ function normalizeEndpoint(value: unknown, fieldName: string): RelayEndpoint {
     kind,
     id: cleanRequiredString(raw.id, `${fieldName}.id`),
   };
-  const userId = cleanOptionalString(raw.user_id);
-  const platform = cleanOptionalString(raw.platform);
+  const userId = cleanOptionalString(raw.user_id, `${fieldName}.user_id`);
+  const platform = cleanOptionalString(raw.platform, `${fieldName}.platform`);
   if (userId) result.user_id = userId;
   if (platform) result.platform = platform;
   return result;
@@ -307,9 +309,25 @@ function validateEnvelopeSemantics(envelope: RelayEnvelope): void {
   if (envelope.kind === "ack" && !ackIdFromEnvelope(envelope)) {
     throw new RelayProtocolError("ack payload.ack_id is required");
   }
+  if (envelope.kind === "ack") {
+    const payload = envelope.payload as AckPayload;
+    if (payload.ack_kind !== undefined) normalizeMessageKind(payload.ack_kind);
+    if (
+      payload.delivery_state !== undefined
+      && !["delivered", "acked", "failed"].includes(cleanRequiredString(payload.delivery_state, "ack.payload.delivery_state"))
+    ) {
+      throw new RelayProtocolError(`ack.payload.delivery_state is invalid: ${String(payload.delivery_state)}`);
+    }
+    cleanOptionalString(payload.reason, "ack.payload.reason");
+  }
   if (envelope.kind === "error") {
-    cleanRequiredString((envelope.payload as ErrorPayload).code, "error.payload.code");
-    cleanRequiredString((envelope.payload as ErrorPayload).message, "error.payload.message");
+    const payload = envelope.payload as ErrorPayload;
+    cleanRequiredString(payload.code, "error.payload.code");
+    cleanRequiredString(payload.message, "error.payload.message");
+    cleanOptionalString(payload.ref_id, "error.payload.ref_id");
+    if (payload.retryable !== undefined && typeof payload.retryable !== "boolean") {
+      throw new RelayProtocolError("error.payload.retryable must be a boolean");
+    }
   }
 }
 
@@ -321,11 +339,15 @@ function validateTimestamp(value: string, fieldName: string): void {
 }
 
 function cleanRequiredString(value: unknown, fieldName: string): string {
-  const text = cleanOptionalString(value);
+  const text = cleanOptionalString(value, fieldName);
   if (!text) throw new RelayProtocolError(`${fieldName} is required`);
   return text;
 }
 
-function cleanOptionalString(value: unknown): string {
-  return String(value || "").trim();
+function cleanOptionalString(value: unknown, fieldName: string): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    throw new RelayProtocolError(`${fieldName} must be a string`);
+  }
+  return value.trim();
 }

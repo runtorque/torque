@@ -163,14 +163,20 @@ async function attachRelayWebSocket(
     if (route.role === "daemon") {
       const result = await runtime.attachDaemon(route.daemonId, socket);
       epoch = result.epoch;
-      socket.sendEnvelope(runtime.makeReadyEnvelope(route.daemonId, connectionId, resultToPayload(result)));
+      socket.sendEnvelope(runtime.makeReadyEnvelope(route.daemonId, connectionId, resultToPayload(result), "daemon"));
     } else {
       const result = await runtime.attachClient(route.daemonId, route.clientId, socket);
       epoch = result.epoch;
       socket.sendEnvelope(runtime.makeReadyEnvelope(route.daemonId, connectionId, resultToPayload(result)));
     }
   } catch (error) {
-    socket.sendEnvelope(runtime.makeErrorEnvelope(route.daemonId, connectionId, error));
+    socket.sendEnvelope(runtime.makeErrorEnvelope(
+      route.daemonId,
+      connectionId,
+      error,
+      "",
+      route.role === "daemon" ? "daemon" : "remote-client",
+    ));
     socket.close(1011, "attach_failed");
     return;
   }
@@ -200,7 +206,13 @@ async function handleRelayWsMessage(
       await runtime.handleFromClient(envelope);
     }
   } catch (error) {
-    socket.sendEnvelope(runtime.makeErrorEnvelope(route.daemonId, connectionId, error, envelope?.id || ""));
+    socket.sendEnvelope(runtime.makeErrorEnvelope(
+      route.daemonId,
+      connectionId,
+      error,
+      envelope?.id || "",
+      route.role === "daemon" ? "daemon" : "remote-client",
+    ));
   }
 }
 

@@ -2,6 +2,8 @@ import {
   ackIdFromEnvelope,
   makeErrorEnvelope,
   makeRelayEnvelope,
+  type RelayEndpoint,
+  type RelayEndpointKind,
   type JsonObject,
   type JsonValue,
   type RelayEnvelope,
@@ -191,21 +193,32 @@ export class RelayRuntime {
     return this.store.markAcked(ackId, envelope.created_at || nowIso());
   }
 
-  makeReadyEnvelope(daemonId: string, targetId: string, payload: JsonObject): RelayEnvelope {
+  makeReadyEnvelope(
+    daemonId: string,
+    targetId: string,
+    payload: JsonObject,
+    targetKind: RelayEndpointKind = "remote-client",
+  ): RelayEnvelope {
     return makeRelayEnvelope({
       daemon_id: daemonId || "relay",
       source: { kind: "relay", id: this.relayId },
-      target: { kind: "remote-client", id: targetId },
+      target: controlTarget(daemonId, targetId, targetKind),
       kind: "ready",
       payload,
     });
   }
 
-  makeErrorEnvelope(daemonId: string, targetId: string, error: unknown, refId = ""): RelayEnvelope {
+  makeErrorEnvelope(
+    daemonId: string,
+    targetId: string,
+    error: unknown,
+    refId = "",
+    targetKind: RelayEndpointKind = "remote-client",
+  ): RelayEnvelope {
     return makeErrorEnvelope({
       daemon_id: daemonId || "relay",
       source: { kind: "relay", id: this.relayId },
-      target: { kind: "remote-client", id: targetId || "unknown" },
+      target: controlTarget(daemonId, targetId || "unknown", targetKind),
       code: error instanceof RelayError ? error.code : "relay_runtime_error",
       message: errorMessage(error),
       retryable: error instanceof RelayError ? error.retryable : false,
@@ -236,4 +249,11 @@ function cleanRequired(value: string, name: string): string {
   const text = String(value || "").trim();
   if (!text) throw new RelayError(`${name} is required`, "relay_runtime_validation_error");
   return text;
+}
+
+function controlTarget(daemonId: string, targetId: string, targetKind: RelayEndpointKind): RelayEndpoint {
+  if (targetKind === "daemon") {
+    return { kind: "daemon", id: daemonId || targetId };
+  }
+  return { kind: targetKind, id: targetId };
 }
