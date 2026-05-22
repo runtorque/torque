@@ -359,8 +359,13 @@ function _renderTerminalDirectMessages(root, cell) {
   }
   _terminalDirectMessagesAttachPagination(root);
   _terminalDirectMessagesApplyPersistedHeight(root);
-  if (previous) {
-    _restoreTerminalDirectMessagesState(root, { terminalDirectMessages: previous });
+  const canRestorePrevious = previous
+    && (!previous.agentId || previous.agentId === String(agent.id || ''));
+  if (canRestorePrevious) {
+    const restorePrevious = root._terminalDirectMessagesLoadingOlder
+      ? Object.assign({}, previous, { atTail: false })
+      : previous;
+    _restoreTerminalDirectMessagesState(root, { terminalDirectMessages: restorePrevious });
   } else if (changed) {
     const list = _terminalDirectMessagesList(root);
     if (list && typeof list.scrollTop === 'number') {
@@ -622,6 +627,7 @@ function _terminalDirectMessagesAtTail(list) {
 
 function _terminalDirectMessagesLoadOlder(root) {
   if (!root) return false;
+  if (root._terminalDirectMessagesSuppressOlderLoad || root._terminalDirectMessagesLoadingOlder) return false;
   const list = _terminalDirectMessagesList(root);
   const agentId = String((list && list.dataset && list.dataset.agentId)
     || (root.dataset && root.dataset.agentId)
@@ -630,11 +636,22 @@ function _terminalDirectMessagesLoadOlder(root) {
   const rows = _terminalDirectMessagesForAgent(agentId);
   const current = _terminalDirectMessagesVisibleCount(agentId, rows.length);
   if (current >= rows.length) return false;
-  const next = Math.min(rows.length, current + _terminalDirectMessagesWindowSize());
-  _terminalDirectMessagesSetVisibleCount(agentId, next, rows.length);
   const agent = state && state.agents ? state.agents[agentId] : null;
   if (!agent) return false;
-  _renderTerminalDirectMessages(root, agent);
+  const next = Math.min(rows.length, current + _terminalDirectMessagesWindowSize());
+  _terminalDirectMessagesSetVisibleCount(agentId, next, rows.length);
+  root._terminalDirectMessagesSuppressOlderLoad = true;
+  root._terminalDirectMessagesLoadingOlder = true;
+  try {
+    _renderTerminalDirectMessages(root, agent);
+  } finally {
+    root._terminalDirectMessagesLoadingOlder = false;
+    if (typeof setTimeout === 'function') {
+      setTimeout(function() { root._terminalDirectMessagesSuppressOlderLoad = false; }, 100);
+    } else {
+      root._terminalDirectMessagesSuppressOlderLoad = false;
+    }
+  }
   return true;
 }
 

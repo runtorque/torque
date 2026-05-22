@@ -269,6 +269,7 @@ function _chatSetVisibleMessageCount(threadId, count, total) {
 
 function _chatLoadOlderMessagesIfNeeded(shell) {
   if (!shell) return false;
+  if (shell._chatSuppressOlderMessageLoad || shell._chatLoadingOlderMessages) return false;
   var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
   if (!messages || typeof messages.scrollTop !== 'number') return false;
   if (Number(messages.scrollTop || 0) > _CHAT_MESSAGE_SCROLL_TOP_THRESHOLD) return false;
@@ -279,7 +280,18 @@ function _chatLoadOlderMessagesIfNeeded(shell) {
   if (current >= rows.length) return false;
   var next = Math.min(rows.length, current + _chatMessageWindowSize());
   _chatSetVisibleMessageCount(threadId, next, rows.length);
-  renderChatPanel();
+  shell._chatSuppressOlderMessageLoad = true;
+  shell._chatLoadingOlderMessages = true;
+  try {
+    renderChatPanel();
+  } finally {
+    shell._chatLoadingOlderMessages = false;
+    if (typeof setTimeout === 'function') {
+      setTimeout(function() { shell._chatSuppressOlderMessageLoad = false; }, 100);
+    } else {
+      shell._chatSuppressOlderMessageLoad = false;
+    }
+  }
   return true;
 }
 
@@ -410,7 +422,7 @@ function _chatCaptureScrollAnchor(container, attrName) {
 function _chatRestoreScrollAnchor(container, attrName, capture, opts) {
   if (!container || !capture) return;
   opts = opts || {};
-  if (opts.pinTail || capture.atTail) {
+  if (opts.pinTail || (capture.atTail && !opts.ignoreCaptureTail)) {
     container.scrollTop = Math.max(0, Number(container.scrollHeight || 0));
     return;
   }
@@ -815,7 +827,8 @@ function renderChatPanel() {
 
   var threadCapture = _chatCaptureScrollAnchor(list, 'data-chat-thread-id');
   var preserveMessages = previouslyRenderedThread && previouslyRenderedThread === selectedId;
-  var messagesPinTail = preserveMessages && _chatStoredMessageTailPinned(shell);
+  var loadingOlderMessages = preserveMessages && !!shell._chatLoadingOlderMessages;
+  var messagesPinTail = !loadingOlderMessages && preserveMessages && _chatStoredMessageTailPinned(shell);
   var messageCapture = preserveMessages
     ? _chatCaptureScrollAnchor(messages, 'data-chat-message-id')
     : null;
@@ -829,6 +842,7 @@ function renderChatPanel() {
   if (messageCapture) {
     _chatRestoreScrollAnchor(messages, 'data-chat-message-id', messageCapture, {
       pinTail: !!messagesPinTail,
+      ignoreCaptureTail: !!loadingOlderMessages,
     });
   } else if (messages && typeof messages.scrollTop === 'number') {
     messages.scrollTop = Math.max(0, Number(messages.scrollHeight || 0));
