@@ -84,9 +84,14 @@ var AGENT_FOCUS_DEFAULT_FRACTION = 0.30;
 var AGENT_FOCUS_MIN_HEIGHT = 120;
 var AGENT_GRID_MIN_HEIGHT = 200;
 var AGENT_FOCUS_AUTO_MAX_VIEWPORT_FRACTION = 0.45;
+var AGENT_FOCUS_CLICK_MAX_DISPLACEMENT = 4;
+var AGENT_FOCUS_CLICK_MAX_DURATION_MS = 500;
+var AGENT_FOCUS_DRAG_CLICK_SUPPRESS_MS = 800;
 var _agentFocusResize = null;
 var _agentFocusResizeRaf = 0;
 var _agentFocusResizePendingHeight = 0;
+var _agentFocusLastPress = null;
+var _agentFocusSuppressClickUntil = 0;
 
 function _agentFocusStorageKey(name) {
   const runtime = (state && state.runtime) || {};
@@ -287,15 +292,9 @@ function _agentFocusSyncCollapsedUi(parts, collapsed) {
   }
   if (parts.handle) {
     parts.handle.setAttribute('role', collapsed ? 'button' : 'separator');
-    parts.handle.setAttribute('aria-label', collapsed ? 'Expand focus panel' : 'Resize focus panel');
+    parts.handle.setAttribute('aria-label', collapsed ? 'Expand focus panel' : 'Resize or collapse focus panel');
     parts.handle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   }
-  const collapseButton = parts.root && typeof parts.root.querySelector === 'function'
-    ? parts.root.querySelector('[data-agent-focus-collapse]')
-    : (parts.focus && typeof parts.focus.querySelector === 'function'
-      ? parts.focus.querySelector('[data-agent-focus-collapse]')
-      : null);
-  if (collapseButton) collapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 function _agentFocusApplyPersistedSplit() {
@@ -331,26 +330,39 @@ function _agentFocusSetCollapsed(collapsed) {
   if (!collapsed) _agentFocusApplyAutoHeight(parts);
 }
 
+function _agentFocusNow() {
+  return (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0;
+}
+
 function _agentFocusResizerClick(event) {
-  if (!_agentFocusIsCollapsed()) return;
+  const now = _agentFocusNow();
+  if (_agentFocusSuppressClickUntil && now <= _agentFocusSuppressClickUntil) {
+    _agentFocusSuppressClickUntil = 0;
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    return;
+  }
+  _agentFocusSuppressClickUntil = 0;
+  const press = _agentFocusLastPress;
+  if (press && now - press.endedAt <= AGENT_FOCUS_DRAG_CLICK_SUPPRESS_MS) {
+    if (
+      press.dragged
+      || press.distance > AGENT_FOCUS_CLICK_MAX_DISPLACEMENT
+      || press.duration > AGENT_FOCUS_CLICK_MAX_DURATION_MS
+    ) {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      return;
+    }
+  }
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  _agentFocusSetCollapsed(false);
+  _agentFocusSetCollapsed(!_agentFocusIsCollapsed());
 }
 
 function _agentFocusResizerKeydown(event) {
-  if (!_agentFocusIsCollapsed()) return;
   const key = event && (event.key || event.code);
   if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar' && key !== 'Space') return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  _agentFocusSetCollapsed(false);
+  _agentFocusSetCollapsed(!_agentFocusIsCollapsed());
 }
-
-function _agentFocusCollapseFromHeader(event) {
-  if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-  _agentFocusSetCollapsed(true);
-}
-
 
 function _agentFocusScheduleResizeHeight(height) {
   _agentFocusResizePendingHeight = height;
@@ -373,22 +385,32 @@ function _agentFocusScheduleResizeHeight(height) {
 function _agentFocusResizeStart(event) {
   const parts = _agentFocusSplitParts();
   if (!parts) return;
+  if (event && event.button !== undefined && event.button !== 0) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  const startY = event ? event.clientY : 0;
+  const startedAt = _agentFocusNow();
+  _agentFocusLastPress = {
+    startY,
+    endY: startY,
+    startedAt,
+    endedAt: startedAt,
+    duration: 0,
+    distance: 0,
+    dragged: false,
+  };
   if (_agentFocusIsCollapsed()) return;
   const totalHeight = _agentFocusContainerHeight(parts);
   const handleHeight = _agentFocusHandleHeight(parts);
   const focusRect = parts.focus.getBoundingClientRect ? parts.focus.getBoundingClientRect() : { height: 0 };
   _agentFocusResizePendingHeight = 0;
   _agentFocusResize = {
-    startY: event ? event.clientY : 0,
+    startY,
+    startedAt,
+    dragging: false,
     startHeight: focusRect.height || parts.focus.offsetHeight || (totalHeight * _agentFocusPersistedFraction()),
     totalHeight,
     handleHeight,
   };
-  if (document && document.body && document.body.classList) {
-    document.body.classList.add('agent-focus-resizing');
-    document.body.style.cursor = 'ns-resize';
-  }
   document.addEventListener('mousemove', _agentFocusResizeMove);
   document.addEventListener('mouseup', _agentFocusResizeEnd);
 }
@@ -396,10 +418,23 @@ function _agentFocusResizeStart(event) {
 function _agentFocusResizeMove(event) {
   if (!_agentFocusResize) return;
   const dy = (event ? event.clientY : 0) - _agentFocusResize.startY;
+  if (!_agentFocusResize.dragging) {
+    if (Math.abs(dy) <= AGENT_FOCUS_CLICK_MAX_DISPLACEMENT) return;
+    _agentFocusResize.dragging = true;
+    _agentFocusSuppressClickUntil = _agentFocusNow() + AGENT_FOCUS_DRAG_CLICK_SUPPRESS_MS;
+    if (document && document.body && document.body.classList) {
+      document.body.classList.add('agent-focus-resizing');
+      document.body.style.cursor = 'ns-resize';
+    }
+  }
+  if (_agentFocusLastPress) {
+    _agentFocusLastPress.dragged = true;
+    _agentFocusLastPress.distance = Math.max(_agentFocusLastPress.distance || 0, Math.abs(dy));
+  }
   _agentFocusScheduleResizeHeight(_agentFocusResize.startHeight - dy);
 }
 
-function _agentFocusResizeEnd() {
+function _agentFocusResizeEnd(event) {
   if (!_agentFocusResize) return;
   const resize = _agentFocusResize;
   _agentFocusResize = null;
@@ -408,6 +443,19 @@ function _agentFocusResizeEnd() {
   if (document && document.body && document.body.classList) {
     document.body.classList.remove('agent-focus-resizing');
     document.body.style.cursor = '';
+  }
+  const endY = event && Number.isFinite(Number(event.clientY)) ? Number(event.clientY) : resize.startY;
+  if (_agentFocusLastPress) {
+    const distance = Math.abs(endY - resize.startY);
+    _agentFocusLastPress.endY = endY;
+    _agentFocusLastPress.endedAt = _agentFocusNow();
+    _agentFocusLastPress.duration = Math.max(0, _agentFocusLastPress.endedAt - resize.startedAt);
+    _agentFocusLastPress.distance = Math.max(_agentFocusLastPress.distance || 0, distance);
+    _agentFocusLastPress.dragged = !!resize.dragging;
+  }
+  if (!resize.dragging) {
+    _agentFocusResizePendingHeight = 0;
+    return;
   }
   const applied = _agentFocusApplyHeight(_agentFocusResizePendingHeight || resize.startHeight, {
     totalHeight: resize.totalHeight,
@@ -2568,11 +2616,7 @@ function _renderAgentFocusPanelHtml() {
       + esc(agent.name || agent.id || 'Agent')
       + '</div>';
   }
-  html += '<button type="button" class="agent-focus-collapse-btn" data-agent-focus-collapse'
-    + ' onclick="_agentFocusCollapseFromHeader(event)"'
-    + ' title="Collapse focus panel" aria-label="Collapse focus panel"'
-    + ' aria-expanded="true">⌃</button>'
-    + '</div>';
+  html += '</div>';
   if (!agent) {
     html += '<div class="agent-focus-empty">Select an agent to view details and terminals.</div>';
     return html;
@@ -2592,7 +2636,7 @@ function _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml) {
     + '</div>'
     + '<div id="agent-focus-resizer" class="agent-focus-resizer" role="' + (collapsed ? 'button' : 'separator') + '"'
     + ' aria-orientation="horizontal" aria-expanded="' + (collapsed ? 'false' : 'true') + '"'
-    + ' aria-label="' + (collapsed ? 'Expand focus panel' : 'Resize focus panel') + '" tabindex="0"'
+    + ' aria-label="' + (collapsed ? 'Expand focus panel' : 'Resize or collapse focus panel') + '" tabindex="0"'
     + ' data-agent-focus-resizer onmousedown="_agentFocusResizeStart(event)" onclick="_agentFocusResizerClick(event)"'
     + ' onkeydown="_agentFocusResizerKeydown(event)">'
     + '<div class="agent-focus-resizer-grip" aria-hidden="true"></div>'

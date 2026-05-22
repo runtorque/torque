@@ -1273,31 +1273,6 @@ main {
   font-weight: 600;
   letter-spacing: .02em;
 }
-.agent-focus-collapse-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 22px;
-  margin-left: auto;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 8px;
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--bg-surface) 74%, transparent);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-.agent-focus-collapse-btn:hover,
-.agent-focus-collapse-btn:focus-visible {
-  color: var(--text);
-  border-color: var(--border);
-  background: var(--bg-hover);
-  outline: none;
-}
 .agent-split--focus-collapsed .agent-focus-resizer {
   flex-basis: 22px;
   height: 22px;
@@ -1311,9 +1286,6 @@ main {
 }
 .agent-split--focus-collapsed .agent-focus-resizer-grip {
   width: 32px;
-}
-.agent-split--focus-collapsed .agent-focus-collapse-btn {
-  display: none;
 }
 .agent-split--focus-collapsed .agent-focus-reopen-label {
   display: inline;
