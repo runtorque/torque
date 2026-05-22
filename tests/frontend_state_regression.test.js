@@ -16549,6 +16549,104 @@ test('chat panel renders snapshot threads and selected read-only message tail', 
   assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-new');
 });
 
+test('chat panel renders bubbles on the stable side for sender role', () => {
+  const { context, document } = createChatHarness();
+  const architect = { id: 'arch-1', kind: 'architect', name: 'Architect One', group: 'alpha' };
+  const engineer = { id: 'eng-1', kind: 'engineer', name: 'Engineer One', group: 'alpha' };
+  setChatThreads(context, {
+    'thread-role': makeChatThread('thread-role', {
+      sender: architect,
+      recipient: engineer,
+      messages: [
+        {
+          id: 'arch-to-eng',
+          thread_id: 'thread-role',
+          action: 'architect_message',
+          message: 'Owner request',
+          timestamp: 100,
+          sender_id: architect.id,
+          sender_kind: architect.kind,
+          sender_name: architect.name,
+          recipient_id: engineer.id,
+          recipient_kind: engineer.kind,
+          recipient_name: engineer.name,
+          delivery_state: 'delivered',
+        },
+        {
+          id: 'eng-to-arch',
+          thread_id: 'thread-role',
+          action: 'engineer_reply',
+          message: 'Subordinate reply',
+          timestamp: 120,
+          sender_id: engineer.id,
+          sender_kind: engineer.kind,
+          sender_name: engineer.name,
+          recipient_id: architect.id,
+          recipient_kind: architect.kind,
+          recipient_name: architect.name,
+          delivery_state: 'delivered',
+        },
+      ],
+      messageCount: 2,
+    }),
+  });
+
+  context.renderChatPanel();
+
+  let html = document.getElementById('panel-chat')._chatShell._chatParts.messages.innerHTML;
+  assert.match(html, /data-chat-message-id="arch-to-eng"[^>]*data-chat-message-side="right"[^>]*data-chat-sender-kind="architect"/);
+  assert.match(html, /data-chat-message-id="eng-to-arch"[^>]*data-chat-message-side="left"[^>]*data-chat-sender-kind="engineer"/);
+  assert.match(html, /chat-message-bubble-right[\s\S]*Owner request/);
+  assert.match(html, /chat-message-bubble-left[\s\S]*Subordinate reply/);
+
+  const alpha = { id: 'arch-a', kind: 'architect', name: 'Architect Alpha', group: 'alpha' };
+  const zeta = { id: 'arch-z', kind: 'architect', name: 'Architect Zeta', group: 'alpha' };
+  setChatThreads(context, {
+    'thread-architects': makeChatThread('thread-architects', {
+      sender: zeta,
+      recipient: alpha,
+      title: 'Architect Alpha ↔ Architect Zeta',
+      messages: [
+        {
+          id: 'arch-a-msg',
+          thread_id: 'thread-architects',
+          action: 'architect_peer_message',
+          message: 'Lower sorted architect stays left',
+          timestamp: 200,
+          sender_id: alpha.id,
+          sender_kind: alpha.kind,
+          sender_name: alpha.name,
+          recipient_id: zeta.id,
+          recipient_kind: zeta.kind,
+          recipient_name: zeta.name,
+          delivery_state: 'delivered',
+        },
+        {
+          id: 'arch-z-msg',
+          thread_id: 'thread-architects',
+          action: 'architect_peer_reply',
+          message: 'Higher sorted architect stays right',
+          timestamp: 220,
+          sender_id: zeta.id,
+          sender_kind: zeta.kind,
+          sender_name: zeta.name,
+          recipient_id: alpha.id,
+          recipient_kind: alpha.kind,
+          recipient_name: alpha.name,
+          delivery_state: 'delivered',
+        },
+      ],
+      messageCount: 2,
+    }),
+  });
+  runInContext(context, `_chatSelectedThreadId = '';`);
+  context.renderChatPanel();
+
+  html = document.getElementById('panel-chat')._chatShell._chatParts.messages.innerHTML;
+  assert.match(html, /data-chat-message-id="arch-a-msg"[^>]*data-chat-message-side="left"[^>]*data-chat-sender-kind="architect"/);
+  assert.match(html, /data-chat-message-id="arch-z-msg"[^>]*data-chat-message-side="right"[^>]*data-chat-sender-kind="architect"/);
+});
+
 test('chat panel stacks panes from the panel width, not the viewport width', () => {
   const { context, document, sandbox } = createChatHarness({
     window: { innerWidth: 1600, open() {} },
@@ -16575,6 +16673,82 @@ test('chat panel stacks panes from the panel width, not the viewport width', () 
 
   assert.equal(shell.getAttribute('data-chat-layout'), 'wide');
   assert.equal(shell.classList.contains('chat-panel-narrow'), false);
+});
+
+test('chat panel opens at the message tail and follows while tail-pinned', () => {
+  const { context, document } = createChatHarness();
+  setChatThreads(context, {
+    'thread-tail': makeChatThread('thread-tail', {
+      ts: 100,
+      title: 'Tail Thread',
+      message: 'Initial tail message',
+    }),
+  });
+
+  context.renderChatPanel();
+
+  const panel = document.getElementById('panel-chat');
+  const shell = panel._chatShell;
+  const parts = shell._chatParts;
+  assert.equal(parts.messages.scrollTop, parts.messages.scrollHeight);
+  assert.equal(shell._chatMessagesPinnedToTail, true);
+
+  parts.messages.scrollTop = 600;
+  parts.messages.clientHeight = 100;
+  parts.messages.scrollHeight = 600;
+  parts.messages.listeners.scroll();
+  parts.messages.scrollHeight = 920;
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'agent_peer_thread_upsert',
+        thread_id: 'thread-tail',
+        group: 'alpha',
+        thread: makeChatThread('thread-tail', {
+          ts: 200,
+          title: 'Tail Thread',
+          message: 'New tail message',
+          messages: [
+            makeChatThread('thread-tail', { ts: 100, message: 'Initial tail message' }).messages[0],
+            makeChatThread('thread-tail', { ts: 200, message: 'New tail message', messageId: 'thread-tail-msg-2' }).messages[0],
+          ],
+          messageCount: 2,
+        }),
+      },
+    ],
+  });
+  assert.equal(parts.messages.scrollTop, 920);
+  assert.equal(shell._chatMessagesPinnedToTail, true);
+
+  parts.messages.scrollTop = 180;
+  parts.messages.clientHeight = 100;
+  parts.messages.scrollHeight = 920;
+  parts.messages.listeners.scroll();
+  assert.equal(shell._chatMessagesPinnedToTail, false);
+  parts.messages.scrollHeight = 1040;
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      {
+        op: 'agent_peer_thread_upsert',
+        thread_id: 'thread-tail',
+        group: 'alpha',
+        thread: makeChatThread('thread-tail', {
+          ts: 300,
+          title: 'Tail Thread',
+          message: 'Newest tail message',
+          messages: [
+            makeChatThread('thread-tail', { ts: 100, message: 'Initial tail message' }).messages[0],
+            makeChatThread('thread-tail', { ts: 200, message: 'New tail message', messageId: 'thread-tail-msg-2' }).messages[0],
+            makeChatThread('thread-tail', { ts: 300, message: 'Newest tail message', messageId: 'thread-tail-msg-3' }).messages[0],
+          ],
+          messageCount: 3,
+        }),
+      },
+    ],
+  });
+  assert.equal(parts.messages.scrollTop, 180);
 });
 
 test('chat responsive width switch preserves selected thread and scroll anchors', () => {
@@ -16702,6 +16876,7 @@ test('chat thread delta upsert sorts newest first and invalidates only chat surf
   parts.messages.scrollTop = 150;
   parts.messages.clientHeight = 100;
   parts.messages.scrollHeight = 520;
+  parts.messages.listeners.scroll();
   sandbox.renderCalls = {
     main: 0,
     board: 0,
@@ -16743,6 +16918,36 @@ test('chat thread delta upsert sorts newest first and invalidates only chat surf
     templates: 0,
     chat: 1,
   });
+});
+
+test('chat narrow thread list hides previews and moves badges to the right side', () => {
+  const { context, document } = createChatHarness();
+  const panel = document.getElementById('panel-chat');
+  panel.clientWidth = 420;
+  panel.offsetWidth = 420;
+  panel.getBoundingClientRect = () => ({ width: 420, height: 700 });
+  setChatThreads(context, {
+    'thread-compact': makeChatThread('thread-compact', {
+      ts: 250,
+      title: 'Compact Thread',
+      message: 'Preview should not consume a compact row',
+      ack: true,
+      ackCount: 2,
+      pendingCount: 1,
+    }),
+  });
+
+  context.renderChatPanel();
+
+  const shell = panel._chatShell;
+  const listHtml = shell._chatParts.list.innerHTML;
+  assert.equal(shell.getAttribute('data-chat-layout'), 'narrow');
+  assert.match(listHtml, /chat-thread-last/);
+  assert.match(listHtml, /chat-thread-badges[\s\S]*Ack required 2[\s\S]*Pending/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /\.chat-panel\[data-chat-layout="narrow"\]\s+\.chat-thread-last\s*\{[^}]*display:\s*none;/s);
+  assert.match(css, /\.chat-panel\[data-chat-layout="narrow"\]\s+\.chat-thread-badges\s*\{[^}]*grid-column:\s*2;[^}]*align-items:\s*flex-end;/s);
 });
 
 test('chat selection and scroll anchors survive unrelated websocket deltas', () => {
