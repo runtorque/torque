@@ -773,6 +773,8 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   font-size: 11px;
   line-height: 1.42;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .terminal-direct-message-actions {
   margin-top: 7px;
@@ -4542,6 +4544,8 @@ body.runtime-embedded .panel-resize-handle::after {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .chat-message-recipient {
   margin-top: 6px;

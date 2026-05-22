@@ -357,6 +357,98 @@ function _chatMessageBodyHtml(message) {
   return _chatEsc(text);
 }
 
+function _chatCloseContextMenu() {
+  if (typeof _closeCtxMenu === 'function') {
+    _closeCtxMenu();
+    return;
+  }
+  if (typeof closeContextMenu === 'function') {
+    closeContextMenu();
+    return;
+  }
+  var menu = (typeof document !== 'undefined' && document && document.getElementById)
+    ? document.getElementById('ctx-menu')
+    : null;
+  if (menu && menu.classList) menu.classList.remove('open');
+}
+
+function _chatAdjustContextMenu(menu) {
+  if (!menu) return;
+  if (typeof _adjustCtxMenuOverflow === 'function') {
+    _adjustCtxMenuOverflow();
+    return;
+  }
+  var adjust = function() {
+    if (!menu || typeof menu.getBoundingClientRect !== 'function') return;
+    var rect = menu.getBoundingClientRect();
+    var viewportWidth = (typeof window !== 'undefined' && window) ? Number(window.innerWidth || 0) : 0;
+    var viewportHeight = (typeof window !== 'undefined' && window) ? Number(window.innerHeight || 0) : 0;
+    if (viewportWidth && rect.right > viewportWidth) {
+      menu.style.left = Math.max(0, viewportWidth - rect.width - 4) + 'px';
+    }
+    if (viewportHeight && rect.bottom > viewportHeight) {
+      menu.style.top = Math.max(0, viewportHeight - rect.height - 4) + 'px';
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(adjust);
+  else adjust();
+}
+
+function _chatMessageById(threadId, messageId) {
+  var thread = _chatThreadById(threadId);
+  var messages = Array.isArray(thread && thread.messages) ? thread.messages : [];
+  var target = String(messageId || '').trim();
+  if (!target) return null;
+  for (var i = 0; i < messages.length; i++) {
+    if (_chatMessageKey(messages[i], i) === target) return messages[i];
+  }
+  return null;
+}
+
+function chatMessageContextMenu(event, threadId, messageId) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  threadId = String(threadId || '').trim();
+  messageId = String(messageId || '').trim();
+  var menu = (typeof document !== 'undefined' && document && document.getElementById)
+    ? document.getElementById('ctx-menu')
+    : null;
+  if (!threadId || !messageId || !menu) return false;
+  var action = 'chatCopyMessage(' + JSON.stringify(threadId) + ',' + JSON.stringify(messageId) + ')';
+  menu.innerHTML = '<button onclick="event.stopPropagation();' + _chatEsc(action) + '">Copy</button>';
+  menu.style.top = ((event && Number.isFinite(Number(event.clientY))) ? Number(event.clientY) : 0) + 'px';
+  var x = (event && Number.isFinite(Number(event.clientX))) ? Number(event.clientX) : 0;
+  var viewportWidth = (typeof window !== 'undefined' && window) ? Number(window.innerWidth || 0) : 0;
+  menu.style.left = Math.max(0, viewportWidth ? Math.min(x, viewportWidth - 140) : x) + 'px';
+  if (menu.classList) menu.classList.add('open');
+  _chatAdjustContextMenu(menu);
+  return false;
+}
+
+function chatCopyMessage(threadId, messageId) {
+  var message = _chatMessageById(threadId, messageId);
+  var text = _chatMessageRawText(message);
+  var clipboard = (typeof navigator !== 'undefined' && navigator) ? navigator.clipboard : null;
+  var close = function() { _chatCloseContextMenu(); };
+  if (clipboard && typeof clipboard.writeText === 'function') {
+    var result = null;
+    try {
+      result = clipboard.writeText(text);
+    } catch (_e) {
+      close();
+      return false;
+    }
+    if (result && typeof result.then === 'function') {
+      result.then(close, close);
+    } else {
+      close();
+    }
+  } else {
+    close();
+  }
+  return false;
+}
+
 function _chatFirstLine(value, limit) {
   var text = String(value || '').trim().split(/\r?\n/)[0] || '';
   limit = Math.max(12, Number(limit || 88) || 88);
@@ -656,6 +748,7 @@ function _chatMessageSide(message, thread) {
 function _chatMessageCardHtml(message, index, thread) {
   message = message || {};
   var messageId = _chatMessageKey(message, index);
+  var threadId = _chatThreadId(thread, message.thread_id || _chatSelectedThreadId);
   var senderKind = String(message.sender_kind || '').trim() || 'agent';
   var side = _chatMessageSide(message, thread);
   var timestamp = _chatTimestamp(message.timestamp || message.created_at || message.sent_at);
@@ -664,8 +757,10 @@ function _chatMessageCardHtml(message, index, thread) {
   var timeLabel = _chatExactTimestamp(timestamp);
   var html = '<div class="chat-message-row chat-message-row-' + _chatAttr(side)
     + '" data-chat-message-id="' + _chatAttr(messageId) + '"'
+    + ' data-chat-thread-id="' + _chatAttr(threadId) + '"'
     + ' data-chat-message-side="' + _chatAttr(side) + '"'
-    + ' data-chat-sender-kind="' + _chatAttr(senderKind) + '">';
+    + ' data-chat-sender-kind="' + _chatAttr(senderKind) + '"'
+    + ' oncontextmenu="' + _chatEventAttr('return chatMessageContextMenu(event, ' + JSON.stringify(threadId) + ', ' + JSON.stringify(messageId) + ')') + '">';
   html += '<div class="chat-message-bubble chat-message-bubble-' + _chatAttr(side) + '">';
   html += '<div class="chat-message-bubble-meta">';
   html += '<span class="chat-message-sender">' + _chatEsc(_chatMessageSenderLabel(message)) + '</span>';

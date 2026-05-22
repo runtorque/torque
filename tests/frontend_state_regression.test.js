@@ -9416,6 +9416,80 @@ test('embedded terminal direct-message window stays tail-pinned as new messages 
   assert.equal(list.scrollTop, 920);
 });
 
+test('embedded terminal direct-message list pins to bottom when switching focused agents', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-a', 'agent-b'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-a': [], 'agent-b': [] };
+  sandbox.state.agents = {
+    'agent-a': {
+      id: 'agent-a',
+      name: 'Builder A',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-a',
+      status: 'running',
+    },
+    'agent-b': {
+      id: 'agent-b',
+      name: 'Builder B',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-b',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-a': [{
+      message_id: 'dm-a',
+      message_type: 'message',
+      message: 'Message A',
+      sender_id: 'agent-a',
+      sender_kind: 'worker',
+      recipient_id: 'user',
+      recipient_kind: 'user',
+      created_at: 10,
+    }],
+    'agent-b': [{
+      message_id: 'dm-b',
+      message_type: 'message',
+      message: 'Message B',
+      sender_id: 'agent-b',
+      sender_kind: 'worker',
+      recipient_id: 'user',
+      recipient_kind: 'user',
+      created_at: 20,
+    }],
+  };
+
+  const list = new FakeElement('dm-switch-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-a';
+  list.scrollTop = 180;
+  list.clientHeight = 120;
+  list.scrollHeight = 900;
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  context.__dmSlot = dom.directMessages;
+
+  runInContext(context, `_renderTerminalDirectMessages(__dmSlot, state.agents['agent-a']);`);
+  list.dataset.agentId = 'agent-a';
+  list.scrollTop = 0;
+  list.scrollHeight = 900;
+
+  runInContext(context, `_renderTerminalDirectMessages(__dmSlot, state.agents['agent-b']);`);
+
+  assert.match(dom.directMessages.innerHTML, /data-agent-id="agent-b"/);
+  assert.equal(list.scrollTop, 780);
+});
+
 function setupTerminalDirectMessageClickHarness() {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
@@ -9557,8 +9631,8 @@ test('embedded terminal direct-message click preserves list scroll and does not 
 
   const downEvt = terminalClickEvent();
   context.__downEvt = downEvt;
-  runInContext(context, 'terminalDirectMessageMouseDown(__downEvt);');
-  assert.equal(downEvt.preventDefaultCalled, true);
+  assert.equal(runInContext(context, 'terminalDirectMessageMouseDown(__downEvt);'), true);
+  assert.equal(downEvt.preventDefaultCalled, false);
   assert.equal(downEvt.stopPropagationCalled, true);
 
   const clickEvt = terminalClickEvent();
@@ -9571,6 +9645,38 @@ test('embedded terminal direct-message click preserves list scroll and does not 
   assert.equal(terminalFocusCalls(), 0);
   assert.equal(jsonValue(context, `_terminalDirectMessageSelectedByAgent['agent-1']`), 'dm-anchor');
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--message selected/);
+});
+
+test('embedded terminal direct-message drag selection does not select or reset scroll', () => {
+  const { context, document, dom, list, terminalFocusCalls } = setupTerminalDirectMessageClickHarness();
+  document.activeElement = dom.surface;
+
+  const downEvt = terminalClickEvent();
+  downEvt.clientX = 10;
+  downEvt.clientY = 10;
+  context.__downEvt = downEvt;
+  assert.equal(runInContext(context, 'terminalDirectMessageMouseDown(__downEvt);'), true);
+  assert.equal(downEvt.preventDefaultCalled, false);
+  assert.equal(downEvt.stopPropagationCalled, true);
+
+  const clickEvt = terminalClickEvent();
+  clickEvt.clientX = 40;
+  clickEvt.clientY = 12;
+  context.__clickEvt = clickEvt;
+  assert.equal(runInContext(context, `terminalDirectMessageSelect(__clickEvt, 'agent-1', 'dm-anchor');`), true);
+
+  assert.equal(clickEvt.preventDefaultCalled, false);
+  assert.equal(clickEvt.stopPropagationCalled, true);
+  assert.equal(list.scrollTop, 100);
+  assert.equal(terminalFocusCalls(), 0);
+  assert.equal(runInContext(context, `_terminalDirectMessageSelectedByAgent['agent-1'] || ''`), '');
+  assert.doesNotMatch(dom.directMessages.innerHTML, /terminal-direct-message--message selected/);
+});
+
+test('direct-message and chat message bodies explicitly allow native text selection', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /\.terminal-direct-message-body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
+  assert.match(css, /\.chat-message-body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
 });
 
 test('embedded terminal markdown links do not select messages or refocus terminal', () => {
@@ -9599,6 +9705,34 @@ test('embedded terminal markdown links do not select messages or refocus termina
   assert.equal(list.scrollTop, 100);
   assert.equal(terminalFocusCalls(), 0);
   assert.equal(runInContext(context, `_terminalDirectMessageSelectedByAgent['agent-1'] || ''`), '');
+});
+
+test('embedded terminal direct-message context menu copies raw message text', () => {
+  const { context, document, dom } = setupTerminalDirectMessageClickHarness();
+  const menu = document.register('ctx-menu');
+  let copied = '';
+  context.navigator.clipboard.writeText = function(value) {
+    copied = String(value);
+    return { then(resolve) { if (resolve) resolve(); } };
+  };
+
+  assert.match(dom.directMessages.innerHTML, /oncontextmenu="return terminalDirectMessageContextMenu\(event, 'agent-1', 'dm-anchor'\)"/);
+  const evt = terminalClickEvent();
+  evt.clientX = 320;
+  evt.clientY = 240;
+  context.__ctxEvt = evt;
+  assert.equal(runInContext(context, `terminalDirectMessageContextMenu(__ctxEvt, 'agent-1', 'dm-anchor');`), false);
+
+  assert.equal(evt.preventDefaultCalled, true);
+  assert.equal(evt.stopPropagationCalled, true);
+  assert.equal(menu.classList.contains('open'), true);
+  assert.equal(menu.style.left, '320px');
+  assert.equal(menu.style.top, '240px');
+  assert.match(menu.innerHTML, />Copy<\/button>/);
+
+  assert.equal(runInContext(context, `terminalDirectMessageCopy('agent-1', 'dm-anchor');`), false);
+  assert.equal(copied, 'Anchored [docs](https://example.com)');
+  assert.equal(menu.classList.contains('open'), false);
 });
 
 test('embedded terminal direct-message reply click preserves list scroll and focuses compose without terminal flash', () => {
@@ -17009,6 +17143,47 @@ test('chat panel renders message markdown with escaped raw HTML and safe links',
   assert.doesNotMatch(html, /<script\b/i);
   assert.doesNotMatch(html, /<img\b/i);
   assert.doesNotMatch(html, /href="(?:javascript|data):/i);
+});
+
+test('chat message context menu copies raw source text rather than rendered markdown', () => {
+  const { context, document } = createChatHarness();
+  const menu = document.register('ctx-menu');
+  let copied = '';
+  context.navigator.clipboard.writeText = function(value) {
+    copied = String(value);
+    return { then(resolve) { if (resolve) resolve(); } };
+  };
+  const raw = '**raw bold** <em>literal</em> [Docs](https://example.com)';
+  setChatThreads(context, {
+    'thread-copy': makeChatThread('thread-copy', {
+      ts: 300,
+      title: 'Copy Thread',
+      message: raw,
+      messageId: 'thread-copy-msg',
+    }),
+  });
+
+  context.renderChatPanel();
+
+  const html = document.getElementById('panel-chat')._chatShell._chatParts.messages.innerHTML;
+  assert.match(html, /oncontextmenu="return chatMessageContextMenu\(event, &quot;thread-copy&quot;, &quot;thread-copy-msg&quot;\)"/);
+  assert.match(html, /<strong>raw bold<\/strong>/);
+  assert.doesNotMatch(html, />\*\*raw bold\*\*</);
+
+  const evt = terminalClickEvent();
+  evt.clientX = 280;
+  evt.clientY = 180;
+  context.__ctxEvt = evt;
+  assert.equal(runInContext(context, `chatMessageContextMenu(__ctxEvt, 'thread-copy', 'thread-copy-msg');`), false);
+
+  assert.equal(evt.preventDefaultCalled, true);
+  assert.equal(evt.stopPropagationCalled, true);
+  assert.equal(menu.classList.contains('open'), true);
+  assert.match(menu.innerHTML, />Copy<\/button>/);
+
+  assert.equal(runInContext(context, `chatCopyMessage('thread-copy', 'thread-copy-msg');`), false);
+  assert.equal(copied, raw);
+  assert.equal(menu.classList.contains('open'), false);
 });
 
 test('chat panel renders bubbles on the stable side for sender role', () => {
