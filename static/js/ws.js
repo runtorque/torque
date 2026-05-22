@@ -19,6 +19,7 @@ let state = {
   supervisor_panel_state: {},
   agent_message_history: {},
   direct_messages_by_agent: {},
+  agent_peer_threads: {},
 };
 let dragInProgress = false;
 let selectedAgentId = null;
@@ -693,6 +694,7 @@ function _handleFullState(msg) {
   if (!state.mcp_calls) state.mcp_calls = {};
   if (!state.agent_message_history) state.agent_message_history = {};
   if (!state.direct_messages_by_agent) state.direct_messages_by_agent = {};
+  state.agent_peer_threads = _sortAgentPeerThreadMap(state.agent_peer_threads || {});
   if (typeof state.active_group !== 'string') {
     state.active_group = '';
   }
@@ -1025,6 +1027,30 @@ function _deltaTimestampValue(value) {
   return Number.isFinite(parsed) ? parsed / 1000 : 0;
 }
 
+function _sortAgentPeerThreadMap(map) {
+  const items = [];
+  const source = (map && typeof map === 'object') ? map : {};
+  for (const key in source) {
+    const thread = source[key];
+    if (!thread) continue;
+    const id = String((thread && thread.thread_id) || key || '').trim();
+    if (!id) continue;
+    items.push({ id: id, thread: Object.assign({}, thread) });
+  }
+  items.sort(function(a, b) {
+    const at = _deltaTimestampValue(a.thread && a.thread.last_activity_at);
+    const bt = _deltaTimestampValue(b.thread && b.thread.last_activity_at);
+    if (at !== bt) return bt - at;
+    const am = String((a.thread && a.thread.last_message_id) || '');
+    const bm = String((b.thread && b.thread.last_message_id) || '');
+    if (am !== bm) return bm.localeCompare(am);
+    return String(b.id || '').localeCompare(String(a.id || ''));
+  });
+  const out = {};
+  for (let i = 0; i < items.length; i++) out[items[i].id] = items[i].thread;
+  return out;
+}
+
 function _terminalWorkspaceViewedAgentIdBeforeDelta() {
   if (!state || !state.agents) return '';
   let cell = null;
@@ -1199,6 +1225,10 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         break;
       }
+      case 'agent_peer_thread_upsert':
+      case 'agent_peer_thread_remove':
+        _markSurface(flags, 'chat');
+        break;
       case 'engineer_settings_update': {
         _markSurface(flags, 'main');
         const _esFocused = _focusedEngineerAgent();
@@ -1861,13 +1891,13 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
 
 function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
-    _markSurface(flags, 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
+    _markSurface(flags, 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
   }
   if (key === 'active_group') {
     _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
   }
   if (key === 'workspace_sidebar_width') {
-    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
+    _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
   }
   if (key === 'terminal_direct_messages_height') {
     _markSurface(flags, 'main');
@@ -2208,6 +2238,28 @@ function _applyDelta(ops) {
             state.direct_messages_by_agent[directAgentId] =
               state.direct_messages_by_agent[directAgentId].slice(-directLimit);
           }
+        }
+        break;
+      }
+
+      case 'agent_peer_thread_upsert': {
+        if (!state.agent_peer_threads || typeof state.agent_peer_threads !== 'object') {
+          state.agent_peer_threads = {};
+        }
+        var chatThread = Object.assign({}, op.thread || {});
+        var chatThreadId = String(op.thread_id || chatThread.thread_id || '').trim();
+        if (chatThreadId && op.thread) {
+          if (!chatThread.thread_id) chatThread.thread_id = chatThreadId;
+          state.agent_peer_threads[chatThreadId] = chatThread;
+          state.agent_peer_threads = _sortAgentPeerThreadMap(state.agent_peer_threads);
+        }
+        break;
+      }
+
+      case 'agent_peer_thread_remove': {
+        if (state.agent_peer_threads && op.thread_id) {
+          delete state.agent_peer_threads[String(op.thread_id || '')];
+          state.agent_peer_threads = _sortAgentPeerThreadMap(state.agent_peer_threads);
         }
         break;
       }

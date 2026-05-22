@@ -773,6 +773,7 @@ function _captureActiveGroupUiState(group) {
   }
   const panelIds = [
     'panel-board',
+    'panel-chat',
     'panel-actions',
     'panel-templates',
     'panel-context',
@@ -1256,6 +1257,7 @@ let _flipUntil = 0;
 
 function _surfacePanelApp(surface) {
   if (surface === 'board') return 'board';
+  if (surface === 'chat') return 'chat';
   if (surface === 'actions') return 'actions';
   if (surface === 'context') return 'context';
   if (surface === 'events') return 'events';
@@ -1285,6 +1287,7 @@ function _currentPanelSurfaces() {
 
 function _renderSurface(surface) {
   if (surface === 'board' && typeof renderBoard === 'function') renderBoard();
+  if (surface === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
   if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();

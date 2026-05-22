@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
+var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
@@ -286,6 +286,7 @@ function togglePanel(appName) {
     // Render the active app
     if (appName === 'board') renderBoard();
     _loadPanelApp(appName);
+    if (appName === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
     if (appName === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -312,6 +313,7 @@ function _restorePanelState() {
     });
     _loadPanelApp(detachedApp);
     if (detachedApp === 'board') renderBoard();
+    if (detachedApp === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
     if (detachedApp === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
     if (detachedApp === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
     if (detachedApp === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
@@ -363,6 +365,7 @@ function _restorePanelState() {
     });
     if (active === 'board') renderBoard();
     _loadPanelApp(active);
+    if (active === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
