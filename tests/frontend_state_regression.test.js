@@ -560,6 +560,7 @@ function createEmbeddedTerminalHarness(overrides = {}) {
       getFilterByWindow = function() { return false; };
     `);
   }
+  loadScript(context, 'static/js/markdown.js');
   loadScript(context, 'static/js/terminal.js');
   return { context, sandbox, document, sockets, terminals, status };
 }
@@ -887,6 +888,7 @@ function createChatHarness(overrides = {}) {
   loadScript(context, 'static/js/ws.js');
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/markdown.js');
   loadScript(context, 'static/js/chat.js');
   runInContext(context, `
     send = function(message) { sendCalls.push(message); };
@@ -9106,6 +9108,76 @@ test('embedded terminal direct-message panel renders blocking asks, ask replies,
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--ask selected/);
 });
 
+test('embedded terminal direct-message body renders shared markdown safely', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [{
+      message_id: 'dm-md',
+      message_type: 'message',
+      message: [
+        '# Heading',
+        '**bold** and *italic* plus `code`',
+        '- [Docs](https://example.com?a=1&b=2)',
+        '- [Bad](javascript:alert(1))',
+        '- [Entity](java&#115;cript:alert(1))',
+        '> quoted line',
+        '```js',
+        'const tag = "<script>";',
+        '```',
+        '<img src=x onerror=alert(1)>',
+        '<script>alert(1)</script>',
+      ].join('\n'),
+      sender_id: 'agent-1',
+      sender_kind: 'worker',
+      recipient_id: 'user',
+      recipient_kind: 'user',
+      created_at: 10,
+    }],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const html = dom.directMessages.innerHTML;
+  assert.match(html, /class="terminal-direct-message-body torque-markdown"/);
+  assert.match(html, /<h1>Heading<\/h1>/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /<em>italic<\/em>/);
+  assert.match(html, /<code class="torque-md-inline-code">code<\/code>/);
+  assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="https:\/\/example\.com\?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">Docs<\/a>/);
+  assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Bad<\/span>/);
+  assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Entity<\/span>/);
+  assert.match(html, /<blockquote><p>quoted line<\/p><\/blockquote>/);
+  assert.match(html, /<pre class="torque-md-code-block"><code>const tag = &quot;&lt;script&gt;&quot;;<\/code><\/pre>/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script\b/i);
+  assert.doesNotMatch(html, /<img\b/i);
+  assert.doesNotMatch(html, /href="(?:javascript|data):/i);
+});
+
 function setupTerminalDirectMessageClickHarness() {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
@@ -9142,7 +9214,7 @@ function setupTerminalDirectMessageClickHarness() {
       {
         message_id: 'dm-anchor',
         message_type: 'message',
-        message: 'Anchored message',
+        message: 'Anchored [docs](https://example.com)',
         sender_id: 'user',
         sender_kind: 'user',
         recipient_id: 'agent-1',
@@ -9261,6 +9333,34 @@ test('embedded terminal direct-message click preserves list scroll and does not 
   assert.equal(terminalFocusCalls(), 0);
   assert.equal(jsonValue(context, `_terminalDirectMessageSelectedByAgent['agent-1']`), 'dm-anchor');
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--message selected/);
+});
+
+test('embedded terminal markdown links do not select messages or refocus terminal', () => {
+  const { context, document, dom, list, terminalFocusCalls } = setupTerminalDirectMessageClickHarness();
+  document.activeElement = dom.surface;
+
+  assert.match(dom.directMessages.innerHTML, /data-torque-markdown-link="1" href="https:\/\/example\.com"/);
+
+  const linkTarget = new FakeElement('markdown-link');
+  linkTarget.setAttribute('data-torque-markdown-link', '1');
+
+  const downEvt = terminalClickEvent();
+  downEvt.button = 0;
+  downEvt.target = linkTarget;
+  context.__downEvt = downEvt;
+  assert.equal(runInContext(context, 'terminalDirectMessageMouseDown(__downEvt);'), true);
+  assert.equal(downEvt.preventDefaultCalled, false);
+  assert.equal(downEvt.stopPropagationCalled, true);
+
+  const clickEvt = terminalClickEvent();
+  clickEvt.target = linkTarget;
+  context.__clickEvt = clickEvt;
+  assert.equal(runInContext(context, `terminalDirectMessageSelect(__clickEvt, 'agent-1', 'dm-anchor');`), true);
+  assert.equal(clickEvt.preventDefaultCalled, false);
+  assert.equal(clickEvt.stopPropagationCalled, true);
+  assert.equal(list.scrollTop, 100);
+  assert.equal(terminalFocusCalls(), 0);
+  assert.equal(runInContext(context, `_terminalDirectMessageSelectedByAgent['agent-1'] || ''`), '');
 });
 
 test('embedded terminal direct-message reply click preserves list scroll and focuses compose without terminal flash', () => {
@@ -16634,6 +16734,43 @@ test('chat panel renders snapshot threads and selected read-only message tail', 
   assert.match(parts.messages.innerHTML, /Older messages exist outside this loaded tail/);
   assert.match(parts.messages.innerHTML, /Context details/);
   assert.equal(jsonValue(context, '_chatSelectedThreadId'), 'thread-new');
+});
+
+test('chat panel renders message markdown with escaped raw HTML and safe links', () => {
+  const { context, document } = createChatHarness();
+  setChatThreads(context, {
+    'thread-md': makeChatThread('thread-md', {
+      ts: 300,
+      title: 'Markdown Thread',
+      message: [
+        '## Plan',
+        'Use **bold**, *italic*, and `code`.',
+        '- [Safe](mailto:ops@example.com)',
+        '- [Nope](data:text/html,<svg onload=alert(1)>)',
+        '```',
+        '<script>alert("x")</script>',
+        '```',
+        '<img src=x onerror=alert(1)>',
+      ].join('\n'),
+    }),
+  });
+
+  context.renderChatPanel();
+
+  const html = document.getElementById('panel-chat')._chatShell._chatParts.messages.innerHTML;
+  assert.match(html, /data-chat-message-id="thread-md-msg"/);
+  assert.match(html, /class="chat-message-body torque-markdown"/);
+  assert.match(html, /<h2>Plan<\/h2>/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /<em>italic<\/em>/);
+  assert.match(html, /<code class="torque-md-inline-code">code<\/code>/);
+  assert.match(html, /href="mailto:ops@example\.com" target="_blank" rel="noopener noreferrer">Safe<\/a>/);
+  assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Nope<\/span>/);
+  assert.match(html, /<pre class="torque-md-code-block"><code>&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;<\/code><\/pre>/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<script\b/i);
+  assert.doesNotMatch(html, /<img\b/i);
+  assert.doesNotMatch(html, /href="(?:javascript|data):/i);
 });
 
 test('chat panel renders bubbles on the stable side for sender role', () => {
