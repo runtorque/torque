@@ -8854,6 +8854,278 @@ test('embedded terminal direct-message scroll restore uses anchor item unless al
   assert.equal(list.scrollTop, 550);
 });
 
+test('embedded terminal direct-message top divider resizes and persists height across rerender', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [{
+      message_id: 'dm-1',
+      message: 'hello',
+      sender_id: 'agent-1',
+      sender_kind: 'worker',
+      recipient_id: 'user',
+      recipient_kind: 'user',
+      created_at: 10,
+    }],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  assert.match(dom.directMessages.innerHTML, /data-terminal-direct-messages-resizer/);
+  assert.ok(
+    dom.directMessages.innerHTML.indexOf('data-terminal-direct-messages-resizer')
+      < dom.directMessages.innerHTML.indexOf('class="terminal-direct-messages"'),
+  );
+
+  const resizer = new FakeElement('dm-resizer');
+  resizer.classList.add('terminal-direct-messages-resizer');
+  resizer.setAttribute('data-terminal-direct-messages-resizer', '');
+  const section = new FakeElement('dm-section');
+  section.classList.add('terminal-direct-messages');
+  section.getBoundingClientRect = () => ({ top: 100, bottom: 280, height: 180, left: 0, right: 300, width: 300 });
+  dom.directMessages.appendChild(resizer);
+  dom.directMessages.appendChild(section);
+  dom.directMessages.setQuerySelector('[data-terminal-direct-messages-resizer]', resizer);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages', section);
+
+  context.__dmResizer = resizer;
+  runInContext(context, `
+    terminalDirectMessagesResizeStart({
+      button: 0,
+      clientY: 300,
+      currentTarget: __dmResizer,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.stopped = true; },
+    });
+  `);
+  assert.equal(document.body.classList.contains('terminal-direct-messages-resizing'), true);
+
+  document.listeners.mousemove({
+    clientY: 260,
+    preventDefault() {},
+  });
+  assert.equal(dom.directMessages.style['--terminal-direct-messages-height'], '220px');
+  assert.equal(section.style.height || '', '');
+  assert.equal(resizer.getAttribute('aria-valuenow'), null);
+  assert.equal(jsonValue(context, 'state.terminal_direct_messages_height'), 220);
+
+  document.listeners.mouseup({
+    clientY: 260,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(document.body.classList.contains('terminal-direct-messages-resizing'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls.at(-1))), {
+    cmd: 'ui_set_terminal_direct_messages_height',
+    height: 220,
+  });
+
+  delete dom.directMessages.style['--terminal-direct-messages-height'];
+  section.style.height = '';
+  runInContext(context, 'renderTerminalWorkspace();');
+  assert.equal(dom.directMessages.style['--terminal-direct-messages-height'], '220px');
+  assert.equal(section.style.height || '', '');
+  assert.equal(resizer.getAttribute('aria-valuenow'), null);
+});
+
+test('embedded terminal direct-message resize and unrelated WS delta preserve scroll anchor and compose focus', () => {
+  const { sandbox, document } = createSandbox({
+    location: { protocol: 'http:', host: 'localhost:9000' },
+  });
+  const workspace = document.register('terminal-workspace');
+  workspace.classList.add('active');
+  document.body.classList.add('runtime-embedded');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/terminal.js');
+  const dom = attachTerminalWorkspaceDom(document);
+
+  runInContext(context, `
+    _expectedSeq = 1;
+    updateEventsAttentionBadge = function() {};
+    renderInvalidatedSurfaces = function() { renderTerminalWorkspace(); };
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.group_settings = { alpha: {} };
+    state.children = { 'agent-1': [], 'agent-2': [] };
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Builder',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: '',
+        status: 'stopped'
+      },
+      'agent-2': {
+        id: 'agent-2',
+        name: 'Other',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: '',
+        status: 'stopped'
+      }
+    };
+    state.direct_messages_by_agent = {
+      'agent-1': [
+        {
+          message_id: 'dm-old',
+          message: 'older',
+          sender_id: 'agent-1',
+          sender_kind: 'worker',
+          recipient_id: 'user',
+          recipient_kind: 'user',
+          created_at: 10
+        },
+        {
+          message_id: 'dm-anchor',
+          message: 'anchored',
+          sender_id: 'agent-1',
+          sender_kind: 'worker',
+          recipient_id: 'user',
+          recipient_kind: 'user',
+          created_at: 11
+        }
+      ]
+    };
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const resizer = new FakeElement('dm-resizer');
+  resizer.classList.add('terminal-direct-messages-resizer');
+  resizer.setAttribute('data-terminal-direct-messages-resizer', '');
+  const section = new FakeElement('dm-section');
+  section.classList.add('terminal-direct-messages');
+  section.getBoundingClientRect = () => ({ top: 100, bottom: 280, height: 180, left: 0, right: 300, width: 300 });
+  const list = new FakeElement('dm-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  const oldItem = new FakeElement('dm-old');
+  oldItem.dataset.terminalDmAnchor = 'dm-old';
+  oldItem.offsetTop = 40;
+  oldItem.offsetHeight = 24;
+  const anchorItem = new FakeElement('dm-anchor');
+  anchorItem.dataset.terminalDmAnchor = 'dm-anchor';
+  anchorItem.offsetTop = 140;
+  anchorItem.offsetHeight = 24;
+  list.setQuerySelectorAll('[data-terminal-dm-anchor]', [oldItem, anchorItem]);
+  list.scrollTop = 100;
+  list.clientHeight = 100;
+  list.scrollHeight = 500;
+  dom.directMessages.appendChild(resizer);
+  dom.directMessages.appendChild(section);
+  section.appendChild(list);
+  dom.directMessages.setQuerySelector('[data-terminal-direct-messages-resizer]', resizer);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages', section);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  dom.workspace.setQuerySelector('.terminal-direct-messages-list', list);
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.tagName = 'TEXTAREA';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = 'draft hello';
+  input.selectionStart = 6;
+  input.selectionEnd = 11;
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__composeInput = input;
+  context.__dmResizer = resizer;
+  runInContext(context, 'terminalComposeInput(__composeInput);');
+
+  runInContext(context, `
+    terminalDirectMessagesResizeStart({
+      button: 0,
+      clientY: 300,
+      currentTarget: __dmResizer,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+  `);
+  document.listeners.mousemove({ clientY: 260, preventDefault() {} });
+  document.listeners.mouseup({ clientY: 260, preventDefault() {}, stopPropagation() {} });
+
+  assert.equal(list.scrollTop, 100);
+  assert.equal(input.value, 'draft hello');
+  assert.equal(input.selectionStart, 6);
+  assert.equal(input.selectionEnd, 11);
+  assert.equal(input.focused, true);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-2',
+      group: 'alpha',
+      name: 'Other',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: '',
+      status: 'running',
+    }],
+  });
+
+  assert.equal(list.scrollTop, 100);
+  assert.equal(input.value, 'draft hello');
+  assert.equal(input.selectionStart, 6);
+  assert.equal(input.selectionEnd, 11);
+  assert.equal(input.focused, true);
+});
+
+test('embedded terminal direct-message resize rail has a dedicated hit-zone outside header and compose controls', () => {
+  const terminalSource = fs.readFileSync(path.join(repoRoot, 'static/js/terminal.js'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const resizerIndex = terminalSource.indexOf('data-terminal-direct-messages-resizer');
+  const sectionIndex = terminalSource.indexOf('<section class="terminal-direct-messages"');
+  const headerIndex = terminalSource.indexOf('terminal-direct-messages-header');
+  assert.ok(resizerIndex >= 0, 'direct-message resize divider markup exists');
+  assert.ok(sectionIndex > resizerIndex, 'resize divider is before the message panel section');
+  assert.ok(headerIndex > sectionIndex, 'header controls remain inside the section below the divider');
+
+  const resizerRule = css.match(/\.terminal-direct-messages-resizer\s*\{[^}]+\}/);
+  assert.ok(resizerRule, 'direct-message resize divider CSS exists');
+  assert.match(resizerRule[0], /height:\s*12px;/);
+  assert.match(resizerRule[0], /cursor:\s*ns-resize;/);
+  assert.doesNotMatch(resizerRule[0], /position:\s*absolute|inset:|top:|bottom:/);
+  assert.match(css, /\.terminal-direct-messages-slot\[data-resized="true"\] \.terminal-direct-messages-list\s*\{[\s\S]*max-height:\s*none;/);
+});
+
 test('embedded terminal compose renders only for standalone runtime and preserves drafts across rerenders', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,

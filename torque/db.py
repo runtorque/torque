@@ -4850,6 +4850,13 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except (TypeError, ValueError):
             workspace_sidebar_width = 0
         try:
+            terminal_direct_messages_height = max(
+                0,
+                int(ui.get("terminal_direct_messages_height", "0") or "0"),
+            )
+        except (TypeError, ValueError):
+            terminal_direct_messages_height = 0
+        try:
             context_panel_split_ratio = float(
                 ui.get("context_panel_split_ratio", "0.38") or "0.38"
             )
@@ -4944,6 +4951,9 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "detached_panels": detached_panels,
             "window_bounds": window_bounds,
             "workspace_sidebar_width": workspace_sidebar_width,
+            "terminal_direct_messages_height": (
+                terminal_direct_messages_height
+            ),
             "engineer_panel_split_fraction": engineer_panel_split_fraction,
             "context_panel_split_ratio": context_panel_split_ratio,
             "supervisor_panel_state": supervisor_panel_state,
