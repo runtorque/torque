@@ -11,6 +11,7 @@ from pathlib import Path
 import shlex
 from textwrap import dedent
 
+from ..context_window import normalize_context_window_usage
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 from .mcp_launch import build_stdio_launch_spec
 
@@ -21,6 +22,13 @@ TORQUE_SKILL_PREFIX = "torque-"
 _AUTO_MEMORY_ORIGINAL_REL_PATH = Path(
     ".torque/claude-auto-memory-original.json"
 )
+_STATUSLINE_ORIGINAL_REL_PATH = Path(
+    ".torque/claude-statusline-original.json"
+)
+_STATUSLINE_PROXY_REL_PATH = Path(
+    ".torque/claude-statusline-proxy.py"
+)
+_TORQUE_STATUSLINE_MARKER = "claude-statusline-proxy.py"
 
 # ---------------------------------------------------------------------------
 # Slash command (skill) definitions — injected into .claude/skills/
@@ -164,6 +172,327 @@ def _restore_auto_memory_setting(working_dir: str, settings: dict) -> None:
         marker.unlink(missing_ok=True)
     except Exception:
         pass
+
+
+def _statusline_original_file(working_dir: str) -> Path:
+    return Path(working_dir) / _STATUSLINE_ORIGINAL_REL_PATH
+
+
+def _statusline_proxy_file(working_dir: str) -> Path:
+    return Path(working_dir) / _STATUSLINE_PROXY_REL_PATH
+
+
+def _is_torque_statusline_entry(entry) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    command = str(entry.get("command", "") or "")
+    return _TORQUE_STATUSLINE_MARKER in command
+
+
+def _torque_statusline_command(working_dir: str) -> str:
+    return "python3 " + shlex.quote(str(_statusline_proxy_file(working_dir)))
+
+
+def _statusline_proxy_source(original_file: Path, event_url: str) -> str:
+    """Return the Torque-managed Claude statusLine proxy script."""
+    original_path = json.dumps(str(original_file))
+    event_url_literal = json.dumps(str(event_url or _torque_hook_url()))
+    return dedent(f"""\
+        #!/usr/bin/env python3
+        import hashlib
+        import json
+        import os
+        import subprocess
+        import sys
+        import urllib.request
+
+        ORIGINAL_FILE = {original_path}
+        EVENT_URL = {event_url_literal}
+
+
+        def _load_original():
+            try:
+                with open(ORIGINAL_FILE, "r") as fh:
+                    data = json.load(fh)
+            except Exception:
+                return {{}}
+            if not isinstance(data, dict) or not data.get("present"):
+                return {{}}
+            value = data.get("value")
+            return value if isinstance(value, dict) else {{}}
+
+
+        def _post_event(raw):
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{{}}")
+            except Exception:
+                payload = {{}}
+            if not isinstance(payload, dict):
+                payload = {{}}
+            payload.setdefault("hook_event_name", "StatusLine")
+            body_for_hash = json.dumps(
+                payload, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            payload.setdefault(
+                "event_id", hashlib.sha256(body_for_hash).hexdigest()
+            )
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            request = urllib.request.Request(
+                EVENT_URL,
+                data=body,
+                headers={{
+                    "Content-Type": "application/json",
+                    "X-Torque-Cell-Id": os.environ.get("TORQUE_CELL_ID", ""),
+                }},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(request, timeout=1).read()
+            except Exception:
+                pass
+            return payload
+
+
+        def _forward_original(raw):
+            original = _load_original()
+            command = str(original.get("command", "") or "")
+            if original.get("type") != "command" or not command:
+                return False
+            try:
+                completed = subprocess.run(
+                    command,
+                    input=raw,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                sys.stdout.buffer.write(completed.stdout)
+                sys.stderr.buffer.write(completed.stderr)
+            except Exception:
+                # A configured project-local statusLine existed, so avoid
+                # printing Torque fallback text that would change the user's
+                # visible line on proxy failures.
+                pass
+            return True
+
+
+        def _neutral_status(payload):
+            context = payload.get("context_window")
+            if not isinstance(context, dict):
+                context = {{}}
+            pct = context.get("used_percentage")
+            try:
+                pct = float(pct)
+            except Exception:
+                pct = None
+            if pct is None:
+                sys.stdout.write("ctx --\\n")
+            else:
+                sys.stdout.write(f"ctx {{pct:.0f}}%\\n")
+
+
+        def main():
+            raw = sys.stdin.buffer.read()
+            payload = _post_event(raw)
+            if not _forward_original(raw):
+                _neutral_status(payload)
+
+
+        if __name__ == "__main__":
+            main()
+    """)
+
+
+def _install_statusline_proxy(working_dir: str, settings: dict) -> None:
+    """Install Torque's Claude statusLine proxy, preserving project-local config."""
+    original_file = _statusline_original_file(working_dir)
+    proxy_file = _statusline_proxy_file(working_dir)
+    event_url = _torque_hook_url()
+    existing = settings.get("statusLine")
+
+    if not _is_torque_statusline_entry(existing):
+        original_file.parent.mkdir(parents=True, exist_ok=True)
+        original_file.write_text(
+            json.dumps(
+                {
+                    "present": "statusLine" in settings,
+                    "value": existing,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+
+    proxy_file.parent.mkdir(parents=True, exist_ok=True)
+    proxy_file.write_text(_statusline_proxy_source(original_file, event_url))
+    os.chmod(proxy_file, 0o755)
+    settings["statusLine"] = {
+        "type": "command",
+        "command": _torque_statusline_command(working_dir),
+    }
+
+
+def _restore_statusline_setting(working_dir: str, settings: dict | None) -> None:
+    """Restore the project-local Claude statusLine saved by install_hooks."""
+    original_file = _statusline_original_file(working_dir)
+    proxy_file = _statusline_proxy_file(working_dir)
+    try:
+        current = (settings or {}).get("statusLine") if isinstance(settings, dict) else None
+        if (
+            isinstance(settings, dict)
+            and _is_torque_statusline_entry(current)
+            and original_file.exists()
+        ):
+            data = json.loads(original_file.read_text() or "{}")
+            if data.get("present"):
+                settings["statusLine"] = data.get("value")
+            else:
+                settings.pop("statusLine", None)
+        elif isinstance(settings, dict) and _is_torque_statusline_entry(current):
+            settings.pop("statusLine", None)
+        original_file.unlink(missing_ok=True)
+        proxy_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _dict_value(source: dict, *keys):
+    if not isinstance(source, dict):
+        return None
+    for key in keys:
+        if key in source and source[key] is not None:
+            return source[key]
+    return None
+
+
+def _int_value(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _float_value(value, default: float = -1.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _positive_token_value(source: dict, *keys) -> int:
+    return max(0, _int_value(_dict_value(source, *keys), 0))
+
+
+def _claude_model_name(raw: dict) -> str:
+    model = raw.get("model")
+    if isinstance(model, dict):
+        return str(
+            model.get("id")
+            or model.get("name")
+            or model.get("display_name")
+            or model.get("displayName")
+            or ""
+        )
+    return str(model or "")
+
+
+def _claude_statusline_context_window(raw: dict, timestamp: float) -> dict:
+    context = raw.get("context_window") or raw.get("contextWindow")
+    if not isinstance(context, dict):
+        return {}
+
+    limit_tokens = _int_value(
+        _dict_value(
+            context,
+            "context_window_size",
+            "contextWindowSize",
+            "limit_tokens",
+            "limitTokens",
+        ),
+        0,
+    )
+    input_tokens = _positive_token_value(
+        context, "input_tokens", "inputTokens", "total_input_tokens", "totalInputTokens"
+    )
+    output_tokens = _positive_token_value(
+        context,
+        "output_tokens",
+        "outputTokens",
+        "total_output_tokens",
+        "totalOutputTokens",
+    )
+    cached_input_tokens = _positive_token_value(
+        context,
+        "cached_input_tokens",
+        "cachedInputTokens",
+        "cache_read_input_tokens",
+        "cacheReadInputTokens",
+    )
+    cache_creation_tokens = _positive_token_value(
+        context, "cache_creation_input_tokens", "cacheCreationInputTokens"
+    )
+    if cache_creation_tokens:
+        cached_input_tokens += cache_creation_tokens
+    reasoning_output_tokens = _positive_token_value(
+        context,
+        "reasoning_output_tokens",
+        "reasoningOutputTokens",
+    )
+    session_total_tokens = _positive_token_value(
+        context,
+        "session_total_tokens",
+        "sessionTotalTokens",
+        "total_session_tokens",
+        "totalSessionTokens",
+    )
+
+    used_tokens = _int_value(
+        _dict_value(
+            context,
+            "used_tokens",
+            "usedTokens",
+            "total_tokens",
+            "totalTokens",
+            "current_context_tokens",
+            "currentContextTokens",
+        ),
+        0,
+    )
+    if used_tokens <= 0:
+        used_tokens = input_tokens + output_tokens + reasoning_output_tokens
+
+    used_pct = _float_value(
+        _dict_value(context, "used_percentage", "usedPercentage", "used_pct", "usedPct")
+    )
+    if used_tokens <= 0 and used_pct >= 0 and limit_tokens > 0:
+        used_tokens = round((used_pct / 100.0) * limit_tokens)
+
+    # Claude StatusLine can emit null/zero values before the first model
+    # response.  Keep context_window empty until both sides are meaningful.
+    if used_tokens <= 0 or limit_tokens <= 0:
+        return {}
+
+    data = {
+        "source": "claude_statusline",
+        "model": _claude_model_name(raw),
+        "session_id": str(raw.get("session_id") or raw.get("sessionId") or ""),
+        "used_tokens": used_tokens,
+        "limit_tokens": limit_tokens,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "reasoning_output_tokens": reasoning_output_tokens,
+        "session_total_tokens": session_total_tokens,
+        "updated_at": timestamp,
+    }
+    if used_pct >= 0:
+        data["used_pct"] = used_pct
+    return normalize_context_window_usage(data, now=timestamp)
 
 
 # Tool name → human-readable activity detail
@@ -450,6 +779,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             # Claude Code's provider-local MEMORY.md auto-memory for every
             # Torque-spawned Claude session while hooks are installed.
             _remember_and_disable_auto_memory(working_dir, existing)
+            _install_statusline_proxy(working_dir, existing)
 
             # Remove any stale Torque hooks first
             existing_hooks = existing.get("hooks", {})
@@ -482,6 +812,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         """
         settings_file = Path(working_dir) / ".claude" / "settings.local.json"
         if not settings_file.exists():
+            _restore_statusline_setting(working_dir, None)
             return
 
         try:
@@ -508,6 +839,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 existing.pop("hooks", None)
 
             _restore_auto_memory_setting(working_dir, existing)
+            _restore_statusline_setting(working_dir, existing)
 
             # If nothing left, delete the file
             if not existing:
@@ -627,6 +959,16 @@ class ClaudeCodeAdapter(AgentAdapter):
         """Parse a Claude Code hook HTTP payload into a normalized AgentEvent."""
         hook_event = raw.get("hook_event_name", "")
         now = time.time()
+
+        if hook_event == "StatusLine":
+            context_window = _claude_statusline_context_window(raw, now)
+            if not context_window:
+                return None
+            return AgentEvent(
+                cell_id=cell.id, timestamp=now,
+                event_type="context_update",
+                data={"context_window": context_window},
+            )
 
         if hook_event == "SessionStart":
             return AgentEvent(

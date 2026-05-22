@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 from .mcp_launch import build_stdio_launch_spec
+from ..context_window import normalize_context_window_usage
 
 _TORQUE_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
@@ -396,6 +397,121 @@ def _set_model_instructions_file(content: str, path: str = "") -> str:
     return block + "\n" + content
 
 
+def _dict_value(source: dict, *keys: str):
+    if not isinstance(source, dict):
+        return None
+    for key in keys:
+        if key in source:
+            return source.get(key)
+    return None
+
+
+def _read_text_tail(path: Path, max_bytes: int) -> str:
+    size = path.stat().st_size
+    start = max(0, size - max(1, int(max_bytes or 1)))
+    with path.open("rb") as fh:
+        fh.seek(start)
+        data = fh.read()
+    if start > 0:
+        _prefix, sep, remainder = data.partition(b"\n")
+        data = remainder if sep else b""
+    return data.decode("utf-8", errors="replace")
+
+
+def _codex_context_window_from_token_count(
+    info: dict,
+    *,
+    model: str = "",
+    session_id: str = "",
+    timestamp: float | None = None,
+) -> dict:
+    if not isinstance(info, dict):
+        return {}
+    last = _dict_value(info, "last_token_usage", "last") or {}
+    total = _dict_value(info, "total_token_usage", "total") or {}
+    limit_tokens = _dict_value(
+        info, "model_context_window", "modelContextWindow"
+    )
+    return normalize_context_window_usage(
+        {
+            "source": "codex_transcript",
+            "model": model,
+            "session_id": session_id,
+            "used_tokens": _dict_value(last, "total_tokens", "totalTokens"),
+            "limit_tokens": limit_tokens,
+            "input_tokens": _dict_value(last, "input_tokens", "inputTokens"),
+            "output_tokens": _dict_value(last, "output_tokens", "outputTokens"),
+            "cached_input_tokens": _dict_value(
+                last, "cached_input_tokens", "cachedInputTokens"
+            ),
+            "reasoning_output_tokens": _dict_value(
+                last, "reasoning_output_tokens", "reasoningOutputTokens"
+            ),
+            "session_total_tokens": _dict_value(
+                total, "total_tokens", "totalTokens"
+            ),
+        },
+        now=timestamp,
+    )
+
+
+def _latest_codex_context_window_from_transcript(
+    transcript_path: str,
+    *,
+    model: str = "",
+    session_id: str = "",
+    timestamp: float | None = None,
+    max_bytes: int = 1_000_000,
+) -> dict:
+    """Extract the latest Codex token_count event from a bounded JSONL tail."""
+    if not transcript_path:
+        return {}
+    try:
+        path = Path(str(transcript_path)).expanduser()
+        if not path.is_file():
+            return {}
+        text = _read_text_tail(path, max_bytes)
+    except Exception:
+        return {}
+
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        payload = item.get("payload") if isinstance(item, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("type") != "token_count":
+            continue
+        context_window = _codex_context_window_from_token_count(
+            payload.get("info") or {},
+            model=model,
+            session_id=session_id,
+            timestamp=timestamp,
+        )
+        if context_window:
+            return context_window
+    return {}
+
+
+def _codex_context_window_from_raw(raw: dict, timestamp: float) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    transcript_path = raw.get("transcript_path") or raw.get("transcriptPath") or ""
+    model = str(raw.get("model", "") or "")
+    session_id = str(raw.get("session_id", "") or raw.get("sessionId", "") or "")
+    return _latest_codex_context_window_from_transcript(
+        transcript_path,
+        model=model,
+        session_id=session_id,
+        timestamp=timestamp,
+    )
+
+
 class CodexAdapter(AgentAdapter):
     name = "codex"
     display_name = "Codex"
@@ -729,26 +845,33 @@ class CodexAdapter(AgentAdapter):
         # Codex hooks include a "type" or "hook_event_name" field
         hook_event = raw.get("hook_event_name", "") or raw.get("type", "")
         now = time.time()
+        context_window = _codex_context_window_from_raw(raw, now)
 
         if hook_event == "SessionStart":
+            data = {
+                "model": raw.get("model", ""),
+                "session_id": raw.get("session_id", ""),
+            }
+            if context_window:
+                data["context_window"] = context_window
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_start",
-                data={
-                    "model": raw.get("model", ""),
-                    "session_id": raw.get("session_id", ""),
-                },
+                data=data,
             )
 
         if hook_event == "Stop":
+            data = {
+                "reason": raw.get("stop_reason")
+                or raw.get("stopReason", "completed"),
+                "summary": raw.get("last_assistant_message") or "",
+            }
+            if context_window:
+                data["context_window"] = context_window
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_end",
-                data={
-                    "reason": raw.get("stop_reason")
-                    or raw.get("stopReason", "completed"),
-                    "summary": raw.get("last_assistant_message") or "",
-                },
+                data=data,
             )
 
         if hook_event == "PreToolUse":

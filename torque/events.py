@@ -10,6 +10,7 @@ from dataclasses import asdict
 from .adapters import get_adapter
 from .adapters.base import AgentEvent, EVENT_TYPES
 from .config import log
+from .context_window import normalize_context_window_usage
 from .task_health import HEALTH_SEVERITY
 from . import profiling
 
@@ -18,7 +19,11 @@ PERSISTENT_CELL_EVENT_KINDS = {"architect", "engineer"}
 WORKER_BOOT_DOA_EVENT = "worker_boot_doa"
 WORKER_BOOT_DOA_DEFAULT_SECONDS = 90.0
 WORKER_BOOT_DOA_ENV = "TORQUE_WORKER_BOOT_DOA_SECONDS"
-WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS = {"session_start", "heartbeat"}
+WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS = {
+    "session_start",
+    "heartbeat",
+    "context_update",
+}
 WORKER_BOOT_DOA_IGNORED_PANEL_EVENTS = {
     "agent_started",
     "task_dispatched",
@@ -73,6 +78,24 @@ def _agent_progress_ts(state, cell) -> float:
 
 def _cell_kind(cell) -> str:
     return str(getattr(cell, "kind", "") or "").strip()
+
+
+def _apply_context_window(cell, data: dict | None, timestamp: float | None,
+                          *, clear_on_empty: bool = False) -> bool:
+    context_window = normalize_context_window_usage(
+        (data or {}).get("context_window"),
+        now=timestamp,
+    )
+    if context_window:
+        if getattr(cell, "context_window", {}) == context_window:
+            return False
+        cell.context_window = context_window
+        return True
+    if clear_on_empty and getattr(cell, "context_window", {}):
+        cell.context_window = {}
+        return True
+    else:
+        return False
 
 
 def _effective_owner_engineer_id(cell) -> str:
@@ -674,6 +697,8 @@ def _agent_event_message(event: AgentEvent) -> str:
         return data.get("detail", "") or "Progress update"
     if et == "cost_update":
         return "Token usage updated"
+    if et == "context_update":
+        return "Context usage updated"
     return et.replace("_", " ")
 
 
@@ -843,6 +868,12 @@ class EventBus:
             cell.mark_progress(event.timestamp)
         else:
             cell.mark_heartbeat(event.timestamp)
+        context_window_changed = _apply_context_window(
+            cell,
+            d,
+            event.timestamp,
+            clear_on_empty=et == "session_start",
+        )
 
         if et == "session_start":
             cell.activity = ""
@@ -938,6 +969,10 @@ class EventBus:
         elif et == "cost_update":
             cell.session_tokens_in += d.get("input_tokens", 0)
             cell.session_tokens_out += d.get("output_tokens", 0)
+
+        elif et == "context_update":
+            if context_window_changed:
+                cell.last_event_text = "Context usage updated"
 
         elif et == "heartbeat":
             detail = d.get("detail", "")

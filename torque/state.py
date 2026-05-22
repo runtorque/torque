@@ -904,6 +904,7 @@ class AgentCell:
     last_event_text: str = ""  # last meaningful event description
     session_tokens_in: int = 0  # cumulative input tokens this session
     session_tokens_out: int = 0  # cumulative output tokens this session
+    context_window: dict = field(default_factory=dict)  # current context usage
     error_message: str = ""  # last error, cleared on next successful event
     needs_attention: bool = False  # agent waiting for input or stuck
     last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
@@ -1027,6 +1028,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "activity", "activity_detail",
                      "last_event_text",
                      "session_tokens_in", "session_tokens_out",
+                     "context_window",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
                      "worktree_dirty", "worktree_diff",

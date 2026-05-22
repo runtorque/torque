@@ -1,9 +1,15 @@
 import fcntl
+import http.server
 import json
 import multiprocessing
 import os
+import queue
 import re
+import shlex
+import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -151,7 +157,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "autoMemoryEnabled": True,
             }))
 
-            self.assertTrue(adapter.install_hooks(tmp))
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "1"}, clear=False):
+                self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(settings_file.read_text())
             self.assertIs(installed.get("autoMemoryEnabled"), False)
@@ -173,6 +180,237 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event.event_type, "session_end")
         self.assertEqual(event.data["reason"], "clear")
+
+    def test_claude_parse_statusline_context_update_event(self):
+        adapter = ClaudeCodeAdapter()
+
+        event = adapter.parse_event(
+            {
+                "hook_event_name": "StatusLine",
+                "session_id": "claude-session-1",
+                "model": {"id": "claude-sonnet-4-6"},
+                "context_window": {
+                    "context_window_size": 200000,
+                    "used_percentage": 12.5,
+                    "total_tokens": 25000,
+                    "input_tokens": 24000,
+                    "output_tokens": 950,
+                    "reasoning_output_tokens": 50,
+                    "cache_read_input_tokens": 1000,
+                    "cache_creation_input_tokens": 250,
+                    "session_total_tokens": 123456,
+                },
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "context_update")
+        context_window = event.data["context_window"]
+        self.assertEqual(context_window["source"], "claude_statusline")
+        self.assertEqual(context_window["model"], "claude-sonnet-4-6")
+        self.assertEqual(context_window["session_id"], "claude-session-1")
+        self.assertEqual(context_window["used_tokens"], 25000)
+        self.assertEqual(context_window["limit_tokens"], 200000)
+        self.assertEqual(context_window["used_pct"], 12.5)
+        self.assertEqual(context_window["input_tokens"], 24000)
+        self.assertEqual(context_window["output_tokens"], 950)
+        self.assertEqual(context_window["cached_input_tokens"], 1250)
+        self.assertEqual(context_window["reasoning_output_tokens"], 50)
+        self.assertEqual(context_window["session_total_tokens"], 123456)
+
+        self.assertIsNone(
+            adapter.parse_event(
+                {
+                    "hook_event_name": "StatusLine",
+                    "context_window": {
+                        "context_window_size": 200000,
+                        "used_percentage": 0,
+                    },
+                },
+                SimpleNamespace(id="agent-1"),
+            )
+        )
+
+    def test_claude_statusline_proxy_preserves_project_local_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = ClaudeCodeAdapter()
+            settings_file = Path(tmp) / ".claude" / "settings.local.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            user_script = Path(tmp) / "user_statusline.py"
+            user_script.write_text(
+                "\n".join([
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "payload = json.load(sys.stdin)",
+                    "sys.stdout.write('USER-LINE:' + payload.get('session_id', ''))",
+                    "",
+                ])
+            )
+            user_script.chmod(0o755)
+            original_statusline = {
+                "type": "command",
+                "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(user_script))}",
+            }
+            settings_file.write_text(
+                json.dumps(
+                    {
+                        "theme": "dark",
+                        "statusLine": original_statusline,
+                    }
+                )
+            )
+
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "1"}, clear=False):
+                self.assertTrue(adapter.install_hooks(tmp))
+
+            installed = json.loads(settings_file.read_text())
+            proxy = installed["statusLine"]
+            self.assertEqual(proxy["type"], "command")
+            self.assertIn("claude-statusline-proxy.py", proxy["command"])
+            self.assertTrue(
+                (Path(tmp) / ".torque" / "claude-statusline-original.json").exists()
+            )
+
+            payload = {
+                "session_id": "claude-session-1",
+                "context_window": {
+                    "context_window_size": 200000,
+                    "used_percentage": 12.5,
+                    "total_tokens": 25000,
+                },
+            }
+            result = subprocess.run(
+                proxy["command"],
+                shell=True,
+                input=json.dumps(payload).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={**os.environ, "TORQUE_CELL_ID": "agent-1", "TORQUE_PORT": "1"},
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.decode("utf-8"), "USER-LINE:claude-session-1")
+
+            adapter.uninstall_hooks(tmp)
+
+            cleaned = json.loads(settings_file.read_text())
+            self.assertEqual(cleaned["statusLine"], original_statusline)
+            self.assertFalse(
+                (Path(tmp) / ".torque" / "claude-statusline-original.json").exists()
+            )
+
+    def test_claude_statusline_proxy_takes_over_without_project_local_statusline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = ClaudeCodeAdapter()
+            settings_file = Path(tmp) / ".claude" / "settings.local.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            settings_file.write_text(json.dumps({"theme": "dark"}))
+
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "1"}, clear=False):
+                self.assertTrue(adapter.install_hooks(tmp))
+
+            installed = json.loads(settings_file.read_text())
+            proxy = installed["statusLine"]
+            payload = {
+                "session_id": "claude-session-1",
+                "context_window": {
+                    "context_window_size": 200000,
+                    "used_percentage": 25,
+                    "total_tokens": 50000,
+                },
+            }
+            result = subprocess.run(
+                proxy["command"],
+                shell=True,
+                input=json.dumps(payload).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={**os.environ, "TORQUE_CELL_ID": "agent-1", "TORQUE_PORT": "1"},
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.decode("utf-8"), "ctx 25%\n")
+
+            adapter.uninstall_hooks(tmp)
+
+            cleaned = json.loads(settings_file.read_text())
+            self.assertNotIn("statusLine", cleaned)
+            self.assertEqual(cleaned["theme"], "dark")
+
+    def test_claude_statusline_proxy_bakes_install_time_port(self):
+        received = queue.Queue()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                received.put({
+                    "path": self.path,
+                    "cell_id": self.headers.get("X-Torque-Cell-Id", ""),
+                    "body": json.loads(body.decode("utf-8")),
+                })
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, fmt, *args):
+                pass
+
+        server = http.server.HTTPServer(("localhost", 0), Handler)
+        thread = threading.Thread(target=server.handle_request)
+        thread.daemon = True
+        thread.start()
+        try:
+            port = str(server.server_port)
+            with tempfile.TemporaryDirectory() as tmp:
+                adapter = ClaudeCodeAdapter()
+                settings_file = Path(tmp) / ".claude" / "settings.local.json"
+                settings_file.parent.mkdir(parents=True, exist_ok=True)
+                settings_file.write_text(json.dumps({"theme": "dark"}))
+
+                with mock.patch.dict(os.environ, {"TORQUE_PORT": port}, clear=False):
+                    self.assertTrue(adapter.install_hooks(tmp))
+
+                installed = json.loads(settings_file.read_text())
+                proxy = installed["statusLine"]
+                proxy_source = (Path(tmp) / ".torque" / "claude-statusline-proxy.py").read_text()
+                self.assertIn(f"http://localhost:{port}/events", proxy_source)
+                self.assertNotIn('os.environ.get("TORQUE_PORT")', proxy_source)
+
+                payload = {
+                    "session_id": "claude-session-1",
+                    "context_window": {
+                        "context_window_size": 200000,
+                        "used_percentage": 25,
+                        "total_tokens": 50000,
+                    },
+                }
+                env = {k: v for k, v in os.environ.items() if k != "TORQUE_PORT"}
+                env["TORQUE_CELL_ID"] = "agent-1"
+                result = subprocess.run(
+                    proxy["command"],
+                    shell=True,
+                    input=json.dumps(payload).encode("utf-8"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    timeout=5,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.decode("utf-8"), "ctx 25%\n")
+                posted = received.get(timeout=5)
+                self.assertEqual(posted["path"], "/events")
+                self.assertEqual(posted["cell_id"], "agent-1")
+                self.assertEqual(posted["body"]["hook_event_name"], "StatusLine")
+                self.assertEqual(posted["body"]["session_id"], "claude-session-1")
+                self.assertIn("event_id", posted["body"])
+        finally:
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_claude_mcp_config_install_and_cleanup_preserve_other_servers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -625,6 +863,90 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("torque.mcp_engineer", installed)
             self.assertNotIn('url = "http://127.0.0.1', installed)
             self.assertNotIn('env_http_headers = { "X-Torque-Cell-Id"', installed)
+
+    def test_codex_parse_stop_attaches_context_window_from_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "rollout.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    "not-json",
+                    json.dumps({
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "token_count",
+                            "info": {
+                                "total_token_usage": {"total_tokens": 1000},
+                                "last_token_usage": {
+                                    "input_tokens": 100,
+                                    "cached_input_tokens": 20,
+                                    "output_tokens": 10,
+                                    "reasoning_output_tokens": 5,
+                                    "total_tokens": 110,
+                                },
+                                "model_context_window": 1000,
+                            },
+                        },
+                    }),
+                    json.dumps({
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "token_count",
+                            "info": {
+                                "total_token_usage": {"total_tokens": 1799981},
+                                "last_token_usage": {
+                                    "input_tokens": 147293,
+                                    "cached_input_tokens": 139648,
+                                    "output_tokens": 439,
+                                    "reasoning_output_tokens": 16,
+                                    "total_tokens": 147732,
+                                },
+                                "model_context_window": 258400,
+                            },
+                        },
+                    }),
+                ]) + "\n"
+            )
+
+            event = CodexAdapter().parse_event(
+                {
+                    "hook_event_name": "Stop",
+                    "session_id": "codex-session-1",
+                    "model": "gpt-5.4",
+                    "transcript_path": str(transcript),
+                    "last_assistant_message": "done",
+                },
+                SimpleNamespace(id="agent-1"),
+            )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "session_end")
+        context_window = event.data["context_window"]
+        self.assertEqual(context_window["source"], "codex_transcript")
+        self.assertEqual(context_window["model"], "gpt-5.4")
+        self.assertEqual(context_window["session_id"], "codex-session-1")
+        self.assertEqual(context_window["used_tokens"], 147732)
+        self.assertEqual(context_window["limit_tokens"], 258400)
+        self.assertEqual(context_window["input_tokens"], 147293)
+        self.assertEqual(context_window["output_tokens"], 439)
+        self.assertEqual(context_window["cached_input_tokens"], 139648)
+        self.assertEqual(context_window["reasoning_output_tokens"], 16)
+        self.assertEqual(context_window["session_total_tokens"], 1799981)
+        self.assertAlmostEqual(context_window["used_pct"], 57.17, places=2)
+
+    def test_codex_context_window_transcript_parse_is_defensive(self):
+        event = CodexAdapter().parse_event(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "codex-session-1",
+                "model": "gpt-5.4",
+                "transcript_path": "/path/that/does/not/exist.jsonl",
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "session_start")
+        self.assertNotIn("context_window", event.data)
 
     def test_generic_adapter_is_noop_for_template_specific_flags(self):
         adapter = GenericAdapter()
