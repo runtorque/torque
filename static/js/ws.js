@@ -13,6 +13,7 @@ let state = {
   detached_panels: {},
   window_bounds: {},
   workspace_sidebar_width: 0,
+  terminal_direct_messages_height: 0,
   engineer_panel_split_fraction: 0.30,
   context_panel_split_ratio: 0.38,
   supervisor_panel_state: {},
@@ -745,6 +746,12 @@ function _handleFullState(msg) {
   if (typeof state.workspace_sidebar_width !== 'number') {
     var _workspaceWidth = Number(state.workspace_sidebar_width);
     state.workspace_sidebar_width = Number.isFinite(_workspaceWidth) ? _workspaceWidth : 0;
+  }
+  if (typeof state.terminal_direct_messages_height !== 'number') {
+    var _terminalDirectMessagesHeight = Number(state.terminal_direct_messages_height);
+    state.terminal_direct_messages_height = Number.isFinite(_terminalDirectMessagesHeight)
+      ? Math.max(0, _terminalDirectMessagesHeight)
+      : 0;
   }
   if (typeof state.engineer_panel_split_fraction !== 'number') {
     var _splitFraction = Number(state.engineer_panel_split_fraction);
@@ -1861,6 +1868,9 @@ function _applyUiSurfaceInvalidation(flags, key) {
   }
   if (key === 'workspace_sidebar_width') {
     _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
+  }
+  if (key === 'terminal_direct_messages_height') {
+    _markSurface(flags, 'main');
   }
   if (key === 'context_panel_split_ratio') {
     _markSurface(flags, 'context');

@@ -2088,12 +2088,14 @@ class TorqueDBTests(unittest.TestCase):
         }
         self.db.save_ui_state("window_bounds", json.dumps(bounds))
         self.db.save_ui_state("workspace_sidebar_width", "732")
+        self.db.save_ui_state("terminal_direct_messages_height", "224")
         self.db.save_ui_state("context_panel_split_ratio", "0.44")
 
         loaded = self.db.load_all()
 
         self.assertEqual(loaded["window_bounds"], bounds)
         self.assertEqual(loaded["workspace_sidebar_width"], 732)
+        self.assertEqual(loaded["terminal_direct_messages_height"], 224)
         self.assertEqual(loaded["context_panel_split_ratio"], 0.44)
 
     def test_panel_event_paging_and_trim_keep_recent_events(self):

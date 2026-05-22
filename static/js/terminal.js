@@ -17,7 +17,12 @@ let _terminalComposeHistoryOpenCellId = '';
 let _terminalDirectMessageSelectedByAgent = Object.create(null);
 let _terminalDirectMessageReplyToByAgent = Object.create(null);
 let _terminalDirectMessageIdempotencyCounter = 0;
+let _terminalDirectMessagesResizeDrag = null;
 let _lastAppliedXtermScrollback = null;
+
+var TERMINAL_DIRECT_MESSAGES_MIN_HEIGHT = 112;
+var TERMINAL_DIRECT_MESSAGES_DEFAULT_HEIGHT = 190;
+var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
 
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
@@ -259,6 +264,13 @@ function _renderTerminalDirectMessagesHtml(agent) {
     }
   }
   return ''
+    + '<div class="terminal-direct-messages-resizer" role="separator"'
+    + ' aria-orientation="horizontal" aria-label="Resize direct messages"'
+    + ' title="Resize direct messages" tabindex="0" data-terminal-direct-messages-resizer'
+    + ' onmousedown="terminalDirectMessagesResizeStart(event)"'
+    + ' onkeydown="terminalDirectMessagesResizeKeydown(event)">'
+    + '  <div class="terminal-direct-messages-resizer-grip" aria-hidden="true"></div>'
+    + '</div>'
     + '<section class="terminal-direct-messages" data-agent-id="' + esc(agentId) + '"'
     + ' aria-label="Direct messages with ' + esc((agent && agent.name) || 'agent') + '">'
     + '  <div class="terminal-direct-messages-header">'
@@ -288,11 +300,200 @@ function _renderTerminalDirectMessages(root, cell) {
     root.innerHTML = html;
     root._torqueLastHtml = html;
   }
+  _terminalDirectMessagesApplyPersistedHeight(root);
 }
 
 function _terminalDirectMessagesList(root) {
   if (!root || typeof root.querySelector !== 'function') return null;
   return root.querySelector('.terminal-direct-messages-list');
+}
+
+function _terminalDirectMessagesSection(root) {
+  if (!root || typeof root.querySelector !== 'function') return null;
+  return root.querySelector('.terminal-direct-messages');
+}
+
+function _terminalDirectMessagesSetStyleVar(el, key, value) {
+  if (!el || !el.style) return;
+  if (typeof el.style.setProperty === 'function') el.style.setProperty(key, value);
+  else el.style[key] = value;
+}
+
+function _terminalDirectMessagesRemoveStyleVar(el, key) {
+  if (!el || !el.style) return;
+  if (typeof el.style.removeProperty === 'function') el.style.removeProperty(key);
+  else delete el.style[key];
+}
+
+function _terminalDirectMessagesHeightBounds(root) {
+  const min = TERMINAL_DIRECT_MESSAGES_MIN_HEIGHT;
+  let max = 0;
+  const shell = root && typeof root.closest === 'function'
+    ? root.closest('.terminal-shell')
+    : null;
+  if (shell && typeof shell.getBoundingClientRect === 'function') {
+    const rect = shell.getBoundingClientRect();
+    const shellHeight = rect && Number.isFinite(rect.height) ? rect.height : 0;
+    if (shellHeight >= 320) max = Math.floor(shellHeight * 0.55);
+  }
+  if (!max && typeof window !== 'undefined' && typeof window.innerHeight === 'number') {
+    max = Math.floor(window.innerHeight * 0.45);
+  }
+  max = Math.max(min, max || TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK);
+  return { min: min, max: max };
+}
+
+function _terminalDirectMessagesClampHeight(root, height) {
+  const raw = parseInt(height, 10);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  const bounds = _terminalDirectMessagesHeightBounds(root);
+  return Math.max(bounds.min, Math.min(bounds.max, raw));
+}
+
+function _terminalDirectMessagesPersistedHeight() {
+  const raw = parseInt(state ? state.terminal_direct_messages_height : 0, 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+function _terminalDirectMessagesCurrentHeight(root) {
+  const section = _terminalDirectMessagesSection(root);
+  if (section && typeof section.getBoundingClientRect === 'function') {
+    const rect = section.getBoundingClientRect();
+    if (rect && Number.isFinite(rect.height) && rect.height > 0) {
+      return rect.height;
+    }
+  }
+  if (section && Number(section.offsetHeight) > 0) return Number(section.offsetHeight);
+  const saved = _terminalDirectMessagesPersistedHeight();
+  return saved || TERMINAL_DIRECT_MESSAGES_DEFAULT_HEIGHT;
+}
+
+function _terminalDirectMessagesSetHeight(root, height) {
+  const clamped = _terminalDirectMessagesClampHeight(root, height);
+  if (!root) return clamped;
+  if (root.dataset) {
+    if (clamped > 0) root.dataset.resized = 'true';
+    else delete root.dataset.resized;
+  }
+  if (clamped > 0) {
+    _terminalDirectMessagesSetStyleVar(root, '--terminal-direct-messages-height', clamped + 'px');
+  } else {
+    _terminalDirectMessagesRemoveStyleVar(root, '--terminal-direct-messages-height');
+  }
+  return clamped;
+}
+
+function _terminalDirectMessagesApplyPersistedHeight(root) {
+  return _terminalDirectMessagesSetHeight(root, _terminalDirectMessagesPersistedHeight());
+}
+
+function _terminalDirectMessagesSlotFromEvent(event) {
+  const target = event && (event.currentTarget || event.target);
+  if (target && typeof target.closest === 'function') {
+    const slot = target.closest('.terminal-direct-messages-slot');
+    if (slot) return slot;
+  }
+  const workspace = document.getElementById ? document.getElementById('terminal-workspace') : null;
+  return workspace && workspace.querySelector
+    ? workspace.querySelector('.terminal-direct-messages-slot')
+    : null;
+}
+
+function _terminalDirectMessagesApplyResizeHeight(root, height) {
+  const workspace = document.getElementById ? document.getElementById('terminal-workspace') : null;
+  const cell = _resolveTerminalWorkspaceCell();
+  const snapshot = workspace ? _captureTerminalWorkspaceState(workspace, cell) : null;
+  const applied = _terminalDirectMessagesSetHeight(root, height);
+  if (state) state.terminal_direct_messages_height = applied;
+  if (workspace) _restoreTerminalWorkspaceState(workspace, snapshot, cell);
+  return applied;
+}
+
+function terminalDirectMessagesResizeStart(event) {
+  if (!event || (typeof event.button === 'number' && event.button !== 0)) return false;
+  const root = _terminalDirectMessagesSlotFromEvent(event);
+  if (!root || root.hidden) return false;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  _terminalDirectMessagesResizeDrag = {
+    root: root,
+    startY: Number.isFinite(event.clientY) ? event.clientY : 0,
+    startHeight: _terminalDirectMessagesCurrentHeight(root),
+    currentHeight: _terminalDirectMessagesCurrentHeight(root),
+    changed: false,
+  };
+  if (document && document.body) {
+    if (document.body.classList) document.body.classList.add('terminal-direct-messages-resizing');
+    if (document.body.style) document.body.style.cursor = 'ns-resize';
+  }
+  document.addEventListener('mousemove', _terminalDirectMessagesResizeMove);
+  document.addEventListener('mouseup', _terminalDirectMessagesResizeEnd);
+  return false;
+}
+
+function _terminalDirectMessagesResizeMove(event) {
+  const drag = _terminalDirectMessagesResizeDrag;
+  if (!drag) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  const clientY = event && Number.isFinite(event.clientY) ? event.clientY : drag.startY;
+  const next = drag.startHeight - (clientY - drag.startY);
+  drag.currentHeight = _terminalDirectMessagesApplyResizeHeight(drag.root, next);
+  drag.changed = true;
+}
+
+function _terminalDirectMessagesClearResizeDrag() {
+  document.removeEventListener('mousemove', _terminalDirectMessagesResizeMove);
+  document.removeEventListener('mouseup', _terminalDirectMessagesResizeEnd);
+  if (document && document.body) {
+    if (document.body.classList) document.body.classList.remove('terminal-direct-messages-resizing');
+    if (document.body.style) document.body.style.cursor = '';
+  }
+  _terminalDirectMessagesResizeDrag = null;
+}
+
+function _terminalDirectMessagesPersistHeight(height, root) {
+  const applied = _terminalDirectMessagesClampHeight(root || null, height);
+  if (state) state.terminal_direct_messages_height = applied;
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_set_terminal_direct_messages_height', height: applied });
+  }
+}
+
+function _terminalDirectMessagesResizeEnd(event) {
+  const drag = _terminalDirectMessagesResizeDrag;
+  if (!drag) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  if (event && Number.isFinite(event.clientY)) {
+    const next = drag.startHeight - (event.clientY - drag.startY);
+    drag.currentHeight = _terminalDirectMessagesApplyResizeHeight(drag.root, next);
+    if (event.clientY !== drag.startY) drag.changed = true;
+  }
+  const shouldPersist = !!drag.changed;
+  const height = drag.currentHeight;
+  _terminalDirectMessagesClearResizeDrag();
+  if (shouldPersist) _terminalDirectMessagesPersistHeight(height, drag.root);
+}
+
+function terminalDirectMessagesResizeKeydown(event) {
+  const key = event && (event.key || event.code);
+  const deltas = {
+    ArrowUp: 18,
+    Up: 18,
+    ArrowDown: -18,
+    Down: -18,
+    PageUp: 72,
+    PageDown: -72,
+  };
+  if (!Object.prototype.hasOwnProperty.call(deltas, key)) return false;
+  const root = _terminalDirectMessagesSlotFromEvent(event);
+  if (!root || root.hidden) return false;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  const current = _terminalDirectMessagesCurrentHeight(root);
+  const applied = _terminalDirectMessagesApplyResizeHeight(root, current + deltas[key]);
+  _terminalDirectMessagesPersistHeight(applied, root);
+  return false;
 }
 
 function _terminalDirectMessageAnchorItems(list) {
