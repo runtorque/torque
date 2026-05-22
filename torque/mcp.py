@@ -26,6 +26,10 @@ from .mcp_engineer import (
     engineer_tools_for_cell,
 )
 from .mcp_tool_search import deferred_tool_specs, eager_tool_specs
+from .mcp_tools_shared import (
+    _direct_user_message_response,
+    save_agent_user_direct_message_from_mcp,
+)
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
     derive_idempotency_key,
@@ -503,6 +507,44 @@ TOOLS = [
         },
     },
     {
+        "name": "torque_message_user",
+        "description": (
+            "Send a non-blocking durable direct message to the user-facing "
+            "conversation panel. Use this to answer a `## Message from the "
+            "User` injection or to send user-visible context without "
+            "creating a Backlog ask task. For blocking decisions or "
+            "approvals, use torque_ask instead."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Message content for the user.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional direct-message thread id. V1 normalizes "
+                        "user↔agent lanes to one thread per agent."
+                    ),
+                },
+                "reply_to_id": {
+                    "type": "string",
+                    "description": "Optional message id this is replying to.",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": (
+                        "Optional retry key; omit unless explicitly retrying "
+                        "the same message."
+                    ),
+                },
+            },
+            "required": ["message"],
+        },
+    },
+    {
         "name": "torque_reply",
         "description": (
             "Reply to a message from the engineer (orchestrator agent). "
@@ -790,6 +832,31 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if name == "torque_message_user":
+        cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+        if not cell:
+            return f"Agent {cell_id} not found", True
+        if state.agent_is_tombstoned(cell):
+            return f"Agent {cell_id} is tombstoned", True
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        try:
+            saved, created = save_agent_user_direct_message_from_mcp(
+                state,
+                cell,
+                message=message,
+                thread_id=str(args.get("thread_id", "") or "").strip(),
+                reply_to_id=str(args.get("reply_to_id", "") or "").strip(),
+                idempotency_key=idempotency_key,
+                notify=True,
+            )
+        except ValueError as exc:
+            return str(exc), True
+        return json.dumps(
+            _direct_user_message_response(saved, deduped=not created)
+        ), False
 
     if name in {
         "torque_memory_publish",

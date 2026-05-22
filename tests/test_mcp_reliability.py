@@ -130,6 +130,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "torque_name",
             "torque_derive",
             "torque_ask",
+            "torque_message_user",
             "torque_reply",
             "torque_memory_publish",
             "torque_memory_pin",
@@ -149,6 +150,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "engineer_journal",
             "engineer_agent_message",
             "engineer_ask",
+            "engineer_message_user",
             "engineer_note",
             "engineer_agent_close",
             "engineer_agent_relaunch",
@@ -170,6 +172,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_reassign",
             "architect_task_move",
             "architect_ask",
+            "architect_message_user",
             "architect_engineer_message",
             "architect_peer_message",
             "architect_reply",
@@ -270,6 +273,53 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("dedupe"), 1)
+
+    async def test_torque_message_user_retry_does_not_duplicate_row(self):
+        async def handle_command(_payload):
+            return {"type": "ok"}
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "torque_message_user",
+                "arguments": {
+                    "message": "This should be saved once.",
+                    IDEMPOTENCY_ARG: "direct-user-idem-1",
+                },
+            },
+        }
+
+        first, status = await self.mcp.dispatch_mcp_rpc_body(
+            body,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(first["result"]["isError"])
+        first_payload = json.loads(first["result"]["content"][0]["text"])
+
+        retry = dict(body)
+        retry["id"] = 2
+        second, status = await self.mcp.dispatch_mcp_rpc_body(
+            retry,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(second["result"]["isError"])
+        second_payload = json.loads(second["result"]["content"][0]["text"])
+        self.assertEqual(second_payload["message_id"], first_payload["message_id"])
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT COUNT(*) FROM agent_peer_messages "
+                "WHERE sender_kind='worker' AND recipient_kind='user'"
+            ).fetchone()[0],
+            1,
+        )
 
     async def test_engineer_merge_pr_phase_errors_cache_only_non_retryable(self):
         engineer = AgentCell(

@@ -51,7 +51,8 @@ architect_task_move, architect_task_update
 always poll architect_pending_hire_status before treating the hire as \
 live)
 **Messaging / user asks**: architect_engineer_message, \
-architect_peer_message, architect_reply, architect_ask
+architect_peer_message, architect_reply, architect_message_user, \
+architect_ask
 **Decisions**: architect_decision_create, architect_decision_update, \
 architect_decision_link
 **Journal**: architect_journal, architect_journal_read
@@ -106,6 +107,11 @@ architect_decision_link
   materially depend on the user's choice; it creates a visible
   Backlog attention item and the user's reply will appear in your
   unread messages.
+- **Direct user messages** are non-blocking conversation. Use
+  `architect_message_user(message=..., thread_id=..., reply_to_id=...)`
+  for user-facing status/context or when replying to a
+  `## Message from the User` injection. Do not rely on free-text
+  terminal output for user-facing replies.
 
 ## Session boot checklist
 
@@ -222,7 +228,8 @@ decisions, or request a hire.
    decisions or approvals (product direction, priority conflicts,
    scope trade-offs). Include concise options and your recommendation
    in the description. For soft ambiguity or status notes, prefer a
-   journal entry or an engineer message.
+   journal entry, an engineer message, or `architect_message_user` when
+   the message should be visible to the user without blocking progress.
 
 10. **First session** — If `architect_journal_read` and
    `architect_decision_list` both come back empty, you are in first

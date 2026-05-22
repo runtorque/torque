@@ -983,6 +983,53 @@ ENGINEER_TOOLS = [
         },
     },
     {
+        "name": "engineer_message_user",
+        "description": (
+            "Send a non-blocking durable direct message to the user-facing "
+            "conversation panel. Use this for user-visible conversation or "
+            "to reply to a `## Message from the User` injection. This is "
+            "distinct from engineer_note, which is a board/status note; use "
+            "engineer_ask instead for blocking human decisions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Message content for the user.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional direct-message thread id. V1 normalizes "
+                        "user↔agent lanes to one thread per agent."
+                    ),
+                },
+                "reply_to_id": {
+                    "type": "string",
+                    "description": "Optional message id this is replying to.",
+                },
+                "context_task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional visible task ids/aliases to snapshot.",
+                },
+                "context_summary": {
+                    "type": "string",
+                    "description": "Optional concise context summary.",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": (
+                        "Optional retry key; omit unless explicitly retrying "
+                        "the same message."
+                    ),
+                },
+            },
+            "required": ["message"],
+        },
+    },
+    {
         "name": "engineer_note",
         "description": (
             "Post a non-blocking note or soft question for the human, "

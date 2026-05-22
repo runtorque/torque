@@ -87,6 +87,7 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True) -> str:
         - `torque_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
         - `torque_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
         - `torque_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
+        - `torque_message_user(message="message", thread_id="thread-id", reply_to_id="message-id")` — send a non-blocking durable message to the user-facing conversation panel
         - `torque_context()` — view your current task, agent info, and pipeline state
     """).rstrip()]
 
@@ -101,6 +102,9 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True) -> str:
         use those to determine valid `derive` targets.
         Use `torque_ask` only when a blocking human answer or approval is
         required to continue safely. If you can keep moving, do so.
+        If you receive a `## Message from the User` block, reply through
+        `torque_message_user` rather than relying on free-text terminal
+        output.
         For status updates, non-blocking observations, or optional
         follow-up ideas, continue working and report them via
         `torque_progress`, `torque_done`, `torque_blocked`, or derived-task

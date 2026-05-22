@@ -25,7 +25,15 @@ Available to **every authenticated agent**. These are how Workers report progres
 |---|---|
 | `torque_derive` | Hand off the next pipeline step. Validates the target action against the current action's `transitions`. → [Pipelines](../tasks/pipelines.md) |
 | `torque_ask` | Blocking human-in-the-loop question. Creates a derived task in Backlog with `human` label. |
+| `torque_message_user` | Non-blocking durable direct message to the user-facing conversation panel. |
 | `torque_reply` | Reply to a follow-up question from the Engineer. Resolves the matching follow-up task. |
+
+### Direct user messaging
+
+Use `torque_message_user(message, thread_id='', reply_to_id='', idempotency_key='')`
+to answer a `## Message from the User` injection or send user-visible context
+without blocking work. Use `torque_ask` only when progress must stop for a
+human decision or approval.
 
 ### Identity and context
 
@@ -161,6 +169,7 @@ merge mode cannot close issues this way because no PR body is written.
 |---|---|
 | `engineer_note` | Non-blocking note or soft question for the human. |
 | `engineer_ask` | Blocking question. Pauses event pushes until the human answers. |
+| `engineer_message_user` | Non-blocking durable direct message to the user-facing conversation panel. |
 | `engineer_message_architect` | Message the Architect that hired this Engineer. |
 | `engineer_reply` | Reply to a thread in an existing message conversation. |
 
@@ -242,7 +251,24 @@ The Architect can update only tasks it created itself or that the user created. 
 | `architect_peer_message` | Send a durable same-group direct message to one Architect, optionally with context snapshots. |
 | `architect_peer_inbox` | Read durable Architect peer message threads, including reply-required filters. |
 | `architect_reply` | Reply to an existing Architect ↔ Engineer or Architect ↔ Architect thread. |
+| `architect_message_user` | Non-blocking durable direct message to the user-facing conversation panel. |
 | `architect_ask` | Blocking question to the human. Creates a Backlog task with `human` label. |
+
+#### User direct-message signatures
+
+Participant kinds in the unified `agent_peer_messages` direct-message store are
+`architect`, `engineer`, `worker`, and `user`. The frontend should treat
+`message_type` as one of `message`, `ask`, `ask_reply`, or `system`; the
+blocking ask badge comes from `blocking=true`.
+
+- `architect_message_user(message: string, thread_id?: string = '', reply_to_id?: string = '', context_task_ids?: string[], context_engineer_ids?: string[], context_decision_ids?: string[], context_summary?: string, idempotency_key?: string = '')`
+- `engineer_message_user(message: string, thread_id?: string = '', reply_to_id?: string = '', context_task_ids?: string[], context_summary?: string, idempotency_key?: string = '')`
+- `torque_message_user(message: string, thread_id?: string = '', reply_to_id?: string = '', idempotency_key?: string = '')`
+
+All three persist `sender_kind=<calling agent kind>` and `recipient_kind=user`,
+emit a `direct_message_upsert` delta, return `type`, `message_id`, `thread_id`,
+`reply_to_id`, delivery/read metadata, and never create a Backlog ask task.
+V1 normalizes user↔agent messages to one thread per viewed agent.
 
 #### Architect peer messaging signatures
 
