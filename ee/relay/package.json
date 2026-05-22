@@ -1,0 +1,28 @@
+{
+  "name": "@torque/ee-relay-spike",
+  "version": "0.0.0-spike",
+  "private": true,
+  "type": "module",
+  "description": "Enterprise Channels relay spike: dual-target storage and rendezvous ports for remote Torque operation.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "start": "node dist/src/adapters/standalone/server.js",
+    "dev": "npm run build && node dist/src/adapters/standalone/server.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250525.0",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.50.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
