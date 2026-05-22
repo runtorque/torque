@@ -1381,10 +1381,11 @@ function _currentSurfaceGroup() {
 }
 
 function _taskHasHumanAskLabel(task) {
+  const labels = task && Array.isArray(task.labels) ? task.labels : [];
   return !!(
     task
-    && Array.isArray(task.labels)
-    && task.labels.indexOf('torque:human') >= 0
+    && labels.indexOf('torque:human') >= 0
+    && labels.indexOf('torque:non-user-ask') < 0
   );
 }
 

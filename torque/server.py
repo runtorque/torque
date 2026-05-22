@@ -35,6 +35,8 @@ from .config import (
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import capture_deploy_boot_state
 from .direct_message_mirrors import (
+    ask_owner_recipient_is_user,
+    ask_task_labels_for_owner_recipient,
     direct_ask_mirror_source_key,
     save_direct_ask_mirror,
     save_direct_ask_reply_mirror,
@@ -15491,11 +15493,13 @@ async def main(connection=None):
                                       "message":
                                           "Ask requires a question"}
                         else:
+                            ask_targets_user = ask_owner_recipient_is_user(
+                                state, cell)
                             # Keep parent in In Progress with
                             # "Awaiting Input" status
                             cell.activity = ""
                             cell.activity_detail = ""
-                            cell.needs_attention = True
+                            cell.needs_attention = ask_targets_user
                             cell.error_message = ""
                             _append_mcp(cell, "ask", message)
                             _append_task_msg(task, "ask",
@@ -15523,7 +15527,11 @@ async def main(connection=None):
                                 task=message,
                                 group=grp,
                                 lane="Backlog",
-                                labels=["torque:human", "torque:derived"],
+                                labels=ask_task_labels_for_owner_recipient(
+                                    state,
+                                    cell,
+                                    ["torque:human", "torque:derived"],
+                                ),
                                 parent_task_id=task.id,
                                 pipeline_depth=
                                     task.pipeline_depth + 1,

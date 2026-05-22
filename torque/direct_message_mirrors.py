@@ -15,6 +15,9 @@ from .config import log
 from .db import canonical_user_agent_thread_id
 
 
+NON_USER_ASK_LABEL = "torque:non-user-ask"
+
+
 @dataclass(frozen=True)
 class DirectMessageParticipant:
     id: str
@@ -82,6 +85,34 @@ def resolve_ask_owner_recipient(state, asking_agent) -> DirectMessageParticipant
             return agent_direct_message_participant(architect)
         return user_direct_message_participant()
     return user_direct_message_participant()
+
+
+def ask_owner_recipient_is_user(state, asking_agent) -> bool:
+    """Return whether a blocking ask is ultimately addressed to the user."""
+    recipient = resolve_ask_owner_recipient(state, asking_agent)
+    return (
+        str(getattr(recipient, "kind", "") or "").strip() == "user"
+        and str(getattr(recipient, "id", "") or "").strip() == "user"
+    )
+
+
+def ask_task_labels_for_owner_recipient(
+        state,
+        asking_agent,
+        labels: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """Return ask-task labels annotated with backend-authoritative routing.
+
+    ``torque:human`` remains the compatibility marker for blocking ask tasks
+    and resolution tooling.  ``torque:non-user-ask`` marks asks whose
+    owner-aware recipient is an agent rather than the user, allowing
+    user-facing attention surfaces to suppress their yellow nudge without
+    re-deriving ownership in the frontend.
+    """
+    result = list(labels or [])
+    if not ask_owner_recipient_is_user(state, asking_agent):
+        if NON_USER_ASK_LABEL not in result:
+            result.append(NON_USER_ASK_LABEL)
+    return result
 
 
 def direct_ask_mirror_source_key(
