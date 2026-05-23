@@ -9012,6 +9012,47 @@ test('embedded terminal output does not refollow when user scrolls up during asy
   assert.equal(term.scrollToBottomCount || 0, 0);
 });
 
+function triggerEmbeddedTerminalResize(context, sessionKey) {
+  runInContext(context, `
+    (function() {
+      var __e = _embeddedTerminalSessions['${sessionKey}'];
+      __e.lastObservedWidth = 800;
+      __e.lastObservedHeight = 400;
+      __e.resizeObserver.callback([{ contentRect: { width: 800, height: 220 } }]);
+    })();
+  `);
+}
+
+test('embedded terminal re-pins the tail when a growing compose box resizes the stage', () => {
+  const { context, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  // Pinned to the bottom (tail) before the compose box grows.
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.scrollToBottomCount = 0;
+
+  // Compose box grows to multiple lines -> stage shrinks -> surface
+  // ResizeObserver fires with a shorter height.
+  triggerEmbeddedTerminalResize(context, 'term-1:sess-1');
+
+  assert.equal(term.scrollToBottomCount, 1);
+  assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY);
+});
+
+test('embedded terminal resize does not yank a user who scrolled up while composing', () => {
+  const { context, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  // User has deliberately scrolled up into the scrollback.
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 30;
+  term.scrollToBottomCount = 0;
+
+  triggerEmbeddedTerminalResize(context, 'term-1:sess-1');
+
+  assert.equal(term.scrollToBottomCount || 0, 0);
+  assert.equal(term.buffer.active.viewportY, 30);
+});
+
 test('embedded terminal keeps visual inset on xterm so FitAddon rows match the visible viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const surfaceRule = css.match(/^\.terminal-surface\s*\{[^}]*\}/m);
@@ -10998,6 +11039,78 @@ test('embedded terminal switch preserves cached xterm scrollback buffers', () =>
   assert.equal(terminals.length, 2);
   assert.equal(terminals[0].options.scrollback, 10000);
   assert.deepEqual(terminals[0].writes, ['a scrollback', '\na hidden output']);
+});
+
+test('embedded terminal switch scrolls the target terminal to the bottom and resumes tailing', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a', 'term-b'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a' },
+    'term-b': { id: 'term-b', name: 'B', group: 'alpha', cell_type: 'terminal', session_id: 'sess-b' },
+  };
+
+  // Open both terminals so each has a live, cached xterm entry.
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  runInContext(context, `
+    selectedTerminalId = 'term-b';
+    renderTerminalWorkspace();
+  `);
+  assert.equal(terminals.length, 2);
+
+  // term-a was left scrolled up into its scrollback.
+  const termA = terminals[0];
+  termA.buffer.active.baseY = 80;
+  termA.buffer.active.viewportY = 12;
+  termA.scrollToBottomCount = 0;
+
+  // Switching back to term-a must land at the bottom and re-arm the tail.
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(termA.scrollToBottomCount, 1);
+  assert.equal(termA.buffer.active.viewportY, termA.buffer.active.baseY);
+});
+
+test('embedded terminal same-session rerender does not force-scroll a scrolled-up viewport', () => {
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  const termA = terminals[0];
+  termA.buffer.active.baseY = 80;
+  termA.buffer.active.viewportY = 12;
+  termA.scrollToBottomCount = 0;
+
+  // A routine rerender for the same terminal (firehose) must preserve the
+  // user's scroll-up rather than yanking them to the bottom.
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(termA.scrollToBottomCount || 0, 0);
+  assert.equal(termA.buffer.active.viewportY, 12);
 });
 
 test('embedded terminal stop then relaunch preserves same-cell scrollback buffer', () => {
