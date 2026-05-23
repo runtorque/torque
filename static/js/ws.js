@@ -505,6 +505,8 @@ function connect() {
       if (typeof _handleBoardPullApply === 'function') _handleBoardPullApply(msg);
     } else if (msg.type === 'pipelines') {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
+    } else if (msg.type === 'relay_test_result') {
+      if (typeof handleRelayTestResult === 'function') handleRelayTestResult(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
     } else if (msg.type === 'memory_entries') {

@@ -233,6 +233,14 @@ function _relaySectionUpdateVisibility() {
   var section = document.getElementById('gls-relay-section');
   if (!section) return;
   section.hidden = !(_relayConnModalVisible || _relayConfigModalVisible);
+  // The Test-connectivity probe slot (TORQUE:603 #2) rides the section
+  // visibility: show the button whenever the Relay section shows. This toggles
+  // ONLY `hidden` — it must never clear the slot's contents, so a low-frequency
+  // relay_config / relay_connection delta refresh (which lands here via the
+  // sub-block renderers) can't wipe the last probe result or reset the button.
+  // The probe result/button are owned solely by the probe handler below.
+  var slot = document.getElementById('gls-relay-probe-slot');
+  if (slot) slot.hidden = section.hidden;
 }
 
 /* Connection sub-block of the daemon-status modal "Relay" section. Driven from
@@ -419,10 +427,155 @@ function refreshRelayConfigModal(opts) {
   }
 }
 
+/* ----------------------------------------------------------------------------
+ * Relay TEST-CONNECTIVITY probe (TORQUE:603 #2).
+ *
+ * CONSUMER of Courier's merged daemon-side probe (server cmd
+ * `test_relay_connection` → `cloud_hooks.probe_relay_connection`), which returns
+ * a structured, ACTIONABLE result:
+ *   { type: "relay_test_result", status, message, detail }
+ * status ∈ ok | reachable_unauthed | ca_missing | unreachable | auth_rejected |
+ *          disabled | misconfigured  (RELAY_PROBE_* on the daemon side).
+ * `message` is human-readable actionable guidance; `detail` is extra context.
+ *
+ * The probe is a one-shot command RESPONSE, NOT a delta/surface: the button
+ * sends the command, the daemon replies once, and the result renders into the
+ * reserved `#gls-relay-probe-slot` (mounted by :603 #1). The slot's content is
+ * owned here and is preserved across relay_config / relay_connection delta
+ * refreshes (those never touch the slot).
+ * -------------------------------------------------------------------------- */
+
+/* status → dot color group, mirroring the relay-status dot grouping: ok green,
+ * reachable_unauthed amber, disabled grey, everything else (config/TLS/auth
+ * failures the operator must act on) red. */
+var RELAY_PROBE_STATUS_COLORS = {
+  ok: 'green',
+  reachable_unauthed: 'amber',
+  disabled: 'grey',
+  ca_missing: 'red',
+  unreachable: 'red',
+  auth_rejected: 'red',
+  misconfigured: 'red',
+};
+
+/* Only the success state carries a glyph; the colored dot conveys the rest. */
+var RELAY_PROBE_STATUS_ICONS = {
+  ok: '✓',
+};
+
+var _relayProbeInFlight = false;
+
+/* Self-contained HTML escaper (matches render.js's esc()). Kept local rather
+ * than delegating to the global esc() because relay_status.js loads BEFORE
+ * render.js in webview.html — this keeps the probe renderer XSS-safe with no
+ * load-order dependency. All server-supplied message/detail text flows through
+ * here before reaching innerHTML. */
+function _relayProbeEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* Pure view computation — no DOM. Maps a relay_test_result payload to a render
+ * view. Absent / malformed (no status) → { visible: false }. */
+function _relayProbeComputeView(result) {
+  if (!result || typeof result !== 'object' || !result.status) {
+    return { visible: false };
+  }
+  var status = String(result.status || '');
+  return {
+    visible: true,
+    status: status,
+    // Unknown status from a newer producer → amber (render something useful).
+    dotColor: RELAY_PROBE_STATUS_COLORS[status] || 'amber',
+    icon: RELAY_PROBE_STATUS_ICONS[status] || '',
+    message: String(result.message || ''),
+    detail: String(result.detail || ''),
+  };
+}
+
+/* Render the actionable result line into `#gls-relay-probe-result`. All
+ * server-supplied text is esc()'d. Rebuilds innerHTML so stale dot-color
+ * classes never linger between probes. */
+function _relayProbeRenderResult(view) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-probe-result');
+  if (!el) return;
+  if (!view || !view.visible) {
+    el.hidden = true;
+    el.innerHTML = '';
+    if (typeof el.removeAttribute === 'function') {
+      el.removeAttribute('data-relay-probe-status');
+    }
+    return;
+  }
+  var html = '<span class="relay-status-dot relay-status-dot--'
+    + _relayProbeEsc(view.dotColor) + '" aria-hidden="true"></span>';
+  if (view.icon) {
+    html += '<span class="gls-relay-probe-icon" aria-hidden="true">'
+      + _relayProbeEsc(view.icon) + '</span>';
+  }
+  html += '<span class="gls-relay-probe-message">'
+    + _relayProbeEsc(view.message) + '</span>';
+  if (view.detail) {
+    html += '<span class="gls-relay-probe-detail">'
+      + _relayProbeEsc(view.detail) + '</span>';
+  }
+  el.hidden = false;
+  if (typeof el.setAttribute === 'function') {
+    el.setAttribute('data-relay-probe-status', view.status);
+  }
+  el.innerHTML = html;
+}
+
+/* Toggle the in-flight loading state: disable the button + "Testing…" label,
+ * and show a transient loading line. */
+function _relayProbeSetInFlight(inFlight) {
+  _relayProbeInFlight = !!inFlight;
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var btn = document.getElementById('gls-relay-probe-test');
+  if (btn) {
+    btn.disabled = !!inFlight;
+    btn.textContent = inFlight ? 'Testing…' : 'Test connectivity';
+  }
+  if (inFlight) {
+    var el = document.getElementById('gls-relay-probe-result');
+    if (el) {
+      el.hidden = false;
+      if (typeof el.removeAttribute === 'function') {
+        el.removeAttribute('data-relay-probe-status');
+      }
+      el.innerHTML = '<span class="gls-relay-probe-message">'
+        + 'Testing relay connectivity…</span>';
+    }
+  }
+}
+
+/* Button onclick: send the daemon probe command (mirrors the established
+ * command transport, e.g. board-sync's preflight). The probe takes up to ~10s
+ * server-side, hence the disabled/loading state. Guard against double-sends. */
+function testRelayConnection() {
+  if (_relayProbeInFlight) return;
+  _relayProbeSetInFlight(true);
+  if (typeof send === 'function') {
+    send({ cmd: 'test_relay_connection' });
+  }
+}
+
+/* Handle the daemon's one-shot `relay_test_result` response: clear the loading
+ * state and render the actionable result. */
+function handleRelayTestResult(msg) {
+  if (!msg || msg.type !== 'relay_test_result') return;
+  _relayProbeSetInFlight(false);
+  _relayProbeRenderResult(_relayProbeComputeView(msg));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     _relayStatusComputeView: _relayStatusComputeView,
     _relayConfigComputeView: _relayConfigComputeView,
+    _relayProbeComputeView: _relayProbeComputeView,
     RELAY_STUCK_RETRY_THRESHOLD: RELAY_STUCK_RETRY_THRESHOLD,
+    RELAY_PROBE_STATUS_COLORS: RELAY_PROBE_STATUS_COLORS,
   };
 }

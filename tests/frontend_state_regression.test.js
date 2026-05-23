@@ -1012,6 +1012,9 @@ function createRelayStatusHarness() {
     'gls-relay-credential-id', 'gls-relay-credential-id-badge',
     'gls-relay-private-key-path', 'gls-relay-private-key-path-badge',
     'gls-relay-probe-slot',
+    // Test-connectivity probe sub-block (TORQUE:603 #2).
+    'gls-relay-probe-test',
+    'gls-relay-probe-result',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/relay_status.js');
@@ -5884,6 +5887,198 @@ test('global settings save sends the relay_* settings-layer keys', () => {
   assert.equal(saved.relay_daemon_id, '');
   assert.equal(saved.relay_credential_id, '');
   assert.equal(saved.relay_private_key_path, '/home/op/relay.pem');
+});
+
+/* -- Relay test-connectivity probe (TORQUE:603 #2) ------------------------ */
+
+function _relayProbeView(context, payload) {
+  context.__relayProbePayload = (payload === undefined) ? null : payload;
+  return jsonValue(context, '_relayProbeComputeView(__relayProbePayload)');
+}
+
+// status → expected dot-color group, mirroring the relay-status dot grouping.
+const RELAY_PROBE_STATUS_EXPECTATIONS = [
+  { status: 'ok', color: 'green', icon: '✓' },
+  { status: 'reachable_unauthed', color: 'amber', icon: '' },
+  { status: 'disabled', color: 'grey', icon: '' },
+  { status: 'ca_missing', color: 'red', icon: '' },
+  { status: 'unreachable', color: 'red', icon: '' },
+  { status: 'auth_rejected', color: 'red', icon: '' },
+  { status: 'misconfigured', color: 'red', icon: '' },
+];
+
+test('relay probe view maps each of the 7 statuses to a dot color group + icon', () => {
+  const { context } = createRelayStatusHarness();
+  for (const c of RELAY_PROBE_STATUS_EXPECTATIONS) {
+    const view = _relayProbeView(context, {
+      type: 'relay_test_result',
+      status: c.status,
+      message: `${c.status} message`,
+      detail: `${c.status} detail`,
+    });
+    assert.equal(view.visible, true, `${c.status} visible`);
+    assert.equal(view.dotColor, c.color, `${c.status} → ${c.color} dot`);
+    assert.equal(view.icon, c.icon, `${c.status} icon`);
+    assert.equal(view.message, `${c.status} message`, `${c.status} message`);
+    assert.equal(view.detail, `${c.status} detail`, `${c.status} detail`);
+  }
+});
+
+test('relay probe view: absent/malformed payload renders nothing; unknown status → amber', () => {
+  const { context } = createRelayStatusHarness();
+  assert.equal(_relayProbeView(context, null).visible, false);
+  assert.equal(_relayProbeView(context, undefined).visible, false);
+  assert.equal(_relayProbeView(context, {}).visible, false);
+  assert.equal(_relayProbeView(context, { message: 'no status' }).visible, false);
+  const unknown = _relayProbeView(context, { status: 'something_new', message: 'x' });
+  assert.equal(unknown.visible, true);
+  assert.equal(unknown.dotColor, 'amber');
+});
+
+test('relay probe button sends test_relay_connection + enters loading/disabled state', () => {
+  const { context, document, sandbox } = createRelayStatusHarness();
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  runInContext(context, 'testRelayConnection();');
+
+  // Command transport matches the merged backend (cmd: test_relay_connection).
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'test_relay_connection');
+  assert.deepEqual(Object.keys(sandbox.sendCalls[0]), ['cmd']);
+
+  // Button disabled + "Testing…"; loading line shown.
+  const btn = document.getElementById('gls-relay-probe-test');
+  assert.equal(btn.disabled, true);
+  assert.equal(btn.textContent, 'Testing…');
+  const resultEl = document.getElementById('gls-relay-probe-result');
+  assert.equal(resultEl.hidden, false);
+  assert.match(resultEl.innerHTML, /Testing relay connectivity/);
+
+  // In-flight: a second click must not double-send.
+  runInContext(context, 'testRelayConnection();');
+  assert.equal(sandbox.sendCalls.length, 1);
+});
+
+test('relay probe response renders actionable result + clears loading for each status', () => {
+  const { context, document } = createRelayStatusHarness();
+  for (const c of RELAY_PROBE_STATUS_EXPECTATIONS) {
+    runInContext(context, '_relayProbeSetInFlight(true);');
+    context.__relayProbeMsg = {
+      type: 'relay_test_result',
+      status: c.status,
+      message: `${c.status} actionable text`,
+      detail: `${c.status} extra context`,
+    };
+    runInContext(context, 'handleRelayTestResult(__relayProbeMsg);');
+
+    const btn = document.getElementById('gls-relay-probe-test');
+    assert.equal(btn.disabled, false, `${c.status} button re-enabled`);
+    assert.equal(btn.textContent, 'Test connectivity', `${c.status} button label reset`);
+
+    const el = document.getElementById('gls-relay-probe-result');
+    assert.equal(el.hidden, false, `${c.status} result shown`);
+    assert.equal(el.getAttribute('data-relay-probe-status'), c.status);
+    // Correct dot color group rendered.
+    assert.match(
+      el.innerHTML,
+      new RegExp(`relay-status-dot--${c.color}\\b`),
+      `${c.status} → ${c.color} dot`,
+    );
+    // Actionable message + detail present.
+    assert.match(el.innerHTML, new RegExp(`${c.status} actionable text`), `${c.status} message`);
+    assert.match(el.innerHTML, new RegExp(`${c.status} extra context`), `${c.status} detail`);
+    if (c.icon) assert.match(el.innerHTML, /✓/, `${c.status} icon`);
+  }
+});
+
+test('relay probe result esc()s server-supplied message/detail (XSS-safe)', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__relayProbeMsg = {
+    type: 'relay_test_result',
+    status: 'misconfigured',
+    message: '<img src=x onerror=alert(1)>',
+    detail: '"><script>boom()</script>',
+  };
+  runInContext(context, 'handleRelayTestResult(__relayProbeMsg);');
+  const html = document.getElementById('gls-relay-probe-result').innerHTML;
+  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;img/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test('relay probe result is preserved across a relay_config delta refresh', () => {
+  const { context, document } = createRelayStatusHarness();
+  // A probe result is on screen.
+  context.__relayProbeMsg = {
+    type: 'relay_test_result', status: 'ca_missing',
+    message: 'CA bundle missing — install certifi.', detail: 'SSL: CERTIFICATE_VERIFY_FAILED',
+  };
+  runInContext(context, 'handleRelayTestResult(__relayProbeMsg);');
+  const before = document.getElementById('gls-relay-probe-result').innerHTML;
+  assert.match(before, /CA bundle missing/);
+
+  // A relay_config delta arrives (unrelated to the probe).
+  context.__relayConfigSample = RELAY_CONFIG_SAMPLE;
+  runInContext(context, `
+    _expectedSeq = 1;
+    _handleDelta({ seq: 1, ops: [Object.assign({ op: 'relay_config' }, __relayConfigSample)] });
+  `);
+
+  // Probe result + status attr survive; button not reset.
+  const after = document.getElementById('gls-relay-probe-result');
+  assert.equal(after.innerHTML, before, 'probe result not clobbered by relay_config delta');
+  assert.equal(after.getAttribute('data-relay-probe-status'), 'ca_missing');
+  // Slot unhidden because the section is now visible (config present).
+  assert.equal(document.getElementById('gls-relay-probe-slot').hidden, false);
+});
+
+test('relay probe result is preserved across a relay_connection delta refresh', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__relayProbeMsg = {
+    type: 'relay_test_result', status: 'auth_rejected',
+    message: 'Relay rejected the daemon credential.', detail: 'handshake 403',
+  };
+  runInContext(context, 'handleRelayTestResult(__relayProbeMsg);');
+  const before = document.getElementById('gls-relay-probe-result').innerHTML;
+
+  runInContext(context, `
+    _expectedSeq = 1;
+    _handleDelta({
+      seq: 1,
+      ops: [{
+        op: 'relay_connection',
+        status: 'error', enabled: true, relay_host: 'relay.runtorque.com',
+        retry_count: 3, last_error: 'connection reset',
+      }],
+    });
+  `);
+
+  const after = document.getElementById('gls-relay-probe-result');
+  assert.equal(after.innerHTML, before, 'probe result not clobbered by relay_connection delta');
+  assert.equal(after.getAttribute('data-relay-probe-status'), 'auth_rejected');
+  assert.equal(document.getElementById('gls-relay-probe-slot').hidden, false);
+});
+
+test('relay probe slot is unhidden whenever the Relay section is shown, hidden otherwise', () => {
+  const { context, document } = createRelayStatusHarness();
+  // No connection + no config → section hidden → slot hidden.
+  runInContext(context, `
+    state.relay_connection = null;
+    state.relay_config = null;
+    _relayStatusRenderModalRow();
+    refreshRelayConfigModal();
+  `);
+  assert.equal(document.getElementById('gls-relay-section').hidden, true);
+  assert.equal(document.getElementById('gls-relay-probe-slot').hidden, true);
+
+  // Config present → section + slot shown.
+  context.__relayConfigSample = RELAY_CONFIG_SAMPLE;
+  runInContext(context, `
+    state.relay_config = __relayConfigSample;
+    refreshRelayConfigModal();
+  `);
+  assert.equal(document.getElementById('gls-relay-section').hidden, false);
+  assert.equal(document.getElementById('gls-relay-probe-slot').hidden, false);
 });
 
 test('backlog dispatch note ignores overlap warnings for ready work', () => {

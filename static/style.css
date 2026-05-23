@@ -3506,6 +3506,22 @@ body.runtime-embedded #modal-group .modal-summary {
 }
 .gls-relay-probe-slot { margin-top: 8px; }
 .gls-relay-probe-slot[hidden] { display: none; }
+.gls-relay-probe-result {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.gls-relay-probe-result[hidden] { display: none; }
+/* The result dot reuses the relay-status-dot base + color modifiers; nudge it
+   to baseline so it lines up with the message text. */
+.gls-relay-probe-result .relay-status-dot { align-self: center; flex: 0 0 auto; }
+.gls-relay-probe-icon { flex: 0 0 auto; font-weight: 600; }
+.gls-relay-probe-message { color: var(--text); }
+.gls-relay-probe-detail { width: 100%; color: var(--text-dim); font-size: 10px; }
 
 .daemon-actions {
   display: flex;
