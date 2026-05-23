@@ -623,6 +623,49 @@ async def _probe_relay_connection_inner(
     )
 
 
+async def mint_relay_device_link(
+    runtime: CloudConnectorRuntime | None,
+    *,
+    label: str = "",
+) -> dict[str, Any]:
+    """Mint a single-use relay device-link establish code via the connector.
+
+    Delegates to the running enterprise connector's ``mint_client_establish_code``
+    (which sends a daemon-mediated mint over the authenticated relay WS and
+    returns the raw code + establish URL exactly once).  Defensive: NEVER raises
+    and NEVER persists the raw code — returns a structured result dict with
+    ``{"ok": bool, ...}``.  Community/disabled builds report a clear, actionable
+    error rather than an exception.
+    """
+
+    if not runtime or not runtime.enabled:
+        return {"ok": False, "error": "relay_disabled", "message": "The relay connector is not enabled."}
+    connector = runtime.connector
+    if connector is None or not runtime.started:
+        return {
+            "ok": False,
+            "error": "relay_not_started",
+            "message": runtime.error or "The relay connector is not running.",
+        }
+    mint = getattr(connector, "mint_client_establish_code", None)
+    if not callable(mint):
+        return {
+            "ok": False,
+            "error": "mint_unsupported",
+            "message": "The relay connector does not support device-link minting.",
+        }
+    try:
+        result = mint(label=str(label or ""))
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception as exc:  # pragma: no cover - belt-and-suspenders
+        log.exception("Relay device-link mint failed")
+        return {"ok": False, "error": "mint_failed", "message": str(exc) or type(exc).__name__}
+    if isinstance(result, dict):
+        return dict(result)
+    return {"ok": False, "error": "mint_invalid_response", "message": "Connector returned an unexpected mint result."}
+
+
 async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnectorRuntime:
     """Load and start the optional enterprise cloud connector.
 

@@ -24,6 +24,8 @@ test("wire protocol exposes the full V1 message kind contract", () => {
     "ack",
     "error",
     "channel_event",
+    "mint_client_establish_code",
+    "mint_client_establish_code_result",
   ]);
 });
 

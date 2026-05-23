@@ -18,6 +18,7 @@ import inspect
 import ipaddress
 import json
 import os
+import secrets
 import ssl
 import time
 from collections.abc import Mapping
@@ -60,6 +61,9 @@ CONNECTOR_DEBUG_BUFFER_LIMIT = 200
 # well under the ~500 frontend tail-cap.  NEVER unbounded.
 SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 100
 SNAPSHOT_MAX_MESSAGE_LIMIT = 1000
+# Bound on how long a daemon-mediated establish-code mint waits for the relay
+# response before giving up with a clear, non-raising result.
+MINT_REQUEST_TIMEOUT_SECONDS = 10.0
 # relay_connection is a low-frequency status signal, but a flapping reconnect
 # loop (e.g. the go-live SSL loop that fired every ~5s) can turn per-attempt
 # retry_count churn into a delta storm.  We ALWAYS report a status-enum change
@@ -136,6 +140,9 @@ class EnterpriseConnector:
         self._relay_since = ""
         self._relay_connected_session = False
         self._relay_last_report_monotonic = 0.0
+        # In-flight establish-code mint requests, keyed by request envelope id.
+        # The receive loop resolves the matching future when the relay responds.
+        self._pending_mints: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     async def start(self) -> None:
         """Validate config and start the background outbound WS loop."""
@@ -194,6 +201,105 @@ class EnterpriseConnector:
                 "EE connector outbound queue full; dropping direct message %s",
                 ((event or {}).get("row") or {}).get("id", ""),
             )
+
+    async def mint_client_establish_code(
+        self,
+        *,
+        label: str = "",
+        timeout: float = MINT_REQUEST_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Mint a single-use relay device-link establish code over the authed WS.
+
+        Sends a ``mint_client_establish_code`` request carrying a fresh nonce to
+        the relay over the established (authenticated) daemon WebSocket and awaits
+        the relay→daemon response.  The relay derives the owner from the authed
+        attach and enforces replay/fencing/rate-limit before minting; this method
+        only ferries the request and returns the result.
+
+        Defensive: NEVER raises to the caller and NEVER persists the raw code.
+        Returns ``{"ok": True, "code", "establish_url", "expires_at",
+        "owner_user_id"}`` on success, or ``{"ok": False, "error", "message"}``
+        on any failure (not connected, timeout, or a relay rejection).
+        """
+        if self.config is None:
+            return _mint_error("connector_not_configured", "relay connector is not configured")
+        if not self.started or self._ws is None or not self._connected_event.is_set():
+            return _mint_error("relay_not_connected", "relay connection is not established")
+
+        nonce = secrets.token_urlsafe(32)
+        try:
+            request = make_relay_envelope(
+                daemon_id=self.config.daemon_id,
+                source={"kind": "daemon", "id": self.config.daemon_id},
+                target={"kind": "relay", "id": "relay"},
+                kind="mint_client_establish_code",
+                payload={"nonce": nonce, "label": str(label or "")},
+            )
+        except RelayProtocolError as exc:
+            return _mint_error("mint_request_invalid", str(exc) or type(exc).__name__)
+
+        request_id = str(request.get("id") or "")
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._pending_mints[request_id] = future
+        try:
+            await self._send_envelope(request)
+            payload = await asyncio.wait_for(future, timeout=max(1.0, float(timeout)))
+        except asyncio.TimeoutError:
+            return _mint_error("mint_timeout", "relay did not respond to the mint request in time")
+        except Exception as exc:
+            return _mint_error("mint_failed", str(exc) or type(exc).__name__)
+        finally:
+            self._pending_mints.pop(request_id, None)
+
+        if payload.get("__error__"):
+            return _mint_error(
+                str(payload.get("code") or "mint_rejected"),
+                str(payload.get("message") or "relay rejected the mint request"),
+            )
+        code = str(payload.get("code") or "").strip()
+        if not code:
+            return _mint_error("mint_invalid_response", "relay response did not contain a code")
+        return {
+            "ok": True,
+            "code": code,
+            "establish_url": self._establish_url(code),
+            "expires_at": str(payload.get("expires_at") or ""),
+            "owner_user_id": str(payload.get("owner_user_id") or ""),
+        }
+
+    def _resolve_pending_mint(self, envelope: Mapping[str, Any], *, error: bool) -> None:
+        payload = dict(envelope.get("payload") or {})
+        ref_id = str(payload.get("ref_id") or "")
+        future = self._pending_mints.get(ref_id)
+        if future is None or future.done():
+            return
+        if error:
+            future.set_result(
+                {
+                    "__error__": True,
+                    "code": payload.get("code"),
+                    "message": payload.get("message"),
+                }
+            )
+        else:
+            future.set_result(payload)
+
+    def _establish_url(self, code: str) -> str:
+        """Build the same-origin /establish device link for a minted code.
+
+        Maps the configured relay base (ws/wss/http/https) to its http(s) origin
+        and appends ``/establish?code=<otc>``.  The raw code rides the URL only
+        because it is single-use, short-lived, and consumed-on-use.
+        """
+        base = str((self.config.relay_url if self.config else "") or "").strip()
+        parsed = urlparse(base if "://" in base else f"https://{base}")
+        scheme = parsed.scheme.lower()
+        http_scheme = "https" if scheme in {"https", "wss"} else "http"
+        netloc = parsed.netloc or parsed.path
+        return urlunparse(
+            (http_scheme, netloc, "/establish", "", f"code={quote(code, safe='')}", "")
+        )
 
     async def _run_forever(self) -> None:
         assert self.config is not None
@@ -294,7 +400,18 @@ class EnterpriseConnector:
             return
         if kind == "pong":
             return
+        if kind == "mint_client_establish_code_result":
+            # Relay→daemon response to a daemon-mediated mint; resolve the waiter.
+            self._resolve_pending_mint(parsed, error=False)
+            return
         if kind == "error":
+            payload = parsed.get("payload") or {}
+            ref_id = str((payload or {}).get("ref_id") or "")
+            # A relay error that references an in-flight mint request resolves that
+            # waiter as a typed failure rather than just being logged-and-dropped.
+            if ref_id and ref_id in self._pending_mints:
+                self._resolve_pending_mint(parsed, error=True)
+                return
             log.warning("EE relay error envelope received: %s", parsed.get("payload"))
             return
         if kind == "ack":
@@ -911,6 +1028,11 @@ async def _await_report_result(result: Any) -> None:
         await result
     except Exception:
         log.exception("EE connector async report_connection_state callback failed")
+
+
+def _mint_error(code: str, message: str) -> dict[str, Any]:
+    """Shape a defensive, non-raising mint failure result."""
+    return {"ok": False, "error": str(code or "mint_failed"), "message": str(message or "")}
 
 
 def _is_persistent_connection_error(exc: BaseException) -> bool:

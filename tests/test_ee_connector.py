@@ -57,6 +57,8 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
             "ack",
             "error",
             "channel_event",
+            "mint_client_establish_code",
+            "mint_client_establish_code_result",
         ))
 
     def test_build_daemon_ws_url_accepts_base_or_full_local_url(self):
@@ -992,6 +994,98 @@ class RelayTlsTrustTests(unittest.TestCase):
             connector._log_connection_failure(Exception("connection reset"))
         self.assertEqual(fake_log.error.call_count, 0)
         self.assertEqual(fake_log.warning.call_count, 1)
+
+
+class EstablishCodeMintTests(unittest.IsolatedAsyncioTestCase):
+    def _connected_connector(self):
+        connector = EnterpriseConnector(context={"config": {}})
+        connector.config = ConnectorConfig(
+            relay_url="wss://relay.runtorque.com",
+            daemon_id="daemon-1",
+            ws_url="wss://relay.runtorque.com/v1/daemon/daemon-1/ws",
+        )
+        connector.started = True
+        connector._ws = FakeWs()
+        connector._connected_event.set()
+        return connector
+
+    async def _drain_until_sent(self, connector):
+        for _ in range(200):
+            await asyncio.sleep(0)
+            if connector._ws.sent:
+                return connector._ws.sent[-1]
+        raise AssertionError("mint request was never sent")
+
+    async def test_mint_returns_clear_error_when_not_connected(self):
+        connector = EnterpriseConnector(context={"config": {}})
+        connector.config = ConnectorConfig(
+            relay_url="wss://relay.runtorque.com",
+            daemon_id="daemon-1",
+            ws_url="wss://relay.runtorque.com/v1/daemon/daemon-1/ws",
+        )
+        result = await connector.mint_client_establish_code()
+        self.assertEqual(result["ok"], False)
+        self.assertEqual(result["error"], "relay_not_connected")
+
+    async def test_mint_sends_request_with_nonce_and_returns_code_and_url(self):
+        connector = self._connected_connector()
+        task = asyncio.create_task(connector.mint_client_establish_code(label="iphone"))
+        request = await self._drain_until_sent(connector)
+        self.assertEqual(request["kind"], "mint_client_establish_code")
+        self.assertTrue(request["payload"].get("nonce"))
+        self.assertEqual(request["payload"].get("label"), "iphone")
+        # The owner is derived server-side from the attach — never sent by us.
+        self.assertNotIn("owner_user_id", request["payload"])
+
+        await connector._handle_envelope(make_relay_envelope(
+            daemon_id="daemon-1",
+            source={"kind": "relay", "id": "relay"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="mint_client_establish_code_result",
+            payload={
+                "ref_id": request["id"],
+                "code": "RAWCODE-abc123",
+                "owner_user_id": "owner-1",
+                "expires_at": "2026-05-23T00:15:00.000Z",
+            },
+        ))
+        result = await task
+        self.assertEqual(result["ok"], True)
+        self.assertEqual(result["code"], "RAWCODE-abc123")
+        self.assertEqual(
+            result["establish_url"],
+            "https://relay.runtorque.com/establish?code=RAWCODE-abc123",
+        )
+        self.assertEqual(result["expires_at"], "2026-05-23T00:15:00.000Z")
+        self.assertEqual(result["owner_user_id"], "owner-1")
+
+    async def test_mint_routes_relay_rejection_to_a_typed_error(self):
+        connector = self._connected_connector()
+        task = asyncio.create_task(connector.mint_client_establish_code())
+        request = await self._drain_until_sent(connector)
+        await connector._handle_envelope(make_relay_envelope(
+            daemon_id="daemon-1",
+            source={"kind": "relay", "id": "relay"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="error",
+            payload={
+                "ref_id": request["id"],
+                "code": "replayed_mint_nonce",
+                "message": "mint request nonce has already been used",
+            },
+        ))
+        result = await task
+        self.assertEqual(result["ok"], False)
+        self.assertEqual(result["error"], "replayed_mint_nonce")
+        # The pending-mint map is cleaned up after the request settles.
+        self.assertEqual(connector._pending_mints, {})
+
+    async def test_mint_times_out_with_a_clear_result(self):
+        connector = self._connected_connector()
+        result = await connector.mint_client_establish_code(timeout=0.01)
+        self.assertEqual(result["ok"], False)
+        self.assertEqual(result["error"], "mint_timeout")
+        self.assertEqual(connector._pending_mints, {})
 
 
 if __name__ == "__main__":
