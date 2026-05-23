@@ -219,9 +219,25 @@ function _relayStatusSetModalText(id, value) {
     : String(value);
 }
 
-/* Secondary detail surface: the compact "Relay" row in the daemon-status
- * modal (Global Settings → System). Driven from `state.relay_connection`.
- * Absent field → hide the section entirely. */
+/* Whether each Relay sub-surface currently has data to show. The section
+ * wrapper is visible if EITHER is present so config can render even on a build
+ * that publishes `relay_config` without a `relay_connection` signal (and vice
+ * versa). Module-level so the two independent renderers coordinate one
+ * `section.hidden`. */
+var _relayConnModalVisible = false;
+var _relayConfigModalVisible = false;
+
+/* Single owner of `#gls-relay-section`.hidden — the OR of the two sub-blocks. */
+function _relaySectionUpdateVisibility() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var section = document.getElementById('gls-relay-section');
+  if (!section) return;
+  section.hidden = !(_relayConnModalVisible || _relayConfigModalVisible);
+}
+
+/* Connection sub-block of the daemon-status modal "Relay" section. Driven from
+ * `state.relay_connection`; absent field → hide the connection block (the
+ * section may still show if `relay_config` is present). */
 function _relayStatusRenderModalRow(view, rc) {
   if (typeof document === 'undefined' || !document.getElementById) return;
   var section = document.getElementById('gls-relay-section');
@@ -231,11 +247,15 @@ function _relayStatusRenderModalRow(view, rc) {
   }
   if (!view) view = _relayStatusComputeView(rc);
 
+  var block = document.getElementById('gls-relay-connection-block');
+  _relayConnModalVisible = !!view.visible;
   if (!view.visible) {
-    section.hidden = true;
+    if (block) block.hidden = true;
+    _relaySectionUpdateVisibility();
     return;
   }
-  section.hidden = false;
+  if (block) block.hidden = false;
+  _relaySectionUpdateVisibility();
   _relayStatusApplyDot(document.getElementById('gls-relay-status-dot'), view);
   _relayStatusSetModalText('gls-relay-status-text', view.statusText);
   _relayStatusSetModalText('gls-relay-host', rc && rc.relay_host);
@@ -245,9 +265,164 @@ function _relayStatusRenderModalRow(view, rc) {
   _relayStatusSetModalText('gls-relay-last-error', rc && rc.last_error);
 }
 
+/* ----------------------------------------------------------------------------
+ * Relay CONFIG + provenance (TORQUE:603 #1).
+ *
+ * CONSUMER of Courier's resolved-config-with-provenance contract (shared memory
+ * 40c1c73e6bec). Shape (do NOT invent; consume the producer's `relay_config`):
+ *   { config:  { enabled, relay_url, daemon_id, credential_id, private_key_path },
+ *     sources: { <field>: { value, source } } }
+ * source ∈ "settings" | "ee_connector.json" | "env" | "" (unset);
+ * precedence settings > ee_connector.json > env. private_key_path is BY PATH
+ * only — inline-PEM resolves to source "ee_connector.json" with value "" and
+ * NEVER leaks the PEM here.
+ *
+ * Read from 3 same-shape surfaces: the snapshot `state.relay_config`, the
+ * `get_global_settings` response `relay_config`, and the low-frequency
+ * `relay_config` delta op. Like the connection signal, the delta patches state
+ * in place + refreshes ONLY this section — never a panel/grid surface.
+ * -------------------------------------------------------------------------- */
+
+/* Field order + metadata. `key` matches the contract `config`/`sources` keys;
+ * the editable settings-layer save key is `relay_<key>` (relay_enabled,
+ * relay_url, relay_daemon_id, relay_credential_id, relay_private_key_path). */
+var RELAY_CONFIG_FIELDS = [
+  { key: 'enabled',          type: 'bool', inputId: 'gls-relay-enabled' },
+  { key: 'relay_url',        type: 'text', inputId: 'gls-relay-url' },
+  { key: 'daemon_id',        type: 'text', inputId: 'gls-relay-daemon-id' },
+  { key: 'credential_id',    type: 'text', inputId: 'gls-relay-credential-id' },
+  { key: 'private_key_path', type: 'text', inputId: 'gls-relay-private-key-path' },
+];
+
+function _relaySourceLabel(source) {
+  switch (source) {
+    case 'settings': return 'settings';
+    case 'ee_connector.json': return 'ee_connector.json';
+    case 'env': return 'env';
+    default: return 'unset';
+  }
+}
+
+function _relaySourceClass(source) {
+  switch (source) {
+    case 'settings': return 'settings';
+    case 'ee_connector.json': return 'file';
+    case 'env': return 'env';
+    default: return 'unset';
+  }
+}
+
+/* Pure view computation — no DOM. Maps the `relay_config` payload to a per-field
+ * view. Absent / malformed → { visible: false } (pre-producer / community).
+ *
+ * Per field:
+ *   - source / sourceLabel / sourceClass: provenance badge.
+ *   - For text: `textValue` is the editable SETTINGS-LAYER override — non-empty
+ *     only when the effective source is "settings" (so saving an untouched
+ *     inherited field re-sends "" and keeps the file/env fallback). When the
+ *     value is inherited, the effective value surfaces as `placeholder` so the
+ *     operator still sees what is in effect — for private_key_path this is "" on
+ *     inline-PEM (never the PEM) and a path otherwise.
+ *   - For bool: `checked` is the effective value; the badge carries provenance.
+ */
+function _relayConfigComputeView(rc) {
+  if (!rc || typeof rc !== 'object') return { visible: false, fields: [] };
+  var sources = (rc.sources && typeof rc.sources === 'object') ? rc.sources : {};
+  var config = (rc.config && typeof rc.config === 'object') ? rc.config : {};
+  var fields = RELAY_CONFIG_FIELDS.map(function(f) {
+    var src = (sources[f.key] && typeof sources[f.key] === 'object') ? sources[f.key] : {};
+    var source = String(src.source || '');
+    var fromSettings = source === 'settings';
+    var effective;
+    if (Object.prototype.hasOwnProperty.call(config, f.key)) effective = config[f.key];
+    else if (Object.prototype.hasOwnProperty.call(src, 'value')) effective = src.value;
+    else effective = (f.type === 'bool' ? false : '');
+    var view = {
+      key: f.key,
+      type: f.type,
+      inputId: f.inputId,
+      source: source,
+      sourceLabel: _relaySourceLabel(source),
+      sourceClass: _relaySourceClass(source),
+    };
+    if (f.type === 'bool') {
+      view.checked = !!effective;
+    } else {
+      var effStr = (effective === null || effective === undefined) ? '' : String(effective);
+      var srcStr = (src.value === null || src.value === undefined) ? '' : String(src.value);
+      view.textValue = fromSettings ? srcStr : '';
+      view.placeholder = fromSettings ? '' : effStr;
+    }
+    return view;
+  });
+  return { visible: true, fields: fields };
+}
+
+/* Skip clobbering an input the operator is actively editing (focused) or has an
+ * unsaved draft in (dirty) — a low-frequency `relay_config` delta must never
+ * wipe an in-progress edit. */
+function _relayConfigInputLocked(el) {
+  if (!el) return false;
+  if (typeof document !== 'undefined' && document.activeElement === el) return true;
+  if (el.dataset && el.dataset.relayDirty === '1') return true;
+  return false;
+}
+
+function _relayConfigApplyBadge(id, view) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var badge = document.getElementById(id);
+  if (!badge) return;
+  badge.textContent = view.sourceLabel;
+  if (badge.classList) {
+    ['settings', 'file', 'env', 'unset'].forEach(function(c) {
+      badge.classList.remove('relay-source-badge--' + c);
+    });
+    badge.classList.add('relay-source-badge--' + view.sourceClass);
+  }
+  if (typeof badge.setAttribute === 'function') {
+    badge.setAttribute('title', 'Effective source: ' + view.sourceLabel);
+  }
+}
+
+/* DOM apply for the config sub-block. opts.force=true (modal open) repopulates
+ * every input and clears dirty flags; otherwise (delta / snapshot) it preserves
+ * focused/dirty inputs so a delta never clobbers an in-progress edit. Badges
+ * (read-only provenance) always refresh. */
+function refreshRelayConfigModal(opts) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  opts = opts || {};
+  var block = document.getElementById('gls-relay-config-block');
+  var rc = (typeof state !== 'undefined' && state) ? state.relay_config : null;
+  var view = _relayConfigComputeView(rc);
+
+  _relayConfigModalVisible = !!view.visible;
+  if (block) block.hidden = !view.visible;
+  _relaySectionUpdateVisibility();
+  if (!view.visible) return;
+
+  for (var i = 0; i < view.fields.length; i++) {
+    var f = view.fields[i];
+    var input = document.getElementById(f.inputId);
+    if (input && (opts.force || !_relayConfigInputLocked(input))) {
+      if (f.type === 'bool') {
+        input.checked = f.checked;
+      } else {
+        input.value = f.textValue;
+        // Surface a non-empty inherited effective value as the placeholder;
+        // keep the static HTML hint when there is nothing effective (e.g.
+        // private_key_path on inline-PEM, whose effective value is "").
+        if (f.placeholder) input.placeholder = f.placeholder;
+      }
+      if (opts.force && input.dataset) delete input.dataset.relayDirty;
+    }
+    _relayConfigApplyBadge(f.inputId + '-badge', f);
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     _relayStatusComputeView: _relayStatusComputeView,
+    _relayConfigComputeView: _relayConfigComputeView,
     RELAY_STUCK_RETRY_THRESHOLD: RELAY_STUCK_RETRY_THRESHOLD,
   };
 }

@@ -3444,6 +3444,69 @@ body.runtime-embedded #modal-group .modal-summary {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+/* Relay config + provenance (TORQUE:603 #1). Editable settings-layer fields
+   inside the Settings "Relay" section, each with a per-field source badge. */
+.gls-relay-config {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.gls-relay-config[hidden] { display: none; }
+.gls-relay-config-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 7px 12px;
+  align-items: center;
+}
+.gls-relay-config-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.gls-relay-config-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.gls-relay-config-control input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+.gls-relay-config-control input[type="checkbox"] { flex: 0 0 auto; }
+.relay-source-badge {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: lowercase;
+  letter-spacing: .02em;
+  padding: 1px 6px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.relay-source-badge[hidden] { display: none; }
+.relay-source-badge--settings { color: var(--green); border-color: var(--green); }
+.relay-source-badge--file { color: var(--amber); border-color: var(--amber); }
+.relay-source-badge--env { color: var(--text-dim); }
+.relay-source-badge--unset { color: var(--text-dim); opacity: .7; }
+.gls-relay-config-hint {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.gls-relay-probe-slot { margin-top: 8px; }
+.gls-relay-probe-slot[hidden] { display: none; }
+
 .daemon-actions {
   display: flex;
   gap: 8px;
