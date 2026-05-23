@@ -973,6 +973,47 @@ function createWsRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createRelayStatusHarness() {
+  const { sandbox, document } = createSandbox({
+    renderInvalidatedSurfaces(flags) {
+      sandbox.lastInvalidations = JSON.parse(JSON.stringify(flags));
+    },
+  });
+  sandbox.renderMainCalls = 0;
+  sandbox.renderActivePanelCalls = 0;
+  // Header host carrying the daemon `#conn-dot` and taskbar carrying
+  // `#taskbar-conn-dot`, both attached to body so the relay indicator can
+  // mount beside whichever `RELAY_STATUS_MOUNT` selects.
+  const header = document.register('header-host');
+  const connDot = document.register('conn-dot');
+  header.appendChild(connDot);
+  document.body.appendChild(header);
+  const taskbar = document.register('taskbar');
+  const taskbarConnDot = document.register('taskbar-conn-dot');
+  taskbar.appendChild(taskbarConnDot);
+  document.body.appendChild(taskbar);
+  // Modal "Relay" detail row elements.
+  [
+    'gls-relay-section',
+    'gls-relay-status-dot',
+    'gls-relay-status-text',
+    'gls-relay-host',
+    'gls-relay-retry-count',
+    'gls-relay-since',
+    'gls-relay-last-error',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/relay_status.js');
+  loadScript(context, 'static/js/ws.js');
+  runInContext(context, `
+    render = function() { renderMainCalls++; };
+    renderActivePanel = function() { renderActivePanelCalls++; };
+    dragInProgress = false;
+    _expectedSeq = 1;
+  `);
+  return { context, document, sandbox };
+}
+
 function createStandaloneDeltaBatchHarness(visibleSurfaces = ['board']) {
   const rafCallbacks = [];
   const canceledFrames = new Set();
@@ -5259,6 +5300,263 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     jsonValue(context, `Object.prototype.hasOwnProperty.call(state.decisions || {}, "decision-1")`),
     false,
   );
+});
+
+/* -- Relay-connection indicator (TORQUE:560) ------------------------------ */
+
+function _relayComputeView(context, payload) {
+  context.__relayPayload = (payload === undefined) ? null : payload;
+  return jsonValue(context, '_relayStatusComputeView(__relayPayload)');
+}
+
+test('relay_connection view maps each of the 5 statuses to a dot color group', () => {
+  const { context } = createRelayStatusHarness();
+  const cases = [
+    { status: 'connected', dotColor: 'green', statusText: 'connected' },
+    { status: 'connecting', dotColor: 'amber', statusText: 'connecting' },
+    { status: 'disconnected', dotColor: 'amber', statusText: 'disconnected' },
+    { status: 'error', dotColor: 'red', statusText: 'error' },
+    { status: 'disabled', dotColor: 'grey', statusText: 'disabled' },
+  ];
+  for (const c of cases) {
+    const view = _relayComputeView(context, {
+      status: c.status,
+      relay_host: 'relay.runtorque.com',
+      retry_count: 0,
+    });
+    assert.equal(view.visible, true, `${c.status} visible`);
+    assert.equal(view.dotColor, c.dotColor, `${c.status} dot color`);
+    assert.equal(view.statusText, c.statusText, `${c.status} status text`);
+    assert.equal(view.label, 'Relay', `${c.status} label`);
+    assert.equal(view.escalated, false, `${c.status} not escalated at retry 0`);
+  }
+});
+
+test('relay_connection disabled vs error vs disconnected render distinctly', () => {
+  const { context } = createRelayStatusHarness();
+  const disabled = _relayComputeView(context, { status: 'disabled', retry_count: 0 });
+  const error = _relayComputeView(context, {
+    status: 'error', retry_count: 0, last_error: 'certificate verify failed',
+  });
+  const disconnected = _relayComputeView(context, { status: 'disconnected', retry_count: 1 });
+  // Distinct dot color groups.
+  assert.equal(disabled.dotColor, 'grey');
+  assert.equal(error.dotColor, 'red');
+  assert.equal(disconnected.dotColor, 'amber');
+  // Distinct status text.
+  assert.equal(disabled.statusText, 'disabled');
+  assert.equal(error.statusText, 'error');
+  assert.equal(disconnected.statusText, 'disconnected');
+  // Full last_error lives in the tooltip (not the dot/label).
+  assert.match(error.tooltip, /certificate verify failed/);
+  assert.doesNotMatch(disabled.tooltip, /certificate verify failed/);
+});
+
+test('relay_connection tooltip carries full detail (host, since, retries, error)', () => {
+  const { context } = createRelayStatusHarness();
+  const view = _relayComputeView(context, {
+    status: 'disconnected',
+    relay_host: 'relay.runtorque.com',
+    last_connected_at: '2026-05-23T10:00:00Z',
+    last_error: 'connection reset by peer',
+    retry_count: 3,
+    since: '2026-05-23T10:05:00Z',
+  });
+  assert.match(view.tooltip, /Relay: disconnected/);
+  assert.match(view.tooltip, /relay\.runtorque\.com/);
+  assert.match(view.tooltip, /Last connected: 2026-05-23T10:00:00Z/);
+  assert.match(view.tooltip, /Retrying, 3 attempts/);
+  assert.match(view.tooltip, /Since: 2026-05-23T10:05:00Z/);
+  assert.match(view.tooltip, /connection reset by peer/);
+});
+
+test('relay_connection absent / malformed field renders nothing', () => {
+  const { context } = createRelayStatusHarness();
+  assert.equal(_relayComputeView(context, null).visible, false);
+  assert.equal(_relayComputeView(context, undefined).visible, false);
+  assert.equal(_relayComputeView(context, {}).visible, false);
+  assert.equal(_relayComputeView(context, { enabled: true }).visible, false);
+});
+
+test('relay_connection stuck-retry escalates only the dot color amber->red', () => {
+  const { context } = createRelayStatusHarness();
+  const threshold = jsonValue(context, 'RELAY_STUCK_RETRY_THRESHOLD');
+  assert.equal(threshold, 5);
+  for (const status of ['connecting', 'disconnected']) {
+    // Below threshold: stays amber, not escalated.
+    const below = _relayComputeView(context, { status, retry_count: threshold - 1 });
+    assert.equal(below.dotColor, 'amber', `${status} below threshold amber`);
+    assert.equal(below.escalated, false, `${status} below threshold not escalated`);
+    assert.equal(below.statusText, status, `${status} below keeps true status`);
+    // At/above threshold: dot escalates to red, status text unchanged.
+    const at = _relayComputeView(context, { status, retry_count: threshold });
+    assert.equal(at.dotColor, 'red', `${status} at threshold red`);
+    assert.equal(at.escalated, true, `${status} at threshold escalated`);
+    assert.equal(at.statusText, status, `${status} at threshold keeps true status`);
+    assert.match(at.tooltip, new RegExp(`Relay: ${status}`), `${status} tooltip true status`);
+  }
+  // connected/disabled never escalate regardless of retry_count.
+  assert.equal(_relayComputeView(context, { status: 'connected', retry_count: 99 }).dotColor, 'green');
+  assert.equal(_relayComputeView(context, { status: 'disabled', retry_count: 99 }).dotColor, 'grey');
+});
+
+test('relay_connection snapshot read populates state and renders the indicator', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      relay_connection: {
+        status: 'connected',
+        enabled: true,
+        relay_host: 'relay.runtorque.com',
+        retry_count: 0,
+        since: '2026-05-23T10:00:00Z',
+      },
+    });
+  `);
+  assert.equal(jsonValue(context, 'state.relay_connection.status'), 'connected');
+  // Indicator mounted beside conn-dot, visible, green dot, "Relay" label.
+  assert.equal(jsonValue(context, '!!_relayStatusEls && !!_relayStatusEls.root'), true);
+  assert.equal(jsonValue(context, '_relayStatusEls.root.hidden'), false);
+  assert.equal(
+    jsonValue(context, `_relayStatusEls.dot.classList.contains('relay-status-dot--green')`),
+    true,
+  );
+  assert.equal(jsonValue(context, '_relayStatusEls.label.textContent'), 'Relay');
+  // Default mount = taskbar: mounted as a sibling of #taskbar-conn-dot (same
+  // parent #taskbar), as a distinct labelled element (not a second bare dot).
+  const taskbar = document.getElementById('taskbar');
+  assert.ok(taskbar.children.some((c) => c.id === 'relay-status-indicator'));
+  assert.ok(taskbar.children.some((c) => c.id === 'taskbar-conn-dot'));
+});
+
+test('relay_connection indicator mounts beside #taskbar-conn-dot (confirmed placement)', () => {
+  const { context, document } = createRelayStatusHarness();
+  // Effective mount is the taskbar, not the header.
+  assert.equal(jsonValue(context, 'RELAY_STATUS_MOUNT'), 'taskbar');
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'connecting', enabled: true, relay_host: 'relay.runtorque.com',
+      retry_count: 0, since: '2026-05-23T10:00:00Z',
+    };
+    refreshRelayStatusIndicator();
+  `);
+  const taskbar = document.getElementById('taskbar');
+  const header = document.getElementById('header-host');
+  assert.ok(
+    taskbar.children.some((c) => c.id === 'relay-status-indicator'),
+    'indicator mounts inside #taskbar',
+  );
+  assert.ok(
+    !header.children.some((c) => c.id === 'relay-status-indicator'),
+    'indicator does NOT mount in the header',
+  );
+  // Distinct labelled element — not a second bare dot.
+  assert.equal(jsonValue(context, '_relayStatusEls.label.textContent'), 'Relay');
+});
+
+test('relay-status indicator is browser-visible and not Tauri-gated (CSS)', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  // Base rule renders the indicator (inline-flex) — visible by default.
+  const baseRule = css.match(/^\.relay-status\s*\{[^}]*\}/m);
+  assert.ok(baseRule, '.relay-status base rule exists');
+  assert.match(baseRule[0], /display:\s*inline-flex/);
+  // Taskbar context keeps it visible in browser + desktop.
+  assert.match(css, /#taskbar \.relay-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
+  // The relay indicator must NOT inherit the Tauri-only display gate that the
+  // bare #taskbar-conn-dot carries (display:none default + body.tauri-mode
+  // show-gate). The base rule above is inline-flex (not none), and no
+  // body.tauri-mode rule targets .relay-status.
+  assert.doesNotMatch(css, /body\.tauri-mode[^{]*\.relay-status\b/);
+});
+
+test('relay_connection delta patches state in place without a panel/grid rebuild', () => {
+  const { context } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'connected', enabled: true, relay_host: 'relay.runtorque.com',
+      retry_count: 0, last_error: '', since: '2026-05-23T10:00:00Z',
+    };
+    renderMainCalls = 0;
+    renderActivePanelCalls = 0;
+    lastInvalidations = null;
+    _expectedSeq = 1;
+  `);
+  const beforeRef = jsonValue(context, 'state.relay_connection.status');
+  assert.equal(beforeRef, 'connected');
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'relay_connection',
+        status: 'error',
+        enabled: true,
+        relay_host: 'relay.runtorque.com',
+        retry_count: 7,
+        last_error: 'certificate verify failed',
+        since: '2026-05-23T11:00:00Z',
+      },
+    ],
+  });
+
+  // State patched in place.
+  assert.equal(jsonValue(context, 'state.relay_connection.status'), 'error');
+  assert.equal(jsonValue(context, 'state.relay_connection.retry_count'), 7);
+  assert.equal(jsonValue(context, 'state.relay_connection.last_error'), 'certificate verify failed');
+
+  // The op marks NO panel surface — surface-invalidation discipline. Either
+  // renderInvalidatedSurfaces was never called (no surface flagged) or every
+  // flag is false.
+  const inval = jsonValue(context, 'lastInvalidations');
+  if (inval) {
+    for (const key of Object.keys(inval)) {
+      assert.equal(inval[key], false, `surface ${key} must not be marked`);
+    }
+  }
+  // No full-panel / active-panel rebuild triggered.
+  assert.equal(jsonValue(context, 'renderMainCalls'), 0);
+  assert.equal(jsonValue(context, 'renderActivePanelCalls'), 0);
+
+  // The indicator itself refreshed to the red error dot.
+  assert.equal(
+    jsonValue(context, `_relayStatusEls.dot.classList.contains('relay-status-dot--red')`),
+    true,
+  );
+});
+
+test('relay_connection modal "Relay" row renders from state and hides when absent', () => {
+  const { context } = createRelayStatusHarness();
+  // Present field → section visible, fields populated.
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'disconnected', enabled: true, relay_host: 'relay.runtorque.com',
+      retry_count: 4, last_error: 'connection reset', since: '2026-05-23T12:00:00Z',
+    };
+    _relayStatusRenderModalRow();
+  `);
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-section').hidden`), false);
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-status-text').textContent`), 'disconnected');
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-host').textContent`), 'relay.runtorque.com');
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-retry-count').textContent`), '4');
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-since').textContent`), '2026-05-23T12:00:00Z');
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-last-error').textContent`), 'connection reset');
+  assert.equal(
+    jsonValue(context, `document.getElementById('gls-relay-status-dot').classList.contains('relay-status-dot--amber')`),
+    true,
+  );
+
+  // Absent field → section hidden.
+  runInContext(context, `
+    state.relay_connection = null;
+    _relayStatusRenderModalRow();
+  `);
+  assert.equal(jsonValue(context, `document.getElementById('gls-relay-section').hidden`), true);
 });
 
 test('backlog dispatch note ignores overlap warnings for ready work', () => {

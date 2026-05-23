@@ -770,6 +770,10 @@ function _handleFullState(msg) {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
   if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+  // Relay-connection indicator: top-level `relay_connection` is captured into
+  // `state` via the `state = msg` assignment above; refresh the indicator from
+  // it (renders nothing when the field is absent — pre-producer / community).
+  if (typeof refreshRelayStatusIndicator === 'function') refreshRelayStatusIndicator();
   _triggerDoneFlourishesFromTaskSnapshot(prevTasks, state.board_tasks || {});
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});
@@ -2813,6 +2817,32 @@ function _applyDelta(ops) {
       case 'pending_hire_resolve':
         if (state.pending_hires) delete state.pending_hires[op.id];
         break;
+
+      case 'relay_connection': {
+        // Daemon-global, low-frequency (state-change only). Patch
+        // `state.relay_connection` in place + refresh ONLY the relay
+        // indicator (+ modal row if open). Deliberately NOT handled in
+        // `_deltaSurfaceInvalidations` — it must never mark a panel/grid
+        // surface (surface-invalidation discipline, CLAUDE.md).
+        var relayPayload = Object.assign({}, op);
+        delete relayPayload.op;
+        if (state.relay_connection && typeof state.relay_connection === 'object') {
+          // Patch in place so any held reference stays valid; drop stale keys.
+          for (var relayKey in state.relay_connection) {
+            if (Object.prototype.hasOwnProperty.call(state.relay_connection, relayKey)
+                && !Object.prototype.hasOwnProperty.call(relayPayload, relayKey)) {
+              delete state.relay_connection[relayKey];
+            }
+          }
+          Object.assign(state.relay_connection, relayPayload);
+        } else {
+          state.relay_connection = relayPayload;
+        }
+        if (typeof refreshRelayStatusIndicator === 'function') {
+          refreshRelayStatusIndicator();
+        }
+        break;
+      }
 
       case 'focus_update':
         if ('active_session_id' in op) {
