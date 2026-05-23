@@ -36,6 +36,23 @@ class EventIngestUnavailable(RuntimeError):
     pass
 
 
+# Substrings of the bare ``RuntimeError`` messages CPython raises when the
+# process/thread or lock allocator is exhausted (e.g. orphan sidecars near
+# ``kern.maxprocperuid``). These surface from ``executor.submit`` /
+# ``threading`` while spinning up ``asyncio.to_thread`` work.
+_THREAD_RESOURCE_MARKERS = (
+    "can't start new thread",
+    "can not start new thread",
+    "failed to allocate",
+    "resource temporarily unavailable",
+    "no usable temporary",
+)
+
+
+def _is_thread_resource_error(exc: BaseException) -> bool:
+    return any(marker in str(exc).lower() for marker in _THREAD_RESOURCE_MARKERS)
+
+
 class EventIngestClient:
     """Persistent unix-socket client with reconnect + append retry."""
 
@@ -210,10 +227,37 @@ class EventIngestClient:
         """
         async with self._connect_lock:
             if self.data_dir is not None:
-                self.socket_path = await asyncio.to_thread(
-                    self._ensure_running_func,
-                    self.data_dir,
-                )
+                try:
+                    self.socket_path = await asyncio.to_thread(
+                        self._ensure_running_func,
+                        self.data_dir,
+                    )
+                except RuntimeError as exc:
+                    # ``asyncio.to_thread`` allocates an executor worker (and a
+                    # backing lock) before our ensure-running func runs. Under
+                    # thread/process exhaustion that raises a bare RuntimeError
+                    # ("can't start new thread"/lock-alloc) which would
+                    # otherwise abort daemon startup. Map it to
+                    # EventIngestUnavailable so the normal reconnect-retry /
+                    # degraded-startup paths handle it gracefully. Our own
+                    # RuntimeError subclasses still propagate untouched.
+                    if isinstance(
+                        exc, (EventIngestUnavailable, EventIngestProtocolError)
+                    ):
+                        raise
+                    if _is_thread_resource_error(exc):
+                        log.error(
+                            "event-ingest connect failed: system thread/process "
+                            "limit reached — check for leaked sidecars or raise "
+                            "ulimit -u (%s)",
+                            exc,
+                        )
+                    else:
+                        log.warning(
+                            "event-ingest ensure-running failed: %s", exc)
+                    raise EventIngestUnavailable(
+                        f"event-ingest connect failed: {exc}"
+                    ) from exc
             reader, writer = await asyncio.wait_for(
                 asyncio.open_unix_connection(str(self.socket_path)),
                 timeout=self._connect_timeout,
