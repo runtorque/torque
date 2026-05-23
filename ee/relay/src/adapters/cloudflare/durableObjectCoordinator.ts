@@ -5,10 +5,19 @@ import {
   parseRelayEnvelope,
   type RelayEnvelope,
 } from "../../core/protocol.js";
-import type { RelaySocket } from "../../core/ports.js";
+import type { ClientAuthPrincipal, DaemonAuthPrincipal, RelaySocket, RelayStore } from "../../core/ports.js";
 import { toJsonObject } from "../../core/runtime.js";
 import { errorMessage } from "../../core/errors.js";
+import {
+  authErrorStatus,
+  authenticateClientSession,
+  authenticateDaemonAttach,
+  isActiveSession,
+  makeAuthErrorEnvelope,
+  sanitizeClientEnvelopeForV1,
+} from "../../core/auth.js";
 import { StandaloneRegistryCoordinator } from "../standalone/registryCoordinator.js";
+import { D1RelayStore } from "./d1Store.js";
 
 export type DurableObjectSessionAttachment = {
   role: "daemon" | "client";
@@ -16,15 +25,22 @@ export type DurableObjectSessionAttachment = {
   clientId: string;
   connectionId: string;
   epoch: number;
+  ownerUserId?: string;
+  credentialId?: string;
+  sessionId?: string;
+  userId?: string;
+};
+
+type DurableObjectEnv = {
+  RELAY_DB?: D1Database;
+  authStore?: RelayStore;
 };
 
 export class DaemonRendezvousDurableObject {
   private readonly registry = new StandaloneRegistryCoordinator();
   private rehydrated = false;
 
-  constructor(private readonly state: DurableObjectState, private readonly env: unknown) {
-    void this.env;
-  }
+  constructor(private readonly state: DurableObjectState, private readonly env: DurableObjectEnv) {}
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -44,16 +60,17 @@ export class DaemonRendezvousDurableObject {
     const route = parseDurableObjectWsRoute(url);
     if (!route) return new Response("Not found", { status: 404 });
 
+    let principal: DaemonAuthPrincipal | ClientAuthPrincipal;
+    try {
+      principal = await this.authenticateRoute(route, request);
+    } catch (error) {
+      return json({ type: "error", message: errorMessage(error), code: (error as { code?: string }).code || "relay_auth_error" }, authErrorStatus(error));
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     const connectionId = `${route.role}:${route.daemonId}:${route.clientId || "daemon"}:${crypto.randomUUID()}`;
-    const attachment: DurableObjectSessionAttachment = {
-      role: route.role,
-      daemonId: route.daemonId,
-      clientId: route.clientId,
-      connectionId,
-      epoch: 0,
-    };
+    const attachment = attachmentForPrincipal(route, connectionId, principal);
     server.serializeAttachment?.(attachment);
     this.state.acceptWebSocket(server);
     await this.attachSocket(server, attachment);
@@ -78,7 +95,10 @@ export class DaemonRendezvousDurableObject {
         }
         await this.registry.broadcastToClients(attachment.daemonId, envelope);
       } else {
-        await this.registry.sendToDaemon(attachment.daemonId, envelope);
+        await this.registry.sendToDaemon(
+          attachment.daemonId,
+          sanitizeClientEnvelopeForV1(envelope, clientPrincipalFromAttachment(attachment)),
+        );
       }
     } catch (error) {
       const err = makeErrorEnvelope({
@@ -106,8 +126,60 @@ export class DaemonRendezvousDurableObject {
     await this.rehydrateFromHibernatedSockets();
   }
 
+  async attachSocketForTest(
+    ws: WebSocket,
+    route: { role: "daemon" | "client"; daemonId: string; clientId: string },
+    request: Request,
+  ): Promise<DurableObjectSessionAttachment> {
+    const principal = await this.authenticateRoute(route, request);
+    const attachment = attachmentForPrincipal(route, `${route.role}:${route.daemonId}:${route.clientId || "daemon"}:test`, principal);
+    ws.serializeAttachment?.(attachment);
+    await this.attachSocket(ws, attachment);
+    return attachment;
+  }
+
   snapshotForTest(daemonId: string) {
     return this.registry.snapshot(daemonId);
+  }
+
+  private async authenticateRoute(
+    route: { role: "daemon" | "client"; daemonId: string; clientId: string },
+    request: Request,
+  ): Promise<DaemonAuthPrincipal | ClientAuthPrincipal> {
+    const store = this.authStore();
+    if (route.role === "daemon") {
+      return authenticateDaemonAttach(store, {
+        method: request.method,
+        url: new URL(request.url),
+        daemonId: route.daemonId,
+        headers: request.headers,
+      });
+    }
+    return authenticateClientSession(store, {
+      daemonId: route.daemonId,
+      headers: request.headers,
+    });
+  }
+
+  private authStore(): RelayStore {
+    if (this.env.authStore) return this.env.authStore;
+    if (!this.env.RELAY_DB) throw new Error("RELAY_DB binding is required for Durable Object auth");
+    return new D1RelayStore(this.env.RELAY_DB);
+  }
+
+
+  private async attachmentStillAuthorized(attachment: DurableObjectSessionAttachment): Promise<boolean> {
+    const store = this.authStore();
+    const instance = await store.getInstance(attachment.daemonId);
+    if (!instance?.owner_user_id || instance.owner_user_id !== attachment.ownerUserId) return false;
+    if (attachment.role === "daemon") {
+      if (!attachment.credentialId) return false;
+      const credential = await store.getDaemonCredential(attachment.daemonId, attachment.credentialId);
+      return Boolean(credential && !credential.revoked_at && credential.owner_user_id === instance.owner_user_id);
+    }
+    if (!attachment.sessionId) return false;
+    const session = await store.getClientSession(attachment.sessionId);
+    return Boolean(isActiveSession(session) && session.owner_user_id === instance.owner_user_id);
   }
 
   private async attachSocket(ws: WebSocket, attachment: DurableObjectSessionAttachment): Promise<void> {
@@ -118,7 +190,16 @@ export class DaemonRendezvousDurableObject {
       controlTargetForAttachment(attachment),
     );
     if (attachment.role === "daemon") {
-      const result = await this.registry.attachDaemon({ daemonId: attachment.daemonId, socket });
+      const result = await this.registry.attachDaemon({
+        daemonId: attachment.daemonId,
+        socket,
+        auth: daemonPrincipalFromAttachment(attachment),
+      });
+      if (!result.accepted) {
+        socket.sendEnvelope(makeAuthErrorEnvelope(attachment.daemonId, attachment.daemonId, new Error(result.reason || "daemon attach rejected"), "daemon"));
+        socket.close(4003, result.reason || "daemon_attach_rejected");
+        return;
+      }
       attachment.epoch = result.epoch;
       ws.serializeAttachment?.(attachment);
       socket.sendControl("ready", result);
@@ -127,7 +208,13 @@ export class DaemonRendezvousDurableObject {
         daemonId: attachment.daemonId,
         clientId: attachment.clientId,
         socket,
+        auth: clientPrincipalFromAttachment(attachment),
       });
+      if (!result.accepted) {
+        socket.sendEnvelope(makeAuthErrorEnvelope(attachment.daemonId, attachment.clientId, new Error(result.reason || "client attach rejected"), "remote-client"));
+        socket.close(4003, result.reason || "client_attach_rejected");
+        return;
+      }
       attachment.epoch = result.epoch;
       ws.serializeAttachment?.(attachment);
       socket.sendControl("ready", result);
@@ -138,6 +225,10 @@ export class DaemonRendezvousDurableObject {
     if (this.rehydrated) return;
     this.rehydrated = true;
     for (const { ws, attachment } of hibernatedSocketEntries(this.state.getWebSockets())) {
+      if (!attachment.ownerUserId || !await this.attachmentStillAuthorized(attachment)) {
+        ws.close(4003, "authenticated_session_revoked");
+        continue;
+      }
       await this.attachSocket(ws, attachment);
     }
   }
@@ -224,7 +315,45 @@ function rolePriority(role: DurableObjectSessionAttachment["role"]): number {
 function controlTargetForAttachment(attachment: DurableObjectSessionAttachment): RelayEndpoint {
   return attachment.role === "daemon"
     ? { kind: "daemon", id: attachment.daemonId }
-    : { kind: "remote-client", id: attachment.clientId || attachment.connectionId };
+    : { kind: "remote-client", id: attachment.clientId || attachment.connectionId, user_id: attachment.userId || "user" };
+}
+
+function attachmentForPrincipal(
+  route: { role: "daemon" | "client"; daemonId: string; clientId: string },
+  connectionId: string,
+  principal: DaemonAuthPrincipal | ClientAuthPrincipal,
+): DurableObjectSessionAttachment {
+  return {
+    role: route.role,
+    daemonId: route.daemonId,
+    clientId: route.clientId,
+    connectionId,
+    epoch: 0,
+    ownerUserId: principal.ownerUserId,
+    credentialId: principal.kind === "daemon" ? principal.credentialId : undefined,
+    sessionId: principal.kind === "client" ? principal.sessionId : undefined,
+    userId: principal.kind === "client" ? principal.userId : undefined,
+  };
+}
+
+function daemonPrincipalFromAttachment(attachment: DurableObjectSessionAttachment): DaemonAuthPrincipal {
+  return {
+    kind: "daemon",
+    daemonId: attachment.daemonId,
+    ownerUserId: attachment.ownerUserId || "",
+    credentialId: attachment.credentialId || "",
+    authMode: "signed-attach-v1",
+  };
+}
+
+function clientPrincipalFromAttachment(attachment: DurableObjectSessionAttachment): ClientAuthPrincipal {
+  return {
+    kind: "client",
+    ownerUserId: attachment.ownerUserId || "",
+    sessionId: attachment.sessionId || "",
+    userId: attachment.userId || "user",
+    authMode: "session-v1",
+  };
 }
 
 function withSuppressedSend(ws: WebSocket, envelope: RelayEnvelope): void {

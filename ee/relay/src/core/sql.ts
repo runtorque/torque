@@ -1,8 +1,16 @@
 import type { JsonObject, RelayEnvelope, RelayMessageKind } from "./protocol.js";
 import { endpointToJson, parseRelayEnvelope } from "./protocol.js";
-import type { RelayDeliveryState, RelayDirection, RelayInstanceRecord, StoredRelayMessage } from "./ports.js";
+import type {
+  RelayClientSessionRecord,
+  RelayDaemonCredentialRecord,
+  RelayDeliveryState,
+  RelayDirection,
+  RelayInstanceRecord,
+  RelayPairingTokenRecord,
+  StoredRelayMessage,
+} from "./ports.js";
 
-export const RELAY_SCHEMA_VERSION = 2;
+export const RELAY_SCHEMA_VERSION = 3;
 
 export const RELAY_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS relay_meta (
@@ -36,12 +44,59 @@ export const RELAY_SCHEMA_STATEMENTS = [
     last_delivery_error TEXT NOT NULL DEFAULT '',
     last_delivery_epoch INTEGER NOT NULL DEFAULT 0
   )`,
+  `CREATE TABLE IF NOT EXISTS relay_pairing_tokens (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    owner_user_id TEXT NOT NULL,
+    daemon_id TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT NOT NULL DEFAULT '',
+    revoked_at TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+  )`,
+  `CREATE TABLE IF NOT EXISTS relay_daemon_credentials (
+    credential_id TEXT PRIMARY KEY,
+    daemon_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    public_key_jwk_json TEXT NOT NULL DEFAULT '{}',
+    alg TEXT NOT NULL DEFAULT 'ES256',
+    created_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL DEFAULT '',
+    revoked_at TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+  )`,
+  `CREATE TABLE IF NOT EXISTS relay_auth_nonces (
+    credential_id TEXT NOT NULL,
+    nonce_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (credential_id, nonce_hash)
+  )`,
+  `CREATE TABLE IF NOT EXISTS relay_client_sessions (
+    session_id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    owner_user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_relay_messages_daemon_created
     ON relay_messages (daemon_id, created_at ASC, id ASC)`,
   `CREATE INDEX IF NOT EXISTS idx_relay_messages_daemon_direction_created
     ON relay_messages (daemon_id, direction, created_at ASC, id ASC)`,
   `CREATE INDEX IF NOT EXISTS idx_relay_messages_pending
     ON relay_messages (daemon_id, direction, acked_at, created_at ASC, id ASC)`,
+  `CREATE INDEX IF NOT EXISTS idx_relay_pairing_tokens_owner
+    ON relay_pairing_tokens (owner_user_id, expires_at ASC)`,
+  `CREATE INDEX IF NOT EXISTS idx_relay_daemon_credentials_daemon
+    ON relay_daemon_credentials (daemon_id, owner_user_id, credential_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_relay_auth_nonces_expires
+    ON relay_auth_nonces (expires_at ASC)`,
+  `CREATE INDEX IF NOT EXISTS idx_relay_client_sessions_owner
+    ON relay_client_sessions (owner_user_id, expires_at ASC)`,
   `INSERT OR REPLACE INTO relay_meta (key, value)
     VALUES ('schema_version', '${RELAY_SCHEMA_VERSION}')`,
 ];
@@ -97,6 +152,41 @@ export interface RelayMessageRow {
   last_delivery_epoch: number;
 }
 
+export interface RelayPairingTokenRow {
+  id: string;
+  token_hash: string;
+  owner_user_id: string;
+  daemon_id: string;
+  label: string;
+  created_at: string;
+  expires_at: string;
+  consumed_at: string;
+  revoked_at: string;
+  metadata_json: string;
+}
+
+export interface RelayDaemonCredentialRow {
+  credential_id: string;
+  daemon_id: string;
+  owner_user_id: string;
+  public_key_jwk_json: string;
+  alg: string;
+  created_at: string;
+  last_used_at: string;
+  revoked_at: string;
+  metadata_json: string;
+}
+
+export interface RelayClientSessionRow {
+  session_id: string;
+  token_hash: string;
+  owner_user_id: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string;
+  metadata_json: string;
+}
+
 export function normalizeRelayInstanceRow(row: RelayInstanceRow | null | undefined): RelayInstanceRecord | null {
   if (!row) return null;
   return {
@@ -138,6 +228,50 @@ export function normalizeRelayMessageRow(
   };
 }
 
+export function normalizeRelayPairingTokenRow(row: RelayPairingTokenRow | null | undefined): RelayPairingTokenRecord | null {
+  if (!row) return null;
+  return {
+    id: String(row.id || ""),
+    token_hash: String(row.token_hash || ""),
+    owner_user_id: String(row.owner_user_id || ""),
+    daemon_id: String(row.daemon_id || ""),
+    label: String(row.label || ""),
+    created_at: String(row.created_at || ""),
+    expires_at: String(row.expires_at || ""),
+    consumed_at: String(row.consumed_at || ""),
+    revoked_at: String(row.revoked_at || ""),
+    metadata: decodeJsonObject(row.metadata_json),
+  };
+}
+
+export function normalizeRelayDaemonCredentialRow(row: RelayDaemonCredentialRow | null | undefined): RelayDaemonCredentialRecord | null {
+  if (!row) return null;
+  return {
+    credential_id: String(row.credential_id || ""),
+    daemon_id: String(row.daemon_id || ""),
+    owner_user_id: String(row.owner_user_id || ""),
+    public_key_jwk: decodeJsonObject(row.public_key_jwk_json),
+    alg: String(row.alg || "ES256"),
+    created_at: String(row.created_at || ""),
+    last_used_at: String(row.last_used_at || ""),
+    revoked_at: String(row.revoked_at || ""),
+    metadata: decodeJsonObject(row.metadata_json),
+  };
+}
+
+export function normalizeRelayClientSessionRow(row: RelayClientSessionRow | null | undefined): RelayClientSessionRecord | null {
+  if (!row) return null;
+  return {
+    session_id: String(row.session_id || ""),
+    token_hash: String(row.token_hash || ""),
+    owner_user_id: String(row.owner_user_id || ""),
+    created_at: String(row.created_at || ""),
+    expires_at: String(row.expires_at || ""),
+    revoked_at: String(row.revoked_at || ""),
+    metadata: decodeJsonObject(row.metadata_json),
+  };
+}
+
 export function relayMessageValues(envelope: RelayEnvelope, direction: RelayDirection): unknown[] {
   const envelopeJson = encodeJsonObject(envelopeToJson(envelope));
   return [
@@ -172,10 +306,51 @@ export function relayInstanceValues(record: RelayInstanceRecord): unknown[] {
   ];
 }
 
+export function relayPairingTokenValues(record: RelayPairingTokenRecord): unknown[] {
+  return [
+    record.id,
+    record.token_hash,
+    record.owner_user_id,
+    record.daemon_id,
+    record.label,
+    record.created_at,
+    record.expires_at,
+    record.consumed_at,
+    record.revoked_at,
+    encodeJsonObject(record.metadata || {}),
+  ];
+}
+
+export function relayDaemonCredentialValues(record: RelayDaemonCredentialRecord): unknown[] {
+  return [
+    record.credential_id,
+    record.daemon_id,
+    record.owner_user_id,
+    encodeJsonObject(record.public_key_jwk || {}),
+    record.alg || "ES256",
+    record.created_at,
+    record.last_used_at,
+    record.revoked_at,
+    encodeJsonObject(record.metadata || {}),
+  ];
+}
+
+export function relayClientSessionValues(record: RelayClientSessionRecord): unknown[] {
+  return [
+    record.session_id,
+    record.token_hash,
+    record.owner_user_id,
+    record.created_at,
+    record.expires_at,
+    record.revoked_at,
+    encodeJsonObject(record.metadata || {}),
+  ];
+}
+
 export function relayEnvelopeHash(envelope: RelayEnvelope): string {
   // Stable fingerprint for idempotency conflict detection. It is intentionally
-  // deterministic and portable across Node/Workers; auth/signing belongs to a
-  // later phase.
+  // deterministic and portable across Node/Workers; signed auth uses separate
+  // request-level signatures and nonce records.
   return stableStringify(envelopeToJson(envelope));
 }
 

@@ -5,9 +5,10 @@ Enterprise-only Python package boundary for the Channels outbound relay connecto
 The open-core daemon loads this package only when explicitly enabled through
 `torque.cloud_hooks`; community packaging still excludes `ee/`.
 
-## Phase 3 config surface
+## Phase 4 config surface
 
-Default is **off**. For local development against the standalone relay only:
+Default is **off**. Loopback standalone development can still run without a
+credential:
 
 ```sh
 TORQUE_EE_CONNECTOR_ENABLED=1 \
@@ -17,9 +18,21 @@ PYTHONPATH=/path/to/torque/ee/python:$PYTHONPATH \
 python3 torque.py
 ```
 
-`TORQUE_CLOUD_RELAY_URL` / `TORQUE_CLOUD_DAEMON_ID` are accepted aliases for the
-core seam. Phase 3 is intentionally unauthenticated and rejects non-loopback
-relay hosts; authenticated remote owner attach is Phase 4.
+Reachable/non-loopback relay URLs require signed daemon attach:
+
+- `TORQUE_EE_DAEMON_CREDENTIAL_ID` or `credential_id` in the profile config;
+- `TORQUE_EE_DAEMON_PRIVATE_KEY_PEM` or `private_key_pem`/`private_key_path` in
+  `~/.torque/profiles/<profile>/ee_connector.json`;
+- private-key/config files must be mode `0600`;
+- remote URLs must resolve to `wss://` after normalization.
+
+The connector signs the WebSocket attach request with ES256/P-256. The private
+key never leaves the local profile. The relay stores only the public key created
+during pairing.
+
+`cryptography` is an EE-only dependency. It is imported lazily: environments
+without it can still import the connector package, and signed remote attach is
+cleanly disabled instead of crashing at import time.
 
 ## Handshake shape
 
@@ -29,8 +42,9 @@ The connector opens an outbound WebSocket to:
 /v1/daemon/:daemon_id/ws
 ```
 
-Then sends a V1 `hello` envelope. The standalone relay replies with `ready` and
-an epoch. Relayed `user_message` envelopes are delivered through the existing
-local `user_agent_message` command path and acknowledged with `ack`. Local
-direct-message observer rows are emitted as `agent_message`, `ask`, or
-`ask_reply` envelopes.
+For signed mode the HTTP upgrade carries `Authorization: Torque-Daemon-Signature
+v1 ...`. After the relay verifies the signature, owner, timestamp, and nonce, it
+returns `ready` with an epoch. Relayed `user_message` envelopes are delivered
+through the existing local `user_agent_message` command path and acknowledged
+with `ack`. Local direct-message observer rows are emitted as `agent_message`,
+`ask`, or `ask_reply` envelopes.

@@ -6,6 +6,8 @@ import {
   DaemonRendezvousDurableObject,
   type DurableObjectSessionAttachment,
 } from "../src/adapters/cloudflare/durableObjectCoordinator.js";
+import { SqliteRelayStore } from "../src/adapters/standalone/sqliteStore.js";
+import { createClientSessionFixture, createDaemonCredentialFixture, signedDaemonAttachHeader } from "./helpers/auth.js";
 
 class FakeDurableObjectState {
   constructor(private readonly sockets: FakeCfWebSocket[]) {}
@@ -39,12 +41,18 @@ class FakeCfWebSocket {
 }
 
 test("Durable Object rehydrates hibernated sockets and fences stale daemon epochs", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
+  await createClientSessionFixture(store, { ownerUserId: "owner-1", sessionId: "session-1", token: "client-token" });
   const oldDaemon = new FakeCfWebSocket({
     role: "daemon",
     daemonId: "daemon-1",
     clientId: "",
     connectionId: "daemon-old",
     epoch: 1,
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
   });
   const newDaemon = new FakeCfWebSocket({
     role: "daemon",
@@ -52,6 +60,8 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
     clientId: "",
     connectionId: "daemon-new",
     epoch: 2,
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
   });
   const client = new FakeCfWebSocket({
     role: "client",
@@ -59,9 +69,12 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
     clientId: "client-1",
     connectionId: "client-1",
     epoch: 0,
+    ownerUserId: "owner-1",
+    sessionId: "session-1",
+    userId: "user",
   });
   const state = new FakeDurableObjectState([oldDaemon, newDaemon, client]);
-  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, {});
+  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, { authStore: store });
 
   await durableObject.rehydrateHibernatedSocketsForTest();
 
@@ -84,7 +97,9 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
     payload: { message: "from client" },
   });
   await durableObject.webSocketMessage(client as unknown as WebSocket, JSON.stringify(clientMessage));
-  assert.equal(newDaemon.envelopes().some((envelope) => envelope.id === "msg-client"), true);
+  const forwardedClientMessage = newDaemon.envelopes().find((envelope) => envelope.id === "msg-client");
+  assert.ok(forwardedClientMessage);
+  assert.equal(forwardedClientMessage.source.user_id, "user");
   assert.equal(oldDaemon.envelopes().some((envelope) => envelope.id === "msg-client"), false);
 
   const staleDaemonMessage = makeRelayEnvelope({
@@ -114,12 +129,17 @@ test("Durable Object rehydrates hibernated sockets and fences stale daemon epoch
 });
 
 test("Durable Object rehydrate preserves latest daemon owner when Cloudflare returns sockets in reverse epoch order", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
   const currentDaemon = new FakeCfWebSocket({
     role: "daemon",
     daemonId: "daemon-1",
     clientId: "",
     connectionId: "daemon-current",
     epoch: 2,
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
   });
   const staleDaemon = new FakeCfWebSocket({
     role: "daemon",
@@ -127,9 +147,11 @@ test("Durable Object rehydrate preserves latest daemon owner when Cloudflare ret
     clientId: "",
     connectionId: "daemon-stale",
     epoch: 1,
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
   });
   const state = new FakeDurableObjectState([currentDaemon, staleDaemon]);
-  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, {});
+  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, { authStore: store });
 
   await durableObject.rehydrateHibernatedSocketsForTest();
 
@@ -139,3 +161,237 @@ test("Durable Object rehydrate preserves latest daemon owner when Cloudflare ret
   assert.equal(staleDaemon.closes.some((close) => close.code === 4000), true);
   assert.equal(currentDaemon.closes.some((close) => close.code === 4000), false);
 });
+
+
+test("Durable Object closes hibernated daemon when current instance owner changed", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
+  await store.upsertInstance({
+    id: "daemon-1",
+    owner_user_id: "owner-2",
+    label: "daemon-1",
+    created_at: "2026-05-23T00:01:00.000Z",
+    last_seen_at: "2026-05-23T00:01:00.000Z",
+    metadata: {},
+  });
+  const staleDaemon = new FakeCfWebSocket({
+    role: "daemon",
+    daemonId: "daemon-1",
+    clientId: "",
+    connectionId: "owner1-old",
+    epoch: 1,
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+  });
+  const durableObject = new DaemonRendezvousDurableObject(
+    new FakeDurableObjectState([staleDaemon]) as unknown as DurableObjectState,
+    { authStore: store },
+  );
+
+  await durableObject.rehydrateHibernatedSocketsForTest();
+
+  assert.equal(staleDaemon.closes.some((close) => close.code === 4003 && close.reason === "authenticated_session_revoked"), true);
+  const snapshot = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(snapshot.daemon_online, false);
+  assert.equal(snapshot.daemon_connection_id, "");
+  assert.equal(snapshot.epoch, 0);
+  assert.equal((await store.getInstance("daemon-1"))?.owner_user_id, "owner-2");
+});
+
+test("Durable Object closes hibernated client when current instance owner changed", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
+  await createClientSessionFixture(store, { ownerUserId: "owner-1", sessionId: "session-1", token: "client-token" });
+  await store.upsertInstance({
+    id: "daemon-1",
+    owner_user_id: "owner-2",
+    label: "daemon-1",
+    created_at: "2026-05-23T00:01:00.000Z",
+    last_seen_at: "2026-05-23T00:01:00.000Z",
+    metadata: {},
+  });
+  const staleClient = new FakeCfWebSocket({
+    role: "client",
+    daemonId: "daemon-1",
+    clientId: "client-1",
+    connectionId: "owner1-client",
+    epoch: 0,
+    ownerUserId: "owner-1",
+    sessionId: "session-1",
+    userId: "user",
+  });
+  const durableObject = new DaemonRendezvousDurableObject(
+    new FakeDurableObjectState([staleClient]) as unknown as DurableObjectState,
+    { authStore: store },
+  );
+
+  await durableObject.rehydrateHibernatedSocketsForTest();
+
+  assert.equal(staleClient.closes.some((close) => close.code === 4003 && close.reason === "authenticated_session_revoked"), true);
+  const snapshot = await durableObject.snapshotForTest("daemon-1");
+  assert.deepEqual(snapshot.client_connection_ids, []);
+  assert.equal(snapshot.daemon_online, false);
+  assert.equal((await store.getInstance("daemon-1"))?.owner_user_id, "owner-2");
+});
+
+
+test("Durable Object rejects daemon attach hijack matrix without owner replacement or epoch increment", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const ownerOne = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-owner-1" });
+  await store.createDaemonCredential({
+    credential_id: "cred-owner-2",
+    daemon_id: "daemon-1",
+    owner_user_id: "owner-2",
+    public_key_jwk: ownerOne.publicKeyJwk as any,
+    alg: "ES256",
+    created_at: "2026-05-23T00:00:00.000Z",
+    last_used_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  const currentDaemon = new FakeCfWebSocket({
+    role: "daemon",
+    daemonId: "daemon-1",
+    clientId: "",
+    connectionId: "daemon-current",
+    epoch: 1,
+    ownerUserId: "owner-1",
+    credentialId: "cred-owner-1",
+  });
+  const state = new FakeDurableObjectState([currentDaemon]);
+  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, { authStore: store });
+  await durableObject.rehydrateHibernatedSocketsForTest();
+  const before = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(before.daemon_connection_id, "daemon-current");
+  assert.equal(before.epoch, 1);
+
+  await assert.rejects(
+    () => attachDaemonForTest(durableObject, {}, "missing-auth"),
+    /Authorization header is required/,
+  );
+  await assertNoDurableOwnerChange(durableObject, "daemon-current", 1);
+
+  const wrongSignature = (await signedDaemonAttachHeader(ownerOne)).replace(/signature="[^"]+"/, 'signature="bogus"');
+  await assert.rejects(
+    () => attachDaemonForTest(durableObject, { authorization: wrongSignature }, "wrong-signature"),
+    /signature is invalid/,
+  );
+  await assertNoDurableOwnerChange(durableObject, "daemon-current", 1);
+
+  const replayHeader = await signedDaemonAttachHeader(ownerOne, { nonce: "do-replay-once" });
+  const replacement = new FakeCfWebSocket({ role: "daemon", daemonId: "daemon-1", clientId: "", connectionId: "replacement", epoch: 0 });
+  await durableObject.attachSocketForTest(
+    replacement as unknown as WebSocket,
+    { role: "daemon", daemonId: "daemon-1", clientId: "" },
+    daemonAttachRequest({ authorization: replayHeader }),
+  );
+  const afterReplacement = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(afterReplacement.daemon_connection_id, "daemon:daemon-1:daemon:test");
+  assert.equal(afterReplacement.epoch, 2);
+  await assert.rejects(
+    () => attachDaemonForTest(durableObject, { authorization: replayHeader }, "replayed"),
+    /nonce has already been used/,
+  );
+  await assertNoDurableOwnerChange(durableObject, "daemon:daemon-1:daemon:test", 2);
+
+  const wrongOwnerHeader = await signedDaemonAttachHeader({ ...ownerOne, credentialId: "cred-owner-2", ownerUserId: "owner-2" });
+  await assert.rejects(
+    () => attachDaemonForTest(durableObject, { authorization: wrongOwnerHeader }, "wrong-owner"),
+    /owner does not match/,
+  );
+  await assertNoDurableOwnerChange(durableObject, "daemon:daemon-1:daemon:test", 2);
+  assert.equal((await store.getInstance("daemon-1"))?.owner_user_id, "owner-1");
+  assert.equal(currentDaemon.closes.some((close) => close.code === 4000), true);
+  assert.equal(replacement.closes.some((close) => close.code === 4000), false);
+});
+
+
+test("Durable Object rejects wrong-owner authenticated daemon attach without replacing current owner", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const ownerOne = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-owner-1" });
+  await store.createDaemonCredential({
+    credential_id: "cred-owner-2",
+    daemon_id: "daemon-1",
+    owner_user_id: "owner-2",
+    public_key_jwk: ownerOne.publicKeyJwk as any,
+    alg: "ES256",
+    created_at: "2026-05-23T00:00:00.000Z",
+    last_used_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  const currentDaemon = new FakeCfWebSocket({
+    role: "daemon",
+    daemonId: "daemon-1",
+    clientId: "",
+    connectionId: "daemon-current",
+    epoch: 1,
+    ownerUserId: "owner-1",
+    credentialId: "cred-owner-1",
+  });
+  const state = new FakeDurableObjectState([currentDaemon]);
+  const durableObject = new DaemonRendezvousDurableObject(state as unknown as DurableObjectState, { authStore: store });
+  await durableObject.rehydrateHibernatedSocketsForTest();
+  const before = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(before.daemon_connection_id, "daemon-current");
+  assert.equal(before.epoch, 1);
+
+  const attacker = new FakeCfWebSocket({ role: "daemon", daemonId: "daemon-1", clientId: "", connectionId: "attacker", epoch: 0 });
+  const wrongOwnerHeader = await signedDaemonAttachHeader({ ...ownerOne, credentialId: "cred-owner-2", ownerUserId: "owner-2" });
+  await assert.rejects(
+    () => durableObject.attachSocketForTest(
+      attacker as unknown as WebSocket,
+      { role: "daemon", daemonId: "daemon-1", clientId: "" },
+      new Request("https://relay.example.com/v1/daemon/daemon-1/ws", {
+        method: "GET",
+        headers: { authorization: wrongOwnerHeader },
+      }),
+    ),
+    /owner does not match/,
+  );
+  const after = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(after.daemon_connection_id, "daemon-current");
+  assert.equal(after.epoch, 1);
+  assert.equal(currentDaemon.closes.some((close) => close.code === 4000), false);
+});
+
+function daemonAttachRequest(headers: Record<string, string>): Request {
+  return new Request("https://relay.example.com/v1/daemon/daemon-1/ws", {
+    method: "GET",
+    headers,
+  });
+}
+
+async function attachDaemonForTest(
+  durableObject: DaemonRendezvousDurableObject,
+  headers: Record<string, string>,
+  connectionLabel: string,
+): Promise<DurableObjectSessionAttachment> {
+  const ws = new FakeCfWebSocket({
+    role: "daemon",
+    daemonId: "daemon-1",
+    clientId: "",
+    connectionId: connectionLabel,
+    epoch: 0,
+  });
+  return durableObject.attachSocketForTest(
+    ws as unknown as WebSocket,
+    { role: "daemon", daemonId: "daemon-1", clientId: "" },
+    daemonAttachRequest(headers),
+  );
+}
+
+async function assertNoDurableOwnerChange(
+  durableObject: DaemonRendezvousDurableObject,
+  connectionId: string,
+  epoch: number,
+): Promise<void> {
+  const snapshot = await durableObject.snapshotForTest("daemon-1");
+  assert.equal(snapshot.daemon_connection_id, connectionId);
+  assert.equal(snapshot.epoch, epoch);
+  assert.equal(snapshot.daemon_online, true);
+}

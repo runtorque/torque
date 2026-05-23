@@ -9,8 +9,11 @@ import type {
   AppendMessageResult,
   ListRelayMessagesOptions,
   PendingRelayMessagesOptions,
+  RelayClientSessionRecord,
+  RelayDaemonCredentialRecord,
   RelayDirection,
   RelayInstanceRecord,
+  RelayPairingTokenRecord,
   RelayStore,
   StoredRelayMessage,
 } from "../../core/ports.js";
@@ -19,15 +22,25 @@ import {
   RELAY_MESSAGE_SELECT,
   RELAY_SCHEMA_STATEMENTS,
   clampRelayLimit,
+  normalizeRelayClientSessionRow,
+  normalizeRelayDaemonCredentialRow,
   normalizeRelayInstanceRow,
   normalizeRelayMessageRow,
+  normalizeRelayPairingTokenRow,
   nowIso,
+  relayClientSessionValues,
+  relayDaemonCredentialValues,
   relayEnvelopeHash,
   relayInstanceValues,
   relayMessageValues,
+  relayPairingTokenValues,
+  type RelayClientSessionRow,
+  type RelayDaemonCredentialRow,
   type RelayInstanceRow,
   type RelayMessageRow,
+  type RelayPairingTokenRow,
 } from "../../core/sql.js";
+
 
 type StatementSyncLike = {
   run(...args: unknown[]): unknown;
@@ -79,6 +92,134 @@ export class SqliteRelayStore implements RelayStore {
 
   async getInstance(id: string): Promise<RelayInstanceRecord | null> {
     return this.operation("getInstance", () => this.getInstanceSync(id));
+  }
+
+  async createPairingToken(record: RelayPairingTokenRecord): Promise<RelayPairingTokenRecord> {
+    return this.operation("createPairingToken", () => {
+      assertNonEmpty(record.id, "pairing token id");
+      assertNonEmpty(record.token_hash, "pairing token hash");
+      this.db.prepare(
+        `INSERT INTO relay_pairing_tokens
+          (id, token_hash, owner_user_id, daemon_id, label, created_at, expires_at, consumed_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(...relayPairingTokenValues(record));
+      const saved = this.getPairingTokenByHashSync(record.token_hash);
+      if (!saved) throw new RelayStoreError(`failed to save pairing token ${record.id}`);
+      return saved;
+    });
+  }
+
+  async consumePairingToken(tokenHash: string, consumedAt = nowIso()): Promise<RelayPairingTokenRecord | null> {
+    return this.operation("consumePairingToken", () => {
+      const hash = assertNonEmpty(tokenHash, "pairing token hash");
+      this.db.prepare(
+        `UPDATE relay_pairing_tokens
+         SET consumed_at=?
+         WHERE token_hash=? AND consumed_at='' AND revoked_at='' AND expires_at>?`,
+      ).run(consumedAt, hash, consumedAt);
+      if (this.lastChanges() === 0) return null;
+      return this.getPairingTokenByHashSync(hash);
+    });
+  }
+
+  async createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord> {
+    return this.operation("createDaemonCredential", () => {
+      assertNonEmpty(record.credential_id, "credential id");
+      assertNonEmpty(record.daemon_id, "credential daemon_id");
+      assertNonEmpty(record.owner_user_id, "credential owner_user_id");
+      this.db.prepare(
+        `INSERT INTO relay_daemon_credentials
+          (credential_id, daemon_id, owner_user_id, public_key_jwk_json, alg, created_at, last_used_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(...relayDaemonCredentialValues(record));
+      const saved = this.getDaemonCredentialSync(record.daemon_id, record.credential_id);
+      if (!saved) throw new RelayStoreError(`failed to save daemon credential ${record.credential_id}`);
+      return saved;
+    });
+  }
+
+  async getDaemonCredential(daemonId: string, credentialId: string): Promise<RelayDaemonCredentialRecord | null> {
+    return this.operation("getDaemonCredential", () => this.getDaemonCredentialSync(daemonId, credentialId));
+  }
+
+  async touchDaemonCredential(credentialId: string, lastUsedAt = nowIso()): Promise<RelayDaemonCredentialRecord | null> {
+    return this.operation("touchDaemonCredential", () => {
+      const id = assertNonEmpty(credentialId, "credential id");
+      this.db.prepare(
+        `UPDATE relay_daemon_credentials SET last_used_at=? WHERE credential_id=?`,
+      ).run(lastUsedAt, id);
+      return this.getDaemonCredentialByIdSync(id);
+    });
+  }
+
+  async revokeDaemonCredential(credentialId: string, revokedAt = nowIso()): Promise<RelayDaemonCredentialRecord | null> {
+    return this.operation("revokeDaemonCredential", () => {
+      const id = assertNonEmpty(credentialId, "credential id");
+      this.db.prepare(
+        `UPDATE relay_daemon_credentials SET revoked_at=? WHERE credential_id=?`,
+      ).run(revokedAt, id);
+      return this.getDaemonCredentialByIdSync(id);
+    });
+  }
+
+  async recordAuthNonce(credentialId: string, nonceHash: string, expiresAt: string, createdAt = nowIso()): Promise<boolean> {
+    return this.operation("recordAuthNonce", () => {
+      this.pruneExpiredAuthNoncesSync(createdAt);
+      this.db.prepare(
+        `INSERT OR IGNORE INTO relay_auth_nonces
+          (credential_id, nonce_hash, created_at, expires_at)
+         VALUES (?, ?, ?, ?)`,
+      ).run(
+        assertNonEmpty(credentialId, "credential id"),
+        assertNonEmpty(nonceHash, "nonce hash"),
+        createdAt,
+        assertNonEmpty(expiresAt, "nonce expires_at"),
+      );
+      return this.lastChanges() > 0;
+    });
+  }
+
+  async createClientSession(record: RelayClientSessionRecord): Promise<RelayClientSessionRecord> {
+    return this.operation("createClientSession", () => {
+      assertNonEmpty(record.session_id, "session id");
+      assertNonEmpty(record.token_hash, "session token hash");
+      assertNonEmpty(record.owner_user_id, "session owner_user_id");
+      this.db.prepare(
+        `INSERT INTO relay_client_sessions
+          (session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(...relayClientSessionValues(record));
+      const saved = this.getClientSessionByTokenHashSync(record.token_hash);
+      if (!saved) throw new RelayStoreError(`failed to save client session ${record.session_id}`);
+      return saved;
+    });
+  }
+
+
+  async getClientSession(sessionId: string): Promise<RelayClientSessionRecord | null> {
+    return this.operation("getClientSession", () => this.getClientSessionByIdSync(sessionId));
+  }
+
+  async getClientSessionByTokenHash(tokenHash: string): Promise<RelayClientSessionRecord | null> {
+    return this.operation("getClientSessionByTokenHash", () => this.getClientSessionByTokenHashSync(tokenHash));
+  }
+
+  async revokeClientSession(sessionId: string, revokedAt = nowIso()): Promise<RelayClientSessionRecord | null> {
+    return this.operation("revokeClientSession", () => {
+      const id = assertNonEmpty(sessionId, "session id");
+      this.db.prepare(
+        `UPDATE relay_client_sessions SET revoked_at=? WHERE session_id=?`,
+      ).run(revokedAt, id);
+      const row = this.db.prepare(
+        `SELECT session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json
+         FROM relay_client_sessions WHERE session_id=?`,
+      ).get(id) as RelayClientSessionRow | undefined;
+      return normalizeRelayClientSessionRow(row);
+    });
+  }
+
+  async pruneExpiredAuthNonces(now = nowIso()): Promise<void> {
+    return this.operation("pruneExpiredAuthNonces", () => this.pruneExpiredAuthNoncesSync(now));
   }
 
   async appendMessage(envelope: RelayEnvelope, direction: RelayDirection): Promise<StoredRelayMessage> {
@@ -222,6 +363,50 @@ export class SqliteRelayStore implements RelayStore {
        FROM relay_instances WHERE id=?`,
     ).get(String(id || "").trim()) as RelayInstanceRow | undefined;
     return normalizeRelayInstanceRow(row);
+  }
+
+  private getPairingTokenByHashSync(tokenHash: string): RelayPairingTokenRecord | null {
+    const row = this.db.prepare(
+      `SELECT id, token_hash, owner_user_id, daemon_id, label, created_at, expires_at, consumed_at, revoked_at, metadata_json
+       FROM relay_pairing_tokens WHERE token_hash=?`,
+    ).get(assertNonEmpty(tokenHash, "pairing token hash")) as RelayPairingTokenRow | undefined;
+    return normalizeRelayPairingTokenRow(row);
+  }
+
+  private getDaemonCredentialSync(daemonId: string, credentialId: string): RelayDaemonCredentialRecord | null {
+    const row = this.db.prepare(
+      `SELECT credential_id, daemon_id, owner_user_id, public_key_jwk_json, alg, created_at, last_used_at, revoked_at, metadata_json
+       FROM relay_daemon_credentials WHERE daemon_id=? AND credential_id=?`,
+    ).get(cleanDaemonId(daemonId), assertNonEmpty(credentialId, "credential id")) as RelayDaemonCredentialRow | undefined;
+    return normalizeRelayDaemonCredentialRow(row);
+  }
+
+  private getDaemonCredentialByIdSync(credentialId: string): RelayDaemonCredentialRecord | null {
+    const row = this.db.prepare(
+      `SELECT credential_id, daemon_id, owner_user_id, public_key_jwk_json, alg, created_at, last_used_at, revoked_at, metadata_json
+       FROM relay_daemon_credentials WHERE credential_id=?`,
+    ).get(assertNonEmpty(credentialId, "credential id")) as RelayDaemonCredentialRow | undefined;
+    return normalizeRelayDaemonCredentialRow(row);
+  }
+
+  private getClientSessionByIdSync(sessionId: string): RelayClientSessionRecord | null {
+    const row = this.db.prepare(
+      `SELECT session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json
+       FROM relay_client_sessions WHERE session_id=?`,
+    ).get(assertNonEmpty(sessionId, "session id")) as RelayClientSessionRow | undefined;
+    return normalizeRelayClientSessionRow(row);
+  }
+
+  private getClientSessionByTokenHashSync(tokenHash: string): RelayClientSessionRecord | null {
+    const row = this.db.prepare(
+      `SELECT session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json
+       FROM relay_client_sessions WHERE token_hash=?`,
+    ).get(assertNonEmpty(tokenHash, "session token hash")) as RelayClientSessionRow | undefined;
+    return normalizeRelayClientSessionRow(row);
+  }
+
+  private pruneExpiredAuthNoncesSync(now: string): void {
+    this.db.prepare(`DELETE FROM relay_auth_nonces WHERE expires_at<=?`).run(now);
   }
 
   private getMessageSync(messageId: string, options: { idempotent?: boolean } = {}): StoredRelayMessage | null {

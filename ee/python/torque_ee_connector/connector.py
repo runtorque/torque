@@ -1,4 +1,4 @@
-"""Enterprise outbound relay connector for Channels Phase 3.
+"""Enterprise outbound relay connector for Channels Phase 4.
 
 The open-core daemon loads this package only when explicitly enabled through the
 ``torque.cloud_hooks`` seam.  This connector keeps the daemon as the source of
@@ -6,9 +6,8 @@ truth: inbound relay ``user_message`` envelopes are routed to the existing
 ``user_agent_message`` command path, and local direct-message observer events are
 published back to the relay as V1 JSON envelopes.
 
-Phase 3 intentionally supports unauthenticated LOCAL/STANDALONE relays only.
-Production auth/pairing is Phase 4; until then non-loopback relay URLs are
-rejected rather than creating a remotely exposed control surface.
+Loopback standalone development can use the local-dev unauthenticated mode.
+Reachable/non-loopback relays require Phase 4 signed daemon attach headers.
 """
 
 from __future__ import annotations
@@ -17,12 +16,15 @@ import asyncio
 import contextlib
 import inspect
 import ipaddress
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
+from .auth import cryptography_available, load_private_key_pem_from_config, make_daemon_attach_headers
 from .protocol import (
     RelayProtocolError,
     dumps_envelope,
@@ -62,6 +64,9 @@ class ConnectorConfig:
     reconnect_initial_seconds: float = 0.25
     reconnect_max_seconds: float = 5.0
     outbound_queue_size: int = 500
+    auth_mode: str = "local-dev-unauthenticated"
+    credential_id: str = ""
+    private_key_pem: str = ""
 
 
 @dataclass
@@ -159,7 +164,8 @@ class EnterpriseConnector:
     async def _connect_once(self) -> None:
         assert self.config is not None
         session = await self._ensure_session()
-        async with session.ws_connect(self.config.ws_url) as ws:
+        headers = self._attach_headers()
+        async with session.ws_connect(self.config.ws_url, headers=headers or None) as ws:
             self._ws = ws
             self._connected_event.set()
             await self._send_hello()
@@ -281,6 +287,18 @@ class EnterpriseConnector:
             return dict(result)
         return {"type": "ok", "result": str(result)}
 
+
+    def _attach_headers(self) -> dict[str, str]:
+        assert self.config is not None
+        if self.config.auth_mode != "signed-attach-v1":
+            return {}
+        return make_daemon_attach_headers(
+            ws_url=self.config.ws_url,
+            daemon_id=self.config.daemon_id,
+            credential_id=self.config.credential_id,
+            private_key_pem=self.config.private_key_pem,
+        )
+
     async def _send_hello(self) -> None:
         assert self.config is not None
         await self._send_envelope(
@@ -296,7 +314,7 @@ class EnterpriseConnector:
                         "direct_message_observer",
                     ],
                     "profile": self.config.profile,
-                    "auth": "unauthenticated-local-dev-only",
+                    "auth": self.config.auth_mode,
                 },
             )
         )
@@ -477,7 +495,7 @@ def create_connector(context: Any) -> EnterpriseConnector:
 
 
 def config_from_context(context: Any) -> ConnectorConfig:
-    context_config = _context_config(context)
+    context_config = _merged_context_config(context)
     relay_url = _first_non_empty(
         context_config.get("relay_url"),
         os.environ.get("TORQUE_EE_RELAY_URL"),
@@ -498,7 +516,29 @@ def config_from_context(context: Any) -> ConnectorConfig:
         context_config.get("profile"),
     )
     ws_url = build_daemon_ws_url(relay_url, daemon_id)
-    _assert_local_relay_url(ws_url)
+    local_relay = _is_local_relay_url(ws_url)
+    credential_id = _first_non_empty(
+        context_config.get("credential_id"),
+        context_config.get("daemon_credential_id"),
+        os.environ.get("TORQUE_EE_DAEMON_CREDENTIAL_ID"),
+    )
+    private_key_pem = _first_non_empty(
+        load_private_key_pem_from_config(context_config),
+        os.environ.get("TORQUE_EE_DAEMON_PRIVATE_KEY_PEM"),
+    )
+    auth_mode = "signed-attach-v1" if credential_id or private_key_pem else "local-dev-unauthenticated"
+    if auth_mode == "signed-attach-v1":
+        if not credential_id or not private_key_pem:
+            raise ValueError("signed relay attach requires both credential_id and private_key_pem")
+        if not cryptography_available():
+            raise ValueError("cryptography is unavailable; signed relay attach is disabled cleanly")
+    if not local_relay:
+        if auth_mode != "signed-attach-v1":
+            raise ValueError(
+                "Phase-4 EE connector only supports local relay URLs unless signed daemon auth is configured"
+            )
+        if not ws_url.startswith("wss://"):
+            raise ValueError("remote relay URLs require wss:// or https:// when signed daemon auth is enabled")
     return ConnectorConfig(
         relay_url=relay_url,
         daemon_id=daemon_id,
@@ -522,6 +562,9 @@ def config_from_context(context: Any) -> ConnectorConfig:
             "TORQUE_EE_CONNECTOR_OUTBOUND_QUEUE_SIZE",
             500,
         ),
+        auth_mode=auth_mode,
+        credential_id=credential_id,
+        private_key_pem=private_key_pem,
     )
 
 
@@ -551,23 +594,27 @@ def build_daemon_ws_url(relay_url: str, daemon_id: str) -> str:
     ))
 
 
-def _assert_local_relay_url(ws_url: str) -> None:
+def _is_local_relay_url(ws_url: str) -> bool:
     parsed = urlparse(ws_url)
     host = (parsed.hostname or "").strip().lower()
     if host in _LOCAL_RELAY_HOSTS or host.endswith(".localhost"):
-        return
+        return True
     try:
         address = ipaddress.ip_address(host)
-    except ValueError as exc:
-        raise ValueError(
-            "Phase-3 EE connector only supports local standalone relay URLs; "
-            f"got host {host!r}"
-        ) from exc
-    if not address.is_loopback:
-        raise ValueError(
-            "Phase-3 EE connector only supports local standalone relay URLs; "
-            f"got host {host!r}"
-        )
+    except ValueError:
+        return False
+    return address.is_loopback
+
+
+def _assert_local_relay_url(ws_url: str) -> None:
+    if _is_local_relay_url(ws_url):
+        return
+    parsed = urlparse(ws_url)
+    host = (parsed.hostname or "").strip().lower()
+    raise ValueError(
+        "Phase-4 EE connector only supports local relay URLs unless signed daemon auth is configured; "
+        f"got host {host!r}"
+    )
 
 
 def _wire_kind_for_direct_message_row(row: Mapping[str, Any]) -> str:
@@ -632,6 +679,32 @@ def _ws_message_text(message: Any) -> str | None:
     if isinstance(data, (bytes, bytearray)):
         return bytes(data).decode("utf-8")
     return None
+
+
+def _merged_context_config(context: Any) -> dict[str, Any]:
+    config = _profile_connector_config(context)
+    config.update(_context_config(context))
+    return config
+
+
+def _profile_connector_config(context: Any) -> dict[str, Any]:
+    data_dir = str(getattr(context, "data_dir", "") or "")
+    if isinstance(context, Mapping):
+        data_dir = str(context.get("data_dir", data_dir) or data_dir)
+    if not data_dir:
+        return {}
+    path = Path(data_dir).expanduser() / "ee_connector.json"
+    if not path.exists():
+        return {}
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        return {}
+    if mode & 0o077:
+        raise ValueError("EE connector config file must not be group/world accessible; expected mode 0600")
+    with path.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return dict(data or {}) if isinstance(data, Mapping) else {}
 
 
 def _context_config(context: Any) -> dict[str, Any]:

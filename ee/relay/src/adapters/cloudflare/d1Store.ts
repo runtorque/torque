@@ -4,8 +4,11 @@ import type {
   AppendMessageResult,
   ListRelayMessagesOptions,
   PendingRelayMessagesOptions,
+  RelayClientSessionRecord,
+  RelayDaemonCredentialRecord,
   RelayDirection,
   RelayInstanceRecord,
+  RelayPairingTokenRecord,
   RelayStore,
   StoredRelayMessage,
 } from "../../core/ports.js";
@@ -14,14 +17,23 @@ import {
   RELAY_MESSAGE_SELECT,
   RELAY_SCHEMA_STATEMENTS,
   clampRelayLimit,
+  normalizeRelayClientSessionRow,
+  normalizeRelayDaemonCredentialRow,
   normalizeRelayInstanceRow,
   normalizeRelayMessageRow,
+  normalizeRelayPairingTokenRow,
   nowIso,
+  relayClientSessionValues,
+  relayDaemonCredentialValues,
   relayEnvelopeHash,
   relayInstanceValues,
   relayMessageValues,
+  relayPairingTokenValues,
+  type RelayClientSessionRow,
+  type RelayDaemonCredentialRow,
   type RelayInstanceRow,
   type RelayMessageRow,
+  type RelayPairingTokenRow,
 } from "../../core/sql.js";
 
 export class D1RelayStore implements RelayStore {
@@ -66,6 +78,154 @@ export class D1RelayStore implements RelayStore {
     });
   }
 
+  async createPairingToken(record: RelayPairingTokenRecord): Promise<RelayPairingTokenRecord> {
+    return this.operation("createPairingToken", async () => {
+      assertNonEmpty(record.id, "pairing token id");
+      assertNonEmpty(record.token_hash, "pairing token hash");
+      await this.db.prepare(
+        `INSERT INTO relay_pairing_tokens
+          (id, token_hash, owner_user_id, daemon_id, label, created_at, expires_at, consumed_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(...relayPairingTokenValues(record)).run();
+      const saved = await this.getPairingTokenByHash(record.token_hash);
+      if (!saved) throw new RelayStoreError(`failed to save pairing token ${record.id}`);
+      return saved;
+    });
+  }
+
+  async consumePairingToken(tokenHash: string, consumedAt = nowIso()): Promise<RelayPairingTokenRecord | null> {
+    return this.operation("consumePairingToken", async () => {
+      const hash = assertNonEmpty(tokenHash, "pairing token hash");
+      const result = await this.db.prepare(
+        `UPDATE relay_pairing_tokens
+         SET consumed_at=?
+         WHERE token_hash=? AND consumed_at='' AND revoked_at='' AND expires_at>?`,
+      ).bind(consumedAt, hash, consumedAt).run();
+      if (changesFromResult(result) === 0) return null;
+      return this.getPairingTokenByHash(hash);
+    });
+  }
+
+  async createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord> {
+    return this.operation("createDaemonCredential", async () => {
+      assertNonEmpty(record.credential_id, "credential id");
+      assertNonEmpty(record.daemon_id, "credential daemon_id");
+      assertNonEmpty(record.owner_user_id, "credential owner_user_id");
+      await this.db.prepare(
+        `INSERT INTO relay_daemon_credentials
+          (credential_id, daemon_id, owner_user_id, public_key_jwk_json, alg, created_at, last_used_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(...relayDaemonCredentialValues(record)).run();
+      const saved = await this.getDaemonCredential(record.daemon_id, record.credential_id);
+      if (!saved) throw new RelayStoreError(`failed to save daemon credential ${record.credential_id}`);
+      return saved;
+    });
+  }
+
+  async getDaemonCredential(daemonId: string, credentialId: string): Promise<RelayDaemonCredentialRecord | null> {
+    return this.operation("getDaemonCredential", async () => {
+      const row = await this.db.prepare(
+        `SELECT credential_id, daemon_id, owner_user_id, public_key_jwk_json, alg, created_at, last_used_at, revoked_at, metadata_json
+         FROM relay_daemon_credentials WHERE daemon_id=? AND credential_id=?`,
+      ).bind(cleanDaemonId(daemonId), assertNonEmpty(credentialId, "credential id")).first<RelayDaemonCredentialRow>();
+      return normalizeRelayDaemonCredentialRow(row);
+    });
+  }
+
+  async touchDaemonCredential(credentialId: string, lastUsedAt = nowIso()): Promise<RelayDaemonCredentialRecord | null> {
+    return this.operation("touchDaemonCredential", async () => {
+      const id = assertNonEmpty(credentialId, "credential id");
+      await this.db.prepare(
+        `UPDATE relay_daemon_credentials SET last_used_at=? WHERE credential_id=?`,
+      ).bind(lastUsedAt, id).run();
+      return this.getDaemonCredentialById(id);
+    });
+  }
+
+  async revokeDaemonCredential(credentialId: string, revokedAt = nowIso()): Promise<RelayDaemonCredentialRecord | null> {
+    return this.operation("revokeDaemonCredential", async () => {
+      const id = assertNonEmpty(credentialId, "credential id");
+      await this.db.prepare(
+        `UPDATE relay_daemon_credentials SET revoked_at=? WHERE credential_id=?`,
+      ).bind(revokedAt, id).run();
+      return this.getDaemonCredentialById(id);
+    });
+  }
+
+  async recordAuthNonce(credentialId: string, nonceHash: string, expiresAt: string, createdAt = nowIso()): Promise<boolean> {
+    return this.operation("recordAuthNonce", async () => {
+      await this.pruneExpiredAuthNonces(createdAt);
+      const result = await this.db.prepare(
+        `INSERT OR IGNORE INTO relay_auth_nonces
+          (credential_id, nonce_hash, created_at, expires_at)
+         VALUES (?, ?, ?, ?)`,
+      ).bind(
+        assertNonEmpty(credentialId, "credential id"),
+        assertNonEmpty(nonceHash, "nonce hash"),
+        createdAt,
+        assertNonEmpty(expiresAt, "nonce expires_at"),
+      ).run();
+      return changesFromResult(result) > 0;
+    });
+  }
+
+  async createClientSession(record: RelayClientSessionRecord): Promise<RelayClientSessionRecord> {
+    return this.operation("createClientSession", async () => {
+      assertNonEmpty(record.session_id, "session id");
+      assertNonEmpty(record.token_hash, "session token hash");
+      assertNonEmpty(record.owner_user_id, "session owner_user_id");
+      await this.db.prepare(
+        `INSERT INTO relay_client_sessions
+          (session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(...relayClientSessionValues(record)).run();
+      const saved = await this.getClientSessionByTokenHash(record.token_hash);
+      if (!saved) throw new RelayStoreError(`failed to save client session ${record.session_id}`);
+      return saved;
+    });
+  }
+
+
+  async getClientSession(sessionId: string): Promise<RelayClientSessionRecord | null> {
+    return this.operation("getClientSession", async () => {
+      const row = await this.db.prepare(
+        `SELECT session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json
+         FROM relay_client_sessions WHERE session_id=?`,
+      ).bind(assertNonEmpty(sessionId, "session id")).first<RelayClientSessionRow>();
+      return normalizeRelayClientSessionRow(row);
+    });
+  }
+
+  async getClientSessionByTokenHash(tokenHash: string): Promise<RelayClientSessionRecord | null> {
+    return this.operation("getClientSessionByTokenHash", async () => {
+      const row = await this.db.prepare(
+        `SELECT session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json
+         FROM relay_client_sessions WHERE token_hash=?`,
+      ).bind(assertNonEmpty(tokenHash, "session token hash")).first<RelayClientSessionRow>();
+      return normalizeRelayClientSessionRow(row);
+    });
+  }
+
+  async revokeClientSession(sessionId: string, revokedAt = nowIso()): Promise<RelayClientSessionRecord | null> {
+    return this.operation("revokeClientSession", async () => {
+      const id = assertNonEmpty(sessionId, "session id");
+      await this.db.prepare(
+        `UPDATE relay_client_sessions SET revoked_at=? WHERE session_id=?`,
+      ).bind(revokedAt, id).run();
+      const row = await this.db.prepare(
+        `SELECT session_id, token_hash, owner_user_id, created_at, expires_at, revoked_at, metadata_json
+         FROM relay_client_sessions WHERE session_id=?`,
+      ).bind(id).first<RelayClientSessionRow>();
+      return normalizeRelayClientSessionRow(row);
+    });
+  }
+
+  async pruneExpiredAuthNonces(now = nowIso()): Promise<void> {
+    return this.operation("pruneExpiredAuthNonces", async () => {
+      await this.db.prepare(`DELETE FROM relay_auth_nonces WHERE expires_at<=?`).bind(now).run();
+    });
+  }
+
   async appendMessage(envelope: RelayEnvelope, direction: RelayDirection): Promise<StoredRelayMessage> {
     return (await this.appendMessageResult(envelope, direction)).message;
   }
@@ -78,7 +238,7 @@ export class D1RelayStore implements RelayStore {
           (${RELAY_MESSAGE_COLUMNS.join(", ")})
          VALUES (${RELAY_MESSAGE_COLUMNS.map(() => "?").join(", ")})`,
       ).bind(...relayMessageValues(envelope, direction)).run();
-      const inserted = Number((result as { meta?: { changes?: number } }).meta?.changes || 0) > 0;
+      const inserted = changesFromResult(result) > 0;
       const saved = await this.getMessageInternal(envelope.id, { idempotent: !inserted });
       if (!saved) throw new RelayStoreError(`failed to save relay message ${envelope.id}`);
       if (saved.envelope_hash !== expectedHash || saved.direction !== direction) {
@@ -197,6 +357,22 @@ export class D1RelayStore implements RelayStore {
     });
   }
 
+  private async getPairingTokenByHash(tokenHash: string): Promise<RelayPairingTokenRecord | null> {
+    const row = await this.db.prepare(
+      `SELECT id, token_hash, owner_user_id, daemon_id, label, created_at, expires_at, consumed_at, revoked_at, metadata_json
+       FROM relay_pairing_tokens WHERE token_hash=?`,
+    ).bind(assertNonEmpty(tokenHash, "pairing token hash")).first<RelayPairingTokenRow>();
+    return normalizeRelayPairingTokenRow(row);
+  }
+
+  private async getDaemonCredentialById(credentialId: string): Promise<RelayDaemonCredentialRecord | null> {
+    const row = await this.db.prepare(
+      `SELECT credential_id, daemon_id, owner_user_id, public_key_jwk_json, alg, created_at, last_used_at, revoked_at, metadata_json
+       FROM relay_daemon_credentials WHERE credential_id=?`,
+    ).bind(assertNonEmpty(credentialId, "credential id")).first<RelayDaemonCredentialRow>();
+    return normalizeRelayDaemonCredentialRow(row);
+  }
+
   private async getMessageInternal(
     messageId: string,
     options: { idempotent?: boolean } = {},
@@ -216,6 +392,10 @@ export class D1RelayStore implements RelayStore {
       throw new RelayStoreError(`D1 RelayStore ${name} failed: ${errorMessage(error)}`, "d1_store_error", false, error);
     }
   }
+}
+
+function changesFromResult(result: unknown): number {
+  return Number((result as { meta?: { changes?: number } }).meta?.changes || 0);
 }
 
 function isStoredMessage(value: StoredRelayMessage | null): value is StoredRelayMessage {

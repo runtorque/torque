@@ -3,6 +3,8 @@ import type {
   AttachClientArgs,
   AttachDaemonArgs,
   AttachResult,
+  ClientAuthPrincipal,
+  DaemonAuthPrincipal,
   RelayBroadcastResult,
   RelayCoordinator,
   RelayDeliveryResult,
@@ -15,6 +17,7 @@ type DaemonSlot = {
   connectionId: string;
   socket: RelaySocket;
   epoch: number;
+  auth?: DaemonAuthPrincipal;
 };
 
 type ClientSlot = {
@@ -23,6 +26,7 @@ type ClientSlot = {
   connectionId: string;
   socket: RelaySocket;
   epoch: number;
+  auth?: ClientAuthPrincipal;
 };
 
 export class StandaloneRegistryCoordinator implements RelayCoordinator {
@@ -37,9 +41,17 @@ export class StandaloneRegistryCoordinator implements RelayCoordinator {
     const socket = args.socket;
     const connectionId = cleanRequired(socket.id, "socket.id");
     const previous = this.daemonsById.get(daemonId);
+    if (!this.canReplaceDaemon(previous, args.auth)) {
+      return {
+        accepted: false,
+        connectionId,
+        epoch: this.epochsByDaemonId.get(daemonId) || 0,
+        reason: "daemon_owner_mismatch",
+      };
+    }
     const epoch = (this.epochsByDaemonId.get(daemonId) || 0) + 1;
     this.epochsByDaemonId.set(daemonId, epoch);
-    this.daemonsById.set(daemonId, { daemonId, connectionId, socket, epoch });
+    this.daemonsById.set(daemonId, { daemonId, connectionId, socket, epoch, auth: args.auth });
 
     if (previous && previous.connectionId !== connectionId) {
       void previous.socket.close?.(4000, "replaced_by_new_daemon_connection");
@@ -60,6 +72,15 @@ export class StandaloneRegistryCoordinator implements RelayCoordinator {
     const clientId = cleanRequired(args.clientId, "clientId");
     const socket = args.socket;
     const connectionId = cleanRequired(socket.id, "socket.id");
+    const daemon = this.daemonsById.get(daemonId);
+    if (daemon?.auth?.ownerUserId && args.auth?.ownerUserId && daemon.auth.ownerUserId !== args.auth.ownerUserId) {
+      return {
+        accepted: false,
+        connectionId,
+        epoch: this.epochsByDaemonId.get(daemonId) || 0,
+        reason: "client_owner_mismatch",
+      };
+    }
     const epoch = this.epochsByDaemonId.get(daemonId) || 0;
     this.clientsByConnectionId.set(connectionId, {
       daemonId,
@@ -67,6 +88,7 @@ export class StandaloneRegistryCoordinator implements RelayCoordinator {
       connectionId,
       socket,
       epoch,
+      auth: args.auth,
     });
     const set = this.clientConnectionsByDaemonId.get(daemonId) || new Set<string>();
     set.add(connectionId);
@@ -140,7 +162,15 @@ export class StandaloneRegistryCoordinator implements RelayCoordinator {
       daemon_connection_id: daemon?.connectionId || "",
       epoch: this.epochsByDaemonId.get(id) || 0,
       client_connection_ids: Array.from(this.clientConnectionsByDaemonId.get(id) || []),
+      owner_user_id: daemon?.auth?.ownerUserId || "",
+      daemon_credential_id: daemon?.auth?.credentialId || "",
     };
+  }
+
+  private canReplaceDaemon(previous: DaemonSlot | undefined, nextAuth: DaemonAuthPrincipal | undefined): boolean {
+    if (!previous?.auth?.ownerUserId) return true;
+    if (!nextAuth?.ownerUserId) return false;
+    return previous.auth.ownerUserId === nextAuth.ownerUserId;
   }
 }
 

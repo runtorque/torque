@@ -58,3 +58,24 @@ Standalone and Cloudflare expose equivalent routes:
 - Redis/multi-process standalone coordination.
 - Community packaging exclusion guards.
 - Remote frontend and Slack adapter.
+
+## Phase 4 auth boundary
+
+Phase 4 turns the relay from a local unauthenticated spike into a fail-closed
+owner-attach surface for any reachable deployment:
+
+- daemon WebSocket attach uses `Torque-Daemon-Signature v1` over a canonical
+  `GET /v1/daemon/:daemon_id/ws` request with ES256/P-256, timestamp, and nonce;
+- the relay verifies the credential, owner, timestamp, and nonce **before** it
+  calls `attachDaemon`, so rejected attach attempts cannot increment the epoch,
+  replace the current owner, mutate `relay_instances`, or trigger replay;
+- client WebSocket/HTTP message ingress uses separate owner sessions and V1
+  forces envelope `source.user_id` to the synthetic Torque `user`;
+- Cloudflare/Durable Object paths require auth; standalone loopback may use the
+  explicit `local-dev-unauthenticated` mode, but non-loopback bind hosts force
+  `auth_mode=required` at server construction and reject attempts to select the
+  relaxed mode.
+
+Minimal standalone provisioning helpers exist for tests/dev (`/v1/admin/pairing-tokens`,
+`/v1/pair`, `/v1/admin/client-sessions`). They are not a go-live surface; remote
+exposure still requires a separate user gate.
