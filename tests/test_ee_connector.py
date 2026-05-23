@@ -11,6 +11,7 @@ if str(EE_PYTHON) not in sys.path:
     sys.path.insert(0, str(EE_PYTHON))
 
 from torque_ee_connector.connector import (  # noqa: E402
+    CONNECTOR_DEBUG_BUFFER_LIMIT,
     EnterpriseConnector,
     build_daemon_ws_url,
     config_from_context,
@@ -134,6 +135,52 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ack["payload"]["ack_kind"], "user_message")
         self.assertEqual(ack["payload"]["delivery_state"], "acked")
 
+    async def test_user_message_ingress_error_emits_remote_error_and_failed_ack(self):
+        async def remote_ingress(_payload):
+            return {
+                "type": "error",
+                "code": "agent_not_found",
+                "message": "agent worker-404 not found",
+                "retryable": False,
+            }
+
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+            remote_user_agent_message=remote_ingress,
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        fake_ws = FakeWs()
+        connector._ws = fake_ws
+
+        envelope = make_relay_envelope(
+            id="msg-remote-error",
+            daemon_id="daemon-1",
+            source={"kind": "remote-client", "id": "browser-1", "user_id": "user"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="user_message",
+            created_at="2026-05-22T00:00:00.000Z",
+            payload={"agent_id": "worker-404", "message": "hello"},
+        )
+
+        await connector._handle_envelope(envelope)
+
+        self.assertEqual(len(fake_ws.sent), 2)
+        ack, error = fake_ws.sent
+        self.assertEqual(ack["kind"], "ack")
+        self.assertEqual(ack["payload"]["ack_id"], "msg-remote-error")
+        self.assertEqual(ack["payload"]["ack_kind"], "user_message")
+        self.assertEqual(ack["payload"]["delivery_state"], "failed")
+        self.assertEqual(ack["payload"]["reason"], "agent worker-404 not found")
+        self.assertEqual(error["kind"], "error")
+        self.assertEqual(error["target"], {"kind": "remote-client", "id": "browser-1", "user_id": "user"})
+        self.assertEqual(error["payload"]["code"], "agent_not_found")
+        self.assertEqual(error["payload"]["message"], "agent worker-404 not found")
+        self.assertEqual(error["payload"]["ref_id"], "msg-remote-error")
+        self.assertIs(error["payload"]["retryable"], False)
+
     async def test_agent_messages_and_ask_mirrors_are_queued_outbound(self):
         context = SimpleNamespace(
             profile="desktop",
@@ -213,6 +260,47 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
             },
         })
         self.assertTrue(connector._outbound_queue.empty())
+
+    async def test_debug_envelope_lists_are_bounded_ring_buffers(self):
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+            remote_user_agent_message=lambda _payload: {"type": "ok"},
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        fake_ws = FakeWs()
+        connector._ws = fake_ws
+
+        for index in range(CONNECTOR_DEBUG_BUFFER_LIMIT + 25):
+            event_id = f"event-{index}"
+            await connector.on_direct_message({"type": event_id})
+            await connector._handle_envelope(make_relay_envelope(
+                id=f"ready-{index}",
+                daemon_id="daemon-1",
+                source={"kind": "relay", "id": "relay"},
+                target={"kind": "daemon", "id": "daemon-1"},
+                kind="ready",
+                created_at="2026-05-22T00:00:00.000Z",
+                payload={"epoch": index},
+            ))
+            await connector._send_envelope(make_relay_envelope(
+                id=f"ping-{index}",
+                daemon_id="daemon-1",
+                source={"kind": "daemon", "id": "daemon-1"},
+                target={"kind": "relay", "id": "relay"},
+                kind="ping",
+                created_at="2026-05-22T00:00:00.000Z",
+                payload={},
+            ))
+
+        self.assertEqual(len(connector.observed_events), CONNECTOR_DEBUG_BUFFER_LIMIT)
+        self.assertEqual(len(connector.received_envelopes), CONNECTOR_DEBUG_BUFFER_LIMIT)
+        self.assertEqual(len(connector.sent_envelopes), CONNECTOR_DEBUG_BUFFER_LIMIT)
+        self.assertEqual(connector.observed_events[0], "event-25")
+        self.assertEqual(connector.received_envelopes[0], "ready-25")
+        self.assertEqual(connector.sent_envelopes[0], "ping-25")
 
 
 class EnterpriseConnectorSyncTests(unittest.TestCase):

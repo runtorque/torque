@@ -51,6 +51,7 @@ _IDEMPOTENCY_FIELDS = (
     "clientMessageId",
 )
 _DIRECT_MESSAGE_OUTBOUND_TYPES = {"message", "ask", "ask_reply"}
+CONNECTOR_DEBUG_BUFFER_LIMIT = 200
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,7 @@ class EnterpriseConnector:
 
         event_type = str((event or {}).get("type", "") or "").strip()
         if event_type:
-            self.observed_events.append(event_type)
+            _append_debug(self.observed_events, event_type)
         if not self.started or event_type != "direct_message_saved":
             return
         envelope = self._envelope_for_direct_message_event(event)
@@ -217,7 +218,7 @@ class EnterpriseConnector:
         parsed = parse_relay_envelope(envelope)
         kind = str(parsed.get("kind", "") or "")
         envelope_id = str(parsed.get("id", "") or "")
-        self.received_envelopes.append(envelope_id)
+        _append_debug(self.received_envelopes, envelope_id)
         if kind == "ready":
             payload = parsed.get("payload") or {}
             try:
@@ -263,13 +264,23 @@ class EnterpriseConnector:
                 message=str(exc) or type(exc).__name__,
                 ref_id=str(envelope.get("id", "") or ""),
                 trace_id=str(envelope.get("trace_id", "") or ""),
+                target=envelope.get("source"),
             )
             return
         if str((result or {}).get("type", "") or "").strip() == "error":
+            code, message, retryable = _remote_ingress_error_details(result)
             await self._send_ack(
                 envelope,
                 delivery_state="failed",
-                reason=str((result or {}).get("message", "") or "remote ingress failed"),
+                reason=message,
+            )
+            await self._send_error(
+                code=code,
+                message=message,
+                retryable=retryable,
+                ref_id=str(envelope.get("id", "") or ""),
+                trace_id=str(envelope.get("trace_id", "") or ""),
+                target=envelope.get("source"),
             )
             return
         await self._send_ack(envelope, delivery_state="acked")
@@ -362,18 +373,20 @@ class EnterpriseConnector:
         *,
         code: str,
         message: str,
+        retryable: bool | None = False,
         ref_id: str = "",
         trace_id: str = "",
+        target: Mapping[str, Any] | None = None,
     ) -> None:
         assert self.config is not None
         await self._send_envelope(
             make_error_envelope(
                 daemon_id=self.config.daemon_id,
                 source={"kind": "daemon", "id": self.config.daemon_id},
-                target={"kind": "relay", "id": "relay"},
+                target=target or {"kind": "relay", "id": "relay"},
                 code=code,
                 message=message,
-                retryable=False,
+                retryable=retryable,
                 ref_id=ref_id,
                 trace_id=trace_id,
             )
@@ -396,7 +409,7 @@ class EnterpriseConnector:
             result = target_ws.send(text)
         if inspect.isawaitable(result):
             await result
-        self.sent_envelopes.append(str(envelope.get("id", "") or ""))
+        _append_debug(self.sent_envelopes, str(envelope.get("id", "") or ""))
 
     def _envelope_for_direct_message_event(
         self,
@@ -670,6 +683,29 @@ def _direct_message_payload(row: Mapping[str, Any], agent_id: str) -> dict[str, 
         else "",
     }
     return {key: value for key, value in payload.items() if value != ""}
+
+
+def _append_debug(buffer: list[str], value: str) -> None:
+    buffer.append(value)
+    overflow = len(buffer) - CONNECTOR_DEBUG_BUFFER_LIMIT
+    if overflow > 0:
+        del buffer[:overflow]
+
+
+def _remote_ingress_error_details(result: Mapping[str, Any] | None) -> tuple[str, str, bool]:
+    raw = dict(result or {})
+    code = _first_non_empty(
+        raw.get("code"),
+        raw.get("error_code"),
+        "remote_ingress_failed",
+    )
+    message = _first_non_empty(
+        raw.get("message"),
+        raw.get("error"),
+        "remote ingress failed",
+    )
+    retryable = raw.get("retryable")
+    return code, message, retryable if isinstance(retryable, bool) else False
 
 
 def _ws_message_text(message: Any) -> str | None:

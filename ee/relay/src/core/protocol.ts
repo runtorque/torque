@@ -207,7 +207,7 @@ export function parseRelayEnvelope(input: unknown): RelayEnvelope {
     target: normalizeEndpoint(raw.target, "target"),
     kind: normalizeMessageKind(raw.kind),
     created_at: createdAt,
-    payload: normalizeJsonObject(raw.payload || {}, "payload"),
+    payload: normalizeJsonObject(raw.payload === undefined ? {} : raw.payload, "payload"),
   };
   validateEnvelopeSemantics(envelope);
   return envelope;
