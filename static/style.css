@@ -131,6 +131,35 @@ body.tauri-mode header {
 body.tauri-mode #taskbar-conn-dot {
   display: inline-block;
 }
+/* Relay-connection indicator (TORQUE:560). Daemon<->relay-cloud connection —
+   deliberately distinct from the daemon `#conn-dot` (browser<->daemon WS) via
+   the "Relay" label so the two are never confusable. Mounts beside whichever
+   connection dot `RELAY_STATUS_MOUNT` selects; renders identically. */
+.relay-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex-shrink: 0;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  font-size: 10px; color: var(--text-dim);
+  letter-spacing: .02em;
+}
+.relay-status[hidden], .relay-status--hidden { display: none; }
+.relay-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-dim);
+  transition: background .3s;
+}
+.relay-status-label { white-space: nowrap; }
+/* Dot color groups: all five states stay distinct in the label/tooltip text;
+   only the dot collapses to four urgency colors. */
+.relay-status-dot--green { background: var(--green); }
+.relay-status-dot--amber { background: var(--amber); }
+.relay-status-dot--red { background: var(--red); }
+.relay-status-dot--grey { background: var(--text-dim); }
+/* When mounted in the Tauri-only taskbar, keep the indicator visible in the
+   browser too (the bare `#taskbar-conn-dot` is Tauri-only). */
+#taskbar .relay-status { display: inline-flex; }
 .hdr-spacer { flex: 1; min-width: 0; }
 .hdr-btn {
   font-size: 10px; padding: 3px 8px;

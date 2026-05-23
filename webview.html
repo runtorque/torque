@@ -1125,6 +1125,26 @@
           <button type="button" id="gls-stop-daemon-btn" class="btn-danger">■ Stop Daemon</button>
         </div>
       </section>
+      <!-- Relay-connection detail (TORQUE:560). Hidden when the daemon
+           publishes no `relay_connection` field (pre-producer / community). -->
+      <section class="daemon-status" id="gls-relay-section" aria-labelledby="gls-relay-heading" hidden>
+        <h3 id="gls-relay-heading">Relay</h3>
+        <div class="daemon-status-grid">
+          <div class="daemon-status-label">State</div>
+          <div class="daemon-status-value daemon-status-state">
+            <span id="gls-relay-status-dot" class="relay-status-dot" aria-hidden="true"></span>
+            <span id="gls-relay-status-text">—</span>
+          </div>
+          <div class="daemon-status-label">Host</div>
+          <div id="gls-relay-host" class="daemon-status-value daemon-status-path">—</div>
+          <div class="daemon-status-label">Retries</div>
+          <div id="gls-relay-retry-count" class="daemon-status-value">—</div>
+          <div class="daemon-status-label">Since</div>
+          <div id="gls-relay-since" class="daemon-status-value">—</div>
+          <div class="daemon-status-label">Last error</div>
+          <div id="gls-relay-last-error" class="daemon-status-value">—</div>
+        </div>
+      </section>
     </div>
 
     <div class="modal-actions">
@@ -1533,6 +1553,7 @@
 <script src="/static/js/constants.js"></script>
 <script src="/static/js/compact.js"></script>
 <script src="/static/js/ws.js"></script>
+<script src="/static/js/relay_status.js"></script>
 <script src="/static/js/render.js"></script>
 <script src="/static/js/canvas.js"></script>
 <script src="/static/js/commands.js"></script>

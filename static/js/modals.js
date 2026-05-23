@@ -2687,6 +2687,9 @@ function loadDaemonStatus() {
     _formatDaemonRelativeTime(runtime.started_at),
     _formatDaemonAbsoluteTime(runtime.started_at) || 'Time the daemon started'
   );
+  // Relay-connection detail row (TORQUE:560). Driven from
+  // `state.relay_connection`; hides itself when the field is absent.
+  if (typeof _relayStatusRenderModalRow === 'function') _relayStatusRenderModalRow();
   _wireDaemonStatusActions();
 }
 
