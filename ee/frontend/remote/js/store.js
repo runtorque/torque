@@ -133,6 +133,23 @@
     return msg;
   };
 
+  // Find THIS client's optimistic outbound answer that an inbound user-authored
+  // ask_reply echo (§2c) should collapse onto. Matches on agent + reply_to_id +
+  // identical body, a different (client-envelope) id, and the optimistic
+  // ask_answer shape — so only an echo of our own answer collapses, never a
+  // distinct message. Scans newest-first; messages are tail-capped, so bounded.
+  RemoteStore.prototype._findOptimisticAnswer = function(conv, echo) {
+    for (var i = conv.messages.length - 1; i >= 0; i--) {
+      var m = conv.messages[i];
+      if (m.sender === 'user' && m.messageType === 'ask_answer'
+          && m.replyToId && m.replyToId === echo.replyToId
+          && m.id !== echo.id && m.body === echo.body) {
+        return m;
+      }
+    }
+    return null;
+  };
+
   function _kindFromMessageType(messageType) {
     var m = _trim(messageType);
     if (m === 'ask') return 'ask';
@@ -182,6 +199,31 @@
       deliveryState: _trim(payload.delivery_state)
         || (sender === 'user' ? 'acked' : 'delivered'),
     };
+
+    // §2c collapse: a user-authored ask_reply echoed back by the daemon for
+    // multi-client sync (sender_kind="user", message_id = the daemon's stored id
+    // ≠ our optimistic envelope id) must NOT render a second answer bubble. When
+    // THIS client already has an optimistic outbound answer to the same ask,
+    // collapse the echo onto it: alias the daemon id onto that bubble so a re-echo
+    // de-dupes, mark it delivered, resolve the ask, and skip the append. Only an
+    // echo of our OWN answer collapses (matched on agent + reply_to_id + body);
+    // an answer made on another client has no local optimistic twin and renders
+    // normally.
+    if (env.kind === 'ask_reply' && sender === 'user' && msg.replyToId
+        && !conv.messageIndex[id]) {
+      var twin = this._findOptimisticAnswer(conv, msg);
+      if (twin) {
+        conv.messageIndex[id] = twin;  // alias daemon id -> existing bubble
+        if (twin.deliveryState === 'pending') twin.deliveryState = 'delivered';
+        if (conv.pendingAsks[msg.replyToId]) delete conv.pendingAsks[msg.replyToId];
+        this._touch(agentId, atMs);
+        return twin;
+      }
+    }
+
+    // Bump unread only for a genuinely NEW live message (a snapshot row that also
+    // arrives live upserts onto its existing id and must not over-count).
+    var isNew = !conv.messageIndex[id];
     this._appendOrUpsert(conv, msg);
 
     // A blocking ask stays ACTIONABLE until answered — for BOTH live and
@@ -196,8 +238,8 @@
       delete conv.pendingAsks[msg.replyToId];
     }
     // History rows never inflate the unread badge; live rows for a non-active
-    // agent do.
-    if (!opts.history && agentId !== this.activeAgentId) conv.unread += 1;
+    // agent do — but only on a genuinely new insert, never an upsert.
+    if (!opts.history && isNew && agentId !== this.activeAgentId) conv.unread += 1;
     this._touch(agentId, atMs);
     return msg;
   };
