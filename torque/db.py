@@ -3825,6 +3825,37 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ).fetchall()
         return [_decode_agent_peer_message_row(row) for row in rows]
 
+    def load_recent_user_direct_messages(
+        self,
+        *,
+        limit: int = 100,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent user↔agent direct rows across all agents, newest first.
+
+        This is the user-conversation lane that feeds the remote-channel egress
+        (ordinary user↔agent messages plus the display-only ask/ask_reply
+        mirrors).  It deliberately includes owner-routed ask mirrors whose
+        recipient is an agent; user-destined filtering for egress is applied
+        downstream by the connector (the canonical resolver-stamped gate), so
+        this loader stays the single shared source and never re-derives
+        ownership.  Bounded by ``limit``; never unbounded.
+        """
+        limit = max(1, min(int(limit or 100), 1000))
+        where = [_AGENT_DIRECT_MESSAGE_WHERE]
+        params: list = []
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
     def load_agent_peer_chat_messages_for_thread(
         self,
         thread_id: str,

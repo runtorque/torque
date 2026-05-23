@@ -12,7 +12,10 @@ if str(EE_PYTHON) not in sys.path:
 
 from torque_ee_connector.connector import (  # noqa: E402
     CONNECTOR_DEBUG_BUFFER_LIMIT,
+    SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
     EnterpriseConnector,
+    _agent_id_for_direct_message,
+    _direct_message_payload,
     _wire_kind_for_direct_message_row,
     build_daemon_ws_url,
     config_from_context,
@@ -388,6 +391,168 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connector.observed_events[0], "event-25")
         self.assertEqual(connector.received_envelopes[0], "ready-25")
         self.assertEqual(connector.sent_envelopes[0], "ping-25")
+
+
+class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
+    """snapshot_request → bounded user↔agent snapshot, gated like live egress."""
+
+    def _connector(self, *, rows=None, recent_provider=None, config=None):
+        cfg = {"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"}
+        if config:
+            cfg.update(config)
+        provider = recent_provider
+        if provider is None and rows is not None:
+            provider = lambda _limit: [dict(r) for r in rows]  # noqa: E731
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config=cfg,
+            remote_user_agent_message=lambda _payload: {"type": "ok"},
+            recent_direct_messages=provider,
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        connector.started = True
+        connector._ws = FakeWs()
+        return connector
+
+    def _request(self, **payload):
+        return make_relay_envelope(
+            id="snap-req-1",
+            daemon_id="daemon-1",
+            source={"kind": "remote-client", "id": "user", "user_id": "user"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="snapshot_request",
+            created_at="2026-05-23T00:00:00.000Z",
+            payload=payload,
+        )
+
+    async def _snapshot_payload(self, connector, request):
+        await connector._handle_envelope(request)
+        sent = [e for e in connector._ws.sent if e.get("kind") == "snapshot"]
+        self.assertEqual(len(sent), 1, "expected exactly one snapshot envelope")
+        return sent[0]
+
+    def _lane_rows(self):
+        # Newest-first, as the daemon provider returns them.
+        return [
+            {  # user answered an ask -> ask_reply egresses
+                "id": "r1", "message_type": "ask_reply",
+                "sender_id": "user", "sender_kind": "user",
+                "recipient_id": "w1", "recipient_kind": "worker",
+                "recipient_name": "Worker One", "message": "go ahead",
+                "group_name": "g", "created_at": 105.0,
+            },
+            {  # owner-routed ask (recipient=engineer) -> MUST be excluded
+                "id": "r2", "message_type": "ask",
+                "sender_id": "w2", "sender_kind": "worker",
+                "recipient_id": "e1", "recipient_kind": "engineer",
+                "message": "approve?", "group_name": "g",
+                "created_at": 104.0, "blocking": True,
+            },
+            {  # user-destined ask -> ask egresses
+                "id": "r3", "message_type": "ask",
+                "sender_id": "w1", "sender_kind": "worker",
+                "recipient_id": "user", "recipient_kind": "user",
+                "message": "ship it?", "group_name": "g",
+                "created_at": 103.0, "blocking": True,
+            },
+            {  # agent->user message -> agent_message egresses
+                "id": "r4", "message_type": "message",
+                "sender_id": "w1", "sender_kind": "worker",
+                "sender_name": "Worker One",
+                "recipient_id": "user", "recipient_kind": "user",
+                "message": "done", "group_name": "g", "created_at": 102.0,
+            },
+            {  # user->agent message -> not looped back outbound
+                "id": "r5", "message_type": "message",
+                "sender_id": "user", "sender_kind": "user",
+                "recipient_id": "w1", "recipient_kind": "worker",
+                "message": "status?", "group_name": "g", "created_at": 101.0,
+            },
+        ]
+
+    async def test_snapshot_is_user_agent_only_and_ask_gated(self):
+        connector = self._connector(rows=self._lane_rows())
+        payload = await self._snapshot_payload(connector, self._request())
+
+        self.assertEqual(payload["payload"]["lane"], "user-agent")
+        msgs = payload["payload"]["messages"]
+        # r2 (owner-routed ask) and r5 (user->agent) excluded; oldest-first.
+        self.assertEqual(
+            [(m["message_id"], m["kind"]) for m in msgs],
+            [("r4", "agent_message"), ("r3", "ask"), ("r1", "ask_reply")],
+        )
+        self.assertEqual(payload["payload"]["count"], 3)
+        # Targets the requesting remote client.
+        self.assertEqual(payload["target"]["kind"], "remote-client")
+        self.assertEqual(payload["target"]["id"], "user")
+
+    async def test_snapshot_row_payload_matches_live_agent_message(self):
+        rows = self._lane_rows()
+        connector = self._connector(rows=rows)
+        payload = await self._snapshot_payload(connector, self._request())
+        entry = next(m for m in payload["payload"]["messages"] if m["message_id"] == "r4")
+        # The agent_message row -> identical payload shape to live egress + kind.
+        live = _direct_message_payload(rows[3], _agent_id_for_direct_message(rows[3]))
+        self.assertEqual(entry["kind"], "agent_message")
+        self.assertEqual({k: v for k, v in entry.items() if k != "kind"}, live)
+
+    async def test_snapshot_is_bounded_by_default_cap(self):
+        many = [
+            {
+                "id": f"m{i}", "message_type": "message",
+                "sender_id": "w1", "sender_kind": "worker",
+                "recipient_id": "user", "recipient_kind": "user",
+                "message": f"msg {i}", "group_name": "g",
+                "created_at": float(1000 + i),
+            }
+            for i in range(SNAPSHOT_DEFAULT_MESSAGE_LIMIT + 150)
+        ]
+        # Provider receives the cap as its limit; emulate it returning the cap.
+        captured = {}
+
+        def provider(limit):
+            captured["limit"] = limit
+            return [dict(r) for r in many[: limit]]
+
+        connector = self._connector(recent_provider=provider)
+        payload = await self._snapshot_payload(connector, self._request())
+        self.assertEqual(captured["limit"], SNAPSHOT_DEFAULT_MESSAGE_LIMIT)
+        self.assertEqual(payload["payload"]["count"], SNAPSHOT_DEFAULT_MESSAGE_LIMIT)
+        self.assertEqual(len(payload["payload"]["messages"]), SNAPSHOT_DEFAULT_MESSAGE_LIMIT)
+        self.assertTrue(payload["payload"]["truncated"])
+
+    async def test_snapshot_honors_smaller_requested_limit(self):
+        captured = {}
+
+        def provider(limit):
+            captured["limit"] = limit
+            return []
+
+        connector = self._connector(recent_provider=provider)
+        await self._snapshot_payload(connector, self._request(limit=5))
+        self.assertEqual(captured["limit"], 5)
+
+    async def test_requested_limit_cannot_exceed_cap(self):
+        captured = {}
+
+        def provider(limit):
+            captured["limit"] = limit
+            return []
+
+        connector = self._connector(recent_provider=provider)
+        await self._snapshot_payload(
+            connector, self._request(limit=SNAPSHOT_DEFAULT_MESSAGE_LIMIT + 5000)
+        )
+        self.assertEqual(captured["limit"], SNAPSHOT_DEFAULT_MESSAGE_LIMIT)
+
+    async def test_snapshot_empty_when_no_provider(self):
+        connector = self._connector(recent_provider=None)
+        payload = await self._snapshot_payload(connector, self._request())
+        self.assertEqual(payload["payload"]["count"], 0)
+        self.assertEqual(payload["payload"]["messages"], [])
+        self.assertFalse(payload["payload"]["truncated"])
 
 
 class WireKindGateTests(unittest.TestCase):

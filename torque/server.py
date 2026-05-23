@@ -9465,6 +9465,23 @@ async def main(connection=None):
             handler=_handle_user_agent_message_command,
         )
 
+    def _recent_user_direct_messages(limit: int) -> list[dict]:
+        """Bounded recent user↔agent rows for the remote snapshot-on-open.
+
+        Returns newest-first canonical direct-message rows from the same
+        agent_peer_messages source that feeds live egress; the connector
+        applies the user-destined gate + payload shaping.  Never unbounded.
+        """
+        db = getattr(state, "db", None)
+        loader = getattr(db, "load_recent_user_direct_messages", None) if db else None
+        if not callable(loader):
+            return []
+        try:
+            return loader(limit=max(1, int(limit or 1)))
+        except Exception:
+            log.exception("recent user direct-message snapshot load failed")
+            return []
+
     # -- Persistent system prompt ---------------------------------------------
 
     def _build_dispatch_persistent_prompt(system_prompt: str = "",
@@ -16684,6 +16701,7 @@ async def main(connection=None):
         cloud_hooks.CloudConnectorContext(
             state=state,
             remote_user_agent_message=_ingest_remote_user_agent_message,
+            recent_direct_messages=_recent_user_direct_messages,
             register_direct_message_observer=(
                 cloud_hooks.register_direct_message_observer
             ),
