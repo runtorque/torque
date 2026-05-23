@@ -476,6 +476,10 @@ asyncio.run(main())
         self.assertEqual(cell.context_window["used_pct"], 25.0)
         self.assertEqual(cell.context_window["updated_at"], 123.0)
 
+        # Prove context_update does NOT clobber the human-facing status line:
+        # seed a meaningful prior status and confirm it survives the update.
+        cell.last_event_text = "Using Edit"
+
         await bus.emit(
             self.base_mod.AgentEvent(
                 cell_id=cell.id,
@@ -498,6 +502,8 @@ asyncio.run(main())
             )
         )
 
+        # The ephemeral context_window meter still updates (the WS delta path is
+        # unaffected) ...
         self.assertEqual(cell.context_window["used_tokens"], 147732)
         self.assertEqual(cell.context_window["limit_tokens"], 258400)
         self.assertAlmostEqual(cell.context_window["used_pct"], 57.17, places=2)
@@ -506,12 +512,25 @@ asyncio.run(main())
         self.assertEqual(cell.context_window["cached_input_tokens"], 139648)
         self.assertEqual(cell.context_window["reasoning_output_tokens"], 16)
         self.assertEqual(cell.context_window["session_total_tokens"], 1799981)
-        self.assertEqual(cell.last_event_text, "Context usage updated")
+        # ... but context_update no longer surfaces the noisy "Context usage
+        # updated" status line on the agent card: the prior status is preserved.
+        self.assertEqual(cell.last_event_text, "Using Edit")
+        self.assertNotEqual(cell.last_event_text, "Context usage updated")
         self.assertEqual(cell.session_tokens_in, 7)
         self.assertEqual(cell.session_tokens_out, 11)
         self.assertEqual(
             [event.event_type for event in event_log.get(cell.id)],
             ["session_start", "context_update"],
+        )
+
+        # The human-facing per-cell event feed excludes context_update telemetry
+        # (the grid context meter renders the data directly).
+        stream = self.events_mod.get_cell_event_stream(cell, event_log)
+        self.assertNotIn(
+            "context_update", [evt["kind"] for evt in stream]
+        )
+        self.assertNotIn(
+            "Context usage updated", [evt["message"] for evt in stream]
         )
 
     async def test_session_start_without_context_clears_stale_context_window(self):
