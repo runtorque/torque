@@ -992,15 +992,26 @@ function createRelayStatusHarness() {
   const taskbarConnDot = document.register('taskbar-conn-dot');
   taskbar.appendChild(taskbarConnDot);
   document.body.appendChild(taskbar);
-  // Modal "Relay" detail row elements.
+  // Modal "Relay" detail row elements (connection sub-block, TORQUE:560).
   [
     'gls-relay-section',
+    'gls-relay-connection-block',
     'gls-relay-status-dot',
     'gls-relay-status-text',
     'gls-relay-host',
     'gls-relay-retry-count',
     'gls-relay-since',
     'gls-relay-last-error',
+  ].forEach((id) => document.register(id));
+  // Relay config + provenance sub-block elements (TORQUE:603 #1).
+  [
+    'gls-relay-config-block',
+    'gls-relay-enabled', 'gls-relay-enabled-badge',
+    'gls-relay-url', 'gls-relay-url-badge',
+    'gls-relay-daemon-id', 'gls-relay-daemon-id-badge',
+    'gls-relay-credential-id', 'gls-relay-credential-id-badge',
+    'gls-relay-private-key-path', 'gls-relay-private-key-path-badge',
+    'gls-relay-probe-slot',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/relay_status.js');
@@ -5614,6 +5625,265 @@ test('relay_connection modal "Relay" row renders from state and hides when absen
     _relayStatusRenderModalRow();
   `);
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-section').hidden`), true);
+});
+
+/* -- Relay config + provenance (TORQUE:603 #1) ---------------------------- */
+
+// A resolved relay_config payload spanning every provenance source, including
+// the inline-PEM private_key_path case (source ee_connector.json, value "").
+const RELAY_CONFIG_SAMPLE = {
+  config: {
+    enabled: true,
+    relay_url: 'wss://relay.runtorque.com',
+    daemon_id: 'daemon-123',
+    credential_id: 'cred-abc',
+  },
+  sources: {
+    enabled: { value: true, source: 'settings' },
+    relay_url: { value: 'wss://relay.runtorque.com', source: 'settings' },
+    daemon_id: { value: 'daemon-123', source: 'env' },
+    credential_id: { value: 'cred-abc', source: 'ee_connector.json' },
+    private_key_path: { value: '', source: 'ee_connector.json' },
+  },
+};
+
+function _relayConfigView(context, payload) {
+  context.__relayConfigPayload = (payload === undefined) ? null : payload;
+  return jsonValue(context, '_relayConfigComputeView(__relayConfigPayload)');
+}
+
+function _relayConfigFieldView(view, key) {
+  return view.fields.find((f) => f.key === key);
+}
+
+test('relay_config view maps each provenance source to a badge + settings-layer value', () => {
+  const { context } = createRelayStatusHarness();
+  const view = _relayConfigView(context, RELAY_CONFIG_SAMPLE);
+  assert.equal(view.visible, true);
+
+  // settings-sourced bool: checkbox reflects the effective value; badge=settings.
+  const enabled = _relayConfigFieldView(view, 'enabled');
+  assert.equal(enabled.type, 'bool');
+  assert.equal(enabled.checked, true);
+  assert.equal(enabled.sourceLabel, 'settings');
+  assert.equal(enabled.sourceClass, 'settings');
+
+  // settings-sourced text: value flows into the editable input (no placeholder).
+  const url = _relayConfigFieldView(view, 'relay_url');
+  assert.equal(url.textValue, 'wss://relay.runtorque.com');
+  assert.equal(url.placeholder, '');
+  assert.equal(url.sourceLabel, 'settings');
+
+  // env-sourced text: NOT a settings override → empty input, effective value as
+  // placeholder, badge=env.
+  const daemon = _relayConfigFieldView(view, 'daemon_id');
+  assert.equal(daemon.textValue, '');
+  assert.equal(daemon.placeholder, 'daemon-123');
+  assert.equal(daemon.sourceLabel, 'env');
+  assert.equal(daemon.sourceClass, 'env');
+
+  // ee_connector.json-sourced text: empty input, effective value as placeholder,
+  // badge maps to the 'file' class.
+  const cred = _relayConfigFieldView(view, 'credential_id');
+  assert.equal(cred.textValue, '');
+  assert.equal(cred.placeholder, 'cred-abc');
+  assert.equal(cred.sourceLabel, 'ee_connector.json');
+  assert.equal(cred.sourceClass, 'file');
+});
+
+test('relay_config private_key_path is BY PATH only and never leaks inline PEM', () => {
+  const { context } = createRelayStatusHarness();
+  // Inline-PEM case: source ee_connector.json, value "" → no value anywhere.
+  const view = _relayConfigView(context, RELAY_CONFIG_SAMPLE);
+  const key = _relayConfigFieldView(view, 'private_key_path');
+  assert.equal(key.textValue, '');
+  assert.equal(key.placeholder, '');
+  assert.equal(key.sourceLabel, 'ee_connector.json');
+  assert.equal(key.sourceClass, 'file');
+
+  // A settings-layer PATH is shown verbatim (it's a path, not a PEM).
+  const withPath = _relayConfigView(context, {
+    config: { private_key_path: '/home/op/relay.pem' },
+    sources: { private_key_path: { value: '/home/op/relay.pem', source: 'settings' } },
+  });
+  const keyPath = _relayConfigFieldView(withPath, 'private_key_path');
+  assert.equal(keyPath.textValue, '/home/op/relay.pem');
+  assert.equal(keyPath.sourceLabel, 'settings');
+});
+
+test('relay_config absent / malformed payload renders nothing', () => {
+  const { context } = createRelayStatusHarness();
+  assert.equal(_relayConfigView(context, null).visible, false);
+  assert.equal(_relayConfigView(context, undefined).visible, false);
+  assert.equal(_relayConfigView(context, 'nope').visible, false);
+});
+
+test('relay_config delta patches state in place + populates fields/badges with no panel rebuild', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_config = null;
+    renderMainCalls = 0;
+    renderActivePanelCalls = 0;
+    lastInvalidations = null;
+    _expectedSeq = 1;
+  `);
+  context.__relayConfigSample = RELAY_CONFIG_SAMPLE;
+  runInContext(context, `
+    _handleDelta({
+      seq: 1,
+      ops: [Object.assign({ op: 'relay_config' }, __relayConfigSample)],
+    });
+  `);
+
+  // State patched in place.
+  assert.equal(jsonValue(context, 'state.relay_config.config.relay_url'), 'wss://relay.runtorque.com');
+  assert.equal(jsonValue(context, `state.relay_config.sources.daemon_id.source`), 'env');
+
+  // No panel/grid surface marked, no full/active panel rebuild.
+  const inval = jsonValue(context, 'lastInvalidations');
+  if (inval) {
+    for (const key of Object.keys(inval)) {
+      assert.equal(inval[key], false, `surface ${key} must not be marked`);
+    }
+  }
+  assert.equal(jsonValue(context, 'renderMainCalls'), 0);
+  assert.equal(jsonValue(context, 'renderActivePanelCalls'), 0);
+
+  // Config sub-block shown, inputs + badges populated from provenance.
+  assert.equal(document.getElementById('gls-relay-config-block').hidden, false);
+  assert.equal(document.getElementById('gls-relay-section').hidden, false);
+  assert.equal(document.getElementById('gls-relay-url').value, 'wss://relay.runtorque.com');
+  assert.equal(document.getElementById('gls-relay-enabled').checked, true);
+  assert.equal(document.getElementById('gls-relay-daemon-id').value, '');
+  assert.equal(document.getElementById('gls-relay-daemon-id').placeholder, 'daemon-123');
+  assert.equal(document.getElementById('gls-relay-url-badge').textContent, 'settings');
+  assert.equal(
+    document.getElementById('gls-relay-credential-id-badge').classList.contains('relay-source-badge--file'),
+    true,
+  );
+  // private_key_path inline-PEM: empty input, never PEM.
+  assert.equal(document.getElementById('gls-relay-private-key-path').value, '');
+});
+
+test('relay_config snapshot read populates state and renders the config sub-block', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__relayConfigSample = RELAY_CONFIG_SAMPLE;
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      relay_config: __relayConfigSample,
+    });
+  `);
+  assert.equal(jsonValue(context, 'state.relay_config.config.daemon_id'), 'daemon-123');
+  assert.equal(document.getElementById('gls-relay-config-block').hidden, false);
+  assert.equal(document.getElementById('gls-relay-url').value, 'wss://relay.runtorque.com');
+  assert.equal(document.getElementById('gls-relay-credential-id-badge').textContent, 'ee_connector.json');
+});
+
+test('relay_config delta preserves a focused / dirty in-progress edit', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__relayConfigSample = RELAY_CONFIG_SAMPLE;
+  runInContext(context, `
+    state.relay_config = __relayConfigSample;
+    refreshRelayConfigModal({ force: true });
+    _expectedSeq = 1;
+  `);
+  // Operator is mid-edit on relay_url (focused) with an unsaved draft.
+  const urlInput = document.getElementById('gls-relay-url');
+  urlInput.value = 'wss://my-edit.example.com';
+  urlInput.selectionStart = 5;
+  urlInput.selectionEnd = 5;
+  document.activeElement = urlInput;
+  // A separate (blurred) field carries a dirty draft.
+  const daemonInput = document.getElementById('gls-relay-daemon-id');
+  daemonInput.value = 'draft-daemon';
+  daemonInput.dataset.relayDirty = '1';
+
+  // A relay_config delta arrives (e.g. boot / another save) with different data.
+  runInContext(context, `
+    _handleDelta({
+      seq: 1,
+      ops: [{
+        op: 'relay_config',
+        config: { enabled: false, relay_url: 'wss://server-value.example.com' },
+        sources: {
+          enabled: { value: false, source: 'settings' },
+          relay_url: { value: 'wss://server-value.example.com', source: 'settings' },
+          daemon_id: { value: 'server-daemon', source: 'settings' },
+        },
+      }],
+    });
+  `);
+
+  // Focused edit + caret preserved (NOT clobbered by the delta).
+  assert.equal(urlInput.value, 'wss://my-edit.example.com');
+  assert.equal(urlInput.selectionStart, 5);
+  // Dirty (blurred) draft preserved too.
+  assert.equal(daemonInput.value, 'draft-daemon');
+  // Badges (read-only provenance) still refresh on the delta.
+  assert.equal(document.getElementById('gls-relay-url-badge').textContent, 'settings');
+  assert.equal(document.getElementById('gls-relay-daemon-id-badge').textContent, 'settings');
+});
+
+test('relay section shows when relay_config is present even without relay_connection', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_connection = null;
+    _relayStatusRenderModalRow();
+  `);
+  // No connection signal → section hidden so far.
+  assert.equal(document.getElementById('gls-relay-section').hidden, true);
+  context.__relayConfigSample = RELAY_CONFIG_SAMPLE;
+  runInContext(context, `
+    state.relay_config = __relayConfigSample;
+    refreshRelayConfigModal();
+  `);
+  // Config alone keeps the section visible (connection block stays hidden).
+  assert.equal(document.getElementById('gls-relay-section').hidden, false);
+  assert.equal(document.getElementById('gls-relay-config-block').hidden, false);
+  assert.equal(document.getElementById('gls-relay-connection-block').hidden, true);
+});
+
+test('global settings save sends the relay_* settings-layer keys', () => {
+  const { context, document, sandbox } = createRelayStatusHarness();
+  loadScript(context, 'static/js/modals.js');
+  // ws.js (loaded by the relay harness) installs its own WebSocket `send`;
+  // re-point it at the capture array so we can assert the save payload.
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  // Minimal General-tab fields submitGlobalSettings reads.
+  [
+    'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
+    'gls-focus-on-click', 'gls-default-lanes', 'gls-max-pipeline-depth',
+    'gls-max-event-log', 'gls-xterm-scrollback',
+  ].forEach((id) => document.register(id));
+  document.getElementById('gls-default-cmd').value = '';
+  document.getElementById('gls-default-lanes').value = '';
+  document.getElementById('gls-max-pipeline-depth').value = '10';
+  document.getElementById('gls-max-event-log').value = '500';
+  document.getElementById('gls-xterm-scrollback').value = '9000';
+
+  // Operator edits: enable, set a settings URL + a key PATH; leave the rest
+  // empty (inherit from file/env).
+  document.getElementById('gls-relay-enabled').checked = true;
+  document.getElementById('gls-relay-url').value = '  wss://edited.example.com  ';
+  document.getElementById('gls-relay-daemon-id').value = '';
+  document.getElementById('gls-relay-credential-id').value = '';
+  document.getElementById('gls-relay-private-key-path').value = '/home/op/relay.pem';
+
+  runInContext(context, 'submitGlobalSettings();');
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  const saved = sandbox.sendCalls[0].settings;
+  assert.equal(saved.relay_enabled, true);
+  assert.equal(saved.relay_url, 'wss://edited.example.com'); // trimmed
+  assert.equal(saved.relay_daemon_id, '');
+  assert.equal(saved.relay_credential_id, '');
+  assert.equal(saved.relay_private_key_path, '/home/op/relay.pem');
 });
 
 test('backlog dispatch note ignores overlap warnings for ready work', () => {

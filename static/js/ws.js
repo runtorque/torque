@@ -774,6 +774,11 @@ function _handleFullState(msg) {
   // `state` via the `state = msg` assignment above; refresh the indicator from
   // it (renders nothing when the field is absent — pre-producer / community).
   if (typeof refreshRelayStatusIndicator === 'function') refreshRelayStatusIndicator();
+  // Relay config + provenance (TORQUE:603 #1): top-level `state.relay_config` is
+  // captured by the `state = msg` assignment above; refresh the Settings Relay
+  // config sub-block from it (no-op when the section/field elements aren't
+  // mounted, i.e. the modal is closed or pre-producer / community).
+  if (typeof refreshRelayConfigModal === 'function') refreshRelayConfigModal();
   _triggerDoneFlourishesFromTaskSnapshot(prevTasks, state.board_tasks || {});
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});
@@ -2840,6 +2845,34 @@ function _applyDelta(ops) {
         }
         if (typeof refreshRelayStatusIndicator === 'function') {
           refreshRelayStatusIndicator();
+        }
+        break;
+      }
+
+      case 'relay_config': {
+        // Resolved relay config + per-field provenance (TORQUE:603 #1, contract
+        // 40c1c73e6bec). Daemon-global, low-frequency (boot + relay-settings
+        // save). Patch `state.relay_config` in place + refresh ONLY the Settings
+        // Relay config sub-block (if open). Like `relay_connection`, deliberately
+        // NOT in `_deltaSurfaceInvalidations` — never marks a panel/grid surface
+        // (surface-invalidation discipline, CLAUDE.md). The render preserves any
+        // focused/dirty editable input so a delta never clobbers an in-progress
+        // edit (frontend-state-preservation discipline).
+        var relayConfigPayload = Object.assign({}, op);
+        delete relayConfigPayload.op;
+        if (state.relay_config && typeof state.relay_config === 'object') {
+          for (var relayCfgKey in state.relay_config) {
+            if (Object.prototype.hasOwnProperty.call(state.relay_config, relayCfgKey)
+                && !Object.prototype.hasOwnProperty.call(relayConfigPayload, relayCfgKey)) {
+              delete state.relay_config[relayCfgKey];
+            }
+          }
+          Object.assign(state.relay_config, relayConfigPayload);
+        } else {
+          state.relay_config = relayConfigPayload;
+        }
+        if (typeof refreshRelayConfigModal === 'function') {
+          refreshRelayConfigModal();
         }
         break;
       }

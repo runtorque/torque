@@ -2759,6 +2759,16 @@ function _showGlobalSettingsModal(data) {
   // Keybindings
   _renderKeybindingList();
 
+  // Relay config + provenance (TORQUE:603 #1). The get_global_settings response
+  // carries a fresh top-level `relay_config` (same shape as the snapshot / the
+  // `relay_config` delta); adopt it into `state` and force-populate the editable
+  // settings-layer inputs + source badges. force=true clears any stale dirty
+  // flags so the freshly opened modal reflects the authoritative resolved config.
+  if (data.relay_config) state.relay_config = data.relay_config;
+  if (typeof refreshRelayConfigModal === 'function') {
+    refreshRelayConfigModal({ force: true });
+  }
+
   // Reset tabs
   switchGlsTab('gls-general');
   var firstSub = document.querySelector('#modal-global-settings .gs-subtab');
@@ -2926,6 +2936,25 @@ function submitGlobalSettings() {
   if (maxRowsEl) settings.event_ingest_max_rows = parseInt(maxRowsEl.value) || 100000;
   var maxDaysEl = document.getElementById('gls-event-ingest-max-days');
   if (maxDaysEl) settings.event_ingest_max_days = parseInt(maxDaysEl.value) || 0;
+
+  // Relay config (TORQUE:603 #1). Editable settings-layer overrides; the daemon
+  // applies on change (stop+restart the connector) and the :601 relay_connection
+  // signal reports the result. Text fields are sent trimmed — an EMPTY value is
+  // a deliberate "no settings override; inherit from ee_connector.json / env"
+  // (the backend only flows NON-EMPTY settings values into the connector config,
+  // so re-sending "" for an untouched inherited field preserves its fallback).
+  // private_key_path is BY PATH only — never inline PEM.
+  var relayEnabledEl = document.getElementById('gls-relay-enabled');
+  if (relayEnabledEl) settings.relay_enabled = !!relayEnabledEl.checked;
+  var relayUrlEl = document.getElementById('gls-relay-url');
+  if (relayUrlEl) settings.relay_url = relayUrlEl.value.trim();
+  var relayDaemonIdEl = document.getElementById('gls-relay-daemon-id');
+  if (relayDaemonIdEl) settings.relay_daemon_id = relayDaemonIdEl.value.trim();
+  var relayCredentialIdEl = document.getElementById('gls-relay-credential-id');
+  if (relayCredentialIdEl) settings.relay_credential_id = relayCredentialIdEl.value.trim();
+  var relayPrivateKeyPathEl = document.getElementById('gls-relay-private-key-path');
+  if (relayPrivateKeyPathEl) settings.relay_private_key_path = relayPrivateKeyPathEl.value.trim();
+
   send({ cmd: 'update_global_settings', settings: settings });
   closeModals();
 }
