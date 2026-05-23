@@ -14,9 +14,11 @@ import importlib
 import inspect
 import json
 import os
+import types
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse, urlunparse
 
 from . import config as torque_config
 from .config import log
@@ -290,6 +292,335 @@ def resolve_relay_config(settings: Any, *, data_dir: str = "") -> dict[str, Any]
     )
 
     return {"config": config, "sources": sources}
+
+
+# ---------------------------------------------------------------------------
+# Relay test-connectivity probe (daemon-side, actionable result)
+# ---------------------------------------------------------------------------
+
+# Structured probe statuses. The frontend "Test connection" button (owned by the
+# Settings "Relay" section) renders ``status`` + ``message``; ``detail`` carries
+# the non-secret technical specifics. An inline PEM is never read or surfaced.
+RELAY_PROBE_OK = "ok"
+RELAY_PROBE_REACHABLE_UNAUTHED = "reachable_unauthed"
+RELAY_PROBE_CA_MISSING = "ca_missing"
+RELAY_PROBE_UNREACHABLE = "unreachable"
+RELAY_PROBE_AUTH_REJECTED = "auth_rejected"
+RELAY_PROBE_DISABLED = "disabled"
+RELAY_PROBE_MISCONFIGURED = "misconfigured"
+
+RELAY_PROBE_TIMEOUT_SECONDS = 10.0
+
+
+def _relay_probe_result(status: str, message: str, detail: str = "") -> dict[str, str]:
+    return {
+        "status": str(status),
+        "message": str(message),
+        "detail": str(detail or ""),
+    }
+
+
+def _relay_health_url(relay_url: str) -> str:
+    """Derive the ``/health`` URL from a relay base/WS URL.
+
+    ``wss``/``https`` map to ``https`` (the go-live TLS case); ``ws``/``http``
+    and bare hosts map to ``http`` (loopback local-dev). Path/query are dropped
+    in favour of ``/health``.
+    """
+
+    raw = str(relay_url or "").strip()
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    scheme = (parsed.scheme or "").lower()
+    http_scheme = "https" if scheme in ("https", "wss") else "http"
+    netloc = parsed.netloc or parsed.path
+    return urlunparse((http_scheme, netloc, "/health", "", "", ""))
+
+
+def _import_relay_probe_deps() -> Any:
+    """Lazily import the EE connector helpers the probe rides.
+
+    Kept in a tiny indirection so (a) the community core never imports ``ee/``
+    at module load and (b) tests can monkeypatch a missing-deps outcome. Raises
+    ``ImportError`` (or similar) when the connector package is absent.
+    """
+
+    from torque_ee_connector.connector import (  # type: ignore
+        _build_relay_ssl_context,
+        _is_tls_verify_error,
+        build_daemon_ws_url,
+    )
+    from torque_ee_connector.auth import (  # type: ignore
+        load_private_key_pem_from_config,
+        make_daemon_attach_headers,
+    )
+
+    return types.SimpleNamespace(
+        build_relay_ssl_context=_build_relay_ssl_context,
+        is_tls_verify_error=_is_tls_verify_error,
+        build_daemon_ws_url=build_daemon_ws_url,
+        load_private_key_pem_from_config=load_private_key_pem_from_config,
+        make_daemon_attach_headers=make_daemon_attach_headers,
+    )
+
+
+async def _relay_probe_health(
+    url: str, *, ssl_ctx: Any, timeout: float
+) -> dict[str, Any]:
+    """GET ``url`` and return ``{"status_code", "json"}``.
+
+    Raises on transport/TLS errors so the orchestrator can classify them.
+    """
+
+    import aiohttp  # type: ignore
+
+    client_timeout = aiohttp.ClientTimeout(total=timeout)
+    async with aiohttp.ClientSession(timeout=client_timeout) as session:
+        kwargs: dict[str, Any] = {}
+        if ssl_ctx is not None:
+            kwargs["ssl"] = ssl_ctx
+        async with session.get(url, **kwargs) as resp:
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = None
+            return {"status_code": int(resp.status), "json": data}
+
+
+async def _relay_probe_attach(
+    ws_url: str, *, headers: dict[str, str] | None, ssl_ctx: Any, timeout: float
+) -> dict[str, Any]:
+    """Attempt a signed WS attach; return ``{"status_code": 101}`` on upgrade.
+
+    Closes the socket immediately on success. A 4xx handshake rejection raises
+    ``aiohttp.WSServerHandshakeError`` (carrying ``.status``); transport/TLS
+    failures raise their native exceptions for the orchestrator to classify.
+    """
+
+    import aiohttp  # type: ignore
+
+    client_timeout = aiohttp.ClientTimeout(total=timeout)
+    async with aiohttp.ClientSession(timeout=client_timeout) as session:
+        kwargs: dict[str, Any] = {"headers": headers or None}
+        if ssl_ctx is not None:
+            kwargs["ssl"] = ssl_ctx
+        async with session.ws_connect(ws_url, **kwargs) as ws:
+            await ws.close()
+            return {"status_code": 101}
+
+
+async def probe_relay_connection(
+    settings: Any,
+    *,
+    data_dir: str = "",
+    timeout: float = RELAY_PROBE_TIMEOUT_SECONDS,
+) -> dict[str, str]:
+    """Probe the configured relay and return a structured, actionable result.
+
+    Defensive: never raises to the caller. Bounded by ``timeout`` (seconds). The
+    probe RIDES the connector's certifi-backed SSL context, so TLS verification
+    is independent of any ambient ``SSL_CERT_FILE`` — a CA-missing failure is
+    surfaced as the distinct ``ca_missing`` status with an actionable message
+    rather than an opaque "unreachable".
+
+    Two checks, mirroring how the connector actually attaches:
+
+    (a) TLS reachability — HTTPS GET to ``/health`` using the certifi context.
+    (b) Auth dry-run — a signed WS attach (only when both ``credential_id`` and
+        ``private_key_path`` are configured), expecting a ``101`` upgrade.
+
+    Returns ``{"status", "message", "detail"}`` where ``status`` is one of the
+    ``RELAY_PROBE_*`` values.
+    """
+
+    try:
+        return await asyncio.wait_for(
+            _probe_relay_connection_inner(settings, data_dir=data_dir, timeout=timeout),
+            timeout=max(1.0, float(timeout) + 2.0),
+        )
+    except asyncio.TimeoutError:
+        return _relay_probe_result(
+            RELAY_PROBE_UNREACHABLE,
+            "Relay did not respond within the time limit.",
+            f"probe timed out after ~{timeout:g}s",
+        )
+    except Exception as exc:  # pragma: no cover - belt-and-suspenders
+        log.exception("Relay connectivity probe failed unexpectedly")
+        return _relay_probe_result(
+            RELAY_PROBE_UNREACHABLE,
+            "Relay probe failed unexpectedly.",
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+async def _probe_relay_connection_inner(
+    settings: Any, *, data_dir: str, timeout: float
+) -> dict[str, str]:
+    resolved = resolve_relay_config(settings, data_dir=data_dir)
+    config = dict(resolved.get("config", {}))
+    sources = dict(resolved.get("sources", {}))
+
+    def _value(field_key: str) -> str:
+        entry = sources.get(field_key) or {}
+        return str(entry.get("value", "") or "").strip()
+
+    if not bool(config.get("enabled")):
+        return _relay_probe_result(
+            RELAY_PROBE_DISABLED,
+            "Relay is disabled. Enable it in Settings → Relay before testing connectivity.",
+        )
+
+    relay_url = _value("relay_url")
+    if not relay_url:
+        return _relay_probe_result(
+            RELAY_PROBE_MISCONFIGURED,
+            "No relay URL is configured. Set the relay URL in Settings → Relay.",
+        )
+
+    daemon_id = _value("daemon_id") or "default"
+    credential_id = _value("credential_id")
+    private_key_path = _value("private_key_path")
+
+    try:
+        deps = _import_relay_probe_deps()
+    except Exception as exc:
+        return _relay_probe_result(
+            RELAY_PROBE_MISCONFIGURED,
+            "The relay connector package is not installed for this daemon. "
+            "Install the EE connector dependencies (ee/python on PYTHONPATH) to test connectivity.",
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    health_url = _relay_health_url(relay_url)
+    is_tls = health_url.lower().startswith("https://")
+    host = urlparse(health_url).netloc or relay_url
+
+    ssl_ctx = None
+    used_certifi = False
+    if is_tls:
+        try:
+            ssl_ctx, used_certifi = deps.build_relay_ssl_context()
+        except Exception as exc:
+            return _relay_probe_result(
+                RELAY_PROBE_MISCONFIGURED,
+                "Could not build the relay TLS context.",
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    # (a) TLS reachability against /health.
+    try:
+        health = await _relay_probe_health(health_url, ssl_ctx=ssl_ctx, timeout=timeout)
+    except Exception as exc:
+        if is_tls and deps.is_tls_verify_error(exc):
+            return _relay_probe_result(
+                RELAY_PROBE_CA_MISSING,
+                "Relay TLS certificate could not be verified. Install the EE connector "
+                "dependencies (which bundle certifi), or point SSL_CERT_FILE at a valid CA bundle.",
+                f"{type(exc).__name__}: {exc}",
+            )
+        return _relay_probe_result(
+            RELAY_PROBE_UNREACHABLE,
+            f"Could not reach the relay at {host}. Check the relay URL and your network connection.",
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    health_status = int(health.get("status_code", 0) or 0)
+    if health_status != 200:
+        return _relay_probe_result(
+            RELAY_PROBE_UNREACHABLE,
+            f"Relay at {host} responded with HTTP {health_status} instead of a healthy 200.",
+            f"GET /health -> {health_status}",
+        )
+
+    health_json = health.get("json")
+    auth_mode = ""
+    if isinstance(health_json, dict):
+        auth_mode = str(health_json.get("auth_mode", "") or "")
+    certifi_note = " (verified with bundled certifi)" if used_certifi else ""
+
+    # (b) Auth dry-run only when both credential_id and private_key_path are set.
+    if not (credential_id and private_key_path):
+        return _relay_probe_result(
+            RELAY_PROBE_REACHABLE_UNAUTHED,
+            f"Relay at {host} is reachable{certifi_note}. No daemon credentials are configured, "
+            "so authentication was not tested. Set credential_id and private_key_path in "
+            "Settings → Relay to verify the signed attach.",
+            f"auth_mode={auth_mode}" if auth_mode else "",
+        )
+
+    try:
+        private_key_pem = deps.load_private_key_pem_from_config(
+            {"private_key_path": private_key_path}
+        )
+    except Exception as exc:
+        return _relay_probe_result(
+            RELAY_PROBE_MISCONFIGURED,
+            "The daemon private key could not be loaded. "
+            f"Check the key file at the configured path ({private_key_path}).",
+            f"{type(exc).__name__}: {exc}",
+        )
+    if not private_key_pem:
+        return _relay_probe_result(
+            RELAY_PROBE_MISCONFIGURED,
+            f"The daemon private key file at {private_key_path} is empty or unreadable.",
+        )
+
+    try:
+        ws_url = deps.build_daemon_ws_url(relay_url, daemon_id)
+    except Exception as exc:
+        return _relay_probe_result(
+            RELAY_PROBE_MISCONFIGURED,
+            "Could not derive the relay WebSocket URL from the configured relay URL.",
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    try:
+        headers = deps.make_daemon_attach_headers(
+            ws_url=ws_url,
+            daemon_id=daemon_id,
+            credential_id=credential_id,
+            private_key_pem=private_key_pem,
+        )
+    except Exception as exc:
+        return _relay_probe_result(
+            RELAY_PROBE_MISCONFIGURED,
+            "Could not sign the relay attach request. "
+            "Signed attach requires the cryptography dependency.",
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    ws_is_tls = ws_url.lower().startswith("wss://")
+    attach_ssl_ctx = ssl_ctx if ws_is_tls else None
+    try:
+        await _relay_probe_attach(
+            ws_url, headers=headers, ssl_ctx=attach_ssl_ctx, timeout=timeout
+        )
+    except Exception as exc:
+        if ws_is_tls and deps.is_tls_verify_error(exc):
+            return _relay_probe_result(
+                RELAY_PROBE_CA_MISSING,
+                "Relay TLS certificate could not be verified. Install the EE connector "
+                "dependencies (which bundle certifi), or point SSL_CERT_FILE at a valid CA bundle.",
+                f"{type(exc).__name__}: {exc}",
+            )
+        status_code = getattr(exc, "status", None)
+        if isinstance(status_code, int) and 400 <= status_code < 500:
+            return _relay_probe_result(
+                RELAY_PROBE_AUTH_REJECTED,
+                f"Relay at {host} is reachable but rejected the daemon credentials (HTTP {status_code}). "
+                "Check credential_id and that the private key matches the registered credential.",
+                f"attach -> {status_code}",
+            )
+        return _relay_probe_result(
+            RELAY_PROBE_UNREACHABLE,
+            f"Reached {host} but the WebSocket attach failed. Check the relay URL and network.",
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    return _relay_probe_result(
+        RELAY_PROBE_OK,
+        f"Relay at {host} is reachable{certifi_note} and accepted the daemon credentials.",
+        f"auth_mode={auth_mode}" if auth_mode else "",
+    )
 
 
 async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnectorRuntime:

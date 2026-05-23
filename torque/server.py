@@ -10381,6 +10381,16 @@ async def main(connection=None):
                 ),
             }
 
+        # test_relay_connection: daemon-side connectivity probe for the Settings
+        # "Relay" section "Test connection" button. Bounded + defensive; rides the
+        # connector's certifi context so a CA-missing failure is distinguished
+        # from "unreachable". Returns a structured {status, message, detail}.
+        if cmd == "test_relay_connection":
+            result = await cloud_hooks.probe_relay_connection(
+                state.global_settings, data_dir=str(DATA_DIR)
+            )
+            return {"type": "relay_test_result", **result}
+
         if cmd == "doctor":
             return _handle_doctor_command(db)
 
