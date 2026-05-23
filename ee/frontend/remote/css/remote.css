@@ -38,6 +38,7 @@ html, body {
 .remote-banner-reconnecting { background: #3a2f14; }
 .remote-banner-reauth { background: var(--remote-fail); color: #fff; }
 .remote-banner-closed { background: #2a2f38; color: var(--remote-muted); }
+.remote-banner-error { background: var(--remote-fail); color: #fff; }
 
 .remote-layout { display: flex; flex: 1; min-height: 0; }
 

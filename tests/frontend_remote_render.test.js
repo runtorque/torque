@@ -125,3 +125,61 @@ test('paintSurface preserve restores focus with preventScroll across a repaint',
   assert.ok(textarea.focusCalls[0] && textarea.focusCalls[0].preventScroll === true,
     'focus uses {preventScroll:true} so scroll restoration is not overridden');
 });
+
+// --- #2 generic relay error banner ---------------------------------------
+test('bannerHtml surfaces a generic relay error (message, then code)', () => {
+  const s = buildSandbox();
+  const withMsg = s.RemoteRender.bannerHtml('error', { payload: { code: 'remote_ingress_failed', message: 'agent is offline' } });
+  assert.match(withMsg, /remote-banner-error/);
+  assert.match(withMsg, /role="alert"/);
+  assert.match(withMsg, /agent is offline/);
+
+  const codeOnly = s.RemoteRender.bannerHtml('error', { payload: { code: 'boom' } });
+  assert.match(codeOnly, /boom/, 'falls back to code when no message');
+
+  const empty = s.RemoteRender.bannerHtml('error', {});
+  assert.match(empty, /Relay error/, 'safe default when payload is empty');
+});
+
+test('error banner does not regress normal connection banners', () => {
+  const s = buildSandbox();
+  assert.match(s.RemoteRender.bannerHtml('reconnecting', {}), /Reconnecting/);
+  assert.equal(s.RemoteRender.bannerHtml('ready', {}), '', 'ready stays silent');
+  assert.match(s.RemoteRender.bannerHtml('reauth_required', {}), /re-pair/);
+});
+
+// --- #3 stick-to-bottom on inbound (at-tail gated) ------------------------
+function makeConvEl(initial) {
+  let stored = '';
+  const el = {
+    scrollTop: initial.scrollTop,
+    scrollHeight: initial.scrollHeight,
+    clientHeight: initial.clientHeight,
+    get innerHTML() { return stored; },
+    set innerHTML(v) { stored = v; el.scrollHeight = initial.grownScrollHeight; },
+    contains() { return false; }, querySelector() { return null; },
+  };
+  return el;
+}
+
+test('stick-to-bottom: at tail + inbound repaint sticks to the new bottom', () => {
+  const s = buildSandbox(); // no focused element
+  // At bottom: scrollHeight 100, clientHeight 50, scrollTop 50 -> distance 0.
+  const el = makeConvEl({ scrollTop: 50, scrollHeight: 100, clientHeight: 50, grownScrollHeight: 160 });
+  el._remoteLastHtml = '<p>old</p>'; // force a repaint without tripping the scrollHeight setter
+  const repainted = s.RemoteRender.paintSurface(el, '<p>old</p><p>new</p>',
+    { preserve: true, surfaceOpts: { stickToBottom: ':root' } });
+  assert.equal(repainted, true);
+  assert.equal(el.scrollTop, 160, 're-pinned to the grown bottom');
+});
+
+test('stick-to-bottom: scrolled up + inbound repaint preserves position', () => {
+  const s = buildSandbox();
+  // Scrolled up: scrollTop 0, distance = 100-50-0 = 50 > threshold(24).
+  const el = makeConvEl({ scrollTop: 0, scrollHeight: 100, clientHeight: 50, grownScrollHeight: 160 });
+  el._remoteLastHtml = '<p>old</p>';
+  const repainted = s.RemoteRender.paintSurface(el, '<p>old</p><p>new</p>',
+    { preserve: true, surfaceOpts: { stickToBottom: ':root' } });
+  assert.equal(repainted, true);
+  assert.equal(el.scrollTop, 0, 'did not yank a scrolled-up reader to the bottom');
+});

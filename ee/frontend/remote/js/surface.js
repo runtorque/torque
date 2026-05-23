@@ -63,6 +63,30 @@
         left: typeof el.scrollLeft === 'number' ? el.scrollLeft : null,
       });
     }
+    // Stick-to-bottom (chat tail) discipline: capture whether the scroll
+    // container was AT/NEAR the bottom BEFORE the repaint. Restore then either
+    // re-pins to the (new) bottom when it was, or preserves the prior anchor
+    // when the user had scrolled up — so a new message never yanks them.
+    // Integrates with surface restore (it does not bolt on a second scroll
+    // write that fights the anchor): the stick node is handled here instead of
+    // via scrollSelectors. Mirrors the at-tail gating from TORQUE:574/:535.
+    if (opts.stickToBottom) {
+      var stickSel = (opts.stickToBottom === true) ? ':root' : opts.stickToBottom;
+      var stickEl = _findSurfaceNode(node, stickSel);
+      if (stickEl) {
+        var threshold = (typeof opts.stickThreshold === 'number') ? opts.stickThreshold : 24;
+        var sH = typeof stickEl.scrollHeight === 'number' ? stickEl.scrollHeight : 0;
+        var cH = typeof stickEl.clientHeight === 'number' ? stickEl.clientHeight : 0;
+        var sT = typeof stickEl.scrollTop === 'number' ? stickEl.scrollTop : 0;
+        snapshot.stick = {
+          selector: stickSel,
+          scrollTop: sT,
+          // Treat non-overflowing content as "at bottom" so the very first
+          // messages stick.
+          wasAtBottom: (sH <= cH) || ((sH - cH - sT) <= threshold),
+        };
+      }
+    }
     if (typeof opts.capture === 'function') opts.capture(snapshot, node);
     return snapshot;
   }
@@ -78,6 +102,11 @@
       if (typeof saved.left === 'number') el.scrollLeft = saved.left;
     }
     if (typeof opts.restore === 'function') opts.restore(node, snapshot);
+    // Stick runs here (after scroll restore, before the focus early-return) so
+    // it applies whether or not anything was focused. Focus restore below only
+    // touches the focused child's own scroll with preventScroll, never the
+    // stick container, so this order does not fight focus restoration.
+    _restoreStick(node, snapshot);
     if (!snapshot.focus) return;
     var target = _findSurfaceNode(node, snapshot.focus.key);
     if (!target && typeof opts.resolveFocus === 'function') {
@@ -116,6 +145,20 @@
     }
     if (typeof snapshot.focus.scrollLeft === 'number' && typeof target.scrollLeft === 'number') {
       target.scrollLeft = snapshot.focus.scrollLeft;
+    }
+  }
+
+  // Applied LAST so it wins over the scrolls/focus restore above (and the
+  // browser's post-innerHTML scroll reset): re-pin to the fresh bottom when the
+  // user was at tail, else restore their prior scroll position.
+  function _restoreStick(node, snapshot) {
+    if (!snapshot.stick) return;
+    var stickEl = _findSurfaceNode(node, snapshot.stick.selector);
+    if (!stickEl) return;
+    if (snapshot.stick.wasAtBottom) {
+      if (typeof stickEl.scrollHeight === 'number') stickEl.scrollTop = stickEl.scrollHeight;
+    } else if (typeof snapshot.stick.scrollTop === 'number') {
+      stickEl.scrollTop = snapshot.stick.scrollTop;
     }
   }
 
