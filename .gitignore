@@ -18,6 +18,7 @@ state.json
 .claude/instructions.md
 .playwright-cli/
 site/
+.env
 
 # claude-code MCP lock (runtime artifact)
 .mcp.json.lock
