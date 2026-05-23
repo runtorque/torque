@@ -150,6 +150,23 @@
     return null;
   };
 
+  // §602: find THIS client's optimistic outbound user message that an inbound
+  // user-authored echo (sender_kind="user", payload.idempotency_key present)
+  // should collapse onto. Matches on EXACT idempotency_key only — NEVER fuzzy
+  // body/sender/recency (that approach was twice-rejected). A different (client
+  // -envelope) id distinguishes the optimistic twin from the daemon echo. Scans
+  // newest-first; messages are tail-capped, so bounded.
+  RemoteStore.prototype._findOptimisticByIdempotencyKey = function(conv, echo) {
+    for (var i = conv.messages.length - 1; i >= 0; i--) {
+      var m = conv.messages[i];
+      if (m.sender === 'user' && m.idempotencyKey
+          && m.idempotencyKey === echo.idempotencyKey && m.id !== echo.id) {
+        return m;
+      }
+    }
+    return null;
+  };
+
   function _kindFromMessageType(messageType) {
     var m = _trim(messageType);
     if (m === 'ask') return 'ask';
@@ -195,10 +212,34 @@
       blocking: !!payload.blocking,
       threadId: _trim(payload.thread_id),
       replyToId: _trim(payload.reply_to_id),
+      idempotencyKey: _trim(payload.idempotency_key),
       createdAtMs: atMs,
       deliveryState: _trim(payload.delivery_state)
         || (sender === 'user' ? 'acked' : 'delivered'),
     };
+
+    // §602 collapse: a USER-authored message (sender_kind="user") echoed back by
+    // the daemon for multi-client sync (both user->agent and the user's own
+    // mirrored answers, reusing the agent_message shape) carries
+    // payload.idempotency_key + a daemon message_id ≠ our optimistic envelope id.
+    // When THIS client minted that key on an optimistic outbound, collapse the
+    // echo onto it (alias the daemon id, mark delivered, resolve any referenced
+    // ask) instead of rendering a 2nd bubble. EXACT idempotency_key match ONLY —
+    // never fuzzy. Tried BEFORE the §2c reply_to_id path so an ask-answer echo
+    // (which carries BOTH idempotency_key AND reply_to_id) collapses via exactly
+    // ONE path — the EXACT-key path — keeping §587 intact with no double-collapse.
+    if (sender === 'user' && msg.idempotencyKey && !conv.messageIndex[id]) {
+      var keyTwin = this._findOptimisticByIdempotencyKey(conv, msg);
+      if (keyTwin) {
+        conv.messageIndex[id] = keyTwin;  // alias daemon id -> existing bubble
+        if (keyTwin.deliveryState === 'pending') keyTwin.deliveryState = 'delivered';
+        if (msg.replyToId && conv.pendingAsks[msg.replyToId]) {
+          delete conv.pendingAsks[msg.replyToId];
+        }
+        this._touch(agentId, atMs);
+        return keyTwin;
+      }
+    }
 
     // §2c collapse: a user-authored ask_reply echoed back by the daemon for
     // multi-client sync (sender_kind="user", message_id = the daemon's stored id
@@ -314,6 +355,9 @@
       blocking: false,
       threadId: _trim(payload.thread_id),
       replyToId: _trim(payload.reply_to_id),
+      // §602: carry the client-minted idempotency_key on the optimistic bubble
+      // so the daemon's user-authored echo can collapse onto it by EXACT key.
+      idempotencyKey: _trim(payload.idempotency_key),
       createdAtMs: atMs,
       deliveryState: 'pending',
     };

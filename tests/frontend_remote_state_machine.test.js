@@ -70,6 +70,25 @@ test('queued outbound flushes only after ready', () => {
   assert.equal(sent[0].payload.message, 'queued before ready');
 });
 
+test('§602: sendUserMessage mints an idempotency_key and records it on the optimistic bubble', () => {
+  const s = loadBundle();
+  const sockets = [];
+  const { client, store } = makeClient(s, sockets);
+  client.connect();
+  sockets[0].onmessage({ data: JSON.stringify(ready('d')) });
+  const env = client.sendUserMessage('w', 'deploy now');
+  const key = env.payload.idempotency_key;
+  assert.ok(key, 'a per-message idempotency_key is minted onto the outbound payload');
+  const sent = sockets[0].sent.filter((e) => e.kind === 'user_message');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.idempotency_key, key, 'the minted key is sent on the wire');
+  const optimistic = store.conversations['w'].messageIndex[env.id];
+  assert.equal(optimistic.idempotencyKey, key, 'optimistic bubble records the key for echo dedupe');
+  // A second send mints a DISTINCT key (per-message, never reused).
+  const env2 = client.sendUserMessage('w', 'deploy now');
+  assert.notEqual(env2.payload.idempotency_key, key, 'each message gets a distinct key');
+});
+
 test('snapshot_request is sent on ready (recent-history-on-connect)', () => {
   const s = loadBundle();
   const sockets = [];

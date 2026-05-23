@@ -236,6 +236,144 @@ test('§2c NEGATIVE: an agent_message never collapses onto an optimistic answer'
     'agent_message is a distinct bubble, never collapsed onto a user answer');
 });
 
+test('§602: echoed user_message collapses onto its optimistic by idempotency_key (one bubble)', () => {
+  const store = loadStore();
+  // 1) User sends a plain message; optimistic outbound carries the minted key.
+  store.recordOutbound({
+    id: 'env-client-1', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'deploy now', idempotency_key: 'idem-abc' },
+  });
+  assert.equal(store.conversations['w'].messages.length, 1);
+  // 2) Daemon echoes the user-authored message back (multi-client sync) reusing
+  //    the agent_message shape: sender_kind=user, a DIFFERENT daemon message_id,
+  //    and the same idempotency_key.
+  store.ingestInbound(agentMessage('msg-daemon-1', 'w', 'deploy now', {
+    sender_kind: 'user', idempotency_key: 'idem-abc' }));
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages.length, 1, 'echo collapses — exactly ONE user bubble');
+  assert.equal(conv.messages[0].id, 'env-client-1', 'optimistic bubble id preserved (DOM-stable)');
+  assert.equal(conv.messages[0].deliveryState, 'delivered', 'echo upgrades pending -> delivered');
+  assert.equal(conv.messageIndex['msg-daemon-1'].id, 'env-client-1', 'daemon id aliased onto the bubble');
+  // A re-echo (same daemon id) de-dupes onto the aliased bubble — still one.
+  store.ingestInbound(agentMessage('msg-daemon-1', 'w', 'deploy now', {
+    sender_kind: 'user', idempotency_key: 'idem-abc' }));
+  assert.equal(conv.messages.length, 1, 're-echo de-dupes via the aliased daemon id');
+});
+
+test('§602 NEGATIVE: distinct idempotency_keys never collapse', () => {
+  const store = loadStore();
+  store.recordOutbound({ id: 'env-1', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'same text', idempotency_key: 'idem-1' } });
+  // Echo carries a DIFFERENT key — must NOT collapse despite identical text.
+  store.ingestInbound(agentMessage('msg-2', 'w', 'same text', {
+    sender_kind: 'user', idempotency_key: 'idem-2' }));
+  assert.equal(store.conversations['w'].messages.length, 2,
+    'a different key is a distinct message, never collapsed');
+});
+
+test('§602 NEGATIVE: two identical-TEXT user messages with distinct keys never collapse (no fuzzy)', () => {
+  const store = loadStore();
+  store.recordOutbound({ id: 'env-a', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'ok', idempotency_key: 'k-a' } });
+  store.recordOutbound({ id: 'env-b', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'ok', idempotency_key: 'k-b' } });
+  assert.equal(store.conversations['w'].messages.length, 2);
+  // Echo for k-a only — body 'ok' matches BOTH, but EXACT-key match collapses one.
+  store.ingestInbound(agentMessage('msg-a', 'w', 'ok', {
+    sender_kind: 'user', idempotency_key: 'k-a' }));
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages.length, 2, 'echo-a collapses onto env-a; env-b untouched');
+  assert.equal(conv.messageIndex['msg-a'].id, 'env-a', 'collapsed onto the matching key, not the twin');
+  assert.equal(conv.messageIndex['env-b'].deliveryState, 'pending', 'the other bubble is untouched');
+});
+
+test('§602: a LOCALLY-originated user message (no optimistic twin) renders fresh', () => {
+  const store = loadStore();
+  // Typed in the LOCAL Torque UI, not via this remote client — it still echoes
+  // with sender_kind=user + an idempotency_key, but there is NO matching
+  // optimistic twin on this client, so it renders as its own fresh bubble.
+  store.ingestInbound(agentMessage('msg-local', 'w', 'typed locally', {
+    sender_kind: 'user', idempotency_key: 'idem-local' }));
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages.length, 1, 'no twin -> renders fresh');
+  assert.equal(conv.messages[0].sender, 'user');
+  assert.equal(conv.messages[0].id, 'msg-local', 'keeps its own daemon id');
+});
+
+test('§602 x §587: an ask-answer echo (reply_to_id + idempotency_key) collapses exactly ONCE', () => {
+  const store = loadStore();
+  // Agent raises a blocking ask.
+  const ask = agentMessage('ask-9', 'w', 'approve?', { message_type: 'ask', blocking: true });
+  ask.kind = 'ask';
+  store.ingestInbound(ask);
+  assert.equal(store.pendingAsks('w').length, 1);
+  // User answers: optimistic outbound carries BOTH reply_to_id AND idempotency_key.
+  store.recordOutbound({
+    id: 'env-answer', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'yes', reply_to_id: 'ask-9', idempotency_key: 'idem-ans' },
+  });
+  assert.equal(store.conversations['w'].messages.length, 2);
+  assert.equal(store.pendingAsks('w').length, 0, 'optimistic answer clears the ask');
+  // Daemon echoes the answer back carrying BOTH keys — it could match the §587
+  // (reply_to_id + body) path AND the §602 idempotency_key path. It must collapse
+  // via EXACTLY ONE path (the EXACT-key path is tried first), leaving one bubble.
+  const echo = agentMessage('reply-daemon-9', 'w', 'yes', {
+    message_type: 'ask_reply', sender_kind: 'user', reply_to_id: 'ask-9', idempotency_key: 'idem-ans' });
+  echo.kind = 'ask_reply';
+  store.ingestInbound(echo);
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages.length, 2, 'echo collapses exactly once — no double-collapse, no 2nd bubble');
+  const answers = conv.messages.filter((m) => m.sender === 'user' && m.messageType === 'ask_answer');
+  assert.equal(answers.length, 1, 'a single answer bubble remains');
+  assert.equal(answers[0].id, 'env-answer', 'collapsed onto the optimistic answer');
+  assert.equal(answers[0].deliveryState, 'delivered', 'pending -> delivered');
+  assert.equal(conv.messageIndex['reply-daemon-9'].id, 'env-answer', 'daemon id aliased onto the one bubble');
+  assert.equal(store.pendingAsks('w').length, 0, 'ask stays resolved');
+});
+
+test('§602 SNAPSHOT: a user-authored row collapses onto an optimistic twin by idempotency_key', () => {
+  const store = loadStore();
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  // An optimistic outbound exists (the user sent it this session, pre-reconnect).
+  store.recordOutbound({ id: 'env-snap', created_at: iso(now - 1000),
+    payload: { agent_id: 'w', message: 'hello from remote', idempotency_key: 'idem-snap' } });
+  // Reconnect snapshot now carries the user-authored row (both directions are in
+  // the :578 snapshot) with the SAME idempotency_key + a daemon message_id.
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: iso(now),
+    payload: { messages: [
+      { kind: 'agent_message', agent_id: 'w', message_id: 'msg-snap-daemon',
+        message: 'hello from remote', message_type: 'message', sender_kind: 'user',
+        recipient_kind: 'worker', idempotency_key: 'idem-snap', created_at: iso(now - 1000) },
+    ] },
+  });
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages.length, 1, 'snapshot row collapses onto the optimistic twin');
+  assert.equal(conv.messages[0].id, 'env-snap', 'optimistic bubble preserved');
+  assert.equal(conv.messageIndex['msg-snap-daemon'].id, 'env-snap', 'daemon id aliased onto it');
+});
+
+test('§602 SNAPSHOT: a fresh-connect user-authored row (no twin) renders fresh', () => {
+  const store = loadStore();
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  // Fresh connect: no optimistic twin exists. The user-authored snapshot row
+  // (e.g. typed locally, or from a prior session) renders as its own bubble.
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: iso(now),
+    payload: { messages: [
+      { kind: 'agent_message', agent_id: 'w', message_id: 'msg-fresh',
+        message: 'earlier message', message_type: 'message', sender_kind: 'user',
+        recipient_kind: 'worker', idempotency_key: 'idem-fresh', created_at: iso(now - 1000) },
+    ] },
+  });
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages.length, 1, 'no twin -> renders fresh');
+  assert.equal(conv.messages[0].id, 'msg-fresh', 'keeps its own daemon id');
+  assert.equal(conv.messages[0].sender, 'user');
+});
+
 test('§2c NEGATIVE: same answer text to a DIFFERENT agent does not collapse', () => {
   const store = loadStore();
   store.recordOutbound({ id: 'env-w', created_at: new Date().toISOString(),
