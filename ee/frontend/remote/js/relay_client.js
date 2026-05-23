@@ -35,6 +35,13 @@
   var DEDUPE_CAP = 2000;
   var DATA_KINDS = { agent_message: true, ask: true, ask_reply: true };
 
+  // Data-bearing inbound kinds the relay expects an ack for (so it stops
+  // replaying). `snapshot` is acked like the conversation kinds even though it
+  // is dispatched on a dedicated path.
+  function _isDataKind(kind) {
+    return DATA_KINDS[kind] === true || kind === 'snapshot';
+  }
+
   function RemoteRelayClient(opts) {
     opts = opts || {};
     this.config = opts.config;
@@ -156,7 +163,15 @@
     } catch (_e) {
       return; // drop malformed frame
     }
-    if (this._seen(env.id)) return; // at-least-once de-dupe
+    if (this._seen(env.id)) {
+      // At-least-once de-dupe. For a DUPLICATE DATA envelope (incl. snapshot),
+      // re-ack it so the relay stops re-replaying it on every reconnect when the
+      // original ack was lost — but do NOT re-dispatch to the store (the store
+      // upsert already protects, and re-dispatch would be wasted work). Control
+      // kinds (ready/ack/error/ping/pong) are simply dropped.
+      if (_isDataKind(env.kind)) this._ackInbound(env);
+      return;
+    }
 
     switch (env.kind) {
       case 'ready':

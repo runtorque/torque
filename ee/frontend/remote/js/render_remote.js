@@ -104,6 +104,16 @@
 
   function bannerHtml(status, detail) {
     detail = detail || {};
+    // Generic relay `error` envelopes (no matching ref_id) surface here so the
+    // failure is not silently swallowed. The per-message failure path
+    // (ref_id-matched in relay_client._handleError) is unaffected — that marks
+    // the specific outbound bubble failed and never reaches this banner.
+    if (status === 'error') {
+      var p = detail.payload || {};
+      var msg = String(p.message || p.code || 'Relay error').trim() || 'Relay error';
+      return '<div class="remote-banner remote-banner-error" role="alert">'
+        + esc(msg) + '</div>';
+    }
     var map = {
       idle: ['', ''],
       connecting: ['connecting', 'Connecting…'],

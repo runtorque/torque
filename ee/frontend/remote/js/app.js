@@ -31,6 +31,13 @@
       cfg.clientId = _stableClientId();
     }
 
+    // Banner state: the live connection status plus a transient relay-error
+    // overlay. A generic relay `error` (onStatus('error', …)) shows over the
+    // connection status; it clears on the next `ready` or the next inbound
+    // store update (both signal the channel is alive again).
+    var connStatus = root.RemoteRelayClient.STATUS.IDLE;
+    var errorPayload = null;
+
     var store = new root.RemoteStore({});
     var client = new root.RemoteRelayClient({
       config: cfg,
@@ -39,7 +46,19 @@
       onStatus: function(status, detail) { renderBanner(status, detail); },
     });
 
-    store.subscribe(function() { render(); });
+    store.subscribe(function() {
+      // Any store mutation (inbound/outbound/snapshot) means the channel is
+      // live — clear a stale relay-error banner.
+      if (errorPayload) { errorPayload = null; paintBanner(); }
+      render();
+    });
+
+    function paintBanner() {
+      if (!els.banner) return;
+      els.banner.innerHTML = errorPayload
+        ? root.RemoteRender.bannerHtml('error', { payload: errorPayload })
+        : root.RemoteRender.bannerHtml(connStatus, {});
+    }
 
     function render() {
       if (els.history) {
@@ -50,17 +69,29 @@
           root.RemoteRender.agentListHtml(store));
       }
       if (els.conversation) {
+        // stickToBottom (chat tail): a new message auto-scrolls to bottom only
+        // when the user was already at/near the tail; if they scrolled up, their
+        // position is preserved. The stick container is the conversation pane
+        // itself (':root'); it replaces a plain scrollSelectors anchor so the
+        // two do not fight.
         root.RemoteRender.paintSurface(els.conversation,
           root.RemoteRender.conversationHtml(store.activeConversation(), cfg),
-          { preserve: true, surfaceOpts: { scrollSelectors: [':root'] } });
+          { preserve: true, surfaceOpts: { stickToBottom: ':root' } });
       }
     }
 
     function renderBanner(status, detail) {
-      if (els.banner) els.banner.innerHTML = root.RemoteRender.bannerHtml(status, detail);
-      if (els.composer) {
-        var disabled = status !== root.RemoteRelayClient.STATUS.READY;
-        if (els.input) els.input.disabled = disabled;
+      if (status === 'error') {
+        // Transient overlay; does not change the underlying connection status.
+        errorPayload = (detail && detail.payload) || {};
+        paintBanner();
+        return;
+      }
+      connStatus = status;
+      if (status === root.RemoteRelayClient.STATUS.READY) errorPayload = null;
+      paintBanner();
+      if (els.composer && els.input) {
+        els.input.disabled = status !== root.RemoteRelayClient.STATUS.READY;
       }
     }
 
