@@ -11,8 +11,11 @@ from torque.db import TorqueDB, canonical_user_agent_thread_id
 from torque.direct_message_mirrors import (
     NON_USER_ASK_LABEL,
     ask_owner_recipient_is_user,
+    ask_recipient_is_user,
     ask_task_labels_for_owner_recipient,
+    participant_is_user,
     resolve_ask_owner_recipient,
+    resolve_ask_recipient,
     save_direct_ask_mirror,
     save_direct_ask_reply_mirror,
 )
@@ -200,6 +203,115 @@ class DirectMessageMirrorTests(unittest.TestCase):
         self.assertEqual(engineer_cached["id"], ask_row["id"])
         self.assertEqual(engineer_cached["direction"], "received")
         self.assertEqual(engineer_cached["peer_kind"], "worker")
+
+    def test_canonical_resolver_name_and_alias_are_the_same(self):
+        # The canonical resolver and its back-compat alias must be one object,
+        # so no surface can drift onto a parallel copy.
+        self.assertIs(resolve_ask_recipient, resolve_ask_owner_recipient)
+        self.assertIs(ask_recipient_is_user, ask_owner_recipient_is_user)
+
+    def test_routing_table_full_matrix(self):
+        architect = self._add_agent("arch-1", "architect", "Architect")
+        hired_engineer = self._add_agent(
+            "eng-1",
+            "engineer",
+            "Hired Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        user_engineer = self._add_agent("eng-user", "engineer", "User Engineer")
+        eng_worker = self._add_agent(
+            "worker-eng",
+            "worker",
+            "Engineer Worker",
+            owner_engineer_id=hired_engineer.id,
+        )
+        user_worker = self._add_agent("worker-user", "worker", "User Worker")
+
+        cases = [
+            # (agent, expected recipient kind, expected recipient id, is_user)
+            (eng_worker, "engineer", hired_engineer.id, False),
+            (user_worker, "user", "user", True),
+            (hired_engineer, "architect", architect.id, False),
+            (user_engineer, "user", "user", True),
+            (architect, "user", "user", True),
+        ]
+        for agent, kind, ident, is_user in cases:
+            recipient = resolve_ask_recipient(self.state, agent)
+            self.assertEqual(recipient.kind, kind, agent.name)
+            self.assertEqual(recipient.id, ident, agent.name)
+            self.assertEqual(
+                ask_recipient_is_user(self.state, agent), is_user, agent.name
+            )
+            self.assertEqual(
+                participant_is_user(recipient.kind, recipient.id),
+                is_user,
+                agent.name,
+            )
+
+    def test_owner_absent_falls_through_to_user(self):
+        # owner_engineer_id pointing at a missing/deleted owner -> user.
+        orphan_worker = self._add_agent(
+            "worker-orphan",
+            "worker",
+            "Orphan Worker",
+            owner_engineer_id="eng-missing",
+        )
+        # hired_by_architect_id pointing at a missing architect -> user.
+        orphan_engineer = self._add_agent(
+            "eng-orphan",
+            "engineer",
+            "Orphan Engineer",
+            hired_by_architect_id="arch-missing",
+        )
+        # owner id resolving to a wrong-kind cell -> user.
+        terminal = self._add_agent("term-1", "terminal", "Terminal")
+        miswired_worker = self._add_agent(
+            "worker-miswired",
+            "worker",
+            "Miswired Worker",
+            owner_engineer_id=terminal.id,
+        )
+
+        for agent in (orphan_worker, orphan_engineer, miswired_worker):
+            recipient = resolve_ask_recipient(self.state, agent)
+            self.assertEqual(recipient.kind, "user", agent.name)
+            self.assertEqual(recipient.id, "user", agent.name)
+            self.assertTrue(ask_recipient_is_user(self.state, agent), agent.name)
+
+    def test_none_agent_resolves_to_user(self):
+        recipient = resolve_ask_recipient(self.state, None)
+        self.assertEqual(recipient.kind, "user")
+        self.assertEqual(recipient.id, "user")
+        self.assertTrue(ask_recipient_is_user(self.state, None))
+
+    def test_mirror_recipient_matches_canonical_resolver(self):
+        # The recipient stamped onto the persisted DM row must be IDENTICAL to
+        # the canonical resolver output -- this is what the connector egress
+        # and P6 consume, so the two must never disagree.
+        engineer = self._add_agent("eng-1", "engineer", "Engineer")
+        worker = self._add_agent(
+            "worker-1",
+            "worker",
+            "Worker",
+            owner_engineer_id=engineer.id,
+        )
+        user_worker = self._add_agent("worker-user", "worker", "User Worker")
+
+        for agent in (worker, user_worker):
+            resolved = resolve_ask_recipient(self.state, agent)
+            row = save_direct_ask_mirror(
+                self.state,
+                agent,
+                "Question?",
+                source_task_id=f"ask-{agent.id}",
+            )
+            self.assertEqual(row["recipient_kind"], resolved.kind, agent.name)
+            self.assertEqual(row["recipient_id"], resolved.id, agent.name)
+            self.assertEqual(
+                participant_is_user(row["recipient_kind"], row["recipient_id"]),
+                ask_recipient_is_user(self.state, agent),
+                agent.name,
+            )
 
     def test_ask_reply_mirror_links_to_display_ask_row(self):
         engineer = self._add_agent("eng-1", "engineer", "Engineer")

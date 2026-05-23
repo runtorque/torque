@@ -1,8 +1,26 @@
-"""Display-only direct-message mirror helpers for blocking asks.
+"""Canonical blocking-ask recipient resolution + direct-message mirrors.
 
-These helpers keep blocking ask delivery/resolution semantics in their
-existing code paths while projecting asks and ask replies into the durable
-direct-message store for the below-terminal conversation panel.
+This module is the SINGLE canonical home for "who is this agent's blocking-ask
+recipient / is the ask user-destined" (``resolve_ask_recipient``).  Every
+surface that needs owner-aware ask routing MUST share this one resolver rather
+than re-deriving ownership in parallel:
+
+1. ``torque_ask`` blocking-HITL routing (server.py ``ask`` action): uses
+   ``ask_recipient_is_user`` for ``needs_attention`` and
+   ``ask_task_labels_for_owner_recipient`` for the ``torque:non-user-ask``
+   label.
+2. The direct-message mirror rows below the terminal: ``save_direct_ask_mirror``
+   stamps the resolved ``recipient_*`` fields onto the persisted row.
+3. The EE connector egress (``ee/python`` / ``_wire_kind_for_direct_message_row``):
+   it consumes the resolver's OUTPUT as stamped on the row
+   (``recipient_kind``/``sender_kind``) to decide whether an ask is user-destined
+   and may egress to the ``{kind:"remote-client", id:"user"}`` lane.  It does NOT
+   re-derive ownership.
+4. P6's remote ask surface consumes the same stamped rows, so it answers exactly
+   the asks that are genuinely user-destined -- identical to local behavior.
+
+The mirror rows themselves remain display-only: blocking ask delivery/resolution
+still flows through the existing user-facing code paths.
 """
 
 from __future__ import annotations
@@ -29,6 +47,18 @@ def user_direct_message_participant() -> DirectMessageParticipant:
     return DirectMessageParticipant(id="user", kind="user", name="User")
 
 
+def participant_is_user(kind, ident) -> bool:
+    """Return whether a ``(kind, id)`` pair denotes the canonical user.
+
+    Shared so every surface (ask routing, mirrors, and the connector's
+    row-level gate) agrees on what "user-destined" means.
+    """
+    return (
+        str(kind or "").strip() == "user"
+        and str(ident or "").strip() == "user"
+    )
+
+
 def agent_direct_message_kind(cell) -> str:
     kind = str(getattr(cell, "kind", "") or "").strip()
     if kind in {"architect", "engineer", "worker"}:
@@ -46,16 +76,17 @@ def agent_direct_message_participant(cell) -> DirectMessageParticipant:
     )
 
 
-def resolve_ask_owner_recipient(state, asking_agent) -> DirectMessageParticipant:
-    """Return the display recipient for an asking agent's blocking ask.
+def resolve_ask_recipient(state, asking_agent) -> DirectMessageParticipant:
+    """Canonical owner-aware resolver: who answers ``asking_agent``'s ask.
 
-    V1 asks are still delivered/resolved by the existing user-facing paths.
-    The mirror row is owner-aware so the conversation model is already shaped
-    for owner-routed ask delivery:
+    This is THE single resolver shared by ``torque_ask`` routing, the
+    direct-message mirror, and (via the stamped row fields) the connector
+    egress.  Owner-chain routing falls through to the user only when the
+    immediate owner is the user:
 
-    - worker → owning engineer (``owner_engineer_id``), otherwise user
-    - engineer → hiring architect (``hired_by_architect_id``), otherwise user
-    - architect → user
+    - worker -> owning engineer (``owner_engineer_id``), otherwise user
+    - engineer -> hiring architect (``hired_by_architect_id``), otherwise user
+    - architect -> user (always)
     """
     if not asking_agent:
         return user_direct_message_participant()
@@ -87,13 +118,23 @@ def resolve_ask_owner_recipient(state, asking_agent) -> DirectMessageParticipant
     return user_direct_message_participant()
 
 
-def ask_owner_recipient_is_user(state, asking_agent) -> bool:
-    """Return whether a blocking ask is ultimately addressed to the user."""
-    recipient = resolve_ask_owner_recipient(state, asking_agent)
-    return (
-        str(getattr(recipient, "kind", "") or "").strip() == "user"
-        and str(getattr(recipient, "id", "") or "").strip() == "user"
-    )
+# Back-compat alias: ``resolve_ask_recipient`` is the canonical name.
+resolve_ask_owner_recipient = resolve_ask_recipient
+
+
+def ask_recipient_is_user(state, asking_agent) -> bool:
+    """Return whether a blocking ask is ultimately addressed to the user.
+
+    Canonical user-destined determination, derived from
+    ``resolve_ask_recipient``.  This is the same definition the connector
+    egress applies to the resolver-stamped row fields.
+    """
+    recipient = resolve_ask_recipient(state, asking_agent)
+    return participant_is_user(recipient.kind, recipient.id)
+
+
+# Back-compat alias retained for existing callsites.
+ask_owner_recipient_is_user = ask_recipient_is_user
 
 
 def ask_task_labels_for_owner_recipient(
@@ -109,7 +150,7 @@ def ask_task_labels_for_owner_recipient(
     re-deriving ownership in the frontend.
     """
     result = list(labels or [])
-    if not ask_owner_recipient_is_user(state, asking_agent):
+    if not ask_recipient_is_user(state, asking_agent):
         if NON_USER_ASK_LABEL not in result:
             result.append(NON_USER_ASK_LABEL)
     return result
@@ -194,7 +235,7 @@ def save_direct_ask_mirror(
     if existing:
         return _append_existing_direct_message(state, existing)
 
-    recipient = resolve_ask_owner_recipient(state, asking_agent)
+    recipient = resolve_ask_recipient(state, asking_agent)
     now = float(created_at if created_at is not None else time.time())
     row = {
         "id": message_id,
