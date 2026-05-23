@@ -198,6 +198,7 @@ async function assertNoOwnerChange(relay: StandaloneRelayServerHandle, daemonId:
   assert.equal(snapshot.daemon_connection_id, connectionId);
   assert.equal(snapshot.epoch, epoch);
   assert.equal(snapshot.daemon_online, true);
+  assert.equal((await relay.store.getInstance(daemonId))?.owner_user_id, "owner-1");
 }
 
 function assertWsRejected(url: string, headers: Record<string, string>, status: number): Promise<void> {

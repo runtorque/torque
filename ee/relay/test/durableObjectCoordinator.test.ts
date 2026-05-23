@@ -229,6 +229,7 @@ test("Durable Object rejects daemon attach hijack matrix without owner replaceme
     /owner does not match/,
   );
   await assertNoDurableOwnerChange(durableObject, "daemon:daemon-1:daemon:test", 2);
+  assert.equal((await store.getInstance("daemon-1"))?.owner_user_id, "owner-1");
   assert.equal(currentDaemon.closes.some((close) => close.code === 4000), true);
   assert.equal(replacement.closes.some((close) => close.code === 4000), false);
 });
