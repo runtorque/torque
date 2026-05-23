@@ -1715,10 +1715,16 @@ body.runtime-embedded .agent-focus-header {
   color: var(--text-dim);
 }
 .agent-context-meter {
+  /* Anchored to the header strip (between the top-left close/pause controls and
+     the top-right status dot) rather than the bottom row. The bottom row is
+     shared by the provider label (bottom-left) and the role pill (bottom-right);
+     on narrow 77px cards a wide pill like "Architect"/"Engineer" left no room and
+     overlapped the centered meter. The header gap between two fixed-width anchors
+     is deterministic, so the meter stays legible regardless of pill text. */
   position: absolute;
-  left: 34px;
-  right: 34px;
-  bottom: 2px;
+  top: 5px;
+  left: 36px;
+  right: 12px;
   min-width: 0;
   overflow: hidden;
   text-overflow: clip;

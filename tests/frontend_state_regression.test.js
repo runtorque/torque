@@ -16118,6 +16118,22 @@ test('renderAgentCell shows context-window meter only when usage is available wi
   assert.match(dangerHtml, />ctx 90%<\/div>/);
 });
 
+test('context-window meter is anchored to the header strip, not the bottom role-pill row', () => {
+  // Regression for :575 — the meter shared the bottom baseline (bottom:2px) with
+  // the provider label (bottom-left) and the role pill (bottom-right). On narrow
+  // 77px cards a wide pill ("Architect"/"Engineer") overlapped the centered meter.
+  // It must stay top-anchored, clear of the top-left controls and top-right dot.
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const meterRule = css.match(/\.agent-context-meter\s*\{[^}]*\}/s);
+  assert.ok(meterRule, 'expected an .agent-context-meter rule');
+  const rule = meterRule[0];
+  assert.match(rule, /top:\s*\d+px/, 'meter should be top-anchored');
+  assert.doesNotMatch(rule, /bottom:\s*2px/, 'meter must not share the bottom role-pill baseline');
+  // Left/right insets must clear the fixed-width header controls and status dot.
+  assert.match(rule, /left:\s*3[0-9]px/);
+  assert.match(rule, /right:\s*1[0-9]px/);
+});
+
 test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
   const { context } = createEngineerHarness();
   context.state.group_settings = {
