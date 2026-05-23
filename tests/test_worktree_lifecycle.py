@@ -358,6 +358,35 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             (self.repo_root / "local-only" / "config.json").resolve(),
         )
 
+    async def test_gitignored_symlink_discovery_fails_open_on_exception(self):
+        # Discovery is best-effort: a spawn/IO failure in the subprocess
+        # helper (e.g. git binary missing, OSError on Popen) must fail open —
+        # the worktree is still created with no auto-symlinks, and worker
+        # creation does not fail. Distinct from the nonzero-exit path, which
+        # already returns [] internally; here the helper *raises*.
+        (self.repo_root / ".gitignore").write_text("local-only/\n")
+        await self._git("add", ".gitignore")
+        await self._git("commit", "-m", "Ignore local fixtures")
+
+        cell = self._make_cell()
+        with mock.patch.object(
+            self.mgr,
+            "_git_ls_ignored_candidates",
+            side_effect=OSError("git binary missing"),
+        ):
+            wt_path = await self.mgr.create(
+                cell,
+                str(self.repo_root),
+                base_branch="main",
+                include_gitignored_symlinks=True,
+            )
+
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        self.assertTrue(wt.exists())
+        self.assertFalse((wt / "local-only").is_symlink())
+        self.assertFalse((wt / "local-only" / "config.json").is_symlink())
+
     def test_gitignored_symlink_filter_skips_dot_git_and_torque_runtime(self):
         filtered = self.mgr._filter_gitignored_symlink_candidates(
             str(self.repo_root),
