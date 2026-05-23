@@ -178,6 +178,31 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("non-trivial product or scope decision", prompt)
         self.assertIn("If you are user-owned", prompt)
 
+    def test_user_owned_engineer_prompt_includes_message_instruction(self):
+        prompt = self.engineer_mod.build_engineer_system_prompt(
+            "Torque", owner_is_user=True)
+
+        self.assertIn("## After bootstrap: message the user", prompt)
+        self.assertIn("You are owned by the user", prompt)
+        self.assertIn('engineer_message_user(message="...")', prompt)
+        self.assertIn("rather than only emitting it to the terminal", prompt)
+
+    def test_architect_hired_engineer_prompt_omits_message_instruction(self):
+        # Default (architect-hired / non-user-owned) must be byte-unchanged:
+        # the message-user instruction is absent and the user-owned variant
+        # only appends it.
+        default = self.engineer_mod.build_engineer_system_prompt("Torque")
+        self.assertNotIn("## After bootstrap: message the user", default)
+        self.assertNotIn("owned by the user", default)
+        self.assertEqual(
+            self.engineer_mod.build_engineer_system_prompt(
+                "Torque", owner_is_user=False),
+            default,
+        )
+        owned = self.engineer_mod.build_engineer_system_prompt(
+            "Torque", owner_is_user=True)
+        self.assertTrue(owned.startswith(default.rstrip()))
+
     def test_engineer_prompt_includes_shared_memory_guidance(self):
         prompt = self.engineer_mod.build_engineer_system_prompt("Torque")
 
