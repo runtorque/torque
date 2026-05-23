@@ -546,6 +546,31 @@ def _worktree_merge_error(aid: str, message: str, **extra) -> dict:
     return result
 
 
+async def _reconcile_worktree_branch(state: MatrixState, worktree_mgr,
+                                     cell) -> bool:
+    """Sync a cell's cached worktree branch with its live HEAD, then persist.
+
+    Called at the head of merge/rebase/diff command handling so a worker
+    reused across tasks (now checked out on a fresh branch) is resolved to
+    its current branch instead of the stale original. Returns True when the
+    cached field changed.
+    """
+    if not cell or not getattr(cell, "worktree_path", ""):
+        return False
+    try:
+        changed = await worktree_mgr.reconcile_worktree_branch(cell)
+    except Exception:
+        log.exception(
+            "Failed to reconcile worktree branch for '%s'",
+            getattr(cell, "name", "") or getattr(cell, "id", ""),
+        )
+        return False
+    if changed:
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+    return changed
+
+
 def _engineer_merge_mode_for_cell(state: MatrixState, cell) -> str:
     if not cell:
         return "pr"
@@ -11635,6 +11660,7 @@ async def main(connection=None):
 
             elif cmd == "worktree_diff_full":
                 cell = state.agents.get(data.get("id", ""))
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 result = await _worktree_full_diff(cell, worktree_mgr)
                 if cell and cell.worktree_path:
                     boundary_state = await _latest_boundary_state_for_cell(
@@ -11649,6 +11675,7 @@ async def main(connection=None):
             elif cmd == "worktree_check_merge":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 if cell and cell.worktree_path \
                         and cell.worktree_branch:
                     boundary_state = await _latest_boundary_state_for_cell(
@@ -11737,6 +11764,7 @@ async def main(connection=None):
             elif cmd == "worktree_rebase":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 if cell and cell.worktree_path:
                     overwrite_paths = (
                         await worktree_mgr.rebase_untracked_overwrite_paths(cell)
@@ -11846,6 +11874,7 @@ async def main(connection=None):
 
             elif cmd == "worktree_diff":
                 cell = state.agents.get(data.get("id", ""))
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 if not cell or not cell.worktree_path:
                     result = {"type": "error",
                               "message": "Agent has no worktree."}
@@ -11918,6 +11947,7 @@ async def main(connection=None):
 
             elif cmd == "worktree_check_conflicts":
                 cell = state.agents.get(data.get("id", ""))
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 if not cell or not cell.worktree_path:
                     result = {"type": "error",
                               "message": "Agent has no worktree."}
@@ -11951,6 +11981,7 @@ async def main(connection=None):
 
             elif cmd == "worktree_create_pr":
                 cell = state.agents.get(data.get("id", ""))
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 if not cell or not cell.worktree_path:
                     result = {"type": "worktree_pr",
                               "error": "Agent has no worktree."}
@@ -11981,6 +12012,7 @@ async def main(connection=None):
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
+                await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 requested_force_direct = bool(data.get("force_direct"))
                 merge_mode = _engineer_merge_mode_for_cell(state, cell)
                 direct_merge_breach_event = None

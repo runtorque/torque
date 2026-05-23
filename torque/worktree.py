@@ -1276,6 +1276,40 @@ class WorktreeManager:
             log.debug("Could not get current branch for %s", repo_root)
         return "HEAD"
 
+    async def reconcile_worktree_branch(self, cell) -> bool:
+        """Sync ``cell.worktree_branch`` with the worktree's live HEAD branch.
+
+        A worker reused across two tasks can end up checked out on a new
+        branch (created for the re-dispatched task) while ``worktree_branch``
+        still names the original task's branch. The merge/rebase/diff and
+        stale-base machinery resolve the agent through ``worktree_branch``, so
+        a stale mapping silently targets the wrong branch (see the reused-worker
+        merge bug). Re-read the actual checked-out branch and update the cached
+        field when they diverge.
+
+        Returns True when ``cell.worktree_branch`` was changed (callers should
+        persist/emit), False otherwise. Detached HEAD and lookup failures are
+        left untouched so a real branch name is never clobbered.
+        """
+        if not cell or not getattr(cell, "worktree_path", ""):
+            return False
+        if not await self.validate(cell):
+            return False
+        actual = await self.get_current_branch(cell.worktree_path)
+        actual = str(actual or "").strip()
+        if not actual or actual == "HEAD":
+            return False
+        if actual == (str(getattr(cell, "worktree_branch", "") or "").strip()):
+            return False
+        log.info(
+            "Reconciled worktree branch for '%s': %s -> %s",
+            getattr(cell, "name", "") or getattr(cell, "id", ""),
+            getattr(cell, "worktree_branch", "") or "(unset)",
+            actual,
+        )
+        cell.worktree_branch = actual
+        return True
+
     async def list_worktrees(self, repo_root: str) -> list[dict]:
         """List git worktrees for a repository."""
         if not repo_root:

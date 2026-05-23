@@ -451,6 +451,56 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(refreshed["stale"])
         self.assertEqual(refreshed["fork_point"], refreshed["base_head"])
 
+    async def test_reconcile_worktree_branch_follows_live_head(self):
+        # Simulates a worker reused across tasks: a fresh branch is checked
+        # out in the worktree for the second task while ``worktree_branch``
+        # still names the first task's branch. Reconciliation must follow the
+        # live HEAD so merge/rebase/diff resolve the correct branch.
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+        self.assertIsNotNone(wt_path)
+        original_branch = cell.worktree_branch
+        self.assertTrue(original_branch)
+
+        # Worker re-dispatched: a new branch is created and checked out in the
+        # same worktree (e.g. by a follow-up task), but the cached field is not
+        # updated by the switch.
+        new_branch = "torque/worker-second-task"
+        await self._git("switch", "-c", new_branch, cwd=wt_path)
+
+        self.assertNotEqual(cell.worktree_branch, new_branch)
+        changed = await self.mgr.reconcile_worktree_branch(cell)
+        self.assertTrue(changed)
+        self.assertEqual(cell.worktree_branch, new_branch)
+
+        # Idempotent: a second call with no divergence reports no change.
+        self.assertFalse(await self.mgr.reconcile_worktree_branch(cell))
+
+    async def test_reconcile_worktree_branch_ignores_detached_head(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+        self.assertIsNotNone(wt_path)
+        original_branch = cell.worktree_branch
+
+        # Detach HEAD; a real branch name must not be clobbered with "HEAD".
+        head_sha = await self._git("rev-parse", "HEAD", cwd=wt_path)
+        await self._git("checkout", "--detach", head_sha, cwd=wt_path)
+
+        self.assertFalse(await self.mgr.reconcile_worktree_branch(cell))
+        self.assertEqual(cell.worktree_branch, original_branch)
+
+    async def test_reconcile_worktree_branch_noop_without_worktree(self):
+        cell = self._make_cell()
+        self.assertFalse(await self.mgr.reconcile_worktree_branch(cell))
+
     async def test_stale_base_info_current_base_branch_is_not_stale(self):
         (self.repo_root / "base.txt").write_text("base change\n")
         await self._git("add", "base.txt")
