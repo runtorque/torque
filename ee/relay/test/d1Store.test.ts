@@ -16,9 +16,13 @@ test("D1RelayStore uses the same RelayStore contract as SQLite", async () => {
     label: "D1 daemon",
     created_at: "2026-05-22T00:00:00.000Z",
     last_seen_at: "2026-05-22T00:00:01.000Z",
+    fencing_epoch: 4,
+    active_credential_id: "cred-d1",
+    coordination_updated_at: "2026-05-22T00:00:01.000Z",
     metadata: { target: "cloudflare" },
   });
   assert.equal((await store.getInstance("daemon-d1"))?.metadata.target, "cloudflare");
+  assert.equal((await store.getInstance("daemon-d1"))?.fencing_epoch, 4);
 
   const envelope = makeRelayEnvelope({
     id: "msg-d1",

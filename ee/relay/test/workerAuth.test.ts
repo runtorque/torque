@@ -24,6 +24,9 @@ test("Cloudflare Worker HTTP enqueue rejects unauthenticated clients before D1 a
     label: "Daemon",
     created_at: "2026-05-23T00:00:00.000Z",
     last_seen_at: "2026-05-23T00:00:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "",
+    coordination_updated_at: "2026-05-23T00:00:00.000Z",
     metadata: {},
   });
   const envelope = makeRelayEnvelope({
@@ -55,6 +58,9 @@ test("Cloudflare Worker HTTP enqueue accepts owner session and forces V1 source.
     label: "Daemon",
     created_at: "2026-05-23T00:00:00.000Z",
     last_seen_at: "2026-05-23T00:00:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "",
+    coordination_updated_at: "2026-05-23T00:00:00.000Z",
     metadata: {},
   });
   const session = await createClientSessionFixture(store, { ownerUserId: "owner-1", token: "client-token" });

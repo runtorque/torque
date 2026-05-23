@@ -68,15 +68,29 @@ export class RelayRuntime {
     if (!attached.accepted) {
       return { ...attached, replayed: 0, replay_failed: 0 };
     }
-    await this.store.upsertInstance({
+    const claimed = await this.store.claimInstanceOwner({
       id,
-      owner_user_id: auth?.ownerUserId || this.instanceOwnerUserId,
+      ownerUserId: auth?.ownerUserId || this.instanceOwnerUserId || "local-dev",
+      credentialId: auth?.credentialId || "local-dev-unauthenticated",
+      fencingEpoch: attached.epoch,
       label: this.instanceLabel || id,
-      created_at: nowIso(),
-      last_seen_at: nowIso(),
       metadata: { relay_runtime: "phase1" },
     });
-    const replay = await this.replayToDaemon(id);
+    if (!claimed.claimed) {
+      await this.coordinator.detach(attached.connectionId);
+      return {
+        accepted: false,
+        connectionId: attached.connectionId,
+        epoch: attached.epoch,
+        reason: claimed.reason || "relay_instance_claim_failed",
+        replayed: 0,
+        replay_failed: 0,
+      };
+    }
+    const replay = await this.replayToDaemon(id, {
+      connectionId: attached.connectionId,
+      epoch: attached.epoch,
+    });
     return { ...attached, replayed: replay.replayed, replay_failed: replay.failed };
   }
 
@@ -157,7 +171,10 @@ export class RelayRuntime {
     };
   }
 
-  async replayToDaemon(daemonId: string): Promise<{ replayed: number; failed: number }> {
+  async replayToDaemon(
+    daemonId: string,
+    guard?: { connectionId: string; epoch: number },
+  ): Promise<{ replayed: number; failed: number }> {
     const pending = await this.store.listPendingMessages(daemonId, {
       direction: "to_daemon",
       limit: this.replayLimit,
@@ -165,8 +182,14 @@ export class RelayRuntime {
     let replayed = 0;
     let failed = 0;
     for (const row of pending) {
+      if (guard && !await this.coordinator.isCurrentDaemonConnection(daemonId, guard.connectionId, guard.epoch)) {
+        break;
+      }
       const delivery = await this.coordinator.sendToDaemon(daemonId, row.envelope);
       if (delivery.delivered) {
+        if (guard && Number(delivery.epoch || 0) !== guard.epoch) {
+          break;
+        }
         await this.store.markDeliveryAttempt(row.id, delivery.epoch || 0);
         replayed += 1;
       } else {

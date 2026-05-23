@@ -15,6 +15,9 @@ export interface RelayInstanceRecord {
   label: string;
   created_at: string;
   last_seen_at: string;
+  fencing_epoch: number;
+  active_credential_id: string;
+  coordination_updated_at: string;
   metadata: JsonObject;
 }
 
@@ -107,9 +110,31 @@ export interface RelayAuthStore {
   pruneExpiredAuthNonces?(now?: string): Promise<void>;
 }
 
+export interface ClaimInstanceOwnerArgs {
+  id: string;
+  ownerUserId: string;
+  label?: string;
+  credentialId?: string;
+  fencingEpoch: number;
+  now?: string;
+  metadata?: JsonObject;
+}
+
+export type ClaimInstanceOwnerReason =
+  | "daemon_owner_mismatch"
+  | "stale_fencing_epoch"
+  | "relay_instance_claim_failed";
+
+export interface ClaimInstanceOwnerResult {
+  claimed: boolean;
+  record?: RelayInstanceRecord;
+  reason?: ClaimInstanceOwnerReason;
+}
+
 export interface RelayStore extends RelayAuthStore {
   migrate(): Promise<void>;
   upsertInstance(record: RelayInstanceRecord): Promise<RelayInstanceRecord>;
+  claimInstanceOwner(args: ClaimInstanceOwnerArgs): Promise<ClaimInstanceOwnerResult>;
   getInstance(id: string): Promise<RelayInstanceRecord | null>;
   appendMessage(envelope: RelayEnvelope, direction: RelayDirection): Promise<StoredRelayMessage>;
   appendMessageResult(envelope: RelayEnvelope, direction: RelayDirection): Promise<AppendMessageResult>;

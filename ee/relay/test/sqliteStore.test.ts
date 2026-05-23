@@ -26,10 +26,15 @@ test("SqliteRelayStore migrates and persists instances/messages through the Rela
     label: "Laptop",
     created_at: "2026-05-22T00:00:00.000Z",
     last_seen_at: "2026-05-22T00:00:01.000Z",
+    fencing_epoch: 3,
+    active_credential_id: "cred-1",
+    coordination_updated_at: "2026-05-22T00:00:01.000Z",
     metadata: { profile: "desktop" },
   });
 
   assert.equal(instance.id, "daemon-1");
+  assert.equal(instance.fencing_epoch, 3);
+  assert.equal(instance.active_credential_id, "cred-1");
   assert.deepEqual((await store.getInstance("daemon-1"))?.metadata, { profile: "desktop" });
 
   const saved = await store.appendMessage(envelope(), "to_daemon");

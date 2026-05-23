@@ -10,7 +10,13 @@ import type {
   StoredRelayMessage,
 } from "./ports.js";
 
-export const RELAY_SCHEMA_VERSION = 3;
+export const RELAY_SCHEMA_VERSION = 4;
+
+export const RELAY_INSTANCE_COORDINATION_COLUMNS = [
+  { name: "fencing_epoch", definition: "INTEGER NOT NULL DEFAULT 0" },
+  { name: "active_credential_id", definition: "TEXT NOT NULL DEFAULT ''" },
+  { name: "coordination_updated_at", definition: "TEXT NOT NULL DEFAULT ''" },
+] as const;
 
 export const RELAY_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS relay_meta (
@@ -23,6 +29,9 @@ export const RELAY_SCHEMA_STATEMENTS = [
     label TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
+    fencing_epoch INTEGER NOT NULL DEFAULT 0,
+    active_credential_id TEXT NOT NULL DEFAULT '',
+    coordination_updated_at TEXT NOT NULL DEFAULT '',
     metadata_json TEXT NOT NULL DEFAULT '{}'
   )`,
   `CREATE TABLE IF NOT EXISTS relay_messages (
@@ -123,12 +132,29 @@ export const RELAY_MESSAGE_COLUMNS = [
 
 export const RELAY_MESSAGE_SELECT = RELAY_MESSAGE_COLUMNS.join(", ");
 
+export const RELAY_INSTANCE_COLUMNS = [
+  "id",
+  "owner_user_id",
+  "label",
+  "created_at",
+  "last_seen_at",
+  "fencing_epoch",
+  "active_credential_id",
+  "coordination_updated_at",
+  "metadata_json",
+] as const;
+
+export const RELAY_INSTANCE_SELECT = RELAY_INSTANCE_COLUMNS.join(", ");
+
 export interface RelayInstanceRow {
   id: string;
   owner_user_id: string;
   label: string;
   created_at: string;
   last_seen_at: string;
+  fencing_epoch?: number;
+  active_credential_id?: string;
+  coordination_updated_at?: string;
   metadata_json: string;
 }
 
@@ -195,6 +221,9 @@ export function normalizeRelayInstanceRow(row: RelayInstanceRow | null | undefin
     label: String(row.label || ""),
     created_at: String(row.created_at || ""),
     last_seen_at: String(row.last_seen_at || ""),
+    fencing_epoch: Math.max(0, Math.floor(Number(row.fencing_epoch || 0))),
+    active_credential_id: String(row.active_credential_id || ""),
+    coordination_updated_at: String(row.coordination_updated_at || ""),
     metadata: decodeJsonObject(row.metadata_json),
   };
 }
@@ -302,6 +331,9 @@ export function relayInstanceValues(record: RelayInstanceRecord): unknown[] {
     record.label,
     record.created_at,
     record.last_seen_at,
+    Math.max(0, Math.floor(Number(record.fencing_epoch || 0))),
+    record.active_credential_id || "",
+    record.coordination_updated_at || "",
     encodeJsonObject(record.metadata || {}),
   ];
 }

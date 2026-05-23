@@ -2,6 +2,8 @@ import type { RelayEnvelope } from "../../core/protocol.js";
 import { RelayConflictError, RelayStoreError, errorMessage } from "../../core/errors.js";
 import type {
   AppendMessageResult,
+  ClaimInstanceOwnerArgs,
+  ClaimInstanceOwnerResult,
   ListRelayMessagesOptions,
   PendingRelayMessagesOptions,
   RelayClientSessionRecord,
@@ -13,8 +15,11 @@ import type {
   StoredRelayMessage,
 } from "../../core/ports.js";
 import {
+  RELAY_INSTANCE_COORDINATION_COLUMNS,
+  RELAY_INSTANCE_SELECT,
   RELAY_MESSAGE_COLUMNS,
   RELAY_MESSAGE_SELECT,
+  RELAY_SCHEMA_VERSION,
   RELAY_SCHEMA_STATEMENTS,
   clampRelayLimit,
   normalizeRelayClientSessionRow,
@@ -46,6 +51,7 @@ export class D1RelayStore implements RelayStore {
       for (const statement of RELAY_SCHEMA_STATEMENTS) {
         await this.db.prepare(statement).run();
       }
+      await this.ensureRelayInstanceCoordinationColumns();
     });
   }
 
@@ -54,12 +60,15 @@ export class D1RelayStore implements RelayStore {
       assertNonEmpty(record.id, "instance id");
       await this.db.prepare(
         `INSERT INTO relay_instances
-          (id, owner_user_id, label, created_at, last_seen_at, metadata_json)
-         VALUES (?, ?, ?, ?, ?, ?)
+          (id, owner_user_id, label, created_at, last_seen_at, fencing_epoch, active_credential_id, coordination_updated_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
           owner_user_id=excluded.owner_user_id,
           label=excluded.label,
           last_seen_at=excluded.last_seen_at,
+          fencing_epoch=excluded.fencing_epoch,
+          active_credential_id=excluded.active_credential_id,
+          coordination_updated_at=excluded.coordination_updated_at,
           metadata_json=excluded.metadata_json`,
       ).bind(...relayInstanceValues(record)).run();
       const saved = await this.getInstance(record.id);
@@ -68,10 +77,72 @@ export class D1RelayStore implements RelayStore {
     });
   }
 
+  async claimInstanceOwner(args: ClaimInstanceOwnerArgs): Promise<ClaimInstanceOwnerResult> {
+    return this.operation("claimInstanceOwner", async () => {
+      const id = assertNonEmpty(args.id, "instance id");
+      const ownerUserId = assertNonEmpty(args.ownerUserId, "owner_user_id");
+      const fencingEpoch = Math.max(0, Math.floor(Number(args.fencingEpoch || 0)));
+      const now = String(args.now || nowIso());
+      const existing = await this.getInstance(id);
+      if (existing?.owner_user_id && existing.owner_user_id !== ownerUserId) {
+        return { claimed: false, record: existing, reason: "daemon_owner_mismatch" };
+      }
+      if (existing && Number(existing.fencing_epoch || 0) > fencingEpoch) {
+        return { claimed: false, record: existing, reason: "stale_fencing_epoch" };
+      }
+
+      const record: RelayInstanceRecord = {
+        id,
+        owner_user_id: ownerUserId,
+        label: String(args.label || existing?.label || id),
+        created_at: existing?.created_at || now,
+        last_seen_at: now,
+        fencing_epoch: fencingEpoch,
+        active_credential_id: String(args.credentialId || existing?.active_credential_id || ""),
+        coordination_updated_at: now,
+        metadata: args.metadata || existing?.metadata || {},
+      };
+
+      if (existing) {
+        await this.db.prepare(
+          `UPDATE relay_instances
+           SET owner_user_id=?, label=?, last_seen_at=?, fencing_epoch=?,
+               active_credential_id=?, coordination_updated_at=?, metadata_json=?
+           WHERE id=? AND (owner_user_id='' OR owner_user_id=?) AND fencing_epoch<=?`,
+        ).bind(
+          record.owner_user_id,
+          record.label,
+          record.last_seen_at,
+          record.fencing_epoch,
+          record.active_credential_id,
+          record.coordination_updated_at,
+          relayInstanceValues(record)[8],
+          id,
+          ownerUserId,
+          fencingEpoch,
+        ).run();
+      } else {
+        await this.db.prepare(
+          `INSERT OR IGNORE INTO relay_instances
+            (id, owner_user_id, label, created_at, last_seen_at, fencing_epoch, active_credential_id, coordination_updated_at, metadata_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(...relayInstanceValues(record)).run();
+      }
+
+      const saved = await this.getInstance(id);
+      if (!saved) return { claimed: false, reason: "relay_instance_claim_failed" };
+      if (saved.owner_user_id !== ownerUserId) return { claimed: false, record: saved, reason: "daemon_owner_mismatch" };
+      if (Number(saved.fencing_epoch || 0) > fencingEpoch) {
+        return { claimed: false, record: saved, reason: "stale_fencing_epoch" };
+      }
+      return { claimed: true, record: saved };
+    });
+  }
+
   async getInstance(id: string): Promise<RelayInstanceRecord | null> {
     return this.operation("getInstance", async () => {
       const row = await this.db.prepare(
-        `SELECT id, owner_user_id, label, created_at, last_seen_at, metadata_json
+        `SELECT ${RELAY_INSTANCE_SELECT}
          FROM relay_instances WHERE id=?`,
       ).bind(String(id || "").trim()).first<RelayInstanceRow>();
       return normalizeRelayInstanceRow(row);
@@ -355,6 +426,17 @@ export class D1RelayStore implements RelayStore {
       ).bind(failedAt, String(reason || ""), cleanMessageId(messageId)).run();
       return this.getMessageInternal(messageId);
     });
+  }
+
+  private async ensureRelayInstanceCoordinationColumns(): Promise<void> {
+    const result = await this.db.prepare("PRAGMA table_info(relay_instances)").all<{ name?: string }>();
+    const rows = Array.isArray(result.results) ? result.results : [];
+    const names = new Set(rows.map((row) => String(row.name || "")));
+    for (const column of RELAY_INSTANCE_COORDINATION_COLUMNS) {
+      if (names.has(column.name)) continue;
+      await this.db.prepare(`ALTER TABLE relay_instances ADD COLUMN ${column.name} ${column.definition}`).run();
+    }
+    await this.db.prepare("INSERT OR REPLACE INTO relay_meta (key, value) VALUES ('schema_version', ?)").bind(String(RELAY_SCHEMA_VERSION)).run();
   }
 
   private async getPairingTokenByHash(tokenHash: string): Promise<RelayPairingTokenRecord | null> {
