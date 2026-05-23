@@ -95,9 +95,30 @@ export interface RelayClientSessionRecord {
   metadata: JsonObject;
 }
 
+// Single-use, short-lived, hashed code that the same-origin /establish endpoint
+// trades for a freshly minted client session. Parallels relay_pairing_tokens:
+// the raw code is handed out once (QR/link); only its hash is stored; consume is
+// atomic so the code can be redeemed exactly once.
+export interface RelayClientEstablishCodeRecord {
+  id: string;
+  code_hash: string;
+  owner_user_id: string;
+  daemon_id: string;
+  label: string;
+  created_at: string;
+  expires_at: string;
+  consumed_at: string;
+  revoked_at: string;
+  metadata: JsonObject;
+}
+
 export interface RelayAuthStore {
   createPairingToken(record: RelayPairingTokenRecord): Promise<RelayPairingTokenRecord>;
   consumePairingToken(tokenHash: string, consumedAt?: string): Promise<RelayPairingTokenRecord | null>;
+  createClientEstablishCode(record: RelayClientEstablishCodeRecord): Promise<RelayClientEstablishCodeRecord>;
+  // Atomic single-use redemption: returns the record only if it was not already
+  // consumed/revoked/expired (so two concurrent /establish calls cannot both win).
+  consumeClientEstablishCode(codeHash: string, consumedAt?: string): Promise<RelayClientEstablishCodeRecord | null>;
   createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord>;
   getDaemonCredential(daemonId: string, credentialId: string): Promise<RelayDaemonCredentialRecord | null>;
   touchDaemonCredential(credentialId: string, lastUsedAt?: string): Promise<RelayDaemonCredentialRecord | null>;

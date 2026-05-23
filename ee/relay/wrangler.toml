@@ -43,3 +43,9 @@ class_name = "DaemonRendezvousDurableObject"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DaemonRendezvousDurableObject"]
+
+# Non-secret config injected into the served RemoteConfig at /app/.
+# RELAY_DAEMON_ID is the paired daemon_id; relayBaseUrl defaults to the request
+# origin (https://relay.runtorque.com), so RELAY_PUBLIC_ORIGIN is usually unset.
+[vars]
+RELAY_DAEMON_ID = "REPLACE_WITH_PAIRED_DAEMON_ID"

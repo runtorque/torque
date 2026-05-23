@@ -125,3 +125,41 @@ test("D1RelayStore upsertInstance preserves monotonic fencing_epoch", async () =
   assert.equal((await store.getInstance("daemon-rotation-d1"))?.fencing_epoch, 7);
   fake.close();
 });
+
+test("D1RelayStore client-establish codes are single-use and expiry-gated", async () => {
+  const fake = new FakeD1Database();
+  const store = new D1RelayStore(fake as unknown as D1Database);
+  await store.migrate();
+  await store.createClientEstablishCode({
+    id: "establish-d1-1",
+    code_hash: "hash-code-d1-1",
+    owner_user_id: "owner-1",
+    daemon_id: "daemon-d1",
+    label: "QR",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: "2099-01-01T00:00:00.000Z",
+    consumed_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  assert.equal(
+    (await store.consumeClientEstablishCode("hash-code-d1-1", "2026-05-23T00:01:00.000Z"))?.consumed_at,
+    "2026-05-23T00:01:00.000Z",
+  );
+  // Single-use: a second redemption mints nothing.
+  assert.equal(await store.consumeClientEstablishCode("hash-code-d1-1", "2026-05-23T00:02:00.000Z"), null);
+  await store.createClientEstablishCode({
+    id: "establish-d1-2",
+    code_hash: "hash-code-d1-2",
+    owner_user_id: "owner-1",
+    daemon_id: "",
+    label: "",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: "2000-01-01T00:00:00.000Z",
+    consumed_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  assert.equal(await store.consumeClientEstablishCode("hash-code-d1-2", "2026-05-23T00:03:00.000Z"), null);
+  fake.close();
+});

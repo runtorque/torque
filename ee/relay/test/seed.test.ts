@@ -4,33 +4,42 @@ import test from "node:test";
 import { hashSecret } from "../src/core/auth.js";
 import {
   RELAY_DB_NAME,
-  buildClientSessionSeed,
+  buildClientEstablishCodeSeed,
   buildDaemonCredentialSeed,
   generateDaemonKeyMaterial,
   insertStatement,
   sqlLiteral,
 } from "../src/tools/seed.js";
 
-test("client session seed hash EXACTLY matches the relay's hashSecret", async () => {
-  // hashSecret trims then SHA-256; the seeded hash must be byte-identical to what
-  // the relay computes from the token at auth time, or the session never authenticates.
-  const seed = await buildClientSessionSeed({ ownerUserId: "owner-1", rawToken: "  spaced-token  " });
-  assert.equal(seed.record.token_hash, await hashSecret("  spaced-token  "));
+test("establish-code seed hash EXACTLY matches the relay's hashSecret", async () => {
+  // hashSecret trims then SHA-256; the seeded code_hash must be byte-identical to
+  // what /establish computes from the code at redeem time, or it never matches.
+  const seed = await buildClientEstablishCodeSeed({ ownerUserId: "owner-1", rawCode: "  spaced-code  " });
+  assert.equal(seed.record.code_hash, await hashSecret("  spaced-code  "));
 });
 
-test("client session seed never persists the raw token in the emitted SQL", async () => {
-  const seed = await buildClientSessionSeed({ ownerUserId: "owner-1" });
-  assert.ok(seed.rawToken.length >= 16, "generated token should have real entropy");
-  assert.ok(!seed.statement.includes(seed.rawToken), "raw token must not appear in SQL");
-  assert.ok(seed.statement.includes(seed.record.token_hash), "SQL must carry the hash");
-  assert.equal(seed.record.token_hash, await hashSecret(seed.rawToken));
+test("establish-code seed never persists the raw code in the emitted SQL", async () => {
+  const seed = await buildClientEstablishCodeSeed({ ownerUserId: "owner-1", daemonId: "daemon-1" });
+  assert.ok(seed.rawCode.length >= 16, "generated code should have real entropy");
+  assert.ok(!seed.statement.includes(seed.rawCode), "raw code must not appear in SQL");
+  assert.ok(seed.statement.includes(seed.record.code_hash), "SQL must carry the hash");
+  assert.equal(seed.record.code_hash, await hashSecret(seed.rawCode));
 });
 
-test("generated client tokens are unique", async () => {
-  const a = await buildClientSessionSeed({ ownerUserId: "owner-1" });
-  const b = await buildClientSessionSeed({ ownerUserId: "owner-1" });
-  assert.notEqual(a.rawToken, b.rawToken);
-  assert.notEqual(a.record.token_hash, b.record.token_hash);
+test("establish-code seed is unconsumed and carries owner + daemon scope", async () => {
+  const seed = await buildClientEstablishCodeSeed({ ownerUserId: "owner-1", daemonId: "daemon-1" });
+  assert.equal(seed.record.owner_user_id, "owner-1");
+  assert.equal(seed.record.daemon_id, "daemon-1");
+  assert.equal(seed.record.consumed_at, "");
+  assert.equal(seed.record.revoked_at, "");
+  assert.ok(seed.record.expires_at > seed.record.created_at);
+});
+
+test("generated establish codes are unique", async () => {
+  const a = await buildClientEstablishCodeSeed({ ownerUserId: "owner-1" });
+  const b = await buildClientEstablishCodeSeed({ ownerUserId: "owner-1" });
+  assert.notEqual(a.rawCode, b.rawCode);
+  assert.notEqual(a.record.code_hash, b.record.code_hash);
 });
 
 test("daemon credential seed stores the PUBLIC JWK and stamps the instance owner", async () => {
@@ -59,8 +68,8 @@ test("sqlLiteral escapes single quotes and inlines finite numbers bare", () => {
 });
 
 test("insertStatement composes columns and escaped values", () => {
-  const stmt = insertStatement("relay_client_sessions", ["session_id", "revoked_at"], ["s'1", ""]);
-  assert.equal(stmt, "INSERT INTO relay_client_sessions (session_id, revoked_at) VALUES ('s''1', '');");
+  const stmt = insertStatement("relay_client_establish_codes", ["id", "consumed_at"], ["c'1", ""]);
+  assert.equal(stmt, "INSERT INTO relay_client_establish_codes (id, consumed_at) VALUES ('c''1', '');");
 });
 
 test("relay db name is the renamed (non-spike) target", () => {

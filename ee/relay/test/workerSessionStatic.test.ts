@@ -3,8 +3,8 @@ import test from "node:test";
 
 import worker from "../src/adapters/cloudflare/worker.js";
 import { D1RelayStore } from "../src/adapters/cloudflare/d1Store.js";
+import { hashSecret } from "../src/core/auth.js";
 import { FakeD1Database } from "./helpers/fakeD1.js";
-import { createClientSessionFixture } from "./helpers/auth.js";
 
 class FakeNamespace {
   idFromName(name: string): string { return name; }
@@ -13,19 +13,28 @@ class FakeNamespace {
   }
 }
 
-// Echoes the resolved asset path so tests can assert the /app → asset rewrite.
+const INDEX_HTML = '<!doctype html><html><head>'
+  + '<script id="torque-remote-config" type="application/json">{}</script>'
+  + '</head><body>app</body></html>';
+
+// Echoes the resolved asset path, except /index.html which returns the bundle
+// HTML carrying the empty config tag (so injection can be asserted).
 const fakeAssets = {
   fetch: async (request: Request): Promise<Response> => {
     const path = new URL(request.url).pathname;
+    if (path === "/index.html") {
+      return new Response(INDEX_HTML, { status: 200, headers: { "content-type": "text/html" } });
+    }
     return new Response(`asset:${path}`, { status: 200, headers: { "content-type": "text/plain" } });
   },
 };
 
-function env(db: FakeD1Database, withAssets = true) {
+function env(db: FakeD1Database, opts: { assets?: boolean; daemonId?: string } = {}) {
   return {
     RELAY_DB: db as unknown as D1Database,
     RENDEZVOUS: new FakeNamespace() as any,
-    ASSETS: withAssets ? (fakeAssets as any) : undefined,
+    ASSETS: opts.assets === false ? undefined : (fakeAssets as any),
+    RELAY_DAEMON_ID: opts.daemonId,
   };
 }
 
@@ -36,107 +45,115 @@ async function seededStore(): Promise<{ db: FakeD1Database; store: D1RelayStore 
   return { db, store };
 }
 
-test("POST /session with a valid token sets the HttpOnly login cookie and redirects to /app/", async () => {
+async function seedCode(
+  store: D1RelayStore,
+  opts: { owner?: string; daemonId?: string; code?: string; expiresAt?: string } = {},
+): Promise<string> {
+  const rawCode = opts.code || `code-${crypto.randomUUID()}`;
+  await store.createClientEstablishCode({
+    id: `establish-${crypto.randomUUID()}`,
+    code_hash: await hashSecret(rawCode),
+    owner_user_id: opts.owner || "owner-1",
+    daemon_id: opts.daemonId || "",
+    label: "",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: opts.expiresAt || "2099-01-01T00:00:00.000Z",
+    consumed_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  return rawCode;
+}
+
+function cookieToken(setCookie: string): string {
+  const match = /torque_session=([^;]+)/.exec(setCookie || "");
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+test("GET /establish redeems a valid code, mints a session, sets the HttpOnly cookie, redirects to /app/", async () => {
   const { db, store } = await seededStore();
-  const fixture = await createClientSessionFixture(store, { ownerUserId: "owner-1" });
+  const code = await seedCode(store, { owner: "owner-1" });
   const response = await worker.fetch(
-    new Request("https://relay.runtorque.com/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: fixture.token }),
-    }),
+    new Request(`https://relay.runtorque.com/establish?code=${encodeURIComponent(code)}`),
     env(db),
   );
-  assert.equal(response.status, 303);
+  assert.equal(response.status, 302);
   assert.equal(response.headers.get("location"), "/app/");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   const cookie = response.headers.get("set-cookie") || "";
   assert.match(cookie, /^torque_session=/);
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /Secure/);
   assert.match(cookie, /SameSite=Lax/);
   assert.match(cookie, /Path=\//);
-  // The cookie must carry the raw token so the WS upgrade can re-derive the hash.
-  assert.ok(cookie.includes(encodeURIComponent(fixture.token)));
+  // The minted token is fresh and resolves to an active session by its hash.
+  const token = cookieToken(cookie);
+  assert.ok(token.length >= 16);
+  assert.ok(!token.includes(code), "minted session token must not be the establish code");
+  const session = await store.getClientSessionByTokenHash(await hashSecret(token));
+  assert.equal(session?.owner_user_id, "owner-1");
   db.close();
 });
 
-test("POST /session accepts a form-encoded body (plain same-origin HTML form)", async () => {
+test("GET /establish is single-use: a second redemption of the same code fails into reauth_required", async () => {
   const { db, store } = await seededStore();
-  const fixture = await createClientSessionFixture(store, { ownerUserId: "owner-1" });
-  const response = await worker.fetch(
-    new Request("https://relay.runtorque.com/session", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: `token=${encodeURIComponent(fixture.token)}`,
-    }),
-    env(db),
-  );
-  assert.equal(response.status, 303);
-  assert.match(response.headers.get("set-cookie") || "", /^torque_session=/);
+  const code = await seedCode(store, { owner: "owner-1" });
+  const first = await worker.fetch(new Request(`https://relay.runtorque.com/establish?code=${encodeURIComponent(code)}`), env(db));
+  assert.equal(first.status, 302);
+  const second = await worker.fetch(new Request(`https://relay.runtorque.com/establish?code=${encodeURIComponent(code)}`), env(db));
+  assert.equal(second.status, 401);
+  const body = await second.json() as { code?: string };
+  assert.equal(body.code, "reauth_required");
+  assert.equal(second.headers.get("set-cookie"), null);
   db.close();
 });
 
-test("POST /session rejects an unknown token with 401 and no cookie", async () => {
+test("GET /establish with an unknown code → 401 reauth_required, no cookie, no session minted", async () => {
+  const { db, store } = await seededStore();
+  const response = await worker.fetch(new Request("https://relay.runtorque.com/establish?code=nope"), env(db));
+  assert.equal(response.status, 401);
+  assert.equal((await response.json() as { code?: string }).code, "reauth_required");
+  assert.equal(response.headers.get("set-cookie"), null);
+  assert.equal(await store.getClientSessionByTokenHash(await hashSecret("nope")), null);
+  db.close();
+});
+
+test("GET /establish with an expired code → 401 reauth_required", async () => {
+  const { db, store } = await seededStore();
+  const code = await seedCode(store, { expiresAt: "2000-01-01T00:00:00.000Z" });
+  const response = await worker.fetch(new Request(`https://relay.runtorque.com/establish?code=${encodeURIComponent(code)}`), env(db));
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("set-cookie"), null);
+  db.close();
+});
+
+test("GET /establish with no code → 401 reauth_required", async () => {
   const { db } = await seededStore();
-  const response = await worker.fetch(
-    new Request("https://relay.runtorque.com/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: "not-a-real-token" }),
-    }),
-    env(db),
-  );
+  const response = await worker.fetch(new Request("https://relay.runtorque.com/establish"), env(db));
   assert.equal(response.status, 401);
-  assert.equal(response.headers.get("set-cookie"), null);
   db.close();
 });
 
-test("POST /session rejects a revoked session with 401 and no cookie", async () => {
+test("GET /establish rejects an owner-mismatched code against the configured daemon instance", async () => {
   const { db, store } = await seededStore();
-  const fixture = await createClientSessionFixture(store, { ownerUserId: "owner-1" });
-  await store.revokeClientSession(fixture.sessionId);
-  const response = await worker.fetch(
-    new Request("https://relay.runtorque.com/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: fixture.token }),
-    }),
-    env(db),
-  );
-  assert.equal(response.status, 401);
-  assert.equal(response.headers.get("set-cookie"), null);
-  db.close();
-});
-
-test("POST /session rejects an expired session with 401", async () => {
-  const { db, store } = await seededStore();
-  const fixture = await createClientSessionFixture(store, {
-    ownerUserId: "owner-1",
-    expiresAt: "2000-01-01T00:00:00.000Z",
+  await store.upsertInstance({
+    id: "daemon-1",
+    owner_user_id: "owner-A",
+    label: "daemon-1",
+    created_at: "2026-05-23T00:00:00.000Z",
+    last_seen_at: "2026-05-23T00:00:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "",
+    coordination_updated_at: "2026-05-23T00:00:00.000Z",
+    metadata: {},
   });
+  const code = await seedCode(store, { owner: "owner-B" });
   const response = await worker.fetch(
-    new Request("https://relay.runtorque.com/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: fixture.token }),
-    }),
-    env(db),
+    new Request(`https://relay.runtorque.com/establish?code=${encodeURIComponent(code)}`),
+    env(db, { daemonId: "daemon-1" }),
   );
   assert.equal(response.status, 401);
-  db.close();
-});
-
-test("POST /session with no token is a 400, not a 401", async () => {
-  const { db } = await seededStore();
-  const response = await worker.fetch(
-    new Request("https://relay.runtorque.com/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
-    }),
-    env(db),
-  );
-  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("set-cookie"), null);
   db.close();
 });
 
@@ -148,34 +165,39 @@ test("GET /app redirects to /app/ so relative bundle asset URLs resolve", async 
   db.close();
 });
 
-test("GET /app/ serves the bundle index.html from the assets binding", async () => {
+test("GET /app/ serves index.html with the injected same-origin RemoteConfig + Referrer-Policy", async () => {
   const { db } = await seededStore();
-  const response = await worker.fetch(new Request("https://relay.runtorque.com/app/"), env(db));
+  const response = await worker.fetch(new Request("https://relay.runtorque.com/app/"), env(db, { daemonId: "daemon-1" }));
   assert.equal(response.status, 200);
-  assert.equal(await response.text(), "asset:/index.html");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  const html = await response.text();
+  assert.ok(html.includes('"relayBaseUrl":"https://relay.runtorque.com"'), "relayBaseUrl = request origin");
+  assert.ok(html.includes('"daemonId":"daemon-1"'));
+  assert.ok(html.includes('"authMode":"cookie"'));
+  assert.ok(!html.includes(">{}</script>"), "empty config tag must be replaced");
   db.close();
 });
 
-test("GET /app/js/app.js maps to the asset path with the /app prefix stripped", async () => {
+test("GET /app/js/app.js maps to the asset path with the /app prefix stripped (+ Referrer-Policy)", async () => {
   const { db } = await seededStore();
   const response = await worker.fetch(new Request("https://relay.runtorque.com/app/js/app.js"), env(db));
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   assert.equal(await response.text(), "asset:/js/app.js");
   db.close();
 });
 
 test("GET /app/ returns 500 when no assets binding is configured", async () => {
   const { db } = await seededStore();
-  const response = await worker.fetch(new Request("https://relay.runtorque.com/app/"), env(db, false));
+  const response = await worker.fetch(new Request("https://relay.runtorque.com/app/"), env(db, { assets: false }));
   assert.equal(response.status, 500);
   db.close();
 });
 
-test("the static-serve path never shadows the API routes (/health still required-mode JSON)", async () => {
+test("the establish/static routes never shadow the API routes (/health still required-mode JSON)", async () => {
   const { db } = await seededStore();
   const response = await worker.fetch(new Request("https://relay.runtorque.com/health"), env(db));
   assert.equal(response.status, 200);
-  const body = await response.json() as { auth_mode?: string };
-  assert.equal(body.auth_mode, "required");
+  assert.equal((await response.json() as { auth_mode?: string }).auth_mode, "required");
   db.close();
 });

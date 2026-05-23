@@ -24,27 +24,30 @@ import { hashSecret } from "../core/auth.js";
 import {
   RELAY_INSTANCE_COLUMNS,
   nowIso,
-  relayClientSessionValues,
+  relayClientEstablishCodeValues,
   relayDaemonCredentialValues,
   relayInstanceValues,
 } from "../core/sql.js";
 import type { JsonObject } from "../core/protocol.js";
 import type {
-  RelayClientSessionRecord,
+  RelayClientEstablishCodeRecord,
   RelayDaemonCredentialRecord,
   RelayInstanceRecord,
 } from "../core/ports.js";
 
 export const RELAY_DB_NAME = "torque-relay";
 
-// Column orders MUST stay aligned with migrations/0001_relay.sql and the value
-// helpers in core/sql.ts (which produce the values in exactly this order).
-export const RELAY_CLIENT_SESSION_COLUMNS = [
-  "session_id",
-  "token_hash",
+// Column orders MUST stay aligned with the migrations and the value helpers in
+// core/sql.ts (which produce the values in exactly this order).
+export const RELAY_CLIENT_ESTABLISH_CODE_COLUMNS = [
+  "id",
+  "code_hash",
   "owner_user_id",
+  "daemon_id",
+  "label",
   "created_at",
   "expires_at",
+  "consumed_at",
   "revoked_at",
   "metadata_json",
 ] as const;
@@ -61,13 +64,15 @@ export const RELAY_DAEMON_CREDENTIAL_COLUMNS = [
   "metadata_json",
 ] as const;
 
-const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+// The establish code is short-lived (the QR/link is scanned promptly); the
+// minted session it redeems for gets its own longer lifetime server-side.
+const DEFAULT_CODE_TTL_MS = 15 * 60 * 1000;
 
-export interface ClientSessionSeed {
-  /** Raw bearer/cookie token — print ONCE, never persist. */
-  rawToken: string;
-  record: RelayClientSessionRecord;
-  /** INSERT carrying only the token HASH (no raw token). */
+export interface ClientEstablishCodeSeed {
+  /** Raw single-use code — print ONCE for the QR/link, never persist. */
+  rawCode: string;
+  record: RelayClientEstablishCodeRecord;
+  /** INSERT carrying only the code HASH (no raw code). */
   statement: string;
 }
 
@@ -95,33 +100,38 @@ export function insertStatement(table: string, columns: readonly string[], value
   return `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${values.map(sqlLiteral).join(", ")});`;
 }
 
-export async function buildClientSessionSeed(args: {
+export async function buildClientEstablishCodeSeed(args: {
   ownerUserId: string;
-  rawToken?: string;
-  sessionId?: string;
+  daemonId?: string;
+  rawCode?: string;
+  id?: string;
+  label?: string;
   expiresAt?: string;
   now?: string;
-}): Promise<ClientSessionSeed> {
+}): Promise<ClientEstablishCodeSeed> {
   const ownerUserId = required(args.ownerUserId, "owner_user_id");
-  const rawToken = args.rawToken || randomToken();
+  const rawCode = args.rawCode || randomToken();
   const now = args.now || nowIso();
-  const record: RelayClientSessionRecord = {
-    session_id: args.sessionId || `session-${crypto.randomUUID()}`,
-    // Same trim-then-SHA256 the relay applies at auth time (core/auth.ts
-    // hashSecret); the seeded hash must match or the session never authenticates.
-    token_hash: await hashSecret(rawToken),
+  const record: RelayClientEstablishCodeRecord = {
+    id: args.id || `establish-${crypto.randomUUID()}`,
+    // Same trim-then-SHA256 the relay applies when redeeming the code at
+    // /establish (core/auth.ts hashSecret); the seeded hash must match exactly.
+    code_hash: await hashSecret(rawCode),
     owner_user_id: ownerUserId,
+    daemon_id: args.daemonId || "",
+    label: args.label || "",
     created_at: now,
-    expires_at: args.expiresAt || new Date(parseTime(now) + DEFAULT_SESSION_TTL_MS).toISOString(),
+    expires_at: args.expiresAt || new Date(parseTime(now) + DEFAULT_CODE_TTL_MS).toISOString(),
+    consumed_at: "",
     revoked_at: "",
     metadata: {},
   };
   const statement = insertStatement(
-    "relay_client_sessions",
-    RELAY_CLIENT_SESSION_COLUMNS,
-    relayClientSessionValues(record),
+    "relay_client_establish_codes",
+    RELAY_CLIENT_ESTABLISH_CODE_COLUMNS,
+    relayClientEstablishCodeValues(record),
   );
-  return { rawToken, record, statement };
+  return { rawCode, record, statement };
 }
 
 export function buildDaemonCredentialSeed(args: {
@@ -235,16 +245,21 @@ async function runCli(argv: string[]): Promise<void> {
     credentialId: args["credential-id"],
     label: args.label,
   });
-  const sessionSeed = await buildClientSessionSeed({ ownerUserId, expiresAt: args["session-expires"] });
+  const codeSeed = await buildClientEstablishCodeSeed({
+    ownerUserId,
+    daemonId,
+    expiresAt: args["code-expires"],
+  });
 
   // Private key: 0600, never printed.
   writeFileSync(keyOut, key.privateKeyPem, { mode: 0o600 });
-  // SQL: hash + public JWK only — no secrets.
-  writeFileSync(sqlOut, [...daemonSeed.statements, sessionSeed.statement].join("\n") + "\n", { mode: 0o600 });
+  // SQL: code HASH + public JWK only — no secrets (no raw code, no session token).
+  writeFileSync(sqlOut, [...daemonSeed.statements, codeSeed.statement].join("\n") + "\n", { mode: 0o600 });
 
+  const establishUrl = `https://relay.runtorque.com/establish?code=${encodeURIComponent(codeSeed.rawCode)}`;
   process.stdout.write(
     [
-      "# Seed written. The .sql file contains ONLY the hashed session token + PUBLIC key JWK (no secrets).",
+      "# Seed written. The .sql file contains ONLY the hashed establish code + PUBLIC key JWK (no secrets).",
       `# 1. Apply to the deployed D1:`,
       `#    npx wrangler d1 execute ${RELAY_DB_NAME} --remote --file ${sqlOut}`,
       `# 2. Daemon private key (0600, keep local, NEVER commit): ${keyOut}`,
@@ -252,8 +267,9 @@ async function runCli(argv: string[]): Promise<void> {
       `#    private_key_path=${keyOut} (mode 0600), TORQUE_EE_DAEMON_ID=${daemonId}`,
       `#    TORQUE_EE_RELAY_URL=wss://relay.runtorque.com`,
       "",
-      "# >>> CLIENT SESSION TOKEN — shown ONCE. Copy now; hand to the device out-of-band. <<<",
-      sessionSeed.rawToken,
+      "# >>> SINGLE-USE ESTABLISH LINK — shown ONCE, short-lived. QR/hand to the device; <<<",
+      "# >>> opening it mints the session cookie. The session token never appears here.   <<<",
+      establishUrl,
       "",
     ].join("\n"),
   );

@@ -188,3 +188,41 @@ test("SqliteRelayStore upsertInstance does not lower persisted fencing_epoch", a
   assert.equal((await store.getInstance("daemon-rotation"))?.fencing_epoch, 7);
   await store.close();
 });
+
+test("SqliteRelayStore client-establish codes are single-use, hashed, and expiry-gated", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await store.createClientEstablishCode({
+    id: "establish-1",
+    code_hash: "hash-code-1",
+    owner_user_id: "owner-1",
+    daemon_id: "daemon-1",
+    label: "QR",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: "2099-01-01T00:00:00.000Z",
+    consumed_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  // First redemption wins and stamps consumed_at.
+  const first = await store.consumeClientEstablishCode("hash-code-1", "2026-05-23T00:01:00.000Z");
+  assert.equal(first?.owner_user_id, "owner-1");
+  assert.equal(first?.consumed_at, "2026-05-23T00:01:00.000Z");
+  // Second redemption returns null (already consumed) — no double-mint.
+  assert.equal(await store.consumeClientEstablishCode("hash-code-1", "2026-05-23T00:02:00.000Z"), null);
+  // An expired code can never be redeemed.
+  await store.createClientEstablishCode({
+    id: "establish-2",
+    code_hash: "hash-code-2",
+    owner_user_id: "owner-1",
+    daemon_id: "",
+    label: "",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: "2000-01-01T00:00:00.000Z",
+    consumed_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  assert.equal(await store.consumeClientEstablishCode("hash-code-2", "2026-05-23T00:03:00.000Z"), null);
+  await store.close();
+});

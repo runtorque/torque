@@ -1,6 +1,7 @@
 import type { JsonObject, RelayEnvelope, RelayMessageKind } from "./protocol.js";
 import { endpointToJson, parseRelayEnvelope } from "./protocol.js";
 import type {
+  RelayClientEstablishCodeRecord,
   RelayClientSessionRecord,
   RelayDaemonCredentialRecord,
   RelayDeliveryState,
@@ -10,7 +11,7 @@ import type {
   StoredRelayMessage,
 } from "./ports.js";
 
-export const RELAY_SCHEMA_VERSION = 4;
+export const RELAY_SCHEMA_VERSION = 5;
 
 export const RELAY_INSTANCE_COORDINATION_COLUMNS = [
   { name: "fencing_epoch", definition: "INTEGER NOT NULL DEFAULT 0" },
@@ -106,6 +107,20 @@ export const RELAY_SCHEMA_STATEMENTS = [
     ON relay_auth_nonces (expires_at ASC)`,
   `CREATE INDEX IF NOT EXISTS idx_relay_client_sessions_owner
     ON relay_client_sessions (owner_user_id, expires_at ASC)`,
+  `CREATE TABLE IF NOT EXISTS relay_client_establish_codes (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,
+    owner_user_id TEXT NOT NULL,
+    daemon_id TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT NOT NULL DEFAULT '',
+    revoked_at TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_relay_client_establish_codes_owner
+    ON relay_client_establish_codes (owner_user_id, expires_at ASC)`,
   `INSERT OR REPLACE INTO relay_meta (key, value)
     VALUES ('schema_version', '${RELAY_SCHEMA_VERSION}')`,
 ];
@@ -181,6 +196,19 @@ export interface RelayMessageRow {
 export interface RelayPairingTokenRow {
   id: string;
   token_hash: string;
+  owner_user_id: string;
+  daemon_id: string;
+  label: string;
+  created_at: string;
+  expires_at: string;
+  consumed_at: string;
+  revoked_at: string;
+  metadata_json: string;
+}
+
+export interface RelayClientEstablishCodeRow {
+  id: string;
+  code_hash: string;
   owner_user_id: string;
   daemon_id: string;
   label: string;
@@ -273,6 +301,22 @@ export function normalizeRelayPairingTokenRow(row: RelayPairingTokenRow | null |
   };
 }
 
+export function normalizeRelayClientEstablishCodeRow(row: RelayClientEstablishCodeRow | null | undefined): RelayClientEstablishCodeRecord | null {
+  if (!row) return null;
+  return {
+    id: String(row.id || ""),
+    code_hash: String(row.code_hash || ""),
+    owner_user_id: String(row.owner_user_id || ""),
+    daemon_id: String(row.daemon_id || ""),
+    label: String(row.label || ""),
+    created_at: String(row.created_at || ""),
+    expires_at: String(row.expires_at || ""),
+    consumed_at: String(row.consumed_at || ""),
+    revoked_at: String(row.revoked_at || ""),
+    metadata: decodeJsonObject(row.metadata_json),
+  };
+}
+
 export function normalizeRelayDaemonCredentialRow(row: RelayDaemonCredentialRow | null | undefined): RelayDaemonCredentialRecord | null {
   if (!row) return null;
   return {
@@ -342,6 +386,21 @@ export function relayPairingTokenValues(record: RelayPairingTokenRecord): unknow
   return [
     record.id,
     record.token_hash,
+    record.owner_user_id,
+    record.daemon_id,
+    record.label,
+    record.created_at,
+    record.expires_at,
+    record.consumed_at,
+    record.revoked_at,
+    encodeJsonObject(record.metadata || {}),
+  ];
+}
+
+export function relayClientEstablishCodeValues(record: RelayClientEstablishCodeRecord): unknown[] {
+  return [
+    record.id,
+    record.code_hash,
     record.owner_user_id,
     record.daemon_id,
     record.label,
