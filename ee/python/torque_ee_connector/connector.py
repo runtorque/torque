@@ -630,6 +630,20 @@ def _assert_local_relay_url(ws_url: str) -> None:
     )
 
 
+def _row_recipient_is_user(row: Mapping[str, Any]) -> bool:
+    """Whether the row's resolved recipient is the canonical user.
+
+    The ``recipient_*`` fields are stamped onto the persisted direct-message
+    row by the daemon's canonical owner-aware resolver
+    (``torque.direct_message_mirrors.resolve_ask_recipient``).  The connector
+    consumes that resolution; it never re-derives ownership.
+    """
+    return (
+        str(row.get("recipient_kind", "") or "").strip() == "user"
+        and str(row.get("recipient_id", "") or "").strip() == "user"
+    )
+
+
 def _wire_kind_for_direct_message_row(row: Mapping[str, Any]) -> str:
     message_type = str(row.get("message_type", "message") or "message").strip()
     if message_type not in _DIRECT_MESSAGE_OUTBOUND_TYPES:
@@ -637,9 +651,14 @@ def _wire_kind_for_direct_message_row(row: Mapping[str, Any]) -> str:
     sender_kind = str(row.get("sender_kind", "") or "").strip()
     recipient_kind = str(row.get("recipient_kind", "") or "").strip()
     if message_type == "ask":
-        return "ask"
+        # Only genuinely user-destined asks reach the remote-client/user lane.
+        # Owner-routed asks (recipient is an engineer/architect) stay local.
+        return "ask" if _row_recipient_is_user(row) else ""
     if message_type == "ask_reply":
-        return "ask_reply"
+        # A reply mirrors the original ask with sender/recipient swapped, so the
+        # answerer is the sender.  Egress only replies to user-destined asks,
+        # i.e. where the user is the answerer.
+        return "ask_reply" if sender_kind == "user" else ""
     if message_type == "message" and sender_kind != "user" and recipient_kind == "user":
         return "agent_message"
     return ""

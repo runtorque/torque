@@ -37,7 +37,7 @@ from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import capture_deploy_boot_state
 from .remote_ingress import ingest_remote_user_agent_message
 from .direct_message_mirrors import (
-    ask_owner_recipient_is_user,
+    ask_recipient_is_user,
     ask_task_labels_for_owner_recipient,
     direct_ask_mirror_source_key,
     save_direct_ask_mirror,
@@ -15562,7 +15562,7 @@ async def main(connection=None):
                                       "message":
                                           "Ask requires a question"}
                         else:
-                            ask_targets_user = ask_owner_recipient_is_user(
+                            ask_targets_user = ask_recipient_is_user(
                                 state, cell)
                             # Keep parent in In Progress with
                             # "Awaiting Input" status

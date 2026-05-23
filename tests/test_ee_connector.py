@@ -13,6 +13,7 @@ if str(EE_PYTHON) not in sys.path:
 from torque_ee_connector.connector import (  # noqa: E402
     CONNECTOR_DEBUG_BUFFER_LIMIT,
     EnterpriseConnector,
+    _wire_kind_for_direct_message_row,
     build_daemon_ws_url,
     config_from_context,
 )
@@ -234,6 +235,92 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ask_envelope["kind"], "ask")
         self.assertEqual(ask_envelope["payload"]["blocking"], True)
 
+    async def test_owner_routed_asks_do_not_egress_to_user_lane(self):
+        # Consumer #3 of the canonical resolver: only user-destined asks may
+        # reach the {remote-client, user} lane.  An owner-routed ask
+        # (recipient=engineer) must NOT egress.
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+            remote_user_agent_message=lambda _payload: {"type": "ok"},
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        connector.started = True
+
+        # Engineer-owned worker's ask: recipient is the engineer, not the user.
+        await connector.on_direct_message({
+            "type": "direct_message_saved",
+            "row": {
+                "id": "msg-ask-owner",
+                "thread_id": "user-agent:user:worker-1",
+                "sender_id": "worker-1",
+                "sender_kind": "worker",
+                "recipient_id": "eng-1",
+                "recipient_kind": "engineer",
+                "message": "approve?",
+                "message_type": "ask",
+                "created_at": 1779480001.0,
+                "blocking": True,
+            },
+        })
+        self.assertTrue(connector._outbound_queue.empty())
+
+        # Reply to an owner-routed ask: answerer (sender) is the engineer.
+        await connector.on_direct_message({
+            "type": "direct_message_saved",
+            "row": {
+                "id": "msg-ask-owner-reply",
+                "thread_id": "user-agent:user:worker-1",
+                "sender_id": "eng-1",
+                "sender_kind": "engineer",
+                "recipient_id": "worker-1",
+                "recipient_kind": "worker",
+                "message": "go ahead",
+                "message_type": "ask_reply",
+                "created_at": 1779480002.0,
+            },
+        })
+        self.assertTrue(connector._outbound_queue.empty())
+
+        # A genuinely user-destined ask + its user reply DO egress.
+        await connector.on_direct_message({
+            "type": "direct_message_saved",
+            "row": {
+                "id": "msg-ask-user",
+                "thread_id": "user-agent:user:arch-1",
+                "sender_id": "arch-1",
+                "sender_kind": "architect",
+                "recipient_id": "user",
+                "recipient_kind": "user",
+                "message": "ship it?",
+                "message_type": "ask",
+                "created_at": 1779480003.0,
+                "blocking": True,
+            },
+        })
+        ask_envelope = await connector._outbound_queue.get()
+        self.assertEqual(ask_envelope["kind"], "ask")
+
+        await connector.on_direct_message({
+            "type": "direct_message_saved",
+            "row": {
+                "id": "msg-ask-user-reply",
+                "thread_id": "user-agent:user:arch-1",
+                "sender_id": "user",
+                "sender_kind": "user",
+                "recipient_id": "arch-1",
+                "recipient_kind": "architect",
+                "message": "yes",
+                "message_type": "ask_reply",
+                "created_at": 1779480004.0,
+            },
+        })
+        reply_envelope = await connector._outbound_queue.get()
+        self.assertEqual(reply_envelope["kind"], "ask_reply")
+        self.assertTrue(connector._outbound_queue.empty())
+
     async def test_user_to_agent_direct_messages_do_not_loop_outbound(self):
         context = SimpleNamespace(
             profile="desktop",
@@ -301,6 +388,94 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connector.observed_events[0], "event-25")
         self.assertEqual(connector.received_envelopes[0], "ready-25")
         self.assertEqual(connector.sent_envelopes[0], "ping-25")
+
+
+class WireKindGateTests(unittest.TestCase):
+    """The egress gate consumes the resolver-stamped row fields only."""
+
+    def _row(self, **overrides):
+        row = {
+            "message_type": "message",
+            "sender_kind": "worker",
+            "sender_id": "worker-1",
+            "recipient_kind": "user",
+            "recipient_id": "user",
+        }
+        row.update(overrides)
+        return row
+
+    def test_user_destined_ask_egresses(self):
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(message_type="ask")
+            ),
+            "ask",
+        )
+
+    def test_owner_routed_ask_is_suppressed(self):
+        for recipient_kind, recipient_id in (
+            ("engineer", "eng-1"),
+            ("architect", "arch-1"),
+            ("user", ""),  # malformed: kind without canonical id
+        ):
+            self.assertEqual(
+                _wire_kind_for_direct_message_row(
+                    self._row(
+                        message_type="ask",
+                        recipient_kind=recipient_kind,
+                        recipient_id=recipient_id,
+                    )
+                ),
+                "",
+                (recipient_kind, recipient_id),
+            )
+
+    def test_ask_reply_egresses_only_when_user_answered(self):
+        # Reply mirror swaps sender/recipient: the answerer is the sender.
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(
+                    message_type="ask_reply",
+                    sender_kind="user",
+                    sender_id="user",
+                    recipient_kind="architect",
+                    recipient_id="arch-1",
+                )
+            ),
+            "ask_reply",
+        )
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(
+                    message_type="ask_reply",
+                    sender_kind="engineer",
+                    sender_id="eng-1",
+                    recipient_kind="worker",
+                    recipient_id="worker-1",
+                )
+            ),
+            "",
+        )
+
+    def test_agent_message_gate_unchanged(self):
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(message_type="message")
+            ),
+            "agent_message",
+        )
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(
+                    message_type="message",
+                    sender_kind="user",
+                    sender_id="user",
+                    recipient_kind="worker",
+                    recipient_id="worker-1",
+                )
+            ),
+            "",
+        )
 
 
 class EnterpriseConnectorSyncTests(unittest.TestCase):
