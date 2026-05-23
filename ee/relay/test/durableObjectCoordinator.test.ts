@@ -173,6 +173,9 @@ test("Durable Object closes hibernated daemon when current instance owner change
     label: "daemon-1",
     created_at: "2026-05-23T00:01:00.000Z",
     last_seen_at: "2026-05-23T00:01:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "",
+    coordination_updated_at: "2026-05-23T00:01:00.000Z",
     metadata: {},
   });
   const staleDaemon = new FakeCfWebSocket({
@@ -210,6 +213,9 @@ test("Durable Object closes hibernated client when current instance owner change
     label: "daemon-1",
     created_at: "2026-05-23T00:01:00.000Z",
     last_seen_at: "2026-05-23T00:01:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "",
+    coordination_updated_at: "2026-05-23T00:01:00.000Z",
     metadata: {},
   });
   const staleClient = new FakeCfWebSocket({

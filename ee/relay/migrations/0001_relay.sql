@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS relay_instances (
   label TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
+  fencing_epoch INTEGER NOT NULL DEFAULT 0,
+  active_credential_id TEXT NOT NULL DEFAULT '',
+  coordination_updated_at TEXT NOT NULL DEFAULT '',
   metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -96,4 +99,4 @@ CREATE INDEX IF NOT EXISTS idx_relay_auth_nonces_expires
 CREATE INDEX IF NOT EXISTS idx_relay_client_sessions_owner
   ON relay_client_sessions (owner_user_id, expires_at ASC);
 
-INSERT OR REPLACE INTO relay_meta (key, value) VALUES ('schema_version', '3');
+INSERT OR REPLACE INTO relay_meta (key, value) VALUES ('schema_version', '4');

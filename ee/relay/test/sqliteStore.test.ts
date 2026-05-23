@@ -26,10 +26,15 @@ test("SqliteRelayStore migrates and persists instances/messages through the Rela
     label: "Laptop",
     created_at: "2026-05-22T00:00:00.000Z",
     last_seen_at: "2026-05-22T00:00:01.000Z",
+    fencing_epoch: 3,
+    active_credential_id: "cred-1",
+    coordination_updated_at: "2026-05-22T00:00:01.000Z",
     metadata: { profile: "desktop" },
   });
 
   assert.equal(instance.id, "daemon-1");
+  assert.equal(instance.fencing_epoch, 3);
+  assert.equal(instance.active_credential_id, "cred-1");
   assert.deepEqual((await store.getInstance("daemon-1"))?.metadata, { profile: "desktop" });
 
   const saved = await store.appendMessage(envelope(), "to_daemon");
@@ -107,5 +112,79 @@ test("SqliteRelayStore persists auth credentials, sessions, and nonce replay gua
   assert.equal((await store.getClientSessionByTokenHash("hash-session-1"))?.session_id, "session-1");
   assert.equal((await store.getClientSession("session-1"))?.owner_user_id, "owner-1");
   assert.equal((await store.revokeClientSession("session-1", "2026-05-23T00:04:00.000Z"))?.revoked_at, "2026-05-23T00:04:00.000Z");
+  await store.close();
+});
+
+test("SqliteRelayStore claimInstanceOwner enforces owner-CAS and monotonic fencing epochs", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const first = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 1,
+    now: "2026-05-23T00:00:00.000Z",
+  });
+  assert.equal(first.claimed, true);
+  assert.equal(first.record?.fencing_epoch, 1);
+
+  const sameOwnerHigherEpoch = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 2,
+    now: "2026-05-23T00:00:01.000Z",
+  });
+  assert.equal(sameOwnerHigherEpoch.claimed, true);
+  assert.equal(sameOwnerHigherEpoch.record?.fencing_epoch, 2);
+
+  const stale = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 1,
+  });
+  assert.equal(stale.claimed, false);
+  assert.equal(stale.reason, "stale_fencing_epoch");
+
+  const wrongOwner = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-2",
+    credentialId: "cred-2",
+    fencingEpoch: 3,
+  });
+  assert.equal(wrongOwner.claimed, false);
+  assert.equal(wrongOwner.reason, "daemon_owner_mismatch");
+  assert.equal((await store.getInstance("daemon-cas"))?.owner_user_id, "owner-1");
+  assert.equal((await store.getInstance("daemon-cas"))?.fencing_epoch, 2);
+  await store.close();
+});
+
+test("SqliteRelayStore upsertInstance does not lower persisted fencing_epoch", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await store.claimInstanceOwner({
+    id: "daemon-rotation",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 7,
+    now: "2026-05-23T00:00:00.000Z",
+  });
+
+  const rotated = await store.upsertInstance({
+    id: "daemon-rotation",
+    owner_user_id: "owner-1",
+    label: "rotated",
+    created_at: "2026-05-23T00:00:00.000Z",
+    last_seen_at: "2026-05-23T00:01:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "cred-2",
+    coordination_updated_at: "2026-05-23T00:01:00.000Z",
+    metadata: {},
+  });
+
+  assert.equal(rotated.active_credential_id, "cred-2");
+  assert.equal(rotated.fencing_epoch, 7);
+  assert.equal((await store.getInstance("daemon-rotation"))?.fencing_epoch, 7);
   await store.close();
 });

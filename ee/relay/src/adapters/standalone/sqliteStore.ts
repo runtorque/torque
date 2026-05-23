@@ -7,6 +7,8 @@ import type { RelayEnvelope } from "../../core/protocol.js";
 import { RelayConflictError, RelayStoreError, errorMessage } from "../../core/errors.js";
 import type {
   AppendMessageResult,
+  ClaimInstanceOwnerArgs,
+  ClaimInstanceOwnerResult,
   ListRelayMessagesOptions,
   PendingRelayMessagesOptions,
   RelayClientSessionRecord,
@@ -18,8 +20,11 @@ import type {
   StoredRelayMessage,
 } from "../../core/ports.js";
 import {
+  RELAY_INSTANCE_COORDINATION_COLUMNS,
+  RELAY_INSTANCE_SELECT,
   RELAY_MESSAGE_COLUMNS,
   RELAY_MESSAGE_SELECT,
+  RELAY_SCHEMA_VERSION,
   RELAY_SCHEMA_STATEMENTS,
   clampRelayLimit,
   normalizeRelayClientSessionRow,
@@ -61,6 +66,7 @@ export class SqliteRelayStore implements RelayStore {
 
   constructor(path = ":memory:") {
     this.db = new DatabaseSync(path) as DatabaseSyncLike;
+    this.db.exec("PRAGMA busy_timeout=5000");
   }
 
   async migrate(): Promise<void> {
@@ -68,6 +74,7 @@ export class SqliteRelayStore implements RelayStore {
       for (const statement of RELAY_SCHEMA_STATEMENTS) {
         this.db.exec(statement);
       }
+      this.ensureRelayInstanceCoordinationColumnsSync();
     });
   }
 
@@ -76,17 +83,98 @@ export class SqliteRelayStore implements RelayStore {
       assertNonEmpty(record.id, "instance id");
       this.db.prepare(
         `INSERT INTO relay_instances
-          (id, owner_user_id, label, created_at, last_seen_at, metadata_json)
-         VALUES (?, ?, ?, ?, ?, ?)
+          (id, owner_user_id, label, created_at, last_seen_at, fencing_epoch, active_credential_id, coordination_updated_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
           owner_user_id=excluded.owner_user_id,
           label=excluded.label,
           last_seen_at=excluded.last_seen_at,
+          fencing_epoch=MAX(relay_instances.fencing_epoch, excluded.fencing_epoch),
+          active_credential_id=excluded.active_credential_id,
+          coordination_updated_at=excluded.coordination_updated_at,
           metadata_json=excluded.metadata_json`,
       ).run(...relayInstanceValues(record));
       const saved = this.getInstanceSync(record.id);
       if (!saved) throw new RelayStoreError(`failed to save relay instance ${record.id}`);
       return saved;
+    });
+  }
+
+  async claimInstanceOwner(args: ClaimInstanceOwnerArgs): Promise<ClaimInstanceOwnerResult> {
+    return this.operation("claimInstanceOwner", () => {
+      const id = assertNonEmpty(args.id, "instance id");
+      const ownerUserId = assertNonEmpty(args.ownerUserId, "owner_user_id");
+      const fencingEpoch = Math.max(0, Math.floor(Number(args.fencingEpoch || 0)));
+      const now = String(args.now || nowIso());
+      let saved: RelayInstanceRecord | null = null;
+
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const existing = this.getInstanceSync(id);
+        if (existing?.owner_user_id && existing.owner_user_id !== ownerUserId) {
+          this.db.exec("ROLLBACK");
+          return { claimed: false, record: existing, reason: "daemon_owner_mismatch" };
+        }
+        if (existing && Number(existing.fencing_epoch || 0) > fencingEpoch) {
+          this.db.exec("ROLLBACK");
+          return { claimed: false, record: existing, reason: "stale_fencing_epoch" };
+        }
+
+        const record: RelayInstanceRecord = {
+          id,
+          owner_user_id: ownerUserId,
+          label: String(args.label || existing?.label || id),
+          created_at: existing?.created_at || now,
+          last_seen_at: now,
+          fencing_epoch: fencingEpoch,
+          active_credential_id: String(args.credentialId || existing?.active_credential_id || ""),
+          coordination_updated_at: now,
+          metadata: args.metadata || existing?.metadata || {},
+        };
+
+        if (existing) {
+          this.db.prepare(
+            `UPDATE relay_instances
+             SET owner_user_id=?, label=?, last_seen_at=?, fencing_epoch=?,
+                 active_credential_id=?, coordination_updated_at=?, metadata_json=?
+             WHERE id=? AND (owner_user_id='' OR owner_user_id=?) AND fencing_epoch<=?`,
+          ).run(
+            record.owner_user_id,
+            record.label,
+            record.last_seen_at,
+            record.fencing_epoch,
+            record.active_credential_id,
+            record.coordination_updated_at,
+            relayInstanceValues(record)[8],
+            id,
+            ownerUserId,
+            fencingEpoch,
+          );
+        } else {
+          this.db.prepare(
+            `INSERT INTO relay_instances
+              (id, owner_user_id, label, created_at, last_seen_at, fencing_epoch, active_credential_id, coordination_updated_at, metadata_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(...relayInstanceValues(record));
+        }
+
+        saved = this.getInstanceSync(id);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {
+          // Ignore rollback errors; the original error is more useful.
+        }
+        throw error;
+      }
+
+      if (!saved) return { claimed: false, reason: "relay_instance_claim_failed" };
+      if (saved.owner_user_id !== ownerUserId) return { claimed: false, record: saved, reason: "daemon_owner_mismatch" };
+      if (Number(saved.fencing_epoch || 0) > fencingEpoch) {
+        return { claimed: false, record: saved, reason: "stale_fencing_epoch" };
+      }
+      return { claimed: true, record: saved };
     });
   }
 
@@ -359,10 +447,20 @@ export class SqliteRelayStore implements RelayStore {
 
   private getInstanceSync(id: string): RelayInstanceRecord | null {
     const row = this.db.prepare(
-      `SELECT id, owner_user_id, label, created_at, last_seen_at, metadata_json
+      `SELECT ${RELAY_INSTANCE_SELECT}
        FROM relay_instances WHERE id=?`,
     ).get(String(id || "").trim()) as RelayInstanceRow | undefined;
     return normalizeRelayInstanceRow(row);
+  }
+
+  private ensureRelayInstanceCoordinationColumnsSync(): void {
+    const rows = this.db.prepare("PRAGMA table_info(relay_instances)").all() as Array<{ name?: string }>;
+    const names = new Set(rows.map((row) => String(row.name || "")));
+    for (const column of RELAY_INSTANCE_COORDINATION_COLUMNS) {
+      if (names.has(column.name)) continue;
+      this.db.exec(`ALTER TABLE relay_instances ADD COLUMN ${column.name} ${column.definition}`);
+    }
+    this.db.prepare("INSERT OR REPLACE INTO relay_meta (key, value) VALUES ('schema_version', ?)").run(String(RELAY_SCHEMA_VERSION));
   }
 
   private getPairingTokenByHashSync(tokenHash: string): RelayPairingTokenRecord | null {

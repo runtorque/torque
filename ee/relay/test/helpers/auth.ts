@@ -45,6 +45,9 @@ export async function createDaemonCredentialFixture(
     label: args.label || daemonId,
     created_at: now,
     last_seen_at: now,
+    fencing_epoch: 0,
+    active_credential_id: credentialId,
+    coordination_updated_at: now,
     metadata: {},
   });
   return { credentialId, daemonId, ownerUserId, publicKeyJwk, privateKey: keyPair.privateKey };

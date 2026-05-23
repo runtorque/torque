@@ -4,7 +4,7 @@ import WebSocket, { WebSocketServer } from "ws";
 
 import { RelayRuntime, toJsonObject } from "../../core/runtime.js";
 import { parseRelayEnvelope, parseRelayEnvelopeJson, type JsonObject, type RelayEnvelope } from "../../core/protocol.js";
-import type { ClientAuthPrincipal, DaemonAuthPrincipal, RelaySocket } from "../../core/ports.js";
+import type { ClientAuthPrincipal, DaemonAuthPrincipal, RelayCoordinator, RelaySocket } from "../../core/ports.js";
 import { errorMessage } from "../../core/errors.js";
 import {
   LOCAL_DEV_AUTH_MODE,
@@ -21,6 +21,14 @@ import {
 import { nowIso } from "../../core/sql.js";
 import { SqliteRelayStore } from "./sqliteStore.js";
 import { StandaloneRegistryCoordinator } from "./registryCoordinator.js";
+import {
+  createRedisClientsFromUrl,
+  DEFAULT_REDIS_LEASE_TTL_MS,
+  DEFAULT_REDIS_RENEW_INTERVAL_MS,
+  RedisRelayCoordinator,
+} from "./redisCoordinator.js";
+
+export type StandaloneRelayCoordinationMode = "registry" | "redis";
 
 export interface StandaloneRelayServerOptions {
   port?: number;
@@ -29,14 +37,27 @@ export interface StandaloneRelayServerOptions {
   replayLimit?: number;
   authMode?: StandaloneAuthMode;
   bootstrapToken?: string;
+  coordination?: StandaloneRelayCoordinationMode;
+  redisUrl?: string;
+  redisKeyPrefix?: string;
+  redisLeaseTtlMs?: number;
+  redisRenewIntervalMs?: number;
+  allowInMemoryRedisStoreForTests?: boolean;
 }
+
+type StandaloneCoordinator = RelayCoordinator & {
+  readonly kind?: string;
+  close?: () => Promise<void> | void;
+  leaseTtlMs?: number;
+  renewIntervalMs?: number;
+};
 
 export interface StandaloneRelayServerHandle {
   listen(): Promise<void>;
   close(): Promise<void>;
   server: http.Server;
   store: SqliteRelayStore;
-  coordinator: StandaloneRegistryCoordinator;
+  coordinator: StandaloneCoordinator;
   runtime: RelayRuntime;
   authMode: StandaloneAuthMode;
 }
@@ -49,7 +70,7 @@ export async function createStandaloneRelayServer(
   const authMode = selectStandaloneAuthMode({ host, requestedMode: requestedAuthMode });
   const store = new SqliteRelayStore(options.databasePath || process.env.TORQUE_RELAY_DB || ":memory:");
   await store.migrate();
-  const coordinator = new StandaloneRegistryCoordinator();
+  const coordinator = await createStandaloneCoordinator(store, options);
   const runtime = new RelayRuntime(store, coordinator, {
     replayLimit: options.replayLimit,
     relayId: "standalone",
@@ -103,10 +124,13 @@ export async function createStandaloneRelayServer(
       }
       wss.close((wssError) => {
         server.close((serverError) => {
-          void store.close();
-          const error = wssError || serverError;
-          if (error) reject(error);
-          else resolve();
+          void (async () => {
+            await coordinator.close?.();
+            await store.close();
+      const error = wssError || serverError;
+      if (error) reject(error);
+      else resolve();
+          })().catch(reject);
         });
       });
     }),
@@ -118,7 +142,7 @@ async function handleHttpRequest(
   res: http.ServerResponse,
   runtime: RelayRuntime,
   store: SqliteRelayStore,
-  coordinator: StandaloneRegistryCoordinator,
+  coordinator: StandaloneCoordinator,
   authMode: StandaloneAuthMode,
   bootstrapToken: string,
 ): Promise<void> {
@@ -129,6 +153,8 @@ async function handleHttpRequest(
       relay: "torque-ee-relay",
       storage: store.kind,
       coordination: coordinator.kind,
+      redis_lease_ttl_ms: coordinator.kind === "redis-lease" ? coordinator.leaseTtlMs : undefined,
+      redis_renew_interval_ms: coordinator.kind === "redis-lease" ? coordinator.renewIntervalMs : undefined,
       protocol_version: 1,
       auth_mode: authMode,
     });
@@ -196,6 +222,9 @@ async function handleHttpRequest(
       label: pairing.label || daemonId,
       created_at: now,
       last_seen_at: now,
+      fencing_epoch: 0,
+      active_credential_id: credential.credential_id,
+      coordination_updated_at: now,
       metadata: { paired_by: "standalone" },
     });
     writeJson(res, 201, { type: "ok", credential_id: credential.credential_id, daemon_id: daemonId, owner_user_id: pairing.owner_user_id });
@@ -253,6 +282,41 @@ async function handleHttpRequest(
   }
 
   writeJson(res, 404, { type: "error", message: "not found" });
+}
+
+async function createStandaloneCoordinator(
+  store: SqliteRelayStore,
+  options: StandaloneRelayServerOptions,
+): Promise<StandaloneCoordinator> {
+  const requested = cleanOptional(options.coordination || process.env.TORQUE_RELAY_COORDINATION || "") as StandaloneRelayCoordinationMode | "";
+  if (requested && requested !== "registry" && requested !== "redis") {
+    throw new Error(`unknown relay coordination mode: ${requested}`);
+  }
+  const redisUrl = cleanOptional(options.redisUrl || process.env.TORQUE_RELAY_REDIS_URL || "");
+  if (requested === "redis" && !redisUrl) {
+    throw new Error("TORQUE_RELAY_REDIS_URL is required when TORQUE_RELAY_COORDINATION=redis");
+  }
+  if (requested === "registry" && redisUrl) {
+    throw new Error("ambiguous relay coordination config: registry mode cannot be combined with TORQUE_RELAY_REDIS_URL");
+  }
+  if (!redisUrl && requested !== "redis") {
+    return new StandaloneRegistryCoordinator();
+  }
+  const databasePath = cleanOptional(options.databasePath || process.env.TORQUE_RELAY_DB || ":memory:");
+  if (databasePath === ":memory:" && !options.allowInMemoryRedisStoreForTests) {
+    throw new Error("Redis coordination requires a shared durable TORQUE_RELAY_DB; :memory: would split owner state per process");
+  }
+  const clients = await createRedisClientsFromUrl(redisUrl);
+  return new RedisRelayCoordinator({
+    store,
+    commands: clients.commands,
+    publisher: clients.publisher,
+    subscriber: clients.subscriber,
+    keyPrefix: cleanOptional(options.redisKeyPrefix || process.env.TORQUE_RELAY_REDIS_PREFIX || ""),
+    leaseTtlMs: parsePositiveInt(options.redisLeaseTtlMs ?? process.env.TORQUE_RELAY_REDIS_LEASE_TTL_MS, DEFAULT_REDIS_LEASE_TTL_MS),
+    renewIntervalMs: parsePositiveInt(options.redisRenewIntervalMs ?? process.env.TORQUE_RELAY_REDIS_RENEW_INTERVAL_MS, DEFAULT_REDIS_RENEW_INTERVAL_MS),
+    closeClients: clients.close,
+  });
 }
 
 type WsRoute = {
@@ -450,6 +514,16 @@ function cleanRequired(value: string, name: string): string {
   const text = String(value || "").trim();
   if (!text) throw new Error(`${name} is required`);
   return text;
+}
+
+function cleanOptional(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function parsePositiveInt(value: unknown, fallback: number): number {
+  const numeric = Math.floor(Number(value || fallback));
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  return numeric;
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
