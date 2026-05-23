@@ -49,9 +49,17 @@
       // Default: bearer when a token was handed to JS, else cookie.
       authMode = sessionToken ? 'bearer' : 'cookie';
     }
+    // Ask UI is enabled BY DEFAULT (P6-V1 completion): the canonical
+    // user-destination gating (TORQUE:534) is live on main and the connector
+    // egress hands a clean user-destined ask stream, so ask cards render +
+    // answer the SERVER-resolved stream. The flag never implies client-side
+    // recipient filtering — user-destination is resolved server-side. Set
+    // ask_enabled=0 to opt out.
     var askEnabled = raw.askEnabled !== undefined
       ? !!raw.askEnabled
-      : (raw.ask_enabled !== undefined ? _truthy(raw.ask_enabled) : false);
+      : (raw.ask_enabled !== undefined ? _truthy(raw.ask_enabled) : true);
+    var snapshotLimit = parseInt(raw.snapshotLimit || raw.snapshot_limit || '', 10);
+    if (!isFinite(snapshotLimit) || snapshotLimit <= 0) snapshotLimit = 0;
     var errors = [];
     if (!relayBaseUrl) errors.push('relayBaseUrl is required');
     if (!daemonId) errors.push('daemonId is required');
@@ -61,13 +69,9 @@
       sessionToken: sessionToken,
       authMode: authMode,
       clientId: clientId,
-      // Ask UI is gated OFF by default: ask render + ask answering only light up
-      // once TORQUE:534 + the connector user-destination egress gating land and
-      // a clean user-destined ask stream exists. Until then the conversation
-      // surface (user_message/agent_message) ships unblocked. The flag never
-      // implies client-side recipient filtering — user-destination is resolved
-      // server-side.
       askEnabled: askEnabled,
+      // Optional client-requested snapshot size; 0 = omit (server uses default).
+      snapshotLimit: snapshotLimit,
       valid: errors.length === 0,
       errors: errors,
     };
@@ -130,7 +134,7 @@
       var params = _paramsFrom(loc);
       ['relayBaseUrl', 'relay_base_url', 'daemonId', 'daemon_id', 'sessionToken',
         'session_token', 'authMode', 'auth_mode', 'clientId', 'client_id',
-        'askEnabled', 'ask_enabled', 'ask'].forEach(function(name) {
+        'askEnabled', 'ask_enabled', 'ask', 'snapshotLimit', 'snapshot_limit'].forEach(function(name) {
         if (params[name] !== undefined) merged[name] = params[name];
       });
       if (params.ask !== undefined && merged.ask_enabled === undefined

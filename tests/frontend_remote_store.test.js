@@ -85,33 +85,77 @@ test('duplicate message id upserts (no duplicate bubble)', () => {
   assert.equal(store.conversations['w'].messages[0].body, 'first-edited');
 });
 
-test('snapshot applies recent history before live, sorted, deduping live overlap', () => {
+test('snapshot consumes the real :578 row shape (flat payload + kind) oldest-first', () => {
   const store = loadStore();
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
-  // Snapshot carries BOTH sides of the conversation (user + agent rows) and
-  // reuses the agent_message payload shape. Provided out of order on purpose.
-  store.ingestSnapshot({
+  // Shipped :578 row shape: a FLAT live payload dict + a top-level `kind`
+  // discriminator (NOT a nested envelope). Both sides appear: an agent_message
+  // and the user's own mirrored ask_reply (sender_kind="user"). Out of order on
+  // purpose to prove oldest-first ordering.
+  const applied = store.ingestSnapshot({
     kind: 'snapshot', created_at: iso(now),
-    payload: { messages: [
-      { agent_id: 'w', message_id: 's2', message: 'second', sender_kind: 'worker',
-        created_at: iso(now - 1000) },
-      { agent_id: 'w', message_id: 's1', message: 'first (user)', sender_kind: 'user',
-        created_at: iso(now - 2000) },
-    ] },
+    payload: { lane: 'user-agent', count: 2, limit: 100, truncated: false, ref_id: 'req-1',
+      messages: [
+        { kind: 'agent_message', agent_id: 'w', message_id: 's2', message: 'second',
+          message_type: 'message', sender_kind: 'worker', sender_name: 'w',
+          recipient_kind: 'user', created_at: iso(now - 1000) },
+        { kind: 'ask_reply', agent_id: 'w', message_id: 's1', message: 'my earlier answer',
+          message_type: 'ask_reply', sender_kind: 'user', reply_to_id: 'ask-0',
+          created_at: iso(now - 2000) },
+      ] },
   });
+  assert.equal(applied, 2, 'both rows consumed (real shape, not skipped)');
   assert.equal(store.snapshotApplied, true);
   const conv = store.conversations['w'];
   assert.equal(conv.messages.length, 2);
   assert.equal(conv.messages[0].id, 's1', 'sorted oldest-first');
-  assert.equal(conv.messages[0].sender, 'user', 'sender derived from sender_kind');
+  assert.equal(conv.messages[0].sender, 'user', 'user ask_reply derives sender from sender_kind');
   assert.equal(conv.messages[1].sender, 'agent');
   assert.equal(conv.unread, 0, 'snapshot history does not bump unread');
 
-  // A live message overlapping a snapshot row upserts onto the same bubble.
+  // A live message overlapping a snapshot row upserts onto the same bubble
+  // (de-dupe vs live stream by message id).
   store.ingestInbound(agentMessage('s2', 'w', 'second (live edit)'));
   assert.equal(store.conversations['w'].messages.length, 2, 'overlap de-dupes via upsert');
   assert.equal(store.conversations['w'].messageIndex['s2'].body, 'second (live edit)');
+});
+
+test('snapshot unanswered blocking ask is actionable but does not bump unread', () => {
+  const store = loadStore();
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: iso(now),
+    payload: { messages: [
+      { kind: 'ask', agent_id: 'w', message_id: 'ask-9', message: 'approve deploy?',
+        message_type: 'ask', blocking: true, sender_kind: 'worker', recipient_kind: 'user',
+        created_at: iso(now - 5000) },
+    ] },
+  });
+  assert.equal(store.pendingAsks('w').length, 1,
+    'a still-pending snapshot ask remains answerable after reconnect');
+  assert.equal(store.conversations['w'].unread, 0, 'snapshot ask does not bump unread');
+});
+
+test('snapshot ask + its ask_reply both present render resolved (not pending)', () => {
+  const store = loadStore();
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: iso(now),
+    payload: { messages: [
+      { kind: 'ask', agent_id: 'w', message_id: 'ask-7', message: 'ok?',
+        message_type: 'ask', blocking: true, sender_kind: 'worker', recipient_kind: 'user',
+        created_at: iso(now - 3000) },
+      { kind: 'ask_reply', agent_id: 'w', message_id: 'rep-7', message: 'yes',
+        message_type: 'ask_reply', sender_kind: 'user', reply_to_id: 'ask-7',
+        created_at: iso(now - 2000) },
+    ] },
+  });
+  assert.equal(store.pendingAsks('w').length, 0,
+    'already-answered ask (reply also in snapshot) is resolved');
+  assert.equal(store.conversations['w'].messages.length, 2);
 });
 
 test('empty/absent snapshot degrades gracefully (replay-only baseline)', () => {

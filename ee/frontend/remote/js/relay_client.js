@@ -211,7 +211,31 @@
     this.lastReady = payload;
     this._reconnectAttempts = 0; // reset backoff on a clean ready
     this._setStatus(STATUS.READY, { epoch: this.epoch, replayed: payload.replayed });
+    this._requestSnapshot();
     this._flushOutbound();
+  };
+
+  // Request recent-conversation history on connect (after `ready`). The
+  // connector (TORQUE:578) replies with one `snapshot` envelope. Sent on every
+  // `ready` (i.e. once per connection); a reconnect re-requests, and snapshot
+  // rows de-dupe against the live stream by message id, so re-requesting is
+  // harmless. Honors an optional configured limit (server clamps to its cap).
+  RemoteRelayClient.prototype._requestSnapshot = function() {
+    if (!this.config) return;
+    var payload = {};
+    var limit = Number(this.config.snapshotLimit);
+    if (isFinite(limit) && limit > 0) payload.limit = Math.floor(limit);
+    var req;
+    try {
+      req = this.envelope.makeEnvelope({
+        daemon_id: this.config.daemonId,
+        source: { kind: 'remote-client', id: this.config.clientId || 'remote-client' },
+        target: { kind: 'daemon', id: this.config.daemonId },
+        kind: 'snapshot_request',
+        payload: payload,
+      });
+    } catch (_e) { return; }
+    this._rawSend(req);
   };
 
   RemoteRelayClient.prototype._handleAck = function(env) {
