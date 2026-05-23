@@ -429,6 +429,18 @@ def normalize_mcp_call_log_args_capture(value) -> str:
     return "metadata"
 
 
+def normalize_relay_text(value) -> str:
+    """Trim a relay (cloud connector) text setting. Empty == unset/fallback."""
+    return str(value or "").strip()
+
+
+def normalize_relay_enabled(value) -> bool:
+    """Coerce the relay-enabled toggle, tolerating string forms from the UI."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def normalize_event_ingest_max_rows(value) -> int:
     try:
         rows = int(value)
@@ -1900,6 +1912,15 @@ class GlobalSettings:
     # the nudge for that kind.
     architect_default_boot_nudge: str = DEFAULT_ARCHITECT_BOOT_NUDGE
     engineer_default_boot_nudge: str = DEFAULT_ENGINEER_BOOT_NUDGE
+    # Relay (optional cloud connector). Settings-primary config that the daemon
+    # merges into the connector's context.config; env vars and ee_connector.json
+    # remain the fallback when a field is left unset. NEVER store inline PEM
+    # here — the private key is referenced by path only and loaded at runtime.
+    relay_enabled: bool = False
+    relay_url: str = ""
+    relay_daemon_id: str = ""
+    relay_credential_id: str = ""
+    relay_private_key_path: str = ""
 
     def __post_init__(self):
         self.xterm_scrollback = normalize_xterm_scrollback(
@@ -1918,6 +1939,13 @@ class GlobalSettings:
             normalize_mcp_call_log_full_capture_tools(
                 self.mcp_call_log_full_capture_tools
             )
+        )
+        self.relay_enabled = normalize_relay_enabled(self.relay_enabled)
+        self.relay_url = normalize_relay_text(self.relay_url)
+        self.relay_daemon_id = normalize_relay_text(self.relay_daemon_id)
+        self.relay_credential_id = normalize_relay_text(self.relay_credential_id)
+        self.relay_private_key_path = normalize_relay_text(
+            self.relay_private_key_path
         )
 
 
@@ -2024,6 +2052,12 @@ class MatrixState:
         # distinct enum is preserved here (connecting/disconnected are not
         # collapsed); the UI groups them visually.
         self.relay_connection: dict = self._default_relay_connection()
+        # Ephemeral resolved relay (cloud connector) config WITH per-field
+        # provenance (settings / ee_connector.json / env / unset). Populated by
+        # the server from GlobalSettings + file + env when the connector context
+        # is (re)built; lets the Settings "Relay" UI show each effective value's
+        # source. Never persisted; recomputed on boot and on relay-settings save.
+        self.relay_config: dict = {"config": {}, "sources": {}}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -2815,6 +2849,31 @@ class MatrixState:
         loop.create_task(self.broadcast())
         return True
 
+    def set_relay_config(self, payload: dict | None) -> bool:
+        """Store and broadcast the resolved relay config + provenance.
+
+        Ephemeral (never persisted): recomputed by the server from GlobalSettings
+        + ee_connector.json + env whenever the connector context is (re)built.
+        Dedupes and only emits a ``relay_config`` delta on change. Returns True
+        iff a delta was emitted.
+        """
+        merged = {"config": {}, "sources": {}}
+        if isinstance(payload, dict):
+            if isinstance(payload.get("config"), dict):
+                merged["config"] = dict(payload["config"])
+            if isinstance(payload.get("sources"), dict):
+                merged["sources"] = copy.deepcopy(payload["sources"])
+        if merged == self.relay_config:
+            return False
+        self.relay_config = merged
+        self._emit("relay_config", **copy.deepcopy(merged))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return True
+        loop.create_task(self.broadcast())
+        return True
+
     # -- Task indexes --------------------------------------------------------
 
     def _task_index_values(self, task: "BoardTask"):
@@ -3275,6 +3334,8 @@ class MatrixState:
             "pending_hires": pending_hires,
             # Ephemeral daemon-global relay connection-state for the status bar.
             "relay_connection": dict(self.relay_connection),
+            # Resolved relay config with per-field provenance for Settings.
+            "relay_config": copy.deepcopy(self.relay_config),
         }
 
     def get_task_detail(self, task_id: str) -> dict | None:
@@ -3566,6 +3627,8 @@ class MatrixState:
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
             # Ephemeral daemon-global relay connection-state for the status bar.
             "relay_connection": dict(self.relay_connection),
+            # Resolved relay config with per-field provenance for Settings.
+            "relay_config": copy.deepcopy(self.relay_config),
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -6753,6 +6816,15 @@ class MatrixState:
                     value = normalize_mcp_call_log_args_capture(value)
                 elif key == "mcp_call_log_full_capture_tools":
                     value = normalize_mcp_call_log_full_capture_tools(value)
+                elif key == "relay_enabled":
+                    value = normalize_relay_enabled(value)
+                elif key in (
+                    "relay_url",
+                    "relay_daemon_id",
+                    "relay_credential_id",
+                    "relay_private_key_path",
+                ):
+                    value = normalize_relay_text(value)
                 updates[key] = value
         for key, value in updates.items():
             setattr(self.global_settings, key, value)

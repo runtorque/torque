@@ -48,6 +48,59 @@ class TorqueDBTests(unittest.TestCase):
             4321,
         )
 
+    def test_global_settings_round_trips_relay_fields(self):
+        self.db.save_global_settings(GlobalSettings(
+            relay_enabled=True,
+            relay_url="wss://relay.example/ws",
+            relay_daemon_id="daemon-9",
+            relay_credential_id="cred-9",
+            relay_private_key_path="/keys/relay.pem",
+        ))
+
+        gs = self.db.load_all()["global_settings"]
+
+        self.assertIs(gs["relay_enabled"], True)
+        self.assertEqual(gs["relay_url"], "wss://relay.example/ws")
+        self.assertEqual(gs["relay_daemon_id"], "daemon-9")
+        self.assertEqual(gs["relay_credential_id"], "cred-9")
+        self.assertEqual(gs["relay_private_key_path"], "/keys/relay.pem")
+
+    def test_global_settings_legacy_db_without_relay_keys_loads_defaults(self):
+        # Upgrade path: a global_settings table populated before relay fields
+        # existed must reconstruct to safe defaults (relay off, empty strings)
+        # — the key/value blob storage needs no schema migration for new fields.
+        legacy_path = Path(self.tmp.name) / "legacy-relay.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            "CREATE TABLE global_settings ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL, "
+            "xterm_scrollback INTEGER NOT NULL DEFAULT 2000)"
+        )
+        for key, value in (("default_command", '"claude"'),
+                           ("xterm_scrollback", "2500")):
+            conn.execute(
+                "INSERT INTO global_settings (key, value, xterm_scrollback) "
+                "VALUES (?,?,?)",
+                (key, value, 2500),
+            )
+        conn.commit()
+        conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+        gs_raw = migrated.load_all()["global_settings"]
+        # Legacy keys preserved; relay keys simply absent from the blob.
+        self.assertNotIn("relay_url", gs_raw)
+        # Reconstructing the dataclass fills relay defaults (mirrors state.load).
+        gls_fields = set(GlobalSettings.__dataclass_fields__)
+        gs = GlobalSettings(**{
+            k: v for k, v in gs_raw.items() if k in gls_fields})
+        self.assertFalse(gs.relay_enabled)
+        self.assertEqual(gs.relay_url, "")
+        self.assertEqual(gs.relay_private_key_path, "")
+        self.assertEqual(gs.default_command, "claude")
+
     def test_global_settings_schema_migrates_xterm_scrollback_column(self):
         legacy_path = Path(self.tmp.name) / "legacy-global-settings.db"
         conn = sqlite3.connect(str(legacy_path))
