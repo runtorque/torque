@@ -18,6 +18,19 @@
 
   var DEFAULT_TAIL_CAP = 500;
 
+  // Delivery-state strength ladder, mirroring the glyph progression rendered in
+  // render_remote.js (pending '·' → delivered '✓' → acked '✓✓'). Used by the
+  // no-downgrade guard in _appendOrUpsert so a duplicate/replay never lowers a
+  // bubble's delivery state. 'failed'/unknown map to 0: a stale weaker re-echo
+  // can't downgrade a success state, and a genuine delivery confirmation may
+  // still upgrade a prior failure. markDelivery stays the authoritative path for
+  // terminal 'failed' (set from a relay `error` envelope).
+  var _DELIVERY_RANK = { pending: 1, delivered: 2, acked: 3 };
+
+  function _deliveryRank(state) {
+    return _DELIVERY_RANK[state] || 0;
+  }
+
   function _trim(value) {
     return String(value == null ? '' : value).trim();
   }
@@ -116,11 +129,21 @@
   RemoteStore.prototype._appendOrUpsert = function(conv, msg) {
     var existing = conv.messageIndex[msg.id];
     if (existing) {
-      // Idempotent merge: keep the stronger delivery state, refresh fields.
+      // Idempotent merge: refresh fields from the newer copy, but NEVER lower
+      // the delivery state. A re-echo / replayed snapshot row can carry a weaker
+      // delivery_state than the bubble already reached (e.g. a stored 'pending'
+      // history row arriving after the live 'acked'); the no-downgrade guard
+      // keeps the strongest observed state so the ✓✓/✓ indicator can't flicker
+      // backwards on a duplicate. A stronger state still upgrades.
       for (var k in msg) {
-        if (Object.prototype.hasOwnProperty.call(msg, k) && msg[k] !== undefined) {
-          existing[k] = msg[k];
+        if (!Object.prototype.hasOwnProperty.call(msg, k) || msg[k] === undefined) {
+          continue;
         }
+        if (k === 'deliveryState'
+            && _deliveryRank(msg[k]) < _deliveryRank(existing[k])) {
+          continue;
+        }
+        existing[k] = msg[k];
       }
       return existing;
     }
@@ -218,16 +241,29 @@
         || (sender === 'user' ? 'acked' : 'delivered'),
     };
 
-    // §602 collapse: a USER-authored message (sender_kind="user") echoed back by
-    // the daemon for multi-client sync (both user->agent and the user's own
-    // mirrored answers, reusing the agent_message shape) carries
-    // payload.idempotency_key + a daemon message_id ≠ our optimistic envelope id.
-    // When THIS client minted that key on an optimistic outbound, collapse the
-    // echo onto it (alias the daemon id, mark delivered, resolve any referenced
-    // ask) instead of rendering a 2nd bubble. EXACT idempotency_key match ONLY —
-    // never fuzzy. Tried BEFORE the §2c reply_to_id path so an ask-answer echo
-    // (which carries BOTH idempotency_key AND reply_to_id) collapses via exactly
-    // ONE path — the EXACT-key path — keeping §587 intact with no double-collapse.
+    // ---- Echoed-own-outbound collapse: a TWO-STAGE layered match -----------
+    // The daemon echoes the user's OWN outbound back for multi-client sync
+    // (sender_kind="user", a daemon message_id ≠ our optimistic envelope id).
+    // We collapse that echo onto its local optimistic twin instead of rendering
+    // a second bubble. The two stages are matched in STRICT priority order and
+    // are mutually exclusive — an echo collapses via EXACTLY ONE stage:
+    //
+    //   STAGE 1 (PRIMARY, §602): EXACT idempotency_key match. Every optimistic
+    //     outbound minted since :602 carries an idempotency_key (plain messages
+    //     AND ask-answers), so this is the path that fires for current clients.
+    //   STAGE 2 (FALLBACK, §587/§2c): reply_to_id + body match for an ask_reply
+    //     echo. Now only reached when Stage 1 did NOT collapse the echo — i.e. an
+    //     ask-answer echo with no matching idempotency_key twin (a pre-:602
+    //     optimistic answer, or an echo missing the key). It is a backward-compat
+    //     fallback, deliberately NOT load-bearing on the primary path.
+    //
+    // Stage 1 runs first precisely so an ask-answer echo (which carries BOTH an
+    // idempotency_key AND a reply_to_id) collapses via the key path only, never
+    // twice. Both stages are EXACT keys — never fuzzy body/sender/recency.
+
+    // STAGE 1 (PRIMARY, §602): collapse onto the optimistic twin by EXACT
+    // idempotency_key. Alias the daemon id onto the bubble, lift pending ->
+    // delivered, and resolve any referenced ask.
     if (sender === 'user' && msg.idempotencyKey && !conv.messageIndex[id]) {
       var keyTwin = this._findOptimisticByIdempotencyKey(conv, msg);
       if (keyTwin) {
@@ -241,15 +277,12 @@
       }
     }
 
-    // §2c collapse: a user-authored ask_reply echoed back by the daemon for
-    // multi-client sync (sender_kind="user", message_id = the daemon's stored id
-    // ≠ our optimistic envelope id) must NOT render a second answer bubble. When
-    // THIS client already has an optimistic outbound answer to the same ask,
-    // collapse the echo onto it: alias the daemon id onto that bubble so a re-echo
-    // de-dupes, mark it delivered, resolve the ask, and skip the append. Only an
-    // echo of our OWN answer collapses (matched on agent + reply_to_id + body);
-    // an answer made on another client has no local optimistic twin and renders
-    // normally.
+    // STAGE 2 (FALLBACK, §587/§2c): an ask_reply echo with no Stage-1 key match.
+    // Collapse onto an optimistic answer to the same ask (matched on agent +
+    // reply_to_id + identical body): alias the daemon id onto that bubble so a
+    // re-echo de-dupes, lift pending -> delivered, resolve the ask, skip the
+    // append. Only an echo of our OWN answer collapses; an answer made on another
+    // client has no local optimistic twin and renders normally.
     if (env.kind === 'ask_reply' && sender === 'user' && msg.replyToId
         && !conv.messageIndex[id]) {
       var twin = this._findOptimisticAnswer(conv, msg);

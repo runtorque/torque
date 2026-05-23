@@ -5871,8 +5871,11 @@ test('global settings save sends the relay_* settings-layer keys', () => {
   document.getElementById('gls-xterm-scrollback').value = '9000';
 
   // Operator edits: enable, set a settings URL + a key PATH; leave the rest
-  // empty (inherit from file/env).
-  document.getElementById('gls-relay-enabled').checked = true;
+  // empty (inherit from file/env). The checkbox is EXPLICITLY toggled, so it
+  // carries the dirty flag the save gate requires (see tri-state test below).
+  const enabledEl = document.getElementById('gls-relay-enabled');
+  enabledEl.checked = true;
+  enabledEl.dataset.relayDirty = '1';
   document.getElementById('gls-relay-url').value = '  wss://edited.example.com  ';
   document.getElementById('gls-relay-daemon-id').value = '';
   document.getElementById('gls-relay-credential-id').value = '';
@@ -5887,6 +5890,88 @@ test('global settings save sends the relay_* settings-layer keys', () => {
   assert.equal(saved.relay_daemon_id, '');
   assert.equal(saved.relay_credential_id, '');
   assert.equal(saved.relay_private_key_path, '/home/op/relay.pem');
+});
+
+test('global settings save OMITS relay_enabled when the checkbox is untouched (tri-state inherit)', () => {
+  const { context, document, sandbox } = createRelayStatusHarness();
+  loadScript(context, 'static/js/modals.js');
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  [
+    'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
+    'gls-focus-on-click', 'gls-default-lanes', 'gls-max-pipeline-depth',
+    'gls-max-event-log', 'gls-xterm-scrollback',
+  ].forEach((id) => document.register(id));
+  document.getElementById('gls-max-pipeline-depth').value = '10';
+  document.getElementById('gls-max-event-log').value = '500';
+  document.getElementById('gls-xterm-scrollback').value = '9000';
+
+  // The checkbox reflects an EFFECTIVE enabled inherited from env/file (checked),
+  // but the operator never toggled it (no dirty flag) — e.g. they saved an
+  // unrelated General-tab field. relay_enabled must NOT be sent, so the inherited
+  // value is preserved and never promoted into a settings-layer override.
+  document.getElementById('gls-relay-enabled').checked = true;
+  document.getElementById('gls-relay-url').value = '';
+
+  runInContext(context, 'submitGlobalSettings();');
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  const saved = sandbox.sendCalls[0].settings;
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(saved, 'relay_enabled'), false,
+    'untouched checkbox -> relay_enabled omitted (inherit preserved)',
+  );
+  // Text fields keep their always-sent empty=inherit contract.
+  assert.equal(saved.relay_url, '');
+});
+
+test('global settings save sends relay_enabled=false when the checkbox is explicitly toggled off', () => {
+  const { context, document, sandbox } = createRelayStatusHarness();
+  loadScript(context, 'static/js/modals.js');
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  [
+    'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
+    'gls-focus-on-click', 'gls-default-lanes', 'gls-max-pipeline-depth',
+    'gls-max-event-log', 'gls-xterm-scrollback',
+  ].forEach((id) => document.register(id));
+  document.getElementById('gls-max-pipeline-depth').value = '10';
+  document.getElementById('gls-max-event-log').value = '500';
+  document.getElementById('gls-xterm-scrollback').value = '9000';
+
+  // Operator explicitly unchecks (dirty) -> an intentional settings-layer write.
+  const enabledEl = document.getElementById('gls-relay-enabled');
+  enabledEl.checked = false;
+  enabledEl.dataset.relayDirty = '1';
+
+  runInContext(context, 'submitGlobalSettings();');
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  const saved = sandbox.sendCalls[0].settings;
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(saved, 'relay_enabled'), true,
+    'explicit toggle -> relay_enabled written',
+  );
+  assert.equal(saved.relay_enabled, false);
+});
+
+test('refreshRelayConfigModal force-open clears the enabled checkbox dirty flag', () => {
+  const { context, document } = createRelayStatusHarness();
+  // Fresh local payload (NOT the shared RELAY_CONFIG_SAMPLE, which the in-place
+  // relay_config delta patch mutates) so this assertion is order-independent.
+  context.__relayConfig = {
+    config: { enabled: true },
+    sources: { enabled: { value: true, source: 'env' } },
+  };
+  // Simulate a leftover dirty flag from a prior session, then force-repopulate.
+  const enabledEl = document.getElementById('gls-relay-enabled');
+  enabledEl.dataset.relayDirty = '1';
+  runInContext(context, `
+    state.relay_config = __relayConfig;
+    refreshRelayConfigModal({ force: true });
+  `);
+  // Force-open repopulates checked from effective config AND clears dirty, so a
+  // subsequent unrelated save won't spuriously write relay_enabled.
+  assert.equal(enabledEl.checked, true);
+  assert.notEqual(enabledEl.dataset.relayDirty, '1');
 });
 
 /* -- Relay test-connectivity probe (TORQUE:603 #2) ------------------------ */
