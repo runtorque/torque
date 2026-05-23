@@ -2944,8 +2944,21 @@ function submitGlobalSettings() {
   // (the backend only flows NON-EMPTY settings values into the connector config,
   // so re-sending "" for an untouched inherited field preserves its fallback).
   // private_key_path is BY PATH only — never inline PEM.
+  //
+  // `relay_enabled` is TRI-STATE/inherit (TORQUE:603 #1 review): unlike the text
+  // fields (where empty="" is the inherit signal), a checkbox has no empty state
+  // and reflects the EFFECTIVE config.enabled — which may be sourced from env /
+  // ee_connector.json. Always sending it would silently PROMOTE an inherited
+  // enabled into a settings-layer override on any unrelated save (a provenance
+  // surprise). So send relay_enabled ONLY when the operator EXPLICITLY toggled
+  // it (dataset.relayDirty, set by the checkbox onchange); an untouched checkbox
+  // is omitted, and update_global_settings leaves the existing (inherited) value
+  // unchanged.
   var relayEnabledEl = document.getElementById('gls-relay-enabled');
-  if (relayEnabledEl) settings.relay_enabled = !!relayEnabledEl.checked;
+  if (relayEnabledEl && relayEnabledEl.dataset
+      && relayEnabledEl.dataset.relayDirty === '1') {
+    settings.relay_enabled = !!relayEnabledEl.checked;
+  }
   var relayUrlEl = document.getElementById('gls-relay-url');
   if (relayUrlEl) settings.relay_url = relayUrlEl.value.trim();
   var relayDaemonIdEl = document.getElementById('gls-relay-daemon-id');

@@ -260,6 +260,47 @@ test('§602: echoed user_message collapses onto its optimistic by idempotency_ke
   assert.equal(conv.messages.length, 1, 're-echo de-dupes via the aliased daemon id');
 });
 
+test('no-downgrade guard: a weaker re-echo never lowers an already-stronger delivery state', () => {
+  const store = loadStore();
+  // Optimistic send carrying the minted idempotency_key.
+  store.recordOutbound({ id: 'env-1', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'go', idempotency_key: 'k1' } });
+  // Daemon echo collapses onto the optimistic bubble (pending -> delivered) and
+  // aliases the daemon message_id onto it.
+  store.ingestInbound(agentMessage('msg-1', 'w', 'go', {
+    sender_kind: 'user', idempotency_key: 'k1' }));
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages[0].deliveryState, 'delivered');
+  // An explicit ack lifts it to the strongest state (acked, ✓✓).
+  store.markDelivery('env-1', 'acked');
+  assert.equal(conv.messages[0].deliveryState, 'acked');
+  // A re-echo / replayed snapshot row for the SAME daemon id arrives carrying a
+  // WEAKER delivery_state (e.g. the 'pending' stored at send time). It upserts
+  // onto the aliased bubble — the no-downgrade guard must keep 'acked'.
+  store.ingestInbound(agentMessage('msg-1', 'w', 'go', {
+    sender_kind: 'user', idempotency_key: 'k1', delivery_state: 'pending' }));
+  assert.equal(conv.messages.length, 1, 're-echo de-dupes onto one bubble');
+  assert.equal(conv.messages[0].deliveryState, 'acked',
+    'no-downgrade guard: a weaker re-echo never lowers acked');
+});
+
+test('no-downgrade guard: a STRONGER re-echo still upgrades the delivery state', () => {
+  const store = loadStore();
+  store.recordOutbound({ id: 'env-2', created_at: new Date().toISOString(),
+    payload: { agent_id: 'w', message: 'hi', idempotency_key: 'k2' } });
+  // First echo collapses pending -> delivered (✓).
+  store.ingestInbound(agentMessage('msg-2', 'w', 'hi', {
+    sender_kind: 'user', idempotency_key: 'k2' }));
+  const conv = store.conversations['w'];
+  assert.equal(conv.messages[0].deliveryState, 'delivered');
+  // A re-echo carrying the stronger 'acked' (✓✓) upgrades the bubble — the guard
+  // blocks only downgrades, never upgrades.
+  store.ingestInbound(agentMessage('msg-2', 'w', 'hi', {
+    sender_kind: 'user', idempotency_key: 'k2', delivery_state: 'acked' }));
+  assert.equal(conv.messages.length, 1);
+  assert.equal(conv.messages[0].deliveryState, 'acked', 'stronger state still upgrades');
+});
+
 test('§602 NEGATIVE: distinct idempotency_keys never collapse', () => {
   const store = loadStore();
   store.recordOutbound({ id: 'env-1', created_at: new Date().toISOString(),
