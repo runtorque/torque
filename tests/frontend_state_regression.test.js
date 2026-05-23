@@ -16116,6 +16116,21 @@ test('renderAgentCell shows context-window meter only when usage is available wi
   });
   assert.match(dangerHtml, /agent-context-meter--danger/);
   assert.match(dangerHtml, />ctx 90%<\/div>/);
+
+  // At the 3-digit (>=100%) case the "ctx " prefix overflows narrow 77px cards,
+  // so the label drops the prefix and renders just "100%".
+  const fullHtml = context.renderAgentCell({
+    ...baseAgent,
+    context_window: {
+      used_pct: 100,
+      used_tokens: 100,
+      limit_tokens: 100,
+    },
+  });
+  assert.match(fullHtml, /agent-context-meter--danger/);
+  assert.match(fullHtml, /data-context-pct="100"/);
+  assert.match(fullHtml, />100%<\/div>/);
+  assert.doesNotMatch(fullHtml, />ctx 100%</);
 });
 
 test('context-window meter is anchored to the header strip, not the bottom role-pill row', () => {
@@ -16132,6 +16147,30 @@ test('context-window meter is anchored to the header strip, not the bottom role-
   // Left/right insets must clear the fixed-width header controls and status dot.
   assert.match(rule, /left:\s*3[0-9]px/);
   assert.match(rule, /right:\s*1[0-9]px/);
+});
+
+test('grid context meter clears the done-flourish badge and the expanded attention/dismissed dot', () => {
+  // Cosmetic polish flagged in the :575 review of the top-anchored meter:
+  //  1) the done-flourish pill (later sibling: .cell-status before .agent-context-meter)
+  //     would paint dim meter text over the green pill — hide the meter while active.
+  //  2) the attention/dismissed dot expands to 12px @ right:2px, clipping ~2px into
+  //     the meter's default right:12px inset — push the meter clear in those states.
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  const flourishRule = css.match(
+    /\.cell-status\.cell-status-done-flourish\s*~\s*\.agent-context-meter\s*\{[^}]*\}/s,
+  );
+  assert.ok(flourishRule, 'expected a done-flourish sibling rule for the meter');
+  assert.match(flourishRule[0], /opacity:\s*0\b/, 'meter must be hidden during the done flourish');
+
+  const dotClearRule = css.match(
+    /\.cell-status\.attention\s*~\s*\.agent-context-meter,\s*\.cell-status\.dismissed\s*~\s*\.agent-context-meter\s*\{[^}]*\}/s,
+  );
+  assert.ok(dotClearRule, 'expected an attention/dismissed sibling rule for the meter');
+  // Expanded dot left edge sits at ~[w-14]; right inset must be >=14px to clear it.
+  const inset = dotClearRule[0].match(/right:\s*(\d+)px/);
+  assert.ok(inset, 'attention/dismissed meter rule must set a right inset');
+  assert.ok(Number(inset[1]) >= 14, 'meter right inset must clear the 12px expanded dot at right:2px');
 });
 
 test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
