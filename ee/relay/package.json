@@ -11,7 +11,8 @@
     "start": "node dist/src/adapters/standalone/server.js",
     "dev": "npm run build && node dist/src/adapters/standalone/server.js",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy"
+    "cf:deploy": "wrangler deploy",
+    "seed": "npm run build && node dist/src/tools/seed.js"
   },
   "dependencies": {
     "ws": "^8.18.3"

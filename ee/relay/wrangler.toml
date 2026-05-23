@@ -1,11 +1,38 @@
-name = "torque-ee-relay-spike"
+name = "torque-relay"
 main = "src/adapters/cloudflare/worker.ts"
 compatibility_date = "2026-05-22"
 compatibility_flags = ["nodejs_compat"]
 
+# Bind the Worker to its dedicated subdomain. `custom_domain = true` provisions
+# the proxied DNS record + edge TLS cert for relay.runtorque.com automatically
+# and routes ALL paths on that hostname to the Worker (no "/*" needed). The
+# wrangler API token must carry, for the runtorque.com zone: Zone:Read +
+# DNS:Edit + Workers Routes:Edit (on top of account-level Workers Scripts:Edit
+# + D1:Edit + Account Settings:Read).
+#
+# Alternative (only if a proxied relay.runtorque.com DNS record already exists
+# and a plain route is preferred) — replace the block below with:
+#   [[routes]]
+#   pattern = "relay.runtorque.com/*"
+#   zone_name = "runtorque.com"
+[[routes]]
+pattern = "relay.runtorque.com"
+custom_domain = true
+
+# Static-serve the same-origin remote UI bundle (ee/frontend/remote) under /app/.
+# run_worker_first keeps the Worker in front of every request (so /health, /v1/*,
+# /session keep working); the Worker delegates only /app* to this ASSETS binding.
+# ee/frontend is enterprise-only and stays excluded from community packaging
+# (verified by `make assert-community-package`).
+[assets]
+directory = "../frontend/remote"
+binding = "ASSETS"
+run_worker_first = true
+
 [[d1_databases]]
 binding = "RELAY_DB"
-database_name = "torque-ee-relay-spike"
+database_name = "torque-relay"
+# Filled from `npx wrangler d1 create torque-relay` at deploy time (STEP 2).
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
