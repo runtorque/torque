@@ -60,6 +60,18 @@ test("parseRelayEnvelope validates version, kind, endpoints, JSON payload and ti
     RelayProtocolError,
   );
   assert.throws(
+    () => parseRelayEnvelope({ ...envelope, payload: null }),
+    RelayProtocolError,
+  );
+  assert.throws(
+    () => parseRelayEnvelope({ ...envelope, payload: "" }),
+    RelayProtocolError,
+  );
+  const withoutPayload = { ...envelope } as Record<string, unknown>;
+  delete withoutPayload.payload;
+  assert.deepEqual(parseRelayEnvelope(withoutPayload).payload, {});
+  assert.equal(parseRelayEnvelope({ ...envelope, future_field: { keep: true } }).id, "msg-protocol");
+  assert.throws(
     () => parseRelayEnvelope({ ...envelope, id: {} }),
     RelayProtocolError,
   );

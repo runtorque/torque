@@ -107,3 +107,45 @@ test("RelayRuntime fences stale daemon epochs before broadcasting", async () => 
   assert.equal(client.sent.some((envelope) => envelope.id === "msg-current"), true);
   await store.close();
 });
+
+test("RelayRuntime failed ack marks the original message failed instead of acked", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const coordinator = new StandaloneRegistryCoordinator();
+  const runtime = new RelayRuntime(store, coordinator, { replayLimit: 5, relayId: "test-relay" });
+
+  const queued = makeRelayEnvelope({
+    id: "msg-failed-ingress",
+    daemon_id: "daemon-1",
+    source: { kind: "remote-client", id: "browser-1", user_id: "user-1" },
+    target: { kind: "daemon", id: "daemon-1" },
+    kind: "user_message",
+    created_at: "2026-05-22T00:00:00.000Z",
+    payload: { agent_id: "agent-1", message: "will fail locally" },
+  });
+
+  await runtime.handleFromClient(queued);
+  const daemonSocket = new MemorySocket("daemon-conn-failed-ack");
+  const attached = await runtime.attachDaemon("daemon-1", daemonSocket);
+  assert.equal(attached.replayed, 1);
+
+  const failedAck = makeAckEnvelope({
+    id: "ack-failed-ingress",
+    daemon_id: "daemon-1",
+    source: { kind: "daemon", id: "daemon-1" },
+    target: { kind: "relay", id: "test-relay" },
+    ack_id: "msg-failed-ingress",
+    ack_kind: "user_message",
+    delivery_state: "failed",
+    reason: "agent not found",
+    created_at: "2026-05-22T00:00:01.000Z",
+  });
+  const failed = await runtime.handleFromDaemon("daemon-conn-failed-ack", attached.epoch, failedAck);
+  assert.equal(failed.acked?.delivery_state, "failed");
+  assert.equal(failed.acked?.last_delivery_error, "agent not found");
+  const saved = await store.getMessage("msg-failed-ingress");
+  assert.equal(saved?.delivery_state, "failed");
+  assert.equal(saved?.acked_at, "");
+  assert.equal(saved?.failed_at, "2026-05-22T00:00:01.000Z");
+  await store.close();
+});

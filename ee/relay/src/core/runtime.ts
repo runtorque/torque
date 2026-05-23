@@ -2,6 +2,7 @@ import {
   ackIdFromEnvelope,
   makeErrorEnvelope,
   makeRelayEnvelope,
+  type AckPayload,
   type RelayEndpoint,
   type RelayEndpointKind,
   type JsonObject,
@@ -221,6 +222,14 @@ export class RelayRuntime {
   async handleAck(envelope: RelayEnvelope): Promise<StoredRelayMessage | null> {
     const ackId = ackIdFromEnvelope(envelope);
     if (!ackId) return null;
+    const payload = envelope.payload as AckPayload;
+    if (payload.delivery_state === "failed") {
+      return this.store.markFailed(
+        ackId,
+        typeof payload.reason === "string" && payload.reason.trim() ? payload.reason.trim() : "relay delivery failed",
+        envelope.created_at || nowIso(),
+      );
+    }
     return this.store.markAcked(ackId, envelope.created_at || nowIso());
   }
 
