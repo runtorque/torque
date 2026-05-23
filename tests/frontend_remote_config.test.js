@@ -25,20 +25,32 @@ test('parseConfig validates required fields + defaults', () => {
   assert.equal(ok.valid, true);
   assert.equal(ok.relayBaseUrl, 'https://relay.test', 'trailing slash stripped');
   assert.equal(ok.authMode, 'cookie', 'cookie-mode default when no token');
-  assert.equal(ok.askEnabled, false, 'ask UI gated off by default');
+  assert.equal(ok.askEnabled, true, 'ask UI enabled by default (P6-V1 completion)');
 
   const bad = C.parseConfig({ relayBaseUrl: '' });
   assert.equal(bad.valid, false);
   assert.ok(bad.errors.length >= 2);
 });
 
-test('bearer-mode inferred when a token is provided; ask flag parses', () => {
+test('ask UI can be opted out via ask_enabled=0; snapshotLimit parses', () => {
+  const C = loadConfig();
+  const off = C.parseConfig({ relayBaseUrl: 'https://r', daemonId: 'd', ask_enabled: '0' });
+  assert.equal(off.askEnabled, false, 'ask_enabled=0 opts out');
+  const explicit = C.parseConfig({ relayBaseUrl: 'https://r', daemonId: 'd', askEnabled: false });
+  assert.equal(explicit.askEnabled, false);
+
+  const lim = C.parseConfig({ relayBaseUrl: 'https://r', daemonId: 'd', snapshot_limit: '50' });
+  assert.equal(lim.snapshotLimit, 50);
+  const noLim = C.parseConfig({ relayBaseUrl: 'https://r', daemonId: 'd' });
+  assert.equal(noLim.snapshotLimit, 0, 'omitted -> 0 (server default applies)');
+});
+
+test('bearer-mode inferred when a token is provided', () => {
   const C = loadConfig();
   const cfg = C.parseConfig({
-    relayBaseUrl: 'https://r', daemonId: 'd', sessionToken: 'sess-x', ask_enabled: '1',
+    relayBaseUrl: 'https://r', daemonId: 'd', sessionToken: 'sess-x',
   });
   assert.equal(cfg.authMode, 'bearer');
-  assert.equal(cfg.askEnabled, true);
 });
 
 test('wsUrl derives ws(s) scheme, client_id, and token only in bearer-mode', () => {

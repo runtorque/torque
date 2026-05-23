@@ -133,9 +133,20 @@
     return msg;
   };
 
-  // Ingest an inbound conversation envelope (agent_message | ask | ask_reply).
-  // Returns the resulting message, or null if it is not a conversation kind.
-  RemoteStore.prototype.ingestInbound = function(env) {
+  function _kindFromMessageType(messageType) {
+    var m = _trim(messageType);
+    if (m === 'ask') return 'ask';
+    if (m === 'ask_reply') return 'ask_reply';
+    return 'agent_message';
+  }
+
+  // Shared ingest core for conversation envelopes (agent_message | ask |
+  // ask_reply). Used by BOTH live inbound and snapshot history (opts.history)
+  // so snapshot rows render via the exact same path as live messages — there is
+  // no separate snapshot renderer. Idempotent by message id; does NOT notify
+  // (callers batch the notify). Returns the resulting message, or null.
+  RemoteStore.prototype._ingestConversationEnvelope = function(env, opts) {
+    opts = opts || {};
     if (!env || !env.kind) return null;
     if (env.kind !== 'agent_message' && env.kind !== 'ask' && env.kind !== 'ask_reply') {
       return null;
@@ -146,44 +157,60 @@
     var agentName = _agentNameFromPayload(payload, agentId);
     var conv = this._ensureConversation(agentId, agentName);
     var atMs = _createdAtMs(payload, env.created_at);
-    // Prefer the stable underlying message_id when present so an agent_message
-    // and its later edits/acks collapse onto one bubble; fall back to env id.
+    // Prefer the stable underlying message_id so a message and its snapshot/live
+    // duplicates collapse onto one bubble (de-dupe vs the live stream by id);
+    // fall back to the envelope id.
     var id = _trim(payload.message_id) || _trim(env.id);
+    if (!id) return null;
+    // Derive sender from sender_kind: a user-authored row (e.g. the user's own
+    // mirrored ask_reply, sender_kind="user") renders as a user bubble; agent
+    // rows render as agent bubbles.
+    var sender = _trim(payload.sender_kind) === 'user' ? 'user' : 'agent';
     var messageType = _trim(payload.message_type)
       || (env.kind === 'ask' ? 'ask' : (env.kind === 'ask_reply' ? 'ask_reply' : 'message'));
     var msg = {
       id: id,
       kind: env.kind,
       agentId: agentId,
-      sender: 'agent',
+      sender: sender,
       body: (payload.message == null) ? '' : String(payload.message),
       messageType: messageType,
       blocking: !!payload.blocking,
       threadId: _trim(payload.thread_id),
       replyToId: _trim(payload.reply_to_id),
       createdAtMs: atMs,
-      deliveryState: _trim(payload.delivery_state) || 'delivered',
+      deliveryState: _trim(payload.delivery_state)
+        || (sender === 'user' ? 'acked' : 'delivered'),
     };
     this._appendOrUpsert(conv, msg);
 
+    // A blocking ask stays ACTIONABLE until answered — for BOTH live and
+    // snapshot rows, so reconnecting still lets you answer a still-pending ask
+    // raised before you connected.
     if (env.kind === 'ask' && msg.blocking) {
       conv.pendingAsks[msg.id] = msg;
     }
-    // An ask_reply (or any reply) referencing a pending ask resolves it.
+    // An ask_reply (or any reply) referencing a pending ask resolves it —
+    // already-answered asks (ask + ask_reply both present) render resolved.
     if (msg.replyToId && conv.pendingAsks[msg.replyToId]) {
       delete conv.pendingAsks[msg.replyToId];
     }
-    if (agentId !== this.activeAgentId) conv.unread += 1;
+    // History rows never inflate the unread badge; live rows for a non-active
+    // agent do.
+    if (!opts.history && agentId !== this.activeAgentId) conv.unread += 1;
     this._touch(agentId, atMs);
-    this._notify();
     return msg;
   };
 
-  // Pull the row array out of a snapshot payload. The :578 shape is not yet
-  // published to shared memory, so accept the documented/likely field names;
-  // each row reuses the agent_message payload shape. (PENDING cross-check vs
-  // Courier's published :578 snapshot shape — flag if a row field we cannot
-  // consume cleanly appears.)
+  // Ingest a live inbound conversation envelope. Returns the message or null.
+  RemoteStore.prototype.ingestInbound = function(env) {
+    var msg = this._ingestConversationEnvelope(env, { history: false });
+    if (msg) this._notify();
+    return msg;
+  };
+
+  // Pull the row array out of a snapshot payload. Shipped :578 uses
+  // payload.messages; the other keys are accepted defensively.
   function _snapshotRows(payload) {
     var candidates = [payload.messages, payload.rows, payload.items,
       payload.conversation, payload.snapshot, payload.history];
@@ -193,64 +220,38 @@
     return [];
   }
 
-  // Build a message from an agent_message-shaped row. Snapshot history includes
-  // BOTH sides of the user<->agent conversation, so the sender is derived from
-  // sender_kind (a user row has sender_kind="user"), unlike live agent_message
-  // egress which is always agent-sent.
-  RemoteStore.prototype._messageFromAgentPayload = function(payload, fallbackIso) {
-    var agentId = _agentIdFromPayload(payload);
-    if (!agentId) return null;
-    var senderKind = _trim(payload.sender_kind);
-    var sender = senderKind === 'user' ? 'user' : 'agent';
-    var messageType = _trim(payload.message_type) || 'message';
-    var id = _trim(payload.message_id) || _trim(payload.id);
-    if (!id) return null;
-    return {
-      msg: {
-        id: id,
-        kind: messageType === 'ask' ? 'ask'
-          : (messageType === 'ask_reply' ? 'ask_reply' : 'agent_message'),
-        agentId: agentId,
-        sender: sender,
-        body: (payload.message == null) ? '' : String(payload.message),
-        messageType: messageType,
-        blocking: !!payload.blocking,
-        threadId: _trim(payload.thread_id),
-        replyToId: _trim(payload.reply_to_id),
-        createdAtMs: _createdAtMs(payload, fallbackIso),
-        deliveryState: _trim(payload.delivery_state)
-          || (sender === 'user' ? 'acked' : 'delivered'),
-      },
-      agentId: agentId,
-      agentName: _agentNameFromPayload(payload, agentId),
-    };
-  };
-
   // Apply a snapshot envelope: a BATCH of recent USER<->AGENT history rows,
-  // consumed on connect BEFORE live messages. Routed through the SAME store
-  // upsert (idempotent by message id) as live messages, so any snapshot<->live
-  // overlap de-dupes cleanly. Historical rows do NOT bump unread and do NOT
-  // populate pendingAsks (only live `ask` envelopes raise an actionable ask).
+  // consumed on connect. Each row is the SHIPPED :578 shape — a flat live
+  // PAYLOAD dict (agent_id/message/message_id/message_type/sender_kind/...) plus
+  // a top-level `kind` discriminator (agent_message|ask|ask_reply), NOT a full
+  // nested envelope (verified against connector.py _handle_snapshot_request:
+  // entry=_direct_message_payload(row, agent_id); entry["kind"]=wire_kind). We
+  // wrap each row as the envelope shape the shared ingest core expects
+  // (payload = the row) so snapshot rows render via the exact live path and
+  // de-dupe against the live stream by message id (store upsert). Applied
+  // oldest-first so a still-pending ask + its later reply resolve in order.
   RemoteStore.prototype.ingestSnapshot = function(env) {
     var rows = _snapshotRows(env && env.payload ? env.payload : {});
     this.snapshotApplied = true;
     if (!rows.length) { this._notify(); return 0; }
-    // Apply oldest-first so tail-cap keeps the most recent rows.
-    var built = [];
-    for (var i = 0; i < rows.length; i++) {
-      if (!rows[i] || typeof rows[i] !== 'object') continue;
-      var b = this._messageFromAgentPayload(rows[i], env.created_at);
-      if (b) built.push(b);
+    var ordered = rows.slice().filter(function(r) { return r && typeof r === 'object'; })
+      .sort(function(a, b) {
+        return _createdAtMs(a, env.created_at) - _createdAtMs(b, env.created_at);
+      });
+    var applied = 0;
+    for (var i = 0; i < ordered.length; i++) {
+      var row = ordered[i];
+      var rowEnv = {
+        kind: _trim(row.kind) || _kindFromMessageType(row.message_type),
+        id: _trim(row.message_id) || _trim(row.id),
+        created_at: row.created_at || env.created_at,
+        payload: row,
+      };
+      if (this._ingestConversationEnvelope(rowEnv, { history: true })) applied += 1;
     }
-    built.sort(function(a, b) { return a.msg.createdAtMs - b.msg.createdAtMs; });
-    for (var j = 0; j < built.length; j++) {
-      var conv = this._ensureConversation(built[j].agentId, built[j].agentName);
-      this._appendOrUpsert(conv, built[j].msg);
-      this._touch(built[j].agentId, built[j].msg.createdAtMs);
-    }
-    this.snapshotRowCount += built.length;
+    this.snapshotRowCount += applied;
     this._notify();
-    return built.length;
+    return applied;
   };
 
   // Record an outbound user message/ask-answer optimistically (pending).

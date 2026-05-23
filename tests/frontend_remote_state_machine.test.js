@@ -70,6 +70,36 @@ test('queued outbound flushes only after ready', () => {
   assert.equal(sent[0].payload.message, 'queued before ready');
 });
 
+test('snapshot_request is sent on ready (recent-history-on-connect)', () => {
+  const s = loadBundle();
+  const sockets = [];
+  const { client } = makeClient(s, sockets);
+  client.connect();
+  assert.equal(sockets[0].sent.filter((e) => e.kind === 'snapshot_request').length, 0,
+    'not requested before ready');
+  sockets[0].onmessage({ data: JSON.stringify(ready('d')) });
+  const reqs = sockets[0].sent.filter((e) => e.kind === 'snapshot_request');
+  assert.equal(reqs.length, 1, 'exactly one snapshot_request on ready');
+  assert.equal(reqs[0].source.kind, 'remote-client');
+  assert.equal(reqs[0].target.kind, 'daemon');
+  assert.equal(reqs[0].target.id, 'd');
+  assert.equal(reqs[0].v, 1);
+  assert.ok(reqs[0].id, 'has a fresh envelope id');
+});
+
+test('snapshot_request is re-sent after a reconnect ready', () => {
+  const s = loadBundle();
+  const sockets = [];
+  const { client } = makeClient(s, sockets);
+  client.connect();
+  sockets[0].onmessage({ data: JSON.stringify(ready('d')) });
+  sockets[0].onclose({ code: 1006 });
+  client.connect(); // simulate scheduled reconnect firing
+  sockets[1].onmessage({ data: JSON.stringify(ready('d')) });
+  assert.equal(sockets[1].sent.filter((e) => e.kind === 'snapshot_request').length, 1,
+    're-requests history on the fresh connection (dedupe by id handles overlap)');
+});
+
 test('close 4003 -> terminal reauth_required, no reconnect scheduled', () => {
   const s = loadBundle();
   const sockets = [];

@@ -22,6 +22,7 @@ class FrontendRemoteTests(unittest.TestCase):
                 "frontend_remote_dedupe.test.js",
                 "frontend_remote_state_machine.test.js",
                 "frontend_remote_render.test.js",
+                "frontend_remote_e2e.test.js",
             )
         ]
         proc = subprocess.run(

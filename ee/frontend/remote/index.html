@@ -10,7 +10,8 @@
     tag's contents and/or sets the HttpOnly torque_session cookie on the relay
     origin. The UI CONSUMES the session; it never mints one. Fields:
       relayBaseUrl, daemonId, authMode ("cookie" | "bearer"), clientId?,
-      sessionToken? (bearer only / local dev), ask_enabled? (gated ask UI).
+      sessionToken? (bearer only / local dev), ask_enabled? (default on; 0 to opt out),
+      snapshot_limit? (recent-history cap; server clamps).
     URL query/hash params override individual fields for local dev.
   -->
   <script id="torque-remote-config" type="application/json">{}</script>

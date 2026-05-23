@@ -52,29 +52,65 @@ Key behaviors (per the approved plan `REMOTE_WEB_UI_PLAN.md` + the locked V1 sha
   every other close ⇒ reconnect-with-backoff on the same session.
 - **De-dupe** inbound by envelope id (bounded LRU) + store upsert by message id;
   per-conversation tail cap. At-least-once delivery, never exactly-once.
-- **Ask UI is feature-flagged off** (`ask_enabled`) until TORQUE:534 + the
-  connector user-destination egress gating land. The UI **never** filters ask
-  recipients itself — user-destination is resolved server-side; the flag only
-  toggles whether the already-resolved user-destined ask stream is rendered/
-  answerable. Ask answers are sent as a `user_message` carrying `reply_to_id`
-  (the connector ingress accepts only `user_message`).
-- **Recent history on open** via a `snapshot` envelope (TORQUE:578), applied as a
-  batch before live messages through the same de-dupe/upsert; degrades
-  gracefully to the replay-only "showing new messages" notice when no/empty
-  snapshot arrives.
+- **Ask UI is ON by default** (`ask_enabled`, P6-V1 completion) now that the
+  canonical user-destination gating (TORQUE:534) is live. The UI **never**
+  filters ask recipients itself — user-destination is resolved server-side; it
+  renders/answers the already-resolved user-destined stream. Ask answers are
+  sent as a `user_message` carrying `reply_to_id` (the connector ingress accepts
+  only `user_message`). Set `ask_enabled=0` to opt out.
+- **Recent history on open** (TORQUE:578): the client sends a `snapshot_request`
+  on connect (after `ready`); the connector replies with one `snapshot` envelope
+  whose `payload.messages[]` rows are the live payload shape + a top-level `kind`
+  (agent_message/ask/ask_reply), oldest-first, already user-destination-gated.
+  Rows render via the **exact same** path as live messages (no separate snapshot
+  renderer) and de-dupe against the live stream by message id. A still-pending
+  snapshot `ask` stays answerable; an ask answered before connect (ask+ask_reply
+  both present) renders resolved. Degrades gracefully (replay-only "showing new
+  messages" notice) when no/empty snapshot arrives.
 
-### Local test recipe (no remote exposure)
+### Local end-to-end loopback recipe (no remote exposure)
+
+The full UI ↔ relay ↔ connector ↔ daemon round-trip is a manual loopback
+verification (it needs the TS relay built + the Python daemon/connector running;
+it is not part of `make test`). Go-live remains a separate user gate.
 
 ```sh
-# 1. Standalone relay (local-dev-unauthenticated, loopback):
+# 1. Standalone relay (local-dev-unauthenticated, loopback). Requires a one-time
+#    `npm install` in ee/relay; `npm run dev` builds (tsc) then serves.
 cd ee/relay && TORQUE_RELAY_DB=/tmp/relay.db npm run dev   # 127.0.0.1:8787
 
-# 2. Serve the bundle with any static server, e.g.:
+# 2. Run the daemon with the EE connector pointed at the loopback relay
+#    (TORQUE_CLOUD_CONNECTOR_ENABLED=true + connector relay_url=ws://127.0.0.1:8787,
+#    daemon_id=<id>) so agent_message/ask egress + snapshot_request handling are live.
+
+# 3. Serve the bundle with any static server:
 cd ee/frontend/remote && python3 -m http.server 8080
 
-# 3. Open with config via URL params (local dev, no session needed):
-#    http://127.0.0.1:8080/?relayBaseUrl=http://127.0.0.1:8787&daemonId=<id>&ask=1
+# 4. Open with config via URL params (local dev, no session needed):
+#    http://127.0.0.1:8080/?relayBaseUrl=http://127.0.0.1:8787&daemonId=<id>
+#    (ask UI is on by default; append &ask=0 to disable, &snapshot_limit=50 to cap)
 ```
+
+Manual round-trips to confirm: (a) on open, recent history renders oldest-first
+from the snapshot; (b) a message that is both in the snapshot and arrives live
+shows once; (c) an agent `ask` renders an answerable card and the reply reaches
+the agent; (d) a typed `user_message` reaches the agent and its `agent_message`
+reply renders back.
+
+### Verification status (P6-V1)
+
+- **Verified via the Node suite (injected/emulated relay):** snapshot_request is
+  sent on `ready`; `ingestSnapshot` consumes the real shipped row shape
+  oldest-first and de-dupes vs live by id; a snapshot ask is actionable without
+  bumping unread; ask answers ride on `user_message`+`reply_to_id`; the full
+  client pipeline (`tests/frontend_remote_e2e.test.js`) drives snapshot/ask/
+  message round-trips over a fake socket that replays the documented connector
+  contract.
+- **Requires the manual loopback recipe above (not automatable in `node --test`):**
+  the live full-stack round-trip through the real TypeScript relay + Python
+  daemon/connector. The connector snapshot egress is a daemon component (needs a
+  live `recent_direct_messages` provider), so it cannot run inside the frontend
+  test harness.
 
 Node regression tests live in `tests/frontend_remote_*.test.js` (run via
 `tests/test_frontend_remote.py` in the Python suite).
