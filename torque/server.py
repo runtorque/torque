@@ -8712,6 +8712,26 @@ async def main(connection=None):
     event_bus = EventBus(state, event_log, notifier, panel_log=panel_log)
     event_bus.start()
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
+
+    # Defence in depth against the proc-ceiling root cause: reap any orphaned
+    # event-ingest / pty-supervisor sidecars left behind by killed daemons
+    # whose temp data dirs have since been deleted. Spare our own DATA_DIR and
+    # any sibling profile so a co-resident live daemon's sidecars survive.
+    try:
+        from . import sidecar_reaper
+
+        spare_dirs = [DATA_DIR]
+        profiles_root = Path.home() / ".torque" / "profiles"
+        if profiles_root.exists():
+            spare_dirs.extend(p for p in profiles_root.iterdir() if p.is_dir())
+        reaped = await asyncio.to_thread(
+            sidecar_reaper.reap_orphaned_sidecars, spare_data_dirs=spare_dirs
+        )
+        if reaped:
+            log.info("Reaped %d orphaned sidecar(s) at startup", len(reaped))
+    except Exception:
+        log.exception("Orphaned-sidecar reap at startup failed (non-fatal)")
+
     from .event_ingest_client import EventIngestClient
 
     event_ingest_client = EventIngestClient(data_dir=DATA_DIR)

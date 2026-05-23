@@ -3607,7 +3607,47 @@ def cmd_mcp_log(args):
         print("  " + _format_mcp_call_line(call))
 
 
+def _resolve_sidecar_spare_dirs():
+    """Live data dirs whose sidecars must never be reaped."""
+    spare = [Path(TORQUE_DB).resolve().parent, Path.home() / ".torque"]
+    profiles_root = Path.home() / ".torque" / "profiles"
+    if profiles_root.exists():
+        spare.extend(p for p in profiles_root.iterdir() if p.is_dir())
+    return spare
+
+
 def cmd_doctor(args):
+    if getattr(args, "sidecars", False) or getattr(args, "reap_sidecars", False):
+        from torque import sidecar_reaper
+
+        spare = _resolve_sidecar_spare_dirs()
+        if getattr(args, "reap_sidecars", False):
+            reaped = sidecar_reaper.reap_orphaned_sidecars(spare_data_dirs=spare)
+            if args.json:
+                print(json.dumps(
+                    [{"pid": s.pid, "kind": s.kind, "data_dir": str(s.data_dir)}
+                     for s in reaped],
+                    indent=2,
+                ))
+            else:
+                print(f"Reaped {len(reaped)} orphaned sidecar(s)")
+                for s in reaped:
+                    print(f"  - {s.kind} pid={s.pid} data_dir={s.data_dir}")
+            return
+        orphans = sidecar_reaper.find_orphaned_sidecars(spare_data_dirs=spare)
+        if args.json:
+            print(json.dumps(
+                [{"pid": s.pid, "kind": s.kind, "data_dir": str(s.data_dir)}
+                 for s in orphans],
+                indent=2,
+            ))
+        else:
+            print(f"Orphaned sidecars: {len(orphans)}")
+            for s in orphans:
+                print(f"  - {s.kind} pid={s.pid} data_dir={s.data_dir}")
+            if orphans:
+                print("Run `torque doctor --reap-sidecars` to terminate them.")
+        return
     report = get_doctor_local(args.port)
     if getattr(args, "mcp_health", False):
         if args.json:
@@ -5065,6 +5105,12 @@ def build_parser():
                    help="Output raw JSON")
     p.add_argument("--mcp-health", action="store_true",
                    help="Show recent MCP retry/drop/dedupe/replay counts")
+    p.add_argument("--sidecars", action="store_true",
+                   help="List orphaned event-ingest/pty-supervisor sidecars "
+                        "(temp data dir deleted)")
+    p.add_argument("--reap-sidecars", action="store_true",
+                   help="Terminate orphaned event-ingest/pty-supervisor "
+                        "sidecars whose data dir no longer exists")
     p.set_defaults(func=cmd_doctor)
 
     # -- mcp-log ------------------------------------------------------------

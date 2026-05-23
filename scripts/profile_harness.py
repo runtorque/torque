@@ -225,14 +225,22 @@ def start_daemon(data_dir: Path, *, port: int | None = None) -> DaemonHandle:
 
 def stop_daemon(handle: DaemonHandle) -> None:
     proc = handle.proc
-    if proc.poll() is not None:
-        return
-    proc.terminate()
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    # The daemon spawns detached event-ingest / pty-supervisor sidecars into
+    # this temp data dir; they outlive the daemon's SIGTERM. Reap them so the
+    # harness does not leak processes toward the per-uid ceiling.
     try:
-        proc.wait(timeout=8)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
+        from torque import sidecar_reaper
+
+        sidecar_reaper.reap_sidecars_for_data_dir(handle.data_dir)
+    except Exception:
+        pass
 
 
 async def wait_for_daemon(handle: DaemonHandle, *, timeout: float = 20.0) -> None:
