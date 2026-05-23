@@ -7,6 +7,7 @@ import {
   type DurableObjectSessionAttachment,
 } from "../src/adapters/cloudflare/durableObjectCoordinator.js";
 import { SqliteRelayStore } from "../src/adapters/standalone/sqliteStore.js";
+import { hashSecret } from "../src/core/auth.js";
 import { createClientSessionFixture, createDaemonCredentialFixture, signedDaemonAttachHeader } from "./helpers/auth.js";
 
 class FakeDurableObjectState {
@@ -363,6 +364,65 @@ test("Durable Object rejects wrong-owner authenticated daemon attach without rep
   assert.equal(after.daemon_connection_id, "daemon-current");
   assert.equal(after.epoch, 1);
   assert.equal(currentDaemon.closes.some((close) => close.code === 4000), false);
+});
+
+test("Durable Object mints an establish code on the authed daemon WS and rejects replays + stale epochs", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const fixture = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
+  const durableObject = new DaemonRendezvousDurableObject(
+    new FakeDurableObjectState([]) as unknown as DurableObjectState,
+    { authStore: store },
+  );
+
+  const daemonWs = new FakeCfWebSocket({ role: "daemon", daemonId: "daemon-1", clientId: "", connectionId: "mint-daemon", epoch: 0 });
+  await durableObject.attachSocketForTest(
+    daemonWs as unknown as WebSocket,
+    { role: "daemon", daemonId: "daemon-1", clientId: "" },
+    daemonAttachRequest({ authorization: await signedDaemonAttachHeader(fixture, { nonce: "mint-attach-1" }) }),
+  );
+
+  const mintEnvelope = (id: string, nonce: string): RelayEnvelope => makeRelayEnvelope({
+    id,
+    daemon_id: "daemon-1",
+    source: { kind: "daemon", id: "daemon-1" },
+    target: { kind: "relay", id: "relay" },
+    kind: "mint_client_establish_code",
+    payload: { nonce, label: "iphone" },
+  });
+
+  await durableObject.webSocketMessage(daemonWs as unknown as WebSocket, JSON.stringify(mintEnvelope("mint-req-1", "do-mint-nonce-1")));
+  const result = daemonWs.envelopes().find((env) => env.kind === "mint_client_establish_code_result" && env.payload.ref_id === "mint-req-1");
+  assert.ok(result, "expected a mint result envelope");
+  const code = String(result!.payload.code || "");
+  assert.ok(code.length >= 32);
+  assert.equal(result!.payload.owner_user_id, "owner-1");
+  assert.equal(result!.target.kind, "daemon");
+
+  // Hash-only persistence: redeem by hash works, by raw fails (raw never stored).
+  assert.equal(await store.consumeClientEstablishCode(code), null);
+  const redeemed = await store.consumeClientEstablishCode(await hashSecret(code));
+  assert.equal(redeemed?.owner_user_id, "owner-1");
+
+  // Replay: a reused nonce yields a typed error, not a second code.
+  await durableObject.webSocketMessage(daemonWs as unknown as WebSocket, JSON.stringify(mintEnvelope("mint-req-2", "do-mint-nonce-1")));
+  const replayError = daemonWs.envelopes().find((env) => env.kind === "error" && env.payload.ref_id === "mint-req-2");
+  assert.ok(replayError);
+  assert.equal(replayError!.payload.code, "replayed_mint_nonce");
+
+  // Stale epoch: a newer owner connection supersedes this socket; minting on the
+  // now-stale socket is fenced (P5 connection-level fencing).
+  const replacement = new FakeCfWebSocket({ role: "daemon", daemonId: "daemon-1", clientId: "", connectionId: "mint-daemon-2", epoch: 0 });
+  await durableObject.attachSocketForTest(
+    replacement as unknown as WebSocket,
+    { role: "daemon", daemonId: "daemon-1", clientId: "" },
+    daemonAttachRequest({ authorization: await signedDaemonAttachHeader(fixture, { nonce: "mint-attach-2" }) }),
+  );
+  await durableObject.webSocketMessage(daemonWs as unknown as WebSocket, JSON.stringify(mintEnvelope("mint-req-3", "do-mint-nonce-2")));
+  const staleError = daemonWs.envelopes().find((env) => env.kind === "error" && env.payload.ref_id === "mint-req-3");
+  assert.ok(staleError);
+  assert.equal(staleError!.payload.code, "stale_daemon_connection");
+  await store.close();
 });
 
 function daemonAttachRequest(headers: Record<string, string>): Request {

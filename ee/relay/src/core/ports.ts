@@ -119,6 +119,12 @@ export interface RelayAuthStore {
   // Atomic single-use redemption: returns the record only if it was not already
   // consumed/revoked/expired (so two concurrent /establish calls cannot both win).
   consumeClientEstablishCode(codeHash: string, consumedAt?: string): Promise<RelayClientEstablishCodeRecord | null>;
+  // Per-daemon mint rate-limit support: count establish codes minted for a daemon
+  // since the given ISO timestamp (created_at >= since). Used by the daemon-WS mint
+  // path to bound how many bearer codes a single authenticated daemon can mint per
+  // window. Counts by created_at so consumed/expired rows still count toward the
+  // window (they are not deleted on consume).
+  countRecentEstablishCodes(daemonId: string, sinceIso: string): Promise<number>;
   createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord>;
   getDaemonCredential(daemonId: string, credentialId: string): Promise<RelayDaemonCredentialRecord | null>;
   touchDaemonCredential(credentialId: string, lastUsedAt?: string): Promise<RelayDaemonCredentialRecord | null>;

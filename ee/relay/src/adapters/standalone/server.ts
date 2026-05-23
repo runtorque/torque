@@ -19,6 +19,11 @@ import {
   type StandaloneAuthMode,
 } from "../../core/auth.js";
 import { nowIso } from "../../core/sql.js";
+import {
+  MINT_CLIENT_ESTABLISH_CODE_KIND,
+  makeMintResultEnvelope,
+  mintClientEstablishCode,
+} from "../../core/establishMint.js";
 import { SqliteRelayStore } from "./sqliteStore.js";
 import { StandaloneRegistryCoordinator } from "./registryCoordinator.js";
 import {
@@ -434,6 +439,13 @@ async function handleRelayWsMessage(
   try {
     envelope = parseRelayEnvelopeJson(data.toString("utf8"));
     if (route.role === "daemon") {
+      // Daemon-mediated establish-code mint (b2) rides the authed daemon WS only;
+      // handled inline (never stored/broadcast) with all auth invariants enforced
+      // server-side by mintClientEstablishCode.
+      if (envelope.kind === MINT_CLIENT_ESTABLISH_CODE_KIND) {
+        await handleMintRequest(envelope, route, connectionId, epoch, runtime, socket, auth as DaemonAuthPrincipal);
+        return;
+      }
       await runtime.handleFromDaemon(connectionId, epoch, envelope);
     } else {
       await runtime.handleFromClient(sanitizeClientEnvelopeForV1(envelope, auth as ClientAuthPrincipal));
@@ -446,6 +458,38 @@ async function handleRelayWsMessage(
       envelope?.id || "",
       route.role === "daemon" ? "daemon" : "remote-client",
     ));
+  }
+}
+
+async function handleMintRequest(
+  envelope: RelayEnvelope,
+  route: WsRoute,
+  connectionId: string,
+  epoch: number,
+  runtime: RelayRuntime,
+  socket: WsRelaySocket,
+  auth: DaemonAuthPrincipal,
+): Promise<void> {
+  try {
+    const result = await mintClientEstablishCode({
+      store: runtime.store,
+      coordinator: runtime.coordinator,
+      daemonId: route.daemonId,
+      principal: auth,
+      connectionId,
+      epoch,
+      payload: envelope.payload,
+    });
+    // Raw code rides the response ONCE; never stored or broadcast.
+    socket.sendEnvelope(makeMintResultEnvelope({
+      daemonId: route.daemonId,
+      relayId: runtime.relayId,
+      result,
+      refId: envelope.id,
+      traceId: envelope.trace_id,
+    }));
+  } catch (error) {
+    socket.sendEnvelope(runtime.makeErrorEnvelope(route.daemonId, connectionId, error, envelope.id, "daemon"));
   }
 }
 

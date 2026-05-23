@@ -35,6 +35,11 @@ RELAY_MESSAGE_KINDS = (
     "ack",
     "error",
     "channel_event",
+    # Daemon→relay establish-code mint request, and the relay→daemon response
+    # carrying the raw single-use code exactly once. These ride the authenticated
+    # daemon WS only (see EnterpriseConnector.mint_client_establish_code).
+    "mint_client_establish_code",
+    "mint_client_establish_code_result",
 )
 
 _ACK_DELIVERY_STATES = {"delivered", "acked", "failed"}

@@ -37,6 +37,13 @@ export const RELAY_MESSAGE_KINDS = [
   "ack",
   "error",
   "channel_event",
+  // Daemon→relay control request to mint a single-use client establish code, and
+  // the relay→daemon response carrying the raw code exactly once. These ride the
+  // AUTHENTICATED daemon WS only (never a client/public path); the relay derives
+  // the owner from the authed attach and enforces replay/fencing/rate-limit before
+  // minting. They are control frames — never stored or broadcast to clients.
+  "mint_client_establish_code",
+  "mint_client_establish_code_result",
 ] as const;
 
 export type RelayMessageKind = typeof RELAY_MESSAGE_KINDS[number];

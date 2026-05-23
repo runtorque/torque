@@ -17,7 +17,15 @@ import {
   sanitizeClientEnvelopeForV1,
 } from "../../core/auth.js";
 import { StandaloneRegistryCoordinator } from "../standalone/registryCoordinator.js";
+import {
+  MINT_CLIENT_ESTABLISH_CODE_KIND,
+  makeMintResultEnvelope,
+  mintClientEstablishCode,
+} from "../../core/establishMint.js";
+import { RelayError } from "../../core/errors.js";
 import { D1RelayStore } from "./d1Store.js";
+
+const RELAY_ID = "cloudflare-do";
 
 export type DurableObjectSessionAttachment = {
   role: "daemon" | "client";
@@ -89,6 +97,13 @@ export class DaemonRendezvousDurableObject {
       const text = typeof message === "string" ? message : new TextDecoder().decode(message);
       envelope = parseRelayEnvelope(JSON.parse(text));
       if (attachment.role === "daemon") {
+        // Daemon-mediated mint of a client establish code (b2). Handled inline on
+        // the authed daemon WS only — never stored or broadcast to clients; the
+        // mint enforces owner-from-attach + replay/fencing/rate-limit server-side.
+        if (envelope.kind === MINT_CLIENT_ESTABLISH_CODE_KIND) {
+          await this.handleMintRequest(ws, attachment, envelope);
+          return;
+        }
         if (!await this.registry.isCurrentDaemonConnection(attachment.daemonId, attachment.connectionId, attachment.epoch)) {
           ws.close(4001, "stale_daemon_connection");
           return;
@@ -110,6 +125,42 @@ export class DaemonRendezvousDurableObject {
         ref_id: envelope?.id,
       });
       withSuppressedSend(ws, err);
+    }
+  }
+
+  private async handleMintRequest(
+    ws: WebSocket,
+    attachment: DurableObjectSessionAttachment,
+    envelope: RelayEnvelope,
+  ): Promise<void> {
+    try {
+      const result = await mintClientEstablishCode({
+        store: this.authStore(),
+        coordinator: this.registry,
+        daemonId: attachment.daemonId,
+        principal: daemonPrincipalFromAttachment(attachment),
+        connectionId: attachment.connectionId,
+        epoch: attachment.epoch,
+        payload: envelope.payload,
+      });
+      // The raw code rides the response envelope ONCE and is never stored/broadcast.
+      withSuppressedSend(ws, makeMintResultEnvelope({
+        daemonId: attachment.daemonId,
+        relayId: RELAY_ID,
+        result,
+        refId: envelope.id,
+        traceId: envelope.trace_id,
+      }));
+    } catch (error) {
+      withSuppressedSend(ws, makeErrorEnvelope({
+        daemon_id: attachment.daemonId || "relay",
+        source: { kind: "relay", id: RELAY_ID },
+        target: { kind: "daemon", id: attachment.daemonId },
+        code: error instanceof RelayError ? error.code : "mint_establish_code_error",
+        message: errorMessage(error),
+        retryable: error instanceof RelayError ? error.retryable : false,
+        ref_id: envelope.id,
+      }));
     }
   }
 

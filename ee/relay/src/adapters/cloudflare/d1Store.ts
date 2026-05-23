@@ -213,6 +213,17 @@ export class D1RelayStore implements RelayStore {
     });
   }
 
+  async countRecentEstablishCodes(daemonId: string, sinceIso: string): Promise<number> {
+    return this.operation("countRecentEstablishCodes", async () => {
+      const row = await this.db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM relay_client_establish_codes
+         WHERE daemon_id=? AND created_at>=?`,
+      ).bind(cleanDaemonId(daemonId), assertNonEmpty(sinceIso, "since")).first<{ count?: number }>();
+      return Number(row?.count || 0);
+    });
+  }
+
   async createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord> {
     return this.operation("createDaemonCredential", async () => {
       assertNonEmpty(record.credential_id, "credential id");

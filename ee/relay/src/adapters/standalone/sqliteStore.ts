@@ -246,6 +246,17 @@ export class SqliteRelayStore implements RelayStore {
     });
   }
 
+  async countRecentEstablishCodes(daemonId: string, sinceIso: string): Promise<number> {
+    return this.operation("countRecentEstablishCodes", () => {
+      const row = this.db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM relay_client_establish_codes
+         WHERE daemon_id=? AND created_at>=?`,
+      ).get(cleanDaemonId(daemonId), assertNonEmpty(sinceIso, "since")) as { count?: number } | undefined;
+      return Number(row?.count || 0);
+    });
+  }
+
   async createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord> {
     return this.operation("createDaemonCredential", () => {
       assertNonEmpty(record.credential_id, "credential id");

@@ -4,7 +4,7 @@ import WebSocket from "ws";
 
 import { makeAckEnvelope, makeRelayEnvelope, parseRelayEnvelopeJson, type RelayEnvelope } from "../src/core/protocol.js";
 import { createStandaloneRelayServer, type StandaloneRelayServerHandle } from "../src/adapters/standalone/server.js";
-import { LOCAL_DEV_AUTH_MODE } from "../src/core/auth.js";
+import { LOCAL_DEV_AUTH_MODE, hashSecret } from "../src/core/auth.js";
 import { createDaemonCredentialFixture, signedDaemonAttachHeader } from "./helpers/auth.js";
 test("standalone Node entrypoint accepts HTTP enqueue, replays over daemon WS, and records ack", async () => {
   const relay = await createStandaloneRelayServer({ port: 0, databasePath: ":memory:", replayLimit: 10 });
@@ -167,6 +167,53 @@ test("standalone authenticated owner attach rejects hijack matrix without owner 
     await assertNoOwnerChange(relay, "daemon-1", afterReplacement.daemon_connection_id, 2);
     assert.equal(replacement.ws.readyState, WebSocket.OPEN);
     replacement.ws.close();
+    daemon.ws.close();
+  } finally {
+    await relay.close();
+  }
+});
+
+test("standalone daemon WS mints an establish code (owner-from-attach, hash-only) and rejects replays", async () => {
+  const relay = await createStandaloneRelayServer({ port: 0, databasePath: ":memory:", authMode: "required" });
+  try {
+    await relay.listen();
+    const address = relay.server.address();
+    if (!address || typeof address !== "object") throw new Error("expected bound address");
+    const wsUrl = `ws://127.0.0.1:${address.port}/v1/daemon/daemon-1/ws`;
+    const fixture = await createDaemonCredentialFixture(relay.store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
+    const daemon = await openRecordingWs(wsUrl, { authorization: await signedDaemonAttachHeader(fixture) });
+    const ready = await nextEnvelope(daemon);
+    assert.equal(ready.kind, "ready");
+
+    const mintEnvelope = (id: string, nonce: string): RelayEnvelope => makeRelayEnvelope({
+      id,
+      daemon_id: "daemon-1",
+      source: { kind: "daemon", id: "daemon-1" },
+      target: { kind: "relay", id: "standalone" },
+      kind: "mint_client_establish_code",
+      // A payload owner must be ignored — owner is taken from the authed attach.
+      payload: { nonce, label: "ipad", owner_user_id: "attacker" },
+    });
+
+    daemon.ws.send(JSON.stringify(mintEnvelope("mint-1", "standalone-mint-nonce-1")));
+    const result = await nextEnvelope(daemon);
+    assert.equal(result.kind, "mint_client_establish_code_result");
+    assert.equal(result.payload.ref_id, "mint-1");
+    assert.equal(result.payload.owner_user_id, "owner-1");
+    const code = String(result.payload.code || "");
+    assert.ok(code.length >= 32);
+
+    // Hash-only persistence: redeem by hash works, by raw fails.
+    assert.equal(await relay.store.consumeClientEstablishCode(code), null);
+    assert.equal((await relay.store.consumeClientEstablishCode(await hashSecret(code)))?.owner_user_id, "owner-1");
+
+    // Replay: a reused nonce yields a typed error, not a second code.
+    daemon.ws.send(JSON.stringify(mintEnvelope("mint-2", "standalone-mint-nonce-1")));
+    const replayError = await nextEnvelope(daemon);
+    assert.equal(replayError.kind, "error");
+    assert.equal(replayError.payload.ref_id, "mint-2");
+    assert.equal(replayError.payload.code, "replayed_mint_nonce");
+
     daemon.ws.close();
   } finally {
     await relay.close();

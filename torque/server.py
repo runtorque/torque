@@ -10391,6 +10391,34 @@ async def main(connection=None):
             )
             return {"type": "relay_test_result", **result}
 
+        # generate_relay_device_link: b2 daemon-mediated mint of a single-use
+        # relay device link (replaces the manual `wrangler d1` OTC seed). The mint
+        # rides the daemon's authenticated relay WS; the relay derives the owner
+        # from the authed attach and enforces replay/fencing/rate-limit.
+        #
+        # LOCAL-CONFIRMATION gesture is REQUIRED (security invariant): the caller
+        # MUST pass confirm=true, so a remote reach to this command cannot
+        # silently mint a bearer credential. On confirm, the raw code + establish
+        # URL are returned to the LOCAL caller exactly ONCE and are NEVER
+        # persisted or logged by the daemon. Frontend (QR/display-once) is owned
+        # by a separate task and is intentionally out of scope here.
+        if cmd == "generate_relay_device_link":
+            if not bool(data.get("confirm")):
+                return {
+                    "type": "relay_device_link",
+                    "ok": False,
+                    "status": "confirmation_required",
+                    "message": (
+                        "Generating a device link mints a single-use, "
+                        "short-lived credential. Confirm to proceed."
+                    ),
+                }
+            result = await cloud_hooks.mint_relay_device_link(
+                cloud_connector_runtime_holder[0],
+                label=str(data.get("label", "") or ""),
+            )
+            return {"type": "relay_device_link", **result}
+
         if cmd == "doctor":
             return _handle_doctor_command(db)
 
