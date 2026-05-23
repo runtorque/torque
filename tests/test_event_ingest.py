@@ -23,7 +23,11 @@ from torque.event_ingest_daemon import (
     read_frame,
     write_frame,
 )
-from torque.event_ingest_client import EventIngestClient, EventIngestProtocolError
+from torque.event_ingest_client import (
+    EventIngestClient,
+    EventIngestProtocolError,
+    EventIngestUnavailable,
+)
 from torque.events import (
     EventBus,
     EventIngestDrainer,
@@ -414,6 +418,59 @@ class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
         client._call_with_reconnect_retry = fake_call
         with self.assertRaises(EventIngestProtocolError):
             await client.configure(args_capture="metadata")
+
+
+class EventIngestThreadExhaustionTests(unittest.IsolatedAsyncioTestCase):
+    """Connect-time thread/process exhaustion degrades, never aborts startup."""
+
+    def _client(self, exc: Exception) -> EventIngestClient:
+        # ``boom`` stands in for the executor allocating a worker thread/lock
+        # inside ``asyncio.to_thread`` and failing under resource exhaustion;
+        # data_dir is never touched because it raises immediately.
+        def boom(_data_dir):
+            raise exc
+
+        return EventIngestClient(
+            data_dir=Path("/nonexistent-torque-ingest"),
+            reconnect_delay=0.01,
+            ensure_running_func=boom,
+        )
+
+    async def test_connect_maps_thread_limit_to_unavailable(self):
+        client = self._client(RuntimeError("can't start new thread"))
+        with self.assertLogs("torque.event_ingest_client", level="ERROR") as logs:
+            with self.assertRaises(EventIngestUnavailable):
+                await client.connect()
+        joined = "\n".join(logs.output)
+        self.assertIn("system thread/process limit reached", joined)
+        self.assertIn("ulimit -u", joined)
+        # The original bare RuntimeError must not leak as the raised type.
+        await client.aclose()
+
+    async def test_call_with_reconnect_retry_degrades_on_thread_limit(self):
+        client = self._client(RuntimeError("can't start new thread"))
+        # append() -> _call_with_reconnect_retry only catches
+        # EventIngestUnavailable; the mapping keeps runtime appends degrading
+        # instead of surfacing a bare RuntimeError to callers.
+        with self.assertRaises(EventIngestUnavailable):
+            await client.append({"payload": 1}, idempotency_key="k")
+        await client.aclose()
+
+    async def test_non_resource_runtimeerror_still_degrades(self):
+        client = self._client(RuntimeError("ensure_running blew up"))
+        with self.assertLogs(
+            "torque.event_ingest_client", level="WARNING"
+        ) as logs:
+            with self.assertRaises(EventIngestUnavailable):
+                await client.connect()
+        self.assertIn("ensure-running failed", "\n".join(logs.output))
+        await client.aclose()
+
+    async def test_protocol_error_subclass_propagates_untouched(self):
+        client = self._client(EventIngestProtocolError("nope"))
+        with self.assertRaises(EventIngestProtocolError):
+            await client.connect()
+        await client.aclose()
 
 
 class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
