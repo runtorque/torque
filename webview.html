@@ -1202,11 +1202,19 @@
             connection state above reports the result.
           </p>
         </div>
-        <!-- Test-connectivity probe slot (TORQUE:603 #2). Structural only —
-             Courier's probe button + actionable result line (CA-missing /
-             unreachable / auth-rejected / ok) mount here once the invoke API
-             lands on main. Left hidden + empty until then. -->
-        <div id="gls-relay-probe-slot" class="gls-relay-probe-slot" hidden></div>
+        <!-- Test-connectivity probe (TORQUE:603 #2). Button sends the daemon
+             `test_relay_connection` command; the daemon-side probe returns a
+             structured {status, message, detail} that renders as an actionable
+             result line below. Slot visibility rides the Relay section (toggled
+             in _relaySectionUpdateVisibility); the result line is owned by the
+             probe handler and is never cleared by a relay_config /
+             relay_connection delta refresh. -->
+        <div id="gls-relay-probe-slot" class="gls-relay-probe-slot" hidden>
+          <button type="button" class="btn-secondary" id="gls-relay-probe-test"
+                  onclick="testRelayConnection()">Test connectivity</button>
+          <div id="gls-relay-probe-result" class="gls-relay-probe-result"
+               role="status" aria-live="polite" hidden></div>
+        </div>
       </section>
     </div>
 
