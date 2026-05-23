@@ -5475,6 +5475,30 @@ test('relay-status indicator is browser-visible and not Tauri-gated (CSS)', () =
   assert.doesNotMatch(css, /body\.tauri-mode[^{]*\.relay-status\b/);
 });
 
+test('modal Relay dot uses the relay-status-dot base so color modifiers win the cascade', () => {
+  // Regression: the modal dot used the `daemon-status-dot` base, whose
+  // `background: var(--text-dim)` rule is declared AFTER the
+  // `.relay-status-dot--{color}` modifiers at equal specificity, so the grey
+  // base always won and the dot rendered grey regardless of status. The dot
+  // must use the `relay-status-dot` base (declared BEFORE the modifiers) so
+  // the color modifier wins.
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const dot = html.match(/<span id="gls-relay-status-dot"[^>]*>/);
+  assert.ok(dot, '#gls-relay-status-dot span exists');
+  assert.match(dot[0], /class="[^"]*\brelay-status-dot\b[^"]*"/,
+    'modal dot uses the relay-status-dot base');
+  assert.doesNotMatch(dot[0], /\bdaemon-status-dot\b/,
+    'modal dot must not keep the daemon-status-dot base (later-declared grey wins)');
+
+  // The `.relay-status-dot` base must precede its color modifiers in source so
+  // the modifier wins at equal specificity.
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const baseIdx = css.search(/^\.relay-status-dot\s*\{/m);
+  const greenIdx = css.search(/^\.relay-status-dot--green\s*\{/m);
+  assert.ok(baseIdx >= 0 && greenIdx >= 0, 'relay dot base + modifier rules exist');
+  assert.ok(baseIdx < greenIdx, 'relay-status-dot base precedes its color modifiers');
+});
+
 test('relay_connection delta patches state in place without a panel/grid rebuild', () => {
   const { context } = createRelayStatusHarness();
   runInContext(context, `
@@ -5549,6 +5573,39 @@ test('relay_connection modal "Relay" row renders from state and hides when absen
   assert.equal(
     jsonValue(context, `document.getElementById('gls-relay-status-dot').classList.contains('relay-status-dot--amber')`),
     true,
+  );
+
+  // The modal dot reflects status color — regression guard for the
+  // always-grey cascade defect. error → red (and the prior amber is cleared).
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'error', enabled: true, relay_host: 'relay.runtorque.com',
+      retry_count: 9, last_error: 'certificate verify failed', since: '2026-05-23T12:05:00Z',
+    };
+    _relayStatusRenderModalRow();
+  `);
+  assert.equal(
+    jsonValue(context, `document.getElementById('gls-relay-status-dot').classList.contains('relay-status-dot--red')`),
+    true,
+    'error → red dot class',
+  );
+  assert.equal(
+    jsonValue(context, `document.getElementById('gls-relay-status-dot').classList.contains('relay-status-dot--amber')`),
+    false,
+    'stale amber class cleared on status change',
+  );
+  // connected → green.
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'connected', enabled: true, relay_host: 'relay.runtorque.com',
+      retry_count: 0, since: '2026-05-23T12:10:00Z',
+    };
+    _relayStatusRenderModalRow();
+  `);
+  assert.equal(
+    jsonValue(context, `document.getElementById('gls-relay-status-dot').classList.contains('relay-status-dot--green')`),
+    true,
+    'connected → green dot class',
   );
 
   // Absent field → section hidden.
