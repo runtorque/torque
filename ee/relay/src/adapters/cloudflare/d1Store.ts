@@ -66,7 +66,7 @@ export class D1RelayStore implements RelayStore {
           owner_user_id=excluded.owner_user_id,
           label=excluded.label,
           last_seen_at=excluded.last_seen_at,
-          fencing_epoch=excluded.fencing_epoch,
+          fencing_epoch=MAX(relay_instances.fencing_epoch, excluded.fencing_epoch),
           active_credential_id=excluded.active_credential_id,
           coordination_updated_at=excluded.coordination_updated_at,
           metadata_json=excluded.metadata_json`,

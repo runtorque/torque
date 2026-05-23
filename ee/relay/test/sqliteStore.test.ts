@@ -159,3 +159,32 @@ test("SqliteRelayStore claimInstanceOwner enforces owner-CAS and monotonic fenci
   assert.equal((await store.getInstance("daemon-cas"))?.fencing_epoch, 2);
   await store.close();
 });
+
+test("SqliteRelayStore upsertInstance does not lower persisted fencing_epoch", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  await store.claimInstanceOwner({
+    id: "daemon-rotation",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 7,
+    now: "2026-05-23T00:00:00.000Z",
+  });
+
+  const rotated = await store.upsertInstance({
+    id: "daemon-rotation",
+    owner_user_id: "owner-1",
+    label: "rotated",
+    created_at: "2026-05-23T00:00:00.000Z",
+    last_seen_at: "2026-05-23T00:01:00.000Z",
+    fencing_epoch: 0,
+    active_credential_id: "cred-2",
+    coordination_updated_at: "2026-05-23T00:01:00.000Z",
+    metadata: {},
+  });
+
+  assert.equal(rotated.active_credential_id, "cred-2");
+  assert.equal(rotated.fencing_epoch, 7);
+  assert.equal((await store.getInstance("daemon-rotation"))?.fencing_epoch, 7);
+  await store.close();
+});

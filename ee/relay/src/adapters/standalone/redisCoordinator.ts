@@ -563,6 +563,7 @@ export class RedisRelayCoordinator implements RelayCoordinator {
     const instance = await this.store.getInstance(lease.daemon_id);
     if (!instance?.owner_user_id || instance.owner_user_id !== lease.owner_user_id) return false;
     if (Number(instance.fencing_epoch || 0) > Number(lease.epoch || 0)) return false;
+    if (instance.active_credential_id && instance.active_credential_id !== lease.credential_id) return false;
     if (lease.credential_id === "local-dev-unauthenticated") return lease.owner_user_id === "local-dev";
     const credential = await this.store.getDaemonCredential(lease.daemon_id, lease.credential_id);
     return isActiveCredential(credential) && credential.owner_user_id === lease.owner_user_id;

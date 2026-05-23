@@ -161,6 +161,31 @@ test("RedisRelayCoordinator owner change propagates through live store revalidat
   await store.close();
 });
 
+test("RedisRelayCoordinator active credential rotation fences the old same-owner lease", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const oldCredential = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-old" });
+  const redis = new FakeRedis();
+  const oldCoordinator = coordinator({ store, redis, processId: "old-credential", disableAutoRenew: false, renewIntervalMs: 20 });
+  const oldSocket = new MemorySocket("daemon-old");
+  const first = await oldCoordinator.attachDaemon({ daemonId: "daemon-1", socket: oldSocket, auth: daemonPrincipal(oldCredential) });
+  assert.equal(first.accepted, true);
+
+  const newCredential = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-new" });
+  assert.equal((await store.getInstance("daemon-1"))?.active_credential_id, "cred-new");
+  await waitFor(() => Promise.resolve(oldSocket.closes.some((close) => close.reason === "authenticated_session_revoked")));
+  assert.equal(await oldCoordinator.isCurrentDaemonConnection("daemon-1", "daemon-old", first.epoch), false);
+
+  const newCoordinator = coordinator({ store, redis, processId: "new-credential" });
+  const second = await newCoordinator.attachDaemon({ daemonId: "daemon-1", socket: new MemorySocket("daemon-new"), auth: daemonPrincipal(newCredential) });
+  assert.equal(second.accepted, true);
+  assert.equal(second.epoch, first.epoch + 1);
+  assert.equal((await store.getInstance("daemon-1"))?.fencing_epoch, second.epoch);
+  await oldCoordinator.close();
+  await newCoordinator.close();
+  await store.close();
+});
+
 test("RedisRelayCoordinator rejects stale token after a newer epoch", async () => {
   const store = new SqliteRelayStore(":memory:");
   await store.migrate();
@@ -267,11 +292,15 @@ test("Redis restart flush reseeds epoch from relay_instances fencing_epoch", asy
   assert.equal(first.accepted, true);
   assert.equal((await store.getInstance("daemon-1"))?.fencing_epoch, first.epoch);
 
+  const rotated = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-2" });
+  assert.equal((await store.getInstance("daemon-1"))?.active_credential_id, "cred-2");
+  assert.equal((await store.getInstance("daemon-1"))?.fencing_epoch, first.epoch, "credential rotation must not lower the persisted fencing epoch");
+
   redis.flushAll();
   assert.equal(await beforeFlush.isCurrentDaemonConnection("daemon-1", "daemon-before", first.epoch), false);
 
   const afterFlush = coordinator({ store, redis, processId: "after-flush" });
-  const second = await afterFlush.attachDaemon({ daemonId: "daemon-1", socket: new MemorySocket("daemon-after"), auth: daemonPrincipal(fixture) });
+  const second = await afterFlush.attachDaemon({ daemonId: "daemon-1", socket: new MemorySocket("daemon-after"), auth: daemonPrincipal(rotated) });
   assert.equal(second.accepted, true);
   assert.ok(second.epoch > first.epoch, `expected reseeded epoch > ${first.epoch}, got ${second.epoch}`);
   assert.equal((await store.getInstance("daemon-1"))?.fencing_epoch, second.epoch);
