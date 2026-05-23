@@ -368,6 +368,39 @@ class DirectMessageMirrorTests(unittest.TestCase):
         self.assertEqual(worker.mcp_messages, [])
         self.assertEqual(engineer.mcp_messages, [])
 
+    def test_load_recent_user_direct_messages_is_bounded_newest_first(self):
+        engineer = self._add_agent("eng-1", "engineer", "Engineer")
+        owned_worker = self._add_agent(
+            "worker-owned",
+            "worker",
+            "Owned Worker",
+            owner_engineer_id=engineer.id,
+        )
+        user_worker = self._add_agent("worker-user", "worker", "User Worker")
+
+        # User-destined ask (recipient=user) and owner-routed ask
+        # (recipient=engineer); both live in the user↔agent lane the loader
+        # serves -- downstream gating decides egress, not this loader.
+        user_ask = save_direct_ask_mirror(
+            self.state, user_worker, "user ask",
+            source_task_id="t-user", created_at=10.0,
+        )
+        owner_ask = save_direct_ask_mirror(
+            self.state, owned_worker, "owner ask",
+            source_task_id="t-owner", created_at=20.0,
+        )
+
+        recent = self.db.load_recent_user_direct_messages(limit=10)
+        self.assertEqual(
+            [row["id"] for row in recent],
+            [owner_ask["id"], user_ask["id"]],  # newest first
+        )
+        owner_row = next(r for r in recent if r["id"] == owner_ask["id"])
+        self.assertEqual(owner_row["recipient_kind"], "engineer")
+
+        bounded = self.db.load_recent_user_direct_messages(limit=1)
+        self.assertEqual([row["id"] for row in bounded], [owner_ask["id"]])
+
 
 if __name__ == "__main__":
     unittest.main()

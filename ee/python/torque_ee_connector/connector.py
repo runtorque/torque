@@ -52,6 +52,11 @@ _IDEMPOTENCY_FIELDS = (
 )
 _DIRECT_MESSAGE_OUTBOUND_TYPES = {"message", "ask", "ask_reply"}
 CONNECTOR_DEBUG_BUFFER_LIMIT = 200
+# Bounded recent-conversation snapshot sent on a client snapshot_request.
+# Aligns with the daemon's per-agent DIRECT_MESSAGE_CACHE_LIMIT (100) and stays
+# well under the ~500 frontend tail-cap.  NEVER unbounded.
+SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 100
+SNAPSHOT_MAX_MESSAGE_LIMIT = 1000
 
 
 @dataclass(frozen=True)
@@ -239,6 +244,9 @@ class EnterpriseConnector:
         if kind == "user_message":
             await self._handle_user_message(parsed)
             return
+        if kind == "snapshot_request":
+            await self._handle_snapshot_request(parsed)
+            return
         await self._send_error(
             code="unsupported_relay_kind",
             message=f"unsupported relay kind for local daemon: {kind}",
@@ -297,6 +305,93 @@ class EnterpriseConnector:
         if isinstance(result, Mapping):
             return dict(result)
         return {"type": "ok", "result": str(result)}
+
+    async def _handle_snapshot_request(self, envelope: Mapping[str, Any]) -> None:
+        """Answer a client snapshot_request with bounded recent conversation.
+
+        Recent user↔agent rows are drawn from the SAME DM-mirror source that
+        feeds live egress and shaped through the SAME gate + payload builder, so
+        a snapshot row is byte-identical to the live envelope the client would
+        have received.  In particular asks are gated to user-destined via
+        ``_wire_kind_for_direct_message_row`` (the canonical resolver-stamped
+        gate from TORQUE:534): owner-routed asks never enter the snapshot.
+        """
+        assert self.config is not None
+        limit = self._snapshot_limit_from_request(envelope)
+        rows = await self._call_recent_direct_messages(limit)
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            wire_kind = _wire_kind_for_direct_message_row(row)
+            if not wire_kind:
+                continue
+            agent_id = _agent_id_for_direct_message(row)
+            entry = _direct_message_payload(row, agent_id)
+            entry["kind"] = wire_kind
+            messages.append(entry)
+        # Provider returns newest-first; present oldest-first so the client can
+        # append the snapshot in chronological order like the live stream.
+        messages.reverse()
+        if len(messages) > limit:
+            messages = messages[-limit:]
+        await self._send_envelope(
+            make_relay_envelope(
+                daemon_id=self.config.daemon_id,
+                source={"kind": "daemon", "id": self.config.daemon_id},
+                target=_snapshot_client_target(envelope.get("source")),
+                kind="snapshot",
+                payload={
+                    "lane": "user-agent",
+                    "messages": messages,
+                    "count": len(messages),
+                    "limit": limit,
+                    "truncated": bool(len(rows) >= limit),
+                    "ref_id": str(envelope.get("id", "") or ""),
+                },
+                trace_id=str(envelope.get("trace_id", "") or ""),
+            )
+        )
+
+    async def _call_recent_direct_messages(self, limit: int) -> list[dict[str, Any]]:
+        provider = getattr(self.context, "recent_direct_messages", None)
+        if not callable(provider) and isinstance(self.context, Mapping):
+            provider = self.context.get("recent_direct_messages")
+        if not callable(provider):
+            return []
+        try:
+            result = provider(limit)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            log.exception("EE connector recent direct-message provider failed")
+            return []
+        if not isinstance(result, list):
+            return []
+        return [dict(row) for row in result if isinstance(row, Mapping)]
+
+    def _snapshot_message_cap(self) -> int:
+        config = _context_config(self.context)
+        raw = config.get("snapshot_message_limit") or os.environ.get(
+            "TORQUE_EE_CONNECTOR_SNAPSHOT_LIMIT",
+            SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
+        )
+        try:
+            return max(1, min(int(raw), SNAPSHOT_MAX_MESSAGE_LIMIT))
+        except (TypeError, ValueError):
+            return SNAPSHOT_DEFAULT_MESSAGE_LIMIT
+
+    def _snapshot_limit_from_request(self, envelope: Mapping[str, Any]) -> int:
+        cap = self._snapshot_message_cap()
+        payload = envelope.get("payload") or {}
+        requested = payload.get("limit") if isinstance(payload, Mapping) else None
+        if requested is None:
+            return cap
+        try:
+            req = int(requested)
+        except (TypeError, ValueError):
+            return cap
+        if req < 1:
+            return cap
+        return min(req, cap)
 
 
     def _attach_headers(self) -> dict[str, str]:
@@ -662,6 +757,26 @@ def _wire_kind_for_direct_message_row(row: Mapping[str, Any]) -> str:
     if message_type == "message" and sender_kind != "user" and recipient_kind == "user":
         return "agent_message"
     return ""
+
+
+def _snapshot_client_target(source: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Target the snapshot back at the requesting remote client.
+
+    Echoes the request's remote-client endpoint so the relay routes the
+    snapshot to the asking client; falls back to the canonical single-user
+    remote-client lane when the source is missing/unexpected.
+    """
+    src = dict(source or {})
+    if str(src.get("kind", "") or "").strip() == "remote-client":
+        target: dict[str, Any] = {
+            "kind": "remote-client",
+            "id": str(src.get("id", "") or "user").strip() or "user",
+        }
+        user_id = str(src.get("user_id", "") or "").strip()
+        if user_id:
+            target["user_id"] = user_id
+        return target
+    return {"kind": "remote-client", "id": "user", "user_id": "user"}
 
 
 def _agent_id_for_direct_message(row: Mapping[str, Any]) -> str:

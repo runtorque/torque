@@ -20,6 +20,7 @@ from .config import log
 
 DirectMessageObserver = Callable[[dict[str, Any]], Any]
 RemoteUserAgentIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+RecentDirectMessages = Callable[[int], list[dict[str, Any]]]
 Unregister = Callable[[], None]
 
 _DIRECT_MESSAGE_OBSERVERS: list[DirectMessageObserver] = []
@@ -35,6 +36,10 @@ class CloudConnectorContext:
     profile: str = ""
     data_dir: str = ""
     config: dict[str, Any] = field(default_factory=dict)
+    # Optional: bounded recent user↔agent conversation rows for snapshot-on-open
+    # (newest-first canonical rows).  ``None`` in community/legacy builds; the
+    # connector then emits an empty snapshot.
+    recent_direct_messages: RecentDirectMessages | None = None
 
 
 @dataclass
