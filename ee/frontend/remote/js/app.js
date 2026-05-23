@@ -39,11 +39,12 @@
       onStatus: function(status, detail) { renderBanner(status, detail); },
     });
 
-    if (els.history) els.history.innerHTML = root.RemoteRender.historyNoticeHtml();
-
     store.subscribe(function() { render(); });
 
     function render() {
+      if (els.history) {
+        els.history.innerHTML = root.RemoteRender.historyNoticeHtml(store.snapshotApplied);
+      }
       if (els.agentList) {
         root.RemoteRender.paintSurface(els.agentList,
           root.RemoteRender.agentListHtml(store));

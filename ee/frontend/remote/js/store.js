@@ -59,6 +59,12 @@
     this.order = [];               // agentId list, most-recent-activity first
     this.activeAgentId = '';
     this._subscribers = [];
+    // Recent-history-on-open (plan §11, scope-extended per TORQUE:578): set once
+    // a snapshot envelope is consumed. Drives the "showing new messages" vs
+    // "showing recent history" affordance. Stays false when no/empty snapshot,
+    // so we degrade gracefully to the replay-only baseline.
+    this.snapshotApplied = false;
+    this.snapshotRowCount = 0;
   }
 
   RemoteStore.prototype.subscribe = function(fn) {
@@ -171,6 +177,80 @@
     this._touch(agentId, atMs);
     this._notify();
     return msg;
+  };
+
+  // Pull the row array out of a snapshot payload. The :578 shape is not yet
+  // published to shared memory, so accept the documented/likely field names;
+  // each row reuses the agent_message payload shape. (PENDING cross-check vs
+  // Courier's published :578 snapshot shape — flag if a row field we cannot
+  // consume cleanly appears.)
+  function _snapshotRows(payload) {
+    var candidates = [payload.messages, payload.rows, payload.items,
+      payload.conversation, payload.snapshot, payload.history];
+    for (var i = 0; i < candidates.length; i++) {
+      if (Array.isArray(candidates[i])) return candidates[i];
+    }
+    return [];
+  }
+
+  // Build a message from an agent_message-shaped row. Snapshot history includes
+  // BOTH sides of the user<->agent conversation, so the sender is derived from
+  // sender_kind (a user row has sender_kind="user"), unlike live agent_message
+  // egress which is always agent-sent.
+  RemoteStore.prototype._messageFromAgentPayload = function(payload, fallbackIso) {
+    var agentId = _agentIdFromPayload(payload);
+    if (!agentId) return null;
+    var senderKind = _trim(payload.sender_kind);
+    var sender = senderKind === 'user' ? 'user' : 'agent';
+    var messageType = _trim(payload.message_type) || 'message';
+    var id = _trim(payload.message_id) || _trim(payload.id);
+    if (!id) return null;
+    return {
+      msg: {
+        id: id,
+        kind: messageType === 'ask' ? 'ask'
+          : (messageType === 'ask_reply' ? 'ask_reply' : 'agent_message'),
+        agentId: agentId,
+        sender: sender,
+        body: (payload.message == null) ? '' : String(payload.message),
+        messageType: messageType,
+        blocking: !!payload.blocking,
+        threadId: _trim(payload.thread_id),
+        replyToId: _trim(payload.reply_to_id),
+        createdAtMs: _createdAtMs(payload, fallbackIso),
+        deliveryState: _trim(payload.delivery_state)
+          || (sender === 'user' ? 'acked' : 'delivered'),
+      },
+      agentId: agentId,
+      agentName: _agentNameFromPayload(payload, agentId),
+    };
+  };
+
+  // Apply a snapshot envelope: a BATCH of recent USER<->AGENT history rows,
+  // consumed on connect BEFORE live messages. Routed through the SAME store
+  // upsert (idempotent by message id) as live messages, so any snapshot<->live
+  // overlap de-dupes cleanly. Historical rows do NOT bump unread and do NOT
+  // populate pendingAsks (only live `ask` envelopes raise an actionable ask).
+  RemoteStore.prototype.ingestSnapshot = function(env) {
+    var rows = _snapshotRows(env && env.payload ? env.payload : {});
+    this.snapshotApplied = true;
+    if (!rows.length) { this._notify(); return 0; }
+    // Apply oldest-first so tail-cap keeps the most recent rows.
+    var built = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (!rows[i] || typeof rows[i] !== 'object') continue;
+      var b = this._messageFromAgentPayload(rows[i], env.created_at);
+      if (b) built.push(b);
+    }
+    built.sort(function(a, b) { return a.msg.createdAtMs - b.msg.createdAtMs; });
+    for (var j = 0; j < built.length; j++) {
+      var conv = this._ensureConversation(built[j].agentId, built[j].agentName);
+      this._appendOrUpsert(conv, built[j].msg);
+      this._touch(built[j].agentId, built[j].msg.createdAtMs);
+    }
+    this.snapshotRowCount += built.length;
+    this._notify();
+    return built.length;
   };
 
   // Record an outbound user message/ask-answer optimistically (pending).

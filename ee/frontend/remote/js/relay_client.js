@@ -173,6 +173,13 @@
       case 'error':
         this._handleError(env);
         return;
+      case 'snapshot':
+        // Recent-history-on-open batch (TORQUE:578). Apply BEFORE live messages
+        // (it arrives right after `ready`); store upsert de-dupes any
+        // snapshot<->live overlap. Ack it so the relay stops replaying.
+        if (this.store) this.store.ingestSnapshot(env);
+        this._ackInbound(env);
+        return;
       default:
         break;
     }

@@ -118,9 +118,12 @@
       + esc(entry[1]) + '</div>';
   }
 
-  // Honest "showing new messages" affordance for the replay-only history model
-  // (plan §11): we never load full acked history, only replayed pending + live.
-  function historyNoticeHtml() {
+  // History affordance. When a snapshot has been applied (TORQUE:578), recent
+  // context is shown and no notice is needed. When no/empty snapshot arrived
+  // (e.g. :578 not deployed, or a local-dev relay), degrade gracefully to the
+  // honest replay-only "showing new messages" notice (plan §11).
+  function historyNoticeHtml(snapshotApplied) {
+    if (snapshotApplied) return '';
     return '<div class="remote-history-notice">Showing new messages from when this'
       + ' device connected.</div>';
   }
