@@ -209,6 +209,63 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         self.assertEqual(state.global_settings.xterm_scrollback, 4096)
 
+    def test_update_global_settings_normalizes_relay_fields(self):
+        state = self.state_mod.MatrixState()
+        state.update_global_settings(
+            relay_enabled="true",
+            relay_url="  wss://relay.example/ws  ",
+            relay_daemon_id=" daemon-3 ",
+            relay_credential_id="cred-3",
+            relay_private_key_path="  /keys/relay.pem ",
+        )
+        gs = state.global_settings
+        self.assertIs(gs.relay_enabled, True)
+        self.assertEqual(gs.relay_url, "wss://relay.example/ws")
+        self.assertEqual(gs.relay_daemon_id, "daemon-3")
+        self.assertEqual(gs.relay_credential_id, "cred-3")
+        self.assertEqual(gs.relay_private_key_path, "/keys/relay.pem")
+
+        state.update_global_settings(relay_enabled="false")
+        self.assertIs(state.global_settings.relay_enabled, False)
+
+    def test_relay_fields_default_off_and_serialize(self):
+        state = self.state_mod.MatrixState()
+        gs = state.global_settings
+        self.assertFalse(gs.relay_enabled)
+        self.assertEqual(gs.relay_url, "")
+        self.assertEqual(gs.relay_private_key_path, "")
+        # asdict (the persistence + delta payload) carries the relay keys.
+        from dataclasses import asdict
+        d = asdict(gs)
+        for key in ("relay_enabled", "relay_url", "relay_daemon_id",
+                    "relay_credential_id", "relay_private_key_path"):
+            self.assertIn(key, d)
+
+    def test_set_relay_config_dedupes_and_emits(self):
+        state = self.state_mod.MatrixState()
+        payload = {
+            "config": {"enabled": True, "relay_url": "wss://r/ws"},
+            "sources": {"relay_url": {"value": "wss://r/ws",
+                                      "source": "settings"}},
+        }
+        self.assertTrue(state.set_relay_config(payload))
+        self.assertEqual(state.relay_config, payload)
+        # Idempotent: an identical payload emits no further delta.
+        self.assertFalse(state.set_relay_config(dict(payload)))
+
+    def test_snapshot_includes_relay_config(self):
+        state = self.state_mod.MatrixState()
+        state.set_relay_config({
+            "config": {"enabled": False},
+            "sources": {"relay_url": {"value": "", "source": ""}},
+        })
+        snap = state.to_dict()
+        self.assertIn("relay_config", snap)
+        self.assertEqual(snap["relay_config"]["config"], {"enabled": False})
+        # Deep-copied: mutating the snapshot must not corrupt live state.
+        snap["relay_config"]["config"]["enabled"] = True
+        self.assertFalse(state.relay_config["config"]["enabled"])
+
     def test_snapshot_msg_hot_json_round_trips(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = ["agent-1"]

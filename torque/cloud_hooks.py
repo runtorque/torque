@@ -12,11 +12,20 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import json
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from . import config as torque_config
 from .config import log
+
+# Per-field provenance labels for the resolved relay config surfaced to the UI.
+RELAY_SOURCE_SETTINGS = "settings"
+RELAY_SOURCE_FILE = "ee_connector.json"
+RELAY_SOURCE_ENV = "env"
+RELAY_SOURCE_UNSET = ""
 
 DirectMessageObserver = Callable[[dict[str, Any]], Any]
 RemoteUserAgentIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -148,6 +157,141 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def _read_ee_connector_json(data_dir: str) -> dict[str, Any]:
+    """Best-effort read of ``ee_connector.json`` for source resolution.
+
+    Purely informational for the relay source-indicator: unlike the connector's
+    own loader we do NOT enforce file permissions or raise here, so a malformed
+    or unreadable file simply contributes no file-sourced values.
+    """
+
+    if not data_dir:
+        return {}
+    try:
+        path = Path(data_dir).expanduser() / "ee_connector.json"
+        if not path.exists():
+            return {}
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return dict(data) if isinstance(data, dict) else {}
+    except Exception:
+        log.debug(
+            "ee_connector.json read for relay source-indicator failed",
+            exc_info=True,
+        )
+        return {}
+
+
+def resolve_relay_config(settings: Any, *, data_dir: str = "") -> dict[str, Any]:
+    """Resolve effective relay (cloud connector) config and its provenance.
+
+    Precedence per field is Global Settings > ``ee_connector.json`` > env, which
+    mirrors how the connector's own ``config_from_context`` merges
+    ``context.config`` over the profile file over the environment. Only NON-EMPTY
+    settings values are placed into the returned ``config`` (the context.config
+    dict): leaving a field unset must fall through to the file/env fallback
+    inside the connector rather than clobbering it with an empty string.
+
+    The private key is referenced by path only — an inline PEM is never read,
+    stored, or surfaced here.
+
+    Returns ``{"config": {...}, "sources": {field: {"value", "source"}}}``.
+    """
+
+    settings_vals = {
+        "enabled": bool(getattr(settings, "relay_enabled", False)),
+        "relay_url": str(getattr(settings, "relay_url", "") or "").strip(),
+        "daemon_id": str(getattr(settings, "relay_daemon_id", "") or "").strip(),
+        "credential_id": str(
+            getattr(settings, "relay_credential_id", "") or ""
+        ).strip(),
+        "private_key_path": str(
+            getattr(settings, "relay_private_key_path", "") or ""
+        ).strip(),
+    }
+
+    file_vals = _read_ee_connector_json(data_dir)
+
+    def _file(*keys: str) -> str:
+        for key in keys:
+            val = str(file_vals.get(key, "") or "").strip()
+            if val:
+                return val
+        return ""
+
+    file_relay_url = _file("relay_url")
+    file_daemon_id = _file("daemon_id")
+    file_credential_id = _file("credential_id", "daemon_credential_id")
+    file_key_path = _file("private_key_path", "daemon_private_key_path")
+    # An inline PEM in the file still counts as a file-sourced key for the
+    # provenance badge, but we only ever surface the path (never the secret).
+    file_has_key = bool(
+        file_key_path or _file("private_key_pem", "daemon_private_key_pem")
+    )
+
+    env_enabled = bool(getattr(torque_config, "CLOUD_CONNECTOR_ENABLED", False))
+    env_relay_url = str(getattr(torque_config, "CLOUD_RELAY_URL", "") or "").strip()
+    env_daemon_id = str(getattr(torque_config, "CLOUD_DAEMON_ID", "") or "").strip()
+    env_credential_id = str(
+        os.environ.get("TORQUE_EE_DAEMON_CREDENTIAL_ID", "") or ""
+    ).strip()
+
+    sources: dict[str, Any] = {}
+    config: dict[str, Any] = {}
+
+    # enabled — the settings toggle wins; the env flag is the fallback.
+    if settings_vals["enabled"]:
+        sources["enabled"] = {"value": True, "source": RELAY_SOURCE_SETTINGS}
+    elif env_enabled:
+        sources["enabled"] = {"value": True, "source": RELAY_SOURCE_ENV}
+    else:
+        sources["enabled"] = {"value": False, "source": RELAY_SOURCE_UNSET}
+    config["enabled"] = sources["enabled"]["value"]
+
+    def _resolve(
+        field_key: str,
+        settings_val: str,
+        file_val: str,
+        env_val: str,
+        *,
+        config_key: str,
+        file_present: bool | None = None,
+    ) -> None:
+        present = bool(file_val) if file_present is None else file_present
+        if settings_val:
+            source, value = RELAY_SOURCE_SETTINGS, settings_val
+        elif present:
+            source, value = RELAY_SOURCE_FILE, file_val
+        elif env_val:
+            source, value = RELAY_SOURCE_ENV, env_val
+        else:
+            source, value = RELAY_SOURCE_UNSET, ""
+        sources[field_key] = {"value": value, "source": source}
+        # Only the settings value flows into context.config; file/env values are
+        # left for the connector's own resolver so we never clobber its fallback.
+        if settings_val:
+            config[config_key] = settings_val
+
+    _resolve(
+        "relay_url", settings_vals["relay_url"], file_relay_url, env_relay_url,
+        config_key="relay_url",
+    )
+    _resolve(
+        "daemon_id", settings_vals["daemon_id"], file_daemon_id, env_daemon_id,
+        config_key="daemon_id",
+    )
+    _resolve(
+        "credential_id", settings_vals["credential_id"], file_credential_id,
+        env_credential_id, config_key="credential_id",
+    )
+    _resolve(
+        "private_key_path", settings_vals["private_key_path"], file_key_path,
+        "", config_key="private_key_path", file_present=file_has_key,
+    )
+
+    return {"config": config, "sources": sources}
+
+
 async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnectorRuntime:
     """Load and start the optional enterprise cloud connector.
 
@@ -162,8 +306,16 @@ async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnecto
         getattr(torque_config, "CLOUD_CONNECTOR_MODULE", "torque_ee_connector")
         or "torque_ee_connector"
     ).strip() or "torque_ee_connector"
+    # Global Settings (relay_enabled, carried as context.config["enabled"]) is
+    # the primary enable switch; the env flag remains the fallback when the
+    # caller passes no explicit enabled hint.
+    ctx_config = getattr(context, "config", None)
+    ctx_config = ctx_config if isinstance(ctx_config, dict) else {}
+    enabled = ctx_config.get("enabled")
+    if enabled is None:
+        enabled = getattr(torque_config, "CLOUD_CONNECTOR_ENABLED", False)
     runtime = CloudConnectorRuntime(
-        enabled=bool(getattr(torque_config, "CLOUD_CONNECTOR_ENABLED", False)),
+        enabled=bool(enabled),
         module_name=module_name,
     )
     if not runtime.enabled:

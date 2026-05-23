@@ -1,12 +1,28 @@
 import importlib
+import json
+import os
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
 
 async def _remote_user_agent_message(_payload):
     return {"type": "ok"}
+
+
+def _relay_settings(**overrides):
+    base = {
+        "relay_enabled": False,
+        "relay_url": "",
+        "relay_daemon_id": "",
+        "relay_credential_id": "",
+        "relay_private_key_path": "",
+    }
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
 
 
 class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
@@ -136,6 +152,203 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
             self.cloud_hooks.notify_direct_message_observers("direct_message_saved", row),
             0,
         )
+
+
+class ResolveRelayConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.cloud_hooks = importlib.reload(
+            importlib.import_module("torque.cloud_hooks")
+        )
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data_dir = self.tmp.name
+        # Neutral env baseline so individual tests opt into env fallback.
+        self._patches = [
+            mock.patch.object(
+                self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", False),
+            mock.patch.object(
+                self.cloud_hooks.torque_config, "CLOUD_RELAY_URL", ""),
+            mock.patch.object(
+                self.cloud_hooks.torque_config, "CLOUD_DAEMON_ID", ""),
+            mock.patch.dict(
+                os.environ, {"TORQUE_EE_DAEMON_CREDENTIAL_ID": ""}, clear=False),
+        ]
+        for p in self._patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _write_ee_connector(self, payload):
+        path = Path(self.data_dir) / "ee_connector.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_settings_are_primary_and_flow_into_context_config(self):
+        settings = _relay_settings(
+            relay_enabled=True,
+            relay_url="wss://relay.example/ws",
+            relay_daemon_id="daemon-7",
+            relay_credential_id="cred-7",
+            relay_private_key_path="/keys/relay.pem",
+        )
+        resolved = self.cloud_hooks.resolve_relay_config(
+            settings, data_dir=self.data_dir)
+
+        self.assertEqual(resolved["config"], {
+            "enabled": True,
+            "relay_url": "wss://relay.example/ws",
+            "daemon_id": "daemon-7",
+            "credential_id": "cred-7",
+            "private_key_path": "/keys/relay.pem",
+        })
+        sources = resolved["sources"]
+        for field in ("relay_url", "daemon_id", "credential_id",
+                      "private_key_path", "enabled"):
+            self.assertEqual(sources[field]["source"], "settings", field)
+        self.assertEqual(sources["relay_url"]["value"], "wss://relay.example/ws")
+        self.assertTrue(sources["enabled"]["value"])
+
+    def test_unset_settings_fall_through_to_file_then_env(self):
+        # File supplies relay_url + daemon_id; env supplies credential_id.
+        self._write_ee_connector({
+            "relay_url": "wss://file.example/ws",
+            "daemon_id": "file-daemon",
+        })
+        with mock.patch.dict(
+            os.environ,
+            {"TORQUE_EE_DAEMON_CREDENTIAL_ID": "env-cred"},
+            clear=False,
+        ):
+            resolved = self.cloud_hooks.resolve_relay_config(
+                _relay_settings(), data_dir=self.data_dir)
+
+        sources = resolved["sources"]
+        self.assertEqual(sources["relay_url"]["source"], "ee_connector.json")
+        self.assertEqual(sources["relay_url"]["value"], "wss://file.example/ws")
+        self.assertEqual(sources["daemon_id"]["source"], "ee_connector.json")
+        self.assertEqual(sources["credential_id"]["source"], "env")
+        self.assertEqual(sources["credential_id"]["value"], "env-cred")
+        # Crucially: no unset field is written into context.config, so the
+        # connector's own resolver keeps its file/env fallback intact.
+        self.assertEqual(resolved["config"], {"enabled": False})
+
+    def test_settings_override_file_and_env(self):
+        self._write_ee_connector({
+            "relay_url": "wss://file.example/ws",
+            "daemon_id": "file-daemon",
+        })
+        with mock.patch.object(
+            self.cloud_hooks.torque_config, "CLOUD_RELAY_URL",
+            "wss://env.example/ws",
+        ):
+            resolved = self.cloud_hooks.resolve_relay_config(
+                _relay_settings(relay_url="wss://settings.example/ws"),
+                data_dir=self.data_dir,
+            )
+        self.assertEqual(
+            resolved["sources"]["relay_url"]["value"],
+            "wss://settings.example/ws",
+        )
+        self.assertEqual(resolved["sources"]["relay_url"]["source"], "settings")
+        self.assertEqual(
+            resolved["config"]["relay_url"], "wss://settings.example/ws")
+
+    def test_env_enables_when_settings_toggle_off(self):
+        with mock.patch.object(
+            self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", True,
+        ):
+            resolved = self.cloud_hooks.resolve_relay_config(
+                _relay_settings(relay_enabled=False), data_dir=self.data_dir)
+        self.assertTrue(resolved["config"]["enabled"])
+        self.assertEqual(resolved["sources"]["enabled"]["source"], "env")
+
+    def test_inline_pem_in_file_marks_key_file_sourced_without_leaking_pem(self):
+        self._write_ee_connector({
+            "relay_url": "wss://file.example/ws",
+            "private_key_pem": "-----BEGIN PRIVATE KEY-----\nSECRET\n",
+        })
+        resolved = self.cloud_hooks.resolve_relay_config(
+            _relay_settings(), data_dir=self.data_dir)
+        key_src = resolved["sources"]["private_key_path"]
+        self.assertEqual(key_src["source"], "ee_connector.json")
+        # We surface that the key is file-sourced but never the PEM itself.
+        self.assertEqual(key_src["value"], "")
+        self.assertNotIn("private_key_pem", resolved["config"])
+        self.assertNotIn("SECRET", json.dumps(resolved))
+
+    def test_unset_field_resolves_to_empty_unset_source(self):
+        resolved = self.cloud_hooks.resolve_relay_config(
+            _relay_settings(), data_dir=self.data_dir)
+        self.assertEqual(resolved["sources"]["relay_url"]["source"], "")
+        self.assertEqual(resolved["sources"]["relay_url"]["value"], "")
+
+    def test_malformed_ee_connector_json_is_non_fatal(self):
+        (Path(self.data_dir) / "ee_connector.json").write_text(
+            "{not json", encoding="utf-8")
+        resolved = self.cloud_hooks.resolve_relay_config(
+            _relay_settings(relay_url="wss://settings.example/ws"),
+            data_dir=self.data_dir,
+        )
+        self.assertEqual(
+            resolved["sources"]["relay_url"]["value"],
+            "wss://settings.example/ws",
+        )
+
+
+class StartConnectorEnableGatingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.cloud_hooks = importlib.reload(
+            importlib.import_module("torque.cloud_hooks"))
+
+    def _context(self, config):
+        return self.cloud_hooks.CloudConnectorContext(
+            state=object(),
+            remote_user_agent_message=_remote_user_agent_message,
+            register_direct_message_observer=(
+                self.cloud_hooks.register_direct_message_observer),
+            config=config,
+        )
+
+    async def test_settings_enabled_overrides_disabled_env(self):
+        module_name = "fake_relay_enable_via_settings"
+        module = types.ModuleType(module_name)
+
+        class FakeConnector:
+            def __init__(self, context):
+                self.started = False
+
+            async def start(self):
+                self.started = True
+
+        module.create_connector = lambda ctx: FakeConnector(ctx)
+        sys.modules[module_name] = module
+        self.addCleanup(lambda: sys.modules.pop(module_name, None))
+
+        with mock.patch.object(
+            self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", False,
+        ), mock.patch.object(
+            self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_MODULE", module_name,
+        ):
+            runtime = await self.cloud_hooks.start_cloud_connector(
+                self._context({"enabled": True}))
+        self.assertTrue(runtime.enabled)
+        self.assertTrue(runtime.started)
+
+    async def test_settings_disabled_overrides_enabled_env(self):
+        with mock.patch.object(
+            self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", True,
+        ):
+            runtime = await self.cloud_hooks.start_cloud_connector(
+                self._context({"enabled": False}))
+        self.assertFalse(runtime.enabled)
+        self.assertFalse(runtime.started)
+
+    async def test_absent_enabled_hint_falls_back_to_env(self):
+        with mock.patch.object(
+            self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", False,
+        ):
+            runtime = await self.cloud_hooks.start_cloud_connector(
+                self._context({}))
+        self.assertFalse(runtime.enabled)
 
 
 if __name__ == "__main__":

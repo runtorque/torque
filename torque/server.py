@@ -9544,6 +9544,71 @@ async def main(connection=None):
             log.exception("recent user direct-message snapshot load failed")
             return []
 
+    # -- Cloud connector (relay) wiring ---------------------------------------
+    # Mutable holder so a relay-settings save can stop + restart the connector
+    # in place (apply-on-change) without a daemon restart.
+    cloud_connector_runtime_holder: list = [None]
+
+    def _build_cloud_connector_context() -> cloud_hooks.CloudConnectorContext:
+        """Construct the connector context from Global Settings (settings-primary,
+        env / ee_connector.json fallback for unset fields)."""
+        resolved = cloud_hooks.resolve_relay_config(
+            state.global_settings, data_dir=str(DATA_DIR)
+        )
+        # Publish resolved config + per-field provenance for the Settings UI.
+        state.set_relay_config(resolved)
+        config = dict(resolved.get("config", {}))
+        config["module"] = torque_config.CLOUD_CONNECTOR_MODULE
+        return cloud_hooks.CloudConnectorContext(
+            state=state,
+            remote_user_agent_message=_ingest_remote_user_agent_message,
+            recent_direct_messages=_recent_user_direct_messages,
+            register_direct_message_observer=(
+                cloud_hooks.register_direct_message_observer
+            ),
+            report_connection_state=(
+                lambda payload: state.set_relay_connection(payload)
+            ),
+            profile=str(os.environ.get("TORQUE_PROFILE", "") or ""),
+            data_dir=str(DATA_DIR),
+            config=config,
+        )
+
+    def _relay_settings_fingerprint() -> tuple:
+        gs = state.global_settings
+        return (
+            bool(gs.relay_enabled),
+            gs.relay_url,
+            gs.relay_daemon_id,
+            gs.relay_credential_id,
+            gs.relay_private_key_path,
+        )
+
+    async def _restart_cloud_connector() -> None:
+        """Apply-on-change: stop the running connector and start a fresh one with
+        the current settings-derived config. Defensive / non-fatal — a relay
+        misconfig must never crash the settings-save path. The :601
+        relay_connection signal surfaces the resulting connect/disconnect/error.
+        """
+        try:
+            await cloud_hooks.stop_cloud_connector(
+                cloud_connector_runtime_holder[0]
+            )
+        except Exception:
+            log.exception("Cloud connector stop during settings apply failed")
+        runtime = None
+        try:
+            runtime = await cloud_hooks.start_cloud_connector(
+                _build_cloud_connector_context()
+            )
+        except Exception:
+            log.exception("Cloud connector restart during settings apply failed")
+        cloud_connector_runtime_holder[0] = runtime
+        # When the connector is now disabled, clear the relay signal back to
+        # "disabled" (a disabled connector reports nothing on its own).
+        if runtime is not None and not runtime.enabled:
+            state.set_relay_connection(None)
+
     # -- Persistent system prompt ---------------------------------------------
 
     def _build_dispatch_persistent_prompt(system_prompt: str = "",
@@ -10309,6 +10374,11 @@ async def main(connection=None):
                 "type": "global_settings",
                 "settings": asdict(state.global_settings),
                 "keybinding_defaults": _get_keybinding_defaults(keybindings),
+                # Resolved relay config + per-field provenance (settings / env /
+                # ee_connector.json) for the Settings "Relay" section.
+                "relay_config": cloud_hooks.resolve_relay_config(
+                    state.global_settings, data_dir=str(DATA_DIR)
+                ),
             }
 
         if cmd == "doctor":
@@ -10872,8 +10942,18 @@ async def main(connection=None):
             elif cmd == "update_global_settings":
                 settings = data.get("settings", {})
                 old_kb = state.global_settings.keybindings.copy()
+                old_relay = _relay_settings_fingerprint()
                 state.update_global_settings(**settings)
                 new_kb = state.global_settings.keybindings
+                # Apply-on-change: restart the cloud connector when any relay
+                # field changed so the new config takes effect without a daemon
+                # restart. Defensive / non-fatal.
+                if _relay_settings_fingerprint() != old_relay:
+                    try:
+                        await _restart_cloud_connector()
+                    except Exception:
+                        log.exception(
+                            "Cloud connector apply-on-change failed")
                 if new_kb != old_kb and _should_install_keybindings() and keybindings:
                     _displaced[0] = await keybindings.reinstall(
                         connection, _displaced[0],
@@ -16767,26 +16847,9 @@ async def main(connection=None):
     log.info("Startup checkpoint: scheduler tasks scheduled")
 
     cloud_connector_runtime = await cloud_hooks.start_cloud_connector(
-        cloud_hooks.CloudConnectorContext(
-            state=state,
-            remote_user_agent_message=_ingest_remote_user_agent_message,
-            recent_direct_messages=_recent_user_direct_messages,
-            register_direct_message_observer=(
-                cloud_hooks.register_direct_message_observer
-            ),
-            report_connection_state=(
-                lambda payload: state.set_relay_connection(payload)
-            ),
-            profile=str(os.environ.get("TORQUE_PROFILE", "") or ""),
-            data_dir=str(DATA_DIR),
-            config={
-                "module": torque_config.CLOUD_CONNECTOR_MODULE,
-                "enabled": torque_config.CLOUD_CONNECTOR_ENABLED,
-                "relay_url": torque_config.CLOUD_RELAY_URL,
-                "daemon_id": torque_config.CLOUD_DAEMON_ID,
-            },
-        )
+        _build_cloud_connector_context()
     )
+    cloud_connector_runtime_holder[0] = cloud_connector_runtime
     if cloud_connector_runtime.enabled and not cloud_connector_runtime.started:
         log.warning(
             "Cloud connector not started (module=%s, error=%s)",
@@ -17405,7 +17468,7 @@ async def main(connection=None):
             panel_log=panel_log,
             event_ingest_drainer=event_ingest_drainer,
             event_ingest_client=event_ingest_client,
-            cloud_connector_runtime=cloud_connector_runtime,
+            cloud_connector_runtime=cloud_connector_runtime_holder[0],
             bridge=bridge,
             runner=runner,
             state=state,
