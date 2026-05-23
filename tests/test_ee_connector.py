@@ -1,5 +1,6 @@
 import asyncio
 import json
+import ssl
 import sys
 import unittest
 from pathlib import Path
@@ -14,10 +15,13 @@ from torque_ee_connector.connector import (  # noqa: E402
     CONNECTOR_DEBUG_BUFFER_LIMIT,
     RELAY_CONNECTION_RETRY_THROTTLE_SECONDS,
     SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
+    ConnectorConfig,
     EnterpriseConnector,
     _agent_id_for_direct_message,
+    _build_relay_ssl_context,
     _direct_message_payload,
     _is_persistent_connection_error,
+    _is_tls_verify_error,
     _relay_host_only,
     _wire_kind_for_direct_message_row,
     build_daemon_ws_url,
@@ -782,6 +786,165 @@ class RelayConnectionStateTests(unittest.TestCase):
         connector._report_connection_state("connected", connected_now=True)
         self.assertEqual(connector._relay_status, "connected")
         self.assertEqual(connector._relay_retry_count, 0)
+
+
+class RelayTlsTrustTests(unittest.TestCase):
+    def test_ssl_context_uses_certifi_ca_bundle(self):
+        sentinel_ctx = ssl.create_default_context()
+        fake_certifi = SimpleNamespace(where=lambda: "/fake/certifi/cacert.pem")
+        created = {}
+
+        def fake_create_default_context(*args, **kwargs):
+            created["kwargs"] = kwargs
+            return sentinel_ctx
+
+        with mock.patch.dict(sys.modules, {"certifi": fake_certifi}):
+            with mock.patch(
+                "torque_ee_connector.connector.ssl.create_default_context",
+                side_effect=fake_create_default_context,
+            ):
+                context, used_certifi = _build_relay_ssl_context()
+
+        self.assertTrue(used_certifi)
+        self.assertIs(context, sentinel_ctx)
+        # The context is built against certifi's CA path, not an ambient one.
+        self.assertEqual(created["kwargs"], {"cafile": "/fake/certifi/cacert.pem"})
+
+    def test_ssl_context_falls_back_when_certifi_absent(self):
+        real_import = __import__
+
+        def deny_certifi(name, *args, **kwargs):
+            if name == "certifi":
+                raise ImportError("no certifi here")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=deny_certifi):
+            context, used_certifi = _build_relay_ssl_context()
+
+        self.assertFalse(used_certifi)
+        self.assertIsInstance(context, ssl.SSLContext)
+
+    def test_relay_ssl_context_cached_and_warns_once_on_fallback(self):
+        connector = EnterpriseConnector(context={"config": {}})
+        fallback_ctx = ssl.create_default_context()
+        with mock.patch(
+            "torque_ee_connector.connector._build_relay_ssl_context",
+            return_value=(fallback_ctx, False),
+        ) as build, mock.patch(
+            "torque_ee_connector.connector.log"
+        ) as fake_log:
+            first = connector._relay_ssl_context()
+            second = connector._relay_ssl_context()
+
+        self.assertIs(first, fallback_ctx)
+        self.assertIs(second, fallback_ctx)
+        # Built (and warned) exactly once despite repeated calls.
+        self.assertEqual(build.call_count, 1)
+        self.assertEqual(fake_log.warning.call_count, 1)
+
+    def test_connect_once_passes_certifi_ssl_for_wss(self):
+        class _Boom(Exception):
+            pass
+
+        class RecordingSession:
+            def __init__(self):
+                self.kwargs = None
+
+            def ws_connect(self, url, **kwargs):
+                self.kwargs = (url, kwargs)
+                raise _Boom()
+
+        connector = EnterpriseConnector(context={"config": {}})
+        connector.config = ConnectorConfig(
+            relay_url="https://relay.example.com",
+            daemon_id="daemon-1",
+            ws_url="wss://relay.example.com/v1/daemon/daemon-1/ws",
+        )
+        session = RecordingSession()
+        connector._session = session
+
+        with self.assertRaises(_Boom):
+            asyncio.run(connector._connect_once())
+
+        url, kwargs = session.kwargs
+        self.assertEqual(url, "wss://relay.example.com/v1/daemon/daemon-1/ws")
+        self.assertIn("ssl", kwargs)
+        self.assertIsInstance(kwargs["ssl"], ssl.SSLContext)
+
+    def test_connect_once_omits_ssl_for_loopback_ws(self):
+        class _Boom(Exception):
+            pass
+
+        class RecordingSession:
+            def __init__(self):
+                self.kwargs = None
+
+            def ws_connect(self, url, **kwargs):
+                self.kwargs = (url, kwargs)
+                raise _Boom()
+
+        connector = EnterpriseConnector(context={"config": {}})
+        connector.config = ConnectorConfig(
+            relay_url="http://127.0.0.1:8787",
+            daemon_id="daemon-1",
+            ws_url="ws://127.0.0.1:8787/v1/daemon/daemon-1/ws",
+        )
+        session = RecordingSession()
+        connector._session = session
+
+        with self.assertRaises(_Boom):
+            asyncio.run(connector._connect_once())
+
+        _url, kwargs = session.kwargs
+        self.assertNotIn("ssl", kwargs)
+
+    def test_is_tls_verify_error_detects_wrapped_and_text(self):
+        self.assertTrue(
+            _is_tls_verify_error(
+                ssl.SSLCertVerificationError("certificate verify failed")
+            )
+        )
+        # aiohttp wraps the ssl error as a cause; the walk must find it.
+        wrapped = RuntimeError("Cannot connect")
+        wrapped.__cause__ = ssl.SSLCertVerificationError("verify failed")
+        self.assertTrue(_is_tls_verify_error(wrapped))
+        # Text fallback for opaque connector errors.
+        self.assertTrue(
+            _is_tls_verify_error(
+                Exception("unable to get local issuer certificate")
+            )
+        )
+        self.assertFalse(_is_tls_verify_error(Exception("connection refused")))
+
+    def test_log_connection_failure_distinct_for_tls(self):
+        connector = EnterpriseConnector(context={"config": {}})
+        connector.config = ConnectorConfig(
+            relay_url="https://relay.runtorque.com",
+            daemon_id="daemon-1",
+            ws_url="wss://relay.runtorque.com/v1/daemon/daemon-1/ws",
+        )
+        with mock.patch("torque_ee_connector.connector.log") as fake_log:
+            connector._log_connection_failure(
+                ssl.SSLCertVerificationError("certificate verify failed")
+            )
+        self.assertEqual(fake_log.warning.call_count, 0)
+        self.assertEqual(fake_log.error.call_count, 1)
+        message = fake_log.error.call_args[0][0]
+        self.assertIn("TLS certificate verification failed", message)
+        # The actionable diagnostic names the host so the deployer can act.
+        self.assertEqual(fake_log.error.call_args[0][1], "relay.runtorque.com")
+
+    def test_log_connection_failure_generic_for_transient(self):
+        connector = EnterpriseConnector(context={"config": {}})
+        connector.config = ConnectorConfig(
+            relay_url="https://relay.runtorque.com",
+            daemon_id="daemon-1",
+            ws_url="wss://relay.runtorque.com/v1/daemon/daemon-1/ws",
+        )
+        with mock.patch("torque_ee_connector.connector.log") as fake_log:
+            connector._log_connection_failure(Exception("connection reset"))
+        self.assertEqual(fake_log.error.call_count, 0)
+        self.assertEqual(fake_log.warning.call_count, 1)
 
 
 if __name__ == "__main__":

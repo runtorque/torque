@@ -18,6 +18,7 @@ import inspect
 import ipaddress
 import json
 import os
+import ssl
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -121,6 +122,11 @@ class EnterpriseConnector:
         self._ws: Any = None
         self._session: Any = None
         self._owns_session = False
+        # TLS trust for relay wss attach — built once, lazily (see
+        # _relay_ssl_context). Cached so the certifi-vs-fallback decision (and
+        # its one-line warning) happens at most once per connector.
+        self._ssl_context: Any = None
+        self._ssl_context_built = False
         self._epoch = 0
         # relay_connection signal bookkeeping (see _report_connection_state).
         self._relay_status = "disabled"
@@ -202,7 +208,7 @@ class EnterpriseConnector:
                 raise
             except Exception as exc:
                 if not self._stop_event.is_set():
-                    log.warning("EE relay connector disconnected: %s", exc)
+                    self._log_connection_failure(exc)
                     self._note_connection_failure(exc)
             self._connected_event.clear()
             if self._stop_event.is_set():
@@ -214,7 +220,15 @@ class EnterpriseConnector:
         assert self.config is not None
         session = await self._ensure_session()
         headers = self._attach_headers()
-        async with session.ws_connect(self.config.ws_url, headers=headers or None) as ws:
+        connect_kwargs: dict[str, Any] = {"headers": headers or None}
+        # Carry our own CA bundle for the TLS attach rather than depending on an
+        # ambient SSL_CERT_FILE: a CA-less/managed python (iterm2env, python.org
+        # without "Install Certificates", etc.) would otherwise fail every retry
+        # with an undiagnosable SSLCertVerificationError. ws:// (loopback dev)
+        # has no TLS, so the context is built only for wss://.
+        if self.config.ws_url.startswith("wss://"):
+            connect_kwargs["ssl"] = self._relay_ssl_context()
+        async with session.ws_connect(self.config.ws_url, **connect_kwargs) as ws:
             self._ws = ws
             self._connected_event.set()
             self._report_connection_state("connected", connected_now=True)
@@ -593,6 +607,48 @@ class EnterpriseConnector:
         self._owns_session = True
         return self._session
 
+    def _relay_ssl_context(self) -> ssl.SSLContext:
+        """Return the TLS trust context for the relay attach (built once).
+
+        Prefers certifi's CA bundle so the connector carries its own trust
+        store and does not depend on an ambient ``SSL_CERT_FILE``. When certifi
+        is unavailable we fall back to the system default trust store and log a
+        single clear warning so a CA-less python is at least diagnosable.
+        """
+        if self._ssl_context_built:
+            return self._ssl_context
+        context, used_certifi = _build_relay_ssl_context()
+        self._ssl_context = context
+        self._ssl_context_built = True
+        if not used_certifi:
+            log.warning(
+                "EE relay connector: certifi unavailable; falling back to the "
+                "system default CA trust store. If relay TLS verification "
+                "fails, install the EE connector deps (certifi) or set "
+                "SSL_CERT_FILE to a valid CA bundle."
+            )
+        return context
+
+    def _log_connection_failure(self, exc: BaseException) -> None:
+        """Log a connect/disconnect failure, with a distinct TLS diagnostic.
+
+        A TLS certificate verification failure is the go-live footgun (a CA-less
+        python silently failing every retry), so it gets an actionable one-liner
+        rather than the generic disconnect-retry warning the next deployer can't
+        diagnose.
+        """
+        if _is_tls_verify_error(exc):
+            host = _relay_host_only(self.config.ws_url) if self.config else ""
+            log.error(
+                "relay TLS certificate verification failed for %s — CA bundle "
+                "missing/invalid (%s). Install the EE connector deps (certifi) "
+                "or point SSL_CERT_FILE at a valid CA bundle.",
+                host,
+                exc,
+            )
+        else:
+            log.warning("EE relay connector disconnected: %s", exc)
+
     async def _close_ws(self) -> None:
         ws = self._ws
         self._ws = None
@@ -861,6 +917,45 @@ def _is_persistent_connection_error(exc: BaseException) -> bool:
     """Heuristic: auth/TLS/config rejections are persistent, not transient."""
     text = f"{type(exc).__name__} {exc}".lower()
     return any(hint in text for hint in _RELAY_PERSISTENT_ERROR_HINTS)
+
+
+def _build_relay_ssl_context() -> tuple[ssl.SSLContext, bool]:
+    """Build a default SSL context, preferring certifi's CA bundle.
+
+    Returns ``(context, used_certifi)``. ``certifi`` is imported lazily (same
+    pattern as ``cryptography`` in auth.py) so community/runtime imports of the
+    package stay clean; when it is absent we fall back to the system default
+    trust store so a CA-less managed python is diagnosable rather than silently
+    blocked.
+    """
+    try:
+        import certifi  # type: ignore
+    except Exception:
+        return ssl.create_default_context(), False
+    return ssl.create_default_context(cafile=certifi.where()), True
+
+
+def _is_tls_verify_error(exc: BaseException) -> bool:
+    """Whether an exception (or its cause chain) is a TLS verify failure.
+
+    aiohttp wraps the underlying ``ssl.SSLCertVerificationError`` in its own
+    connector error, so we walk ``__cause__``/``__context__`` and also match the
+    canonical OpenSSL message text as a belt-and-suspenders fallback.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        text = f"{type(current).__name__} {current}".lower()
+        if (
+            "certificate verify failed" in text
+            or "unable to get local issuer certificate" in text
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _relay_host_only(ws_url: str) -> str:

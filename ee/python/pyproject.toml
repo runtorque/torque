@@ -7,7 +7,7 @@ name = "torque-ee-connector"
 version = "0.1.0"
 description = "Enterprise-only Torque outbound connector package skeleton"
 requires-python = ">=3.11"
-dependencies = ["aiohttp>=3.9", "cryptography>=42"]
+dependencies = ["aiohttp>=3.9", "cryptography>=42", "certifi>=2024.2.2"]
 
 [tool.setuptools.packages.find]
 where = ["."]
