@@ -724,6 +724,10 @@ def get_cell_event_stream(cell, event_log: EventLog,
     live_events = [
         _serialize_agent_event(event, cell, index)
         for index, event in enumerate(event_log.get(cell_id))
+        # context_update is high-frequency context-meter telemetry; surfacing it
+        # in the human-facing event feed is the same noise we suppress on the
+        # card status line. The grid context meter renders the data directly.
+        if event.event_type != "context_update"
     ]
     events = live_events
     if getattr(cell, "kind", "") in PERSISTENT_CELL_EVENT_KINDS:
@@ -868,7 +872,13 @@ class EventBus:
             cell.mark_progress(event.timestamp)
         else:
             cell.mark_heartbeat(event.timestamp)
-        context_window_changed = _apply_context_window(
+        # Always refresh the ephemeral context_window meter (this mutates
+        # cell.context_window in place); the WS delta still flows via the
+        # unconditional _emit_agent(cell) at the end of this method, so the
+        # grid context meter keeps updating. We intentionally do NOT surface a
+        # human-facing status line for context_update — it is high-frequency
+        # telemetry and would spam the agent card's activity line.
+        _apply_context_window(
             cell,
             d,
             event.timestamp,
@@ -971,8 +981,10 @@ class EventBus:
             cell.session_tokens_out += d.get("output_tokens", 0)
 
         elif et == "context_update":
-            if context_window_changed:
-                cell.last_event_text = "Context usage updated"
+            # Context-window meter already refreshed above. Deliberately no
+            # last_event_text here: surfacing it spammed the agent card status
+            # line on every high-frequency context_update.
+            pass
 
         elif et == "heartbeat":
             detail = d.get("detail", "")
