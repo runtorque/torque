@@ -331,7 +331,10 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply_envelope["kind"], "ask_reply")
         self.assertTrue(connector._outbound_queue.empty())
 
-    async def test_user_to_agent_direct_messages_do_not_loop_outbound(self):
+    async def test_user_to_agent_direct_messages_egress_for_remote_sync(self):
+        # User↔agent sync (TORQUE:602): a message the user sent (e.g. from a
+        # local surface) egresses to the remote UI as an agent_message carrying
+        # sender_kind=user + the idempotency_key for the client's exact dedupe.
         context = SimpleNamespace(
             profile="desktop",
             data_dir="/tmp/torque-desktop",
@@ -347,15 +350,25 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
             "row": {
                 "id": "msg-user-1",
                 "thread_id": "user-agent:user:worker-1",
+                "idempotency_key": "client-key-1",
                 "sender_id": "user",
                 "sender_kind": "user",
+                "sender_name": "User",
                 "recipient_id": "worker-1",
                 "recipient_kind": "worker",
+                "recipient_name": "Worker",
                 "message": "status?",
                 "message_type": "message",
                 "created_at": 1779480002.0,
             },
         })
+        envelope = await connector._outbound_queue.get()
+        self.assertEqual(envelope["kind"], "agent_message")
+        self.assertEqual(envelope["payload"]["sender_kind"], "user")
+        self.assertEqual(envelope["payload"]["agent_id"], "worker-1")
+        # The echoed idempotency_key is the EXACT correlation key the remote UI
+        # dedupes its own optimistic send against (Option B).
+        self.assertEqual(envelope["payload"]["idempotency_key"], "client-key-1")
         self.assertTrue(connector._outbound_queue.empty())
 
     async def test_debug_envelope_lists_are_bounded_ring_buffers(self):
@@ -471,10 +484,12 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
                 "recipient_id": "user", "recipient_kind": "user",
                 "message": "done", "group_name": "g", "created_at": 102.0,
             },
-            {  # user->agent message -> not looped back outbound
+            {  # user->agent message -> agent_message egresses (full sync, TORQUE:602)
                 "id": "r5", "message_type": "message",
+                "idempotency_key": "client-key-r5",
                 "sender_id": "user", "sender_kind": "user",
                 "recipient_id": "w1", "recipient_kind": "worker",
+                "recipient_name": "Worker One",
                 "message": "status?", "group_name": "g", "created_at": 101.0,
             },
         ]
@@ -485,12 +500,18 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["payload"]["lane"], "user-agent")
         msgs = payload["payload"]["messages"]
-        # r2 (owner-routed ask) and r5 (user->agent) excluded; oldest-first.
+        # r2 (owner-routed ask) excluded; r5 (user->agent) now syncs as a
+        # user-authored agent_message (TORQUE:602). Oldest-first.
         self.assertEqual(
             [(m["message_id"], m["kind"]) for m in msgs],
-            [("r4", "agent_message"), ("r3", "ask"), ("r1", "ask_reply")],
+            [("r5", "agent_message"), ("r4", "agent_message"),
+             ("r3", "ask"), ("r1", "ask_reply")],
         )
-        self.assertEqual(payload["payload"]["count"], 3)
+        self.assertEqual(payload["payload"]["count"], 4)
+        # The synced user->agent row carries sender_kind=user + idempotency_key.
+        r5 = next(m for m in msgs if m["message_id"] == "r5")
+        self.assertEqual(r5["sender_kind"], "user")
+        self.assertEqual(r5["idempotency_key"], "client-key-r5")
         # Targets the requesting remote client.
         self.assertEqual(payload["target"]["kind"], "remote-client")
         self.assertEqual(payload["target"]["id"], "user")
@@ -629,13 +650,15 @@ class WireKindGateTests(unittest.TestCase):
             "",
         )
 
-    def test_agent_message_gate_unchanged(self):
+    def test_message_gate_egresses_both_user_agent_directions(self):
+        # agent -> user
         self.assertEqual(
             _wire_kind_for_direct_message_row(
                 self._row(message_type="message")
             ),
             "agent_message",
         )
+        # user -> agent (locally-sent, now synced to the remote UI; TORQUE:602)
         self.assertEqual(
             _wire_kind_for_direct_message_row(
                 self._row(
@@ -644,6 +667,30 @@ class WireKindGateTests(unittest.TestCase):
                     sender_id="user",
                     recipient_kind="worker",
                     recipient_id="worker-1",
+                )
+            ),
+            "agent_message",
+        )
+
+    def test_message_gate_suppresses_non_user_agent_lanes(self):
+        # agent -> agent (e.g. engineer↔architect) never reaches the user lane.
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(
+                    message_type="message",
+                    sender_kind="engineer", sender_id="eng-1",
+                    recipient_kind="architect", recipient_id="arch-1",
+                )
+            ),
+            "",
+        )
+        # degenerate user -> user never egresses.
+        self.assertEqual(
+            _wire_kind_for_direct_message_row(
+                self._row(
+                    message_type="message",
+                    sender_kind="user", sender_id="user",
+                    recipient_kind="user", recipient_id="user",
                 )
             ),
             "",
