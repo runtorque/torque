@@ -292,6 +292,12 @@
   // Send a user message (or ask answer via replyToId) to an agent.
   RemoteRelayClient.prototype.sendUserMessage = function(agentId, text, opts) {
     opts = opts || {};
+    // Mint a per-message idempotency_key so the daemon's USER-authored echo
+    // (§602: user↔agent messages now forward back for multi-client sync,
+    // reusing the agent_message shape) can be collapsed onto this optimistic
+    // outbound by EXACT key — never a 2nd bubble. The daemon persists the key
+    // at ingress and echoes it on payload.idempotency_key.
+    var idempotencyKey = opts.idempotencyKey || this.envelope.newId('idem');
     var env = this.envelope.buildUserMessage({
       daemonId: this.config.daemonId,
       clientId: this.config.clientId,
@@ -299,6 +305,7 @@
       message: text,
       threadId: opts.threadId,
       replyToId: opts.replyToId,
+      idempotencyKey: idempotencyKey,
     });
     if (this.store) this.store.recordOutbound(env);
     this._enqueue(env);
