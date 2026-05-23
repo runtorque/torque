@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -354,6 +355,8 @@ class TorqueDoctorTests(unittest.TestCase):
                 "legacy": 0,
                 "nonconforming": 0,
                 "nonconforming_branches": [],
+                "isolation_guard_repos": [],
+                "isolation_guard_missing": [],
             },
         )
         self.assertIn("[worktrees]", rendered)
@@ -385,6 +388,8 @@ class TorqueDoctorTests(unittest.TestCase):
                 "legacy": 0,
                 "nonconforming": 0,
                 "nonconforming_branches": [],
+                "isolation_guard_repos": [],
+                "isolation_guard_missing": [],
             },
         )
         self.assertNotIn(
@@ -439,6 +444,8 @@ class TorqueDoctorTests(unittest.TestCase):
                         "branch": "torque/alice/worker-bad",
                     }
                 ],
+                "isolation_guard_repos": [],
+                "isolation_guard_missing": [],
             },
         )
         self.assertIn(
@@ -468,6 +475,50 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn(
             "worker worktree branches do not match stage-5 or legacy naming: torque/alice/worker-bad",
             rendered,
+        )
+
+    def test_build_doctor_report_warns_when_isolation_guard_missing(self):
+        # A worker rooted in a real repo without Torque's pre-commit guard
+        # should surface the worktree-isolation-guard warning (TORQUE:580).
+        home = self._home_dir()
+        repo_dir = Path(self.tmp.name) / "repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "-C", str(repo_dir), "init", "-b", "main"],
+                       check=True, capture_output=True)
+        self.assertFalse((repo_dir / ".git" / "hooks" / "pre-commit").exists())
+
+        self._save_engineer("eng-alice", "Alice")
+        self._save_worker(
+            "worker-guarded",
+            "Worker Guarded",
+            owner_engineer_id="eng-alice",
+            worktree_branch="torque/alice/worker-guarded-a1b2c3",
+            worktree_repo_root=str(repo_dir),
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        worktrees = report["worktrees"]
+        self.assertEqual(worktrees["isolation_guard_missing"], [str(repo_dir)])
+        self.assertEqual(
+            worktrees["isolation_guard_repos"],
+            [{"repo_root": str(repo_dir), "installed": False}],
+        )
+        warning_names = {w.get("name", "") for w in report["warnings"]}
+        self.assertIn("worktree_isolation_guard_missing", warning_names)
+        self.assertIn("isolation_guard_missing: 1", rendered)
+
+        # Once the guard is installed, the warning clears.
+        from torque.worktree import ensure_worktree_isolation_guard
+        ensure_worktree_isolation_guard(str(repo_dir))
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report2 = build_doctor_report_for_db(self.db_path)
+        self.assertEqual(report2["worktrees"]["isolation_guard_missing"], [])
+        self.assertNotIn(
+            "worktree_isolation_guard_missing",
+            {w.get("name", "") for w in report2["warnings"]},
         )
 
     def test_build_doctor_report_counts_architect_decisions_and_hired_engineers(self):
