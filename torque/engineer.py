@@ -36,7 +36,10 @@ from .engineer_hints import (
     ENGINEER_HINT_RESEND_COOLDOWN_SECS,
     compute_engineer_hints,
 )
-from .server_prompts import build_shared_memory_guidance
+from .server_prompts import (
+    build_owner_user_message_guidance,
+    build_shared_memory_guidance,
+)
 
 log = logging.getLogger("torque")
 
@@ -700,8 +703,16 @@ def _build_engineer_base_system_prompt(group: str, engineer_settings=None,
 def build_engineer_system_prompt(group: str, engineer_settings=None,
                                  action_system_prompt: str = "",
                                  group_settings=None,
-                                 specializations_preamble: str = "") -> str:
-    """Assemble the engineer boot prompt with architect escalation guidance."""
+                                 specializations_preamble: str = "",
+                                 owner_is_user: bool = False) -> str:
+    """Assemble the engineer boot prompt with architect escalation guidance.
+
+    When ``owner_is_user`` is True (a user-owned engineer with no hiring
+    architect), a post-bootstrap user-message instruction is appended
+    directing the engineer to its `engineer_message_user` channel. The
+    default leaves the prompt byte-identical to the prior behavior so
+    architect-hired engineers are unchanged.
+    """
     prompt = _build_engineer_base_system_prompt(
         group,
         engineer_settings,
@@ -709,7 +720,15 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
         group_settings=group_settings,
         specializations_preamble=specializations_preamble,
     ).rstrip()
-    return prompt + "\n\n" + _ENGINEER_ARCHITECT_ESCALATION_SECTION + "\n"
+    result = prompt + "\n\n" + _ENGINEER_ARCHITECT_ESCALATION_SECTION + "\n"
+    if owner_is_user:
+        result = (
+            result.rstrip()
+            + "\n\n"
+            + build_owner_user_message_guidance("engineer_message_user")
+            + "\n"
+        )
+    return result
 
 
 

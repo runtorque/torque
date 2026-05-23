@@ -5877,6 +5877,35 @@ def _agent_owner_engineer_name(state: MatrixState, cell) -> str:
     return owner.name if owner else ""
 
 
+def _owner_is_user_from_ids(*, owner_engineer_id: str = "",
+                            created_by_engineer_id: str = "",
+                            hired_by_architect_id: str = "") -> bool:
+    """Return True when an agent's owner is the user.
+
+    Owner-is-user is the absence of any non-user ownership stamp: no
+    owning/creating engineer and no hiring architect. Expressed via the
+    ownership ids (per the kinds-refactor invariants) rather than by
+    hardcoding agent kinds, so it holds uniformly for user-owned
+    architects, engineers, and workers.
+    """
+    return not (
+        str(owner_engineer_id or "").strip()
+        or str(created_by_engineer_id or "").strip()
+        or str(hired_by_architect_id or "").strip()
+    )
+
+
+def _agent_owner_is_user(cell) -> bool:
+    """Return True when ``cell``'s owner is the user (not engineer/architect)."""
+    if cell is None:
+        return False
+    return _owner_is_user_from_ids(
+        owner_engineer_id=getattr(cell, "owner_engineer_id", ""),
+        created_by_engineer_id=getattr(cell, "created_by_engineer_id", ""),
+        hired_by_architect_id=getattr(cell, "hired_by_architect_id", ""),
+    )
+
+
 def _normalize_prompt_block(text: str) -> str:
     return str(text or "").strip("\n")
 
@@ -6841,6 +6870,8 @@ async def _handle_add_engineer_command(
         state.get_engineer_settings(group),
         launch_cfg.get("system_prompt", ""),
         group_settings=state.get_group_settings(group),
+        owner_is_user=not str(
+            data.get("hired_by_architect_id", "") or "").strip(),
     )
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
@@ -9436,11 +9467,14 @@ async def main(connection=None):
 
     # -- Persistent system prompt ---------------------------------------------
 
-    def _build_dispatch_persistent_prompt(system_prompt: str = "") -> str:
+    def _build_dispatch_persistent_prompt(system_prompt: str = "",
+                                          owner_is_user: bool = False) -> str:
         parts = []
         if system_prompt:
             parts.append(system_prompt.rstrip())
-        parts.append(build_torque_system_prompt().rstrip())
+        parts.append(
+            build_torque_system_prompt(owner_is_user=owner_is_user).rstrip()
+        )
         return "\n\n".join(parts) + "\n"
 
     def _build_cell_persistent_prompt(cell, launch_cfg: dict) -> str:
@@ -9454,7 +9488,8 @@ async def main(connection=None):
             return build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs,
-                specializations_preamble=spec_preamble)
+                specializations_preamble=spec_preamble,
+                owner_is_user=_agent_owner_is_user(cell))
         if cell.kind == "architect":
             return _architect_persistent_prompt_text(
                 group=cell.group,
@@ -9462,7 +9497,8 @@ async def main(connection=None):
                 state=state,
             )
         return _build_dispatch_persistent_prompt(
-            launch_cfg.get("system_prompt", ""))
+            launch_cfg.get("system_prompt", ""),
+            owner_is_user=_agent_owner_is_user(cell))
 
     def _is_designated_engineer(cell) -> bool:
         if not cell or cell.cell_type != "agent":
@@ -11031,7 +11067,10 @@ async def main(connection=None):
                         persistent_prompt_text = build_engineer_system_prompt(
                             group, ws, action_sp,
                             group_settings=state.get_group_settings(group),
-                            specializations_preamble=spec_preamble)
+                            specializations_preamble=spec_preamble,
+                            owner_is_user=not str(
+                                data.get("hired_by_architect_id", "")
+                                or "").strip())
                         launch_cfg["worktree"] = False
                     startup_prompt = _startup_prompt_for_new_agent(
                         agent_type=launch_cfg.get("agent_type", ""),
@@ -13045,7 +13084,15 @@ async def main(connection=None):
                             if launch_cfg.get("agent_type"):
                                 persistent_prompt_text = \
                                     _build_dispatch_persistent_prompt(
-                                        launch_cfg.get("system_prompt", ""))
+                                        launch_cfg.get("system_prompt", ""),
+                                        owner_is_user=_owner_is_user_from_ids(
+                                            created_by_engineer_id=data.get(
+                                                "_created_by_engineer_id", ""),
+                                            owner_engineer_id=data.get(
+                                                "owner_engineer_id", ""),
+                                            hired_by_architect_id=data.get(
+                                                "hired_by_architect_id", ""),
+                                        ))
                                 startup_prompt = _startup_prompt_for_new_agent(
                                     agent_type=launch_cfg.get(
                                         "agent_type", ""),

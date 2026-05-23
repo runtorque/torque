@@ -486,6 +486,62 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Do not publish routine progress", prompt)
         self.assertIn("MEMORY.md", prompt)
 
+    def test_torque_system_prompt_default_omits_owner_user_message(self):
+        # A non-user-owned worker (engineer-owned / architect-hired) must
+        # NOT receive the post-bootstrap message-user instruction.
+        prompt = self.server_prompts_mod.build_torque_system_prompt()
+        self.assertNotIn("## After bootstrap: message the user", prompt)
+        self.assertNotIn("owned by the user", prompt)
+
+    def test_torque_system_prompt_owner_user_appends_message_instruction(self):
+        prompt = self.server_prompts_mod.build_torque_system_prompt(
+            owner_is_user=True)
+        self.assertIn("## After bootstrap: message the user", prompt)
+        self.assertIn("You are owned by the user", prompt)
+        self.assertIn('torque_message_user(message="...")', prompt)
+        self.assertIn("rather than only emitting it to the terminal", prompt)
+
+    def test_torque_system_prompt_owner_user_is_pure_append(self):
+        # Proves the existing prompt body is byte-unchanged: the
+        # user-owned variant only appends the new section to the default.
+        default = self.server_prompts_mod.build_torque_system_prompt()
+        owned = self.server_prompts_mod.build_torque_system_prompt(
+            owner_is_user=True)
+        self.assertTrue(owned.startswith(default.rstrip()))
+        self.assertEqual(
+            self.server_prompts_mod.build_torque_system_prompt(
+                owner_is_user=False),
+            default,
+        )
+
+    def test_owner_is_user_from_ids_detects_user_ownership(self):
+        from_ids = self.server_mod._owner_is_user_from_ids
+        # No ownership stamps → user-owned.
+        self.assertTrue(from_ids())
+        self.assertTrue(from_ids(owner_engineer_id="",
+                                 created_by_engineer_id="  ",
+                                 hired_by_architect_id=None))
+        # Any non-user ownership stamp → not user-owned.
+        self.assertFalse(from_ids(owner_engineer_id="eng-1"))
+        self.assertFalse(from_ids(created_by_engineer_id="eng-2"))
+        self.assertFalse(from_ids(hired_by_architect_id="arch-1"))
+
+    def test_agent_owner_is_user_reads_cell_ownership(self):
+        is_user = self.server_mod._agent_owner_is_user
+        self.assertFalse(is_user(None))
+        user_owned = types.SimpleNamespace(
+            owner_engineer_id="", created_by_engineer_id="",
+            hired_by_architect_id="")
+        self.assertTrue(is_user(user_owned))
+        engineer_owned = types.SimpleNamespace(
+            owner_engineer_id="eng-1", created_by_engineer_id="",
+            hired_by_architect_id="")
+        self.assertFalse(is_user(engineer_owned))
+        architect_hired = types.SimpleNamespace(
+            owner_engineer_id="", created_by_engineer_id="",
+            hired_by_architect_id="arch-1")
+        self.assertFalse(is_user(architect_hired))
+
     def test_system_prompt_preview_uses_unsaved_engineer_form_values(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

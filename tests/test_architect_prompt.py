@@ -119,6 +119,20 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("peer-message counts", prompt)
         self.assertIn("cross-Architect coordination", prompt)
 
+    def test_prompt_includes_owner_user_message_instruction(self):
+        # Architects are user-created only, so their owner is always the
+        # user: the post-bootstrap message-user instruction is always
+        # present and names the architect-side tool.
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("## After bootstrap: message the user", prompt)
+        self.assertIn("You are owned by the user", prompt)
+        self.assertIn('architect_message_user(message="...")', prompt)
+        self.assertIn("rather than only emitting it to the terminal", prompt)
+        # It must reference the architect tool, not the worker/engineer ones.
+        self.assertNotIn('torque_message_user(message="...")', prompt)
+        self.assertNotIn('engineer_message_user(message="...")', prompt)
+
     def test_prompt_includes_specialization_routing_taxonomy(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 

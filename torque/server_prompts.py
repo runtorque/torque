@@ -66,8 +66,45 @@ def build_shared_memory_guidance() -> str:
     return _SHARED_MEMORY_GUIDANCE
 
 
-def build_torque_system_prompt(*, include_shared_memory: bool = True) -> str:
-    """Build the persistent Torque system prompt for dispatched agents."""
+def build_owner_user_message_guidance(message_tool: str) -> str:
+    """Return post-bootstrap user-message guidance for user-owned agents.
+
+    A user-owned agent has no engineer or architect orchestrating it, so
+    the user is its direct counterpart. Its first/bootstrap output would
+    otherwise land only in the terminal, where the user does not see it as
+    a user-facing message. This block instructs the agent to surface its
+    first substantive status/intro through the durable user-facing message
+    channel instead.
+
+    ``message_tool`` is the kind-appropriate tool name
+    (``torque_message_user`` / ``engineer_message_user`` /
+    ``architect_message_user``). Callers must only include this block for
+    agents whose owner is the user; engineer-owned and architect-hired
+    agents must not receive it.
+    """
+    return dedent(f"""\
+        ## After bootstrap: message the user
+
+        You are owned by the user — no engineer or architect orchestrates
+        you, so the user is your direct counterpart. Once you finish
+        bootstrapping and orient yourself, send your first substantive
+        status or intro to the user via `{message_tool}(message="...")`
+        rather than only emitting it to the terminal, where the user will
+        not see it as a user-facing message. Keep using `{message_tool}`
+        for user-facing updates so they land in the user's conversation
+        panel.""").strip()
+
+
+def build_torque_system_prompt(*, include_shared_memory: bool = True,
+                               owner_is_user: bool = False) -> str:
+    """Build the persistent Torque system prompt for dispatched agents.
+
+    When ``owner_is_user`` is True (a user-owned worker with no engineer
+    owner / architect hire), a post-bootstrap user-message instruction is
+    appended directing the agent to its `torque_message_user` channel.
+    The default leaves the prompt byte-identical to the prior behavior so
+    engineer-owned / architect-hired workers are unchanged.
+    """
     sections = [dedent("""\
         # Torque Agent
 
@@ -111,6 +148,9 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True) -> str:
         context instead of pausing the task.
         When in doubt, call `torque_context()` to see your current state.
     """).rstrip())
+
+    if owner_is_user:
+        sections.append(build_owner_user_message_guidance("torque_message_user"))
 
     return "\n\n".join(sections) + "\n"
 

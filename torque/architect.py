@@ -10,7 +10,10 @@ surfaces stay structurally comparable.
 
 from __future__ import annotations
 
-from .server_prompts import build_shared_memory_guidance
+from .server_prompts import (
+    build_owner_user_message_guidance,
+    build_shared_memory_guidance,
+)
 from .state import (
     normalize_architect_autonomy_mode,
     normalize_architect_journal_checkpoint_frequency,
@@ -368,6 +371,10 @@ def build_architect_system_prompt(group: str,
     parts = [
         _BASE_SYSTEM_PROMPT.format(group=group),
         build_shared_memory_guidance(),
+        # Architects are user-created only, so their owner is always the
+        # user: surface the first substantive message to the user instead
+        # of only emitting it to the terminal.
+        build_owner_user_message_guidance("architect_message_user"),
     ]
 
     if action_system_prompt:
