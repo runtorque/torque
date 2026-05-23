@@ -1658,11 +1658,15 @@ function _agentContextWindowInfo(agentOrContext) {
   let level = 'normal';
   if (displayPct >= 90) level = 'danger';
   else if (displayPct >= 70) level = 'warn';
+  // At the 3-digit (>=100%) case the "ctx " prefix overflows narrow 77px cards
+  // by ~1-2px; drop the prefix there so "100%" fits cleanly while every other
+  // value keeps the labelled "ctx NN%" form.
+  const label = displayPct >= 100 ? displayPct + '%' : 'ctx ' + displayPct + '%';
   return {
     pct,
     displayPct,
     level,
-    label: 'ctx ' + displayPct + '%',
+    label,
   };
 }
 

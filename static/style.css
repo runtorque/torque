@@ -1739,6 +1739,7 @@ body.runtime-embedded .agent-focus-header {
   letter-spacing: .01em;
   text-align: center;
   opacity: .72;
+  transition: opacity .18s ease;
 }
 .agent-context-meter--normal {
   color: var(--text-dim);
@@ -1748,6 +1749,21 @@ body.runtime-embedded .agent-focus-header {
 }
 .agent-context-meter--danger {
   color: color-mix(in srgb, var(--red) 82%, var(--text-dim));
+}
+/* While the done-flourish badge expands across the header strip (~3.4s) it would
+   paint the dim meter text over the green pill — the meter is a later sibling in
+   the same card. Hide the meter for the duration of the flourish; it is purely
+   cosmetic (pointer-events:none) so dropping it briefly costs nothing. */
+.cell-status.cell-status-done-flourish ~ .agent-context-meter {
+  opacity: 0;
+}
+/* In attention/dismissed states the status dot expands to 12px @ right:2px,
+   so its left edge sits at ~[w-14], clipping ~2px into the meter's default
+   right:12px inset (right edge ~[w-12]). Push the meter's right edge clear of
+   the expanded dot in those two states only. */
+.cell-status.attention ~ .agent-context-meter,
+.cell-status.dismissed ~ .agent-context-meter {
+  right: 16px;
 }
 .agent-card-tooltip {
   position: relative;
