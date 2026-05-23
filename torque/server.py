@@ -16753,6 +16753,9 @@ async def main(connection=None):
             register_direct_message_observer=(
                 cloud_hooks.register_direct_message_observer
             ),
+            report_connection_state=(
+                lambda payload: state.set_relay_connection(payload)
+            ),
             profile=str(os.environ.get("TORQUE_PROFILE", "") or ""),
             data_dir=str(DATA_DIR),
             config={

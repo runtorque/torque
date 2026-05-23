@@ -2018,6 +2018,12 @@ class MatrixState:
         # panel. Keyed strictly by canonical agent_peer_messages.thread_id;
         # messages inside each thread are oldest-first and tail-capped.
         self.agent_peer_threads: dict[str, dict] = {}
+        # Ephemeral daemon-global relay connection-state signal for the status
+        # bar.  Driven by the optional EE connector via set_relay_connection();
+        # never persisted and reset to "disabled" on every restart. The full
+        # distinct enum is preserved here (connecting/disconnected are not
+        # collapsed); the UI groups them visually.
+        self.relay_connection: dict = self._default_relay_connection()
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -2763,6 +2769,52 @@ class MatrixState:
         op = "pending_hire_upsert" if status == "pending" else "pending_hire_resolve"
         self._emit(op, **payload)
 
+    @staticmethod
+    def _default_relay_connection() -> dict:
+        """Default relay_connection signal: cloud relay off in community builds."""
+        return {
+            "status": "disabled",
+            "enabled": False,
+            "relay_host": "",
+            "daemon_id": "",
+            "last_connected_at": "",
+            "last_error": "",
+            "retry_count": 0,
+            "since": "",
+        }
+
+    def set_relay_connection(self, payload: dict | None) -> bool:
+        """Store and broadcast the ephemeral relay connection-state signal.
+
+        Producer-side throttling/coalescing already keeps the call rate low (the
+        EE connector emits on status-enum change and debounces retry churn).
+        This is the second line of defense against a delta storm: we DEDUPE here
+        and only emit a ``relay_connection`` delta when the payload actually
+        changed versus the current value.  The signal is ephemeral — never
+        persisted, cleared back to "disabled" on restart.  Returns True iff a
+        delta was emitted.
+        """
+        merged = self._default_relay_connection()
+        if isinstance(payload, dict):
+            for key in merged:
+                if key in payload and payload[key] is not None:
+                    merged[key] = payload[key]
+        if merged == self.relay_connection:
+            return False
+        self.relay_connection = merged
+        self._emit("relay_connection", **merged)
+        # The connector reports out-of-band (not inside a command flow that
+        # already calls broadcast()), so schedule a flush. Low call-rate by
+        # construction: dedupe above + producer-side status/retry throttling.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop (e.g. unit tests inspecting _delta_ops directly);
+            # the delta stays queued for the next real broadcast.
+            return True
+        loop.create_task(self.broadcast())
+        return True
+
     # -- Task indexes --------------------------------------------------------
 
     def _task_index_values(self, task: "BoardTask"):
@@ -3221,6 +3273,8 @@ class MatrixState:
             "engineer_streams": self._engineer_streams_snapshot(),
             "decisions": decisions,
             "pending_hires": pending_hires,
+            # Ephemeral daemon-global relay connection-state for the status bar.
+            "relay_connection": dict(self.relay_connection),
         }
 
     def get_task_detail(self, task_id: str) -> dict | None:
@@ -3510,6 +3564,8 @@ class MatrixState:
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
+            # Ephemeral daemon-global relay connection-state for the status bar.
+            "relay_connection": dict(self.relay_connection),
         }
 
     # -- Targeted persistence helpers ----------------------------------------
