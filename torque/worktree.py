@@ -5,6 +5,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 from typing import Optional
 
 from .config import log
@@ -534,6 +535,177 @@ def ensure_git_exclude(directory: str) -> None:
                       len(to_add), exclude)
     except Exception:
         log.debug("Could not update git exclude in %s", directory)
+
+
+# Worktree-isolation guard: a managed ``pre-commit`` hook installed in the
+# shared repo. It refuses commits made into the SHARED main checkout from
+# inside a Torque worker session (``TORQUE_CELL_ID`` set), while leaving
+# human commits and isolated-worktree commits untouched. Linked worktrees
+# share the common hooks dir, so this single hook covers every worktree and
+# the main checkout; it discriminates via git-dir vs git-common-dir.
+#
+# This is the durable fail-closed fix for the worktree-isolation breach where
+# a worker's ``git commit`` landed on the main checkout HEAD (TORQUE:580).
+_ISOLATION_GUARD_HOOK_MARKER = "torque-worktree-isolation-guard"
+_ISOLATION_GUARD_HOOK_VERSION = 1
+_ISOLATION_GUARD_HOOK_SCRIPT = f"""#!/bin/sh
+# {_ISOLATION_GUARD_HOOK_MARKER} v{_ISOLATION_GUARD_HOOK_VERSION} (managed by Torque)
+# Refuses commits made into the SHARED main checkout from inside a Torque
+# worker session. Worker git changes must stay in the isolated worktree
+# (.torque/worktrees/<id>). See TORQUE:580. Edit via Torque, not by hand.
+#
+# Human commits (no TORQUE_CELL_ID) and commits inside a linked worktree are
+# always allowed; only a worker committing into the main checkout is blocked.
+[ -n "${{TORQUE_CELL_ID}}" ] || exit 0
+
+_abspath() {{ ( cd "$1" 2>/dev/null && pwd ) ; }}
+_git_dir=$(git rev-parse --git-dir 2>/dev/null) || exit 0
+_common_dir=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+_git_dir=$(_abspath "${{_git_dir}}")
+_common_dir=$(_abspath "${{_common_dir}}")
+
+# A linked worktree has a distinct git-dir from the common dir -> allow.
+if [ -z "${{_git_dir}}" ] || [ "${{_git_dir}}" != "${{_common_dir}}" ]; then
+    exit 0
+fi
+
+echo "torque: BLOCKED commit into the shared main checkout from worker session ${{TORQUE_CELL_ID}}." >&2
+echo "torque: worker git changes must stay in your isolated worktree (.torque/worktrees/<id>)." >&2
+echo "torque: cd into your assigned worktree and commit there." >&2
+echo "torque: (worktree-isolation guard, TORQUE:580)" >&2
+exit 1
+"""
+
+
+def _resolve_hooks_dir(repo_root: str) -> Optional[str]:
+    """Return the git hooks directory for *repo_root* (main checkout).
+
+    Honours ``core.hooksPath`` when configured, otherwise uses
+    ``<git-common-dir>/hooks``. Returns ``None`` when git can't be queried.
+    """
+    repo_root = os.path.expanduser(repo_root)
+    try:
+        hooks_path = subprocess.run(
+            ["git", "-C", repo_root, "config", "--get", "core.hooksPath"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if hooks_path.returncode == 0:
+            configured = hooks_path.stdout.strip()
+            if configured:
+                if not os.path.isabs(configured):
+                    configured = os.path.join(repo_root, configured)
+                return configured
+
+        common = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if common.returncode != 0:
+            return None
+        git_common = common.stdout.strip()
+        if not git_common:
+            return None
+        if not os.path.isabs(git_common):
+            git_common = os.path.join(repo_root, git_common)
+        return os.path.join(os.path.normpath(git_common), "hooks")
+    except Exception:
+        log.debug("Could not resolve hooks dir for %s", repo_root, exc_info=True)
+        return None
+
+
+def ensure_worktree_isolation_guard(repo_root: str) -> str:
+    """Install/refresh the worktree-isolation ``pre-commit`` guard hook.
+
+    Idempotent and conservative:
+      - installs the managed hook when no ``pre-commit`` hook exists;
+      - refreshes it when an older managed version is present;
+      - never clobbers a foreign (user-authored) ``pre-commit`` hook — it
+        logs a warning and leaves the foreign hook in place.
+
+    Returns one of: ``"installed"``, ``"refreshed"``, ``"present"``,
+    ``"foreign"``, ``"skipped"`` (no repo / git unavailable).
+    """
+    if not repo_root:
+        return "skipped"
+    hooks_dir = _resolve_hooks_dir(repo_root)
+    if not hooks_dir:
+        return "skipped"
+    pre_commit = os.path.join(hooks_dir, "pre-commit")
+    try:
+        existing = ""
+        if os.path.exists(pre_commit):
+            with open(pre_commit, encoding="utf-8", errors="replace") as f:
+                existing = f.read()
+            if _ISOLATION_GUARD_HOOK_MARKER not in existing:
+                log.warning(
+                    "Worktree-isolation guard: a non-Torque pre-commit hook "
+                    "already exists at %s; leaving it untouched. Worker "
+                    "commits into the shared main checkout will NOT be "
+                    "blocked by the hook until it is merged with Torque's "
+                    "guard (the daemon-side guard still applies).",
+                    pre_commit,
+                )
+                return "foreign"
+            if existing == _ISOLATION_GUARD_HOOK_SCRIPT:
+                # Already current; just make sure it stays executable.
+                _make_executable(pre_commit)
+                return "present"
+
+        os.makedirs(hooks_dir, exist_ok=True)
+        with open(pre_commit, "w", encoding="utf-8") as f:
+            f.write(_ISOLATION_GUARD_HOOK_SCRIPT)
+        _make_executable(pre_commit)
+        outcome = "refreshed" if existing else "installed"
+        log.info("Worktree-isolation guard %s at %s", outcome, pre_commit)
+        return outcome
+    except Exception:
+        log.debug("Could not install worktree-isolation guard at %s",
+                  pre_commit, exc_info=True)
+        return "skipped"
+
+
+def _make_executable(path: str) -> None:
+    try:
+        mode = os.stat(path).st_mode
+        os.chmod(path, mode | 0o111)
+    except OSError:
+        log.debug("Could not chmod +x %s", path, exc_info=True)
+
+
+def worktree_isolation_guard_installed(repo_root: str) -> bool:
+    """Return True when Torque's managed pre-commit guard is present."""
+    if not repo_root:
+        return False
+    hooks_dir = _resolve_hooks_dir(repo_root)
+    if not hooks_dir:
+        return False
+    pre_commit = os.path.join(hooks_dir, "pre-commit")
+    try:
+        if not os.path.exists(pre_commit):
+            return False
+        with open(pre_commit, encoding="utf-8", errors="replace") as f:
+            return _ISOLATION_GUARD_HOOK_MARKER in f.read()
+    except OSError:
+        return False
+
+
+def worktree_dir_is_shared_checkout(cell) -> bool:
+    """True when the cell's worktree_path resolves to its shared repo root.
+
+    A worker/engineer/architect worktree must live under
+    ``.torque/worktrees/<id>`` (or a flat sibling), never at the repo root
+    itself. If they coincide, any mutating git op would contaminate the
+    shared main checkout — the exact failure TORQUE:580 guards against.
+    """
+    wt = (getattr(cell, "worktree_path", "") or "").strip()
+    root = (getattr(cell, "worktree_repo_root", "") or "").strip()
+    if not wt or not root:
+        return False
+    try:
+        return os.path.realpath(os.path.expanduser(wt)) == \
+            os.path.realpath(os.path.expanduser(root))
+    except OSError:
+        return False
 
 
 def _write_claude_code_local_settings(worktree_path: str) -> None:
@@ -2154,9 +2326,34 @@ class WorktreeManager:
             log.debug("changed_files failed for '%s'", cell.name)
             return []
 
+    def _isolated_worktree_dir(self, cell, op: str) -> Optional[str]:
+        """Return the cell's isolated worktree dir, or None to refuse.
+
+        Fail-closed companion to the pre-commit guard hook: a mutating git
+        op Torque runs on behalf of an agent must target that agent's own
+        worktree, never the shared main checkout. If ``worktree_path`` is
+        empty or has somehow collapsed onto the repo root, refuse the op and
+        log loudly rather than risk contaminating the shared checkout
+        (TORQUE:580).
+        """
+        wt = (getattr(cell, "worktree_path", "") or "").strip()
+        if not wt:
+            return None
+        if worktree_dir_is_shared_checkout(cell):
+            log.error(
+                "ISOLATION GUARD: refusing worker git %s for '%s' — "
+                "worktree_path %r resolves to the shared main checkout %r. "
+                "This would contaminate the shared checkout (TORQUE:580).",
+                op, getattr(cell, "name", ""), wt,
+                getattr(cell, "worktree_repo_root", ""),
+            )
+            return None
+        return wt
+
     async def checkpoint(self, cell, message: str = "") -> Optional[str]:
         """Auto-commit all changes in the worktree. Returns commit SHA."""
-        if not cell.worktree_path:
+        wt_dir = self._isolated_worktree_dir(cell, "checkpoint commit")
+        if not wt_dir:
             return None
         try:
             # Seed checkpoint counter from git history if not yet set
@@ -2165,7 +2362,7 @@ class WorktreeManager:
 
             # Stage everything
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path, "add", "-A",
+                "git", "-C", wt_dir, "add", "-A",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -2173,7 +2370,7 @@ class WorktreeManager:
 
             # Check if there's anything to commit
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
+                "git", "-C", wt_dir,
                 "diff", "--cached", "--quiet",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -2188,7 +2385,7 @@ class WorktreeManager:
                 message = f"torque: checkpoint {n} — {cell.name}"
 
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
+                "git", "-C", wt_dir,
                 "commit", "-m", message,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -2201,7 +2398,7 @@ class WorktreeManager:
 
             # Get the SHA
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
+                "git", "-C", wt_dir,
                 "rev-parse", "HEAD",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -2295,11 +2492,12 @@ class WorktreeManager:
 
         Returns True on success.
         """
-        if not cell.worktree_path:
+        wt_dir = self._isolated_worktree_dir(cell, "rollback reset --hard")
+        if not wt_dir:
             return False
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
+                "git", "-C", wt_dir,
                 "reset", "--hard", commit_sha,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -2767,7 +2965,10 @@ class WorktreeManager:
 
         Returns True on success, False on failure.
         """
-        if not cell.worktree_path or not cell.worktree_base_branch:
+        if not cell.worktree_base_branch:
+            return False
+        wt_dir = self._isolated_worktree_dir(cell, "reset_to_base switch")
+        if not wt_dir:
             return False
         base = cell.worktree_base_branch
         try:
@@ -2775,7 +2976,7 @@ class WorktreeManager:
             # checks it out — a single porcelain command that
             # updates ref + index + working tree.
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
+                "git", "-C", wt_dir,
                 "switch", "-C", cell.worktree_branch, base,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -2799,11 +3000,14 @@ class WorktreeManager:
         Returns True on success, False on failure (e.g. conflicts).
         On failure the rebase is aborted so the worktree is left clean.
         """
-        if not cell.worktree_path or not cell.worktree_base_branch:
+        if not cell.worktree_base_branch:
+            return False
+        wt_dir = self._isolated_worktree_dir(cell, "rebase_onto_base")
+        if not wt_dir:
             return False
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
+                "git", "-C", wt_dir,
                 "rebase", cell.worktree_base_branch,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -2814,7 +3018,7 @@ class WorktreeManager:
                 log.warning("Rebase failed for '%s': %s", cell.name, err)
                 # Abort to leave the worktree in a clean state
                 abort = await asyncio.create_subprocess_exec(
-                    "git", "-C", cell.worktree_path,
+                    "git", "-C", wt_dir,
                     "rebase", "--abort",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
@@ -3728,5 +3932,8 @@ class WorktreeManager:
                 log.info("Added %s to .gitignore in %s", entry, repo_root)
             # Exclude Torque-injected files via .git/info/exclude
             ensure_git_exclude(repo_root)
+            # Install the fail-closed worktree-isolation guard hook so a
+            # worker can never commit into the shared main checkout (TORQUE:580).
+            ensure_worktree_isolation_guard(repo_root)
         except Exception:
             log.debug("Could not update .gitignore in %s", repo_root)

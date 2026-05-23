@@ -732,6 +732,8 @@ def _collect_worktrees_section(conn: sqlite3.Connection) -> dict:
         "legacy": 0,
         "nonconforming": 0,
         "nonconforming_branches": [],
+        "isolation_guard_repos": [],
+        "isolation_guard_missing": [],
     }
     if not _column_exists(conn, "agents", "kind"):
         return section
@@ -763,7 +765,45 @@ def _collect_worktrees_section(conn: sqlite3.Connection) -> dict:
                 "branch": str(worktree_branch or ""),
             })
 
+    section.update(_collect_isolation_guard_status(conn))
     return section
+
+
+def _collect_isolation_guard_status(conn: sqlite3.Connection) -> dict:
+    """Report which repo roots have the worktree-isolation guard hook.
+
+    The guard is the fail-closed pre-commit hook (TORQUE:580) that blocks a
+    worker from committing into the shared main checkout. We surface repos
+    where it is missing so the operator can reinstall it.
+    """
+    status = {"isolation_guard_repos": [], "isolation_guard_missing": []}
+    if not _column_exists(conn, "agents", "worktree_repo_root"):
+        return status
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT worktree_repo_root FROM agents "
+            "WHERE worktree_repo_root != ''"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return status
+
+    try:
+        from .worktree import worktree_isolation_guard_installed
+    except Exception:
+        return status
+
+    for (repo_root,) in rows:
+        repo_root = str(repo_root or "").strip()
+        if not repo_root or not os.path.isdir(repo_root):
+            continue
+        installed = bool(worktree_isolation_guard_installed(repo_root))
+        status["isolation_guard_repos"].append({
+            "repo_root": repo_root,
+            "installed": installed,
+        })
+        if not installed:
+            status["isolation_guard_missing"].append(repo_root)
+    return status
 
 
 def _collect_drift_section(conn: sqlite3.Connection) -> dict:
@@ -1102,6 +1142,28 @@ def _warn_nonconforming_worker_worktree_branches(report: dict) -> dict | None:
     }
 
 
+def _warn_worktree_isolation_guard_missing(report: dict) -> dict | None:
+    worktrees = report.get("worktrees", {}) or {}
+    missing = list(worktrees.get("isolation_guard_missing", []) or [])
+    if not missing:
+        return None
+    return {
+        "name": "worktree_isolation_guard_missing",
+        "status": "warn",
+        "details": {
+            "count": len(missing),
+            "repos": [_humanize_path(str(repo)) for repo in missing],
+            "hint": (
+                "the worktree-isolation pre-commit guard (TORQUE:580) is not "
+                "installed in these repos; worker commits into the shared main "
+                "checkout will not be blocked. It self-installs on the next "
+                "worktree creation, or remove a foreign pre-commit hook so "
+                "Torque can install its own."
+            ),
+        },
+    }
+
+
 def _warn_empty_kind_agents_with_task_history(report: dict) -> dict | None:
     agents = report.get("agents", {}) or {}
     entries = list(agents.get("empty_kind_with_task_history", []) or [])
@@ -1141,6 +1203,7 @@ _DOCTOR_WARNINGS = [
     _warn_stale_pending_hires,
     _warn_dangling_decision_architects,
     _warn_nonconforming_worker_worktree_branches,
+    _warn_worktree_isolation_guard_missing,
     _warn_empty_kind_agents_with_task_history,
 ]
 
@@ -1332,6 +1395,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(worktrees.get('legacy', 0) or 0)}",
         "  nonconforming:         "
         f"{int(worktrees.get('nonconforming', 0) or 0)}",
+        "  isolation_guard_missing: "
+        f"{len(list(worktrees.get('isolation_guard_missing', []) or []))}",
         "",
         "[tasks]",
         f"  total:       {int(tasks.get('total', 0) or 0)}",

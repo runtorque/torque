@@ -8759,6 +8759,22 @@ async def main(connection=None):
     action_mgr = ActionManager()
     template_mgr = RoleManager()
     specialization_mgr = SpecializationManager()
+
+    # Install the fail-closed worktree-isolation guard hook for every repo
+    # root we already know about, so existing checkouts are protected without
+    # waiting for the next worktree creation (TORQUE:580). Idempotent and
+    # never clobbers a foreign pre-commit hook.
+    try:
+        from .worktree import ensure_worktree_isolation_guard
+        _guarded_roots: set[str] = set()
+        for _cell in list(state.agents.values()):
+            _root = (getattr(_cell, "worktree_repo_root", "") or "").strip()
+            if _root and _root not in _guarded_roots:
+                _guarded_roots.add(_root)
+                ensure_worktree_isolation_guard(_root)
+    except Exception:
+        log.debug("Could not install worktree-isolation guard at startup",
+                  exc_info=True)
     agent_launch = AgentLaunchService(
         state=state,
         connection=connection,
