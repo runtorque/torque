@@ -1547,19 +1547,33 @@ class WorktreeManager:
 
     async def _expand_gitignored_symlink_paths(
             self, repo_root: str, base_dir: str) -> list[str]:
-        """Return ignored paths to symlink, resolved by git ignore rules."""
-        candidates = await self._git_ls_ignored_candidates(repo_root)
-        if not candidates:
+        """Return ignored paths to symlink, resolved by git ignore rules.
+
+        Discovery is best-effort and fails open: the subprocess helpers
+        already return ``[]`` on nonzero git exit, and any spawn/IO failure
+        (e.g. git binary missing, OSError on Popen) is swallowed here so a
+        broken discovery never aborts worktree creation.
+        """
+        try:
+            candidates = await self._git_ls_ignored_candidates(repo_root)
+            if not candidates:
+                return []
+            ignored_paths = await self._git_check_ignored_paths(
+                repo_root,
+                candidates,
+            )
+            return self._filter_gitignored_symlink_candidates(
+                repo_root,
+                base_dir,
+                ignored_paths,
+            )
+        except Exception:
+            log.exception(
+                "Failed to discover gitignored symlink paths in %s; "
+                "continuing without auto-symlinks",
+                repo_root,
+            )
             return []
-        ignored_paths = await self._git_check_ignored_paths(
-            repo_root,
-            candidates,
-        )
-        return self._filter_gitignored_symlink_candidates(
-            repo_root,
-            base_dir,
-            ignored_paths,
-        )
 
     def _create_symlinks(self, wt_path: str, repo_root: str,
                          symlinks: list[str]) -> None:
