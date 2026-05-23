@@ -152,8 +152,18 @@ test("standalone authenticated owner attach rejects hijack matrix without owner 
     await assertWsRejected(wsUrl, { authorization: replayHeader }, 401);
     await assertNoOwnerChange(relay, "daemon-1", afterReplacement.daemon_connection_id, 2);
 
-    const attacker = await createDaemonCredentialFixture(relay.store, { daemonId: "daemon-1", ownerUserId: "owner-2", credentialId: "cred-owner-2" });
-    await assertWsRejected(wsUrl, { authorization: await signedDaemonAttachHeader(attacker) }, 403);
+    await relay.store.createDaemonCredential({
+      credential_id: "cred-owner-2",
+      daemon_id: "daemon-1",
+      owner_user_id: "owner-2",
+      public_key_jwk: fixture.publicKeyJwk as any,
+      alg: "ES256",
+      created_at: "2026-05-23T00:00:00.000Z",
+      last_used_at: "",
+      revoked_at: "",
+      metadata: {},
+    });
+    await assertWsRejected(wsUrl, { authorization: await signedDaemonAttachHeader({ ...fixture, credentialId: "cred-owner-2", ownerUserId: "owner-2" }) }, 403);
     await assertNoOwnerChange(relay, "daemon-1", afterReplacement.daemon_connection_id, 2);
     assert.equal(replacement.ws.readyState, WebSocket.OPEN);
     replacement.ws.close();

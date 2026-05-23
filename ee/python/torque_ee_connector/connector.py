@@ -1,4 +1,4 @@
-"""Enterprise outbound relay connector for Channels Phase 3.
+"""Enterprise outbound relay connector for Channels Phase 4.
 
 The open-core daemon loads this package only when explicitly enabled through the
 ``torque.cloud_hooks`` seam.  This connector keeps the daemon as the source of
@@ -6,9 +6,8 @@ truth: inbound relay ``user_message`` envelopes are routed to the existing
 ``user_agent_message`` command path, and local direct-message observer events are
 published back to the relay as V1 JSON envelopes.
 
-Phase 3 intentionally supports unauthenticated LOCAL/STANDALONE relays only.
-Production auth/pairing is Phase 4; until then non-loopback relay URLs are
-rejected rather than creating a remotely exposed control surface.
+Loopback standalone development can use the local-dev unauthenticated mode.
+Reachable/non-loopback relays require Phase 4 signed daemon attach headers.
 """
 
 from __future__ import annotations
@@ -25,12 +24,7 @@ from typing import Any
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
-from .auth import (
-    CryptoUnavailableError,
-    cryptography_available,
-    load_private_key_pem_from_config,
-    make_daemon_attach_headers,
-)
+from .auth import cryptography_available, load_private_key_pem_from_config, make_daemon_attach_headers
 from .protocol import (
     RelayProtocolError,
     dumps_envelope,

@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 EE_PYTHON = Path(__file__).resolve().parents[1] / "ee" / "python"
 if str(EE_PYTHON) not in sys.path:
@@ -74,6 +75,22 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaisesRegex(ValueError, "only supports local"):
             config_from_context(context)
+
+
+    def test_signed_remote_config_degrades_cleanly_without_cryptography(self):
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={
+                "relay_url": "https://relay.example.com",
+                "daemon_id": "daemon-1",
+                "credential_id": "cred-1",
+                "private_key_pem": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
+            },
+        )
+        with mock.patch("torque_ee_connector.connector.cryptography_available", return_value=False):
+            with self.assertRaisesRegex(ValueError, "cryptography is unavailable"):
+                config_from_context(context)
 
     async def test_user_message_routes_to_remote_ingress_and_acks(self):
         calls = []

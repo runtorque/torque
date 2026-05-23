@@ -162,7 +162,12 @@ async function handleHttpRequest(
 
   if (req.method === "POST" && url.pathname === "/v1/pair") {
     const body = await readJson(req) as Record<string, unknown>;
-    const tokenHash = await hashSecret(String(body.pairing_token || ""));
+    const pairingToken = String(body.pairing_token || "").trim();
+    if (!pairingToken) {
+      writeJson(res, 401, { type: "error", message: "pairing token is invalid" });
+      return;
+    }
+    const tokenHash = await hashSecret(pairingToken);
     const pairing = await store.consumePairingToken(tokenHash);
     if (!pairing) {
       writeJson(res, 401, { type: "error", message: "pairing token is invalid" });

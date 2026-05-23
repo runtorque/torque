@@ -14,6 +14,7 @@ import {
   authenticateDaemonAttach,
   isActiveSession,
   makeAuthErrorEnvelope,
+  sanitizeClientEnvelopeForV1,
 } from "../../core/auth.js";
 import { StandaloneRegistryCoordinator } from "../standalone/registryCoordinator.js";
 import { D1RelayStore } from "./d1Store.js";
@@ -94,7 +95,10 @@ export class DaemonRendezvousDurableObject {
         }
         await this.registry.broadcastToClients(attachment.daemonId, envelope);
       } else {
-        await this.registry.sendToDaemon(attachment.daemonId, envelope);
+        await this.registry.sendToDaemon(
+          attachment.daemonId,
+          sanitizeClientEnvelopeForV1(envelope, clientPrincipalFromAttachment(attachment)),
+        );
       }
     } catch (error) {
       const err = makeErrorEnvelope({

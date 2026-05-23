@@ -119,7 +119,12 @@ export async function authenticateDaemonAttach(
     timestamp: parts.timestamp,
     nonce: parts.nonce,
   });
-  const verified = await verifyEs256(canonical, parts.signature, credential.public_key_jwk);
+  let verified = false;
+  try {
+    verified = await verifyEs256(canonical, parts.signature, credential.public_key_jwk);
+  } catch {
+    verified = false;
+  }
   if (!verified) {
     throw new RelayAuthError("daemon attach signature is invalid", "invalid_daemon_signature");
   }
