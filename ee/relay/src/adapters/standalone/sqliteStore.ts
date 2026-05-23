@@ -11,6 +11,7 @@ import type {
   ClaimInstanceOwnerResult,
   ListRelayMessagesOptions,
   PendingRelayMessagesOptions,
+  RelayClientEstablishCodeRecord,
   RelayClientSessionRecord,
   RelayDaemonCredentialRecord,
   RelayDirection,
@@ -27,18 +28,21 @@ import {
   RELAY_SCHEMA_VERSION,
   RELAY_SCHEMA_STATEMENTS,
   clampRelayLimit,
+  normalizeRelayClientEstablishCodeRow,
   normalizeRelayClientSessionRow,
   normalizeRelayDaemonCredentialRow,
   normalizeRelayInstanceRow,
   normalizeRelayMessageRow,
   normalizeRelayPairingTokenRow,
   nowIso,
+  relayClientEstablishCodeValues,
   relayClientSessionValues,
   relayDaemonCredentialValues,
   relayEnvelopeHash,
   relayInstanceValues,
   relayMessageValues,
   relayPairingTokenValues,
+  type RelayClientEstablishCodeRow,
   type RelayClientSessionRow,
   type RelayDaemonCredentialRow,
   type RelayInstanceRow,
@@ -207,6 +211,38 @@ export class SqliteRelayStore implements RelayStore {
       ).run(consumedAt, hash, consumedAt);
       if (this.lastChanges() === 0) return null;
       return this.getPairingTokenByHashSync(hash);
+    });
+  }
+
+  async createClientEstablishCode(record: RelayClientEstablishCodeRecord): Promise<RelayClientEstablishCodeRecord> {
+    return this.operation("createClientEstablishCode", () => {
+      assertNonEmpty(record.id, "establish code id");
+      assertNonEmpty(record.code_hash, "establish code hash");
+      assertNonEmpty(record.owner_user_id, "establish code owner_user_id");
+      this.db.prepare(
+        `INSERT INTO relay_client_establish_codes
+          (id, code_hash, owner_user_id, daemon_id, label, created_at, expires_at, consumed_at, revoked_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(...relayClientEstablishCodeValues(record));
+      const saved = this.getClientEstablishCodeByHashSync(record.code_hash);
+      if (!saved) throw new RelayStoreError(`failed to save establish code ${record.id}`);
+      return saved;
+    });
+  }
+
+  async consumeClientEstablishCode(codeHash: string, consumedAt = nowIso()): Promise<RelayClientEstablishCodeRecord | null> {
+    return this.operation("consumeClientEstablishCode", () => {
+      const hash = assertNonEmpty(codeHash, "establish code hash");
+      // Atomic single-use: the conditional UPDATE only matches an unconsumed,
+      // unrevoked, unexpired code. changes()==0 means it was already redeemed (or
+      // never valid), so two concurrent /establish calls cannot both mint.
+      this.db.prepare(
+        `UPDATE relay_client_establish_codes
+         SET consumed_at=?
+         WHERE code_hash=? AND consumed_at='' AND revoked_at='' AND expires_at>?`,
+      ).run(consumedAt, hash, consumedAt);
+      if (this.lastChanges() === 0) return null;
+      return this.getClientEstablishCodeByHashSync(hash);
     });
   }
 
@@ -469,6 +505,14 @@ export class SqliteRelayStore implements RelayStore {
        FROM relay_pairing_tokens WHERE token_hash=?`,
     ).get(assertNonEmpty(tokenHash, "pairing token hash")) as RelayPairingTokenRow | undefined;
     return normalizeRelayPairingTokenRow(row);
+  }
+
+  private getClientEstablishCodeByHashSync(codeHash: string): RelayClientEstablishCodeRecord | null {
+    const row = this.db.prepare(
+      `SELECT id, code_hash, owner_user_id, daemon_id, label, created_at, expires_at, consumed_at, revoked_at, metadata_json
+       FROM relay_client_establish_codes WHERE code_hash=?`,
+    ).get(assertNonEmpty(codeHash, "establish code hash")) as RelayClientEstablishCodeRow | undefined;
+    return normalizeRelayClientEstablishCodeRow(row);
   }
 
   private getDaemonCredentialSync(daemonId: string, credentialId: string): RelayDaemonCredentialRecord | null {
