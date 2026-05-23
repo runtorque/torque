@@ -21,6 +21,7 @@ from .config import log
 DirectMessageObserver = Callable[[dict[str, Any]], Any]
 RemoteUserAgentIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 RecentDirectMessages = Callable[[int], list[dict[str, Any]]]
+ReportConnectionState = Callable[[dict[str, Any]], None]
 Unregister = Callable[[], None]
 
 _DIRECT_MESSAGE_OBSERVERS: list[DirectMessageObserver] = []
@@ -40,6 +41,11 @@ class CloudConnectorContext:
     # (newest-first canonical rows).  ``None`` in community/legacy builds; the
     # connector then emits an empty snapshot.
     recent_direct_messages: RecentDirectMessages | None = None
+    # Optional: report the connector's relay connection-state transitions to the
+    # daemon as the ephemeral ``relay_connection`` signal.  ``None`` in
+    # community/legacy builds.  The connector wraps every invocation in
+    # try/except, so a missing or raising callback can never break the connector.
+    report_connection_state: ReportConnectionState | None = None
 
 
 @dataclass

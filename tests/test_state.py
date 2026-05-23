@@ -4678,3 +4678,79 @@ class EngineerDispatchShapeStateTests(unittest.TestCase):
             reloaded.engineer_dispatch_shape_events("engineer-1"),
             [],
         )
+
+
+class RelayConnectionSignalTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def _state(self):
+        return self.state_mod.MatrixState()
+
+    def test_default_is_disabled_and_in_snapshot(self):
+        state = self._state()
+        self.assertEqual(state.relay_connection["status"], "disabled")
+        self.assertFalse(state.relay_connection["enabled"])
+        full = state.to_dict()
+        compact = state.to_dict_compact()
+        self.assertEqual(full["relay_connection"]["status"], "disabled")
+        self.assertEqual(compact["relay_connection"]["status"], "disabled")
+        # Snapshot is a copy, not the live dict, so a later mutation can't alias.
+        self.assertIsNot(full["relay_connection"], state.relay_connection)
+
+    def test_status_change_emits_exactly_one_delta(self):
+        state = self._state()
+        emitted = state.set_relay_connection({
+            "status": "connecting",
+            "enabled": True,
+            "relay_host": "relay.runtorque.com",
+            "daemon_id": "daemon-1",
+            "since": "2026-05-23T00:00:00.000Z",
+        })
+        self.assertTrue(emitted)
+        ops = [op for op in state._delta_ops if op["op"] == "relay_connection"]
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(ops[0]["status"], "connecting")
+        self.assertTrue(ops[0]["enabled"])
+        self.assertEqual(ops[0]["relay_host"], "relay.runtorque.com")
+        # Live snapshot now reflects the new state.
+        self.assertEqual(state.to_dict()["relay_connection"]["status"], "connecting")
+
+    def test_identical_payload_dedupes_to_no_delta(self):
+        state = self._state()
+        payload = {
+            "status": "connected",
+            "enabled": True,
+            "relay_host": "relay.runtorque.com",
+            "daemon_id": "daemon-1",
+            "last_connected_at": "2026-05-23T00:00:00.000Z",
+            "retry_count": 0,
+            "since": "2026-05-23T00:00:00.000Z",
+        }
+        self.assertTrue(state.set_relay_connection(payload))
+        state._delta_ops.clear()
+        # Re-submitting the same payload must NOT emit a delta.
+        self.assertFalse(state.set_relay_connection(dict(payload)))
+        self.assertEqual(
+            [op for op in state._delta_ops if op["op"] == "relay_connection"],
+            [],
+        )
+        # A genuine change emits exactly one.
+        changed = dict(payload, status="disconnected")
+        self.assertTrue(state.set_relay_connection(changed))
+        ops = [op for op in state._delta_ops if op["op"] == "relay_connection"]
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(ops[0]["status"], "disconnected")
+
+    def test_partial_payload_merges_over_defaults(self):
+        state = self._state()
+        state.set_relay_connection({"status": "error", "last_error": "boom"})
+        rc = state.relay_connection
+        self.assertEqual(rc["status"], "error")
+        self.assertEqual(rc["last_error"], "boom")
+        # Unspecified keys fall back to defaults rather than disappearing.
+        self.assertEqual(rc["retry_count"], 0)
+        self.assertEqual(rc["relay_host"], "")
+        self.assertIn("enabled", rc)

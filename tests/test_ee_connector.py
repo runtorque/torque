@@ -12,10 +12,13 @@ if str(EE_PYTHON) not in sys.path:
 
 from torque_ee_connector.connector import (  # noqa: E402
     CONNECTOR_DEBUG_BUFFER_LIMIT,
+    RELAY_CONNECTION_RETRY_THROTTLE_SECONDS,
     SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
     EnterpriseConnector,
     _agent_id_for_direct_message,
     _direct_message_payload,
+    _is_persistent_connection_error,
+    _relay_host_only,
     _wire_kind_for_direct_message_row,
     build_daemon_ws_url,
     config_from_context,
@@ -649,6 +652,136 @@ class EnterpriseConnectorSyncTests(unittest.TestCase):
         self.assertFalse(connector.started)
         asyncio.run(connector.on_direct_message({"type": "direct_message_saved"}))
         self.assertEqual(connector.observed_events, ["direct_message_saved"])
+
+
+class RelayConnectionStateTests(unittest.TestCase):
+    def _connector(self, *, report=None, raise_report=False):
+        reports = [] if report is None else report
+        if raise_report:
+            def report_connection_state(_payload):
+                raise RuntimeError("callback boom")
+        else:
+            def report_connection_state(payload):
+                reports.append(payload)
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+            report_connection_state=report_connection_state,
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        return connector, reports
+
+    def test_relay_host_only_strips_scheme_and_path(self):
+        self.assertEqual(
+            _relay_host_only("ws://127.0.0.1:8787/v1/daemon/daemon-1/ws"),
+            "127.0.0.1:8787",
+        )
+        self.assertEqual(
+            _relay_host_only("wss://relay.runtorque.com/v1/daemon/d/ws"),
+            "relay.runtorque.com",
+        )
+        self.assertEqual(_relay_host_only(""), "")
+
+    def test_persistent_error_classification(self):
+        self.assertTrue(_is_persistent_connection_error(Exception("SSL handshake failed")))
+        self.assertTrue(_is_persistent_connection_error(Exception("401 Unauthorized")))
+        self.assertTrue(
+            _is_persistent_connection_error(Exception("certificate verify failed"))
+        )
+        self.assertFalse(
+            _is_persistent_connection_error(Exception("connection reset by peer"))
+        )
+
+    def test_transitions_map_to_status_enum(self):
+        connector, reports = self._connector()
+        connector._report_connection_state("connecting")
+        self.assertEqual(reports[-1]["status"], "connecting")
+        self.assertTrue(reports[-1]["enabled"])
+        self.assertEqual(reports[-1]["relay_host"], "127.0.0.1:8787")
+        self.assertEqual(reports[-1]["daemon_id"], "daemon-1")
+        self.assertTrue(reports[-1]["since"])
+
+        connector._report_connection_state("connected", connected_now=True)
+        self.assertEqual(reports[-1]["status"], "connected")
+        self.assertEqual(reports[-1]["retry_count"], 0)
+        self.assertTrue(reports[-1]["last_connected_at"])
+        self.assertEqual(reports[-1]["last_error"], "")
+
+        # Having connected this session, a transient drop is "disconnected".
+        connector._note_connection_failure(Exception("connection reset"))
+        self.assertEqual(reports[-1]["status"], "disconnected")
+        self.assertEqual(reports[-1]["last_error"], "connection reset")
+
+        # A persistent auth/TLS failure is "error" regardless of prior state.
+        connector._note_connection_failure(Exception("SSL handshake failed"))
+        self.assertEqual(reports[-1]["status"], "error")
+
+    def test_connecting_before_first_attach_when_never_connected(self):
+        connector, reports = self._connector()
+        connector._report_connection_state("connecting")
+        # Never attached this session → a failed attempt stays "connecting".
+        connector._note_connection_failure(Exception("connection refused"))
+        self.assertEqual(
+            [r["status"] for r in reports],
+            ["connecting"],
+        )
+        # Status never left "connecting"; retry churn was coalesced (throttled).
+        self.assertEqual(connector._relay_status, "connecting")
+        self.assertGreaterEqual(connector._relay_retry_count, 1)
+
+    def test_fast_retry_loop_does_not_storm(self):
+        connector, reports = self._connector()
+        connector._report_connection_state("connecting")
+        self.assertEqual(len(reports), 1)
+        # A flapping reconnect loop: many failed attempts in quick succession,
+        # all within the same "connecting" status. retry_count climbs, but the
+        # throttle coalesces same-status churn to NO extra deltas.
+        for _ in range(200):
+            connector._note_connection_failure(Exception("connection refused"))
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(connector._relay_retry_count, 200)
+
+        # Once the throttle window elapses, a single coalesced retry update goes
+        # out carrying the accumulated retry_count — still one delta, not 200.
+        connector._relay_last_report_monotonic -= (
+            RELAY_CONNECTION_RETRY_THROTTLE_SECONDS + 1.0
+        )
+        connector._note_connection_failure(Exception("connection refused"))
+        self.assertEqual(len(reports), 2)
+        self.assertEqual(reports[-1]["status"], "connecting")
+        self.assertEqual(reports[-1]["retry_count"], 201)
+
+    def test_status_change_always_emits_even_within_throttle_window(self):
+        connector, reports = self._connector()
+        connector._report_connection_state("connecting")
+        # Immediately transition to connected (same throttle window) — a real
+        # status-enum change must NEVER be throttled away.
+        connector._report_connection_state("connected", connected_now=True)
+        self.assertEqual([r["status"] for r in reports], ["connecting", "connected"])
+
+    def test_missing_callback_does_not_raise(self):
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        # No report_connection_state on the context at all.
+        connector._report_connection_state("connecting")
+        connector._report_connection_state("connected", connected_now=True)
+        self.assertEqual(connector._relay_status, "connected")
+
+    def test_raising_callback_does_not_break_connector(self):
+        connector, _ = self._connector(raise_report=True)
+        # The callback raises every time; the connector must keep its own state
+        # consistent and never propagate the exception.
+        connector._report_connection_state("connecting")
+        connector._report_connection_state("connected", connected_now=True)
+        self.assertEqual(connector._relay_status, "connected")
+        self.assertEqual(connector._relay_retry_count, 0)
 
 
 if __name__ == "__main__":

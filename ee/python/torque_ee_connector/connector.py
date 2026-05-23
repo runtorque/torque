@@ -18,6 +18,7 @@ import inspect
 import ipaddress
 import json
 import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,6 +32,7 @@ from .protocol import (
     make_ack_envelope,
     make_error_envelope,
     make_relay_envelope,
+    now_iso,
     parse_relay_envelope,
     parse_relay_envelope_json,
     timestamp_from_epoch,
@@ -57,6 +59,29 @@ CONNECTOR_DEBUG_BUFFER_LIMIT = 200
 # well under the ~500 frontend tail-cap.  NEVER unbounded.
 SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 100
 SNAPSHOT_MAX_MESSAGE_LIMIT = 1000
+# relay_connection is a low-frequency status signal, but a flapping reconnect
+# loop (e.g. the go-live SSL loop that fired every ~5s) can turn per-attempt
+# retry_count churn into a delta storm.  We ALWAYS report a status-enum change
+# immediately; same-status churn (retry_count / last_error) is coalesced to at
+# most one report per this many seconds so a flapping connection cannot flood.
+RELAY_CONNECTION_RETRY_THROTTLE_SECONDS = 30.0
+# last_error is operator-facing breadcrumb only; keep it short/truncated.
+RELAY_CONNECTION_LAST_ERROR_MAX_CHARS = 240
+# Heuristic classification of persistent (non-transient) connect failures —
+# auth/TLS/config rejections surface as "error" rather than a retry "connecting"
+# /"disconnected" so the UI can distinguish a misconfiguration from a blip.
+_RELAY_PERSISTENT_ERROR_HINTS = (
+    "ssl",
+    "certificate",
+    "cert_",
+    "handshake",
+    "unauthorized",
+    "forbidden",
+    "401",
+    "403",
+    "credential",
+    "auth",
+)
 
 
 @dataclass(frozen=True)
@@ -97,13 +122,28 @@ class EnterpriseConnector:
         self._session: Any = None
         self._owns_session = False
         self._epoch = 0
+        # relay_connection signal bookkeeping (see _report_connection_state).
+        self._relay_status = "disabled"
+        self._relay_retry_count = 0
+        self._relay_last_connected_at = ""
+        self._relay_last_error = ""
+        self._relay_since = ""
+        self._relay_connected_session = False
+        self._relay_last_report_monotonic = 0.0
 
     async def start(self) -> None:
         """Validate config and start the background outbound WS loop."""
 
         if self.started:
             return
-        self.config = self.config or config_from_context(self.context)
+        try:
+            self.config = self.config or config_from_context(self.context)
+        except Exception as exc:
+            # A bad/incomplete connector config is a persistent misconfiguration,
+            # not a transient blip — surface it as "error" before re-raising so
+            # the status bar reflects why the connector never came up.
+            self._report_connection_state("error", last_error=str(exc) or type(exc).__name__)
+            raise
         self._stop_event.clear()
         self._run_task = asyncio.create_task(
             self._run_forever(),
@@ -152,6 +192,8 @@ class EnterpriseConnector:
     async def _run_forever(self) -> None:
         assert self.config is not None
         backoff = self.config.reconnect_initial_seconds
+        # Entering the reconnect loop without a live attach yet → "connecting".
+        self._report_connection_state("connecting")
         while not self._stop_event.is_set():
             try:
                 await self._connect_once()
@@ -161,6 +203,7 @@ class EnterpriseConnector:
             except Exception as exc:
                 if not self._stop_event.is_set():
                     log.warning("EE relay connector disconnected: %s", exc)
+                    self._note_connection_failure(exc)
             self._connected_event.clear()
             if self._stop_event.is_set():
                 break
@@ -174,6 +217,7 @@ class EnterpriseConnector:
         async with session.ws_connect(self.config.ws_url, headers=headers or None) as ws:
             self._ws = ws
             self._connected_event.set()
+            self._report_connection_state("connected", connected_now=True)
             await self._send_hello()
             receive_task = asyncio.create_task(self._receive_loop(ws))
             send_task = asyncio.create_task(self._send_loop(ws))
@@ -595,6 +639,110 @@ class EnterpriseConnector:
         except (TypeError, ValueError):
             return 500
 
+    # -- relay_connection signal -------------------------------------------
+
+    def _note_connection_failure(self, exc: BaseException) -> None:
+        """Map a connect/disconnect exception to a relay_connection transition.
+
+        A persistent auth/TLS/config failure is reported as ``error``; otherwise
+        a session that had previously attached this run reports ``disconnected``
+        and one that never attached reports ``connecting`` (still trying).  Each
+        call counts a failed attempt; the throttle in ``_report_connection_state``
+        keeps a flapping loop from flooding deltas.
+        """
+        last_error = str(exc) or type(exc).__name__
+        if _is_persistent_connection_error(exc):
+            status = "error"
+        elif self._relay_connected_session:
+            status = "disconnected"
+        else:
+            status = "connecting"
+        self._report_connection_state(status, last_error=last_error, attempt=True)
+
+    def _report_connection_state(
+        self,
+        status: str,
+        *,
+        last_error: str = "",
+        connected_now: bool = False,
+        attempt: bool = False,
+    ) -> None:
+        """Update local relay-connection bookkeeping and report on transitions.
+
+        Always reports a status-enum CHANGE immediately; coalesces same-status
+        churn (retry_count / last_error) to at most one report per
+        ``RELAY_CONNECTION_RETRY_THROTTLE_SECONDS`` so a fast reconnect loop
+        cannot turn into a delta storm.  The full distinct enum is preserved at
+        the source — connecting/disconnected are never collapsed here.
+        """
+        status = str(status or "disconnected").strip() or "disconnected"
+        status_changed = status != self._relay_status
+        if connected_now:
+            self._relay_connected_session = True
+            self._relay_last_connected_at = now_iso()
+            self._relay_retry_count = 0
+            self._relay_last_error = ""
+        else:
+            if attempt:
+                self._relay_retry_count += 1
+            if last_error:
+                self._relay_last_error = last_error[
+                    :RELAY_CONNECTION_LAST_ERROR_MAX_CHARS
+                ]
+        if status_changed:
+            self._relay_status = status
+            self._relay_since = now_iso()
+        now = time.monotonic()
+        if not status_changed:
+            if (
+                now - self._relay_last_report_monotonic
+                < RELAY_CONNECTION_RETRY_THROTTLE_SECONDS
+            ):
+                return
+        self._relay_last_report_monotonic = now
+        self._dispatch_connection_state(self._relay_connection_payload())
+
+    def _relay_connection_payload(self) -> dict[str, Any]:
+        relay_host = ""
+        daemon_id = ""
+        if self.config is not None:
+            relay_host = _relay_host_only(self.config.ws_url)
+            daemon_id = self.config.daemon_id
+        return {
+            "status": self._relay_status,
+            "enabled": True,
+            "relay_host": relay_host,
+            "daemon_id": daemon_id,
+            "last_connected_at": self._relay_last_connected_at,
+            "last_error": self._relay_last_error,
+            "retry_count": self._relay_retry_count,
+            "since": self._relay_since,
+        }
+
+    def _dispatch_connection_state(self, payload: dict[str, Any]) -> None:
+        """Hand a relay_connection payload to the daemon callback, defensively.
+
+        A missing or raising ``report_connection_state`` callback must NEVER
+        break the connector, so every failure mode here is swallowed/logged.
+        """
+        report = getattr(self.context, "report_connection_state", None)
+        if not callable(report) and isinstance(self.context, Mapping):
+            report = self.context.get("report_connection_state")
+        if not callable(report):
+            return
+        try:
+            result = report(dict(payload))
+            if inspect.isawaitable(result):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    if inspect.iscoroutine(result):
+                        result.close()
+                else:
+                    loop.create_task(_await_report_result(result))
+        except Exception:
+            log.exception("EE connector report_connection_state callback failed")
+
 
 def create_connector(context: Any) -> EnterpriseConnector:
     """Factory consumed by ``torque.cloud_hooks.start_cloud_connector``."""
@@ -700,6 +848,30 @@ def build_daemon_ws_url(relay_url: str, daemon_id: str) -> str:
         parsed.query,
         "",
     ))
+
+
+async def _await_report_result(result: Any) -> None:
+    try:
+        await result
+    except Exception:
+        log.exception("EE connector async report_connection_state callback failed")
+
+
+def _is_persistent_connection_error(exc: BaseException) -> bool:
+    """Heuristic: auth/TLS/config rejections are persistent, not transient."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(hint in text for hint in _RELAY_PERSISTENT_ERROR_HINTS)
+
+
+def _relay_host_only(ws_url: str) -> str:
+    """Return the relay host (with port) only — no scheme, userinfo, or path."""
+    parsed = urlparse(str(ws_url or ""))
+    host = (parsed.hostname or "").strip()
+    if not host:
+        return ""
+    if parsed.port:
+        return f"{host}:{parsed.port}"
+    return host
 
 
 def _is_local_relay_url(ws_url: str) -> bool:
