@@ -2844,17 +2844,6 @@ function _applyDelta(ops) {
         break;
       }
 
-      case 'relay_config': {
-        // Daemon-global, low-frequency (boot + relay-settings save only).
-        // Resolved relay config + per-field provenance for the Settings
-        // "Relay" section. Patch `state.relay_config` in place so held
-        // references stay valid; NEVER mark a panel/grid surface
-        // (surface-invalidation discipline, CLAUDE.md).
-        var relayCfg = { config: op.config || {}, sources: op.sources || {} };
-        state.relay_config = relayCfg;
-        break;
-      }
-
       case 'focus_update':
         if ('active_session_id' in op) {
           const prevActive = state.active_session_id;
