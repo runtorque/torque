@@ -355,6 +355,54 @@ def _is_github_remote_url(url: str) -> bool:
     return "github.com" in str(url or "").lower()
 
 
+def _github_host_from_url(url: str) -> str:
+    """Extract the hostname from a git remote URL.
+
+    Handles scp-like (``git@host:owner/repo.git``) and URL-like
+    (``https://host/owner/repo.git``, ``ssh://git@host:22/...``) forms.
+    Returns the lowercased host, or ``""`` when it cannot be determined.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    # URL-like: scheme://[user@]host[:port]/...
+    m = re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://(?:[^@/]+@)?([^:/]+)", raw)
+    if m:
+        return m.group(1).lower()
+    # scp-like: [user@]host:owner/repo.git
+    scp = re.match(r"^(?:[^@/]+@)?([^:/]+):", raw)
+    if scp:
+        return scp.group(1).lower()
+    return ""
+
+
+def _select_github_remote_from_remote_v(stdout: str) -> tuple[str, str]:
+    """Pick the preferred GitHub remote from ``git remote -v`` output.
+
+    Prefers ``origin`` when it is a GitHub remote, otherwise the first
+    GitHub remote in declaration order. Returns ``(remote_name, url)`` or
+    ``("", "")`` when no GitHub remote is present.
+    """
+    first_urls: dict[str, str] = {}
+    order: list[str] = []
+    for raw_line in (stdout or "").splitlines():
+        parts = raw_line.split()
+        if len(parts) < 2:
+            continue
+        name, url = parts[0], parts[1]
+        if name not in first_urls:
+            first_urls[name] = url
+            order.append(name)
+
+    github_remotes = [
+        name for name in order if _is_github_remote_url(first_urls[name])
+    ]
+    if not github_remotes:
+        return "", ""
+    remote = "origin" if "origin" in github_remotes else github_remotes[0]
+    return remote, first_urls.get(remote, "")
+
+
 def format_stale_base_warning(info: dict | None, *,
                               rebase_command: str = "") -> str:
     """Return the loud operator warning for a branch forked behind base."""
@@ -3129,13 +3177,32 @@ class WorktreeManager:
                 "GitHub CLI (gh) is not installed or not executable.",
             )
 
-        auth = await self._run_gh(worktree_path, "auth", "status")
+        # Scope the auth check to the TARGET remote's host so an unrelated,
+        # unreachable gh account on a different host (e.g. an enterprise host
+        # whose keyring login times out) cannot block a merge to github.com.
+        # Resolve the host from the worktree's preferred GitHub remote; fall
+        # back to a host-agnostic check only when no GitHub host is found.
+        target_host = ""
+        remotes = await self._run_capture(
+            "git", "-C", worktree_path, "remote", "-v"
+        )
+        if remotes.get("returncode") == 0:
+            _remote, remote_url = _select_github_remote_from_remote_v(
+                remotes.get("stdout") or ""
+            )
+            target_host = _github_host_from_url(remote_url)
+
+        auth_args = ["auth", "status"]
+        if target_host:
+            auth_args += ["--hostname", target_host]
+        auth = await self._run_gh(worktree_path, *auth_args)
         if auth.get("returncode") != 0:
             err = auth.get("stderr") or auth.get("stdout") \
                 or "gh auth status failed"
+            scope = f" for {target_host}" if target_host else ""
             return _worktree_error(
                 phase,
-                f"GitHub CLI authentication failed: {err}",
+                f"GitHub CLI authentication failed{scope}: {err}",
             )
 
         repo = await self._run_gh(
@@ -3179,30 +3246,18 @@ class WorktreeManager:
                 or "git remote -v failed"
             return _worktree_error(phase, f"Failed to inspect remotes: {err}")
 
-        first_urls: dict[str, str] = {}
-        order: list[str] = []
-        for raw_line in (remotes.get("stdout") or "").splitlines():
-            parts = raw_line.split()
-            if len(parts) < 2:
-                continue
-            name, url = parts[0], parts[1]
-            if name not in first_urls:
-                first_urls[name] = url
-                order.append(name)
-
-        github_remotes = [
-            name for name in order if _is_github_remote_url(first_urls[name])
-        ]
-        if not github_remotes:
+        remote, url = _select_github_remote_from_remote_v(
+            remotes.get("stdout") or ""
+        )
+        if not remote:
             return _worktree_error(
                 phase,
                 "PR-based merge requires a GitHub remote; none found.",
             )
-        remote = "origin" if "origin" in github_remotes else github_remotes[0]
         return _worktree_ok(
             phase,
             remote=remote,
-            url=first_urls.get(remote, ""),
+            url=url,
         )
 
     async def github_sync_remote_base(self, worktree_path: str, repo_root: str,
