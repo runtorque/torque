@@ -239,6 +239,10 @@ class TorqueDBTests(unittest.TestCase):
             "delivered_at",
             "read_at",
             "archived_at",
+            # Additive (TORQUE:602): the base table is created by
+            # initialize_database(); _ensure_agent_peer_messages_schema()'s
+            # column-add loop appends idempotency_key last on both fresh + upgrade.
+            "idempotency_key",
         ])
         indexes = {
             row[1]
@@ -354,6 +358,7 @@ class TorqueDBTests(unittest.TestCase):
             "sender_name",
             "recipient_name",
             "read_at",
+            "idempotency_key",
         }.issubset(columns))
         loaded = migrated_again.load_agent_peer_message("legacy-msg")
         self.assertEqual(loaded["message_type"], "message")
@@ -362,6 +367,23 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(loaded["sender_name"], "")
         self.assertEqual(loaded["recipient_name"], "")
         self.assertEqual(loaded["read_at"], 0)
+        # Pre-existing rows get the additive idempotency_key column as '' (TORQUE:602).
+        self.assertEqual(loaded["idempotency_key"], "")
+        # A new user→agent direct message persists + round-trips the idempotency_key.
+        migrated_again.save_direct_message({
+            "id": "msg-idem",
+            "thread_id": "user-agent:user:arch-b",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": "arch-b",
+            "recipient_kind": "architect",
+            "message": "hi",
+            "idempotency_key": "client-key-xyz",
+        })
+        self.assertEqual(
+            migrated_again.load_direct_message("msg-idem")["idempotency_key"],
+            "client-key-xyz",
+        )
 
     def test_agent_peer_messages_round_trip_query_and_delivery_helpers(self):
         base = {

@@ -138,6 +138,7 @@ _AGENT_PEER_MESSAGE_COLUMNS = [
     "id",
     "thread_id",
     "reply_to_id",
+    "idempotency_key",
     "group_name",
     "sender_id",
     "sender_kind",
@@ -302,6 +303,7 @@ def _normalize_agent_peer_message_record(record: dict) -> dict:
         "id": message_id,
         "thread_id": thread_id,
         "reply_to_id": str(source.get("reply_to_id", "") or "").strip(),
+        "idempotency_key": str(source.get("idempotency_key", "") or "").strip(),
         "group_name": group_name,
         "sender_id": sender_id,
         "sender_kind": str(
@@ -854,7 +856,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 delivery_reason      TEXT NOT NULL DEFAULT '',
                 delivered_at         REAL NOT NULL DEFAULT 0,
                 read_at              REAL NOT NULL DEFAULT 0,
-                archived_at          REAL NOT NULL DEFAULT 0
+                archived_at          REAL NOT NULL DEFAULT 0,
+                idempotency_key      TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -867,6 +870,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         column_defs = {
             "thread_id": "TEXT NOT NULL DEFAULT ''",
             "reply_to_id": "TEXT NOT NULL DEFAULT ''",
+            "idempotency_key": "TEXT NOT NULL DEFAULT ''",
             "group_name": "TEXT NOT NULL DEFAULT ''",
             "sender_id": "TEXT NOT NULL DEFAULT ''",
             "sender_kind": "TEXT NOT NULL DEFAULT 'architect'",

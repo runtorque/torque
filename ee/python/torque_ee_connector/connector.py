@@ -1021,8 +1021,18 @@ def _wire_kind_for_direct_message_row(row: Mapping[str, Any]) -> str:
         # answerer is the sender.  Egress only replies to user-destined asks,
         # i.e. where the user is the answerer.
         return "ask_reply" if sender_kind == "user" else ""
-    if message_type == "message" and sender_kind != "user" and recipient_kind == "user":
-        return "agent_message"
+    if message_type == "message":
+        # User↔agent plain messages egress in BOTH directions so the remote UI
+        # mirrors the FULL conversation — including messages the user sent from a
+        # LOCAL surface (TORQUE:602).  Authorship rides sender_kind; the wire kind
+        # stays the message-type discriminator (the agent_message channel).  Lane
+        # discipline: ONLY the user↔agent lane — agent↔agent and degenerate
+        # user↔user rows stay local.
+        agent_to_user = sender_kind != "user" and recipient_kind == "user"
+        user_to_agent = sender_kind == "user" and recipient_kind != "user"
+        if agent_to_user or user_to_agent:
+            return "agent_message"
+        return ""
     return ""
 
 
@@ -1061,6 +1071,7 @@ def _direct_message_payload(row: Mapping[str, Any], agent_id: str) -> dict[str, 
         "agent_id": str(agent_id or "").strip(),
         "thread_id": str(row.get("thread_id", "") or "").strip(),
         "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "idempotency_key": str(row.get("idempotency_key", "") or "").strip(),
         "message": str(row.get("message", "") or ""),
         "message_type": str(row.get("message_type", "message") or "message"),
         "group": str(row.get("group_name", row.get("group", "")) or ""),
