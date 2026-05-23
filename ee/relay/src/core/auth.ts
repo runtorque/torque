@@ -110,7 +110,8 @@ export async function authenticateDaemonAttach(
     throw new RelayAuthError(`unsupported daemon credential algorithm: ${credential.alg}`, "unsupported_daemon_alg");
   }
   const now = options.now || new Date();
-  assertTimestampFresh(parts.timestamp, now, options.skewSeconds ?? DEFAULT_AUTH_SKEW_SECONDS);
+  const skewSeconds = options.skewSeconds ?? DEFAULT_AUTH_SKEW_SECONDS;
+  const signedAtMs = assertTimestampFresh(parts.timestamp, now, skewSeconds);
   const canonical = canonicalDaemonAttachString({
     method: request.method,
     path: request.url.pathname,
@@ -129,7 +130,7 @@ export async function authenticateDaemonAttach(
     throw new RelayAuthError("daemon attach signature is invalid", "invalid_daemon_signature");
   }
   const nonceHash = await hashSecret(parts.nonce);
-  const expiresAt = new Date(now.getTime() + Math.max(1, options.skewSeconds ?? DEFAULT_AUTH_SKEW_SECONDS) * 1000).toISOString();
+  const expiresAt = new Date(signedAtMs + Math.max(1, skewSeconds) * 1000 + 1).toISOString();
   const inserted = await store.recordAuthNonce(parts.credentialId, nonceHash, expiresAt, now.toISOString());
   if (!inserted) {
     throw new RelayAuthError("daemon attach nonce has already been used", "replayed_daemon_nonce");
@@ -311,13 +312,14 @@ function cookieValue(headers: HeadersLike, name: string): string {
   return "";
 }
 
-function assertTimestampFresh(timestamp: string, now: Date, skewSeconds: number): void {
+function assertTimestampFresh(timestamp: string, now: Date, skewSeconds: number): number {
   const parsed = Date.parse(timestamp);
   if (!Number.isFinite(parsed)) throw new RelayAuthError("daemon attach timestamp is invalid", "invalid_daemon_timestamp");
   const skewMs = Math.abs(now.getTime() - parsed);
   if (skewMs > Math.max(1, skewSeconds) * 1000) {
     throw new RelayAuthError("daemon attach timestamp is outside the allowed skew window", "expired_daemon_timestamp");
   }
+  return parsed;
 }
 
 function isLoopbackHost(host: string): boolean {

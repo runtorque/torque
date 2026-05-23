@@ -47,6 +47,37 @@ test("daemon signed attach authenticates, rejects wrong signature, and rejects r
   await store.close();
 });
 
+test("daemon attach nonce remains reserved through the signed timestamp freshness window", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const fixture = await createDaemonCredentialFixture(store, { daemonId: "daemon-1", ownerUserId: "owner-1", credentialId: "cred-1" });
+  const url = new URL("https://relay.example.com/v1/daemon/daemon-1/ws");
+  const firstSeenAt = new Date("2026-05-23T00:00:00.000Z");
+  const signedAt = new Date(firstSeenAt.getTime() + 299_000);
+  const header = await signedDaemonAttachHeader(fixture, {
+    timestamp: signedAt.toISOString(),
+    nonce: "future-fresh-replay",
+  });
+
+  await authenticateDaemonAttach(store, {
+    method: "GET",
+    url,
+    daemonId: "daemon-1",
+    headers: new TestHeaders({ authorization: header }),
+  }, { now: firstSeenAt, skewSeconds: 300 });
+
+  await assert.rejects(
+    () => authenticateDaemonAttach(store, {
+      method: "GET",
+      url,
+      daemonId: "daemon-1",
+      headers: new TestHeaders({ authorization: header }),
+    }, { now: new Date(firstSeenAt.getTime() + 301_000), skewSeconds: 300 }),
+    /nonce has already been used/,
+  );
+  await store.close();
+});
+
 test("auth helpers keep canonical request and fail-closed non-loopback policy stable", async () => {
   assert.equal(selectStandaloneAuthMode({ host: "127.0.0.1" }), "local-dev-unauthenticated");
   assert.equal(selectStandaloneAuthMode({ host: "0.0.0.0" }), "required");

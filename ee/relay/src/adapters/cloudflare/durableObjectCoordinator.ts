@@ -170,14 +170,16 @@ export class DaemonRendezvousDurableObject {
 
   private async attachmentStillAuthorized(attachment: DurableObjectSessionAttachment): Promise<boolean> {
     const store = this.authStore();
+    const instance = await store.getInstance(attachment.daemonId);
+    if (!instance?.owner_user_id || instance.owner_user_id !== attachment.ownerUserId) return false;
     if (attachment.role === "daemon") {
       if (!attachment.credentialId) return false;
       const credential = await store.getDaemonCredential(attachment.daemonId, attachment.credentialId);
-      return Boolean(credential && !credential.revoked_at && credential.owner_user_id === attachment.ownerUserId);
+      return Boolean(credential && !credential.revoked_at && credential.owner_user_id === instance.owner_user_id);
     }
     if (!attachment.sessionId) return false;
     const session = await store.getClientSession(attachment.sessionId);
-    return Boolean(isActiveSession(session) && session.owner_user_id === attachment.ownerUserId);
+    return Boolean(isActiveSession(session) && session.owner_user_id === instance.owner_user_id);
   }
 
   private async attachSocket(ws: WebSocket, attachment: DurableObjectSessionAttachment): Promise<void> {
