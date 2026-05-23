@@ -25,5 +25,8 @@
   },
   "engines": {
     "node": ">=22.5"
+  },
+  "optionalDependencies": {
+    "redis": "^5.12.1"
   }
 }

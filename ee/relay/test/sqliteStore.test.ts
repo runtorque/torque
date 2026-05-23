@@ -114,3 +114,48 @@ test("SqliteRelayStore persists auth credentials, sessions, and nonce replay gua
   assert.equal((await store.revokeClientSession("session-1", "2026-05-23T00:04:00.000Z"))?.revoked_at, "2026-05-23T00:04:00.000Z");
   await store.close();
 });
+
+test("SqliteRelayStore claimInstanceOwner enforces owner-CAS and monotonic fencing epochs", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const first = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 1,
+    now: "2026-05-23T00:00:00.000Z",
+  });
+  assert.equal(first.claimed, true);
+  assert.equal(first.record?.fencing_epoch, 1);
+
+  const sameOwnerHigherEpoch = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 2,
+    now: "2026-05-23T00:00:01.000Z",
+  });
+  assert.equal(sameOwnerHigherEpoch.claimed, true);
+  assert.equal(sameOwnerHigherEpoch.record?.fencing_epoch, 2);
+
+  const stale = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 1,
+  });
+  assert.equal(stale.claimed, false);
+  assert.equal(stale.reason, "stale_fencing_epoch");
+
+  const wrongOwner = await store.claimInstanceOwner({
+    id: "daemon-cas",
+    ownerUserId: "owner-2",
+    credentialId: "cred-2",
+    fencingEpoch: 3,
+  });
+  assert.equal(wrongOwner.claimed, false);
+  assert.equal(wrongOwner.reason, "daemon_owner_mismatch");
+  assert.equal((await store.getInstance("daemon-cas"))?.owner_user_id, "owner-1");
+  assert.equal((await store.getInstance("daemon-cas"))?.fencing_epoch, 2);
+  await store.close();
+});

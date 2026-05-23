@@ -796,12 +796,13 @@ export async function createRedisClientsFromUrl(url: string): Promise<{
   const redisUrl = cleanRequired(url, "redisUrl");
   try {
     const moduleName = "redis";
-    const mod = await import(moduleName) as { createClient?: (options: { url: string }) => RedisLikeClient & { connect?: () => Promise<void>; duplicate?: () => RedisLikeClient & { connect?: () => Promise<void> } } };
+    const mod = await import(moduleName) as { createClient?: (options: Record<string, unknown>) => RedisLikeClient & { connect?: () => Promise<void>; duplicate?: () => RedisLikeClient & { connect?: () => Promise<void> } } };
     if (!mod.createClient) throw new Error("redis.createClient is unavailable");
-    const commands = mod.createClient({ url: redisUrl });
+    const clientOptions = { url: redisUrl, socket: { reconnectStrategy: false } };
+    const commands = mod.createClient(clientOptions);
     await commands.connect?.();
-    const publisher = commands.duplicate ? commands.duplicate() : mod.createClient({ url: redisUrl });
-    const subscriber = commands.duplicate ? commands.duplicate() : mod.createClient({ url: redisUrl });
+    const publisher = commands.duplicate ? commands.duplicate() : mod.createClient(clientOptions);
+    const subscriber = commands.duplicate ? commands.duplicate() : mod.createClient(clientOptions);
     await publisher.connect?.();
     await subscriber.connect?.();
     return {
@@ -911,8 +912,8 @@ function parseClientPresence(value: unknown): RedisClientPresence | null {
 
 function parseRouteMessage(message: string): RouteRequest | RouteReply | null {
   try {
-    const raw = JSON.parse(message) as Partial<RouteRequest & RouteReply>;
-    if (raw.type === "reply" && raw.requestId) return raw as RouteReply;
+    const raw = JSON.parse(message) as Record<string, unknown>;
+    if (raw.type === "reply" && raw.requestId) return raw as unknown as RouteReply;
     if ((raw.type === "send_to_daemon" || raw.type === "broadcast_to_clients") && raw.requestId && raw.replyTo && raw.daemonId && raw.envelope) {
       return raw as RouteRequest;
     }

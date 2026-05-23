@@ -22,6 +22,7 @@ Subsequent Channels slices should depend on this surface instead of duplicating 
 - `RelayRuntime` for idempotent ingest, offline queue, bounded replay, ack, and epoch-fenced daemon delivery.
 - Adapters:
   - `SqliteRelayStore` and `StandaloneRegistryCoordinator` for local standalone/dev.
+  - `RedisRelayCoordinator` for explicitly configured multi-process standalone deployments.
   - `D1RelayStore`, `DaemonRendezvousDurableObject`, and Worker `fetch` for Cloudflare.
 
 ## Local commands
@@ -35,6 +36,46 @@ npm run dev
 ```
 
 `npm run dev` starts the standalone relay on `127.0.0.1:8787` by default. Set `PORT` and `TORQUE_RELAY_DB` to override. Use `createStandaloneRelayServer({ port: 0 })` in tests to bind an ephemeral port.
+
+### Standalone coordination modes
+
+Default standalone coordination is still the in-process registry:
+
+```sh
+TORQUE_RELAY_DB=/path/to/relay.db npm run dev
+```
+
+For multi-process standalone/horizontally scaled Node relay deployments, opt in
+to Redis coordination:
+
+```sh
+TORQUE_RELAY_DB=/shared/relay.db \
+TORQUE_RELAY_REDIS_URL=redis://127.0.0.1:6379 \
+TORQUE_RELAY_REDIS_LEASE_TTL_MS=15000 \
+TORQUE_RELAY_REDIS_RENEW_INTERVAL_MS=5000 \
+npm run dev
+```
+
+Redis mode uses the existing attach `epoch` as the monotonic fencing token. The
+successful daemon owner receives a Redis lease with TTL; renewals revalidate the
+current `relay_instances.owner_user_id`, `active_credential_id`, and
+`fencing_epoch` before extending the lease. If Redis is explicitly configured
+but unavailable, the relay fails fast and does **not** silently fall back to the
+in-process registry, because that would falsely advertise multi-process safety.
+
+Tunable Redis coordination env:
+
+- `TORQUE_RELAY_COORDINATION=redis|registry`
+- `TORQUE_RELAY_REDIS_URL`
+- `TORQUE_RELAY_REDIS_PREFIX`
+- `TORQUE_RELAY_REDIS_LEASE_TTL_MS` — hard-crash takeover window; default
+  `15000`.
+- `TORQUE_RELAY_REDIS_RENEW_INTERVAL_MS` — lease renewal cadence; default
+  `5000`.
+
+All Redis-mode processes must share both Redis **and** a durable shared
+`TORQUE_RELAY_DB`; `:memory:` is rejected in Redis mode because each process
+would otherwise have divergent owner state.
 
 ## Cloudflare scaffold
 
@@ -55,7 +96,6 @@ Standalone and Cloudflare expose equivalent routes:
 
 - Python daemon connector or any changes outside `ee/relay/`.
 - Production auth/session/pairing.
-- Redis/multi-process standalone coordination.
 - Community packaging exclusion guards.
 - Remote frontend and Slack adapter.
 

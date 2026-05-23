@@ -56,3 +56,42 @@ test("D1RelayStore uses the same RelayStore contract as SQLite", async () => {
   );
   fake.close();
 });
+
+test("D1RelayStore claimInstanceOwner mirrors owner-CAS and fencing semantics", async () => {
+  const fake = new FakeD1Database();
+  const store = new D1RelayStore(fake as unknown as D1Database);
+  await store.migrate();
+  const first = await store.claimInstanceOwner({
+    id: "daemon-cas-d1",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 1,
+    now: "2026-05-23T00:00:00.000Z",
+  });
+  assert.equal(first.claimed, true);
+  const second = await store.claimInstanceOwner({
+    id: "daemon-cas-d1",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 2,
+  });
+  assert.equal(second.claimed, true);
+  const stale = await store.claimInstanceOwner({
+    id: "daemon-cas-d1",
+    ownerUserId: "owner-1",
+    credentialId: "cred-1",
+    fencingEpoch: 1,
+  });
+  assert.equal(stale.claimed, false);
+  assert.equal(stale.reason, "stale_fencing_epoch");
+  const wrongOwner = await store.claimInstanceOwner({
+    id: "daemon-cas-d1",
+    ownerUserId: "owner-2",
+    credentialId: "cred-2",
+    fencingEpoch: 3,
+  });
+  assert.equal(wrongOwner.claimed, false);
+  assert.equal(wrongOwner.reason, "daemon_owner_mismatch");
+  assert.equal((await store.getInstance("daemon-cas-d1"))?.fencing_epoch, 2);
+  fake.close();
+});
