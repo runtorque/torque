@@ -1,5 +1,6 @@
 import { parseRelayEnvelope } from "../../core/protocol.js";
 import { errorMessage } from "../../core/errors.js";
+import { authErrorStatus, authenticateClientSession, sanitizeClientEnvelopeForV1 } from "../../core/auth.js";
 import { D1RelayStore } from "./d1Store.js";
 export { DaemonRendezvousDurableObject } from "./durableObjectCoordinator.js";
 
@@ -31,6 +32,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
       storage: "d1",
       coordination: "durable-object",
       protocol_version: 1,
+      auth_mode: "required",
     });
   }
 
@@ -44,7 +46,13 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   const postMessage = url.pathname.match(/^\/v1\/messages\/([^/]+)$/);
   if (request.method === "POST" && postMessage) {
     const daemonId = decodeURIComponent(postMessage[1]);
-    const envelope = parseRelayEnvelope(await request.json());
+    let principal;
+    try {
+      principal = await authenticateClientSession(store, { daemonId, headers: request.headers });
+    } catch (error) {
+      return json({ type: "error", message: errorMessage(error), code: (error as { code?: string }).code || "relay_auth_error" }, authErrorStatus(error));
+    }
+    const envelope = sanitizeClientEnvelopeForV1(parseRelayEnvelope(await request.json()), principal);
     if (envelope.daemon_id !== daemonId) {
       return json({ type: "error", message: "daemon_id path/envelope mismatch" }, 400);
     }

@@ -10,6 +10,8 @@ import {
 } from "./protocol.js";
 import type {
   AttachResult,
+  ClientAuthPrincipal,
+  DaemonAuthPrincipal,
   RelayBroadcastResult,
   RelayCoordinator,
   RelayDeliveryResult,
@@ -60,12 +62,15 @@ export class RelayRuntime {
   private readonly instanceOwnerUserId: string;
   private readonly instanceLabel: string;
 
-  async attachDaemon(daemonId: string, socket: RelaySocket): Promise<RuntimeAttachResult> {
+  async attachDaemon(daemonId: string, socket: RelaySocket, auth?: DaemonAuthPrincipal): Promise<RuntimeAttachResult> {
     const id = cleanRequired(daemonId, "daemonId");
-    const attached = await this.coordinator.attachDaemon({ daemonId: id, socket });
+    const attached = await this.coordinator.attachDaemon({ daemonId: id, socket, auth });
+    if (!attached.accepted) {
+      return { ...attached, replayed: 0, replay_failed: 0 };
+    }
     await this.store.upsertInstance({
       id,
-      owner_user_id: this.instanceOwnerUserId,
+      owner_user_id: auth?.ownerUserId || this.instanceOwnerUserId,
       label: this.instanceLabel || id,
       created_at: nowIso(),
       last_seen_at: nowIso(),
@@ -75,8 +80,11 @@ export class RelayRuntime {
     return { ...attached, replayed: replay.replayed, replay_failed: replay.failed };
   }
 
-  async attachClient(daemonId: string, clientId: string, socket: RelaySocket): Promise<RuntimeAttachResult> {
-    const attached = await this.coordinator.attachClient({ daemonId, clientId, socket });
+  async attachClient(daemonId: string, clientId: string, socket: RelaySocket, auth?: ClientAuthPrincipal): Promise<RuntimeAttachResult> {
+    const attached = await this.coordinator.attachClient({ daemonId, clientId, socket, auth });
+    if (!attached.accepted) {
+      return { ...attached, replayed: 0, replay_failed: 0 };
+    }
     const replay = await this.replayToClients(daemonId);
     return { ...attached, replayed: replay.replayed, replay_failed: replay.failed };
   }

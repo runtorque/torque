@@ -57,7 +57,57 @@ export interface AppendMessageResult {
   idempotent: boolean;
 }
 
-export interface RelayStore {
+export interface RelayPairingTokenRecord {
+  id: string;
+  token_hash: string;
+  owner_user_id: string;
+  daemon_id: string;
+  label: string;
+  created_at: string;
+  expires_at: string;
+  consumed_at: string;
+  revoked_at: string;
+  metadata: JsonObject;
+}
+
+export interface RelayDaemonCredentialRecord {
+  credential_id: string;
+  daemon_id: string;
+  owner_user_id: string;
+  public_key_jwk: JsonObject;
+  alg: "ES256" | string;
+  created_at: string;
+  last_used_at: string;
+  revoked_at: string;
+  metadata: JsonObject;
+}
+
+export interface RelayClientSessionRecord {
+  session_id: string;
+  token_hash: string;
+  owner_user_id: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string;
+  metadata: JsonObject;
+}
+
+export interface RelayAuthStore {
+  createPairingToken(record: RelayPairingTokenRecord): Promise<RelayPairingTokenRecord>;
+  consumePairingToken(tokenHash: string, consumedAt?: string): Promise<RelayPairingTokenRecord | null>;
+  createDaemonCredential(record: RelayDaemonCredentialRecord): Promise<RelayDaemonCredentialRecord>;
+  getDaemonCredential(daemonId: string, credentialId: string): Promise<RelayDaemonCredentialRecord | null>;
+  touchDaemonCredential(credentialId: string, lastUsedAt?: string): Promise<RelayDaemonCredentialRecord | null>;
+  revokeDaemonCredential(credentialId: string, revokedAt?: string): Promise<RelayDaemonCredentialRecord | null>;
+  recordAuthNonce(credentialId: string, nonceHash: string, expiresAt: string, createdAt?: string): Promise<boolean>;
+  createClientSession(record: RelayClientSessionRecord): Promise<RelayClientSessionRecord>;
+  getClientSession(sessionId: string): Promise<RelayClientSessionRecord | null>;
+  getClientSessionByTokenHash(tokenHash: string): Promise<RelayClientSessionRecord | null>;
+  revokeClientSession(sessionId: string, revokedAt?: string): Promise<RelayClientSessionRecord | null>;
+  pruneExpiredAuthNonces?(now?: string): Promise<void>;
+}
+
+export interface RelayStore extends RelayAuthStore {
   migrate(): Promise<void>;
   upsertInstance(record: RelayInstanceRecord): Promise<RelayInstanceRecord>;
   getInstance(id: string): Promise<RelayInstanceRecord | null>;
@@ -73,6 +123,22 @@ export interface RelayStore {
   close?(): Promise<void> | void;
 }
 
+export interface DaemonAuthPrincipal {
+  kind: "daemon";
+  daemonId: string;
+  ownerUserId: string;
+  credentialId: string;
+  authMode: "signed-attach-v1" | "local-dev-unauthenticated";
+}
+
+export interface ClientAuthPrincipal {
+  kind: "client";
+  ownerUserId: string;
+  sessionId: string;
+  userId: string;
+  authMode: "session-v1" | "local-dev-unauthenticated";
+}
+
 export interface RelaySocket {
   id: string;
   sendEnvelope(envelope: RelayEnvelope): Promise<void> | void;
@@ -83,12 +149,14 @@ export interface AttachDaemonArgs {
   daemonId: string;
   socket: RelaySocket;
   resumeToken?: string;
+  auth?: DaemonAuthPrincipal;
 }
 
 export interface AttachClientArgs {
   daemonId: string;
   clientId: string;
   socket: RelaySocket;
+  auth?: ClientAuthPrincipal;
 }
 
 export interface AttachResult {
@@ -119,6 +187,8 @@ export interface RendezvousSnapshot {
   daemon_connection_id: string;
   epoch: number;
   client_connection_ids: string[];
+  owner_user_id?: string;
+  daemon_credential_id?: string;
 }
 
 export interface RelayCoordinator {

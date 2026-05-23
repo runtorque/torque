@@ -59,3 +59,53 @@ test("SqliteRelayStore migrates and persists instances/messages through the Rela
   assert.equal((await store.listPendingMessages("daemon-1", { direction: "to_daemon" })).length, 0);
   await store.close();
 });
+
+test("SqliteRelayStore persists auth credentials, sessions, and nonce replay guard", async () => {
+  const store = new SqliteRelayStore(":memory:");
+  await store.migrate();
+  const pairing = await store.createPairingToken({
+    id: "pair-1",
+    token_hash: "hash-pair-1",
+    owner_user_id: "owner-1",
+    daemon_id: "daemon-1",
+    label: "Laptop",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: "2099-01-01T00:00:00.000Z",
+    consumed_at: "",
+    revoked_at: "",
+    metadata: { ok: true },
+  });
+  assert.equal(pairing.owner_user_id, "owner-1");
+  assert.equal((await store.consumePairingToken("hash-pair-1", "2026-05-23T00:01:00.000Z"))?.consumed_at, "2026-05-23T00:01:00.000Z");
+  assert.equal(await store.consumePairingToken("hash-pair-1", "2026-05-23T00:02:00.000Z"), null);
+
+  await store.createDaemonCredential({
+    credential_id: "cred-1",
+    daemon_id: "daemon-1",
+    owner_user_id: "owner-1",
+    public_key_jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+    alg: "ES256",
+    created_at: "2026-05-23T00:00:00.000Z",
+    last_used_at: "",
+    revoked_at: "",
+    metadata: {},
+  });
+  assert.equal((await store.getDaemonCredential("daemon-1", "cred-1"))?.owner_user_id, "owner-1");
+  assert.equal(await store.recordAuthNonce("cred-1", "nonce-hash", "2099-01-01T00:00:00.000Z"), true);
+  assert.equal(await store.recordAuthNonce("cred-1", "nonce-hash", "2099-01-01T00:00:00.000Z"), false);
+  assert.equal((await store.revokeDaemonCredential("cred-1", "2026-05-23T00:03:00.000Z"))?.revoked_at, "2026-05-23T00:03:00.000Z");
+
+  await store.createClientSession({
+    session_id: "session-1",
+    token_hash: "hash-session-1",
+    owner_user_id: "owner-1",
+    created_at: "2026-05-23T00:00:00.000Z",
+    expires_at: "2099-01-01T00:00:00.000Z",
+    revoked_at: "",
+    metadata: {},
+  });
+  assert.equal((await store.getClientSessionByTokenHash("hash-session-1"))?.session_id, "session-1");
+  assert.equal((await store.getClientSession("session-1"))?.owner_user_id, "owner-1");
+  assert.equal((await store.revokeClientSession("session-1", "2026-05-23T00:04:00.000Z"))?.revoked_at, "2026-05-23T00:04:00.000Z");
+  await store.close();
+});
