@@ -2419,6 +2419,21 @@ function _embeddedTerminalScrollToTail(entry) {
   }
 }
 
+function _scheduleEmbeddedTerminalScrollToTail(entry) {
+  if (!entry) return;
+  // Defer past the fit() that activation also schedules so the scroll lands
+  // after xterm has reflowed to the current stage size. requestAnimationFrame
+  // callbacks fire in order, so the fit runs first.
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function() {
+      if (!_isEmbeddedTerminalEntryActive(entry)) return;
+      _embeddedTerminalScrollToTail(entry);
+    });
+  } else {
+    _embeddedTerminalScrollToTail(entry);
+  }
+}
+
 function _writeEmbeddedTerminalData(entry, data) {
   const term = entry && entry.terminal;
   if (!term || !data || typeof term.write !== 'function') return;
@@ -2447,13 +2462,22 @@ function _sanitizeEmbeddedTerminalRekeySnapshot(data) {
     .replace(/\x1b\[[0-?]*[ -/]*J/g, '');
 }
 
-function _scheduleEmbeddedTerminalFit(entry) {
+function _scheduleEmbeddedTerminalFit(entry, opts) {
   entry = entry || _embeddedTerminalSessions[_embeddedTerminalSessionKey];
   if (!entry || !_isEmbeddedTerminalEntryActive(entry)
       || !entry.terminal || !entry.fit) return;
+  const preserveTail = !!(opts && opts.preserveTail);
   requestAnimationFrame(function() {
     if (!_isEmbeddedTerminalEntryActive(entry) || !entry.terminal || !entry.fit) return;
+    // Capture tail state from the logical buffer before the fit reflows xterm.
+    // The compose box growing to multiple lines shrinks the terminal stage and
+    // fires the surface ResizeObserver; without re-pinning, the reflow detaches
+    // the viewport from the bottom and tail/autoscroll silently stops while the
+    // user is still typing. Only re-pin when the user was already at the tail so
+    // a deliberate scroll-up survives the resize.
+    const wasAtTail = preserveTail && _embeddedTerminalAtTail(entry);
     entry.fit.fit();
+    if (wasAtTail) _embeddedTerminalScrollToTail(entry);
     const cols = entry.terminal.cols;
     const rows = entry.terminal.rows;
     if (entry.lastSentCols === cols && entry.lastSentRows === rows) return;
@@ -2573,7 +2597,7 @@ function _connectEmbeddedTerminal(cell, surface) {
   });
   entry.resizeObserver = new ResizeObserver(function(entries) {
     if (!_embeddedTerminalObservedSizeChanged(entry, entries)) return;
-    _scheduleEmbeddedTerminalFit(entry);
+    _scheduleEmbeddedTerminalFit(entry, { preserveTail: true });
   });
   entry.resizeObserver.observe(surface);
   _setActiveEmbeddedTerminalEntry(entry);
@@ -2700,6 +2724,10 @@ function _createEmbeddedTerminalSurface(stage, sessionKey) {
 function _activateEmbeddedTerminalSurface(stage, sessionKey) {
   _clearEmbeddedTerminalStagePlaceholders(stage);
   const entry = _embeddedTerminalSessions[sessionKey] || null;
+  // The previously active session, captured before _setActiveEmbeddedTerminalEntry
+  // overwrites it, so we can tell an agent switch apart from a same-session
+  // rerender (renderTerminalWorkspace runs on every grid render).
+  const previousSessionKey = _embeddedTerminalSessionKey;
   for (const key in _embeddedTerminalSessions) {
     const candidate = _embeddedTerminalSessions[key];
     if (!candidate || !candidate.surface) continue;
@@ -2712,7 +2740,16 @@ function _activateEmbeddedTerminalSurface(stage, sessionKey) {
     if (candidate.surface.style) candidate.surface.style.display = active ? '' : 'none';
   }
   _setActiveEmbeddedTerminalEntry(entry);
-  if (entry) _scheduleEmbeddedTerminalFit(entry);
+  if (entry) {
+    _scheduleEmbeddedTerminalFit(entry);
+    // Switching to an agent's terminal should land at the bottom and resume
+    // tailing rather than leaving the viewport pinned to the top (or wherever
+    // the previous activation left it). Skip same-session rerenders so a
+    // deliberate scroll-up is preserved during normal output.
+    if (previousSessionKey !== sessionKey) {
+      _scheduleEmbeddedTerminalScrollToTail(entry);
+    }
+  }
   return entry;
 }
 
