@@ -149,6 +149,22 @@ export async function mintClientEstablishCode(args: MintEstablishCodeArgs): Prom
     throw new RelayAuthError("mint request nonce has already been used", "replayed_mint_nonce");
   }
 
+  // [4/P5] FINAL connection-level fencing re-check, immediately before the mint —
+  // closes a check-then-act TOCTOU. On the cloudflare DO path D1 is an external
+  // binding (not DO transactional storage), so the input gate does NOT close on
+  // the ungated D1 awaits above (getInstance/getDaemonCredential/count/recordNonce):
+  // a superseding same-owner attach can land mid-flight after the initial check at
+  // the top. This re-check is the LAST gate before createClientEstablishCode, so a
+  // mint that already passed the first check with a now-stale epoch is still fenced.
+  // Placed AFTER the nonce burn so replay protection is NOT bypassed (the nonce is
+  // already consumed; a same-nonce retry still fails). Same guard/throw as the first.
+  if (args.coordinator) {
+    const stillCurrent = await args.coordinator.isCurrentDaemonConnection(daemonId, args.connectionId, args.epoch);
+    if (!stillCurrent) {
+      throw new RelayAuthError("daemon connection is stale or fenced", "stale_daemon_connection");
+    }
+  }
+
   // [2] Mint: persist ONLY the code hash; the raw code is returned once below.
   const code = randomCode();
   const codeId = `establish-${randomUuid()}`;

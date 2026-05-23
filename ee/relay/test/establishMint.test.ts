@@ -7,7 +7,7 @@ import {
   type MintCoordinatorLike,
   type MintEstablishCodeArgs,
 } from "../src/core/establishMint.js";
-import { hashSecret } from "../src/core/auth.js";
+import { RelayAuthError, hashSecret } from "../src/core/auth.js";
 import type { DaemonAuthPrincipal, RelayStore } from "../src/core/ports.js";
 import { SqliteRelayStore } from "../src/adapters/standalone/sqliteStore.js";
 import { D1RelayStore } from "../src/adapters/cloudflare/d1Store.js";
@@ -198,3 +198,77 @@ for (const factory of STORE_FACTORIES) {
     await close();
   });
 }
+
+// TOCTOU race regression (TORQUE:611 fix): on the DO path the D1 awaits between
+// the initial connection-fencing check and the mint are UNGATED (D1 is an
+// external binding, not DO transactional storage), so a superseding same-owner
+// attach can land mid-flight. The FINAL isCurrentDaemonConnection re-check placed
+// immediately before createClientEstablishCode closes that window. This test
+// genuinely exercises the window: isCurrentDaemonConnection returns true on the
+// first (initial) check and false on the second (final re-check). It FAILS on
+// pre-fix code — without the re-check the mint proceeds and createClientEstablishCode
+// is called — and PASSES with the re-check (verified by temporarily reverting it).
+test("race: a superseding attach during the ungated D1 window fences the mint after the nonce burn", async () => {
+  const calls = { recordAuthNonce: 0, createClientEstablishCode: 0 };
+  let isCurrentCalls = 0;
+  const coordinator: MintCoordinatorLike = {
+    isCurrentDaemonConnection: () => {
+      isCurrentCalls += 1;
+      // 1st call = the initial top-of-function check (passes); 2nd call = the new
+      // final re-check, where a superseding same-owner attach has now landed.
+      return isCurrentCalls === 1;
+    },
+  };
+  const store = {
+    async getInstance() {
+      return {
+        id: "daemon-1", owner_user_id: "owner-1", label: "daemon-1",
+        created_at: "", last_seen_at: "", fencing_epoch: 0,
+        active_credential_id: "cred-1", coordination_updated_at: "", metadata: {},
+      };
+    },
+    async getDaemonCredential() {
+      return {
+        credential_id: "cred-1", daemon_id: "daemon-1", owner_user_id: "owner-1",
+        public_key_jwk: {}, alg: "ES256", created_at: "", last_used_at: "",
+        revoked_at: "", metadata: {},
+      };
+    },
+    async countRecentEstablishCodes() {
+      return 0;
+    },
+    async recordAuthNonce() {
+      calls.recordAuthNonce += 1;
+      return true;
+    },
+    async createClientEstablishCode(record: unknown) {
+      calls.createClientEstablishCode += 1;
+      return record;
+    },
+  } as unknown as RelayStore;
+
+  await assert.rejects(
+    () => mintClientEstablishCode({
+      store,
+      coordinator,
+      daemonId: "daemon-1",
+      principal: {
+        kind: "daemon", daemonId: "daemon-1", ownerUserId: "owner-1",
+        credentialId: "cred-1", authMode: "signed-attach-v1",
+      },
+      connectionId: "daemon-conn-1",
+      epoch: 1,
+      payload: { nonce: "race-nonce" },
+      options: { now: new Date("2026-05-23T00:00:00.000Z") },
+    }),
+    (err: unknown) => err instanceof RelayAuthError && err.code === "stale_daemon_connection",
+  );
+
+  // The nonce was burned BEFORE the fence — replay protection stays intact (a
+  // same-nonce retry would also fail) ...
+  assert.equal(calls.recordAuthNonce, 1);
+  // ... and crucially NO code was minted.
+  assert.equal(calls.createClientEstablishCode, 0);
+  // Both the initial check and the final re-check ran (proving the window is exercised).
+  assert.equal(isCurrentCalls, 2);
+});
