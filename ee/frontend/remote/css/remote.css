@@ -1,0 +1,152 @@
+/* Remote web UI — mobile-first, monospace, themed via CSS custom properties.
+ * Mirrors the operator app's conventions (single stylesheet, no framework). */
+:root {
+  --remote-bg: #11151c;
+  --remote-surface: #1a212b;
+  --remote-surface-2: #232c38;
+  --remote-border: #2f3a49;
+  --remote-text: #e6edf3;
+  --remote-muted: #8b97a7;
+  --remote-accent: #4c8dff;
+  --remote-user: #224a7a;
+  --remote-ask: #4a3a14;
+  --remote-fail: #7a2233;
+  --remote-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--remote-bg);
+  color: var(--remote-text);
+  font-family: var(--remote-font);
+  font-size: 14px;
+}
+
+.remote-app { display: flex; flex-direction: column; height: 100vh; }
+
+.remote-banner-slot:empty { display: none; }
+.remote-banner {
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--remote-surface-2);
+  border-bottom: 1px solid var(--remote-border);
+}
+.remote-banner-reconnecting { background: #3a2f14; }
+.remote-banner-reauth { background: var(--remote-fail); color: #fff; }
+.remote-banner-closed { background: #2a2f38; color: var(--remote-muted); }
+
+.remote-layout { display: flex; flex: 1; min-height: 0; }
+
+.remote-sidebar {
+  width: 240px;
+  border-right: 1px solid var(--remote-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.remote-sidebar-head {
+  padding: 10px 12px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--remote-muted);
+  border-bottom: 1px solid var(--remote-border);
+}
+.remote-agent-list { overflow-y: auto; flex: 1; }
+.remote-agent-empty { padding: 16px 12px; color: var(--remote-muted); font-size: 12px; }
+.remote-agent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--remote-border);
+  color: var(--remote-text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.remote-agent-item.is-active { background: var(--remote-surface-2); }
+.remote-agent-name { font-weight: 600; }
+.remote-agent-preview { color: var(--remote-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-badge {
+  display: inline-block;
+  margin-top: 4px;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  background: var(--remote-accent);
+  color: #fff;
+}
+.remote-badge-ask { background: var(--remote-ask); color: #ffd479; }
+
+.remote-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.remote-history-notice {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--remote-muted);
+  text-align: center;
+}
+.remote-history-notice:empty { display: none; }
+.remote-conversation { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.remote-conv-empty { color: var(--remote-muted); margin: auto; }
+
+.remote-msg { max-width: 80%; padding: 8px 10px; border-radius: 8px; background: var(--remote-surface); }
+.remote-msg-agent { align-self: flex-start; }
+.remote-msg-user { align-self: flex-end; background: var(--remote-user); }
+.remote-msg-body { word-wrap: break-word; overflow-wrap: anywhere; }
+.remote-msg-body p { margin: 0 0 6px; }
+.remote-msg-body p:last-child { margin-bottom: 0; }
+.remote-msg-state { display: block; margin-top: 2px; font-size: 11px; color: var(--remote-muted); text-align: right; }
+.remote-msg-state-failed { color: #ff9aa9; }
+
+.remote-ask-card {
+  align-self: flex-start;
+  max-width: 90%;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--remote-ask);
+  border: 1px solid #6b5520;
+}
+.remote-ask-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #ffd479; margin-bottom: 4px; }
+.remote-ask-form { display: flex; gap: 6px; margin-top: 8px; }
+.remote-ask-input, .remote-composer-input {
+  flex: 1;
+  resize: none;
+  background: var(--remote-bg);
+  color: var(--remote-text);
+  border: 1px solid var(--remote-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.remote-ask-send, .remote-composer-send {
+  background: var(--remote-accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.remote-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--remote-border); }
+.remote-composer-input[disabled] { opacity: 0.5; }
+
+.remote-md-inline-code, .torque-md-inline-code { background: #0c0f14; padding: 1px 4px; border-radius: 4px; }
+.torque-md-code-block { background: #0c0f14; padding: 8px; border-radius: 6px; overflow-x: auto; }
+.torque-md-link { color: var(--remote-accent); }
+
+/* Narrow screens: stack the sidebar above the conversation. */
+@media (max-width: 640px) {
+  .remote-layout { flex-direction: column; }
+  .remote-sidebar { width: 100%; max-height: 35vh; border-right: 0; border-bottom: 1px solid var(--remote-border); }
+}

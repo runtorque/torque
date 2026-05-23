@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Torque — Conversations</title>
+  <link rel="stylesheet" href="css/remote.css">
+  <!--
+    Bootstrap config. The provisioning step (QR / one-time landing) replaces this
+    tag's contents and/or sets the HttpOnly torque_session cookie on the relay
+    origin. The UI CONSUMES the session; it never mints one. Fields:
+      relayBaseUrl, daemonId, authMode ("cookie" | "bearer"), clientId?,
+      sessionToken? (bearer only / local dev), ask_enabled? (gated ask UI).
+    URL query/hash params override individual fields for local dev.
+  -->
+  <script id="torque-remote-config" type="application/json">{}</script>
+</head>
+<body>
+  <div id="remote-app" class="remote-app">
+    <div id="remote-banner" class="remote-banner-slot"></div>
+    <div class="remote-layout">
+      <aside class="remote-sidebar">
+        <header class="remote-sidebar-head">Conversations</header>
+        <div id="remote-agent-list" class="remote-agent-list"></div>
+      </aside>
+      <main class="remote-main">
+        <div id="remote-history-notice"></div>
+        <div id="remote-conversation" class="remote-conversation"></div>
+        <form id="remote-composer" class="remote-composer">
+          <textarea id="remote-composer-input" class="remote-composer-input"
+            rows="2" placeholder="Message…" disabled></textarea>
+          <button type="submit" class="remote-composer-send">Send</button>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <!-- No build step; load order matters (globals first, then consumers). -->
+  <script src="js/config.js"></script>
+  <script src="js/markdown.js"></script>
+  <script src="js/surface.js"></script>
+  <script src="js/envelope.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/relay_client.js"></script>
+  <script src="js/render_remote.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
