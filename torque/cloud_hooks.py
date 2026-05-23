@@ -173,10 +173,31 @@ async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnecto
         module = importlib.import_module(module_name)
     except Exception as exc:
         runtime.error = str(exc) or type(exc).__name__
-        log.exception(
-            "Cloud connector enabled but module %s could not be imported",
-            module_name,
-        )
+        if isinstance(exc, ImportError):
+            # Routine config/availability mistake (missing PYTHONPATH or an
+            # absent optional dep like cryptography), not a crash.  Surface a
+            # single actionable line; keep the full traceback at debug only so
+            # the daemon log does not read like an unhandled startup failure.
+            log.warning(
+                "Cloud connector enabled (TORQUE_CLOUD_CONNECTOR_ENABLED) but "
+                "module %r is not importable: %s. Ensure PYTHONPATH includes "
+                "<repo>/ee/python and required deps (cryptography) are installed "
+                "in this interpreter. Continuing WITHOUT the connector.",
+                module_name,
+                runtime.error,
+            )
+            log.debug(
+                "Cloud connector import traceback for %s",
+                module_name,
+                exc_info=True,
+            )
+        else:
+            # Unexpected error while importing the module — a real bug worth a
+            # full traceback.
+            log.exception(
+                "Cloud connector enabled but module %s could not be imported",
+                module_name,
+            )
         return runtime
 
     try:
