@@ -6,7 +6,27 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from torque.worktree import WorktreeManager
+from torque.worktree import (
+    WorktreeManager,
+    _github_host_from_url,
+)
+
+
+class GithubHostFromUrlTests(unittest.TestCase):
+    def test_parses_common_remote_url_forms(self):
+        cases = {
+            "https://github.com/acme/repo.git": "github.com",
+            "https://user@github.com/acme/repo.git": "github.com",
+            "git@github.com:acme/repo.git": "github.com",
+            "ssh://git@github.com:22/acme/repo.git": "github.com",
+            "git@github.ol.epicgames.net:epic/torque.git":
+                "github.ol.epicgames.net",
+            "https://GitHub.com/Acme/Repo.git": "github.com",
+            "": "",
+            "not a url": "",
+        }
+        for url, expected in cases.items():
+            self.assertEqual(_github_host_from_url(url), expected, url)
 
 
 class FakeProcess:
@@ -112,12 +132,15 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(remaining, [])
 
     async def test_github_preflight_auth_and_repo_view_failures_are_structured(self):
+        origin_v = "origin\thttps://github.com/acme/repo.git (fetch)\n"
         cases = [
             (
                 "auth",
                 [
                     (["gh", "--version"], FakeProcess()),
-                    (["gh", "auth", "status"],
+                    (["git", "-C", "/wt", "remote", "-v"],
+                     FakeProcess(stdout=origin_v)),
+                    (["gh", "auth", "status", "--hostname", "github.com"],
                      FakeProcess(returncode=1, stderr="not logged in")),
                 ],
                 "authentication",
@@ -126,7 +149,10 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
                 "repo",
                 [
                     (["gh", "--version"], FakeProcess()),
-                    (["gh", "auth", "status"], FakeProcess()),
+                    (["git", "-C", "/wt", "remote", "-v"],
+                     FakeProcess(stdout=origin_v)),
+                    (["gh", "auth", "status", "--hostname", "github.com"],
+                     FakeProcess()),
                     (["gh", "repo", "view", "--json", "nameWithOwner,url"],
                      FakeProcess(returncode=1, stderr="not a GitHub repo")),
                 ],
@@ -150,6 +176,100 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             self.assertEqual(remaining, [])
+
+    async def test_github_preflight_scopes_auth_to_target_remote_host(self):
+        """Auth check targets the origin remote's host, not all gh accounts.
+
+        This is the regression scenario: ``gh`` has two accounts (github.com,
+        authed; an enterprise host whose keyring login times out). The
+        preflight must scope ``gh auth status`` to the target host
+        (github.com) so the unrelated, unreachable account never blocks it.
+        """
+        origin_v = "origin\tgit@github.com:runtorque/torque.git (fetch)\n"
+        fake, calls, remaining = self._fake_exec([
+            (["gh", "--version"], FakeProcess()),
+            (["git", "-C", "/wt", "remote", "-v"],
+             FakeProcess(stdout=origin_v)),
+            (["gh", "auth", "status", "--hostname", "github.com"],
+             FakeProcess()),
+            (["gh", "repo", "view", "--json", "nameWithOwner,url"],
+             FakeProcess(stdout=json.dumps({
+                 "nameWithOwner": "runtorque/torque",
+                 "url": "https://github.com/runtorque/torque",
+             }))),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_preflight("/wt")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["name_with_owner"], "runtorque/torque")
+        # The auth check was scoped to the resolved target host; a bare
+        # ``gh auth status`` (which would inspect all accounts) never ran.
+        auth_calls = [
+            c[0] for c in calls if c[0][:3] == ["gh", "auth", "status"]
+        ]
+        self.assertEqual(
+            auth_calls,
+            [["gh", "auth", "status", "--hostname", "github.com"]],
+        )
+        self.assertEqual(remaining, [])
+
+    async def test_github_preflight_host_skips_unrelated_enterprise_origin(self):
+        """When origin is a non-github.com host, the auth scope follows the
+        github.com remote that the merge will actually push to."""
+        remote_v = (
+            "origin\tgit@github.ol.epicgames.net:epic/fork.git (fetch)\n"
+            "upstream\thttps://github.com/runtorque/torque.git (fetch)\n"
+        )
+        fake, calls, remaining = self._fake_exec([
+            (["gh", "--version"], FakeProcess()),
+            (["git", "-C", "/wt", "remote", "-v"],
+             FakeProcess(stdout=remote_v)),
+            (["gh", "auth", "status", "--hostname", "github.com"],
+             FakeProcess()),
+            (["gh", "repo", "view", "--json", "nameWithOwner,url"],
+             FakeProcess(stdout=json.dumps({
+                 "nameWithOwner": "runtorque/torque",
+                 "url": "https://github.com/runtorque/torque",
+             }))),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_preflight("/wt")
+
+        self.assertTrue(result["ok"])
+        auth_calls = [
+            c[0] for c in calls if c[0][:3] == ["gh", "auth", "status"]
+        ]
+        self.assertEqual(
+            auth_calls,
+            [["gh", "auth", "status", "--hostname", "github.com"]],
+        )
+        self.assertEqual(remaining, [])
+
+    async def test_github_preflight_falls_back_to_unscoped_auth_without_remote(self):
+        """With no GitHub remote, auth check stays host-agnostic."""
+        fake, calls, remaining = self._fake_exec([
+            (["gh", "--version"], FakeProcess()),
+            (["git", "-C", "/wt", "remote", "-v"],
+             FakeProcess(stdout="origin\tssh://example.com/x/y.git (fetch)\n")),
+            (["gh", "auth", "status"], FakeProcess()),
+            (["gh", "repo", "view", "--json", "nameWithOwner,url"],
+             FakeProcess(stdout=json.dumps({
+                 "nameWithOwner": "x/y",
+                 "url": "https://example.com/x/y",
+             }))),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_preflight("/wt")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(remaining, [])
 
     async def test_github_remote_selection_prefers_origin_then_first_github_remote(self):
         origin_case = (
