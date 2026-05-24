@@ -6474,6 +6474,30 @@ test('device-link gate: enabled+url → canMint; disabled / no-url / absent gate
   assert.equal(_relayDeviceLinkGate(context, {}).canMint, false);
 });
 
+test('device-link confirm buttons use primary/secondary app button styling', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const confirmStart = html.indexOf('id="gls-relay-device-link-confirm"');
+  assert.ok(confirmStart >= 0, 'device-link confirm markup exists');
+  const confirmEnd = html.indexOf('id="gls-relay-device-link-error"', confirmStart);
+  assert.ok(confirmEnd > confirmStart, 'device-link confirm block is bounded');
+  const confirmHtml = html.slice(confirmStart, confirmEnd);
+  const yesButton = confirmHtml.match(/<button[^>]*id="gls-relay-device-link-confirm-yes"[^>]*>/);
+  const noButton = confirmHtml.match(/<button[^>]*id="gls-relay-device-link-confirm-no"[^>]*>/);
+  assert.ok(yesButton, 'Generate confirm button exists');
+  assert.ok(noButton, 'Cancel confirm button exists');
+  const yesClasses = (yesButton[0].match(/class="([^"]*)"/) || ['', ''])[1].split(/\s+/);
+  const noClasses = (noButton[0].match(/class="([^"]*)"/) || ['', ''])[1].split(/\s+/);
+
+  assert.ok(yesClasses.includes('btn-primary'), 'Generate uses primary button styling');
+  assert.ok(noClasses.includes('btn-secondary'), 'Cancel uses secondary button styling');
+  assert.equal(noClasses.includes('btn-cancel'), false, 'Cancel is not bare text styling');
+  assert.match(css,
+    /\.gls-relay-device-link-confirm-actions \.btn-primary,\s*\.gls-relay-device-link-confirm-actions \.btn-secondary\s*\{[^}]*padding:\s*5px 14px;[^}]*font-size:\s*11px;[^}]*font-weight:\s*600;[^}]*\}/s,
+    'confirm actions carry modal-action sizing',
+  );
+});
+
 test('device-link confirm-gate: trigger reveals confirm + sends NOTHING; only explicit Generate mints with confirm:true', () => {
   const { context, document } = createRelayStatusHarness();
   // ws.js's hoisted no-op send() shadows the harness stub; re-stub to capture.
