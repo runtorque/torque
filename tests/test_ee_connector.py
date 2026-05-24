@@ -7,30 +7,41 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-EE_PYTHON = Path(__file__).resolve().parents[1] / "ee" / "python"
-if str(EE_PYTHON) not in sys.path:
-    sys.path.insert(0, str(EE_PYTHON))
+try:
+    from ee_gate import ee_skip_reason, ee_tests_enabled
+except ModuleNotFoundError:  # Support `python -m unittest tests.<module>`.
+    from tests.ee_gate import ee_skip_reason, ee_tests_enabled
 
-from torque_ee_connector.connector import (  # noqa: E402
-    CONNECTOR_DEBUG_BUFFER_LIMIT,
-    RELAY_CONNECTION_RETRY_THROTTLE_SECONDS,
-    SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
-    ConnectorConfig,
-    EnterpriseConnector,
-    _agent_id_for_direct_message,
-    _build_relay_ssl_context,
-    _direct_message_payload,
-    _is_persistent_connection_error,
-    _is_tls_verify_error,
-    _relay_host_only,
-    _wire_kind_for_direct_message_row,
-    build_daemon_ws_url,
-    config_from_context,
-)
-from torque_ee_connector.protocol import (  # noqa: E402
-    RELAY_MESSAGE_KINDS,
-    make_relay_envelope,
-)
+_EE_REQUIRED_PATHS = ["ee/python/torque_ee_connector"]
+_EE_TESTS_ENABLED = ee_tests_enabled(_EE_REQUIRED_PATHS)
+_EE_SKIP_REASON = ee_skip_reason(_EE_REQUIRED_PATHS)
+
+if _EE_TESTS_ENABLED:
+    EE_PYTHON = Path(__file__).resolve().parents[1] / "ee" / "python"
+    if str(EE_PYTHON) not in sys.path:
+        sys.path.insert(0, str(EE_PYTHON))
+
+if _EE_TESTS_ENABLED:
+    from torque_ee_connector.connector import (  # noqa: E402
+        CONNECTOR_DEBUG_BUFFER_LIMIT,
+        RELAY_CONNECTION_RETRY_THROTTLE_SECONDS,
+        SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
+        ConnectorConfig,
+        EnterpriseConnector,
+        _agent_id_for_direct_message,
+        _build_relay_ssl_context,
+        _direct_message_payload,
+        _is_persistent_connection_error,
+        _is_tls_verify_error,
+        _relay_host_only,
+        _wire_kind_for_direct_message_row,
+        build_daemon_ws_url,
+        config_from_context,
+    )
+    from torque_ee_connector.protocol import (  # noqa: E402
+        RELAY_MESSAGE_KINDS,
+        make_relay_envelope,
+    )
 
 _AGENT_ROSTER_UNSET = object()
 
@@ -43,6 +54,7 @@ class FakeWs:
         self.sent.append(json.loads(text))
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
     def test_protocol_kind_contract_matches_relay_v1(self):
         self.assertEqual(RELAY_MESSAGE_KINDS, (
@@ -417,6 +429,7 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connector.sent_envelopes[0], "ping-25")
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
     """snapshot_request → bounded user↔agent snapshot, gated like live egress."""
 
@@ -633,6 +646,7 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("agents", payload["payload"])
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class WireKindGateTests(unittest.TestCase):
     """The egress gate consumes the resolver-stamped row fields only."""
 
@@ -747,6 +761,7 @@ class WireKindGateTests(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class EnterpriseConnectorSyncTests(unittest.TestCase):
     def test_create_connector_is_inert_until_start(self):
         connector = EnterpriseConnector(context={"config": {}})
@@ -755,6 +770,7 @@ class EnterpriseConnectorSyncTests(unittest.TestCase):
         self.assertEqual(connector.observed_events, ["direct_message_saved"])
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class RelayConnectionStateTests(unittest.TestCase):
     def _connector(self, *, report=None, raise_report=False):
         reports = [] if report is None else report
@@ -885,6 +901,7 @@ class RelayConnectionStateTests(unittest.TestCase):
         self.assertEqual(connector._relay_retry_count, 0)
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class RelayTlsTrustTests(unittest.TestCase):
     def test_ssl_context_uses_certifi_ca_bundle(self):
         sentinel_ctx = ssl.create_default_context()
@@ -1044,6 +1061,7 @@ class RelayTlsTrustTests(unittest.TestCase):
         self.assertEqual(fake_log.warning.call_count, 1)
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class EstablishCodeMintTests(unittest.IsolatedAsyncioTestCase):
     def _connected_connector(self):
         connector = EnterpriseConnector(context={"config": {}})
