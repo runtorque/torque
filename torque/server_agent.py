@@ -392,7 +392,7 @@ class AgentLaunchService:
                                      explicit_template: str = "",
                                      overrides: dict[str, Any] | None = None) -> dict:
         """Resolve launch config for worker agents in a group."""
-        merged = dict(overrides or {})
+        merged = {}
         gs = self.state.get_group_settings(group)
         if getattr(gs, "worker_provider", ""):
             merged["provider"] = gs.worker_provider
@@ -402,6 +402,14 @@ class AgentLaunchService:
             merged["model"] = gs.worker_model
         if getattr(gs, "worker_reasoning_effort", ""):
             merged["reasoning_effort"] = gs.worker_reasoning_effort
+        for key, value in (overrides or {}).items():
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    continue
+            elif value is None:
+                continue
+            merged[key] = value
         return self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

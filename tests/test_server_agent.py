@@ -465,6 +465,91 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(resolved["worktree"])
 
+    def test_resolve_worker_launch_config_explicit_provider_command_win(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="gemini-cli",
+                worker_provider="codex",
+                worker_boot_command="codex --worker-default",
+                worker_model="gpt-worker",
+                worker_reasoning_effort="high",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config(
+            "backend",
+            overrides={
+                "provider": "claude-code",
+                "command": "claude --explicit",
+            },
+        )
+
+        self.assertEqual(resolved["provider"], "claude-code")
+        self.assertEqual(resolved["agent_type"], "claude-code")
+        self.assertEqual(resolved["command"], "claude --explicit")
+
+    def test_resolve_worker_launch_config_explicit_model_reasoning_win(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="claude-code",
+                worker_provider="codex",
+                worker_model="gpt-worker",
+                worker_reasoning_effort="high",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config(
+            "backend",
+            overrides={
+                "model": "gpt-explicit",
+                "reasoning_effort": "low",
+            },
+        )
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-explicit -c model_reasoning_effort=low",
+        )
+
+    def test_resolve_worker_launch_config_empty_explicit_overrides_inherit_worker_defaults(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="claude-code",
+                worker_provider="codex",
+                worker_model="gpt-worker",
+                worker_reasoning_effort="high",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config(
+            "backend",
+            overrides={
+                "provider": "",
+                "command": "",
+                "model": "",
+                "reasoning_effort": "",
+            },
+        )
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-worker -c model_reasoning_effort=high",
+        )
+
     def test_resolve_worker_launch_config_inherits_agent_defaults_when_empty(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
