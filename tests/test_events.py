@@ -907,6 +907,7 @@ asyncio.run(main())
             status="running",
             activity="thinking",
             activity_detail="Running tests",
+            session_id="pty-session-1",
         )
         state.agents[cell.id] = cell
 
@@ -929,6 +930,7 @@ asyncio.run(main())
         self.assertEqual(cell.activity_detail, "")
         self.assertEqual(cell.last_event_text, "Session ended")
         self.assertEqual(cell.last_summary, "All done")
+        self.assertEqual(cell.session_id, "pty-session-1")
         self.assertEqual(saved, [("agent-1", "idle")])
 
     async def test_session_end_ignores_trailing_passive_activity_change(self):

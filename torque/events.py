@@ -1122,6 +1122,15 @@ def build_event_ingest_envelope(
     }
 
 
+
+
+def _hook_payload_debug(raw: dict, *, limit: int = 2000) -> str:
+    text = repr(raw)
+    if len(text) > limit:
+        return text[:limit] + "…<truncated>"
+    return text
+
+
 def _parse_profile_synthetic_event(raw: dict, cell) -> AgentEvent | None:
     """Parse harness-only events without requiring a provider hook shape."""
     if not profiling.is_enabled():
@@ -1185,10 +1194,30 @@ def agent_event_from_ingest_envelope(state, envelope: dict) -> AgentEvent | None
     if event is None:
         adapter = get_adapter(cell.agent_type)
         event = adapter.parse_event(raw, cell)
+    hook_event = str(raw.get("hook_event_name") or raw.get("type") or "")
+    raw_keys = sorted(str(key) for key in raw.keys())
     if event:
+        if str(getattr(cell, "agent_type", "") or "") == "codex":
+            log.debug(
+                "Parsed codex hook payload: cell=%s hook=%r keys=%s raw=%s",
+                cell.id,
+                hook_event,
+                raw_keys,
+                _hook_payload_debug(raw),
+            )
         profiling.recorder().incr("events_accepted")
         return event
 
+    if hook_event or str(getattr(cell, "agent_type", "") or "") == "codex":
+        log.debug(
+            "Unparsed agent hook payload: cell=%s agent_type=%s hook=%r "
+            "keys=%s raw=%s",
+            cell.id,
+            str(getattr(cell, "agent_type", "") or ""),
+            hook_event,
+            raw_keys,
+            _hook_payload_debug(raw),
+        )
     profiling.recorder().incr("events_dropped_unparsed")
     return None
 

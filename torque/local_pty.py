@@ -30,6 +30,7 @@ from .pty_core import (
     set_winsize as _pty_set_winsize,
 )
 from .server_agent import mcp_entrypoint_for_cell
+from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
 from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
 from .worktree import ensure_git_exclude
@@ -67,7 +68,10 @@ class LocalPtyAdapter:
         self._sessions: dict[str, _PtySession] = {}
         self._input_ready_sessions: set[str] = set()
         self._input_ready_events: dict[str, asyncio.Event] = {}
+        self._codex_idle_tasks: dict[str, asyncio.Task] = {}
+        self._codex_idle_detector = CodexIdleSessionEndDetector()
         self.on_session_terminated = None
+        self.on_agent_session_end_detected = None
         self.on_terminal_disconnected = None
         self.on_terminal_output = None
 
@@ -81,7 +85,12 @@ class LocalPtyAdapter:
                 reader_tasks.append(session.reader_task)
         for session_id in list(self._sessions.keys()):
             await self.close_session(session_id)
-        for task in reader_tasks:
+        idle_tasks = list(self._codex_idle_tasks.values())
+        self._codex_idle_tasks.clear()
+        self._codex_idle_detector.clear()
+        for task in idle_tasks:
+            task.cancel()
+        for task in reader_tasks + idle_tasks:
             with contextlib.suppress(asyncio.CancelledError, OSError):
                 await task
 
@@ -94,6 +103,7 @@ class LocalPtyAdapter:
                 cleared += 1
             self._input_ready_sessions.discard(cell.session_id or "")
             self._input_ready_events.pop(cell.id, None)
+            self._cancel_codex_idle_monitor(cell.id)
             cell.status = "stopped"
             cell.session_id = None
             cell.window_id = "standalone"
@@ -261,6 +271,7 @@ class LocalPtyAdapter:
         self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
+        self._start_codex_idle_monitor(cell)
 
         setup_commands = self._startup_commands(
             cell,
@@ -301,6 +312,7 @@ class LocalPtyAdapter:
         self._input_ready_sessions.discard(session_id)
         cell = self.state.agents.get(session.cell_id)
         self._input_ready_events.pop(session.cell_id, None)
+        self._cancel_codex_idle_monitor(session.cell_id)
         with contextlib.suppress(ProcessLookupError):
             os.killpg(session.process.pid, signal.SIGHUP)
         try:
@@ -348,6 +360,7 @@ class LocalPtyAdapter:
         submit_key = adapter.get_submit_key() if adapter else "\r"
         submit_delay = adapter.get_multiline_submit_delay() if adapter else 0.3
         if cell:
+            self._mark_codex_turn_submitted(cell)
             await self._wait_for_input_ready(session, cell)
         body = text.rstrip("\r\n")
         chunks = (
@@ -688,6 +701,7 @@ class LocalPtyAdapter:
             return
         self._input_ready_sessions.discard(session_id)
         self._input_ready_events.pop(cell.id, None)
+        self._cancel_codex_idle_monitor(cell.id)
         cell.status = "stopped"
         cell.session_id = None
         cell.current_process = ""
@@ -853,6 +867,91 @@ class LocalPtyAdapter:
         log.info("Input-ready wait timed out for '%s' (type=%s, session=%s)",
                  cell.name, cell.agent_type, cell.session_id)
 
+    def _mark_codex_turn_submitted(self, cell: AgentCell) -> None:
+        if str(getattr(cell, "agent_type", "") or "") == "codex":
+            self._codex_idle_detector.reset(cell.id, cell.session_id or "")
+
+    def _start_codex_idle_monitor(self, cell: AgentCell) -> None:
+        if self.on_agent_session_end_detected is None:
+            return
+        if (
+            str(getattr(cell, "cell_type", "") or "") != "agent"
+            or str(getattr(cell, "agent_type", "") or "") != "codex"
+            or not getattr(cell, "session_id", "")
+        ):
+            return
+        self._cancel_codex_idle_monitor(cell.id)
+        self._codex_idle_tasks[cell.id] = asyncio.create_task(
+            self._monitor_codex_idle_session_end(cell.id, cell.session_id))
+
+    def _cancel_codex_idle_monitor(self, cell_id: str) -> None:
+        task = self._codex_idle_tasks.pop(str(cell_id or ""), None)
+        if task:
+            task.cancel()
+        self._codex_idle_detector.discard(cell_id)
+
+    async def _monitor_codex_idle_session_end(
+        self, cell_id: str, session_id: str,
+    ) -> None:
+        try:
+            while True:
+                cell = self.state.agents.get(cell_id)
+                session = self._sessions.get(session_id)
+                if (
+                    not cell
+                    or not session
+                    or session.closed
+                    or cell.session_id != session_id
+                    or cell.agent_type != "codex"
+                ):
+                    break
+                adapter = get_adapter("codex")
+                policy = adapter.get_input_ready_policy()
+                await self._poll_codex_idle_session_end(
+                    cell, session, adapter=adapter, stable_polls=policy.stable_polls)
+                await asyncio.sleep(policy.poll_interval_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Codex idle-session monitor failed for cell %s", cell_id)
+        finally:
+            if self._codex_idle_tasks.get(cell_id) is asyncio.current_task():
+                self._codex_idle_tasks.pop(cell_id, None)
+
+    async def _poll_codex_idle_session_end(
+        self,
+        cell: AgentCell,
+        session: _PtySession,
+        *,
+        adapter=None,
+        stable_polls: int = 1,
+    ) -> bool:
+        adapter = adapter or get_adapter(cell.agent_type)
+        screen_text = await self._read_screen_text(session)
+        ready = bool(screen_text) and adapter.is_input_ready_screen(screen_text)
+        if not self._codex_idle_detector.observe(
+            cell, ready=ready, stable_polls=stable_polls,
+        ):
+            return False
+        await self._emit_agent_session_end_detected(
+            cell,
+            {
+                "reason": "pty_idle_screen",
+                "source": "codex_idle_screen_backstop",
+            },
+        )
+        return True
+
+    async def _emit_agent_session_end_detected(
+        self, cell: AgentCell, data: dict,
+    ) -> None:
+        callback = self.on_agent_session_end_detected
+        if callback is None:
+            return
+        result = callback(cell, data)
+        if asyncio.iscoroutine(result):
+            await result
+
     def _set_winsize(self, fd: int, cols: int, rows: int) -> None:
         _pty_set_winsize(fd, cols, rows)
 
@@ -907,6 +1006,12 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             await self._client.aclose()
         except Exception:
             log.exception("PTY supervisor client shutdown failed")
+        for task in list(self._codex_idle_tasks.values()):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._codex_idle_tasks.clear()
+        self._codex_idle_detector.clear()
         # Skip super().shutdown() which would try to kill local sessions.
         self._sessions.clear()
 
@@ -1008,6 +1113,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
+        self._start_codex_idle_monitor(cell)
 
         # Re-install hooks, MCP config, and skills for awareness agents —
         # parity with ITerm2Adapter.reconnect_orphans.  A daemon restart
@@ -1124,6 +1230,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             session.closed = True
             self._input_ready_sessions.discard(session_id)
             self._input_ready_events.pop(session.cell_id, None)
+            self._cancel_codex_idle_monitor(session.cell_id)
             result = await self._client.close_session(session_id)
             if result.get("type") == "error":
                 raise RuntimeError(
@@ -1149,6 +1256,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         session.closed = True
         self._input_ready_sessions.discard(session_id)
         self._input_ready_events.pop(session.cell_id, None)
+        self._cancel_codex_idle_monitor(session.cell_id)
         try:
             await self._client.close_session(session_id)
         except Exception:

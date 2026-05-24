@@ -557,6 +557,51 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_codex_idle_screen_backstop_emits_once_without_teardown(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_agent(
+            name="Worker",
+            group="Torque",
+            terminal_backend="pty",
+            command="codex",
+            directory="/tmp",
+        )
+        cell.agent_type = "codex"
+        cell.session_id = "session-codex"
+        cell.status = "running"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        session = SimpleNamespace(
+            cell_id=cell.id,
+            session_id=cell.session_id,
+            buffer="OpenAI Codex\nWorking on your request",
+            closed=False,
+        )
+        adapter._sessions[cell.session_id] = session
+        seen: list[tuple[str, dict]] = []
+
+        async def on_detected(done_cell, data):
+            seen.append((done_cell.id, dict(data)))
+
+        adapter.on_agent_session_end_detected = on_detected
+        ready_screen = "OpenAI Codex\nmodel: gpt-5\ndirectory: /tmp\n›"
+
+        self.assertFalse(await adapter._poll_codex_idle_session_end(
+            cell, session, stable_polls=2))
+        session.buffer = ready_screen
+        self.assertFalse(await adapter._poll_codex_idle_session_end(
+            cell, session, stable_polls=2))
+        self.assertTrue(await adapter._poll_codex_idle_session_end(
+            cell, session, stable_polls=2))
+        self.assertFalse(await adapter._poll_codex_idle_session_end(
+            cell, session, stable_polls=2))
+
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][0], cell.id)
+        self.assertEqual(seen[0][1]["reason"], "pty_idle_screen")
+        self.assertIn(cell.session_id, adapter._sessions)
+        self.assertIs(adapter._sessions[cell.session_id], session)
+
     async def test_send_text_codex_applies_post_ready_delay_via_screen_path(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

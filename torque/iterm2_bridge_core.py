@@ -11,6 +11,7 @@ import iterm2
 
 from .config import log
 from .server_agent import mcp_entrypoint_for_cell
+from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
 from .adapters import detect_agent_type, detect_by_command, get_adapter
 from .terminal_adapter import (
@@ -38,11 +39,14 @@ class ITerm2BridgeCore:
         self.state = state
         self._prompt_tasks: dict[str, asyncio.Task] = {}
         self._job_tasks: dict[str, asyncio.Task] = {}
+        self._codex_idle_tasks: dict[str, asyncio.Task] = {}
         self._input_ready_sessions: set[str] = set()
         self._input_ready_events: dict[str, asyncio.Event] = {}
+        self._codex_idle_detector = CodexIdleSessionEndDetector()
         self._term_task: Optional[asyncio.Task] = None
         self._focus_task: Optional[asyncio.Task] = None
         self.on_session_terminated = None  # async callback(cell)
+        self.on_agent_session_end_detected = None  # async callback(cell, data)
         self.on_terminal_disconnected = None  # async callback(cell) — auto-remove
         self.on_terminal_output = None  # async callback(cell_id, session_id, text)
         # Short-lived app cache. Rapid focus clicks each used to pay the
@@ -85,8 +89,13 @@ class ITerm2BridgeCore:
         for task in self._job_tasks.values():
             task.cancel()
             tasks.append(task)
+        for task in self._codex_idle_tasks.values():
+            task.cancel()
+            tasks.append(task)
         self._prompt_tasks.clear()
         self._job_tasks.clear()
+        self._codex_idle_tasks.clear()
+        self._codex_idle_detector.clear()
         self._term_task = None
         self._focus_task = None
         for task in tasks:
@@ -197,6 +206,7 @@ class ITerm2BridgeCore:
                     ensure_git_exclude(hook_dir)
 
                 self._start_prompt_monitor(cell)
+                self._start_codex_idle_monitor(cell)
 
         # Clear session_id for cells that weren't matched (sessions truly gone)
         for cell in self.state.iter_active_agents():
@@ -544,6 +554,7 @@ class ITerm2BridgeCore:
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
         self._start_prompt_monitor(cell)
+        self._start_codex_idle_monitor(cell)
         # New session created — let subsequent callers see it.
         self._invalidate_app_cache()
         await self.reorder_tabs()
@@ -707,6 +718,7 @@ class ITerm2BridgeCore:
                 if adapter else 0.3
             )
             if cell:
+                self._mark_codex_turn_submitted(cell)
                 await self._wait_for_input_ready(session, cell)
             body = text.rstrip("\r\n")
             chunks = (
@@ -905,6 +917,91 @@ class ITerm2BridgeCore:
         log.info("Input-ready wait timed out for '%s' (type=%s, session=%s)",
                  cell.name, cell.agent_type, cell.session_id)
 
+    def _mark_codex_turn_submitted(self, cell: AgentCell) -> None:
+        if str(getattr(cell, "agent_type", "") or "") == "codex":
+            self._codex_idle_detector.reset(cell.id, cell.session_id or "")
+
+    def _start_codex_idle_monitor(self, cell: AgentCell) -> None:
+        if self.on_agent_session_end_detected is None:
+            return
+        if (
+            str(getattr(cell, "cell_type", "") or "") != "agent"
+            or str(getattr(cell, "agent_type", "") or "") != "codex"
+            or not getattr(cell, "session_id", "")
+        ):
+            return
+        self._cancel_codex_idle_monitor(cell.id)
+        self._codex_idle_tasks[cell.id] = asyncio.create_task(
+            self._monitor_codex_idle_session_end(cell.id, cell.session_id))
+
+    def _cancel_codex_idle_monitor(self, cell_id: str) -> None:
+        task = self._codex_idle_tasks.pop(str(cell_id or ""), None)
+        if task:
+            task.cancel()
+        self._codex_idle_detector.discard(cell_id)
+
+    async def _monitor_codex_idle_session_end(
+        self, cell_id: str, session_id: str,
+    ) -> None:
+        try:
+            while True:
+                cell = self.state.agents.get(cell_id)
+                if (
+                    not cell
+                    or cell.session_id != session_id
+                    or cell.agent_type != "codex"
+                ):
+                    break
+                session = await self._find_session(session_id)
+                if not session:
+                    break
+                adapter = get_adapter("codex")
+                policy = adapter.get_input_ready_policy()
+                await self._poll_codex_idle_session_end(
+                    cell, session, adapter=adapter, stable_polls=policy.stable_polls)
+                await asyncio.sleep(policy.poll_interval_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Codex idle-session monitor failed for cell %s", cell_id)
+        finally:
+            if self._codex_idle_tasks.get(cell_id) is asyncio.current_task():
+                self._codex_idle_tasks.pop(cell_id, None)
+
+    async def _poll_codex_idle_session_end(
+        self,
+        cell: AgentCell,
+        session,
+        *,
+        adapter=None,
+        stable_polls: int = 1,
+    ) -> bool:
+        adapter = adapter or get_adapter(cell.agent_type)
+        screen_text = await self._read_screen_text(session)
+        ready = bool(screen_text) and adapter.is_input_ready_screen(screen_text)
+        if not self._codex_idle_detector.observe(
+            cell, ready=ready, stable_polls=stable_polls,
+        ):
+            return False
+        await self._emit_agent_session_end_detected(
+            cell,
+            {
+                "reason": "pty_idle_screen",
+                "source": "codex_idle_screen_backstop",
+            },
+        )
+        return True
+
+    async def _emit_agent_session_end_detected(
+        self, cell: AgentCell, data: dict,
+    ) -> None:
+        callback = self.on_agent_session_end_detected
+        if callback is None:
+            return
+        result = callback(cell, data)
+        if asyncio.iscoroutine(result):
+            await result
+
     # -- Monitoring ---------------------------------------------------------
 
     def _start_prompt_monitor(self, cell: AgentCell):
@@ -1076,10 +1173,12 @@ class ITerm2BridgeCore:
                             self.state._emit_agent(cell)
                             self.state._db_save_agent(cell)
                             for tasks in (self._prompt_tasks,
-                                          self._job_tasks):
+                                          self._job_tasks,
+                                          self._codex_idle_tasks):
                                 task = tasks.pop(cell.id, None)
                                 if task:
                                     task.cancel()
+                            self._codex_idle_detector.discard(cell.id)
                             # Notify server for post-termination work
                             if self.on_session_terminated:
                                 try:

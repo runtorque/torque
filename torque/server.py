@@ -72,6 +72,7 @@ from .events import (
 )
 from .event_ingest_db import event_call_row_from_record, redact_event_for_mcp_call_log
 from .adapters import get_adapter, get_providers
+from .adapters.base import AgentEvent
 from .notifications import NotificationManager
 from .worktree import (
     WorktreeManager,
@@ -9394,10 +9395,31 @@ async def main(connection=None):
 
         asyncio.create_task(_recover_buffered_messages())
 
+    async def _on_agent_session_end_detected(cell, data=None):
+        """Convert bridge-detected turn completion into a normal AgentEvent."""
+        if str(getattr(cell, "agent_type", "") or "") != "codex":
+            return
+        if str(getattr(cell, "status", "") or "") != "running":
+            return
+        payload = {
+            "reason": "pty_idle_screen",
+            "source": "codex_idle_screen_backstop",
+        }
+        payload.update(dict(data or {}))
+        await event_bus.emit(AgentEvent(
+            cell_id=cell.id,
+            timestamp=time.time(),
+            event_type="session_end",
+            data=payload,
+        ))
+
     # Signal bridge when agent TUI is ready (hook-based session_start)
     event_bus.on_session_start = _on_agent_session_start
     # Handle agent turn completion (hook-based session_end)
     event_bus.on_session_end = _on_agent_session_end
+    # Handle codex turn completion detected by the PTY idle-screen backstop.
+    if hasattr(bridge, "on_agent_session_end_detected"):
+        bridge.on_agent_session_end_detected = _on_agent_session_end_detected
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
     event_ingest_drainer.start()
