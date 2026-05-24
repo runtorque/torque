@@ -46,6 +46,7 @@ class TerminalAdapter(Protocol):
 
     capabilities: TerminalCapabilities
     on_session_terminated: Optional[Callable]
+    on_agent_session_end_detected: Optional[Callable]
     on_terminal_disconnected: Optional[Callable]
     on_terminal_output: Optional[Callable]
 
