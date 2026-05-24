@@ -3523,6 +3523,85 @@ body.runtime-embedded #modal-group .modal-summary {
 .gls-relay-probe-message { color: var(--text); }
 .gls-relay-probe-detail { width: 100%; color: var(--text-dim); font-size: 10px; }
 
+/* Device-link generator (TORQUE:603 #3). Display-once QR + URL. */
+.gls-relay-device-link-slot { margin-top: 10px; }
+.gls-relay-device-link-slot[hidden] { display: none; }
+.gls-relay-device-link-hint {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.gls-relay-device-link-hint[hidden] { display: none; }
+.gls-relay-device-link-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.gls-relay-device-link-confirm[hidden] { display: none; }
+.gls-relay-device-link-confirm-msg { color: var(--text); }
+.gls-relay-device-link-confirm-actions { display: flex; gap: 6px; }
+.gls-relay-device-link-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.gls-relay-device-link-error[hidden] { display: none; }
+.gls-relay-device-link-error-msg { color: var(--red); }
+.gls-relay-device-link-error-hint { color: var(--text-dim); font-size: 10px; }
+.gls-relay-device-link-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+}
+.gls-relay-device-link-panel[hidden] { display: none; }
+.gls-relay-device-link-qr {
+  width: 160px;
+  height: 160px;
+  background: #fff;
+  padding: 6px;
+  border-radius: 4px;
+  align-self: center;
+}
+.gls-relay-device-link-qr svg { display: block; width: 100%; height: 100%; }
+.gls-relay-device-link-field {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  font-size: 11px;
+}
+.gls-relay-device-link-field-label {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.gls-relay-device-link-url,
+.gls-relay-device-link-code {
+  word-break: break-all;
+  color: var(--text);
+  user-select: all;
+}
+.gls-relay-device-link-ttl { font-size: 11px; color: var(--amber); }
+.gls-relay-device-link-expires { font-size: 10px; color: var(--text-dim); }
+.gls-relay-device-link-note {
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
 .daemon-actions {
   display: flex;
   gap: 8px;

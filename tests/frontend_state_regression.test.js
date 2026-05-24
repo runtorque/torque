@@ -1015,8 +1015,17 @@ function createRelayStatusHarness() {
     // Test-connectivity probe sub-block (TORQUE:603 #2).
     'gls-relay-probe-test',
     'gls-relay-probe-result',
+    // Device-link generator sub-block (TORQUE:603 #3).
+    'gls-relay-device-link-slot',
+    'gls-relay-device-link-generate',
+    'gls-relay-device-link-hint',
+    'gls-relay-device-link-confirm',
+    'gls-relay-device-link-error',
+    'gls-relay-device-link-panel',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
+  // Vendored QR encoder must load BEFORE relay_status.js (provides `qrcode`).
+  loadScript(context, 'static/js/vendor/qrcode-generator.js');
   loadScript(context, 'static/js/relay_status.js');
   loadScript(context, 'static/js/ws.js');
   runInContext(context, `
@@ -6164,6 +6173,300 @@ test('relay probe slot is unhidden whenever the Relay section is shown, hidden o
   `);
   assert.equal(document.getElementById('gls-relay-section').hidden, false);
   assert.equal(document.getElementById('gls-relay-probe-slot').hidden, false);
+});
+
+/* -- Relay device-link: display-once QR + URL (TORQUE:603 #3) -------------- */
+
+const RELAY_DEVICE_LINK_SUCCESS = {
+  type: 'relay_device_link',
+  ok: true,
+  code: 'RAWCODE-xyz',
+  establish_url: 'https://relay.runtorque.com/establish?code=RAWCODE-xyz',
+  expires_at: '2026-05-23T00:15:00.000Z',
+  owner_user_id: 'owner-1',
+};
+
+/* Immutable JSON source for an enabled+configured relay_config. Each use parses
+ * a FRESH object (NOT the shared RELAY_CONFIG_SAMPLE, which the in-place
+ * relay_config delta patch mutates) so these assertions are order-independent. */
+const RELAY_DL_CFG_JSON = JSON.stringify({
+  config: { enabled: true, relay_url: 'wss://relay.runtorque.com' },
+  sources: {
+    enabled: { value: true, source: 'settings' },
+    relay_url: { value: 'wss://relay.runtorque.com', source: 'settings' },
+  },
+});
+
+function _relayDeviceLinkGate(context, payload) {
+  context.__dlGate = (payload === undefined) ? null : payload;
+  return jsonValue(context, '_relayDeviceLinkComputeGate(__dlGate)');
+}
+
+test('device-link gate: enabled+url → canMint; disabled / no-url / absent gated off', () => {
+  const { context } = createRelayStatusHarness();
+  const ok = _relayDeviceLinkGate(context, JSON.parse(RELAY_DL_CFG_JSON));
+  assert.equal(ok.visible, true);
+  assert.equal(ok.canMint, true);
+
+  const disabled = _relayDeviceLinkGate(context, {
+    config: { enabled: false, relay_url: 'wss://r' },
+  });
+  assert.equal(disabled.visible, true);
+  assert.equal(disabled.canMint, false);
+  assert.match(disabled.reason, /Enable relay/i);
+
+  const noUrl = _relayDeviceLinkGate(context, { config: { enabled: true, relay_url: '' } });
+  assert.equal(noUrl.canMint, false);
+  assert.match(noUrl.reason, /relay URL/i);
+
+  // Absent / malformed relay_config → hidden (pre-producer / community).
+  assert.equal(_relayDeviceLinkGate(context, null).visible, false);
+  assert.equal(_relayDeviceLinkGate(context, undefined).visible, false);
+  assert.equal(_relayDeviceLinkGate(context, {}).canMint, false);
+});
+
+test('device-link confirm-gate: trigger reveals confirm + sends NOTHING; only explicit Generate mints with confirm:true', () => {
+  const { context, document } = createRelayStatusHarness();
+  // ws.js's hoisted no-op send() shadows the harness stub; re-stub to capture.
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  context.__cfg = JSON.parse(RELAY_DL_CFG_JSON);
+  runInContext(context, 'state.relay_config = __cfg; refreshRelayConfigModal({ force: true });');
+
+  // No auto-mint on open: refreshing the modal sent no command.
+  assert.equal(context.sendCalls.length, 0, 'no command on modal open');
+
+  // Step 1: clicking Generate reveals the confirm gesture and sends nothing.
+  runInContext(context, 'relayDeviceLinkRequest();');
+  assert.equal(context.sendCalls.length, 0, 'trigger must not mint');
+  assert.equal(document.getElementById('gls-relay-device-link-confirm').hidden, false,
+    'confirm gesture shown');
+  // Trigger button hidden while confirm gesture is up.
+  assert.equal(document.getElementById('gls-relay-device-link-generate').hidden, true);
+
+  // Step 2: explicit Generate inside the gesture is the ONLY mint path.
+  runInContext(context, 'relayDeviceLinkConfirmGenerate();');
+  assert.equal(context.sendCalls.length, 1, 'exactly one command');
+  assert.equal(context.sendCalls[0].cmd, 'generate_relay_device_link');
+  assert.equal(context.sendCalls[0].confirm, true, 'mint sent ONLY with confirm:true');
+  assert.deepEqual(Object.keys(context.sendCalls[0]).sort(), ['cmd', 'confirm']);
+  assert.equal(document.getElementById('gls-relay-device-link-confirm').hidden, true,
+    'confirm gesture cleared after mint');
+});
+
+test('device-link confirm-gate: Cancel and a gated-off state never mint', () => {
+  const { context } = createRelayStatusHarness();
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  context.__cfg = JSON.parse(RELAY_DL_CFG_JSON);
+  runInContext(context, 'state.relay_config = __cfg; refreshRelayConfigModal({ force: true });');
+
+  // Cancel after revealing the gesture: nothing sent.
+  runInContext(context, 'relayDeviceLinkRequest(); relayDeviceLinkCancelConfirm();');
+  assert.equal(context.sendCalls.length, 0);
+
+  // Gate forbids (relay disabled): the trigger is a no-op (no confirm, no mint).
+  runInContext(context, `
+    state.relay_config = { config: { enabled: false, relay_url: '' } };
+    relayDeviceLinkRequest();
+  `);
+  assert.equal(context.sendCalls.length, 0);
+});
+
+test('device-link display-once: success renders QR + url + code + TTL; Dismiss removes DOM nodes + clears local', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__msg = RELAY_DEVICE_LINK_SUCCESS;
+  // Pin "now" so the relative TTL is deterministic (10 min before expiry).
+  runInContext(context, `
+    state.relay_config = ${RELAY_DL_CFG_JSON};
+    handleRelayDeviceLink(__msg);
+  `);
+
+  const panel = document.getElementById('gls-relay-device-link-panel');
+  assert.equal(panel.hidden, false, 'panel shown on success');
+  assert.match(panel.innerHTML, /<svg/, 'inline-SVG QR rendered');
+  assert.match(panel.innerHTML, /establish\?code=RAWCODE-xyz/, 'establish url shown');
+  assert.match(panel.innerHTML, /RAWCODE-xyz/, 'raw code shown');
+  assert.match(panel.innerHTML, /Expires:/, 'absolute expiry shown');
+
+  // The secret lives only in the closure-local while displayed.
+  const secret = jsonValue(context, '_relayDeviceLinkSecret');
+  assert.ok(secret && secret.code === 'RAWCODE-xyz', 'secret held in local while shown');
+
+  // Dismiss: DOM nodes REMOVED (not merely hidden) + local cleared.
+  runInContext(context, 'relayDeviceLinkDismiss();');
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.innerHTML, '', 'secret nodes removed from DOM');
+  assert.equal(panel.children.length, 0);
+  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null, 'local cleared');
+});
+
+test('device-link never-persist: minted secret never lands in state.*', () => {
+  const { context } = createRelayStatusHarness();
+  context.__msg = RELAY_DEVICE_LINK_SUCCESS;
+  runInContext(context, `
+    state.relay_config = ${RELAY_DL_CFG_JSON};
+    handleRelayDeviceLink(__msg);
+  `);
+  // Deep-scan the entire state tree: no minted code / establish_url anywhere.
+  const stateJson = runInContext(context, 'JSON.stringify(state)');
+  assert.ok(!stateJson.includes('RAWCODE-xyz'),
+    'minted code must never reach state');
+  assert.ok(!stateJson.includes('/establish?code='),
+    'establish url must never reach state');
+  // localStorage / sessionStorage stay empty too.
+  assert.equal(runInContext(context, 'localStorage.getItem("relay_device_link")'), null);
+  assert.equal(runInContext(context, 'sessionStorage.getItem("relay_device_link")'), null);
+});
+
+test('device-link display-once: relay_config delta removes the secret and does NOT re-render it', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_config = ${RELAY_DL_CFG_JSON};
+    handleRelayDeviceLink(${JSON.stringify(RELAY_DEVICE_LINK_SUCCESS)});
+  `);
+  const panel = document.getElementById('gls-relay-device-link-panel');
+  assert.match(panel.innerHTML, /RAWCODE-xyz/, 'secret displayed before delta');
+
+  // A relay_config delta arrives mid-display.
+  context.__cfg = JSON.parse(RELAY_DL_CFG_JSON);
+  runInContext(context, `
+    _expectedSeq = 1;
+    _handleDelta({ seq: 1, ops: [Object.assign({ op: 'relay_config' }, __cfg)] });
+  `);
+
+  // Display-once: secret nodes removed; local cleared; never resurrected.
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.innerHTML, '', 'delta removes the secret from the DOM');
+  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null);
+  // The delta still flips the button enabled state (relay enabled+configured).
+  assert.equal(document.getElementById('gls-relay-device-link-generate').disabled, false);
+});
+
+test('device-link display-once: relay_connection delta also removes the secret', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_config = ${RELAY_DL_CFG_JSON};
+    handleRelayDeviceLink(${JSON.stringify(RELAY_DEVICE_LINK_SUCCESS)});
+  `);
+  const panel = document.getElementById('gls-relay-device-link-panel');
+  assert.match(panel.innerHTML, /RAWCODE-xyz/);
+
+  runInContext(context, `
+    _expectedSeq = 1;
+    _handleDelta({ seq: 1, ops: [{
+      op: 'relay_connection', status: 'connected', enabled: true,
+      relay_host: 'relay.runtorque.com', retry_count: 0,
+    }] });
+  `);
+  assert.equal(panel.innerHTML, '', 'relay_connection delta removes the secret');
+  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null);
+});
+
+test('device-link modal-close reset removes secret + confirm gesture', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_config = ${RELAY_DL_CFG_JSON};
+    handleRelayDeviceLink(${JSON.stringify(RELAY_DEVICE_LINK_SUCCESS)});
+    relayDeviceLinkRequest();   /* also reveal a confirm gesture */
+  `);
+  runInContext(context, '_relayDeviceLinkReset();');
+  assert.equal(document.getElementById('gls-relay-device-link-panel').innerHTML, '');
+  assert.equal(document.getElementById('gls-relay-device-link-panel').hidden, true);
+  assert.equal(document.getElementById('gls-relay-device-link-confirm').hidden, true);
+  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null);
+});
+
+test('device-link TTL formatting: relative + absolute, expired, and empty/unparseable', () => {
+  const { context } = createRelayStatusHarness();
+  const fmt = (iso, now) => {
+    context.__iso = iso;
+    context.__now = now;
+    return jsonValue(context, '_relayDeviceLinkFormatExpiry(__iso, __now)');
+  };
+  const base = Date.parse('2026-05-23T00:00:00.000Z');
+  // 15 min ahead → "expires in 15 minutes" + absolute kept.
+  const future = fmt('2026-05-23T00:15:00.000Z', base);
+  assert.match(future.relative, /expires in 15 minutes/);
+  assert.equal(future.absolute, '2026-05-23T00:15:00.000Z');
+  // 30 s ahead → seconds.
+  assert.match(fmt('2026-05-23T00:00:30.000Z', base).relative, /expires in 30 seconds/);
+  // 2 h ahead → hours.
+  assert.match(fmt('2026-05-23T02:00:00.000Z', base).relative, /expires in 2 hours/);
+  // Already past → "expired", absolute still shown.
+  const past = fmt('2026-05-22T23:59:00.000Z', base);
+  assert.equal(past.relative, 'expired');
+  assert.equal(past.absolute, '2026-05-22T23:59:00.000Z');
+  // Empty → both empty (caller omits the relative line).
+  const empty = fmt('', base);
+  assert.equal(empty.relative, '');
+  assert.equal(empty.absolute, '');
+  // Unparseable → no relative line, raw passed through as absolute.
+  const bad = fmt('not-a-date', base);
+  assert.equal(bad.relative, '');
+  assert.equal(bad.absolute, 'not-a-date');
+});
+
+test('device-link success with empty expires_at omits the relative TTL line', () => {
+  const { context, document } = createRelayStatusHarness();
+  const msg = Object.assign({}, RELAY_DEVICE_LINK_SUCCESS, { expires_at: '' });
+  context.__msg = msg;
+  runInContext(context, `
+    state.relay_config = ${RELAY_DL_CFG_JSON};
+    handleRelayDeviceLink(__msg);
+  `);
+  const html = document.getElementById('gls-relay-device-link-panel').innerHTML;
+  assert.ok(!/expires in/i.test(html), 'no relative line when expires_at empty');
+  assert.ok(!/Expires:/.test(html), 'no absolute line when expires_at empty');
+  assert.match(html, /RAWCODE-xyz/, 'code still rendered');
+});
+
+test('device-link error rendering: message + actionable hint, NO secret leak', () => {
+  const { context, document } = createRelayStatusHarness();
+  // relay_disabled failure → message + "not connected" hint; never a secret.
+  context.__err = {
+    type: 'relay_device_link', ok: false,
+    error: 'relay_disabled', message: 'Relay connector is disabled.',
+  };
+  runInContext(context, 'handleRelayDeviceLink(__err);');
+  const errEl = document.getElementById('gls-relay-device-link-error');
+  assert.equal(errEl.hidden, false);
+  assert.match(errEl.innerHTML, /Relay connector is disabled/);
+  assert.match(errEl.innerHTML, /not connected/i, 'actionable hint mapped');
+  // Panel (secret surface) stays empty/hidden.
+  assert.equal(document.getElementById('gls-relay-device-link-panel').innerHTML, '');
+  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null);
+
+  // confirmation_required (defensive) → message shown, no secret.
+  context.__cr = {
+    type: 'relay_device_link', ok: false, status: 'confirmation_required',
+    message: 'Confirmation required.',
+  };
+  runInContext(context, 'handleRelayDeviceLink(__cr);');
+  assert.match(document.getElementById('gls-relay-device-link-error').innerHTML,
+    /Confirmation required/);
+});
+
+test('device-link error rendering escapes server-supplied message (XSS-safe)', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__err = {
+    type: 'relay_device_link', ok: false, error: 'mint_failed',
+    message: '<img src=x onerror=alert(1)>',
+  };
+  runInContext(context, 'handleRelayDeviceLink(__err);');
+  const html = document.getElementById('gls-relay-device-link-error').innerHTML;
+  assert.ok(!html.includes('<img src=x'), 'server message escaped');
+  assert.match(html, /&lt;img/);
+});
+
+test('vendored qrcode-generator produces inline SVG for a sample establish URL', () => {
+  const { context } = createRelayStatusHarness();
+  context.__url = 'https://relay.runtorque.com/establish?code=RAWCODE-xyz';
+  const svg = runInContext(context, '_relayDeviceLinkQrSvg(__url)');
+  assert.equal(typeof svg, 'string');
+  assert.match(svg, /^<svg/, 'emits an SVG tag');
+  assert.match(svg, /<path /, 'has QR module path data');
+  assert.match(svg, /viewBox=/, 'scalable viewBox');
+  // The `qrcode` global is exposed by the vendored encoder (load-order check).
+  assert.equal(runInContext(context, 'typeof qrcode'), 'function');
 });
 
 test('backlog dispatch note ignores overlap warnings for ready work', () => {
