@@ -3569,6 +3569,13 @@ body.runtime-embedded #modal-group .modal-summary {
 .gls-relay-device-link-confirm[hidden] { display: none; }
 .gls-relay-device-link-confirm-msg { color: var(--text); }
 .gls-relay-device-link-confirm-actions { display: flex; gap: 6px; }
+.gls-relay-device-link-confirm-actions .btn-primary,
+.gls-relay-device-link-confirm-actions .btn-secondary {
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 600;
+}
 .gls-relay-device-link-error {
   display: flex;
   flex-direction: column;
