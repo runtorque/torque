@@ -74,8 +74,20 @@ def _agent_active_current_task(state: MatrixState, agent_id: str):
     return task
 
 
-def _agent_has_active_current_task(state: MatrixState, agent_id: str) -> bool:
-    return _agent_active_current_task(state, agent_id) is not None
+def _agent_blocking_active_task(state: MatrixState, agent_id: str, *,
+                                ignore_task_id: str = ""):
+    """Return an active task that should block targeted queue promotion."""
+    task = _agent_active_current_task(state, agent_id)
+    if task:
+        return task
+    ignore_task_id = str(ignore_task_id or "").strip()
+    for task in state.agent_active_tasks(agent_id):
+        if task.id == ignore_task_id:
+            continue
+        if task.lane == "To Do":
+            continue
+        return task
+    return None
 
 
 def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
@@ -466,8 +478,10 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
             active_agents = _active_worker_ids(state, group_name)
             capacity_active_agents = active_agents
             if target_agent_id:
-                target_active_task = _agent_active_current_task(
-                    state, target_agent_id
+                target_active_task = _agent_blocking_active_task(
+                    state,
+                    target_agent_id,
+                    ignore_task_id=task.id,
                 )
                 if target_active_task:
                     if target_active_task.id == task.id:
