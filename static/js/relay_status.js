@@ -242,13 +242,13 @@ function _relaySectionUpdateVisibility() {
   var slot = document.getElementById('gls-relay-probe-slot');
   if (slot) slot.hidden = section.hidden;
   // The device-link slot (TORQUE:603 #3) likewise rides the section visibility.
-  // _relayDeviceLinkRefreshButtonState() then (a) flips ONLY the generate
-  // button's enabled state from the gate and (b) enforces display-once by
-  // removing any on-screen secret — it NEVER re-renders the secret, so a
-  // low-frequency relay_config / relay_connection delta refresh (which lands
-  // here via the sub-block renderers) can update the button without
-  // resurrecting a stale minted secret. The secret is owned solely by the
-  // device-link handler below.
+  // _relayDeviceLinkRefreshButtonState() then flips ONLY the generate button's
+  // enabled state from the gate; the displayed secret is left untouched and
+  // survives the delta (engineer decision 43ab33a09a84). A low-frequency
+  // relay_config / relay_connection delta refresh (which lands here via the
+  // sub-block renderers) can thus update the button without disturbing a live
+  // minted secret. The secret is owned solely by the device-link handler below
+  // and is cleared only on Dismiss and modal close.
   var dlSlot = document.getElementById('gls-relay-device-link-slot');
   if (dlSlot) dlSlot.hidden = section.hidden;
   _relayDeviceLinkRefreshButtonState();
@@ -619,8 +619,10 @@ var _relayDeviceLinkConfirming = false;
 /* The active minted secret, held ONLY while the display-once panel is on
  * screen. A closure-local module var — intentionally NEVER assigned into
  * `state`, localStorage, sessionStorage, or any delta-rebuildable surface, and
- * never logged. Cleared (and its DOM nodes removed) on Dismiss, modal close,
- * and every relay section-refresh delta (display-once). */
+ * never logged. Cleared (and its DOM nodes removed) on Dismiss and on modal
+ * close; it deliberately SURVIVES routine relay section-refresh deltas
+ * (engineer decision 43ab33a09a84). Display-once: no re-view path — re-viewing
+ * requires a fresh mint. */
 var _relayDeviceLinkSecret = null;
 
 /* Pure view computation — no DOM. The generate button is enabled only when
@@ -723,8 +725,9 @@ function _relayDeviceLinkQrSvg(url) {
 }
 
 /* Remove the display-once secret: drop the local AND remove the secret DOM
- * nodes (not merely hide them). Idempotent. Called on Dismiss, modal close, and
- * every relay section-refresh delta. */
+ * nodes (not merely hide them). Idempotent. Called only on Dismiss and on modal
+ * close — routine relay section-refresh deltas deliberately preserve the secret
+ * (engineer decision 43ab33a09a84). */
 function _relayDeviceLinkClearSecret() {
   _relayDeviceLinkSecret = null;
   if (typeof document === 'undefined' || !document.getElementById) return;
