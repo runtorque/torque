@@ -1714,6 +1714,11 @@ class GroupSettings:
     agent_boot_command: str = ""  # override default boot command (e.g. "codex")
     agent_model: str = ""  # default model override when provider supports it
     agent_reasoning_effort: str = ""  # default reasoning-effort override
+    # Worker launch overrides. Empty strings inherit the agent_* group default.
+    worker_provider: str = ""  # adapter override for workers (empty = use group default)
+    worker_boot_command: str = ""  # boot command override for workers (empty = use group default)
+    worker_model: str = ""  # model override for workers (empty = use group default)
+    worker_reasoning_effort: str = ""  # reasoning override for workers (empty = use group default)
     git_worktree: bool = False
     worktree_base_dir: str = ".torque/worktrees"  # directory for worktrees (relative to repo)
     worktree_base_branch: str = ""  # branch to fork from (empty = current HEAD)
@@ -5693,7 +5698,10 @@ class MatrixState:
                     value = bool(value)
                 elif key == "board_sync_github":
                     value = _normalize_board_sync_github_settings(value)
-                elif key in {"agent_model", "agent_reasoning_effort"}:
+                elif key in {
+                        "agent_model", "agent_reasoning_effort",
+                        "worker_provider", "worker_boot_command",
+                        "worker_model", "worker_reasoning_effort"}:
                     value = str(value or "").strip()
                 elif key in (
                         set(ArchitectSettings.__dataclass_fields__) - {"group"}):

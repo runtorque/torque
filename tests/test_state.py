@@ -2644,10 +2644,16 @@ class MatrixStateCleanupTests(unittest.TestCase):
             self.state_mod.GroupSettings().guidance_hint_cadence,
             4,
         )
+        self.assertEqual(self.state_mod.GroupSettings().worker_provider, "")
+        self.assertEqual(self.state_mod.GroupSettings().worker_model, "")
         state.update_group_settings(
             "g",
             engineer_merge_mode="engineer-choice",
             guidance_hint_cadence="0",
+            worker_provider=" codex ",
+            worker_model=" gpt-5.4 ",
+            worker_reasoning_effort=" high ",
+            worker_boot_command=" codex --worker ",
         )
 
         self.assertEqual(
@@ -2657,6 +2663,22 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(
             state.to_dict()["group_settings"]["g"]["guidance_hint_cadence"],
             0,
+        )
+        self.assertEqual(
+            state.to_dict()["group_settings"]["g"]["worker_provider"],
+            "codex",
+        )
+        self.assertEqual(
+            state.to_dict()["group_settings"]["g"]["worker_model"],
+            "gpt-5.4",
+        )
+        self.assertEqual(
+            state.to_dict()["group_settings"]["g"]["worker_reasoning_effort"],
+            "high",
+        )
+        self.assertEqual(
+            state.to_dict()["group_settings"]["g"]["worker_boot_command"],
+            "codex --worker",
         )
 
     def test_guidance_hint_cadence_sequence_and_session_reset(self):

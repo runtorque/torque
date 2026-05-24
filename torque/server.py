@@ -6397,6 +6397,32 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     return msg, root_task
 
 
+def _launch_resolver_for_cell(
+        cell, *,
+        resolve_agent_launch_config,
+        resolve_engineer_launch_config=None,
+        resolve_architect_launch_config=None,
+        resolve_worker_launch_config=None,
+        is_designated_engineer=None):
+    """Pick the kind-specific launch resolver for an existing cell."""
+    if getattr(cell, "cell_type", "") != "agent":
+        return resolve_agent_launch_config
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "architect":
+        if resolve_architect_launch_config:
+            return resolve_architect_launch_config
+        if resolve_engineer_launch_config:
+            return resolve_engineer_launch_config
+    if kind == "engineer" and resolve_engineer_launch_config:
+        return resolve_engineer_launch_config
+    if kind == "worker" and resolve_worker_launch_config:
+        return resolve_worker_launch_config
+    if is_designated_engineer and is_designated_engineer(cell) \
+            and resolve_engineer_launch_config:
+        return resolve_engineer_launch_config
+    return resolve_agent_launch_config
+
+
 async def _relaunch_agent_after_worktree_removal(
         cell, *,
         bridge,
@@ -6405,6 +6431,7 @@ async def _relaunch_agent_after_worktree_removal(
         resolve_agent_launch_config,
         resolve_engineer_launch_config=None,
         resolve_architect_launch_config=None,
+        resolve_worker_launch_config=None,
         is_designated_engineer=None,
         apply_persistent_prompt,
         build_cell_persistent_prompt,
@@ -6429,17 +6456,14 @@ async def _relaunch_agent_after_worktree_removal(
     cell.agent_session_id = ""
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
-    kind = str(getattr(cell, "kind", "") or "").strip()
-    use_engineer_launch = (
-        kind in ("engineer", "architect")
-        or bool(is_designated_engineer and is_designated_engineer(cell))
+    resolver = _launch_resolver_for_cell(
+        cell,
+        resolve_agent_launch_config=resolve_agent_launch_config,
+        resolve_engineer_launch_config=resolve_engineer_launch_config,
+        resolve_architect_launch_config=resolve_architect_launch_config,
+        resolve_worker_launch_config=resolve_worker_launch_config,
+        is_designated_engineer=is_designated_engineer,
     )
-    if kind == "architect" and resolve_architect_launch_config:
-        resolver = resolve_architect_launch_config
-    elif use_engineer_launch and resolve_engineer_launch_config:
-        resolver = resolve_engineer_launch_config
-    else:
-        resolver = resolve_agent_launch_config
     launch_cfg = resolver(
         cell.group,
         base_dir=base_dir,
@@ -7115,6 +7139,7 @@ async def _handle_add_worker_command(
         state: MatrixState, *,
         resolve_base_dir,
         resolve_agent_launch_config,
+        resolve_worker_launch_config=None,
         create_agent_with_config,
         send_agent_prompt) -> dict:
     """Create and launch a user-owned detached worker agent."""
@@ -7154,7 +7179,8 @@ async def _handle_add_worker_command(
             "hired_by_architect_id",
     ):
         overrides.pop(key, None)
-    launch_cfg = resolve_agent_launch_config(
+    launch_resolver = resolve_worker_launch_config or resolve_agent_launch_config
+    launch_cfg = launch_resolver(
         group,
         base_dir=base_dir,
         explicit_template=explicit_template,
@@ -8426,6 +8452,7 @@ async def _handle_relaunch_agent_command(
         resolve_agent_launch_config,
         resolve_engineer_launch_config,
         resolve_architect_launch_config=None,
+        resolve_worker_launch_config=None,
         apply_persistent_prompt,
         build_cell_persistent_prompt,
         persistent_prompt_filename,
@@ -8461,17 +8488,14 @@ async def _handle_relaunch_agent_command(
     gs = state.get_group_settings(cell.group)
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
-    kind = str(getattr(cell, "kind", "") or "").strip()
-    use_engineer_launch = (
-        kind in ("engineer", "architect")
-        or is_designated_engineer(cell)
+    resolver = _launch_resolver_for_cell(
+        cell,
+        resolve_agent_launch_config=resolve_agent_launch_config,
+        resolve_engineer_launch_config=resolve_engineer_launch_config,
+        resolve_architect_launch_config=resolve_architect_launch_config,
+        resolve_worker_launch_config=resolve_worker_launch_config,
+        is_designated_engineer=is_designated_engineer,
     )
-    if kind == "architect" and resolve_architect_launch_config:
-        resolver = resolve_architect_launch_config
-    elif use_engineer_launch:
-        resolver = resolve_engineer_launch_config
-    else:
-        resolver = resolve_agent_launch_config
     launch_cfg = resolver(
         cell.group,
         base_dir=base_dir,
@@ -8627,6 +8651,7 @@ async def _handle_restart_agent_command(
         resolve_agent_launch_config,
         resolve_engineer_launch_config,
         resolve_architect_launch_config=None,
+        resolve_worker_launch_config=None,
         apply_persistent_prompt,
         build_cell_persistent_prompt,
         persistent_prompt_filename,
@@ -8676,17 +8701,14 @@ async def _handle_restart_agent_command(
 
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
-    kind = str(getattr(cell, "kind", "") or "").strip()
-    use_engineer_launch = (
-        kind in ("engineer", "architect")
-        or is_designated_engineer(cell)
+    resolver = _launch_resolver_for_cell(
+        cell,
+        resolve_agent_launch_config=resolve_agent_launch_config,
+        resolve_engineer_launch_config=resolve_engineer_launch_config,
+        resolve_architect_launch_config=resolve_architect_launch_config,
+        resolve_worker_launch_config=resolve_worker_launch_config,
+        is_designated_engineer=is_designated_engineer,
     )
-    if kind == "architect" and resolve_architect_launch_config:
-        resolver = resolve_architect_launch_config
-    elif use_engineer_launch:
-        resolver = resolve_engineer_launch_config
-    else:
-        resolver = resolve_agent_launch_config
     launch_cfg = resolver(
         cell.group,
         base_dir=base_dir,
@@ -8731,6 +8753,7 @@ async def _handle_restart_agent_command(
         )
 
     # Rebuild and re-apply the persistent prompt the same way creation does.
+    kind = str(getattr(cell, "kind", "") or "").strip()
     persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
     if kind == "architect":
         persistent_prompt_text = _architect_persistent_prompt_text(
@@ -9143,6 +9166,7 @@ async def main(connection=None):
                 resolve_agent_launch_config=_resolve_agent_launch_config,
                 resolve_engineer_launch_config=_resolve_engineer_launch_config,
                 resolve_architect_launch_config=_resolve_architect_launch_config,
+                resolve_worker_launch_config=_resolve_worker_launch_config,
                 is_designated_engineer=_is_designated_engineer,
                 apply_persistent_prompt=_apply_persistent_prompt,
                 build_cell_persistent_prompt=_build_cell_persistent_prompt,
@@ -9524,6 +9548,17 @@ async def main(connection=None):
                                       explicit_template: str = "",
                                       overrides: dict | None = None) -> dict:
         return agent_launch.resolve_engineer_launch_config(
+            group,
+            base_dir=base_dir,
+            explicit_template=explicit_template,
+            overrides=overrides,
+        )
+
+    def _resolve_worker_launch_config(group: str, *,
+                                      base_dir: str = "",
+                                      explicit_template: str = "",
+                                      overrides: dict | None = None) -> dict:
+        return agent_launch.resolve_worker_launch_config(
             group,
             base_dir=base_dir,
             explicit_template=explicit_template,
@@ -11153,6 +11188,7 @@ async def main(connection=None):
                     state,
                     resolve_base_dir=_resolve_base_dir,
                     resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_worker_launch_config=_resolve_worker_launch_config,
                     create_agent_with_config=_create_agent_with_config,
                     send_agent_prompt=_send_agent_prompt,
                 )
@@ -11534,6 +11570,7 @@ async def main(connection=None):
                     resolve_agent_launch_config=_resolve_agent_launch_config,
                     resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     resolve_architect_launch_config=_resolve_architect_launch_config,
+                    resolve_worker_launch_config=_resolve_worker_launch_config,
                     apply_persistent_prompt=_apply_persistent_prompt,
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
@@ -11551,6 +11588,7 @@ async def main(connection=None):
                     resolve_agent_launch_config=_resolve_agent_launch_config,
                     resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     resolve_architect_launch_config=_resolve_architect_launch_config,
+                    resolve_worker_launch_config=_resolve_worker_launch_config,
                     apply_persistent_prompt=_apply_persistent_prompt,
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
@@ -11633,7 +11671,20 @@ async def main(connection=None):
                                 base_dir = cell.worktree_repo_root \
                                     or cell.directory \
                                     or await _resolve_base_dir(cell.group)
-                                launch_cfg = _resolve_agent_launch_config(
+                                launch_resolver = _launch_resolver_for_cell(
+                                    cell,
+                                    resolve_agent_launch_config=
+                                    _resolve_agent_launch_config,
+                                    resolve_engineer_launch_config=
+                                    _resolve_engineer_launch_config,
+                                    resolve_architect_launch_config=
+                                    _resolve_architect_launch_config,
+                                    resolve_worker_launch_config=
+                                    _resolve_worker_launch_config,
+                                    is_designated_engineer=
+                                    _is_designated_engineer,
+                                )
+                                launch_cfg = launch_resolver(
                                     cell.group,
                                     base_dir=base_dir,
                                     explicit_template=cell.template,
@@ -11686,6 +11737,7 @@ async def main(connection=None):
                             resolve_agent_launch_config=_resolve_agent_launch_config,
                             resolve_engineer_launch_config=_resolve_engineer_launch_config,
                             resolve_architect_launch_config=_resolve_architect_launch_config,
+                            resolve_worker_launch_config=_resolve_worker_launch_config,
                             is_designated_engineer=_is_designated_engineer,
                             apply_persistent_prompt=_apply_persistent_prompt,
                             build_cell_persistent_prompt=_build_cell_persistent_prompt,
@@ -13360,7 +13412,7 @@ async def main(connection=None):
                                 launch_overrides["reasoning_effort"] = (
                                     reasoning_override
                                 )
-                            launch_cfg = _resolve_agent_launch_config(
+                            launch_cfg = _resolve_worker_launch_config(
                                 group,
                                 base_dir=base_dir,
                                 explicit_template=explicit_template,
