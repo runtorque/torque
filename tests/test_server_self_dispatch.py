@@ -3719,13 +3719,20 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(created["done"])
             self.assertEqual(payload["agent_id"], "agent-1")
-            task.agent_id = "agent-1"
-            task.lane = "To Do"
-            return {
-                "type": "queued",
-                "task_id": task.id,
-                "agent_id": "agent-1",
-            }
+            agent = state.agents[payload["agent_id"]]
+            active = state.agent_current_task(agent.id)
+            if active and active.id != task.id:
+                task.agent_id = agent.id
+                task.lane = "To Do"
+                return {
+                    "type": "queued",
+                    "task_id": task.id,
+                    "agent_id": agent.id,
+                }
+            task.agent_id = agent.id
+            task.lane = "In Progress"
+            agent.current_task_id = task.id
+            return None
 
         dispatched = await self.server_mod._pump_auto_dispatch_queue(
             state,
@@ -3736,12 +3743,209 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [item["task_id"] for item in dispatched],
-            ["task-1", "task-2"],
+            ["task-1"],
         )
         self.assertEqual(state.board_tasks["task-1"].agent_id, "agent-1")
+        self.assertEqual(state.board_tasks["task-2"].agent_id, "")
+        self.assertEqual(state.board_tasks["task-2"].lane, "Backlog")
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            ["task-2"],
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].target_agent_id,
+            "agent-1",
+        )
+
+        state.agents["agent-1"].current_task_id = ""
+        state.board_tasks["task-1"].lane = "Done"
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual(
+            [item["task_id"] for item in dispatched],
+            ["task-2"],
+        )
         self.assertEqual(state.board_tasks["task-2"].agent_id, "agent-1")
-        self.assertEqual(state.board_tasks["task-2"].lane, "To Do")
+        self.assertEqual(state.board_tasks["task-2"].lane, "In Progress")
         self.assertNotIn("g", state.auto_dispatch_queues)
+
+    async def test_pump_promotes_same_agent_queue_one_task_at_a_time(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            session_id="sess-1",
+            current_task_id="task-a",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        active = state.board_add_task(
+            "Active",
+            "g",
+            lane="In Progress",
+            id="task-a",
+            agent_id=worker.id,
+        )
+        first = state.board_add_task(
+            "First queued followup",
+            "g",
+            lane="To Do",
+            id="task-b",
+            agent_id=worker.id,
+        )
+        second = state.board_add_task(
+            "Second queued followup",
+            "g",
+            lane="To Do",
+            id="task-c",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(active)
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        state.auto_dispatch_queue_add(
+            "g", first.id, target_agent_id=worker.id, max_concurrent=1,
+        )
+        state.auto_dispatch_queue_add(
+            "g", second.id, target_agent_id=worker.id, max_concurrent=1,
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            task = state.board_tasks[payload["id"]]
+            agent = state.agents[payload["agent_id"]]
+            active_task = state.agent_current_task(agent.id)
+            if active_task and active_task.id != task.id:
+                task.agent_id = agent.id
+                task.lane = "To Do"
+                state.auto_dispatch_queue_add(
+                    task.group,
+                    task.id,
+                    target_agent_id=agent.id,
+                    max_concurrent=1,
+                )
+                return {
+                    "type": "queued",
+                    "task_id": task.id,
+                    "agent_id": agent.id,
+                }
+            task.agent_id = agent.id
+            task.lane = "In Progress"
+            agent.current_task_id = task.id
+            return {"type": "ok", "task_id": task.id, "agent_id": agent.id}
+
+        worker.current_task_id = ""
+        active.lane = "Done"
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual([call["id"] for call in calls], ["task-b"])
+        self.assertEqual(
+            [item["task_id"] for item in dispatched],
+            ["task-b"],
+        )
+        self.assertEqual(worker.current_task_id, "task-b")
+        self.assertEqual(first.lane, "In Progress")
+        self.assertEqual(second.lane, "To Do")
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            ["task-c"],
+        )
+
+        calls.clear()
+        worker.current_task_id = ""
+        first.lane = "Done"
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual([call["id"] for call in calls], ["task-c"])
+        self.assertEqual(
+            [item["task_id"] for item in dispatched],
+            ["task-c"],
+        )
+        self.assertEqual(worker.current_task_id, "task-c")
+        self.assertEqual(second.lane, "In Progress")
+        self.assertNotIn("g", state.auto_dispatch_queues)
+
+    async def test_pump_targeted_idle_agent_still_respects_other_active_cap(self):
+        state = self._make_state()
+        target = self.state_mod.AgentCell(
+            id="agent-idle",
+            name="Idle target",
+            group="g",
+            cell_type="agent",
+            session_id="sess-idle",
+        )
+        busy = self.state_mod.AgentCell(
+            id="agent-busy",
+            name="Busy worker",
+            group="g",
+            cell_type="agent",
+            session_id="sess-busy",
+            current_task_id="task-active",
+        )
+        state.agents[target.id] = target
+        state.agents[busy.id] = busy
+        state.groups["g"].extend([target.id, busy.id])
+        active = state.board_add_task(
+            "Other active task",
+            "g",
+            lane="In Progress",
+            id="task-active",
+            agent_id=busy.id,
+        )
+        queued = state.board_add_task(
+            "Queued target task",
+            "g",
+            lane="To Do",
+            id="task-queued",
+            agent_id=target.id,
+        )
+        self.assertIsNotNone(active)
+        self.assertIsNotNone(queued)
+        state.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=target.id,
+            max_concurrent=1,
+        )
+
+        async def handle_command(payload):
+            raise AssertionError(f"dispatch should defer: {payload}")
+
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual(dispatched, [])
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            [queued.id],
+        )
+        self.assertEqual(queued.lane, "To Do")
+        self.assertEqual(target.current_task_id, "")
 
     async def test_pump_keeps_entry_when_task_agent_id_matches_target(self):
         """A task pre-bound to its target agent must survive the pump.
@@ -3785,9 +3989,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             max_concurrent=2,
         )
 
-        # Pre-existing pump check would remove this entry because
-        # task.agent_id is set. Verify the loosened check keeps it when
-        # the agent matches the entry's target.
+        # The queued follow-up is pre-bound to its target, but the target is
+        # still running another task. The pump must leave the entry queued
+        # until the target clears its current task.
         calls = []
 
         async def handle_command(payload):
@@ -3795,17 +3999,20 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             return {"type": "queued", "task_id": payload["id"],
                     "agent_id": payload.get("agent_id", "")}
 
-        await self.server_mod._pump_auto_dispatch_queue(
+        dispatched = await self.server_mod._pump_auto_dispatch_queue(
             state,
             handle_command,
             lambda *args, **kwargs: None,
             group="g",
         )
 
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["cmd"], "dispatch_task")
-        self.assertEqual(calls[0]["id"], "task-queued")
-        self.assertEqual(calls[0]["agent_id"], worker.id)
+        self.assertEqual(dispatched, [])
+        self.assertEqual(calls, [])
+        self.assertIn("g", state.auto_dispatch_queues)
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            ["task-queued"],
+        )
 
     async def test_pump_removes_entry_when_task_agent_id_differs_from_target(self):
         """Stale entries (task reassigned to another agent) must be purged."""
