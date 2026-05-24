@@ -6317,7 +6317,7 @@ test('device-link never-persist: minted secret never lands in state.*', () => {
   assert.equal(runInContext(context, 'sessionStorage.getItem("relay_device_link")'), null);
 });
 
-test('device-link display-once: relay_config delta removes the secret and does NOT re-render it', () => {
+test('device-link: a relay_config delta PRESERVES the displayed secret (engineer decision) without re-rendering', () => {
   const { context, document } = createRelayStatusHarness();
   runInContext(context, `
     state.relay_config = ${RELAY_DL_CFG_JSON};
@@ -6325,6 +6325,7 @@ test('device-link display-once: relay_config delta removes the secret and does N
   `);
   const panel = document.getElementById('gls-relay-device-link-panel');
   assert.match(panel.innerHTML, /RAWCODE-xyz/, 'secret displayed before delta');
+  const before = panel.innerHTML;
 
   // A relay_config delta arrives mid-display.
   context.__cfg = JSON.parse(RELAY_DL_CFG_JSON);
@@ -6333,22 +6334,30 @@ test('device-link display-once: relay_config delta removes the secret and does N
     _handleDelta({ seq: 1, ops: [Object.assign({ op: 'relay_config' }, __cfg)] });
   `);
 
-  // Display-once: secret nodes removed; local cleared; never resurrected.
-  assert.equal(panel.hidden, true);
-  assert.equal(panel.innerHTML, '', 'delta removes the secret from the DOM');
-  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null);
+  // Secret DOM node SURVIVES untouched (code/url/QR intact); local kept.
+  assert.equal(panel.hidden, false, 'panel still shown after delta');
+  assert.equal(panel.innerHTML, before, 'delta leaves the secret DOM node untouched');
+  assert.match(panel.innerHTML, /establish\?code=RAWCODE-xyz/, 'url intact');
+  assert.match(panel.innerHTML, /<svg/, 'QR intact');
+  assert.ok(jsonValue(context, '_relayDeviceLinkSecret'), 'local kept');
+  // never-persist intact: the secret never reaches state, so the delta cannot
+  // resurrect it (and here, never destroys it either).
+  const stateJson = runInContext(context, 'JSON.stringify(state)');
+  assert.ok(!stateJson.includes('RAWCODE-xyz'), 'code never in state');
+  assert.ok(!stateJson.includes('/establish?code='), 'url never in state');
   // The delta still flips the button enabled state (relay enabled+configured).
   assert.equal(document.getElementById('gls-relay-device-link-generate').disabled, false);
 });
 
-test('device-link display-once: relay_connection delta also removes the secret', () => {
+test('device-link: a relay_connection delta also PRESERVES the displayed secret', () => {
   const { context, document } = createRelayStatusHarness();
   runInContext(context, `
     state.relay_config = ${RELAY_DL_CFG_JSON};
     handleRelayDeviceLink(${JSON.stringify(RELAY_DEVICE_LINK_SUCCESS)});
   `);
   const panel = document.getElementById('gls-relay-device-link-panel');
-  assert.match(panel.innerHTML, /RAWCODE-xyz/);
+  const before = panel.innerHTML;
+  assert.match(before, /RAWCODE-xyz/);
 
   runInContext(context, `
     _expectedSeq = 1;
@@ -6357,8 +6366,11 @@ test('device-link display-once: relay_connection delta also removes the secret',
       relay_host: 'relay.runtorque.com', retry_count: 0,
     }] });
   `);
-  assert.equal(panel.innerHTML, '', 'relay_connection delta removes the secret');
-  assert.equal(jsonValue(context, '_relayDeviceLinkSecret'), null);
+  assert.equal(panel.hidden, false, 'panel still shown after relay_connection delta');
+  assert.equal(panel.innerHTML, before, 'relay_connection delta leaves the secret untouched');
+  assert.ok(jsonValue(context, '_relayDeviceLinkSecret'), 'local kept');
+  const stateJson = runInContext(context, 'JSON.stringify(state)');
+  assert.ok(!stateJson.includes('RAWCODE-xyz'), 'code never in state');
 });
 
 test('device-link modal-close reset removes secret + confirm gesture', () => {

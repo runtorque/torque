@@ -771,12 +771,16 @@ function _relayDeviceLinkSetInFlight(on) {
 }
 
 /* Delta-driven refresh: flip ONLY the generate button's enabled state from the
- * gate, and enforce display-once by removing any on-screen secret. NEVER
- * re-renders the secret. Preserves an in-progress confirm gesture (it touches
- * only the button's disabled/title/hidden + the hint line, never the confirm
- * box) and preserves the button element (so focus/caret survive). */
+ * gate. It deliberately does NOT touch the displayed secret: a routine
+ * relay_config / relay_connection section-refresh delta must PRESERVE an
+ * already-rendered device-link secret (engineer decision, durable memory
+ * 43ab33a09a84). The secret is cleared ONLY on explicit Dismiss and on modal
+ * close. This is safe for never-persist: the secret is never in state, so a
+ * delta cannot resurrect or re-render it — we simply stop the delta from
+ * destroying the live DOM node. Also preserves an in-progress confirm gesture
+ * (touches only the button's disabled/title/hidden + the hint line, never the
+ * confirm box) and the button element itself (so focus/caret survive). */
 function _relayDeviceLinkRefreshButtonState() {
-  _relayDeviceLinkClearSecret();  // display-once: a section-refresh delta clears it
   if (typeof document === 'undefined' || !document.getElementById) return;
   var rc = (typeof state !== 'undefined' && state) ? state.relay_config : null;
   var gate = _relayDeviceLinkComputeGate(rc);
