@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0,
     engineer_merge_mode         TEXT NOT NULL DEFAULT 'pr',
     worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
+    worktree_submodules         TEXT NOT NULL DEFAULT '[]',
     worktree_symlink_gitignored_paths INTEGER NOT NULL DEFAULT 0,
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 0,
@@ -1245,6 +1246,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
             "worktree_symlinks TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+    # Migrate: add worktree_submodules column to group_settings
+    try:
+        conn.execute(
+            "SELECT worktree_submodules FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE group_settings ADD COLUMN "
+            "worktree_submodules TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
     # Migrate: add worktree_symlink_gitignored_paths column to group_settings
     try:

@@ -140,7 +140,15 @@ async def _worktree_diff_updater(state, worktree_mgr):
             if not cell.worktree_path:
                 continue
             try:
-                cell_changed = await worktree_mgr.refresh_state(cell)
+                gs = state.get_group_settings(getattr(cell, "group", "") or "")
+                cell_changed = await worktree_mgr.refresh_state(
+                    cell,
+                    worktree_submodules=getattr(
+                        gs,
+                        "worktree_submodules",
+                        [],
+                    ),
+                )
             except Exception:
                 log.exception(
                     "Worktree refresh failed for '%s'", cell.name)

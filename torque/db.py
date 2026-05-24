@@ -114,7 +114,7 @@ _AGENT_INSERT_SQL = """
 # GroupSettings fields that store dicts/lists — persisted as JSON text.
 _GS_JSON_FIELDS = {
     "env_vars", "agent_env_vars", "terminal_env_vars",
-    "board_default_labels", "worktree_symlinks",
+    "board_default_labels", "worktree_symlinks", "worktree_submodules",
     "board_sync_github",
     "architect_review_gate_thresholds",
     "architect_enabled_events",
@@ -4899,6 +4899,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         except (json.JSONDecodeError, TypeError):
                             d[k] = [] if k in {"board_default_labels",
                                                 "worktree_symlinks",
+                                                "worktree_submodules",
                                                 "default_engineer_specializations",
                                                 "architect_enabled_events"} else {}
                     if k == "board_sync_github" and k in d \

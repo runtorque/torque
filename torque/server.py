@@ -8615,6 +8615,8 @@ async def _handle_relaunch_agent_command(
                     symlinks=launch_cfg.get("worktree_symlinks", []),
                     include_gitignored_symlinks=launch_cfg.get(
                         "worktree_symlink_gitignored_paths", False),
+                    worktree_submodules=launch_cfg.get(
+                        "worktree_submodules", []),
                     state=state,
                 )
                 if wt_path:
@@ -9031,6 +9033,25 @@ async def main(connection=None):
         cell.worktree_behind = 0
         cell.worktree_merged = False
 
+    def _worktree_submodules_for_cell(cell) -> list[str]:
+        if not cell:
+            return []
+        try:
+            gs = state.get_group_settings(getattr(cell, "group", "") or "")
+            return list(getattr(gs, "worktree_submodules", []) or [])
+        except Exception:
+            return []
+
+    async def _checkpoint_worktree_with_submodules(cell, message: str = ""):
+        submodules = _worktree_submodules_for_cell(cell)
+        if submodules:
+            return await worktree_mgr.checkpoint(
+                cell,
+                message=message,
+                worktree_submodules=submodules,
+            )
+        return await worktree_mgr.checkpoint(cell, message=message)
+
     async def _safe_remove_worktree_result(cell) -> dict:
         """Remove a worktree only when it is not active/shared, then verify."""
         if not cell or not cell.worktree_path:
@@ -9099,7 +9120,14 @@ async def main(connection=None):
             )
 
         if hasattr(worktree_mgr, "remove_result"):
-            result = await worktree_mgr.remove_result(cell)
+            submodules = _worktree_submodules_for_cell(cell)
+            if submodules:
+                result = await worktree_mgr.remove_result(
+                    cell,
+                    worktree_submodules=submodules,
+                )
+            else:
+                result = await worktree_mgr.remove_result(cell)
         else:
             ok = await worktree_mgr.remove(cell)
             result = {
@@ -9303,7 +9331,7 @@ async def main(connection=None):
                 log.info("Skipping session-end checkpoint: %s", block_reason)
                 return
             msg = _checkpoint_message(cell)
-            sha = await worktree_mgr.checkpoint(cell, message=msg)
+            sha = await _checkpoint_worktree_with_submodules(cell, msg)
             if sha:
                 state._db_save_agent(cell)
 
@@ -9330,7 +9358,7 @@ async def main(connection=None):
             msg = f"{subject}\n\n{message}"
         else:
             msg = subject
-        sha = await worktree_mgr.checkpoint(cell, message=msg)
+        sha = await _checkpoint_worktree_with_submodules(cell, msg)
         if sha:
             cell.last_checkpoint_at = now
             state._db_save_agent(cell)
@@ -10201,9 +10229,9 @@ async def main(connection=None):
         kind = "marker"
         reason = ""
         if dirty:
-            boundary_sha = await worktree_mgr.checkpoint(
+            boundary_sha = await _checkpoint_worktree_with_submodules(
                 cell,
-                message=_task_boundary_checkpoint_message(task, cell, message),
+                _task_boundary_checkpoint_message(task, cell, message),
             ) or ""
             kind = "checkpoint"
             if not boundary_sha:
@@ -11702,6 +11730,11 @@ async def main(connection=None):
                                 "worktree_symlink_gitignored_paths",
                                 False,
                             ),
+                            worktree_submodules=getattr(
+                                gs,
+                                "worktree_submodules",
+                                [],
+                            ),
                             state=state,
                         )
                         if wt_path:
@@ -11963,7 +11996,7 @@ async def main(connection=None):
                     result = {"type": "error", "message": block_reason}
                 elif cell and cell.worktree_path:
                     msg = _checkpoint_message(cell)
-                    await worktree_mgr.checkpoint(cell, message=msg)
+                    await _checkpoint_worktree_with_submodules(cell, msg)
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
 
@@ -15059,9 +15092,9 @@ async def main(connection=None):
                                                 f"{cp_msg}\n\n"
                                                 f"{cell.last_summary.strip()}"
                                             )
-                                        sha = await worktree_mgr.checkpoint(
+                                        sha = await _checkpoint_worktree_with_submodules(
                                             cell,
-                                            message=cp_msg,
+                                            cp_msg,
                                         )
                                         if sha:
                                             state._db_save_agent(cell)
@@ -15145,8 +15178,10 @@ async def main(connection=None):
                             else:
                                 try:
                                     cp_msg = _checkpoint_message(cell)
-                                    sha = await worktree_mgr.checkpoint(
-                                        cell, message=cp_msg)
+                                    sha = await _checkpoint_worktree_with_submodules(
+                                        cell,
+                                        cp_msg,
+                                    )
                                     if sha:
                                         state._db_save_agent(cell)
                                 except Exception:

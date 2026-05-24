@@ -1730,6 +1730,7 @@ class GroupSettings:
     worktree_merge_preserve_diff: bool = False  # save the pre-merge patch on the latest boundary task
     engineer_merge_mode: str = "pr"  # pr | direct | engineer-choice
     worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root
+    worktree_submodules: list[str] = field(default_factory=list)  # repo-relative submodule paths to materialize as nested linked worktrees
     worktree_symlink_gitignored_paths: bool = False  # symlink gitignored files/dirs from repo root into worktrees
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
