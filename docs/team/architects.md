@@ -120,6 +120,8 @@ Architects and the Engineers they hired have a direct, audited messaging channel
 
 Engineers reply through `engineer_message_architect(...)` (only to their hiring Architect, not to other Architects).
 
+When a hired Engineer raises a **blocking** question (its owner-routed ask, surfaced by `architect_engineer_pending_question(engineer_id)`), answer it with `architect_engineer_answer(engineer_id, answer)`. This delivers the answer and resumes the Engineer's event delivery — the Architect-side counterpart to how an Engineer resolves a worker's ask with `engineer_task_resolve`. A plain `architect_engineer_message` does **not** clear the pending question or unpause the Engineer; use `architect_engineer_answer` to actually resolve the block.
+
 If you message a dismissed Engineer, the message buffers. When you rehire, buffered messages are delivered. This makes async hand-offs safe.
 
 Same-group Architects also have durable peer messaging:

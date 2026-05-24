@@ -1440,6 +1440,34 @@ def _architect_engineer_pending_question_json(
     return _compact_json(payload), False
 
 
+def _resolve_architect_pending_question_engineer(
+        state, architect_id: str, engineer_ident: str):
+    """Resolve the hired engineer whose pending blocking ask this architect may
+    answer.
+
+    Mirrors the gating of ``_architect_engineer_pending_question_json`` (the
+    read surface) so the answer affordance accepts exactly the asks the
+    architect can see: the engineer must be hired by this architect and have an
+    actor-stamped pending question in its group.  Returns
+    ``(engineer, group, question, error)``.
+    """
+    engineer_id, engineer_error = _resolve_architect_hired_engineer(
+        state, architect_id, engineer_ident
+    )
+    if not engineer_id:
+        return None, "", "", engineer_error
+    engineer = state.agents.get(engineer_id)
+    group = str(getattr(engineer, "group", "") or "").strip()
+    if not group:
+        return engineer, "", "", "Engineer has no group"
+    ws = state.get_engineer_settings(group)
+    question = str(getattr(ws, "pending_question", "") or "").strip()
+    actor_id = str(getattr(ws, "pending_question_actor_id", "") or "").strip()
+    if not question or actor_id != engineer_id:
+        return engineer, group, "", "No pending blocking question for that engineer"
+    return engineer, group, question, ""
+
+
 def _normalize_decision_links(state, caller_id: str, *,
                               task_ids=None,
                               engineer_ids=None) -> tuple[list[str], list[str], str]:
@@ -3471,6 +3499,33 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             caller_id,
             args,
         )
+
+    if tool_name == "engineer_answer" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        answer = str(args.get("answer", "") or "").strip()
+        if not answer:
+            return "answer is required", True
+        engineer, group, _question, pending_error = (
+            _resolve_architect_pending_question_engineer(
+                real_state, caller_id, engineer_ident
+            )
+        )
+        if pending_error:
+            return pending_error, True
+        result = await handle_command({
+            "cmd": "engineer_reply",
+            "group": group,
+            "answer": answer,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({
+            "type": "ok",
+            "engineer_id": engineer.id,
+            "group": group,
+        }), False
 
     if tool_name == "deploy_state" and caller_kind == "architect":
         return _compact_json(
