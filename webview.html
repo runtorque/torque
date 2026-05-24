@@ -1564,10 +1564,20 @@
   <div class="taskbar-spacer"></div>
   <button id="taskbar-restore-layout" class="taskbar-aux-btn"
           onclick="restoreStandaloneLayoutDefaults()"
-          title="Restore the default standalone workspace layout">
-    Restore layout
+          title="Restore the default standalone workspace layout"
+          aria-label="Restore layout">
+    <span class="taskbar-aux-icon" aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false">
+        <path d="M12.5 5.5A5 5 0 1 1 10 3.1"/>
+        <path d="M10 1.75V5.5h3.75"/>
+      </svg>
+    </span>
   </button>
-  <div id="taskbar-conn-dot" title="Disconnected"></div>
+  <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
+       title="Daemon: disconnected">
+    <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
+    <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
+  </div>
 </div>
 
 <!-- Context menu (right-click) -->

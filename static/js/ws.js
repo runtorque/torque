@@ -284,6 +284,71 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
   }
 }
 
+function _daemonStatusDisplayValue(value, fallback) {
+  if (typeof _daemonDisplayValue === 'function') {
+    return _daemonDisplayValue(value, fallback);
+  }
+  if (value === null || value === undefined || value === '') return fallback || '—';
+  return String(value);
+}
+
+function _daemonStatusDurationFromMs(ms) {
+  if (typeof _formatDaemonDurationFromMs === 'function') {
+    return _formatDaemonDurationFromMs(ms);
+  }
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  var seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return seconds + ' second' + (seconds === 1 ? '' : 's');
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + ' minute' + (minutes === 1 ? '' : 's');
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + ' hour' + (hours === 1 ? '' : 's');
+  var days = Math.floor(hours / 24);
+  return days + ' day' + (days === 1 ? '' : 's');
+}
+
+function _daemonStatusConnectedFromDom() {
+  var dot = document.getElementById('taskbar-conn-dot')
+    || document.getElementById('conn-dot');
+  return !!(dot && dot.classList && dot.classList.contains('ok'));
+}
+
+function _daemonStatusTooltip(connected) {
+  var runtime = (typeof state !== 'undefined' && state && state.runtime)
+    ? state.runtime
+    : {};
+  var lines = ['Daemon: ' + (connected ? 'running' : 'disconnected')];
+  lines.push('Version: ' + _daemonStatusDisplayValue(runtime.version, 'unknown'));
+  var started = Number(runtime.started_at);
+  if (Number.isFinite(started) && started > 0) {
+    lines.push('Uptime: ' + _daemonStatusDurationFromMs(
+      Date.now() - (started * 1000)
+    ));
+  }
+  lines.push('Port: ' + _daemonStatusDisplayValue(runtime.port));
+  return lines.join('\n');
+}
+
+function refreshDaemonStatusIndicator(connected) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var isConnected = (typeof connected === 'boolean')
+    ? connected
+    : _daemonStatusConnectedFromDom();
+  var root = document.getElementById('daemon-status-indicator');
+  var dot = document.getElementById('taskbar-conn-dot');
+  var label = document.getElementById('taskbar-daemon-label');
+  var tooltip = _daemonStatusTooltip(isConnected);
+  if (root) {
+    root.title = tooltip;
+    if (typeof root.setAttribute === 'function') {
+      root.setAttribute('data-daemon-status', isConnected ? 'running' : 'disconnected');
+      root.setAttribute('aria-label', tooltip.replace(/\n/g, ', '));
+    }
+  }
+  if (dot) dot.title = tooltip;
+  if (label) label.textContent = 'Daemon';
+}
+
 function _setConnDotState(connected) {
   var ids = ['conn-dot', 'taskbar-conn-dot'];
   for (var i = 0; i < ids.length; i++) {
@@ -297,6 +362,7 @@ function _setConnDotState(connected) {
       el.title = 'Disconnected';
     }
   }
+  refreshDaemonStatusIndicator(connected);
 }
 
 function connect() {
@@ -348,6 +414,9 @@ function connect() {
       if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
       if (msg.runtime) state.runtime = msg.runtime;
       if (msg.runtime && typeof loadDaemonStatus === 'function') loadDaemonStatus();
+      if (msg.runtime && typeof refreshDaemonStatusIndicator === 'function') {
+        refreshDaemonStatusIndicator();
+      }
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
@@ -357,6 +426,9 @@ function connect() {
       if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
       if (msg.runtime) state.runtime = msg.runtime;
       if (msg.runtime && typeof loadDaemonStatus === 'function') loadDaemonStatus();
+      if (msg.runtime && typeof refreshDaemonStatusIndicator === 'function') {
+        refreshDaemonStatusIndicator();
+      }
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);
@@ -774,6 +846,7 @@ function _handleFullState(msg) {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
   if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+  if (typeof refreshDaemonStatusIndicator === 'function') refreshDaemonStatusIndicator();
   // Relay-connection indicator: top-level `relay_connection` is captured into
   // `state` via the `state = msg` assignment above; refresh the indicator from
   // it (renders nothing when the field is absent — pre-producer / community).
@@ -1165,6 +1238,10 @@ function _deltaSurfaceInvalidations(ops, hints) {
         // High-frequency token telemetry updates only the affected card's
         // micro-meter via `_applyContextMeterDeltaUpdates()` after state is
         // patched. Never invalidate broad surfaces for this op.
+        break;
+      case 'runtime':
+        // Runtime metadata refreshes daemon status with a targeted DOM update
+        // in _applyDelta; never invalidate panel/grid surfaces for it.
         break;
       case 'group_update':
       case 'group_remove':
@@ -2826,6 +2903,30 @@ function _applyDelta(ops) {
       case 'pending_hire_resolve':
         if (state.pending_hires) delete state.pending_hires[op.id];
         break;
+
+      case 'runtime': {
+        // Daemon-global runtime metadata (version/port/started_at/etc.). Patch
+        // in place and refresh only the small daemon status surfaces; no panel
+        // invalidation is needed for this low-frequency metadata.
+        var runtimePayload = Object.assign({}, op);
+        delete runtimePayload.op;
+        if (state.runtime && typeof state.runtime === 'object') {
+          for (var runtimeKey in state.runtime) {
+            if (Object.prototype.hasOwnProperty.call(state.runtime, runtimeKey)
+                && !Object.prototype.hasOwnProperty.call(runtimePayload, runtimeKey)) {
+              delete state.runtime[runtimeKey];
+            }
+          }
+          Object.assign(state.runtime, runtimePayload);
+        } else {
+          state.runtime = runtimePayload;
+        }
+        if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+        if (typeof refreshDaemonStatusIndicator === 'function') {
+          refreshDaemonStatusIndicator();
+        }
+        break;
+      }
 
       case 'relay_connection': {
         // Daemon-global, low-frequency (state-change only). Patch

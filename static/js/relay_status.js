@@ -19,9 +19,8 @@
 
 /* Mount point — one-line config. 'taskbar' mounts beside `#taskbar-conn-dot`
  * (user-confirmed placement, TORQUE:560); 'header' mounts beside the daemon
- * `#conn-dot`. The component renders identically regardless of mount. NOTE:
- * the bare `#taskbar-conn-dot` is Tauri-only (CSS gates it behind
- * body.tauri-mode), but the relay indicator is NOT Tauri-gated — it stays
+ * `#conn-dot`. The component renders identically regardless of mount. The
+ * labelled taskbar daemon indicator and this relay indicator are both
  * browser-visible via the `.relay-status` / `#taskbar .relay-status` rules. */
 var RELAY_STATUS_MOUNT = 'taskbar';
 
@@ -156,9 +155,18 @@ function _relayStatusEnsureMounted() {
     ? 'taskbar-conn-dot'
     : 'conn-dot';
   var anchor = document.getElementById ? document.getElementById(anchorId) : null;
+  var insertAfter = anchor;
+  // The taskbar daemon indicator wraps the historical #taskbar-conn-dot with
+  // its "Daemon" label. Keep anchoring on the dot id, but insert the relay
+  // indicator after the whole labelled daemon member so the two indicators sit
+  // together as distinct siblings.
   if (anchor && anchor.parentNode
-      && typeof anchor.parentNode.insertBefore === 'function') {
-    anchor.parentNode.insertBefore(built.root, anchor.nextElementSibling || null);
+      && anchor.parentNode.id === 'daemon-status-indicator') {
+    insertAfter = anchor.parentNode;
+  }
+  if (insertAfter && insertAfter.parentNode
+      && typeof insertAfter.parentNode.insertBefore === 'function') {
+    insertAfter.parentNode.insertBefore(built.root, insertAfter.nextElementSibling || null);
   } else if (document.body && typeof document.body.appendChild === 'function') {
     document.body.appendChild(built.root);
   } else {

@@ -5325,6 +5325,147 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
   );
 });
 
+/* -- Taskbar daemon status + restore-layout control (TORQUE:624) ---------- */
+
+function createDaemonStatusHarness(overrides = {}) {
+  const { sandbox, document } = createSandbox(overrides);
+  const header = document.register('header-host');
+  const headerDot = document.register('conn-dot');
+  header.appendChild(headerDot);
+  document.body.appendChild(header);
+  const taskbar = document.register('taskbar');
+  const restore = document.register('taskbar-restore-layout');
+  const daemon = document.register('daemon-status-indicator');
+  const taskbarDot = document.register('taskbar-conn-dot');
+  const label = document.register('taskbar-daemon-label');
+  daemon.appendChild(taskbarDot);
+  daemon.appendChild(label);
+  taskbar.appendChild(restore);
+  taskbar.appendChild(daemon);
+  document.body.appendChild(taskbar);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  runInContext(context, 'dragInProgress = false; _expectedSeq = 1;');
+  return { context, document, sandbox, taskbar, restore, daemon, taskbarDot, label };
+}
+
+test('taskbar contains Restore layout and labelled daemon status members', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const taskbarStart = html.indexOf('<div id="taskbar">');
+  const taskbarEnd = html.indexOf('<!-- Context menu', taskbarStart);
+  assert.ok(taskbarStart >= 0 && taskbarEnd > taskbarStart, '#taskbar markup exists');
+  const taskbarHtml = html.slice(taskbarStart, taskbarEnd);
+  assert.match(taskbarHtml, /id="taskbar-restore-layout"/);
+  assert.match(taskbarHtml, /id="daemon-status-indicator"/);
+  assert.match(taskbarHtml, /id="taskbar-conn-dot"/);
+  assert.ok(
+    taskbarHtml.indexOf('id="taskbar-restore-layout"') < taskbarHtml.indexOf('id="daemon-status-indicator"'),
+    'Restore layout and daemon status both live inside the taskbar',
+  );
+});
+
+test('Restore layout taskbar control is icon-only and accessible', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const button = html.match(/<button[^>]*id="taskbar-restore-layout"[\s\S]*?<\/button>/);
+  assert.ok(button, 'Restore layout button exists');
+  assert.match(button[0], /title="Restore the default standalone workspace layout"/);
+  assert.match(button[0], /aria-label="Restore layout"/);
+  assert.match(button[0], /<svg\b[\s\S]*<\/svg>/, 'icon is inline SVG');
+  const visibleText = button[0]
+    .replace(/<svg[\s\S]*?<\/svg>/g, '')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+  assert.equal(visibleText, '', 'no visible text label remains');
+});
+
+test('daemon taskbar indicator labels status and surfaces runtime detail', () => {
+  const { context, daemon, taskbarDot, label } = createDaemonStatusHarness();
+  const startedAt = Math.floor((Date.now() - (2 * 60 * 60 * 1000)) / 1000);
+  context.__runtimePayload = {
+    version: '1.2.3',
+    port: 18933,
+    started_at: startedAt,
+  };
+  runInContext(context, `
+    state.runtime = __runtimePayload;
+    _setConnDotState(true);
+  `);
+  assert.equal(taskbarDot.classList.contains('ok'), true);
+  assert.equal(label.textContent, 'Daemon');
+  assert.equal(daemon.getAttribute('data-daemon-status'), 'running');
+  assert.match(daemon.title, /Daemon: running/);
+  assert.match(daemon.title, /Version: 1\.2\.3/);
+  assert.match(daemon.title, /Uptime: 2 hours/);
+  assert.match(daemon.title, /Port: 18933/);
+
+  runInContext(context, '_setConnDotState(false);');
+  assert.equal(taskbarDot.classList.contains('ok'), false);
+  assert.equal(daemon.getAttribute('data-daemon-status'), 'disconnected');
+  assert.match(daemon.title, /Daemon: disconnected/);
+});
+
+test('runtime delta refreshes daemon status detail without panel invalidation', () => {
+  const { context, daemon, sandbox } = createDaemonStatusHarness({
+    renderInvalidatedSurfaces(flags) {
+      sandbox.lastInvalidations = JSON.parse(JSON.stringify(flags));
+    },
+  });
+  const startedAt = Math.floor((Date.now() - (60 * 60 * 1000)) / 1000);
+  context.__runtimeDelta = {
+    op: 'runtime',
+    version: '2.0.0',
+    port: 18934,
+    started_at: startedAt,
+  };
+  runInContext(context, `
+    state.runtime = { version: '1.0.0', port: 18933, started_at: ${startedAt} };
+    _setConnDotState(true);
+    _handleDelta({ seq: 1, ops: [__runtimeDelta] });
+  `);
+  assert.match(daemon.title, /Version: 2\.0\.0/);
+  assert.match(daemon.title, /Port: 18934/);
+  assert.equal(sandbox.lastInvalidations, undefined);
+});
+
+test('daemon status is browser-visible and not only Tauri-gated (CSS)', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /#taskbar \.daemon-connection-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
+  assert.match(css, /\.daemon-connection-status #taskbar-conn-dot\s*\{[^}]*display:\s*inline-block[^}]*\}/);
+  assert.doesNotMatch(css, /body\.tauri-mode[^{]*\.daemon-connection-status\b/);
+});
+
+test('relay indicator mounts after the labelled daemon status wrapper', () => {
+  const { sandbox, document } = createSandbox();
+  const header = document.register('header-host');
+  const connDot = document.register('conn-dot');
+  header.appendChild(connDot);
+  document.body.appendChild(header);
+  const taskbar = document.register('taskbar');
+  const daemon = document.register('daemon-status-indicator');
+  const taskbarConnDot = document.register('taskbar-conn-dot');
+  const daemonLabel = document.register('taskbar-daemon-label');
+  daemon.appendChild(taskbarConnDot);
+  daemon.appendChild(daemonLabel);
+  taskbar.appendChild(daemon);
+  document.body.appendChild(taskbar);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/relay_status.js');
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'connected', enabled: true, relay_host: 'relay.runtorque.com',
+      retry_count: 0,
+    };
+    refreshRelayStatusIndicator();
+  `);
+  assert.deepEqual(taskbar.children.map((child) => child.id), [
+    'daemon-status-indicator',
+    'relay-status-indicator',
+  ]);
+  assert.ok(daemon.children.some((child) => child.id === 'taskbar-conn-dot'));
+  assert.ok(!daemon.children.some((child) => child.id === 'relay-status-indicator'));
+  assert.equal(jsonValue(context, '_relayStatusEls.label.textContent'), 'Relay');
+});
+
 /* -- Relay-connection indicator (TORQUE:560) ------------------------------ */
 
 function _relayComputeView(context, payload) {
