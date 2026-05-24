@@ -1,5 +1,7 @@
 # Torque EE frontend skeleton
 
+> License boundary: this EE directory is proprietary and is not covered by the repository root MIT License. See [../LICENSE](../LICENSE).
+
 Enterprise-only remote frontend assets live here. Community builds do not copy
 `ee/`, and `webview.html` ships with an empty `#torque-ee-frontend-manifest` so
 no remote UI appears unless enterprise packaging injects a manifest before
