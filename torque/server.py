@@ -1411,13 +1411,30 @@ async def _run_pr_worktree_merge(
                 pushed["non_fast_forward"] = True
                 if isinstance(retried.get("auto_force_safety"), dict):
                     pushed["auto_force_safety"] = retried["auto_force_safety"]
+                # The safe-force retry was declined by its safety gate. Carry
+                # the refusal reason forward so the merge error explains WHY
+                # the auto force-with-lease was skipped, not just the original
+                # non-fast-forward rejection.
+                refusal = str(retried.get("error") or "").strip()
+                if refusal:
+                    pushed["auto_force_refusal"] = refusal
         if not pushed.get("ok"):
+            error_message = pushed.get(
+                "error", "Failed to push worktree branch.")
+            refusal = str(pushed.get("auto_force_refusal") or "").strip()
+            if refusal:
+                error_message = (
+                    f"{error_message}\n"
+                    f"Auto force-with-lease refused: {refusal}"
+                )
             result = _worktree_merge_error(
                 aid,
-                pushed.get("error", "Failed to push worktree branch."),
+                error_message,
                 mode="pull_request",
                 phase=pushed.get("phase", "push_branch"),
             )
+            if refusal:
+                result["auto_force_refusal"] = refusal
             if gates.get("workflow_breach"):
                 result["workflow_breach"] = gates["workflow_breach"]
             return result

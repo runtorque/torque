@@ -2608,6 +2608,57 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retry_call[4], "main")
         self.assertIn("non-fast-forward", retry_call[5]["error"])
 
+    async def test_worktree_merge_pr_surfaces_auto_force_safety_refusal(self):
+        state, worker, _task = self._make_pr_merge_state()
+        refusal = (
+            "Local branch does not include the current remote base tip; "
+            "refusing auto force-push."
+        )
+        worktree_mgr = self._FakePrWorktreeManager(
+            {"ok": True, "phase": "pr_merge"},
+            push_result={
+                "ok": False,
+                "phase": "push_branch",
+                "error": "rejected (non-fast-forward)",
+            },
+            force_retry_result={
+                "ok": False,
+                "phase": "push_branch",
+                "error": refusal,
+                "non_fast_forward": True,
+                "auto_force_push": False,
+                "safety_gate_passed": False,
+                "auto_force_safety": {"ok": False, "error": refusal},
+            },
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(result["ok"])
+        # Operator sees both the original push rejection AND why the safe
+        # force-with-lease retry was declined.
+        self.assertIn("non-fast-forward", result["error"])
+        self.assertIn("Auto force-with-lease refused", result["error"])
+        self.assertIn(refusal, result["error"])
+        self.assertEqual(result["auto_force_refusal"], refusal)
+        call_names = [call[0] for call in worktree_mgr.calls]
+        self.assertIn("force_push_retry", call_names)
+
     async def test_worktree_merge_pr_pending_stores_metadata_without_cleanup(self):
         state, worker, task = self._make_pr_merge_state()
         queued = state.board_add_task(
