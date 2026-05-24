@@ -103,6 +103,27 @@ function buildTrees(context, groupName) {
   return JSON.parse(json);
 }
 
+// Count how many times a given card id appears anywhere in the assembled
+// model (architect spines, hired-engineer rows + their workers, loose
+// engineers + their workers, and the loose-workers bar). Used as a
+// belt-and-suspenders dedupe check — every agent should appear exactly once.
+function countCardOccurrences(model, id) {
+  let n = 0;
+  for (const tree of model.trees) {
+    if (tree.architect && tree.architect.id === id) n++;
+    for (const row of tree.engineers) {
+      if (row.engineer && row.engineer.id === id) n++;
+      for (const w of row.workers) if (w.id === id) n++;
+    }
+  }
+  for (const row of model.standalone.engineers) {
+    if (row.engineer && row.engineer.id === id) n++;
+    for (const w of row.workers) if (w.id === id) n++;
+  }
+  for (const w of model.standalone.workers) if (w.id === id) n++;
+  return n;
+}
+
 /* -- Tree model: _canvasBuildTrees -------------------------------------- */
 
 test('canvas tree model nests hired engineers and their owned workers under each architect', () => {
@@ -168,6 +189,34 @@ test('canvas tree model places a loose engineer (no architect) and its workers i
   assert.equal(model.standalone.workers.length, 0);
 });
 
+test('canvas tree model renders a present-loose-engineer worker exactly once even when the worker is iterated before its engineer', () => {
+  // `all` follows state.agents insertion order, which is NOT guaranteed to
+  // be engineer-first across snapshot/delta/resync. Seed the worker BEFORE
+  // its loose (no-architect) engineer: the worker is iterated first in the
+  // standalone loop and must NOT be pushed to standalone.workers, because
+  // the engineer attaches it under standalone.engineers[].workers. A double
+  // push would render the same data-canvas-card-id twice.
+  const context = createContext();
+  seed(context, [
+    worker('worker-before', 'Worker Before Engineer', 'eng-loose', 1),
+    engineer('eng-loose', 'Loose Engineer', '', 2),
+  ]);
+
+  const model = buildTrees(context, 'alpha');
+
+  assert.equal(model.standalone.engineers.length, 1);
+  assert.equal(model.standalone.engineers[0].engineer.id, 'eng-loose');
+  assert.deepEqual(
+    model.standalone.engineers[0].workers.map((w) => w.id),
+    ['worker-before'],
+  );
+  // Must appear under the engineer only — never duplicated in the bar.
+  assert.equal(model.standalone.workers.length, 0);
+  // Belt-and-suspenders: the worker id occurs exactly once across the whole
+  // model (a double-add would produce a duplicate data-canvas-card-id).
+  assert.equal(countCardOccurrences(model, 'worker-before'), 1);
+});
+
 test('canvas tree model surfaces orphaned (owner-less) workers in standalone.workers', () => {
   const context = createContext();
   seed(context, [
@@ -183,6 +232,35 @@ test('canvas tree model surfaces orphaned (owner-less) workers in standalone.wor
     model.standalone.workers.map((w) => w.id),
     ['worker-orphan-a', 'worker-orphan-b'],
   );
+});
+
+test('canvas tree model surfaces a worker whose owning engineer is absent in the loose-workers bar (not dropped)', () => {
+  // owner_engineer_id points at an engineer that is NOT in the group/tree
+  // (e.g. tombstoned or out-of-group). The worker itself exists, so it must
+  // never silently vanish — it falls through to the loose-workers bar, the
+  // same surface used for genuinely owner-less workers.
+  const context = createContext();
+  const tombstonedOwner = engineer('eng-gone', 'Tombstoned Engineer', 'arch-1', 2);
+  tombstonedOwner.deleted_at = 1700000000;
+  seed(context, [
+    architect('arch-1', 'Architect One', 1),
+    tombstonedOwner,
+    worker('worker-orphaned-owner', 'Orphaned-owner Worker', 'eng-gone', 3),
+  ]);
+
+  const model = buildTrees(context, 'alpha');
+
+  // The tombstoned owner engineer is excluded from the tree...
+  assert.equal(model.trees.length, 1);
+  assert.equal(model.trees[0].engineers.length, 0);
+  assert.equal(model.standalone.engineers.length, 0);
+  // ...but its orphaned-owner worker still appears in the loose-workers bar
+  // exactly once (not dropped, not duplicated).
+  assert.deepEqual(
+    model.standalone.workers.map((w) => w.id),
+    ['worker-orphaned-owner'],
+  );
+  assert.equal(countCardOccurrences(model, 'worker-orphaned-owner'), 1);
 });
 
 test('canvas tree model excludes tombstoned agents from trees and standalone buckets', () => {
