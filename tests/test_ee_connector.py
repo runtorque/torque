@@ -32,6 +32,8 @@ from torque_ee_connector.protocol import (  # noqa: E402
     make_relay_envelope,
 )
 
+_AGENT_ROSTER_UNSET = object()
+
 
 class FakeWs:
     def __init__(self):
@@ -418,20 +420,30 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
 class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
     """snapshot_request → bounded user↔agent snapshot, gated like live egress."""
 
-    def _connector(self, *, rows=None, recent_provider=None, config=None):
+    def _connector(
+        self,
+        *,
+        rows=None,
+        recent_provider=None,
+        agent_roster_provider=_AGENT_ROSTER_UNSET,
+        config=None,
+    ):
         cfg = {"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"}
         if config:
             cfg.update(config)
         provider = recent_provider
         if provider is None and rows is not None:
             provider = lambda _limit: [dict(r) for r in rows]  # noqa: E731
-        context = SimpleNamespace(
-            profile="desktop",
-            data_dir="/tmp/torque-desktop",
-            config=cfg,
-            remote_user_agent_message=lambda _payload: {"type": "ok"},
-            recent_direct_messages=provider,
-        )
+        context_kwargs = {
+            "profile": "desktop",
+            "data_dir": "/tmp/torque-desktop",
+            "config": cfg,
+            "remote_user_agent_message": lambda _payload: {"type": "ok"},
+            "recent_direct_messages": provider,
+        }
+        if agent_roster_provider is not _AGENT_ROSTER_UNSET:
+            context_kwargs["agent_roster"] = agent_roster_provider
+        context = SimpleNamespace(**context_kwargs)
         connector = EnterpriseConnector(context=context)
         connector.config = config_from_context(context)
         connector.started = True
@@ -528,6 +540,29 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry["kind"], "agent_message")
         self.assertEqual({k: v for k, v in entry.items() if k != "kind"}, live)
 
+    async def test_snapshot_includes_agent_roster_when_provider_available(self):
+        roster = [
+            {"id": "a1", "name": "Architect One", "kind": "architect"},
+            {"id": "e1", "name": "Engineer One", "kind": "engineer"},
+            {"id": "w1", "name": "Worker One", "kind": "worker"},
+            {"id": "t1", "name": "Terminal One", "kind": "terminal"},
+            {"id": "u1", "name": "Unknown Kind", "kind": ""},
+        ]
+        connector = self._connector(
+            rows=self._lane_rows(),
+            agent_roster_provider=lambda: [dict(row) for row in roster],
+        )
+        payload = await self._snapshot_payload(connector, self._request())
+
+        self.assertEqual(payload["payload"]["agents"], roster)
+        # Existing snapshot keys retain their exact values; the roster is purely
+        # additive on the existing snapshot payload.
+        self.assertEqual(payload["payload"]["lane"], "user-agent")
+        self.assertEqual(payload["payload"]["count"], 4)
+        self.assertEqual(payload["payload"]["limit"], SNAPSHOT_DEFAULT_MESSAGE_LIMIT)
+        self.assertEqual(payload["payload"]["truncated"], False)
+        self.assertEqual(payload["payload"]["ref_id"], "snap-req-1")
+
     async def test_snapshot_is_bounded_by_default_cap(self):
         many = [
             {
@@ -580,9 +615,22 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_snapshot_empty_when_no_provider(self):
         connector = self._connector(recent_provider=None)
         payload = await self._snapshot_payload(connector, self._request())
-        self.assertEqual(payload["payload"]["count"], 0)
-        self.assertEqual(payload["payload"]["messages"], [])
-        self.assertFalse(payload["payload"]["truncated"])
+        self.assertEqual(payload["payload"], {
+            "lane": "user-agent",
+            "messages": [],
+            "count": 0,
+            "limit": SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
+            "truncated": False,
+            "ref_id": "snap-req-1",
+        })
+
+    async def test_snapshot_omits_agents_when_roster_provider_is_none(self):
+        connector = self._connector(
+            recent_provider=None,
+            agent_roster_provider=None,
+        )
+        payload = await self._snapshot_payload(connector, self._request())
+        self.assertNotIn("agents", payload["payload"])
 
 
 class WireKindGateTests(unittest.TestCase):

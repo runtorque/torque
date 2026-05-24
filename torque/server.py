@@ -451,6 +451,33 @@ def _resolve_agent_id(state, identifier: str) -> str:
     return ""
 
 
+def _relay_agent_roster(state: MatrixState) -> list[dict]:
+    """Return the group-scoped, non-tombstoned agent roster for relay snapshots."""
+    group = str(getattr(state, "active_group", "") or "").strip()
+    if not group:
+        groups = [
+            str(name or "").strip()
+            for name in getattr(state, "groups", {}).keys()
+            if str(name or "").strip()
+        ]
+        if len(groups) == 1:
+            group = groups[0]
+    if not group:
+        return []
+    roster: list[dict] = []
+    for cell in getattr(state, "agents", {}).values():
+        if state.agent_is_tombstoned(cell):
+            continue
+        if str(getattr(cell, "group", "") or "") != group:
+            continue
+        roster.append({
+            "id": getattr(cell, "id", ""),
+            "name": getattr(cell, "name", ""),
+            "kind": getattr(cell, "kind", ""),
+        })
+    return roster
+
+
 def _worktree_merge_preserve_diff_enabled(
     state: MatrixState,
     cell,
@@ -9702,6 +9729,7 @@ async def main(connection=None):
             state=state,
             remote_user_agent_message=_ingest_remote_user_agent_message,
             recent_direct_messages=_recent_user_direct_messages,
+            agent_roster=lambda: _relay_agent_roster(state),
             register_direct_message_observer=(
                 cloud_hooks.register_direct_message_observer
             ),
