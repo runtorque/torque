@@ -852,6 +852,187 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertNotIn("agent-pair:arch-a:worker-1", snapshot)
         self.assertNotIn("direct-user-arch", snapshot)
 
+    def test_seed_agent_peer_threads_drops_oldest_pairs_beyond_row_cap(self):
+        # Regression/stress check: the Chat panel seed loads at most
+        # AGENT_PEER_THREAD_SEED_ROW_LIMIT rows, newest-first.  With more chat
+        # rows than the cap spread across many distinct pairs, only the pairs
+        # whose newest activity falls inside the newest-cap window survive a
+        # seed/reload; the oldest pairs are dropped entirely.  This guards
+        # against a regression that drops the row clamp (loading the whole
+        # table) or flips the newest-first ordering (loading stale pairs while
+        # starving recent ones).
+        from torque.db import TorqueDB
+
+        cap = self.state_mod.AGENT_PEER_THREAD_SEED_ROW_LIMIT
+        msgs_per_pair = 4
+        pair_count = (cap // msgs_per_pair) + 300  # rows comfortably over cap
+        expected_kept = cap // msgs_per_pair
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        arch = self.state_mod.AgentCell(
+            id="arch-0",
+            name="Architect 0",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        engineers = [
+            self.state_mod.AgentCell(
+                id=f"eng-{idx}",
+                name=f"Engineer {idx}",
+                group="g",
+                kind="engineer",
+                cell_type="agent",
+            )
+            for idx in range(pair_count)
+        ]
+        members = [arch.id] + [eng.id for eng in engineers]
+        db.save_groups_and_members({"g": members}, {"g": "g"})
+        db.save_agent(arch)
+        for eng in engineers:
+            db.save_agent(eng)
+
+        # Strictly increasing timestamps so pair ordering by created_at is
+        # deterministic: higher pair index == more recent activity.
+        ts = 0.0
+        total_rows = 0
+        for pair_idx, eng in enumerate(engineers):
+            for m in range(msgs_per_pair):
+                ts += 1.0
+                if m % 2 == 0:
+                    sender, recipient = arch, eng
+                else:
+                    sender, recipient = eng, arch
+                db.save_agent_peer_message({
+                    "id": f"m-{pair_idx:06d}-{m}",
+                    "thread_id": f"thread-{pair_idx}",
+                    "group_name": "g",
+                    "sender_id": sender.id,
+                    "sender_kind": sender.kind,
+                    "recipient_id": recipient.id,
+                    "recipient_kind": recipient.kind,
+                    "message": f"pair {pair_idx} msg {m}",
+                    "created_at": ts,
+                    "delivery_state": "delivered",
+                    "delivered_at": ts,
+                })
+                total_rows += 1
+        self.assertGreater(total_rows, cap)
+
+        # The loader itself must honor the cap rather than streaming the table.
+        loaded = db.load_recent_agent_peer_chat_messages(limit=cap)
+        self.assertEqual(len(loaded), cap)
+
+        state = self.state_mod.MatrixState(db=db)
+        seeded = state.seed_agent_peer_threads(emit=False)
+        self.assertEqual(seeded, expected_kept)
+
+        snapshot = state.agent_peer_threads_snapshot()
+        self.assertEqual(len(snapshot), expected_kept)
+        # No partial pair leaks in: every kept pair retains all its rows since
+        # the cap lands on an exact pair boundary here.
+        self.assertEqual(
+            sum(t["message_count"] for t in snapshot.values()),
+            cap,
+        )
+
+        # Newest pairs are kept; oldest pairs are dropped.
+        newest_pair = f"agent-pair:arch-0:eng-{pair_count - 1}"
+        oldest_pair = "agent-pair:arch-0:eng-0"
+        self.assertIn(newest_pair, snapshot)
+        self.assertNotIn(oldest_pair, snapshot)
+        # The boundary pair (oldest one still inside the window) is kept,
+        # the next-older one is not.
+        first_kept_idx = pair_count - expected_kept
+        self.assertIn(f"agent-pair:arch-0:eng-{first_kept_idx}", snapshot)
+        self.assertNotIn(f"agent-pair:arch-0:eng-{first_kept_idx - 1}", snapshot)
+
+        # Ordering is newest-activity-first.
+        keys = list(snapshot)
+        self.assertEqual(keys[0], newest_pair)
+        activities = [snapshot[k]["last_activity_at"] for k in keys]
+        self.assertEqual(activities, sorted(activities, reverse=True))
+
+        # A reload reproduces the same bounded aggregate (idempotent seed).
+        reseeded = state.seed_agent_peer_threads(emit=False)
+        self.assertEqual(reseeded, expected_kept)
+        self.assertEqual(state.agent_peer_threads_snapshot(), snapshot)
+
+    def test_seed_agent_peer_threads_caps_single_oversized_thread(self):
+        # Regression/stress check: a single pair with more rows than the seed
+        # cap loads only the newest-cap rows for that pair.  message_count
+        # reflects the loaded (capped) rows, the thread is flagged truncated,
+        # and the display tail stays bounded to AGENT_PEER_THREAD_MESSAGE_LIMIT
+        # with the genuinely newest message last.
+        from torque.db import TorqueDB
+
+        cap = self.state_mod.AGENT_PEER_THREAD_SEED_ROW_LIMIT
+        message_limit = self.state_mod.AGENT_PEER_THREAD_MESSAGE_LIMIT
+        total_rows = cap + 1500
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        arch = self.state_mod.AgentCell(
+            id="arch-0",
+            name="Architect 0",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        eng = self.state_mod.AgentCell(
+            id="eng-0",
+            name="Engineer 0",
+            group="g",
+            kind="engineer",
+            cell_type="agent",
+        )
+        db.save_groups_and_members({"g": [arch.id, eng.id]}, {"g": "g"})
+        db.save_agent(arch)
+        db.save_agent(eng)
+
+        for i in range(1, total_rows + 1):
+            if i % 2:
+                sender, recipient = arch, eng
+            else:
+                sender, recipient = eng, arch
+            db.save_agent_peer_message({
+                "id": f"m-{i:06d}",
+                "thread_id": "thread-big",
+                "group_name": "g",
+                "sender_id": sender.id,
+                "sender_kind": sender.kind,
+                "recipient_id": recipient.id,
+                "recipient_kind": recipient.kind,
+                "message": f"msg {i}",
+                "created_at": float(i),
+                "delivery_state": "delivered",
+                "delivered_at": float(i),
+            })
+
+        state = self.state_mod.MatrixState(db=db)
+        self.assertEqual(state.seed_agent_peer_threads(emit=False), 1)
+
+        snapshot = state.agent_peer_threads_snapshot()
+        pair_key = "agent-pair:arch-0:eng-0"
+        thread = snapshot[pair_key]
+        # Only the newest-cap rows are loaded for the pair.
+        self.assertEqual(thread["message_count"], cap)
+        self.assertTrue(thread["truncated"])
+        # Display tail stays bounded and ends on the genuinely newest message.
+        self.assertEqual(len(thread["messages"]), message_limit)
+        self.assertEqual(thread["messages"][-1]["id"], f"m-{total_rows:06d}")
+        self.assertEqual(thread["last_message_id"], f"m-{total_rows:06d}")
+        self.assertEqual(thread["last_activity_at"], float(total_rows))
+
     def test_save_direct_message_updates_cache_and_read_deltas(self):
         from torque.db import TorqueDB
 
