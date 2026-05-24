@@ -1,11 +1,11 @@
 /* In-memory conversation model for the remote web UI.
  *
- * Holds switchable USER<->AGENT conversations keyed by agent_id, derived purely
- * from observed traffic (there is no agent roster in V1 — see plan §0.3; a
- * conversation appears the first time an agent messages, and the user cannot
- * initiate to an agent that has never messaged). Inbound envelopes are mapped
- * to messages; outbound user messages are appended optimistically and have
- * their delivery state advanced by acks/errors.
+ * Holds switchable USER<->AGENT conversations keyed by agent_id, derived from
+ * observed traffic plus the optional snapshot agent roster. A conversation
+ * appears the first time an agent messages, and a snapshot roster can pre-seed
+ * conversations with hierarchy metadata. Inbound envelopes are mapped to
+ * messages; outbound user messages are appended optimistically and have their
+ * delivery state advanced by acks/errors.
  *
  * Idempotent on message id (upsert), so at-least-once delivery + reconnect
  * replay never duplicate a bubble even if the relay_client dedupe is bypassed.
@@ -33,6 +33,19 @@
 
   function _trim(value) {
     return String(value == null ? '' : value).trim();
+  }
+
+  var _KIND_TIER = { architect: 0, engineer: 1, worker: 2, terminal: 3 };
+
+  function _kindTier(kind) {
+    var k = _trim(kind);
+    return Object.prototype.hasOwnProperty.call(_KIND_TIER, k) ? _KIND_TIER[k] : 4;
+  }
+
+  function _agentListCompare(a, b) {
+    var tier = _kindTier(a.kind) - _kindTier(b.kind);
+    if (tier) return tier;
+    return (b.lastActivityMs || 0) - (a.lastActivityMs || 0);
   }
 
   // Resolve which agent a conversation envelope belongs to. Prefer the explicit
@@ -105,12 +118,16 @@
         pendingAsks: {},       // askId -> message
         lastActivityMs: 0,
         unread: 0,
+        kind: '',
       };
       this.conversations[agentId] = conv;
       this.order.push(agentId);
       if (!this.activeAgentId) this.activeAgentId = agentId;
-    } else if (agentName && conv.agentName === agentId) {
-      conv.agentName = agentName;
+    } else {
+      if (conv.kind == null) conv.kind = '';
+      if (agentName && conv.agentName === agentId) {
+        conv.agentName = agentName;
+      }
     }
     return conv;
   };
@@ -347,7 +364,17 @@
   // de-dupe against the live stream by message id (store upsert). Applied
   // oldest-first so a still-pending ask + its later reply resolve in order.
   RemoteStore.prototype.ingestSnapshot = function(env) {
-    var rows = _snapshotRows(env && env.payload ? env.payload : {});
+    var payload = env && env.payload ? env.payload : {};
+    var agents = Array.isArray(payload.agents) ? payload.agents : [];
+    for (var a = 0; a < agents.length; a++) {
+      var agent = agents[a];
+      if (!agent || typeof agent !== 'object') continue;
+      var id = _trim(agent.id);
+      if (!id) continue;
+      var conv = this._ensureConversation(id, _trim(agent.name) || id);
+      conv.kind = _trim(agent.kind);
+    }
+    var rows = _snapshotRows(payload);
     this.snapshotApplied = true;
     if (!rows.length) { this._notify(); return 0; }
     var ordered = rows.slice().filter(function(r) { return r && typeof r === 'object'; })
@@ -439,13 +466,14 @@
       return {
         agentId: agentId,
         agentName: conv.agentName,
+        kind: conv.kind || '',
         unread: conv.unread,
         pendingAskCount: Object.keys(conv.pendingAsks).length,
         lastBody: last ? last.body : '',
         lastActivityMs: conv.lastActivityMs,
         active: agentId === self.activeAgentId,
       };
-    });
+    }).sort(_agentListCompare);
   };
 
   RemoteStore.prototype.activeConversation = function() {
