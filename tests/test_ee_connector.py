@@ -1080,6 +1080,30 @@ class EstablishCodeMintTests(unittest.IsolatedAsyncioTestCase):
         # The pending-mint map is cleaned up after the request settles.
         self.assertEqual(connector._pending_mints, {})
 
+    async def test_mint_surfaces_uncorrelated_do_message_error(self):
+        connector = self._connected_connector()
+        task = asyncio.create_task(connector.mint_client_establish_code())
+        await self._drain_until_sent(connector)
+        with mock.patch("torque_ee_connector.connector.log") as fake_log:
+            await connector._handle_envelope(make_relay_envelope(
+                daemon_id="daemon-1",
+                source={"kind": "relay", "id": "cloudflare-do"},
+                target={"kind": "daemon", "id": "daemon-1"},
+                kind="error",
+                payload={
+                    "code": "durable_object_message_error",
+                    "message": "kind is invalid: mint_client_establish_code",
+                },
+            ))
+
+        result = await asyncio.wait_for(task, timeout=1.0)
+        self.assertEqual(result["ok"], False)
+        self.assertEqual(result["error"], "durable_object_message_error")
+        self.assertEqual(result["message"], "kind is invalid: mint_client_establish_code")
+        self.assertIn("pre-correlation", fake_log.warning.call_args.args[0])
+        # The pending-mint map is cleaned up after the request settles.
+        self.assertEqual(connector._pending_mints, {})
+
     async def test_mint_times_out_with_a_clear_result(self):
         connector = self._connected_connector()
         result = await connector.mint_client_establish_code(timeout=0.01)
