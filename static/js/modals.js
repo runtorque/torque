@@ -2704,13 +2704,45 @@ function switchGlsTab(name) {
   if (name === 'gls-system') loadDaemonStatus();
 }
 
+var _glsActiveSubTabs = {};
+
+function _pickGlsSubTab(pane, preferred) {
+  if (!pane || !pane.querySelectorAll) return null;
+  var tabs = Array.prototype.slice.call(pane.querySelectorAll('.gs-subtab'));
+  if (!tabs.length) return null;
+  if (preferred) {
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i].dataset && tabs[i].dataset.subtab === preferred && !tabs[i].hidden) {
+        return tabs[i];
+      }
+    }
+  }
+  for (var j = 0; j < tabs.length; j++) {
+    if (!tabs[j].hidden) return tabs[j];
+  }
+  return tabs[0];
+}
+
+function _syncGlsSubTabs(restoreSelection) {
+  document.querySelectorAll('#modal-global-settings .gs-pane').forEach(function(pane) {
+    var paneName = pane.dataset ? pane.dataset.pane : '';
+    var preferred = restoreSelection && paneName ? _glsActiveSubTabs[paneName] : '';
+    var tab = _pickGlsSubTab(pane, preferred);
+    if (tab) switchGlsSubTab(tab);
+  });
+}
+
 function switchGlsSubTab(btn) {
   var container = btn.closest('.gs-pane');
+  if (!container) return;
   container.querySelectorAll('.gs-subtab').forEach(t =>
     t.classList.toggle('active', t === btn));
   var target = btn.dataset.subtab;
   container.querySelectorAll('.gs-subpane').forEach(p =>
     p.classList.toggle('active', p.dataset.subpane === target));
+  if (container.dataset && container.dataset.pane && target) {
+    _glsActiveSubTabs[container.dataset.pane] = target;
+  }
 }
 
 function openGlobalSettings() {
@@ -2719,6 +2751,12 @@ function openGlobalSettings() {
 
 function _showGlobalSettingsModal(data) {
   var s = data.settings;
+  var modal = document.getElementById('modal-global-settings');
+  var modalWasVisible = modal && modal.classList && modal.classList.contains('visible');
+  var activeTab = modalWasVisible
+    ? document.querySelector('#modal-global-settings .gs-tab.active')
+    : null;
+  var activeTabName = activeTab && activeTab.dataset ? activeTab.dataset.tab : '';
   _glsDefaults = data.keybinding_defaults || {};
   _glsKeybindings = Object.assign({}, s.keybindings || {});
 
@@ -2762,23 +2800,22 @@ function _showGlobalSettingsModal(data) {
   // Keybindings
   _renderKeybindingList();
 
-  // Relay config + provenance (TORQUE:603 #1). The get_global_settings response
+  // Relay config (TORQUE:603 #1). The get_global_settings response
   // carries a fresh top-level `relay_config` (same shape as the snapshot / the
   // `relay_config` delta); adopt it into `state` and force-populate the editable
-  // settings-layer inputs + source badges. force=true clears any stale dirty
+  // settings-layer inputs. force=true clears any stale dirty
   // flags so the freshly opened modal reflects the authoritative resolved config.
   if (data.relay_config) state.relay_config = data.relay_config;
   if (typeof refreshRelayConfigModal === 'function') {
     refreshRelayConfigModal({ force: true });
   }
 
-  // Reset tabs
-  switchGlsTab('gls-general');
-  var firstSub = document.querySelector('#modal-global-settings .gs-subtab');
-  if (firstSub) switchGlsSubTab(firstSub);
+  if (modalWasVisible && activeTabName) switchGlsTab(activeTabName);
+  else switchGlsTab('gls-general');
+  _syncGlsSubTabs(modalWasVisible);
 
-  document.getElementById('modal-global-settings').classList.add('visible');
-  document.getElementById('gls-default-cmd').focus();
+  modal.classList.add('visible');
+  if (!modalWasVisible) document.getElementById('gls-default-cmd').focus();
 }
 
 function _kbDisplayName(action, binding) {

@@ -233,6 +233,30 @@ function _relaySectionUpdateVisibility() {
   var section = document.getElementById('gls-relay-section');
   if (!section) return;
   section.hidden = !(_relayConnModalVisible || _relayConfigModalVisible);
+  var relaySubtab = document.querySelector
+    ? document.querySelector('#modal-global-settings .gs-subtab[data-subtab="gls-relay"]')
+    : null;
+  if (relaySubtab) relaySubtab.hidden = section.hidden;
+  if (section.hidden && relaySubtab && relaySubtab.classList
+      && relaySubtab.classList.contains('active')) {
+    var daemonSubtab = document.querySelector
+      ? document.querySelector('#modal-global-settings .gs-subtab[data-subtab="gls-daemon"]')
+      : null;
+    if (daemonSubtab && typeof switchGlsSubTab === 'function') {
+      switchGlsSubTab(daemonSubtab);
+    } else {
+      relaySubtab.classList.remove('active');
+      var relayPane = document.querySelector
+        ? document.querySelector('#modal-global-settings .gs-subpane[data-subpane="gls-relay"]')
+        : null;
+      var daemonPane = document.querySelector
+        ? document.querySelector('#modal-global-settings .gs-subpane[data-subpane="gls-daemon"]')
+        : null;
+      if (daemonSubtab && daemonSubtab.classList) daemonSubtab.classList.add('active');
+      if (relayPane && relayPane.classList) relayPane.classList.remove('active');
+      if (daemonPane && daemonPane.classList) daemonPane.classList.add('active');
+    }
+  }
   // The Test-connectivity probe slot (TORQUE:603 #2) rides the section
   // visibility: show the button whenever the Relay section shows. This toggles
   // ONLY `hidden` — it must never clear the slot's contents, so a low-frequency
@@ -285,9 +309,9 @@ function _relayStatusRenderModalRow(view, rc) {
 }
 
 /* ----------------------------------------------------------------------------
- * Relay CONFIG + provenance (TORQUE:603 #1).
+ * Relay CONFIG (TORQUE:603 #1).
  *
- * CONSUMER of Courier's resolved-config-with-provenance contract (shared memory
+ * CONSUMER of Courier's resolved config contract (shared memory
  * 40c1c73e6bec). Shape (do NOT invent; consume the producer's `relay_config`):
  *   { config:  { enabled, relay_url, daemon_id, credential_id, private_key_path },
  *     sources: { <field>: { value, source } } }
@@ -313,36 +337,19 @@ var RELAY_CONFIG_FIELDS = [
   { key: 'private_key_path', type: 'text', inputId: 'gls-relay-private-key-path' },
 ];
 
-function _relaySourceLabel(source) {
-  switch (source) {
-    case 'settings': return 'settings';
-    case 'ee_connector.json': return 'ee_connector.json';
-    case 'env': return 'env';
-    default: return 'unset';
-  }
-}
-
-function _relaySourceClass(source) {
-  switch (source) {
-    case 'settings': return 'settings';
-    case 'ee_connector.json': return 'file';
-    case 'env': return 'env';
-    default: return 'unset';
-  }
-}
-
 /* Pure view computation — no DOM. Maps the `relay_config` payload to a per-field
  * view. Absent / malformed → { visible: false } (pre-producer / community).
  *
  * Per field:
- *   - source / sourceLabel / sourceClass: provenance badge.
+ *   - source: config source used only to decide whether an editable text input
+ *     should hold a settings-layer override or inherit from file/env.
  *   - For text: `textValue` is the editable SETTINGS-LAYER override — non-empty
  *     only when the effective source is "settings" (so saving an untouched
  *     inherited field re-sends "" and keeps the file/env fallback). When the
  *     value is inherited, the effective value surfaces as `placeholder` so the
  *     operator still sees what is in effect — for private_key_path this is "" on
  *     inline-PEM (never the PEM) and a path otherwise.
- *   - For bool: `checked` is the effective value; the badge carries provenance.
+ *   - For bool: `checked` is the effective value.
  */
 function _relayConfigComputeView(rc) {
   if (!rc || typeof rc !== 'object') return { visible: false, fields: [] };
@@ -361,8 +368,6 @@ function _relayConfigComputeView(rc) {
       type: f.type,
       inputId: f.inputId,
       source: source,
-      sourceLabel: _relaySourceLabel(source),
-      sourceClass: _relaySourceClass(source),
     };
     if (f.type === 'bool') {
       view.checked = !!effective;
@@ -387,26 +392,9 @@ function _relayConfigInputLocked(el) {
   return false;
 }
 
-function _relayConfigApplyBadge(id, view) {
-  if (typeof document === 'undefined' || !document.getElementById) return;
-  var badge = document.getElementById(id);
-  if (!badge) return;
-  badge.textContent = view.sourceLabel;
-  if (badge.classList) {
-    ['settings', 'file', 'env', 'unset'].forEach(function(c) {
-      badge.classList.remove('relay-source-badge--' + c);
-    });
-    badge.classList.add('relay-source-badge--' + view.sourceClass);
-  }
-  if (typeof badge.setAttribute === 'function') {
-    badge.setAttribute('title', 'Effective source: ' + view.sourceLabel);
-  }
-}
-
 /* DOM apply for the config sub-block. opts.force=true (modal open) repopulates
  * every input and clears dirty flags; otherwise (delta / snapshot) it preserves
- * focused/dirty inputs so a delta never clobbers an in-progress edit. Badges
- * (read-only provenance) always refresh. */
+ * focused/dirty inputs so a delta never clobbers an in-progress edit. */
 function refreshRelayConfigModal(opts) {
   if (typeof document === 'undefined' || !document.getElementById) return;
   opts = opts || {};
@@ -434,7 +422,6 @@ function refreshRelayConfigModal(opts) {
       }
       if (opts.force && input.dataset) delete input.dataset.relayDirty;
     }
-    _relayConfigApplyBadge(f.inputId + '-badge', f);
   }
 }
 

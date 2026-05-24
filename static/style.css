@@ -3030,6 +3030,37 @@ body.standalone-mode .preview-popup {
 .btn-primary:hover { filter: brightness(1.15); }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover { filter: brightness(1.15); }
+.btn-danger-outline {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--red);
+  border: 1px solid color-mix(in srgb, var(--red) 70%, var(--border));
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-danger-outline:hover {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-color: var(--red);
+}
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.btn-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
 .btn-green {
   background: var(--green); color: #fff;
   padding: 5px 14px; border-radius: var(--radius);
@@ -3444,8 +3475,8 @@ body.runtime-embedded #modal-group .modal-summary {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-/* Relay config + provenance (TORQUE:603 #1). Editable settings-layer fields
-   inside the Settings "Relay" section, each with a per-field source badge. */
+/* Relay config (TORQUE:603 #1). Editable settings-layer fields inside the
+   Settings "Relay" section. */
 .gls-relay-config {
   display: flex;
   flex-direction: column;
@@ -3481,23 +3512,6 @@ body.runtime-embedded #modal-group .modal-summary {
   font-size: 11px;
 }
 .gls-relay-config-control input[type="checkbox"] { flex: 0 0 auto; }
-.relay-source-badge {
-  flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: lowercase;
-  letter-spacing: .02em;
-  padding: 1px 6px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.relay-source-badge[hidden] { display: none; }
-.relay-source-badge--settings { color: var(--green); border-color: var(--green); }
-.relay-source-badge--file { color: var(--amber); border-color: var(--amber); }
-.relay-source-badge--env { color: var(--text-dim); }
-.relay-source-badge--unset { color: var(--text-dim); opacity: .7; }
 .gls-relay-config-hint {
   margin: 2px 0 0;
   font-size: 10px;

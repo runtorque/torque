@@ -1003,14 +1003,14 @@ function createRelayStatusHarness() {
     'gls-relay-since',
     'gls-relay-last-error',
   ].forEach((id) => document.register(id));
-  // Relay config + provenance sub-block elements (TORQUE:603 #1).
+  // Relay config sub-block elements (TORQUE:603 #1).
   [
     'gls-relay-config-block',
-    'gls-relay-enabled', 'gls-relay-enabled-badge',
-    'gls-relay-url', 'gls-relay-url-badge',
-    'gls-relay-daemon-id', 'gls-relay-daemon-id-badge',
-    'gls-relay-credential-id', 'gls-relay-credential-id-badge',
-    'gls-relay-private-key-path', 'gls-relay-private-key-path-badge',
+    'gls-relay-enabled',
+    'gls-relay-url',
+    'gls-relay-daemon-id',
+    'gls-relay-credential-id',
+    'gls-relay-private-key-path',
     'gls-relay-probe-slot',
     // Test-connectivity probe sub-block (TORQUE:603 #2).
     'gls-relay-probe-test',
@@ -5522,6 +5522,112 @@ test('modal Relay dot uses the relay-status-dot base so color modifiers win the 
   assert.ok(baseIdx < greenIdx, 'relay-status-dot base precedes its color modifiers');
 });
 
+test('system settings splits Daemon and Relay into subtabs and keeps fields in place', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const systemStart = html.indexOf('data-pane="gls-system"');
+  assert.ok(systemStart >= 0, 'System settings pane exists');
+  const daemonPaneStart = html.indexOf('data-subpane="gls-daemon"', systemStart);
+  const relayPaneStart = html.indexOf('data-subpane="gls-relay"', systemStart);
+  assert.ok(daemonPaneStart > systemStart, 'Daemon subpane exists inside System');
+  assert.ok(relayPaneStart > daemonPaneStart, 'Relay subpane follows Daemon');
+  assert.match(html.slice(systemStart, relayPaneStart), /data-subtab="gls-daemon"/);
+  assert.match(html.slice(systemStart, relayPaneStart), /data-subtab="gls-relay"/);
+
+  const daemonPaneHtml = html.slice(daemonPaneStart, relayPaneStart);
+  const relayPaneEnd = html.indexOf('<div class="modal-actions"', relayPaneStart);
+  const relayPaneHtml = html.slice(relayPaneStart, relayPaneEnd);
+  [
+    'gls-daemon-status-dot',
+    'gls-daemon-version',
+    'gls-daemon-pid',
+    'gls-restart-daemon-btn',
+    'gls-stop-daemon-btn',
+  ].forEach((id) => assert.match(daemonPaneHtml, new RegExp(`id="${id}"`), `${id} stays under Daemon`));
+  [
+    'gls-relay-section',
+    'gls-relay-enabled',
+    'gls-relay-url',
+    'gls-relay-daemon-id',
+    'gls-relay-credential-id',
+    'gls-relay-private-key-path',
+  ].forEach((id) => assert.match(relayPaneHtml, new RegExp(`id="${id}"`), `${id} stays under Relay`));
+});
+
+test('global settings subtabs switch and restore the selected System subtab', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+
+  const pane = new FakeElement();
+  pane.classList.add('gs-pane');
+  pane.dataset.pane = 'gls-system';
+  const daemonTab = new FakeElement();
+  daemonTab.classList.add('gs-subtab', 'active');
+  daemonTab.dataset.subtab = 'gls-daemon';
+  const relayTab = new FakeElement();
+  relayTab.classList.add('gs-subtab');
+  relayTab.dataset.subtab = 'gls-relay';
+  const daemonPane = new FakeElement();
+  daemonPane.classList.add('gs-subpane', 'active');
+  daemonPane.dataset.subpane = 'gls-daemon';
+  const relayPane = new FakeElement();
+  relayPane.classList.add('gs-subpane');
+  relayPane.dataset.subpane = 'gls-relay';
+  [daemonTab, relayTab, daemonPane, relayPane].forEach((el) => pane.appendChild(el));
+  pane.setQuerySelectorAll('.gs-subtab', [daemonTab, relayTab]);
+  pane.setQuerySelectorAll('.gs-subpane', [daemonPane, relayPane]);
+  context.__systemRelayTab = relayTab;
+  context.__systemPane = pane;
+
+  runInContext(context, 'switchGlsSubTab(__systemRelayTab);');
+  assert.equal(relayTab.classList.contains('active'), true);
+  assert.equal(relayPane.classList.contains('active'), true);
+  assert.equal(daemonTab.classList.contains('active'), false);
+  assert.equal(daemonPane.classList.contains('active'), false);
+
+  // Simulate a settings refresh rebuilding active classes, then restore from
+  // the remembered per-pane subtab selection.
+  relayTab.classList.remove('active');
+  relayPane.classList.remove('active');
+  daemonTab.classList.add('active');
+  daemonPane.classList.add('active');
+  document.setSelectorAll('#modal-global-settings .gs-pane', [pane]);
+  runInContext(context, '_syncGlsSubTabs(true);');
+  assert.equal(relayTab.classList.contains('active'), true);
+  assert.equal(relayPane.classList.contains('active'), true);
+  assert.equal(daemonTab.classList.contains('active'), false);
+  assert.equal(daemonPane.classList.contains('active'), false);
+});
+
+test('relay source badges are removed from System settings markup and relay config DOM', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  [
+    'gls-relay-enabled-badge',
+    'gls-relay-url-badge',
+    'gls-relay-daemon-id-badge',
+    'gls-relay-credential-id-badge',
+    'gls-relay-private-key-path-badge',
+  ].forEach((id) => assert.doesNotMatch(html, new RegExp(id), `${id} removed`));
+  assert.doesNotMatch(html, /Effective source/);
+  assert.doesNotMatch(css, /\.relay-source-badge\b/);
+});
+
+test('Stop Daemon uses an outline danger button with an SVG stop icon', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const stopButton = html.match(/<button[^>]*id="gls-stop-daemon-btn"[\s\S]*?<\/button>/);
+  assert.ok(stopButton, 'Stop Daemon button exists');
+  const classAttr = stopButton[0].match(/class="([^"]*)"/);
+  assert.ok(classAttr, 'Stop Daemon has a class attribute');
+  const classes = classAttr[1].split(/\s+/);
+  assert.ok(classes.includes('btn-danger-outline'), 'Stop Daemon uses outline danger style');
+  assert.equal(classes.includes('btn-danger'), false, 'Stop Daemon no longer uses solid danger style');
+  assert.doesNotMatch(stopButton[0], /■/);
+  assert.match(stopButton[0], /<svg\b[\s\S]*<rect\b/, 'Stop Daemon renders a stop SVG');
+  assert.match(css, /\.btn-danger-outline\s*\{[^}]*background:\s*transparent[^}]*border:/s);
+});
+
 test('relay_connection delta patches state in place without a panel/grid rebuild', () => {
   const { context } = createRelayStatusHarness();
   runInContext(context, `
@@ -5639,9 +5745,9 @@ test('relay_connection modal "Relay" row renders from state and hides when absen
   assert.equal(jsonValue(context, `document.getElementById('gls-relay-section').hidden`), true);
 });
 
-/* -- Relay config + provenance (TORQUE:603 #1) ---------------------------- */
+/* -- Relay config (TORQUE:603 #1) ----------------------------------------- */
 
-// A resolved relay_config payload spanning every provenance source, including
+// A resolved relay_config payload spanning every source, including
 // the inline-PEM private_key_path case (source ee_connector.json, value "").
 const RELAY_CONFIG_SAMPLE = {
   config: {
@@ -5668,39 +5774,36 @@ function _relayConfigFieldView(view, key) {
   return view.fields.find((f) => f.key === key);
 }
 
-test('relay_config view maps each provenance source to a badge + settings-layer value', () => {
+test('relay_config view maps each source to settings-layer values without provenance labels', () => {
   const { context } = createRelayStatusHarness();
   const view = _relayConfigView(context, RELAY_CONFIG_SAMPLE);
   assert.equal(view.visible, true);
 
-  // settings-sourced bool: checkbox reflects the effective value; badge=settings.
+  // settings-sourced bool: checkbox reflects the effective value.
   const enabled = _relayConfigFieldView(view, 'enabled');
   assert.equal(enabled.type, 'bool');
   assert.equal(enabled.checked, true);
-  assert.equal(enabled.sourceLabel, 'settings');
-  assert.equal(enabled.sourceClass, 'settings');
+  assert.equal(Object.prototype.hasOwnProperty.call(enabled, 'sourceLabel'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(enabled, 'sourceClass'), false);
 
   // settings-sourced text: value flows into the editable input (no placeholder).
   const url = _relayConfigFieldView(view, 'relay_url');
   assert.equal(url.textValue, 'wss://relay.runtorque.com');
   assert.equal(url.placeholder, '');
-  assert.equal(url.sourceLabel, 'settings');
+  assert.equal(Object.prototype.hasOwnProperty.call(url, 'sourceLabel'), false);
 
   // env-sourced text: NOT a settings override → empty input, effective value as
-  // placeholder, badge=env.
+  // placeholder.
   const daemon = _relayConfigFieldView(view, 'daemon_id');
   assert.equal(daemon.textValue, '');
   assert.equal(daemon.placeholder, 'daemon-123');
-  assert.equal(daemon.sourceLabel, 'env');
-  assert.equal(daemon.sourceClass, 'env');
 
   // ee_connector.json-sourced text: empty input, effective value as placeholder,
-  // badge maps to the 'file' class.
+  // with no badge metadata exposed.
   const cred = _relayConfigFieldView(view, 'credential_id');
   assert.equal(cred.textValue, '');
   assert.equal(cred.placeholder, 'cred-abc');
-  assert.equal(cred.sourceLabel, 'ee_connector.json');
-  assert.equal(cred.sourceClass, 'file');
+  assert.equal(Object.prototype.hasOwnProperty.call(cred, 'sourceClass'), false);
 });
 
 test('relay_config private_key_path is BY PATH only and never leaks inline PEM', () => {
@@ -5710,8 +5813,8 @@ test('relay_config private_key_path is BY PATH only and never leaks inline PEM',
   const key = _relayConfigFieldView(view, 'private_key_path');
   assert.equal(key.textValue, '');
   assert.equal(key.placeholder, '');
-  assert.equal(key.sourceLabel, 'ee_connector.json');
-  assert.equal(key.sourceClass, 'file');
+  assert.equal(Object.prototype.hasOwnProperty.call(key, 'sourceLabel'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(key, 'sourceClass'), false);
 
   // A settings-layer PATH is shown verbatim (it's a path, not a PEM).
   const withPath = _relayConfigView(context, {
@@ -5720,7 +5823,7 @@ test('relay_config private_key_path is BY PATH only and never leaks inline PEM',
   });
   const keyPath = _relayConfigFieldView(withPath, 'private_key_path');
   assert.equal(keyPath.textValue, '/home/op/relay.pem');
-  assert.equal(keyPath.sourceLabel, 'settings');
+  assert.equal(Object.prototype.hasOwnProperty.call(keyPath, 'sourceLabel'), false);
 });
 
 test('relay_config absent / malformed payload renders nothing', () => {
@@ -5730,7 +5833,7 @@ test('relay_config absent / malformed payload renders nothing', () => {
   assert.equal(_relayConfigView(context, 'nope').visible, false);
 });
 
-test('relay_config delta patches state in place + populates fields/badges with no panel rebuild', () => {
+test('relay_config delta patches state in place + populates fields with no panel rebuild', () => {
   const { context, document } = createRelayStatusHarness();
   runInContext(context, `
     state.relay_config = null;
@@ -5761,18 +5864,13 @@ test('relay_config delta patches state in place + populates fields/badges with n
   assert.equal(jsonValue(context, 'renderMainCalls'), 0);
   assert.equal(jsonValue(context, 'renderActivePanelCalls'), 0);
 
-  // Config sub-block shown, inputs + badges populated from provenance.
+  // Config sub-block shown and inputs populated from effective settings/source.
   assert.equal(document.getElementById('gls-relay-config-block').hidden, false);
   assert.equal(document.getElementById('gls-relay-section').hidden, false);
   assert.equal(document.getElementById('gls-relay-url').value, 'wss://relay.runtorque.com');
   assert.equal(document.getElementById('gls-relay-enabled').checked, true);
   assert.equal(document.getElementById('gls-relay-daemon-id').value, '');
   assert.equal(document.getElementById('gls-relay-daemon-id').placeholder, 'daemon-123');
-  assert.equal(document.getElementById('gls-relay-url-badge').textContent, 'settings');
-  assert.equal(
-    document.getElementById('gls-relay-credential-id-badge').classList.contains('relay-source-badge--file'),
-    true,
-  );
   // private_key_path inline-PEM: empty input, never PEM.
   assert.equal(document.getElementById('gls-relay-private-key-path').value, '');
 });
@@ -5794,7 +5892,6 @@ test('relay_config snapshot read populates state and renders the config sub-bloc
   assert.equal(jsonValue(context, 'state.relay_config.config.daemon_id'), 'daemon-123');
   assert.equal(document.getElementById('gls-relay-config-block').hidden, false);
   assert.equal(document.getElementById('gls-relay-url').value, 'wss://relay.runtorque.com');
-  assert.equal(document.getElementById('gls-relay-credential-id-badge').textContent, 'ee_connector.json');
 });
 
 test('relay_config delta preserves a focused / dirty in-progress edit', () => {
@@ -5837,9 +5934,8 @@ test('relay_config delta preserves a focused / dirty in-progress edit', () => {
   assert.equal(urlInput.selectionStart, 5);
   // Dirty (blurred) draft preserved too.
   assert.equal(daemonInput.value, 'draft-daemon');
-  // Badges (read-only provenance) still refresh on the delta.
-  assert.equal(document.getElementById('gls-relay-url-badge').textContent, 'settings');
-  assert.equal(document.getElementById('gls-relay-daemon-id-badge').textContent, 'settings');
+  assert.equal(document.getElementById('gls-relay-url-badge'), null);
+  assert.equal(document.getElementById('gls-relay-daemon-id-badge'), null);
 });
 
 test('relay section shows when relay_config is present even without relay_connection', () => {
