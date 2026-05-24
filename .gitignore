@@ -18,7 +18,8 @@ state.json
 .claude/instructions.md
 .playwright-cli/
 site/
-.env
+*.env
+*.vars
 
 # claude-code MCP lock (runtime artifact)
 .mcp.json.lock
@@ -32,3 +33,4 @@ tests/perf/runs/
 # Rust/Tauri build output
 src-tauri/target/
 src-tauri/gen/
+.torque/worktrees/
