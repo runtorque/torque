@@ -1096,19 +1096,43 @@ def resolve_task(state_data, identifier):
     die(f"Task not found: {identifier}")
 
 
-def detect_context(state_data):
-    """Auto-detect group and parent from the current iTerm2 session.
+def _context_from_cell(cell, agents):
+    group = cell.get("group", "")
 
-    Reads ITERM_SESSION_ID (format: w0t0p0:GUID), matches the GUID
-    against cells in state. Returns (cell, parent_agent, group) or
-    (None, None, None) if not in a Torque-managed session.
+    # If we're in a child terminal, the parent agent is parent_id.
+    # If we're in an agent session, the agent itself is the parent.
+    parent = None
+    if cell.get("parent_id"):
+        parent = agents.get(cell["parent_id"])
+        if parent and _is_tombstoned_cell(parent):
+            parent = None
+    elif cell.get("cell_type") == "agent":
+        parent = cell
+
+    return cell, parent, group
+
+
+def detect_context(state_data):
+    """Auto-detect group and parent from the current Torque session.
+
+    Reads TORQUE_CELL_ID first (standalone/PTY sessions), then falls back
+    to ITERM_SESSION_ID (format: w0t0p0:GUID) for iTerm2/Toolbelt.
+    Returns (cell, parent_agent, group) or (None, None, None) if not in
+    a Torque-managed session.
     """
+    agents = state_data.get("agents", {})
+
+    cell_id = os.environ.get("TORQUE_CELL_ID", "")
+    if cell_id:
+        cell = agents.get(cell_id)
+        if cell and not _is_tombstoned_cell(cell):
+            return _context_from_cell(cell, agents)
+
     iterm_var = os.environ.get("ITERM_SESSION_ID", "")
     if ":" not in iterm_var:
         return None, None, None
 
     guid = iterm_var.split(":", 1)[1]
-    agents = state_data.get("agents", {})
 
     cell = None
     for c in agents.values():
@@ -1121,17 +1145,7 @@ def detect_context(state_data):
     if not cell:
         return None, None, None
 
-    group = cell.get("group", "")
-
-    # If we're in a child terminal, the parent agent is parent_id.
-    # If we're in an agent session, the agent itself is the parent.
-    parent = None
-    if cell.get("parent_id"):
-        parent = agents.get(cell["parent_id"])
-    elif cell.get("cell_type") == "agent":
-        parent = cell
-
-    return cell, parent, group
+    return _context_from_cell(cell, agents)
 
 
 # ---------------------------------------------------------------------------
