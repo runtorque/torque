@@ -11,11 +11,15 @@ iTerm2 sessions.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +35,8 @@ from torque.db_schema import initialize_database  # noqa: E402
 LEGACY_TOOLBELT_RELATIVE = Path(
     "Library/Application Support/iTerm2/Scripts/torque/torque"
 )
+TOOLBELT_DEFAULT_PORT = 18932
+DESKTOP_DEFAULT_PORT = 18933
 
 
 class MigrationError(RuntimeError):
@@ -160,17 +166,126 @@ def _read_live_pid(pid_file: Path) -> int | None:
     return pid if _pid_alive(pid) else None
 
 
-def _refuse_if_target_daemon_live(target_directory: Path) -> None:
-    # Minimal guard: the primary profile runtime may leave a pid file in the
-    # profile data dir.  Do not try to stop it from this script.
+def _normalize_path(path: Path | str) -> Path:
+    return Path(os.path.expanduser(str(path))).resolve(strict=False)
+
+
+def _parse_port(value: object) -> int | None:
+    try:
+        port = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return port if 0 < port < 65536 else None
+
+
+def _candidate_live_daemon_ports(profile_slug: str) -> list[int]:
+    """Ports worth probing for a live primary runtime.
+
+    Primary desktop defaults to 18933; standalone/toolbelt defaults to 18932.
+    Env overrides cover custom launches made from the same shell.
+    """
+    ports: list[int] = []
+
+    def add(port: int | None) -> None:
+        if port is not None and port not in ports:
+            ports.append(port)
+
+    add(_parse_port(os.environ.get("TORQUE_PORT")))
+    add(_parse_port(os.environ.get("TORQUE_DESKTOP_PORT")))
+    if profile_slug == "desktop":
+        add(DESKTOP_DEFAULT_PORT)
+        add(TOOLBELT_DEFAULT_PORT)
+    else:
+        add(TOOLBELT_DEFAULT_PORT)
+        add(DESKTOP_DEFAULT_PORT)
+    return ports
+
+
+def _fetch_live_runtime_config(port: int, *, timeout: float = 0.35) -> dict | None:
+    payload = json.dumps({"cmd": "get_config"}).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/cmd",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            decoded = json.loads(response.read())
+    except (
+        OSError,
+        TimeoutError,
+        ValueError,
+        json.JSONDecodeError,
+        socket.timeout,
+        urllib.error.URLError,
+    ):
+        return None
+    if not isinstance(decoded, dict) or not decoded.get("ok"):
+        return None
+    data = decoded.get("data")
+    if not isinstance(data, dict):
+        return None
+    runtime = data.get("runtime")
+    return runtime if isinstance(runtime, dict) else None
+
+
+def _runtime_matches_target(
+    runtime: dict,
+    *,
+    target_directory: Path,
+    profile_slug: str,
+) -> bool:
+    data_dir = str(runtime.get("data_dir", "") or "").strip()
+    if data_dir:
+        try:
+            if _normalize_path(data_dir) == _normalize_path(target_directory):
+                return True
+        except (OSError, RuntimeError):
+            pass
+
+    profile = str(runtime.get("profile", "") or "").strip()
+    return bool(profile) and _slugify_profile(profile) == profile_slug
+
+
+def _refuse_if_target_daemon_live(
+    target_directory: Path,
+    *,
+    profile_slug: str,
+    live_runtime_probe: Callable[[int], dict | None] | None = None,
+) -> None:
+    # Legacy/possible future cheap path: if a profile pid file exists and is
+    # live, stop.  Primary desktop/standalone currently do not write this file,
+    # so also probe actual default/env runtime ports below.
     pid_file = target_directory / "torque.pid"
     pid = _read_live_pid(pid_file)
-    if pid is None:
-        return
-    raise MigrationError(
-        f"Refusing to overwrite {target_directory}: live target daemon pid {pid} "
-        f"found in {pid_file}. Stop Torque first, then rerun this script."
-    )
+    if pid is not None:
+        raise MigrationError(
+            f"Refusing to overwrite {target_directory}: live target daemon "
+            f"pid {pid} found in {pid_file}. Stop Torque first, then rerun "
+            "this script."
+        )
+
+    probe = live_runtime_probe or _fetch_live_runtime_config
+    for port in _candidate_live_daemon_ports(profile_slug):
+        runtime = probe(port)
+        if not runtime or not _runtime_matches_target(
+            runtime,
+            target_directory=target_directory,
+            profile_slug=profile_slug,
+        ):
+            continue
+        runtime_data_dir = str(runtime.get("data_dir", "") or "").strip()
+        runtime_profile = str(runtime.get("profile", "") or "").strip()
+        runtime_pid = str(runtime.get("pid", "") or "").strip()
+        pid_part = f" pid={runtime_pid}" if runtime_pid else ""
+        raise MigrationError(
+            f"Refusing to overwrite {target_directory}: live Torque daemon"
+            f"{pid_part} on port {port} is using profile "
+            f"{runtime_profile or '(unset)'} / data dir "
+            f"{runtime_data_dir or '(unset)'}. Stop Torque first, then rerun "
+            "this script (or pass --force if you accept the risk)."
+        )
 
 
 def _replace_target_from_source(source_db: Path, target_db: Path) -> None:
@@ -184,10 +299,14 @@ def _replace_target_from_source(source_db: Path, target_db: Path) -> None:
             pass
 
     source_uri = f"file:{source_db}?mode=ro"
-    with sqlite3.connect(source_uri, uri=True) as source_conn:
-        with sqlite3.connect(str(target_db)) as target_conn:
-            source_conn.backup(target_conn)
-            target_conn.commit()
+    source_conn = sqlite3.connect(source_uri, uri=True)
+    target_conn = sqlite3.connect(str(target_db))
+    try:
+        source_conn.backup(target_conn)
+        target_conn.commit()
+    finally:
+        target_conn.close()
+        source_conn.close()
 
 
 def _count(conn: sqlite3.Connection, sql: str) -> int:
@@ -362,6 +481,7 @@ def migrate_toolbelt_to_profile(
     now: Callable[[], datetime] | None = None,
     force: bool = False,
     out: TextIO = sys.stdout,
+    live_runtime_probe: Callable[[int], dict | None] | None = None,
 ) -> MigrationSummary:
     home = home or Path.home()
     source_directory = legacy_toolbelt_dir(home)
@@ -370,9 +490,14 @@ def migrate_toolbelt_to_profile(
     if not source_db.exists():
         raise MigrationError(f"Legacy Toolbelt DB not found: {source_db}")
 
+    profile_slug = _slugify_profile(profile)
     target_directory = profile_dir(profile, home)
     if not force:
-        _refuse_if_target_daemon_live(target_directory)
+        _refuse_if_target_daemon_live(
+            target_directory,
+            profile_slug=profile_slug,
+            live_runtime_probe=live_runtime_probe,
+        )
     target_db = target_directory / "torque.db"
 
     backup_root = (
@@ -394,7 +519,7 @@ def migrate_toolbelt_to_profile(
 
     summary = MigrationSummary(
         profile=profile,
-        profile_slug=_slugify_profile(profile),
+        profile_slug=profile_slug,
         source_db=source_db,
         target_db=target_db,
         backup_dir=backup_dir,
@@ -420,7 +545,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Ignore a live target profile torque.pid guard.",
+        help="Ignore live target profile daemon guards.",
     )
     return parser
 
