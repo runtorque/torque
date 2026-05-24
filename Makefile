@@ -28,7 +28,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test perf-deps perf-baseline perf-delta
+.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
 
 ## install: Set up the secondary iTerm2 Toolbelt script project and copy all files
 install:
@@ -465,6 +465,25 @@ assert-community-package:
 ## test: Run the automated regression suite
 test: lint
 	@$(SANITIZE_TORQUE_TEST_ENV) python3 -m unittest discover -s tests -v
+
+## test-ee: Run enterprise-only regression tests (requires ee/ checkout)
+test-ee: lint
+	@for path in \
+		ee \
+		ee/python/torque_ee_connector \
+		ee/frontend/remote/js \
+		ee/LICENSE \
+		ee/frontend/README.md \
+		ee/python/README.md \
+		ee/relay/README.md; do \
+		[ -e "$$path" ] || { echo "Error: $$path is required for make test-ee"; exit 1; }; \
+	done
+	@$(SANITIZE_TORQUE_TEST_ENV) TORQUE_WITH_EE=1 python3 -m unittest -v \
+		tests.test_ee_connector \
+		tests.test_ee_license_boundary \
+		tests.test_ee_python_package \
+		tests.test_relay_probe \
+		tests.test_frontend_remote
 
 ## perf-deps: Prepare the cached Python environment used by perf harness targets
 perf-deps:

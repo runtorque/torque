@@ -35,6 +35,21 @@ class MakefileInstallTests(unittest.TestCase):
         self.assertNotIn("/dev/nulle", proc.stdout)
         self.assertNotIn("\\true", proc.stdout)
 
+    def test_test_ee_target_runs_explicit_enterprise_suite(self):
+        text = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+        self.assertIn("test-ee:", text)
+        self.assertIn("TORQUE_WITH_EE=1", text)
+        for module in (
+            "tests.test_ee_connector",
+            "tests.test_ee_license_boundary",
+            "tests.test_ee_python_package",
+            "tests.test_relay_probe",
+            "tests.test_frontend_remote",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, text)
+
 
 if __name__ == "__main__":
     unittest.main()

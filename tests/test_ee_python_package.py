@@ -4,10 +4,19 @@ import sys
 import unittest
 from pathlib import Path
 
+try:
+    from ee_gate import ee_skip_reason, ee_tests_enabled
+except ModuleNotFoundError:  # Support `python -m unittest tests.<module>`.
+    from tests.ee_gate import ee_skip_reason, ee_tests_enabled
+
+_EE_REQUIRED_PATHS = ["ee/python/torque_ee_connector"]
+_EE_TESTS_ENABLED = ee_tests_enabled(_EE_REQUIRED_PATHS)
+_EE_SKIP_REASON = ee_skip_reason(_EE_REQUIRED_PATHS)
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class EnterprisePythonPackageSkeletonTests(unittest.TestCase):
     def test_connector_package_import_boundary_is_inert_until_configured(self):
         ee_python = ROOT / "ee" / "python"

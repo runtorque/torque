@@ -3,10 +3,24 @@ import tomllib
 import unittest
 from pathlib import Path
 
+try:
+    from ee_gate import ee_skip_reason, ee_tests_enabled
+except ModuleNotFoundError:  # Support `python -m unittest tests.<module>`.
+    from tests.ee_gate import ee_skip_reason, ee_tests_enabled
+
+_EE_REQUIRED_PATHS = [
+    "ee/LICENSE",
+    "ee/frontend/README.md",
+    "ee/python/README.md",
+    "ee/relay/README.md",
+]
+_EE_TESTS_ENABLED = ee_tests_enabled(_EE_REQUIRED_PATHS)
+_EE_SKIP_REASON = ee_skip_reason(_EE_REQUIRED_PATHS)
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class EeLicenseBoundaryTests(unittest.TestCase):
     def test_root_license_explicitly_excludes_ee(self):
         text = (ROOT / "LICENSE").read_text()

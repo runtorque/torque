@@ -17,13 +17,24 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+try:
+    from ee_gate import ee_skip_reason, ee_tests_enabled
+except ModuleNotFoundError:  # Support `python -m unittest tests.<module>`.
+    from tests.ee_gate import ee_skip_reason, ee_tests_enabled
+
+_EE_REQUIRED_PATHS = ["ee/python/torque_ee_connector"]
+_EE_TESTS_ENABLED = ee_tests_enabled(_EE_REQUIRED_PATHS)
+_EE_SKIP_REASON = ee_skip_reason(_EE_REQUIRED_PATHS)
+
 # The probe lazily imports the EE connector helpers; tests add ee/python to the
 # path so the real SSL-verify classifier is exercised in the ca_missing case.
-EE_PYTHON = Path(__file__).resolve().parents[1] / "ee" / "python"
-if str(EE_PYTHON) not in sys.path:
-    sys.path.insert(0, str(EE_PYTHON))
+if _EE_TESTS_ENABLED:
+    EE_PYTHON = Path(__file__).resolve().parents[1] / "ee" / "python"
+    if str(EE_PYTHON) not in sys.path:
+        sys.path.insert(0, str(EE_PYTHON))
 
-from torque_ee_connector.connector import _is_tls_verify_error  # noqa: E402
+if _EE_TESTS_ENABLED:
+    from torque_ee_connector.connector import _is_tls_verify_error  # noqa: E402
 
 
 def _settings(**overrides):
@@ -64,6 +75,7 @@ def _fake_deps(**overrides):
     return types.SimpleNamespace(**base)
 
 
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class RelayProbeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.cloud_hooks = importlib.reload(

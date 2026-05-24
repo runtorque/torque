@@ -2,7 +2,17 @@ import subprocess
 import unittest
 from pathlib import Path
 
+try:
+    from ee_gate import ee_skip_reason, ee_tests_enabled
+except ModuleNotFoundError:  # Support `python -m unittest tests.<module>`.
+    from tests.ee_gate import ee_skip_reason, ee_tests_enabled
 
+_EE_REQUIRED_PATHS = ["ee/frontend/remote/js"]
+_EE_TESTS_ENABLED = ee_tests_enabled(_EE_REQUIRED_PATHS)
+_EE_SKIP_REASON = ee_skip_reason(_EE_REQUIRED_PATHS)
+
+
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class FrontendRemoteTests(unittest.TestCase):
     """Run the remote web UI (ee/frontend/remote) Node regression suite.
 
