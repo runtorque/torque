@@ -271,6 +271,24 @@ test('group settings markup renders board sync provider subtab and task sync mou
   assert.match(css, /\.board-card-github-chip/);
 });
 
+test('board sync inline-row buttons keep labels on one line (no wrap)', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  // Labels render as intact single-line text, not split across lines.
+  assert.match(html, /id="gs-board-sync-use-current-repo"[^>]*>Use current repo<\/button>/);
+  assert.match(html, /id="gs-board-sync-reload-projects"[^>]*>Reload projects<\/button>/);
+
+  // CSS prevents the button from being squeezed/wrapped inside the flex row.
+  assert.match(css, /\.board-sync-inline-row button\s*\{[^}]*flex:\s*0 0 auto[^}]*\}/);
+  assert.match(css, /\.board-sync-inline-row button\s*\{[^}]*white-space:\s*nowrap[^}]*\}/);
+});
+
+test('group settings drops leftover Option A implementation-choice comment', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.doesNotMatch(html, /Option A:/);
+});
+
 test('group settings renders engineer merge mode selector', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
