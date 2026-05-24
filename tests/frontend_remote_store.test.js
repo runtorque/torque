@@ -31,6 +31,10 @@ function agentMessage(id, agentId, body, extra) {
   });
 }
 
+function agentListIds(store) {
+  return Array.from(store.agentList(), (agent) => agent.agentId);
+}
+
 test('ingestInbound creates per-agent conversations from traffic', () => {
   const store = loadStore();
   store.ingestInbound(agentMessage('m1', 'worker-a', 'hi from a'));
@@ -119,6 +123,102 @@ test('snapshot consumes the real :578 row shape (flat payload + kind) oldest-fir
   store.ingestInbound(agentMessage('s2', 'w', 'second (live edit)'));
   assert.equal(store.conversations['w'].messages.length, 2, 'overlap de-dupes via upsert');
   assert.equal(store.conversations['w'].messageIndex['s2'].body, 'second (live edit)');
+});
+
+test('snapshot roster stamps conversation kind keyed by agent id', () => {
+  const store = loadStore();
+  const applied = store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'architect-1', name: 'Architect One', kind: 'architect' },
+      { id: 'worker-1', name: 'Worker One', kind: 'worker' },
+    ] },
+  });
+
+  assert.equal(applied, 0, 'agent roster alone does not count as message rows');
+  assert.equal(store.conversations['architect-1'].agentName, 'Architect One');
+  assert.equal(store.conversations['architect-1'].kind, 'architect');
+  assert.equal(store.conversations['worker-1'].kind, 'worker');
+  assert.equal(store.agentList().find((agent) => agent.agentId === 'worker-1').kind, 'worker');
+});
+
+test('agentList sorts by kind hierarchy, then lastActivityMs DESC within tiers', () => {
+  const store = loadStore();
+  const base = Date.parse('2026-05-24T12:00:00.000Z');
+  const iso = (offset) => new Date(base + offset).toISOString();
+
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: iso(0),
+    payload: {
+      agents: [
+        { id: 'arch', name: 'Architect', kind: 'architect' },
+        { id: 'eng', name: 'Engineer', kind: 'engineer' },
+        { id: 'worker-old', name: 'Worker Old', kind: 'worker' },
+        { id: 'worker-new', name: 'Worker New', kind: 'worker' },
+        { id: 'term', name: 'Terminal', kind: 'terminal' },
+        { id: 'blank-old', name: 'Blank', kind: '' },
+        { id: 'unknown-kind', name: 'Unknown Kind', kind: 'intern' },
+      ],
+      messages: [
+        { kind: 'agent_message', agent_id: 'arch', message_id: 'm-arch',
+          message: 'arch', sender_kind: 'architect', created_at: iso(1000) },
+        { kind: 'agent_message', agent_id: 'eng', message_id: 'm-eng',
+          message: 'eng', sender_kind: 'engineer', created_at: iso(9000) },
+        { kind: 'agent_message', agent_id: 'worker-old', message_id: 'm-worker-old',
+          message: 'worker old', sender_kind: 'worker', created_at: iso(2000) },
+        { kind: 'agent_message', agent_id: 'worker-new', message_id: 'm-worker-new',
+          message: 'worker new', sender_kind: 'worker', created_at: iso(8000) },
+        { kind: 'agent_message', agent_id: 'term', message_id: 'm-term',
+          message: 'terminal', sender_kind: 'terminal', created_at: iso(7000) },
+        { kind: 'agent_message', agent_id: 'blank-old', message_id: 'm-blank-old',
+          message: 'blank kind', sender_kind: 'worker', created_at: iso(3000) },
+        { kind: 'agent_message', agent_id: 'unknown-kind', message_id: 'm-unknown',
+          message: 'unknown kind', sender_kind: 'worker', created_at: iso(6000) },
+        { kind: 'agent_message', agent_id: 'not-in-roster', message_id: 'm-not-in-roster',
+          message: 'missing roster', sender_kind: 'worker', created_at: iso(5000) },
+      ],
+    },
+  });
+
+  assert.deepEqual(agentListIds(store), [
+    'arch',
+    'eng',
+    'worker-new',
+    'worker-old',
+    'term',
+    'unknown-kind',
+    'not-in-roster',
+    'blank-old',
+  ]);
+  assert.deepEqual(Array.from(store.agentList())
+    .filter((agent) => agent.agentId.startsWith('worker-'))
+    .map((agent) => agent.agentId), ['worker-new', 'worker-old'],
+    'workers use lastActivityMs DESC as the secondary sort');
+  assert.deepEqual(Array.from(store.agentList()).slice(-3).map((agent) => agent.agentId),
+    ['unknown-kind', 'not-in-roster', 'blank-old'],
+    'unknown, blank, and missing-roster kinds sort last by activity');
+});
+
+test('snapshot without agent roster degrades to lastActivityMs-only ordering', () => {
+  const store = loadStore();
+  const base = Date.parse('2026-05-24T12:00:00.000Z');
+  const iso = (offset) => new Date(base + offset).toISOString();
+
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: iso(0),
+    payload: { messages: [
+      { kind: 'agent_message', agent_id: 'old', message_id: 'm-old',
+        message: 'old', sender_kind: 'worker', created_at: iso(1000) },
+      { kind: 'agent_message', agent_id: 'new', message_id: 'm-new',
+        message: 'new', sender_kind: 'worker', created_at: iso(3000) },
+      { kind: 'agent_message', agent_id: 'mid', message_id: 'm-mid',
+        message: 'mid', sender_kind: 'worker', created_at: iso(2000) },
+    ] },
+  });
+
+  assert.deepEqual(agentListIds(store), ['new', 'mid', 'old']);
+  assert.deepEqual(Array.from(store.agentList(), (agent) => agent.kind), ['', '', ''],
+    'without payload.agents, all conversations remain in the unknown tier');
 });
 
 test('snapshot unanswered blocking ask is actionable but does not bump unread', () => {
