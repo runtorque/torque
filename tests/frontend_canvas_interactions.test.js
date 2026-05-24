@@ -185,6 +185,33 @@ test('canvas tree model surfaces orphaned (owner-less) workers in standalone.wor
   );
 });
 
+test('canvas tree model surfaces a worker whose owning engineer is absent in the loose-workers bar (not dropped)', () => {
+  // owner_engineer_id points at an engineer that is NOT in the group/tree
+  // (e.g. tombstoned or out-of-group). The worker itself exists, so it must
+  // never silently vanish — it falls through to the loose-workers bar, the
+  // same surface used for genuinely owner-less workers.
+  const context = createContext();
+  const tombstonedOwner = engineer('eng-gone', 'Tombstoned Engineer', 'arch-1', 2);
+  tombstonedOwner.deleted_at = 1700000000;
+  seed(context, [
+    architect('arch-1', 'Architect One', 1),
+    tombstonedOwner,
+    worker('worker-orphaned-owner', 'Orphaned-owner Worker', 'eng-gone', 3),
+  ]);
+
+  const model = buildTrees(context, 'alpha');
+
+  // The tombstoned owner engineer is excluded from the tree...
+  assert.equal(model.trees.length, 1);
+  assert.equal(model.trees[0].engineers.length, 0);
+  assert.equal(model.standalone.engineers.length, 0);
+  // ...but its orphaned-owner worker still appears in the loose-workers bar.
+  assert.deepEqual(
+    model.standalone.workers.map((w) => w.id),
+    ['worker-orphaned-owner'],
+  );
+});
+
 test('canvas tree model excludes tombstoned agents from trees and standalone buckets', () => {
   const context = createContext();
   const deadArch = architect('arch-dead', 'Dead Architect', 1);
