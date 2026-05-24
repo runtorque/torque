@@ -2792,8 +2792,6 @@ function _showGlobalSettingsModal(data) {
   }
 
   // General > Board
-  document.getElementById('gls-default-lanes').value =
-    (s.default_lanes || []).join('\n');
   document.getElementById('gls-max-pipeline-depth').value =
     s.max_pipeline_depth !== undefined ? s.max_pipeline_depth : 10;
 
@@ -2945,10 +2943,6 @@ function _resetKeybinding(action) {
 }
 
 function submitGlobalSettings() {
-  var lanesText = document.getElementById('gls-default-lanes').value.trim();
-  var lanes = lanesText
-    ? lanesText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean)
-    : [];
   var xtermScrollback = _parseGlsXtermScrollback();
   if (xtermScrollback === null) return;
 
@@ -2958,7 +2952,6 @@ function submitGlobalSettings() {
     focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
     focus_on_click: document.getElementById('gls-focus-on-click').checked,
     xterm_scrollback: xtermScrollback,
-    default_lanes: lanes,
     keybindings: _glsKeybindings,
     max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
     max_event_log: parseInt(document.getElementById('gls-max-event-log').value) || 500,

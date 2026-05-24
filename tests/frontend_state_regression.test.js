@@ -5694,6 +5694,18 @@ test('system settings splits Daemon and Relay into subtabs and keeps fields in p
   ].forEach((id) => assert.match(relayPaneHtml, new RegExp(`id="${id}"`), `${id} stays under Relay`));
 });
 
+test('global settings Board subtab omits deprecated default lanes control', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const boardStart = html.indexOf('data-subpane="gls-board"');
+  const keybindingsStart = html.indexOf('<!-- Keybindings tab -->', boardStart);
+  assert.ok(boardStart >= 0 && keybindingsStart > boardStart, 'Board settings subpane exists');
+  const boardHtml = html.slice(boardStart, keybindingsStart);
+  assert.doesNotMatch(boardHtml, /id="gls-default-lanes"/);
+  assert.doesNotMatch(boardHtml, /Default lanes/);
+  assert.doesNotMatch(boardHtml, /one per line, used for new installations/);
+  assert.match(boardHtml, /id="gls-max-pipeline-depth"/, 'Max pipeline depth remains in Board settings');
+});
+
 test('global settings subtabs switch and restore the selected System subtab', () => {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -6107,11 +6119,10 @@ test('global settings save sends the relay_* settings-layer keys', () => {
   // Minimal General-tab fields submitGlobalSettings reads.
   [
     'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
-    'gls-focus-on-click', 'gls-default-lanes', 'gls-max-pipeline-depth',
+    'gls-focus-on-click', 'gls-max-pipeline-depth',
     'gls-max-event-log', 'gls-xterm-scrollback',
   ].forEach((id) => document.register(id));
   document.getElementById('gls-default-cmd').value = '';
-  document.getElementById('gls-default-lanes').value = '';
   document.getElementById('gls-max-pipeline-depth').value = '10';
   document.getElementById('gls-max-event-log').value = '500';
   document.getElementById('gls-xterm-scrollback').value = '9000';
@@ -6136,6 +6147,7 @@ test('global settings save sends the relay_* settings-layer keys', () => {
   assert.equal(saved.relay_daemon_id, '');
   assert.equal(saved.relay_credential_id, '');
   assert.equal(saved.relay_private_key_path, '/home/op/relay.pem');
+  assert.equal(Object.prototype.hasOwnProperty.call(saved, 'default_lanes'), false);
 });
 
 test('global settings save OMITS relay_enabled when the checkbox is untouched (tri-state inherit)', () => {
@@ -6144,7 +6156,7 @@ test('global settings save OMITS relay_enabled when the checkbox is untouched (t
   runInContext(context, 'send = function(m) { sendCalls.push(m); };');
   [
     'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
-    'gls-focus-on-click', 'gls-default-lanes', 'gls-max-pipeline-depth',
+    'gls-focus-on-click', 'gls-max-pipeline-depth',
     'gls-max-event-log', 'gls-xterm-scrollback',
   ].forEach((id) => document.register(id));
   document.getElementById('gls-max-pipeline-depth').value = '10';
@@ -6176,7 +6188,7 @@ test('global settings save sends relay_enabled=false when the checkbox is explic
   runInContext(context, 'send = function(m) { sendCalls.push(m); };');
   [
     'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
-    'gls-focus-on-click', 'gls-default-lanes', 'gls-max-pipeline-depth',
+    'gls-focus-on-click', 'gls-max-pipeline-depth',
     'gls-max-event-log', 'gls-xterm-scrollback',
   ].forEach((id) => document.register(id));
   document.getElementById('gls-max-pipeline-depth').value = '10';
@@ -13157,7 +13169,6 @@ test('global scrollback setting edit updates existing and new embedded terminals
     'gls-filter-window',
     'gls-focus-new-tabs',
     'gls-focus-on-click',
-    'gls-default-lanes',
     'gls-max-pipeline-depth',
     'gls-max-event-log',
     'gls-xterm-scrollback',
@@ -13166,7 +13177,6 @@ test('global scrollback setting edit updates existing and new embedded terminals
   document.getElementById('gls-filter-window').checked = true;
   document.getElementById('gls-focus-new-tabs').checked = true;
   document.getElementById('gls-focus-on-click').checked = false;
-  document.getElementById('gls-default-lanes').value = 'Backlog\nDone';
   document.getElementById('gls-max-pipeline-depth').value = '10';
   document.getElementById('gls-max-event-log').value = '500';
   document.getElementById('gls-xterm-scrollback').value = '9000';
@@ -13185,6 +13195,7 @@ test('global scrollback setting edit updates existing and new embedded terminals
   assert.equal(sandbox.sendCalls.length, 1);
   const saved = sandbox.sendCalls[0].settings;
   assert.equal(saved.xterm_scrollback, 9000);
+  assert.equal(Object.prototype.hasOwnProperty.call(saved, 'default_lanes'), false);
 
   context.__savedSettings = saved;
   const newSurface = new FakeElement('new-surface');
@@ -13208,13 +13219,11 @@ test('global settings modal rejects out-of-range xterm scrollback', () => {
     'gls-filter-window',
     'gls-focus-new-tabs',
     'gls-focus-on-click',
-    'gls-default-lanes',
     'gls-max-pipeline-depth',
     'gls-max-event-log',
     'gls-xterm-scrollback',
   ].forEach((id) => document.register(id));
   document.getElementById('gls-default-cmd').value = '';
-  document.getElementById('gls-default-lanes').value = '';
   document.getElementById('gls-max-pipeline-depth').value = '10';
   document.getElementById('gls-max-event-log').value = '500';
   document.getElementById('gls-xterm-scrollback').value = '50';
