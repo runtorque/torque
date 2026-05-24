@@ -1641,6 +1641,45 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
 
+    def test_launch_resolver_for_cell_routes_workers_but_not_terminals(self):
+        def generic():
+            return "generic"
+
+        def worker():
+            return "worker"
+
+        worker_cell = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+        )
+        terminal_cell = self.state_mod.AgentCell(
+            id='term-1',
+            name='Shell',
+            group='g',
+            cell_type='terminal',
+            kind='worker',
+        )
+
+        self.assertIs(
+            self.server_mod._launch_resolver_for_cell(
+                worker_cell,
+                resolve_agent_launch_config=generic,
+                resolve_worker_launch_config=worker,
+            ),
+            worker,
+        )
+        self.assertIs(
+            self.server_mod._launch_resolver_for_cell(
+                terminal_cell,
+                resolve_agent_launch_config=generic,
+                resolve_worker_launch_config=worker,
+            ),
+            generic,
+        )
+
     async def test_relaunch_after_worktree_removal_resets_live_agent_session(self):
         cell = self.state_mod.AgentCell(
             id='agent-1',

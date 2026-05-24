@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS group_settings (
     agent_boot_command          TEXT NOT NULL DEFAULT '',
     agent_model                 TEXT NOT NULL DEFAULT '',
     agent_reasoning_effort      TEXT NOT NULL DEFAULT '',
+    worker_provider             TEXT NOT NULL DEFAULT '',
+    worker_boot_command         TEXT NOT NULL DEFAULT '',
+    worker_model                TEXT NOT NULL DEFAULT '',
+    worker_reasoning_effort     TEXT NOT NULL DEFAULT '',
     git_worktree                INTEGER NOT NULL DEFAULT 0,
     worktree_base_dir           TEXT NOT NULL DEFAULT '.torque/worktrees',
     worktree_base_branch        TEXT NOT NULL DEFAULT '',
@@ -928,6 +932,19 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "agent_provider TEXT NOT NULL DEFAULT ''")
         conn.commit()
     for col in ("agent_model", "agent_reasoning_effort"):
+        try:
+            conn.execute(
+                f"SELECT {col} FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE group_settings ADD COLUMN "
+                f"{col} TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+    for col in (
+            "worker_provider",
+            "worker_boot_command",
+            "worker_model",
+            "worker_reasoning_effort"):
         try:
             conn.execute(
                 f"SELECT {col} FROM group_settings LIMIT 0")

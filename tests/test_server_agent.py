@@ -18,6 +18,8 @@ class _FakeState:
                  architect_model="", architect_reasoning_effort="",
                  architect_directory="", architect_profile="",
                  architect_shell="", architect_tab_color="",
+                 worker_provider="", worker_boot_command="",
+                 worker_model="", worker_reasoning_effort="",
                  agent_provider="", agent_boot_command="",
                  agent_model="", agent_reasoning_effort="",
                  agent_tab_color="", tab_color="",
@@ -29,6 +31,10 @@ class _FakeState:
             agent_boot_command=agent_boot_command,
             agent_model=agent_model,
             agent_reasoning_effort=agent_reasoning_effort,
+            worker_provider=worker_provider,
+            worker_boot_command=worker_boot_command,
+            worker_model=worker_model,
+            worker_reasoning_effort=worker_reasoning_effort,
             agent_tab_color=agent_tab_color,
             tab_color=tab_color,
             agent_profile="",
@@ -235,6 +241,45 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(resolved["worktree"])
 
+    def test_resolve_engineer_launch_config_inherits_agent_defaults_when_empty(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="codex",
+                agent_model="gpt-5",
+                agent_reasoning_effort="high",
+                git_worktree=True,
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_engineer_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-5 -c model_reasoning_effort=high",
+        )
+        self.assertFalse(resolved["worktree"])
+
+    def test_resolve_engineer_launch_config_uses_system_default_when_all_empty(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_command="codex", git_worktree=True),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_engineer_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "")
+        self.assertEqual(resolved["agent_type"], "codex")
+        self.assertEqual(resolved["command"], "codex")
+        self.assertFalse(resolved["worktree"])
+
     def test_resolve_engineer_launch_config_applies_terminal_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
@@ -316,6 +361,45 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(resolved["worktree"])
 
+    def test_resolve_architect_launch_config_inherits_agent_defaults_when_empty(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="codex",
+                agent_model="gpt-5",
+                agent_reasoning_effort="high",
+                git_worktree=True,
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-5 -c model_reasoning_effort=high",
+        )
+        self.assertFalse(resolved["worktree"])
+
+    def test_resolve_architect_launch_config_uses_system_default_when_all_empty(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_command="codex", git_worktree=True),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "")
+        self.assertEqual(resolved["agent_type"], "codex")
+        self.assertEqual(resolved["command"], "codex")
+        self.assertFalse(resolved["worktree"])
+
     def test_resolve_architect_launch_config_applies_terminal_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
@@ -355,6 +439,87 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         resolved = service.resolve_architect_launch_config("backend")
 
         self.assertEqual(resolved["tab_color"], "")
+
+    def test_resolve_worker_launch_config_prefers_worker_specific_overrides(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="claude-code",
+                worker_provider="codex",
+                worker_model="gpt-5.4",
+                worker_reasoning_effort="high",
+                git_worktree=True,
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(resolved["agent_type"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-5.4 -c model_reasoning_effort=high",
+        )
+        self.assertTrue(resolved["worktree"])
+
+    def test_resolve_worker_launch_config_inherits_agent_defaults_when_empty(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="codex",
+                agent_model="gpt-5",
+                agent_reasoning_effort="medium",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-5 -c model_reasoning_effort=medium",
+        )
+
+    def test_resolve_worker_launch_config_uses_system_default_when_all_empty(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(default_command="codex"),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_worker_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "")
+        self.assertEqual(resolved["agent_type"], "codex")
+        self.assertEqual(resolved["command"], "codex")
+
+    def test_generic_launch_config_ignores_worker_specific_overrides(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                worker_provider="codex",
+                worker_model="gpt-5",
+                worker_reasoning_effort="high",
+                default_command="claude",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_agent_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "")
+        self.assertEqual(resolved["command"], "claude")
+        self.assertNotIn("gpt-5", resolved["command"])
 
     def test_resolve_agent_launch_config_detects_default_provider_from_command(self):
         service = self.server_agent_mod.AgentLaunchService(

@@ -1061,6 +1061,90 @@ class TorqueDBTests(unittest.TestCase):
             4,
         )
 
+    def test_worker_launch_settings_round_trip_and_default_empty(self):
+        self.db.save_groups({"g": [], "h": []}, {"g": "g", "h": "h"})
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(
+                worker_provider="codex",
+                worker_boot_command="codex --worker",
+                worker_model="gpt-5.4",
+                worker_reasoning_effort="high",
+            ),
+        )
+        self.db.save_group_settings("h", GroupSettings())
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(
+            loaded["group_settings"]["g"]["worker_provider"],
+            "codex",
+        )
+        self.assertEqual(
+            loaded["group_settings"]["g"]["worker_boot_command"],
+            "codex --worker",
+        )
+        self.assertEqual(
+            loaded["group_settings"]["g"]["worker_model"],
+            "gpt-5.4",
+        )
+        self.assertEqual(
+            loaded["group_settings"]["g"]["worker_reasoning_effort"],
+            "high",
+        )
+        self.assertEqual(loaded["group_settings"]["h"]["worker_provider"], "")
+        self.assertEqual(loaded["group_settings"]["h"]["worker_model"], "")
+        columns = {
+            row[1]
+            for row in self.db._conn.execute("PRAGMA table_info(group_settings)")
+        }
+        self.assertTrue({
+            "worker_provider",
+            "worker_boot_command",
+            "worker_model",
+            "worker_reasoning_effort",
+        }.issubset(columns))
+
+    def test_worker_launch_settings_migration_adds_columns_to_existing_rows(self):
+        legacy_path = Path(self.tmp.name) / "legacy-worker-launch-settings.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        legacy._conn.execute("DROP TABLE group_settings")
+        legacy._conn.execute(
+            "CREATE TABLE group_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "agent_provider TEXT NOT NULL DEFAULT '')"
+        )
+        legacy._conn.execute(
+            "INSERT INTO group_settings (group_name, agent_provider) "
+            "VALUES ('g', 'codex')"
+        )
+        legacy._conn.commit()
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(group_settings)"
+            )
+        }
+        self.assertTrue({
+            "worker_provider",
+            "worker_boot_command",
+            "worker_model",
+            "worker_reasoning_effort",
+        }.issubset(columns))
+        loaded = migrated.load_all()["group_settings"]["g"]
+        self.assertEqual(loaded["agent_provider"], "codex")
+        self.assertEqual(loaded["worker_provider"], "")
+        self.assertEqual(loaded["worker_boot_command"], "")
+        self.assertEqual(loaded["worker_model"], "")
+        self.assertEqual(loaded["worker_reasoning_effort"], "")
+
     def test_default_engineer_specializations_migration_adds_column(self):
         # Simulate an older DB by dropping the column then re-running init.
         legacy_path = Path(self.tmp.name) / "legacy-default-specs.db"

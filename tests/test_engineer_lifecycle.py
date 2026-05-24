@@ -349,6 +349,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         def fake_resolve_agent_launch_config(group, *, base_dir="",
                                              explicit_template="",
                                              overrides=None):
+            raise AssertionError("worker creation must use worker launch resolver")
+
+        def fake_resolve_worker_launch_config(group, *, base_dir="",
+                                             explicit_template="",
+                                             overrides=None):
             self.assertEqual(group, "torque")
             self.assertEqual(base_dir, temp_dir)
             self.assertEqual(explicit_template, "worker/reviewer")
@@ -383,6 +388,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 state,
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=fake_resolve_agent_launch_config,
+                resolve_worker_launch_config=fake_resolve_worker_launch_config,
                 create_agent_with_config=service.create_agent_with_config,
                 send_agent_prompt=fake_send_agent_prompt,
             )

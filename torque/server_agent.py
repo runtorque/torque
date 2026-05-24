@@ -387,6 +387,28 @@ class AgentLaunchService:
         resolved["worktree"] = False
         return resolved
 
+    def resolve_worker_launch_config(self, group: str, *,
+                                     base_dir: str = "",
+                                     explicit_template: str = "",
+                                     overrides: dict[str, Any] | None = None) -> dict:
+        """Resolve launch config for worker agents in a group."""
+        merged = dict(overrides or {})
+        gs = self.state.get_group_settings(group)
+        if getattr(gs, "worker_provider", ""):
+            merged["provider"] = gs.worker_provider
+        if getattr(gs, "worker_boot_command", ""):
+            merged["command"] = gs.worker_boot_command
+        if getattr(gs, "worker_model", ""):
+            merged["model"] = gs.worker_model
+        if getattr(gs, "worker_reasoning_effort", ""):
+            merged["reasoning_effort"] = gs.worker_reasoning_effort
+        return self.resolve_agent_launch_config(
+            group,
+            base_dir=base_dir,
+            explicit_template=explicit_template,
+            overrides=merged,
+        )
+
     def resolve_architect_launch_config(self, group: str, *,
                                       base_dir: str = "",
                                       explicit_template: str = "",
