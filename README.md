@@ -7,8 +7,8 @@
 > Torque is a local agent-orchestration workspace for terminal-native
 > developers. Manage AI coding agents, run them in isolated git worktrees,
 > dispatch work from a kanban board, and let an embedded engineer coordinate
-> the wave — from a native desktop window, your browser, or your iTerm2
-> Toolbelt.
+> the wave — from a native desktop window, your browser, or the deprecated
+> secondary iTerm2 Toolbelt.
 
 ![Torque workspace showing the agent grid, engineer workload, task board, and a live terminal session.](docs/images/main-screenshot.jpg)
 
@@ -34,7 +34,7 @@ workspace.
 What you get:
 
 - A visual group, agent, and terminal grid in a native desktop window, a
-  browser, or the iTerm2 Toolbelt sidebar.
+  browser, or the deprecated secondary iTerm2 Toolbelt sidebar.
 - **Automatic git worktrees** per agent, with checkpointing, diff tracking,
   and engineer-driven merges back to your base branch.
 - A built-in **kanban board** with lanes, drag-and-drop, derived subtasks,
@@ -105,10 +105,12 @@ Standalone mode launches the daemon and opens Torque in your default browser.
 It is useful when you want a wider workspace or are running on a remote /
 shared machine.
 
-### iTerm2 Toolbelt mode
+### iTerm2 Toolbelt mode (deprecated secondary)
 
-For macOS users who live in iTerm2, Torque can also embed directly in the
-Toolbelt sidebar so it sits next to your terminal sessions.
+The iTerm2 Toolbelt still works for now, but it is deprecated. The primary
+surfaces are standalone browser mode (`make standalone`) and the desktop app
+(`make run`). If you still use the Toolbelt, migrate its data to a profile
+with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
 
 ```bash
 make deps
@@ -207,7 +209,8 @@ requests use the templates in [`.github/`](.github/).
 
 Torque is single-user, local-first, and currently macOS-focused. The native
 desktop app and the standalone browser mode are the recommended entry points;
-the iTerm2 Toolbelt integration is supported but no longer the default path.
+the iTerm2 Toolbelt integration is a deprecated secondary surface kept working
+for rollback safety during the migration window.
 Linux and Windows are follow-up targets: the daemon itself is portable, but
 the terminal-control layer (iTerm2 today, Ghostty next) is the strongest
 platform dependency.
