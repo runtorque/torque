@@ -285,6 +285,36 @@ class EnterpriseConnector:
         else:
             future.set_result(payload)
 
+    def _resolve_uncorrelated_mint_error(self, envelope: Mapping[str, Any]) -> bool:
+        """Surface pre-correlation relay message errors to an in-flight mint.
+
+        A stale relay deployment can reject ``mint_client_establish_code`` during
+        protocol parsing, before the DO has a parsed envelope id to echo as
+        ``ref_id``.  Without a ref_id the normal pending-mint correlation cannot
+        fire, so the user sees a misleading timeout.  When there is exactly one
+        pending mint, treat an uncorrelated relay ``*_message_error`` as the
+        best available diagnostic for that mint.  This changes only observability
+        (the relay has already rejected the frame); it does not alter what the
+        relay mints, rejects, or persists.
+        """
+        payload = dict(envelope.get("payload") or {})
+        if not _is_uncorrelated_relay_message_error(payload):
+            return False
+        active = [
+            future for future in self._pending_mints.values() if not future.done()
+        ]
+        if len(active) != 1:
+            return False
+        active[0].set_result(
+            {
+                "__error__": True,
+                "code": payload.get("code") or "relay_message_error",
+                "message": payload.get("message")
+                or "relay rejected the request before it could be correlated",
+            }
+        )
+        return True
+
     def _establish_url(self, code: str) -> str:
         """Build the same-origin /establish device link for a minted code.
 
@@ -411,6 +441,12 @@ class EnterpriseConnector:
             # waiter as a typed failure rather than just being logged-and-dropped.
             if ref_id and ref_id in self._pending_mints:
                 self._resolve_pending_mint(parsed, error=True)
+                return
+            if self._resolve_uncorrelated_mint_error(parsed):
+                log.warning(
+                    "EE relay pre-correlation message error surfaced to pending mint: %s",
+                    parsed.get("payload"),
+                )
                 return
             log.warning("EE relay error envelope received: %s", parsed.get("payload"))
             return
@@ -1028,6 +1064,15 @@ async def _await_report_result(result: Any) -> None:
         await result
     except Exception:
         log.exception("EE connector async report_connection_state callback failed")
+
+
+def _is_uncorrelated_relay_message_error(payload: Mapping[str, Any]) -> bool:
+    """Whether a relay error was emitted before request-id correlation existed."""
+    ref_id = str((payload or {}).get("ref_id") or "").strip()
+    if ref_id:
+        return False
+    code = str((payload or {}).get("code") or "").strip()
+    return bool(code and code.endswith("_message_error"))
 
 
 def _mint_error(code: str, message: str) -> dict[str, Any]:
