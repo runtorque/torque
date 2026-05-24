@@ -3669,6 +3669,10 @@ body.runtime-embedded #modal-group .modal-summary {
   flex: 1 1 auto;
   min-width: 0;
 }
+.board-sync-inline-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .board-sync-project-summary {
   min-height: 14px;
   margin-top: 4px;
