@@ -133,13 +133,17 @@ function _canvasBuildTrees(groupName) {
       standalone.engineers.push({ engineer: cell, workers: workers });
       seen.add(cell.id);
     } else if (_canvasIsWorker(cell)) {
-      // Owner-less workers AND workers whose owning engineer is absent
-      // from the group/tree both surface in the loose-workers bar. A
-      // worker reaches here only when it was not placed under any
-      // engineer above; if its owner engineer were present, the worker
-      // would already be in `seen` via that engineer's worker list. So a
-      // non-empty owner here means the owner is gone (tombstoned /
-      // out-of-group) — never silently drop an agent that exists.
+      const owner = String(cell.owner_engineer_id || cell.created_by_engineer_id || '').trim();
+      // Skip only if the owner engineer is actually PRESENT in this group:
+      // a loose engineer may be iterated later in this same loop (after its
+      // worker, since `all` follows state.agents insertion order, not
+      // engineer-first), and it attaches its workers via an `all.filter`
+      // that does not consult `seen` — so pushing here too would
+      // double-render the worker. Workers with no owner, a tombstoned owner
+      // (filtered from `all` upstream), or an out-of-group owner all fall
+      // through to the loose-workers bar so an agent that exists is never
+      // silently dropped.
+      if (owner && all.some(function(c) { return c.id === owner && (c.kind || '') === 'engineer'; })) continue;
       standalone.workers.push(cell);
       seen.add(cell.id);
     }
