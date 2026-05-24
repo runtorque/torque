@@ -131,6 +131,17 @@ body.tauri-mode header {
 body.tauri-mode #taskbar-conn-dot {
   display: inline-block;
 }
+/* Labelled daemon status in the taskbar. Reuses the relay indicator visual
+   language, but keeps the historical #taskbar-conn-dot as the WS/daemon dot
+   anchor so relay_status.js can still mount beside it. Unlike the old bare
+   dot, this labelled indicator is browser-visible as well as desktop-visible. */
+.daemon-connection-status #taskbar-conn-dot {
+  display: inline-block;
+  margin-left: 0;
+}
+#taskbar .daemon-connection-status {
+  display: inline-flex;
+}
 /* Relay-connection indicator (TORQUE:560). Daemon<->relay-cloud connection —
    deliberately distinct from the daemon `#conn-dot` (browser<->daemon WS) via
    the "Relay" label so the two are never confusable. Mounts beside whichever
@@ -157,8 +168,8 @@ body.tauri-mode #taskbar-conn-dot {
 .relay-status-dot--amber { background: var(--amber); }
 .relay-status-dot--red { background: var(--red); }
 .relay-status-dot--grey { background: var(--text-dim); }
-/* When mounted in the Tauri-only taskbar, keep the indicator visible in the
-   browser too (the bare `#taskbar-conn-dot` is Tauri-only). */
+/* When mounted in the taskbar, keep the indicator visible in browser and
+   desktop profiles, matching the labelled daemon status. */
 #taskbar .relay-status { display: inline-flex; }
 .hdr-spacer { flex: 1; min-width: 0; }
 .hdr-btn {
@@ -4147,11 +4158,14 @@ body.runtime-embedded .taskbar-app.active {
 .taskbar-aux-btn {
   display: none;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 0;
+  width: 26px;
+  min-width: 26px;
   min-height: 24px;
   font-size: 10px;
   color: var(--text-dim);
-  padding: 4px 10px;
+  padding: 4px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--bg-cell);
@@ -4160,6 +4174,19 @@ body.runtime-embedded .taskbar-app.active {
 body.runtime-embedded .taskbar-aux-btn {
   display: inline-flex;
   font-size: 11px;
+}
+.taskbar-aux-icon,
+.taskbar-aux-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.taskbar-aux-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .taskbar-aux-btn:hover {
   color: var(--text);
