@@ -364,6 +364,9 @@ function closeModals() {
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
   if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();
+  // Display-once relay device-link (TORQUE:603 #3): drop any minted secret +
+  // confirm gesture so nothing transient survives the modal close.
+  if (typeof _relayDeviceLinkReset === 'function') _relayDeviceLinkReset();
   _modalStack = [];
   _addEngineerGroup = '';
   _addEngineerArchitectId = '';

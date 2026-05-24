@@ -1215,6 +1215,45 @@
           <div id="gls-relay-probe-result" class="gls-relay-probe-result"
                role="status" aria-live="polite" hidden></div>
         </div>
+        <!-- Device-link generator (TORQUE:603 #3). Display-once: an operator
+             mints a single-use, short-lived pairing link, shown ONCE as an
+             inline-SVG QR + copyable establish URL + raw code + TTL so it can
+             be scanned/copied onto a phone to establish a remote web session.
+             The minted secret lives only in an ephemeral local in
+             relay_status.js — NEVER in state / localStorage / sessionStorage —
+             and its DOM nodes are REMOVED (not merely hidden) on Dismiss, on
+             modal close, and on any relay_config / relay_connection delta
+             refresh (display-once; re-viewing requires a fresh mint). The mint
+             command is only sent with confirm:true AFTER the explicit local
+             confirm gesture below (window.confirm is broken in WKWebView). The
+             QR is generated locally from the vendored encoder — the credential-
+             bearing URL never leaves the browser. Slot visibility rides the
+             Relay section (toggled in _relaySectionUpdateVisibility); the
+             generate button's enabled state is refreshed by delta, but the
+             secret is never re-rendered from a delta. -->
+        <div id="gls-relay-device-link-slot" class="gls-relay-device-link-slot" hidden>
+          <button type="button" class="btn-secondary" id="gls-relay-device-link-generate"
+                  onclick="relayDeviceLinkRequest()">Generate device link</button>
+          <p id="gls-relay-device-link-hint" class="gls-relay-device-link-hint" hidden></p>
+          <div id="gls-relay-device-link-confirm" class="gls-relay-device-link-confirm"
+               role="group" aria-label="Confirm device link generation" hidden>
+            <span class="gls-relay-device-link-confirm-msg">This mints a single-use,
+              short-lived device link, shown only once.</span>
+            <span class="gls-relay-device-link-confirm-actions">
+              <button type="button" class="btn-primary" id="gls-relay-device-link-confirm-yes"
+                      onclick="relayDeviceLinkConfirmGenerate()">Generate</button>
+              <button type="button" class="btn-cancel" id="gls-relay-device-link-confirm-no"
+                      onclick="relayDeviceLinkCancelConfirm()">Cancel</button>
+            </span>
+          </div>
+          <div id="gls-relay-device-link-error" class="gls-relay-device-link-error"
+               role="status" aria-live="polite" hidden></div>
+          <!-- Secret nodes are injected/removed here by relay_status.js. Kept
+               EMPTY in static HTML: the display-once secret is never part of the
+               persisted/delta-rebuildable DOM. -->
+          <div id="gls-relay-device-link-panel" class="gls-relay-device-link-panel"
+               role="status" aria-live="polite" hidden></div>
+        </div>
       </section>
     </div>
 
@@ -1624,6 +1663,9 @@
 <script src="/static/js/constants.js"></script>
 <script src="/static/js/compact.js"></script>
 <script src="/static/js/ws.js"></script>
+<!-- Vendored MIT QR encoder (provenance header in-file); MUST load before
+     relay_status.js, which uses the `qrcode` global for the device-link QR. -->
+<script src="/static/js/vendor/qrcode-generator.js"></script>
 <script src="/static/js/relay_status.js"></script>
 <script src="/static/js/render.js"></script>
 <script src="/static/js/canvas.js"></script>

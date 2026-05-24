@@ -507,6 +507,8 @@ function connect() {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'relay_test_result') {
       if (typeof handleRelayTestResult === 'function') handleRelayTestResult(msg);
+    } else if (msg.type === 'relay_device_link') {
+      if (typeof handleRelayDeviceLink === 'function') handleRelayDeviceLink(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
     } else if (msg.type === 'memory_entries') {
