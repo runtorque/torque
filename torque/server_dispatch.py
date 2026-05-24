@@ -52,6 +52,44 @@ def _is_busy_agent(state: MatrixState, agent_id: str) -> bool:
     return state.agent_is_busy(agent_id)
 
 
+def _agent_active_current_task(state: MatrixState, agent_id: str):
+    """Return the task named by current_task_id when it is truly active.
+
+    ``state.agent_is_busy`` deliberately falls back to any assigned To Do /
+    In Progress task so other UI/accounting paths can see a live assignment.
+    The auto-dispatch pump needs a narrower signal for existing-agent queue
+    promotion: a queued follow-up assigned to its target agent must not make
+    that idle agent look busy, but a genuinely running ``current_task_id`` must
+    still hold the lane until it completes.
+    """
+    cell = state.agents.get(agent_id)
+    if not cell or state.agent_is_tombstoned(cell) or cell.cell_type != "agent":
+        return None
+    current_task_id = str(getattr(cell, "current_task_id", "") or "").strip()
+    if not current_task_id:
+        return None
+    task = state.board_tasks.get(current_task_id)
+    if not state.task_occupies_execution_slot(task, agent_id=agent_id):
+        return None
+    return task
+
+
+def _agent_blocking_active_task(state: MatrixState, agent_id: str, *,
+                                ignore_task_id: str = ""):
+    """Return an active task that should block targeted queue promotion."""
+    task = _agent_active_current_task(state, agent_id)
+    if task:
+        return task
+    ignore_task_id = str(ignore_task_id or "").strip()
+    for task in state.agent_active_tasks(agent_id):
+        if task.id == ignore_task_id:
+            continue
+        if task.lane == "To Do":
+            continue
+        return task
+    return None
+
+
 def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
     active = set()
     engineer_id = state.get_group_settings(group).engineer_agent_id
@@ -429,20 +467,47 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
             target_agent_id = entry.target_agent_id
             if target_agent_id:
                 target = state.agents.get(target_agent_id)
-                if not target or target.cell_type != "agent" or target.group != group_name:
+                if (
+                    not target
+                    or target.cell_type != "agent"
+                    or target.group != group_name
+                ):
                     entry.target_agent_id = ""
                     state._db_save_auto_dispatch_queue(group_name)
                     target_agent_id = ""
             active_agents = _active_worker_ids(state, group_name)
-            needs_capacity = not target_agent_id
+            capacity_active_agents = active_agents
             if target_agent_id:
-                needs_capacity = not _is_busy_agent(state, target_agent_id)
-            if needs_capacity and len(active_agents) >= entry.max_concurrent:
+                target_active_task = _agent_blocking_active_task(
+                    state,
+                    target_agent_id,
+                    ignore_task_id=task.id,
+                )
+                if target_active_task:
+                    if target_active_task.id == task.id:
+                        state.auto_dispatch_queue_remove_task(task.id)
+                        continue
+                    log.info(
+                        "auto-dispatch queue target busy for group=%s: "
+                        "agent=%s active_task=%s, deferring task=%s",
+                        group_name,
+                        target_agent_id,
+                        target_active_task.id,
+                        entry.task_id,
+                    )
+                    break
+                # ``active_agents`` still uses the broad busy signal for
+                # global accounting, where assigned To Do tasks intentionally
+                # count as live work.  For this targeted promotion, ignore the
+                # target's own queued follow-up so it cannot block itself.
+                capacity_active_agents = set(active_agents)
+                capacity_active_agents.discard(target_agent_id)
+            if len(capacity_active_agents) >= entry.max_concurrent:
                 log.info(
                     "auto-dispatch queue capacity reached for group=%s: "
                     "%d/%d, deferring task=%s",
                     group_name,
-                    len(active_agents),
+                    len(capacity_active_agents),
                     entry.max_concurrent,
                     entry.task_id,
                 )
