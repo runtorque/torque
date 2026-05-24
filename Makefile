@@ -4,20 +4,27 @@ SCRIPT_DIR     := $(ITERM2_PROJECT)/torque
 MAIN_SCRIPT    := torque.py
 AUTOLAUNCH_DIR := $(ITERM2_SCRIPTS)/AutoLaunch
 PRIMARY_APP_DIR ?= $(HOME)/.torque/app
+TORQUE_RUNTIME_ROOT ?= $(HOME)/.torque/runtime
+TORQUE_RUNTIME_VENV ?= $(TORQUE_RUNTIME_ROOT)/venv
+TORQUE_RUNTIME_PYTHON ?= $(TORQUE_RUNTIME_VENV)/bin/python
+TORQUE_BASE_PYTHON ?= python3
+TORQUE_RUNTIME_REQUIREMENTS ?= requirements/desktop.txt
+TORQUE_TOOLBELT_REQUIREMENTS ?= requirements/toolbelt-legacy.txt
 PRIMARY_PORT    ?= 18933
 TOOLBELT_PORT   ?= 18932
+TORQUE_MIN_PYTHON := 3.10
 
-# Global iTerm2 Python environment (used to bootstrap the project env)
+# Global iTerm2 Python environment (legacy Toolbelt-only runtime)
 GLOBAL_ENV     := $(shell ls -d $(HOME)/.config/iterm2/AppSupport/iterm2env-[0-9]* 2>/dev/null \
                     | sort -V | tail -1)
 
-# Project-local Python (preferred once the env exists)
+# Project-local iTerm2 Python (legacy Toolbelt-only runtime)
 PROJECT_PYTHON := $(shell ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/python3 \
                     2>/dev/null | sort -V | tail -1)
 GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versions/*/bin/python3 \
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
-TORQUE_PYTHON  := $(or $(TORQUE_PYTHON_EXECUTABLE),$(ITERM2_PYTHON),python3)
+TORQUE_PYTHON  := $(TORQUE_RUNTIME_PYTHON)
 
 PERF_MATRIX    ?= 10,20,30
 PERF_DURATION  ?= 15
@@ -28,7 +35,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
+.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt bootstrap deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
 
 ## install: Set up the secondary iTerm2 Toolbelt script project and copy all files
 install:
@@ -94,7 +101,7 @@ install:
 		    2>/dev/null | sort -V | tail -1); \
 	fi; \
 	if [ -n "$$PYTHON" ]; then \
-		"$$PYTHON" -m pip install -q aiohttp jinja2 pyyaml orjson 2>/dev/null || true; \
+		"$$PYTHON" -m pip install -q -r "$(TORQUE_TOOLBELT_REQUIREMENTS)" 2>/dev/null || true; \
 	fi
 	@echo ""
 	@echo "Installed to $(SCRIPT_DIR)"
@@ -146,23 +153,27 @@ uninstall:
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
-## deps: Install runtime dependencies into Torque's Python environment
-deps:
-	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Enable the iTerm2 Python API or run make install-toolbelt once to bootstrap it."; \
+## bootstrap: Create or repair Torque's owned primary runtime venv
+bootstrap:
+	@base_python="$(TORQUE_BASE_PYTHON)"; \
+	if ! command -v "$$base_python" >/dev/null 2>&1; then \
+		echo "Error: python3 is required to bootstrap Torque's runtime venv."; \
+		echo "Install Python $(TORQUE_MIN_PYTHON)+ and rerun: make deps"; \
+		echo "Or set TORQUE_BASE_PYTHON=/path/to/python$(TORQUE_MIN_PYTHON)+"; \
 		exit 1; \
-	fi
-	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml orjson
-	@echo "Done. Using: $(ITERM2_PYTHON)"
+	fi; \
+	"$$base_python" scripts/bootstrap_runtime_venv.py \
+		--python "$$base_python" \
+		--venv "$(TORQUE_RUNTIME_VENV)" \
+		--requirements "$(TORQUE_RUNTIME_REQUIREMENTS)"
 
-## desktop-deps: Install optional native desktop-shell dependency
-desktop-deps:
-	@if [ -z "$(TORQUE_PYTHON)" ]; then \
-		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
-		exit 1; \
-	fi
-	"$(TORQUE_PYTHON)" -m pip install pywebview
-	@echo "Installed pywebview into: $(TORQUE_PYTHON)"
+## deps: Install runtime dependencies into Torque's owned primary venv
+deps: bootstrap
+	@echo "Done. Using Torque runtime: $(TORQUE_RUNTIME_PYTHON)"
+
+## desktop-deps: Compatibility alias; pywebview is included in the primary runtime
+desktop-deps: deps
+	@echo "pywebview is included in $(TORQUE_RUNTIME_REQUIREMENTS) and installed in: $(TORQUE_RUNTIME_PYTHON)"
 
 ## run: Launch the primary desktop app (native shell backed by standalone daemon)
 run: desktop
@@ -235,7 +246,7 @@ _check_not_in_worker:
 	esac
 
 ## deploy: Stop the primary standalone/desktop daemon and install app files
-deploy: _check_not_in_worker
+deploy: _check_not_in_worker deps
 	@$(MAKE) --no-print-directory stop TORQUE_PORT="$(or $(TORQUE_PORT),$(PRIMARY_PORT))"
 	@$(MAKE) --no-print-directory install-standalone cli
 	@echo ""
@@ -269,9 +280,9 @@ cli:
 	esac
 
 ## standalone: Run Torque in standalone-only browser mode in the foreground
-standalone: install-standalone
-	@if [ -z "$(TORQUE_PYTHON)" ]; then \
-		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
+standalone: deps install-standalone
+	@if [ -z "$(TORQUE_RUNTIME_PYTHON)" ]; then \
+		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
 	@profile="$(or $(TORQUE_PROFILE),standalone)"; \
@@ -290,12 +301,12 @@ standalone: install-standalone
 	env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
-		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)"
+		"$(TORQUE_RUNTIME_PYTHON)" "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)"
 
 ## standalone-bg: Best-effort detached standalone launch
-standalone-bg: install-standalone
-	@if [ -z "$(TORQUE_PYTHON)" ]; then \
-		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
+standalone-bg: deps install-standalone
+	@if [ -z "$(TORQUE_RUNTIME_PYTHON)" ]; then \
+		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/standalone.pid"; \
@@ -313,7 +324,7 @@ standalone-bg: install-standalone
 	nohup env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
-		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)" \
+		"$(TORQUE_RUNTIME_PYTHON)" "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)" \
 		>> "$$data_dir/torque.log" 2>&1 < /dev/null & \
 	pid=$$!; \
 	echo "$$pid" > "$$pid_file"; \
@@ -321,9 +332,9 @@ standalone-bg: install-standalone
 	echo "Open http://127.0.0.1:$(or $(TORQUE_PORT),18932)/ in a browser"
 
 ## desktop: Run Torque in a native pywebview window backed by a standalone server
-desktop: install-standalone
-	@if [ -z "$(TORQUE_PYTHON)" ]; then \
-		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
+desktop: deps install-standalone
+	@if [ -z "$(TORQUE_RUNTIME_PYTHON)" ]; then \
+		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
 	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
@@ -347,12 +358,12 @@ desktop: install-standalone
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="spawn" \
-		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/torque_desktop.py"
+		"$(TORQUE_RUNTIME_PYTHON)" "$(PRIMARY_APP_DIR)/torque_desktop.py"
 
 ## desktop-attach: Attach the native shell to an existing matching standalone Torque server
-desktop-attach: install-standalone
-	@if [ -z "$(TORQUE_PYTHON)" ]; then \
-		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
+desktop-attach: deps install-standalone
+	@if [ -z "$(TORQUE_RUNTIME_PYTHON)" ]; then \
+		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
 	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
@@ -376,7 +387,7 @@ desktop-attach: install-standalone
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="attach" \
-		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/torque_desktop.py"
+		"$(TORQUE_RUNTIME_PYTHON)" "$(PRIMARY_APP_DIR)/torque_desktop.py"
 
 ## tauri-dev: Run Tauri shell in dev mode (live reload, daemon spawned). Equivalent of `make desktop`.
 tauri-dev:
@@ -391,7 +402,7 @@ tauri-dev:
 		[ -n "$$safe_profile" ] || safe_profile=default; \
 		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
-	python="$(or $(TORQUE_PYTHON_EXECUTABLE),$(ITERM2_PYTHON),python3)"; \
+	python="$(or $(TORQUE_PYTHON_EXECUTABLE),$(TORQUE_RUNTIME_PYTHON))"; \
 	mode="$${TORQUE_DESKTOP_MODE:-spawn}"; \
 	echo "Starting Torque Tauri shell on http://127.0.0.1:$$port/"; \
 	echo "Using desktop profile: $$profile"; \
@@ -424,18 +435,23 @@ open:
 
 ## check: Verify prerequisites
 check:
-	@echo "iTerm2 Python: $(or $(ITERM2_PYTHON),NOT FOUND)"
-	@echo "Torque Python: $(TORQUE_PYTHON)"
-	@if [ -n "$(ITERM2_PYTHON)" ]; then \
+	@echo "Torque runtime venv: $(TORQUE_RUNTIME_VENV)"
+	@echo "Torque runtime Python: $(TORQUE_RUNTIME_PYTHON)"
+	@if [ -x "$(TORQUE_RUNTIME_PYTHON)" ]; then \
 		echo "aiohttp:"; \
-		"$(ITERM2_PYTHON)" -c "import aiohttp; print('  installed:', aiohttp.__version__)" 2>/dev/null \
+		"$(TORQUE_RUNTIME_PYTHON)" -c "import aiohttp; print('  installed:', aiohttp.__version__)" 2>/dev/null \
 			|| echo "  NOT installed (run: make deps)"; \
 		echo "orjson:"; \
-		"$(ITERM2_PYTHON)" -c "import orjson; print('  installed:', orjson.__version__)" 2>/dev/null \
+		"$(TORQUE_RUNTIME_PYTHON)" -c "import orjson; print('  installed:', orjson.__version__)" 2>/dev/null \
 			|| echo "  NOT installed (run: make deps)"; \
 		echo "pywebview:"; \
-		"$(ITERM2_PYTHON)" -c "import webview; print('  installed:', getattr(webview, '__version__', 'unknown'))" 2>/dev/null \
-			|| echo "  NOT installed (run: make desktop-deps)"; \
+		"$(TORQUE_RUNTIME_PYTHON)" -c "import webview; print('  installed:', getattr(webview, '__version__', 'unknown'))" 2>/dev/null \
+			|| echo "  NOT installed (run: make deps)"; \
+	else \
+		echo "  Runtime venv not ready (run: make deps)"; \
+	fi
+	@echo "iTerm2 Python (legacy Toolbelt): $(or $(ITERM2_PYTHON),NOT FOUND)"
+	@if [ -n "$(ITERM2_PYTHON)" ]; then \
 		echo "iterm2:"; \
 		"$(ITERM2_PYTHON)" -c "import iterm2; print('  installed')" 2>/dev/null \
 			|| echo "  NOT installed"; \

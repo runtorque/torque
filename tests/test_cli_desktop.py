@@ -24,6 +24,18 @@ class CliDesktopTests(unittest.TestCase):
     def setUp(self):
         self.cli = _load_cli_module()
         self.entrypoint = Path(__file__).resolve().parents[1] / "torque_desktop.py"
+        self._env_patch = mock.patch.dict(os.environ, {
+            "TORQUE_DATA_DIR": "",
+            "TORQUE_DESKTOP_DATA_DIR": "",
+            "TORQUE_DESKTOP_PROFILE": "",
+            "TORQUE_DESKTOP_PORT": "",
+            "TORQUE_DESKTOP_PYTHON": "",
+            "TORQUE_PORT": "",
+            "TORQUE_PROFILE": "",
+            "TORQUE_PYTHON_EXECUTABLE": "",
+        }, clear=False)
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
         self.cli._ensure_desktop_runtime_ready = lambda python_path: None
         self._orig_popen = self.cli.subprocess.Popen
         self.addCleanup(
@@ -134,7 +146,21 @@ class CliDesktopTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 7)
 
-    def test_resolve_desktop_python_prefers_iterm2_candidate_over_current_python(self):
+    def test_resolve_desktop_python_prefers_runtime_candidate_over_iterm2(self):
+        self.cli._candidate_torque_runtime_pythons = lambda: [
+            Path("/torque/runtime/python")
+        ]
+        self.cli._candidate_iterm2_pythons = lambda: [
+            Path("/global/python3"),
+            Path("/project/python3"),
+        ]
+
+        resolved = self.cli._resolve_desktop_python("")
+
+        self.assertEqual(resolved, Path("/torque/runtime/python"))
+
+    def test_resolve_desktop_python_falls_back_to_iterm2_candidate(self):
+        self.cli._candidate_torque_runtime_pythons = lambda: []
         self.cli._candidate_iterm2_pythons = lambda: [
             Path("/global/python3"),
             Path("/project/python3"),
@@ -143,6 +169,19 @@ class CliDesktopTests(unittest.TestCase):
         resolved = self.cli._resolve_desktop_python("")
 
         self.assertEqual(resolved, Path("/project/python3"))
+
+    def test_resolve_desktop_python_honors_torque_python_executable(self):
+        self.cli._candidate_torque_runtime_pythons = lambda: [
+            Path("/torque/runtime/python")
+        ]
+        self.cli._candidate_iterm2_pythons = lambda: []
+
+        with mock.patch.dict(os.environ, {
+            "TORQUE_PYTHON_EXECUTABLE": "/custom/torque-python",
+        }, clear=True):
+            resolved = self.cli._resolve_desktop_python("")
+
+        self.assertEqual(resolved, Path("/custom/torque-python"))
 
     def test_resolve_desktop_profile_ignores_general_torque_profile(self):
         with mock.patch.dict(os.environ, {
@@ -205,6 +244,7 @@ class CliDesktopTests(unittest.TestCase):
                     cli._ensure_desktop_runtime_ready(fake_python)
 
         self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("make deps", stderr.getvalue())
         self.assertIn("make desktop-deps", stderr.getvalue())
         self.assertIn("--python", stderr.getvalue())
 

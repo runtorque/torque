@@ -55,6 +55,8 @@ def _yaml():
     return _yaml_mod
 ITERM2_RUNTIME_DIR = Path(os.path.expanduser(
     "~/Library/Application Support/iTerm2/Scripts/torque/torque"))
+TORQUE_RUNTIME_PYTHON = Path(os.path.expanduser(
+    "~/.torque/runtime/venv/bin/python"))
 
 
 def _truthy_env(name):
@@ -143,10 +145,24 @@ def _candidate_iterm2_pythons():
     return []
 
 
+def _candidate_torque_runtime_pythons():
+    if TORQUE_RUNTIME_PYTHON.is_file():
+        return [TORQUE_RUNTIME_PYTHON.resolve()]
+    return []
+
+
 def _resolve_desktop_python(explicit=""):
-    path = (explicit or "").strip() or os.environ.get("TORQUE_DESKTOP_PYTHON", "").strip()
+    path = (
+        (explicit or "").strip()
+        or os.environ.get("TORQUE_PYTHON_EXECUTABLE", "").strip()
+        or os.environ.get("TORQUE_DESKTOP_PYTHON", "").strip()
+    )
     if path:
         return Path(os.path.expanduser(path))
+
+    candidates = _candidate_torque_runtime_pythons()
+    if candidates:
+        return candidates[-1]
 
     candidates = _candidate_iterm2_pythons()
     if candidates:
@@ -175,9 +191,10 @@ def _ensure_desktop_runtime_ready(python_path):
         die(
             "pywebview is not installed in the Python runtime that will launch "
             f"Torque desktop: {python_path}\n"
-            "  If you want the iTerm2-managed runtime, run: make desktop-deps\n"
+            "  For the Torque-owned runtime, run: make deps\n"
+            "  (make desktop-deps remains a compatibility alias.)\n"
             "  Otherwise install pywebview into the interpreter passed via "
-            "--python or TORQUE_DESKTOP_PYTHON."
+            "--python, TORQUE_PYTHON_EXECUTABLE, or TORQUE_DESKTOP_PYTHON."
         )
 
 

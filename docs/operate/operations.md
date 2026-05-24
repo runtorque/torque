@@ -10,8 +10,8 @@ This is the primary day-to-day mode. Torque runs in a real native window
 through `pywebview`, backed by a standalone daemon:
 
 ```bash
+make deps
 make deploy
-make desktop-deps
 make run
 ```
 
@@ -85,7 +85,6 @@ Initial primary standalone/desktop install:
 ```bash
 make deps
 make deploy
-make desktop-deps
 ```
 
 Update after pulling new changes:
@@ -115,7 +114,7 @@ Useful maintenance targets:
 - `make run`
 - `make standalone`
 - `make deploy-toolbelt`
-- `make desktop-deps`
+- `make desktop-deps` (compatibility alias for `make deps`)
 - `make desktop`
 - `make desktop-attach`
 
@@ -209,7 +208,7 @@ log before assuming the frontend is the problem.
 Check these first:
 
 1. Run `make check` and confirm `pywebview` is installed.
-2. Remember that `pywebview` must be installed in the **runtime launching the desktop shell**. On a standard source install, `make desktop-deps` installs it into Torque's Python runtime (the iTerm2-managed Python by default, or `TORQUE_PYTHON_EXECUTABLE` when set).
+2. Remember that `pywebview` must be installed in the **runtime launching the desktop shell**. On a standard source install, `make deps` installs it into Torque's owned runtime at `~/.torque/runtime/venv`. `make desktop-deps` remains a compatibility alias.
 3. If you passed `--python` or `TORQUE_DESKTOP_PYTHON`, install `pywebview` into that interpreter too.
 4. If attach mode fails, confirm the target server is standalone and that its `TORQUE_PROFILE`, `TORQUE_PORT`, and `TORQUE_DATA_DIR` match the desktop shell values exactly.
 
@@ -228,6 +227,9 @@ Common runtime variables:
 | `TORQUE_DESKTOP_PORT` | Desktop shell port override (defaults to `18933`) |
 | `TORQUE_DESKTOP_DATA_DIR` | Desktop shell data-dir override |
 | `TORQUE_DESKTOP_PYTHON` | Python runtime used by `torque desktop` |
+| `TORQUE_PYTHON_EXECUTABLE` | General Python override preferred by `torque desktop` discovery |
+| `TORQUE_BASE_PYTHON` | Base Python used by `make deps` to create `~/.torque/runtime/venv` |
+| `TORQUE_RUNTIME_PYTHON` | Primary runtime Python used by Makefile launch targets |
 
 ## Platform Expectations
 

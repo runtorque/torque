@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MakefileInstallTests(unittest.TestCase):
-    def test_install_dry_run_keeps_orjson_dependency_command_valid(self):
+    def test_install_dry_run_uses_legacy_toolbelt_requirements(self):
         if not shutil.which("make"):
             self.skipTest("make is not available")
 
@@ -29,11 +29,35 @@ class MakefileInstallTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "aiohttp jinja2 pyyaml orjson 2>/dev/null || true",
+            "-m pip install -q -r \"requirements/toolbelt-legacy.txt\" 2>/dev/null",
             proc.stdout,
         )
         self.assertNotIn("/dev/nulle", proc.stdout)
         self.assertNotIn("\\true", proc.stdout)
+        self.assertNotIn("aiohttp jinja2 pyyaml orjson", proc.stdout)
+
+    def test_deps_dry_run_bootstraps_runtime_venv_without_iterm2_requirement(self):
+        if not shutil.which("make"):
+            self.skipTest("make is not available")
+
+        proc = subprocess.run(
+            [
+                "make",
+                "-n",
+                "deps",
+                "TORQUE_BASE_PYTHON=/usr/bin/python3",
+                "TORQUE_RUNTIME_VENV=/tmp/torque-runtime-test/venv",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertIn("scripts/bootstrap_runtime_venv.py", proc.stdout)
+        self.assertIn("--venv \"/tmp/torque-runtime-test/venv\"", proc.stdout)
+        self.assertIn("--requirements \"requirements/desktop.txt\"", proc.stdout)
+        self.assertNotIn("iTerm2 Python not found", proc.stdout)
 
     def test_test_ee_target_runs_explicit_enterprise_suite(self):
         text = (ROOT / "Makefile").read_text(encoding="utf-8")

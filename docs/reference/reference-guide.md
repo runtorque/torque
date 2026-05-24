@@ -88,8 +88,8 @@ These are operator notes, not implementation details.
 | Task | Command |
 |---|---|
 | Verify prerequisites | `make check` |
-| Install or refresh dependencies in iTerm2's Python | `make deps` |
-| Install the optional native desktop-shell dependency | `make desktop-deps` |
+| Create or repair Torque's owned runtime venv | `make deps` |
+| Refresh desktop dependency compatibility alias | `make desktop-deps` |
 | Install/update the primary standalone/desktop app copy | `make deploy` |
 | Copy the current repo into the secondary iTerm2 Scripts install | `make deploy-toolbelt` or `make install` |
 | Stop the daemon listening on port `18932` | `make stop` |

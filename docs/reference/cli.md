@@ -61,8 +61,13 @@ server with a different profile or data dir.
 shell. For the standard Torque install, run:
 
 ```bash
-make desktop-deps
+make deps
 ```
+
+Without `--python`, the CLI prefers `TORQUE_PYTHON_EXECUTABLE`, then the
+legacy `TORQUE_DESKTOP_PYTHON` override, then the Torque-owned runtime at
+`~/.torque/runtime/venv/bin/python`, then the legacy iTerm2 Toolbelt Python,
+and finally the current interpreter.
 
 | Flag | Description |
 |------|-------------|

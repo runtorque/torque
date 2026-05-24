@@ -138,8 +138,9 @@ def load_pywebview(import_module=importlib.import_module):
         raise RuntimeError(
             "pywebview is required for Torque desktop mode. "
             "Install it in the Python runtime that is launching Torque desktop "
-            "(for example the iTerm2-managed runtime via make desktop-deps, "
-            "or the interpreter passed with torque desktop --python)."
+            "(for example the Torque-owned runtime via make deps; "
+            "make desktop-deps remains a compatibility alias, or use the "
+            "interpreter passed with torque desktop --python)."
         ) from exc
 
 

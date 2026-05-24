@@ -82,15 +82,15 @@ git clone git@github.com:runtorque/torque.git
 cd torque
 make deps
 make deploy
-make desktop-deps
 make run
 ```
 
-`make deploy` installs the primary standalone/desktop app files under
-`~/.torque/app` and refreshes the CLI symlink. `make run` starts a native
-desktop window on its own profile and port (defaults: `desktop` profile, port
-`18933`), so it does not collide with any Toolbelt instance you might also
-run.
+`make deps` creates or repairs Torque's owned runtime venv at
+`~/.torque/runtime/venv`. `make deploy` installs the primary
+standalone/desktop app files under `~/.torque/app` and refreshes the CLI
+symlink. `make run` starts a native desktop window on its own profile and port
+(defaults: `desktop` profile, port `18933`), so it does not collide with any
+Toolbelt instance you might also run.
 
 ### Standalone browser mode
 
