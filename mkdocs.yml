@@ -69,6 +69,7 @@ nav:
       - MCP tools: reference/mcp-tools.md
       - Roles and specializations: reference/specializations.md
       - Action YAML format: reference/action-yaml-format.md
+      - Role YAML format: reference/role-yaml-format.md
       - Reference Guide: reference/reference-guide.md
       - iTerm2 API gotchas: reference/iterm2-gotchas.md
       - Claude Code hooks gotchas: reference/hooks-gotchas.md

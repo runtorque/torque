@@ -5,7 +5,8 @@ with `agent: role-name`, and the Library panel edits the same YAML files.
 
 Use roles for **who** should do the work: provider settings, system/initial
 prompts, worktree defaults, environment, child terminals, and the worker
-behavior preamble. Keep per-task instructions in action `prompt:` fields.
+behavior preamble. Keep per-task instructions in action `prompt:` fields — see
+[Action YAML format](action-yaml-format.md) for that schema.
 
 ## File locations and lookup order
 

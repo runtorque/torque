@@ -69,7 +69,7 @@ Legacy actions that use `task:`, `instructions:`, `context:`, and `criteria:` ar
 | `disable_role_preamble` | bool | no | Do not prepend the worker role's preamble/priorities to this action's rendered prompt. |
 | `implementation_depth` | bool | no | Marks the action as code-mutating and eligible for review-gate behavior. |
 | `review_required_above_loc` | int | no | Legacy action-level non-test LOC threshold for review gating. Transition `loc_gate` is more specific. |
-| `deliverable` | object | no | Optional artifact contract. When `required: true`, closeout is gated on uploading the matching artifact. |
+| `deliverable` | object | no | Optional artifact contract. When `required: true`, closeout is gated on uploading the matching artifact. See [Deliverable contract](#deliverable-contract). |
 
 Example skeleton:
 
@@ -103,7 +103,7 @@ Prefer a role/template reference:
 agent: implementer
 ```
 
-This points at a worker role in `.torque/roles/` or `~/.torque/roles/`. Roles are the best place for full launch configuration such as provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
+This points at a worker role in `.torque/roles/` or `~/.torque/roles/`. Roles are the best place for full launch configuration such as provider, model, permissions, system prompt, worktree behavior, environment, and child terminals. For the field-by-field role schema, see [Role YAML format](role-yaml-format.md).
 
 The legacy inline form is still parsed:
 
@@ -219,6 +219,44 @@ transitions:
 | `ship_direct_max` | int | Non-test LOC at or below which direct completion may ship without review. |
 | `review_default_above` | int | Non-test LOC above which review is the default path. |
 | `self_review_bypass_allowed` | bool | Whether an explicit self-review bypass may skip the gate. |
+
+## Deliverable contract
+
+The `deliverable` block declares that a task must produce a persisted artifact, not just a code change. When `required: true`, Torque hard-gates `torque_done` / `torque_ready`: the worker must first attach a matching artifact with `torque_task_upload_artifact`, or closeout is rejected.
+
+```yaml
+deliverable:
+  required: true
+  type: plan
+  format: markdown
+  artifact_title: Implementation Plan
+```
+
+| Field | Type | Required | Description |
+|---|---:|:---:|---|
+| `required` | bool | no | When `true`, the worker must upload a matching artifact before `torque_done`/`torque_ready` can close the task. Defaults to `false` (the block is then a no-op contract). |
+| `type` | string | no | Semantic type identifier such as `plan`, `design`, or `report`. The closeout gate matches leniently: when `type` is empty or `other`, **any** attached artifact satisfies the gate; otherwise an uploaded artifact's `artifact_type` must equal this value. |
+| `format` | string | no | File-format hint such as `markdown` or `yaml`. Advisory — it is surfaced to the worker but not enforced by the gate. |
+| `artifact_title` | string | no | Display title for the uploaded artifact, shown in the task's artifact list. |
+
+### Override semantics
+
+The action's `deliverable` block defines the task's contract. Explicit dispatch-time arguments (from an MCP or HTTP caller that passes its own `deliverable` fields) win over the action block on a per-field basis — `required` is only overridden when explicitly present, and string fields are overridden only when non-empty. An action without a `deliverable` block carries no contract.
+
+### Uploading the matching artifact
+
+The worker satisfies a `type: plan` contract by uploading an artifact whose `artifact_type` matches:
+
+```text
+torque_task_upload_artifact(
+  content_text="# Implementation Plan\n\n...",
+  filename="plan.md",
+  artifact_type="plan",
+  title="Implementation Plan",
+)
+```
+
+`content_text` writes inline text (use `local_path` or `content_base64` for files on disk or binary content). Once the matching artifact is attached, `torque_done` / `torque_ready` succeed.
 
 ## Reserved `torque` namespace
 

@@ -12,7 +12,7 @@ Three prefixed tool surfaces exist:
 |---|---|---|---|
 | `torque_*` | 18 | All authenticated agents | Caller's own state — its tasks, its derivations, its replies. |
 | `engineer_*` | ~90 | Engineers only | The Engineer's group only. Engineer in group A cannot read group B. |
-| `architect_*` | ~50 | Architects only | The Architect's group, with further per-Architect scoping on decisions, hires, and journal. |
+| `architect_*` | ~50 | Architects only | The Architect's group, with further per-Architect scoping on decisions, hires, journal, and peer threads. |
 
 The prefix is the role boundary. A Worker calling `engineer_board_summary` doesn't get a permission denied — it gets `Unknown tool`, because the tool isn't visible to it in the first place.
 
