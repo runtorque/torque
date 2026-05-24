@@ -227,6 +227,7 @@ Visible only to agents with `kind: architect`. Group-scoped, with further per-Ar
 | `architect_engineer_list` | Visible engineers (hired or not), with `dismissed_at` timestamps and current state. |
 | `architect_engineer_journal_read` | Recent journal entries from a hired engineer (with type filter). |
 | `architect_engineer_pending_question` | Current blocking human-input question for a hired engineer. |
+| `architect_engineer_answer` | Answer a hired engineer's pending blocking question (the owner-routed ask): delivers the answer and resumes the engineer. Architect-side counterpart to `engineer_task_resolve`. |
 | `architect_pending_hire_list` | Pending hire requests created by this Architect. |
 | `architect_pending_hire_status` | Status for a single pending hire. |
 

@@ -184,6 +184,16 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             if not agent or not getattr(agent, "session_id", ""):
                 return {"type": "ok", "delivered": False, "reason": "no_session"}
             return {"type": "ok", "delivered": True}
+        if payload["cmd"] == "engineer_reply":
+            group = payload.get("group", "")
+            if not str(payload.get("answer", "") or "").strip():
+                return {"type": "error", "message": "Answer is required"}
+            self.state.update_engineer_settings(
+                group,
+                pending_question="",
+                paused=False,
+            )
+            return {"type": "ok"}
         self.fail(f"Unexpected command: {payload}")
 
     async def _call(self, tool_name: str, args: dict, caller_id: str):
@@ -3190,6 +3200,98 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
+
+    async def test_architect_engineer_answer_resolves_owner_routed_ask(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired Engineer", hired_by_architect_id=architect.id
+        )
+        other_hired = self._add_engineer(
+            "eng-other", "Other Engineer", hired_by_architect_id=other_architect.id
+        )
+        self.state.update_engineer_settings(
+            "torque",
+            pending_question="Need product approval for the rollout plan?",
+            paused=True,
+            _pending_question_actor_id=hired.id,
+        )
+
+        # Missing answer is rejected before any command is issued.
+        empty_text, empty_error = await self._call(
+            "architect_engineer_answer",
+            {"engineer_id": hired.id, "answer": "   "},
+            architect.id,
+        )
+        self.assertTrue(empty_error)
+        self.assertEqual(empty_text, "answer is required")
+        self.assertEqual(self.handle_calls, [])
+
+        # Out-of-scope engineer is denied (same gating as the read surface).
+        denied_text, denied_error = await self._call(
+            "architect_engineer_answer",
+            {"engineer_id": other_hired.id, "answer": "Approved"},
+            architect.id,
+        )
+        self.assertTrue(denied_error)
+        self.assertEqual(denied_text, "engineer not found in scope")
+        self.assertEqual(self.handle_calls, [])
+
+        # Happy path: routes through engineer_reply and clears the question.
+        ok_text, ok_error = await self._call(
+            "architect_engineer_answer",
+            {"engineer_id": hired.id, "answer": "Ship the rollout plan."},
+            architect.id,
+        )
+        self.assertFalse(ok_error, ok_text)
+        payload = json.loads(ok_text)
+        self.assertEqual(payload["type"], "ok")
+        self.assertEqual(payload["engineer_id"], hired.id)
+        self.assertEqual(payload["group"], "torque")
+        reply_calls = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "engineer_reply"
+        ]
+        self.assertEqual(len(reply_calls), 1)
+        self.assertEqual(reply_calls[0]["group"], "torque")
+        self.assertEqual(reply_calls[0]["answer"], "Ship the rollout plan.")
+        ws = self.state.get_engineer_settings("torque")
+        self.assertEqual(str(getattr(ws, "pending_question", "") or ""), "")
+
+        # Answering again with no pending question is rejected.
+        self.handle_calls.clear()
+        none_text, none_error = await self._call(
+            "architect_engineer_answer",
+            {"engineer_id": hired.id, "answer": "Already answered"},
+            architect.id,
+        )
+        self.assertTrue(none_error)
+        self.assertEqual(none_text, "No pending blocking question for that engineer")
+        self.assertEqual(self.handle_calls, [])
+
+    async def test_architect_engineer_answer_rejects_mismatched_actor(self):
+        architect = self._add_architect("arch-1", "Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired Engineer", hired_by_architect_id=architect.id
+        )
+        peer = self._add_engineer(
+            "eng-peer", "Peer Engineer", hired_by_architect_id=architect.id
+        )
+        # A different engineer in the group owns the current pending question.
+        self.state.update_engineer_settings(
+            "torque",
+            pending_question="Peer's blocking question",
+            paused=True,
+            _pending_question_actor_id=peer.id,
+        )
+        text, error = await self._call(
+            "architect_engineer_answer",
+            {"engineer_id": hired.id, "answer": "Answer"},
+            architect.id,
+        )
+        self.assertTrue(error)
+        self.assertEqual(text, "No pending blocking question for that engineer")
+        self.assertEqual(self.handle_calls, [])
 
 
 

@@ -756,6 +756,30 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_engineer_answer",
+        "description": (
+            "Answer a hired engineer's pending blocking question (the "
+            "owner-routed ask surfaced by architect_engineer_pending_question). "
+            "Delivers the answer to the engineer and resumes its event "
+            "delivery — the architect-side counterpart to the way an engineer "
+            "resolves a worker's ask via engineer_task_resolve."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Hired engineer id/slug/name with a pending question.",
+                },
+                "answer": {
+                    "type": "string",
+                    "description": "Answer text delivered to the engineer.",
+                },
+            },
+            "required": ["engineer_id", "answer"],
+        },
+    },
+    {
         "name": "architect_reply",
         "description": (
             "Reply to an existing Architect↔Engineer or Architect↔Architect "
