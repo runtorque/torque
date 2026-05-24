@@ -47,15 +47,18 @@ make standalone
 make open
 ```
 
-For the secondary iTerm2 Toolbelt integration:
+For the deprecated secondary iTerm2 Toolbelt integration, which still works
+for rollback safety while you migrate to the desktop app or standalone browser
+mode:
 
 ```bash
 make deploy-toolbelt
 ```
 
 Then open iTerm2, run **Scripts → torque**, open **View → Show Toolbelt**, and
-enable **Torque** from the Toolbelt gear menu. For more runtime modes, see
-[Operations](../operate/operations.md).
+enable **Torque** from the Toolbelt gear menu. Migrate Toolbelt data to a
+profile with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b). For
+more runtime modes, see [Operations](../operate/operations.md).
 
 ## Your first session
 
@@ -126,9 +129,9 @@ make deploy
 ```
 
 Then relaunch Torque with `make run` for the desktop app, or run
-`make standalone` followed by `make open` for browser-only mode. If you specifically use the iTerm2
-Toolbelt integration, run `make deploy-toolbelt` and restart Torque from the
-**Scripts** menu in iTerm2.
+`make standalone` followed by `make open` for browser-only mode. If you
+specifically use the deprecated iTerm2 Toolbelt integration, run
+`make deploy-toolbelt` and restart Torque from the **Scripts** menu in iTerm2.
 
 !!! warning "Don't deploy or stop from inside a Torque-managed worker"
     If you're operating inside a Torque worktree (a tab the daemon spawned), running `make deploy`, `make deploy-toolbelt`, or `make stop` can kill the very daemon you're talking to and leave the new instance with corrupted in-memory state. The Makefile and HTTP layer both refuse the operation when called from a worker context. See [Operations](../operate/operations.md) for safer alternatives.

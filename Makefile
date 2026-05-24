@@ -13,6 +13,7 @@ TORQUE_TOOLBELT_REQUIREMENTS ?= requirements/toolbelt-legacy.txt
 PRIMARY_PORT    ?= 18933
 TOOLBELT_PORT   ?= 18932
 TORQUE_MIN_PYTHON := 3.10
+TOOLBELT_DEPRECATION_NOTICE := ⚠ The iTerm2 Toolbelt is DEPRECATED. Primary surfaces are standalone (make standalone) and desktop (make run). The Toolbelt still works for now; migrate with scripts/migrate_toolbelt_to_profile.py (TORQUE:645 P1b).
 
 # Global iTerm2 Python environment (legacy Toolbelt-only runtime)
 GLOBAL_ENV     := $(shell ls -d $(HOME)/.config/iterm2/AppSupport/iterm2env-[0-9]* 2>/dev/null \
@@ -35,7 +36,10 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt bootstrap deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
+.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt bootstrap deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta _toolbelt_deprecation_notice
+
+_toolbelt_deprecation_notice:
+	@echo "$(TOOLBELT_DEPRECATION_NOTICE)"
 
 ## install: Set up the secondary iTerm2 Toolbelt script project and copy all files
 install:
@@ -111,8 +115,8 @@ install:
 	@echo "  2. Show Toolbelt: View → Show Toolbelt (⌘⇧B)"
 	@echo "  3. Check 'Torque' in the Toolbelt gear menu"
 
-## install-toolbelt: Alias for the secondary iTerm2 Toolbelt install
-install-toolbelt: install
+## install-toolbelt: Alias for the deprecated secondary iTerm2 Toolbelt install
+install-toolbelt: _toolbelt_deprecation_notice install
 
 ## install-standalone: Copy the primary standalone/desktop app files to ~/.torque/app
 install-standalone:
@@ -178,8 +182,8 @@ desktop-deps: deps
 ## run: Launch the primary desktop app (native shell backed by standalone daemon)
 run: desktop
 
-## run-toolbelt: Launch the secondary iTerm2 Toolbelt script in the background
-run-toolbelt:
+## run-toolbelt: Launch the deprecated secondary iTerm2 Toolbelt script in the background
+run-toolbelt: _toolbelt_deprecation_notice
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make deploy-toolbelt first."; \
 		exit 1; \
@@ -255,8 +259,8 @@ deploy: _check_not_in_worker deps
 	@echo "Primary deploy stops port $(or $(TORQUE_PORT),$(PRIMARY_PORT)); set TORQUE_PORT to deploy another standalone profile."
 	@echo "Browser-only mode remains available with: make standalone (then make open)"
 
-## deploy-toolbelt: Stop old Toolbelt instance, install iTerm2 files, prompt to restart
-deploy-toolbelt: _check_not_in_worker
+## deploy-toolbelt: Stop old deprecated Toolbelt instance, install iTerm2 files, prompt to restart
+deploy-toolbelt: _check_not_in_worker _toolbelt_deprecation_notice
 	@$(MAKE) --no-print-directory stop TORQUE_PORT="$(TOOLBELT_PORT)"
 	@$(MAKE) --no-print-directory install
 	@echo ""
@@ -450,6 +454,7 @@ check:
 	else \
 		echo "  Runtime venv not ready (run: make deps)"; \
 	fi
+	@echo "$(TOOLBELT_DEPRECATION_NOTICE)"
 	@echo "iTerm2 Python (legacy Toolbelt): $(or $(ITERM2_PYTHON),NOT FOUND)"
 	@if [ -n "$(ITERM2_PYTHON)" ]; then \
 		echo "iterm2:"; \

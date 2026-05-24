@@ -35,10 +35,14 @@ make open
 This still controls the configured terminal backend, but the UI is served only
 in the browser. Runtime data defaults to `~/.torque/profiles/standalone`.
 
-### iTerm2 Toolbelt mode
+### iTerm2 Toolbelt mode (deprecated secondary)
 
-The iTerm2 Toolbelt integration is now secondary. It embeds the same UI next
-to your terminal tabs for operators who prefer that workflow:
+The iTerm2 Toolbelt integration is a deprecated secondary surface. It still
+works for now and embeds the same UI next to your terminal tabs for operators
+who need that rollback-safe workflow, but the primary surfaces are the desktop
+app (`make run`) and standalone browser mode (`make standalone`). Migrate
+Toolbelt data to a profile with `scripts/migrate_toolbelt_to_profile.py`
+(TORQUE:645 P1b):
 
 ```bash
 make deploy-toolbelt
@@ -96,7 +100,7 @@ make deploy
 Then relaunch with `make run` for the desktop app, or `make standalone` +
 `make open` for browser-only mode.
 
-Secondary iTerm2 Toolbelt update:
+Deprecated secondary iTerm2 Toolbelt update:
 
 ```bash
 make deploy-toolbelt
