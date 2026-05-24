@@ -2,6 +2,7 @@
   "name": "@torque/ee-relay",
   "version": "0.1.0-phase.1",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "description": "Enterprise Channels relay package: dual-target ports, versioned wire protocol, storage, rendezvous, and entrypoints for remote Torque operation.",
   "scripts": {

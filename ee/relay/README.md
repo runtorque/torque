@@ -1,5 +1,7 @@
 # Torque EE Relay
 
+> License boundary: this EE directory is proprietary and is not covered by the repository root MIT License. See [../LICENSE](../LICENSE).
+
 Enterprise-only Channels relay package for **remote Torque**. The local Python daemon remains the source of truth and execution host; this package provides the thin remote relay/control-plane that remote clients and future channel adapters use to reach an outbound-connected daemon.
 
 Phase 1 hardens the original spike while staying isolated under `ee/relay/`:

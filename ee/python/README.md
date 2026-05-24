@@ -1,5 +1,7 @@
 # Torque EE Python connector
 
+> License boundary: this EE directory is proprietary and is not covered by the repository root MIT License. See [../LICENSE](../LICENSE).
+
 Enterprise-only Python package boundary for the Channels outbound relay connector.
 
 The open-core daemon loads this package only when explicitly enabled through

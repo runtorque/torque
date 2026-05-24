@@ -1,5 +1,10 @@
 MIT License
 
+Scope notice: this MIT License applies to this repository except for the
+`ee/` directory. The `ee/` directory contains proprietary enterprise materials
+that are not covered by this license; see `ee/LICENSE` for the restrictive
+all-rights-reserved license that applies there.
+
 Copyright (c) 2026 Aleksander Arruda
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

@@ -1,6 +1,6 @@
 # Torque
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT%20%28except%20ee%2F%29-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](VERSION)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](docs/index.md)
 
@@ -217,4 +217,6 @@ next.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT for the community code, except for `ee/` — see [LICENSE](LICENSE).
+The `ee/` directory is proprietary enterprise code under a separate
+all-rights-reserved license; see [ee/LICENSE](ee/LICENSE).
