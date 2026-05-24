@@ -50,6 +50,36 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(files[0]['insertions'], 2)
         self.assertEqual(files[0]['deletions'], 0)
 
+    def test_relay_agent_roster_is_group_scoped_and_excludes_tombstones(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g1')
+        state.add_group('g2')
+        state.active_group = 'g1'
+
+        architect = state.add_agent(name='Architect', group='g1')
+        architect.kind = 'architect'
+        engineer = state.add_agent(name='Engineer', group='g1')
+        engineer.kind = 'engineer'
+        unknown = state.add_agent(name='Unknown', group='g1')
+        unknown.kind = ''
+        terminal = state.add_terminal(
+            name='Terminal', group='g1', parent_id=engineer.id)
+        terminal.kind = 'terminal'
+        tombstoned = state.add_agent(name='Deleted Worker', group='g1')
+        tombstoned.kind = 'worker'
+        tombstoned.deleted_at = 123.0
+        out_of_group = state.add_agent(name='Other Engineer', group='g2')
+        out_of_group.kind = 'engineer'
+
+        roster = self.server_mod._relay_agent_roster(state)
+
+        self.assertEqual(roster, [
+            {'id': architect.id, 'name': 'Architect', 'kind': 'architect'},
+            {'id': engineer.id, 'name': 'Engineer', 'kind': 'engineer'},
+            {'id': unknown.id, 'name': 'Unknown', 'kind': ''},
+            {'id': terminal.id, 'name': 'Terminal', 'kind': 'terminal'},
+        ])
+
     def test_action_to_yaml_keeps_prompt_as_block_scalar(self):
         yaml_text = self.server_actions._action_to_yaml('review/code', {
             'description': 'Review code',

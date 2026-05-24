@@ -32,6 +32,7 @@ RELAY_SOURCE_UNSET = ""
 DirectMessageObserver = Callable[[dict[str, Any]], Any]
 RemoteUserAgentIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 RecentDirectMessages = Callable[[int], list[dict[str, Any]]]
+AgentRoster = Callable[[], list[dict[str, Any]]]
 ReportConnectionState = Callable[[dict[str, Any]], None]
 Unregister = Callable[[], None]
 
@@ -52,6 +53,10 @@ class CloudConnectorContext:
     # (newest-first canonical rows).  ``None`` in community/legacy builds; the
     # connector then emits an empty snapshot.
     recent_direct_messages: RecentDirectMessages | None = None
+    # Optional: agent-kind roster for the same group-scoped remote snapshot.
+    # ``None`` in community/legacy builds; the connector then omits the additive
+    # snapshot ``agents`` key for old payload compatibility.
+    agent_roster: AgentRoster | None = None
     # Optional: report the connector's relay connection-state transitions to the
     # daemon as the ephemeral ``relay_connection`` signal.  ``None`` in
     # community/legacy builds.  The connector wraps every invocation in

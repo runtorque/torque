@@ -544,23 +544,44 @@ class EnterpriseConnector:
         messages.reverse()
         if len(messages) > limit:
             messages = messages[-limit:]
+        payload = {
+            "lane": "user-agent",
+            "messages": messages,
+            "count": len(messages),
+            "limit": limit,
+            "truncated": bool(len(rows) >= limit),
+            "ref_id": str(envelope.get("id", "") or ""),
+        }
+        agents = await self._call_agent_roster()
+        if agents is not None:
+            payload["agents"] = agents
         await self._send_envelope(
             make_relay_envelope(
                 daemon_id=self.config.daemon_id,
                 source={"kind": "daemon", "id": self.config.daemon_id},
                 target=_snapshot_client_target(envelope.get("source")),
                 kind="snapshot",
-                payload={
-                    "lane": "user-agent",
-                    "messages": messages,
-                    "count": len(messages),
-                    "limit": limit,
-                    "truncated": bool(len(rows) >= limit),
-                    "ref_id": str(envelope.get("id", "") or ""),
-                },
+                payload=payload,
                 trace_id=str(envelope.get("trace_id", "") or ""),
             )
         )
+
+    async def _call_agent_roster(self) -> list[dict[str, Any]] | None:
+        provider = getattr(self.context, "agent_roster", None)
+        if not callable(provider) and isinstance(self.context, Mapping):
+            provider = self.context.get("agent_roster")
+        if not callable(provider):
+            return None
+        try:
+            result = provider()
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            log.exception("EE connector agent-roster provider failed")
+            return None
+        if not isinstance(result, list):
+            return None
+        return [dict(row) for row in result if isinstance(row, Mapping)]
 
     async def _call_recent_direct_messages(self, limit: int) -> list[dict[str, Any]]:
         provider = getattr(self.context, "recent_direct_messages", None)
