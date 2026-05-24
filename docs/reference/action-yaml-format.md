@@ -103,7 +103,7 @@ Prefer a role/template reference:
 agent: implementer
 ```
 
-This points at a worker role in `.torque/roles/` or `~/.torque/roles/`. Roles are the best place for full launch configuration such as provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
+This points at a worker role in `.torque/roles/` or `~/.torque/roles/`. Roles are the best place for full launch configuration such as provider, model, permissions, system prompt, worktree behavior, environment, and child terminals. For the field-by-field role schema, see [Role YAML format](role-yaml-format.md).
 
 The legacy inline form is still parsed:
 
