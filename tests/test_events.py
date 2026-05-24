@@ -819,6 +819,83 @@ asyncio.run(main())
         self.assertFalse(cell.needs_attention)
         self.assertEqual(panel_log.get_recent(), [])
 
+    def _boot_doa_worker_state(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="running",
+            current_task_id="task-1",
+            owner_engineer_id="eng-1",
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id=cell.id,
+        )
+        state.agents[cell.id] = cell
+        state.board_tasks[task.id] = task
+        return state, cell, task
+
+    async def test_worker_boot_doa_timer_escalates_on_scheduled_path(self):
+        """End-to-end: the EventBus timer scheduled on session_start fires the
+        escalation when the worker posts no activity within the window."""
+        state, cell, task = self._boot_doa_worker_state()
+        panel_log = self.events_mod.PanelEventLog()
+        bus = self.events_mod.EventBus(
+            state, self.events_mod.EventLog(), panel_log=panel_log)
+        bus.start()
+
+        with mock.patch.dict(
+                os.environ, {self.events_mod.WORKER_BOOT_DOA_ENV: "0.05"}):
+            await bus.emit(self.base_mod.AgentEvent(
+                cell_id=cell.id, timestamp=0.0,
+                event_type="session_start", data={}))
+            # Timer is armed but escalation has not fired yet.
+            self.assertIn(cell.id, bus._boot_doa_timers)
+            self.assertFalse(cell.needs_attention)
+            # Advance past the watchdog window with no worker activity.
+            await asyncio.sleep(0.15)
+
+        self.assertTrue(cell.needs_attention)
+        self.assertIn("Worker boot DOA", cell.error_message)
+        events = panel_log.get_recent()
+        self.assertEqual(events[-1]["kind"], "worker_boot_doa")
+        self.assertEqual(events[-1]["cell_id"], cell.id)
+        self.assertEqual(events[-1]["task_id"], task.id)
+        self.assertNotIn(cell.id, bus._boot_doa_timers)
+
+    async def test_worker_boot_doa_timer_suppressed_by_post_boot_activity(self):
+        """Negative path: activity within the window cancels escalation even
+        though the scheduled timer still runs."""
+        state, cell, task = self._boot_doa_worker_state()
+        panel_log = self.events_mod.PanelEventLog()
+        bus = self.events_mod.EventBus(
+            state, self.events_mod.EventLog(), panel_log=panel_log)
+        bus.start()
+
+        with mock.patch.dict(
+                os.environ, {self.events_mod.WORKER_BOOT_DOA_ENV: "0.05"}):
+            await bus.emit(self.base_mod.AgentEvent(
+                cell_id=cell.id, timestamp=0.0,
+                event_type="session_start", data={}))
+            # Worker posts real activity before the window elapses.
+            await bus.emit(self.base_mod.AgentEvent(
+                cell_id=cell.id, timestamp=1.0,
+                event_type="tool_start", data={"detail": "Running tests"}))
+            await asyncio.sleep(0.15)
+
+        self.assertFalse(cell.needs_attention)
+        self.assertNotIn(
+            "worker_boot_doa",
+            {evt["kind"] for evt in panel_log.get_recent()})
+        self.assertNotIn(cell.id, bus._boot_doa_timers)
+
     async def test_session_end_marks_agent_idle_and_persists_status(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(
