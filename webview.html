@@ -1094,127 +1094,141 @@
 
     <!-- System tab -->
     <div class="gs-pane" data-pane="gls-system">
-      <section class="daemon-status" aria-labelledby="gls-daemon-heading">
-        <h3 id="gls-daemon-heading">Daemon</h3>
-        <div class="daemon-status-grid">
-          <div class="daemon-status-label">Status</div>
-          <div class="daemon-status-value daemon-status-state">
-            <span id="gls-daemon-status-dot" class="daemon-status-dot daemon-status-dot-offline" aria-hidden="true"></span>
-            <span id="gls-daemon-status-text">Disconnected</span>
-          </div>
-          <div class="daemon-status-label">Version</div>
-          <div id="gls-daemon-version" class="daemon-status-value">—</div>
-          <div class="daemon-status-label">PID</div>
-          <div id="gls-daemon-pid" class="daemon-status-value" title="Process ID of the Torque daemon">—</div>
-          <div class="daemon-status-label">Uptime</div>
-          <div id="gls-daemon-uptime" class="daemon-status-value">—</div>
-          <div class="daemon-status-label">Port</div>
-          <div id="gls-daemon-port" class="daemon-status-value">—</div>
-          <div class="daemon-status-label">Profile</div>
-          <div id="gls-daemon-profile" class="daemon-status-value">—</div>
-          <div class="daemon-status-label">Data dir</div>
-          <div id="gls-daemon-data-dir" class="daemon-status-value daemon-status-path">—</div>
-          <div class="daemon-status-label">Log file</div>
-          <div id="gls-daemon-log-path" class="daemon-status-value daemon-status-path">—</div>
-          <div class="daemon-status-label">Started</div>
-          <div id="gls-daemon-started-at" class="daemon-status-value" title="Time the daemon started">—</div>
-        </div>
-        <div class="daemon-actions">
-          <button type="button" id="gls-restart-daemon-btn" class="btn-secondary">↻ Restart Daemon</button>
-          <button type="button" id="gls-stop-daemon-btn" class="btn-danger">■ Stop Daemon</button>
-        </div>
-      </section>
-      <!-- Relay detail (TORQUE:560 connection + TORQUE:603 config/provenance).
-           Hidden when the daemon publishes neither `relay_connection` nor
-           `relay_config` (pre-producer / community). -->
-      <section class="daemon-status" id="gls-relay-section" aria-labelledby="gls-relay-heading" hidden>
-        <h3 id="gls-relay-heading">Relay</h3>
-        <!-- Connection status (TORQUE:560), driven by `state.relay_connection`. -->
-        <div id="gls-relay-connection-block">
+      <div class="gs-subtabs">
+        <button class="gs-subtab active" data-subtab="gls-daemon" onclick="switchGlsSubTab(this)">Daemon</button>
+        <button class="gs-subtab" data-subtab="gls-relay" onclick="switchGlsSubTab(this)">Relay</button>
+      </div>
+
+      <div class="gs-subpane active" data-subpane="gls-daemon">
+        <section class="daemon-status" aria-labelledby="gls-daemon-heading">
+          <h3 id="gls-daemon-heading">Daemon</h3>
           <div class="daemon-status-grid">
-            <div class="daemon-status-label">State</div>
+            <div class="daemon-status-label">Status</div>
             <div class="daemon-status-value daemon-status-state">
-              <span id="gls-relay-status-dot" class="relay-status-dot" aria-hidden="true"></span>
-              <span id="gls-relay-status-text">—</span>
+              <span id="gls-daemon-status-dot" class="daemon-status-dot daemon-status-dot-offline" aria-hidden="true"></span>
+              <span id="gls-daemon-status-text">Disconnected</span>
             </div>
-            <div class="daemon-status-label">Host</div>
-            <div id="gls-relay-host" class="daemon-status-value daemon-status-path">—</div>
-            <div class="daemon-status-label">Retries</div>
-            <div id="gls-relay-retry-count" class="daemon-status-value">—</div>
-            <div class="daemon-status-label">Since</div>
-            <div id="gls-relay-since" class="daemon-status-value">—</div>
-            <div class="daemon-status-label">Last error</div>
-            <div id="gls-relay-last-error" class="daemon-status-value">—</div>
+            <div class="daemon-status-label">Version</div>
+            <div id="gls-daemon-version" class="daemon-status-value">—</div>
+            <div class="daemon-status-label">PID</div>
+            <div id="gls-daemon-pid" class="daemon-status-value" title="Process ID of the Torque daemon">—</div>
+            <div class="daemon-status-label">Uptime</div>
+            <div id="gls-daemon-uptime" class="daemon-status-value">—</div>
+            <div class="daemon-status-label">Port</div>
+            <div id="gls-daemon-port" class="daemon-status-value">—</div>
+            <div class="daemon-status-label">Profile</div>
+            <div id="gls-daemon-profile" class="daemon-status-value">—</div>
+            <div class="daemon-status-label">Data dir</div>
+            <div id="gls-daemon-data-dir" class="daemon-status-value daemon-status-path">—</div>
+            <div class="daemon-status-label">Log file</div>
+            <div id="gls-daemon-log-path" class="daemon-status-value daemon-status-path">—</div>
+            <div class="daemon-status-label">Started</div>
+            <div id="gls-daemon-started-at" class="daemon-status-value" title="Time the daemon started">—</div>
           </div>
-        </div>
-        <!-- Config + provenance (TORQUE:603 #1), driven by `state.relay_config`.
-             Each field is editable (settings-layer override) and carries a
-             per-field SOURCE badge (settings / ee_connector.json / env / unset).
-             Empty input = inherit from the connector file / env (the badge shows
-             the effective source). Saving routes through the Global Settings
-             Save button (submitGlobalSettings → update_global_settings relay_*).
-             private_key_path is BY PATH only — inline PEM never appears here. -->
-        <div id="gls-relay-config-block" class="gls-relay-config" hidden>
-          <div class="gls-relay-config-row gls-relay-config-row--bool">
-            <label class="gls-relay-config-label" for="gls-relay-enabled">Enabled</label>
-            <span class="gls-relay-config-control">
-              <input type="checkbox" id="gls-relay-enabled"
-                     onchange="this.dataset.relayDirty='1'">
-              <span id="gls-relay-enabled-badge" class="relay-source-badge" title="Effective source"></span>
-            </span>
+          <div class="daemon-actions">
+            <button type="button" id="gls-restart-daemon-btn" class="btn-secondary">↻ Restart Daemon</button>
+            <button type="button" id="gls-stop-daemon-btn" class="btn-danger-outline">
+              <span class="btn-icon btn-icon-stop" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <rect x="4" y="4" width="8" height="8" rx="1.5"></rect>
+                </svg>
+              </span>
+              Stop Daemon
+            </button>
           </div>
-          <div class="gls-relay-config-row">
-            <label class="gls-relay-config-label" for="gls-relay-url">Relay URL</label>
-            <span class="gls-relay-config-control">
-              <input type="text" id="gls-relay-url" autocomplete="off" spellcheck="false"
-                     oninput="this.dataset.relayDirty='1'">
-              <span id="gls-relay-url-badge" class="relay-source-badge" title="Effective source"></span>
-            </span>
+        </section>
+      </div>
+
+      <div class="gs-subpane" data-subpane="gls-relay">
+        <!-- Relay detail (TORQUE:560 connection + TORQUE:603 config).
+             Hidden when the daemon publishes neither `relay_connection` nor
+             `relay_config` (pre-producer / community). -->
+        <section class="daemon-status" id="gls-relay-section" aria-labelledby="gls-relay-heading" hidden>
+          <h3 id="gls-relay-heading">Relay</h3>
+          <!-- Connection status (TORQUE:560), driven by `state.relay_connection`. -->
+          <div id="gls-relay-connection-block">
+            <div class="daemon-status-grid">
+              <div class="daemon-status-label">State</div>
+              <div class="daemon-status-value daemon-status-state">
+                <span id="gls-relay-status-dot" class="relay-status-dot" aria-hidden="true"></span>
+                <span id="gls-relay-status-text">—</span>
+              </div>
+              <div class="daemon-status-label">Host</div>
+              <div id="gls-relay-host" class="daemon-status-value daemon-status-path">—</div>
+              <div class="daemon-status-label">Retries</div>
+              <div id="gls-relay-retry-count" class="daemon-status-value">—</div>
+              <div class="daemon-status-label">Since</div>
+              <div id="gls-relay-since" class="daemon-status-value">—</div>
+              <div class="daemon-status-label">Last error</div>
+              <div id="gls-relay-last-error" class="daemon-status-value">—</div>
+            </div>
           </div>
-          <div class="gls-relay-config-row">
-            <label class="gls-relay-config-label" for="gls-relay-daemon-id">Daemon ID</label>
-            <span class="gls-relay-config-control">
-              <input type="text" id="gls-relay-daemon-id" autocomplete="off" spellcheck="false"
-                     oninput="this.dataset.relayDirty='1'">
-              <span id="gls-relay-daemon-id-badge" class="relay-source-badge" title="Effective source"></span>
-            </span>
+
+          <!-- Config (TORQUE:603 #1), driven by `state.relay_config`.
+               Each field is editable (settings-layer override). Empty input =
+               inherit from the connector file / env; inherited effective values
+               appear as placeholders. Saving routes through the Global Settings
+               Save button (submitGlobalSettings → update_global_settings
+               relay_*). private_key_path is BY PATH only — inline PEM never
+               appears here. -->
+          <div id="gls-relay-config-block" class="gls-relay-config" hidden>
+            <div class="gls-relay-config-row gls-relay-config-row--bool">
+              <label class="gls-relay-config-label" for="gls-relay-enabled">Enabled</label>
+              <span class="gls-relay-config-control">
+                <input type="checkbox" id="gls-relay-enabled"
+                       onchange="this.dataset.relayDirty='1'">
+              </span>
+            </div>
+            <div class="gls-relay-config-row">
+              <label class="gls-relay-config-label" for="gls-relay-url">Relay URL</label>
+              <span class="gls-relay-config-control">
+                <input type="text" id="gls-relay-url" autocomplete="off" spellcheck="false"
+                       oninput="this.dataset.relayDirty='1'">
+              </span>
+            </div>
+            <div class="gls-relay-config-row">
+              <label class="gls-relay-config-label" for="gls-relay-daemon-id">Daemon ID</label>
+              <span class="gls-relay-config-control">
+                <input type="text" id="gls-relay-daemon-id" autocomplete="off" spellcheck="false"
+                       oninput="this.dataset.relayDirty='1'">
+              </span>
+            </div>
+            <div class="gls-relay-config-row">
+              <label class="gls-relay-config-label" for="gls-relay-credential-id">Credential ID</label>
+              <span class="gls-relay-config-control">
+                <input type="text" id="gls-relay-credential-id" autocomplete="off" spellcheck="false"
+                       oninput="this.dataset.relayDirty='1'">
+              </span>
+            </div>
+            <div class="gls-relay-config-row">
+              <label class="gls-relay-config-label" for="gls-relay-private-key-path">Private key</label>
+              <span class="gls-relay-config-control">
+                <input type="text" id="gls-relay-private-key-path" autocomplete="off" spellcheck="false"
+                       placeholder="path to PEM file"
+                       oninput="this.dataset.relayDirty='1'">
+              </span>
+            </div>
+            <p class="gls-relay-config-hint">
+              Saving applies on change: the connector stops and restarts, and the
+              connection state above reports the result.
+            </p>
           </div>
-          <div class="gls-relay-config-row">
-            <label class="gls-relay-config-label" for="gls-relay-credential-id">Credential ID</label>
-            <span class="gls-relay-config-control">
-              <input type="text" id="gls-relay-credential-id" autocomplete="off" spellcheck="false"
-                     oninput="this.dataset.relayDirty='1'">
-              <span id="gls-relay-credential-id-badge" class="relay-source-badge" title="Effective source"></span>
-            </span>
-          </div>
-          <div class="gls-relay-config-row">
-            <label class="gls-relay-config-label" for="gls-relay-private-key-path">Private key</label>
-            <span class="gls-relay-config-control">
-              <input type="text" id="gls-relay-private-key-path" autocomplete="off" spellcheck="false"
-                     placeholder="path to PEM file"
-                     oninput="this.dataset.relayDirty='1'">
-              <span id="gls-relay-private-key-path-badge" class="relay-source-badge" title="Effective source"></span>
-            </span>
-          </div>
-          <p class="gls-relay-config-hint">
-            Saving applies on change: the connector stops and restarts, and the
-            connection state above reports the result.
-          </p>
-        </div>
-        <!-- Test-connectivity probe (TORQUE:603 #2). Button sends the daemon
+
+          <!-- Test-connectivity probe (TORQUE:603 #2). Button sends the daemon
              `test_relay_connection` command; the daemon-side probe returns a
              structured {status, message, detail} that renders as an actionable
              result line below. Slot visibility rides the Relay section (toggled
              in _relaySectionUpdateVisibility); the result line is owned by the
              probe handler and is never cleared by a relay_config /
              relay_connection delta refresh. -->
-        <div id="gls-relay-probe-slot" class="gls-relay-probe-slot" hidden>
-          <button type="button" class="btn-secondary" id="gls-relay-probe-test"
-                  onclick="testRelayConnection()">Test connectivity</button>
-          <div id="gls-relay-probe-result" class="gls-relay-probe-result"
-               role="status" aria-live="polite" hidden></div>
-        </div>
-        <!-- Device-link generator (TORQUE:603 #3). Display-once: an operator
+          <div id="gls-relay-probe-slot" class="gls-relay-probe-slot" hidden>
+            <button type="button" class="btn-secondary" id="gls-relay-probe-test"
+                    onclick="testRelayConnection()">Test connectivity</button>
+            <div id="gls-relay-probe-result" class="gls-relay-probe-result"
+                 role="status" aria-live="polite" hidden></div>
+          </div>
+
+          <!-- Device-link generator (TORQUE:603 #3). Display-once: an operator
              mints a single-use, short-lived pairing link, shown ONCE as an
              inline-SVG QR + copyable establish URL + raw code + TTL so it can
              be scanned/copied onto a phone to establish a remote web session.
@@ -1230,30 +1244,31 @@
              Relay section (toggled in _relaySectionUpdateVisibility); the
              generate button's enabled state is refreshed by delta, but the
              secret is never re-rendered from a delta. -->
-        <div id="gls-relay-device-link-slot" class="gls-relay-device-link-slot" hidden>
-          <button type="button" class="btn-secondary" id="gls-relay-device-link-generate"
-                  onclick="relayDeviceLinkRequest()">Generate device link</button>
-          <p id="gls-relay-device-link-hint" class="gls-relay-device-link-hint" hidden></p>
-          <div id="gls-relay-device-link-confirm" class="gls-relay-device-link-confirm"
-               role="group" aria-label="Confirm device link generation" hidden>
-            <span class="gls-relay-device-link-confirm-msg">This mints a single-use,
-              short-lived device link, shown only once.</span>
-            <span class="gls-relay-device-link-confirm-actions">
-              <button type="button" class="btn-primary" id="gls-relay-device-link-confirm-yes"
-                      onclick="relayDeviceLinkConfirmGenerate()">Generate</button>
-              <button type="button" class="btn-cancel" id="gls-relay-device-link-confirm-no"
-                      onclick="relayDeviceLinkCancelConfirm()">Cancel</button>
-            </span>
+          <div id="gls-relay-device-link-slot" class="gls-relay-device-link-slot" hidden>
+            <button type="button" class="btn-secondary" id="gls-relay-device-link-generate"
+                    onclick="relayDeviceLinkRequest()">Generate device link</button>
+            <p id="gls-relay-device-link-hint" class="gls-relay-device-link-hint" hidden></p>
+            <div id="gls-relay-device-link-confirm" class="gls-relay-device-link-confirm"
+                 role="group" aria-label="Confirm device link generation" hidden>
+              <span class="gls-relay-device-link-confirm-msg">This mints a single-use,
+                short-lived device link, shown only once.</span>
+              <span class="gls-relay-device-link-confirm-actions">
+                <button type="button" class="btn-primary" id="gls-relay-device-link-confirm-yes"
+                        onclick="relayDeviceLinkConfirmGenerate()">Generate</button>
+                <button type="button" class="btn-cancel" id="gls-relay-device-link-confirm-no"
+                        onclick="relayDeviceLinkCancelConfirm()">Cancel</button>
+              </span>
+            </div>
+            <div id="gls-relay-device-link-error" class="gls-relay-device-link-error"
+                 role="status" aria-live="polite" hidden></div>
+            <!-- Secret nodes are injected/removed here by relay_status.js. Kept
+                 EMPTY in static HTML: the display-once secret is never part of the
+                 persisted/delta-rebuildable DOM. -->
+            <div id="gls-relay-device-link-panel" class="gls-relay-device-link-panel"
+                 role="status" aria-live="polite" hidden></div>
           </div>
-          <div id="gls-relay-device-link-error" class="gls-relay-device-link-error"
-               role="status" aria-live="polite" hidden></div>
-          <!-- Secret nodes are injected/removed here by relay_status.js. Kept
-               EMPTY in static HTML: the display-once secret is never part of the
-               persisted/delta-rebuildable DOM. -->
-          <div id="gls-relay-device-link-panel" class="gls-relay-device-link-panel"
-               role="status" aria-live="polite" hidden></div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
 
     <div class="modal-actions">
