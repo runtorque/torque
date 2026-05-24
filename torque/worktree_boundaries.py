@@ -304,6 +304,50 @@ def task_branch_key(task) -> str:
     return branch_key(repo_root, branch)
 
 
+def boundary_submodule_branches(boundary: dict | None) -> list[dict]:
+    """Return normalized nested-submodule branch entries on a boundary."""
+    if not isinstance(boundary, dict):
+        return []
+    raw = boundary.get("submodules", [])
+    if not isinstance(raw, list):
+        raw = boundary.get("submodule_branches", [])
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path = _clean_text(item.get("path", ""))
+        repo_root = _clean_text(item.get("repo_root", ""))
+        branch = _clean_text(item.get("branch", ""))
+        commit_sha = _clean_text(
+            item.get("commit_sha", "") or item.get("head_sha", "")
+        )
+        if not path or not repo_root or not branch:
+            continue
+        out.append({
+            "path": path,
+            "repo_root": repo_root,
+            "branch": branch,
+            "base_branch": _clean_text(item.get("base_branch", "")),
+            "commit_sha": commit_sha,
+            "gitlink_sha": _clean_text(item.get("gitlink_sha", "")),
+        })
+    return out
+
+
+def task_branch_keys(task, *, include_submodules: bool = False) -> set[str]:
+    """Return primary and, optionally, nested-submodule branch keys."""
+    keys = set()
+    key = task_branch_key(task)
+    if key:
+        keys.add(key)
+    if include_submodules:
+        for sub in boundary_submodule_branches(task_boundary(task)):
+            keys.add(branch_key(sub.get("repo_root", ""), sub.get("branch", "")))
+    return keys
+
+
 def boundary_sort_key(task) -> tuple[str, str]:
     boundary = task_boundary(task)
     return (
@@ -315,11 +359,15 @@ def boundary_sort_key(task) -> tuple[str, str]:
 def branch_boundary_tasks(tasks: Iterable, *,
                           repo_root: str,
                           branch: str,
-                          statuses: set[str] | None = None) -> list:
+                          statuses: set[str] | None = None,
+                          include_submodules: bool = False) -> list:
     wanted = branch_key(repo_root, branch)
     matched = []
     for task in tasks:
-        if task_branch_key(task) != wanted:
+        if include_submodules:
+            if wanted not in task_branch_keys(task, include_submodules=True):
+                continue
+        elif task_branch_key(task) != wanted:
             continue
         if statuses:
             status = task_boundary(task).get("status", "") or ""
@@ -333,9 +381,14 @@ def branch_boundary_tasks(tasks: Iterable, *,
 def latest_boundary_task(tasks: Iterable, *,
                          repo_root: str,
                          branch: str,
-                         statuses: set[str] | None = None):
+                         statuses: set[str] | None = None,
+                         include_submodules: bool = False):
     matched = branch_boundary_tasks(
-        tasks, repo_root=repo_root, branch=branch, statuses=statuses
+        tasks,
+        repo_root=repo_root,
+        branch=branch,
+        statuses=statuses,
+        include_submodules=include_submodules,
     )
     if not matched:
         return None
@@ -459,7 +512,9 @@ def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
                                          repo_root: str,
                                          branch: str,
                                          previous_head_sha: str,
-                                         rebased_head_sha: str):
+                                         rebased_head_sha: str,
+                                         previous_submodules: list[dict] | None = None,
+                                         rebased_submodules: list[dict] | None = None):
     """Re-anchor the latest open boundary after a Torque-managed rebase.
 
     This only updates boundaries that still pointed at the exact pre-rebase
@@ -494,6 +549,39 @@ def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
         return None
 
     boundary["commit_sha"] = rebased_head_sha
+    if previous_submodules is not None or rebased_submodules is not None:
+        previous_by_path = {
+            _clean_text(item.get("path", "")): item
+            for item in (previous_submodules or [])
+            if isinstance(item, dict) and _clean_text(item.get("path", ""))
+        }
+        rebased_by_path = {
+            _clean_text(item.get("path", "")): item
+            for item in (rebased_submodules or [])
+            if isinstance(item, dict) and _clean_text(item.get("path", ""))
+        }
+        updated_submodules = []
+        for existing in boundary_submodule_branches(boundary):
+            path = existing.get("path", "")
+            previous = previous_by_path.get(path, {})
+            rebased = rebased_by_path.get(path, {})
+            expected = _clean_text(
+                previous.get("commit_sha", "") or previous.get("head_sha", "")
+            )
+            if expected and existing.get("commit_sha", "") != expected:
+                return None
+            if rebased:
+                merged = dict(existing)
+                merged.update({
+                    key: value
+                    for key, value in rebased.items()
+                    if value not in ("", None, {})
+                })
+                updated_submodules.append(merged)
+            else:
+                updated_submodules.append(existing)
+        if updated_submodules:
+            boundary["submodules"] = updated_submodules
     boundary.pop("reason", None)
     latest.worktree_boundary = boundary
     return latest
@@ -632,6 +720,8 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
                 "merged_at": "",
                 "merge_commit_sha": "",
             }
+            if source_boundary.get("submodules"):
+                boundary["submodules"] = list(source_boundary.get("submodules") or [])
         else:
             if not boundary.get("version"):
                 boundary["version"] = source_boundary.get("version", "1") or "1"
@@ -652,6 +742,8 @@ def mark_branch_boundaries_merged(tasks: Iterable, *,
                     source_boundary.get("recorded_by_agent_id", "") or ""
                 )
             boundary.setdefault("message", "")
+            if source_boundary.get("submodules") and not boundary.get("submodules"):
+                boundary["submodules"] = list(source_boundary.get("submodules") or [])
 
         boundary["status"] = "merged"
         boundary["merged_at"] = merged_at

@@ -1147,7 +1147,10 @@ class WorktreeManager:
         #   - rev-list --left-right --count → ahead + behind
         #   - status --porcelain=v2         → dirty + uncommitted/untracked
         #   - diff --numstat                → committed file list + stats
-        ahead, behind = await self._ahead_behind(cell)
+        ahead, behind = await self._ahead_behind(
+            cell,
+            worktree_submodules=worktree_submodules,
+        )
         dirty, uncommitted_files, untracked_files = await self._status_v2(cell)
         diff_stats, committed_files = await self._diff_numstat(
             cell,
@@ -1162,7 +1165,10 @@ class WorktreeManager:
         elif behind == 0:
             merged = False
         else:
-            merged = await self.is_merged(cell)
+            merged = await self.is_merged(
+                cell,
+                worktree_submodules=worktree_submodules,
+            )
 
         all_changed = sorted(
             set(committed_files) | set(uncommitted_files) | set(untracked_files)
@@ -1204,8 +1210,11 @@ class WorktreeManager:
         """Drop the cached refresh fingerprint when an agent goes away."""
         self._refresh_fingerprints.pop(cell_id, None)
 
-    async def _ahead_behind(self, cell) -> tuple[int, int]:
+    async def _ahead_behind(self, cell,
+                            worktree_submodules=None) -> tuple[int, int]:
         """One git call: returns (ahead, behind) commits vs base."""
+        ahead = 0
+        behind = 0
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", cell.worktree_path,
@@ -1219,10 +1228,51 @@ class WorktreeManager:
                 return (0, 0)
             parts = stdout.decode().split()
             if len(parts) >= 2:
-                return (int(parts[1]), int(parts[0]))
+                ahead = int(parts[1])
+                behind = int(parts[0])
         except Exception:
             log.debug("ahead_behind failed for '%s'", cell.name)
-        return (0, 0)
+
+        submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+        if not submodule_paths:
+            return (ahead, behind)
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        if not repo_root:
+            repo_root = await self.get_repo_root(cell.worktree_path) or ""
+        if not repo_root:
+            return (ahead, behind)
+        infos = await self._nested_submodule_infos(
+            repo_root,
+            cell.worktree_path,
+            submodule_paths,
+            ref="HEAD",
+            require_worktree=True,
+            strict=False,
+        )
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        for info in infos:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", info["worktree_path"],
+                    "rev-list", "--left-right", "--count",
+                    f"{base}...HEAD",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode != 0:
+                    continue
+                parts = stdout.decode().split()
+                if len(parts) >= 2:
+                    ahead += int(parts[1])
+                    behind += int(parts[0])
+            except Exception:
+                log.debug(
+                    "nested ahead_behind failed for '%s' submodule %s",
+                    cell.name,
+                    info.get("path", ""),
+                )
+        return (ahead, behind)
 
     async def _status_v2(self, cell) -> tuple[bool, list[str], list[str]]:
         """One git call: returns (dirty, uncommitted_paths, untracked_paths)."""
@@ -1333,6 +1383,25 @@ class WorktreeManager:
         except Exception:
             log.debug("git command failed for %s: %s", directory, " ".join(args))
             return 1, ""
+
+    async def _git_run(self, directory: str,
+                       *args: str) -> tuple[int, str, str]:
+        """Run git in *directory* and return ``(returncode, stdout, stderr)``."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            return (
+                proc.returncode,
+                stdout.decode(errors="replace").strip(),
+                stderr.decode(errors="replace").strip(),
+            )
+        except Exception as exc:
+            log.debug("git command failed for %s: %s", directory, " ".join(args))
+            return 1, "", str(exc)
 
     async def _git_common_dir(self, directory: str) -> str:
         code, stdout = await self._git_stdout(
@@ -1458,6 +1527,28 @@ class WorktreeManager:
                 "gitlink_sha": gitlink_sha,
             })
         return infos
+
+    async def _nested_submodule_infos_for_cell(self, cell,
+                                               worktree_submodules,
+                                               *,
+                                               require_worktree: bool = True,
+                                               strict: bool = False) -> list[dict]:
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths or not cell or not getattr(cell, "worktree_path", ""):
+            return []
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        if not repo_root:
+            repo_root = await self.get_repo_root(cell.worktree_path) or ""
+        if not repo_root:
+            return []
+        return await self._nested_submodule_infos(
+            repo_root,
+            cell.worktree_path,
+            paths,
+            ref="HEAD",
+            require_worktree=require_worktree,
+            strict=strict,
+        )
 
     async def _resolve_nested_submodule_branch(self, module_dir: str,
                                                submodule_path: str,
@@ -1790,6 +1881,524 @@ class WorktreeManager:
                 replaced.add(info["path"])
         return "\n".join(chunks), replaced
 
+    async def nested_submodule_head_states(self, cell,
+                                           worktree_submodules) -> list[dict]:
+        """Return current branch/head/gitlink metadata for configured submodules."""
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths:
+            return []
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        if not repo_root and getattr(cell, "worktree_path", ""):
+            repo_root = await self.get_repo_root(cell.worktree_path) or ""
+        if not repo_root:
+            return []
+        infos = await self._nested_submodule_infos(
+            repo_root,
+            getattr(cell, "worktree_path", "") or "",
+            paths,
+            ref="HEAD",
+            require_worktree=True,
+            strict=False,
+        )
+        states: list[dict] = []
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        for info in infos:
+            sub_wt = info.get("worktree_path", "")
+            branch = await self.get_current_branch(sub_wt)
+            head = await self.rev_parse(sub_wt, "HEAD") or ""
+            states.append({
+                "path": info.get("path", ""),
+                "repo_root": info.get("module_dir", ""),
+                "branch": branch if branch != "HEAD" else "",
+                "base_branch": base,
+                "commit_sha": head,
+                "gitlink_sha": info.get("gitlink_sha", ""),
+            })
+        return states
+
+    async def _nested_submodule_base_gitlink(self, cell, path: str) -> str:
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        if not base:
+            return ""
+        return await self._gitlink_sha(
+            getattr(cell, "worktree_path", "") or "",
+            base,
+            path,
+        )
+
+    async def _nested_submodule_remote_name(self, sub_wt: str) -> str:
+        code, stdout = await self._git_stdout(sub_wt, "remote")
+        if code != 0:
+            return ""
+        remotes = [line.strip() for line in stdout.splitlines() if line.strip()]
+        if "origin" in remotes:
+            return "origin"
+        return remotes[0] if remotes else ""
+
+    async def _nested_submodule_fetch_remote(self, sub_wt: str,
+                                             remote: str) -> tuple[bool, str]:
+        if not remote:
+            return False, "No remote configured"
+        code, _out, err = await self._git_run(sub_wt, "fetch", "--quiet", remote)
+        if code != 0:
+            return False, err or f"git fetch {remote} failed"
+        return True, ""
+
+    async def _remote_contains_commit(self, module_dir: str, remote: str,
+                                      sha: str) -> tuple[bool, list[str]]:
+        if not module_dir or not remote or not sha:
+            return False, []
+        code, stdout = await self._git_stdout(
+            module_dir,
+            "branch",
+            "-r",
+            "--contains",
+            sha,
+        )
+        if code != 0:
+            return False, []
+        prefix = f"{remote}/"
+        refs: list[str] = []
+        for raw in stdout.splitlines():
+            ref = raw.strip().lstrip("*").strip()
+            if not ref or ref.endswith("/HEAD"):
+                continue
+            if ref == remote or ref.startswith(prefix):
+                refs.append(ref)
+        return bool(refs), refs
+
+    async def _remote_branch_sha(self, module_dir: str, remote: str,
+                                 branch: str) -> str:
+        if not module_dir or not remote or not branch:
+            return ""
+        code, stdout = await self._git_stdout(
+            module_dir,
+            "rev-parse",
+            "--verify",
+            f"{remote}/{branch}",
+        )
+        if code != 0:
+            return ""
+        return stdout.splitlines()[0].strip() if stdout else ""
+
+    def _nested_preflight_error(self, entry: dict, condition: str,
+                                detail: str) -> dict:
+        path = entry.get("path", "")
+        old_sha = entry.get("old_gitlink_sha", "")
+        new_sha = entry.get("new_gitlink_sha", "")
+        head = entry.get("head_sha", "")
+        branch = entry.get("branch", "")
+        message = (
+            "Nested submodule merge preflight failed for "
+            f"{path}: {condition}. {detail} "
+            f"old_gitlink={old_sha or '(missing)'} "
+            f"new_gitlink={new_sha or '(missing)'} "
+            f"head={head or '(missing)'}"
+        ).strip()
+        if branch:
+            message += f" branch={branch}"
+        return {
+            "ok": False,
+            "error": message,
+            "condition": condition,
+            "submodule": entry,
+        }
+
+    async def nested_submodule_merge_preflight(self, cell,
+                                               worktree_submodules) -> dict:
+        """Validate nested submodule gitlinks are safe to publish/merge.
+
+        The checks are dormant unless configured submodule worktrees are
+        present.  They deliberately fail before any superproject merge can
+        publish a gitlink to an unfetchable submodule commit.
+        """
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths:
+            return {"ok": True, "submodules": []}
+        infos = await self._nested_submodule_infos_for_cell(
+            cell,
+            paths,
+            require_worktree=True,
+            strict=False,
+        )
+        checked: list[dict] = []
+        for info in infos:
+            sub_wt = info["worktree_path"]
+            path = info["path"]
+            branch = await self.get_current_branch(sub_wt)
+            head = await self.rev_parse(sub_wt, "HEAD") or ""
+            old_gitlink = await self._nested_submodule_base_gitlink(cell, path)
+            new_gitlink = info.get("gitlink_sha", "")
+            entry = {
+                "path": path,
+                "worktree_path": sub_wt,
+                "repo_root": info.get("module_dir", ""),
+                "branch": "" if branch == "HEAD" else branch,
+                "base_branch": str(
+                    getattr(cell, "worktree_base_branch", "") or ""
+                ).strip(),
+                "old_gitlink_sha": old_gitlink,
+                "new_gitlink_sha": new_gitlink,
+                "head_sha": head,
+                "remote": "",
+                "remote_refs_containing_gitlink": [],
+            }
+
+            code, status = await self._git_stdout(
+                sub_wt,
+                "status",
+                "--porcelain",
+            )
+            if code != 0:
+                return self._nested_preflight_error(
+                    entry,
+                    "STATUS_FAILED",
+                    "Could not read submodule status.",
+                )
+            if status.strip():
+                return self._nested_preflight_error(
+                    entry,
+                    "DIRTY",
+                    "Commit or checkpoint nested submodule changes first.",
+                )
+
+            if head and new_gitlink and head != new_gitlink:
+                return self._nested_preflight_error(
+                    entry,
+                    "HEAD_MISMATCH",
+                    "Submodule HEAD does not match the superproject gitlink.",
+                )
+
+            remote = await self._nested_submodule_remote_name(sub_wt)
+            entry["remote"] = remote
+            fetched, fetch_error = await self._nested_submodule_fetch_remote(
+                sub_wt,
+                remote,
+            )
+            if not fetched:
+                return self._nested_preflight_error(
+                    entry,
+                    "REMOTE_UNAVAILABLE",
+                    fetch_error,
+                )
+
+            contains, refs = await self._remote_contains_commit(
+                info["module_dir"],
+                remote,
+                new_gitlink,
+            )
+            entry["remote_refs_containing_gitlink"] = refs
+            if not contains:
+                return self._nested_preflight_error(
+                    entry,
+                    "MISSING_FROM_REMOTE",
+                    "The gitlink commit is not reachable from the "
+                    f"{remote} remote.",
+                )
+
+            remote_branch_sha = await self._remote_branch_sha(
+                info["module_dir"],
+                remote,
+                entry["branch"],
+            )
+            entry["remote_branch_sha"] = remote_branch_sha
+            if entry["branch"] and remote_branch_sha != head:
+                return self._nested_preflight_error(
+                    entry,
+                    "UNPUSHED",
+                    "The nested submodule branch tip is not pushed to "
+                    f"{remote}/{entry['branch']}.",
+                )
+
+            checked.append(entry)
+        return {"ok": True, "submodules": checked}
+
+    async def _checked_out_worktree_for_branch(self, repo_root: str,
+                                               branch: str) -> str:
+        if not repo_root or not branch:
+            return ""
+        for entry in await self.list_worktrees(repo_root):
+            entry_branch = str(entry.get("branch", "") or "").strip()
+            branch_ref = str(entry.get("branch_ref", "") or "").strip()
+            if entry_branch == branch or branch_ref == f"refs/heads/{branch}":
+                return str(entry.get("path", "") or "").strip()
+        current = await self.get_current_branch(repo_root)
+        if current == branch:
+            return repo_root
+        return ""
+
+    async def _advance_branch_to_commit(self, repo_root: str, branch: str,
+                                        sha: str) -> tuple[bool, str]:
+        checkout = await self._checked_out_worktree_for_branch(repo_root, branch)
+        if checkout:
+            code, _out, err = await self._git_run(
+                checkout,
+                "merge",
+                "--ff-only",
+                sha,
+            )
+            if code != 0:
+                return False, err or "merge --ff-only failed"
+            return True, ""
+        code, _out, err = await self._git_run(
+            repo_root,
+            "update-ref",
+            f"refs/heads/{branch}",
+            sha,
+        )
+        if code != 0:
+            return False, err or "update-ref failed"
+        return True, ""
+
+    async def _merge_branch_into_base_repo(self, repo_root: str, *,
+                                           base_branch: str,
+                                           branch: str,
+                                           message: str) -> dict:
+        base_sha = await self.rev_parse(repo_root, base_branch) or ""
+        branch_sha = await self.rev_parse(repo_root, branch) or ""
+        if not base_sha or not branch_sha:
+            return {
+                "ok": False,
+                "error": (
+                    f"Cannot resolve {base_branch} or {branch} in nested "
+                    "submodule."
+                ),
+            }
+        if base_sha == branch_sha:
+            return {"ok": True, "sha": base_sha, "changed": False}
+
+        code, _out = await self._git_stdout(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            branch,
+            base_branch,
+        )
+        if code == 0:
+            return {"ok": True, "sha": base_sha, "changed": False}
+
+        code, _out = await self._git_stdout(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            base_branch,
+            branch,
+        )
+        if code == 0:
+            new_sha = branch_sha
+        else:
+            code, tree_out, err = await self._git_run(
+                repo_root,
+                "merge-tree",
+                "--write-tree",
+                base_branch,
+                branch,
+            )
+            if code != 0:
+                conflicts = await self._parse_merge_tree_conflicts(
+                    tree_out,
+                    repo_root=repo_root,
+                    base_label=base_branch,
+                    branch_label=branch,
+                )
+                paths = ", ".join(
+                    item.get("path", "") for item in conflicts if item.get("path")
+                )
+                detail = f" conflicts: {paths}" if paths else ""
+                return {
+                    "ok": False,
+                    "error": (
+                        "Nested submodule merge conflict while merging "
+                        f"{branch} into {base_branch}.{detail}"
+                    ) or err,
+                    "conflicts": conflicts,
+                }
+            tree_sha = tree_out.splitlines()[0].strip() if tree_out else ""
+            code, commit_out, commit_err = await self._git_run(
+                repo_root,
+                "commit-tree",
+                tree_sha,
+                "-p",
+                base_sha,
+                "-p",
+                branch_sha,
+                "-m",
+                message,
+            )
+            if code != 0:
+                return {
+                    "ok": False,
+                    "error": commit_err or "nested submodule commit-tree failed",
+                }
+            new_sha = commit_out.splitlines()[0].strip()
+
+        advanced, advance_error = await self._advance_branch_to_commit(
+            repo_root,
+            base_branch,
+            new_sha,
+        )
+        if not advanced:
+            return {"ok": False, "error": advance_error}
+        return {"ok": True, "sha": new_sha, "changed": new_sha != base_sha}
+
+    async def _push_nested_submodule_ref(self, sub_wt: str, remote: str,
+                                         sha: str, branch: str) -> dict:
+        code, _out, err = await self._git_run(
+            sub_wt,
+            "push",
+            remote,
+            f"{sha}:refs/heads/{branch}",
+        )
+        if code != 0:
+            return {
+                "ok": False,
+                "error": err or f"git push {remote} {branch} failed",
+            }
+        return {"ok": True}
+
+    async def _commit_superproject_gitlink_bumps(self, wt_dir: str,
+                                                 updates: list[dict],
+                                                 *,
+                                                 message: str) -> dict:
+        changed: list[str] = []
+        for update in updates:
+            path = update.get("path", "")
+            sha = update.get("sha", "")
+            if not path or not sha:
+                continue
+            sub_wt = self._join_repo_rel(wt_dir, path)
+            code, _out, err = await self._git_run(sub_wt, "reset", "--hard", sha)
+            if code != 0:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Could not reset nested submodule {path} to "
+                        f"{sha[:12]}: {err}"
+                    ),
+                }
+            code, _out, err = await self._git_run(wt_dir, "add", "--", path)
+            if code != 0:
+                return {
+                    "ok": False,
+                    "error": f"Could not stage gitlink for {path}: {err}",
+                }
+            code, _out = await self._git_stdout(
+                wt_dir,
+                "diff",
+                "--cached",
+                "--quiet",
+                "--",
+                path,
+            )
+            if code != 0:
+                changed.append(path)
+
+        if not changed:
+            return {"ok": True, "committed": False, "paths": []}
+        code, _out, err = await self._git_run(wt_dir, "commit", "-m", message)
+        if code != 0:
+            return {
+                "ok": False,
+                "error": f"Could not commit nested submodule gitlink bump: {err}",
+            }
+        sha = await self.rev_parse(wt_dir, "HEAD") or ""
+        return {"ok": True, "committed": True, "sha": sha, "paths": changed}
+
+    async def _merge_nested_submodules_for_merge(self, cell,
+                                                 worktree_submodules,
+                                                 *,
+                                                 message: str) -> dict:
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths:
+            return {"ok": True, "submodules": []}
+        preflight = await self.nested_submodule_merge_preflight(cell, paths)
+        if not preflight.get("ok"):
+            return preflight
+
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        wt_dir = getattr(cell, "worktree_path", "") or ""
+        updates: list[dict] = []
+        merged: list[dict] = []
+        for entry in preflight.get("submodules", []) or []:
+            path = entry.get("path", "")
+            branch = entry.get("branch", "")
+            module_dir = entry.get("repo_root", "")
+            remote = entry.get("remote", "") or "origin"
+            merge_result = await self._merge_branch_into_base_repo(
+                module_dir,
+                base_branch=base,
+                branch=branch,
+                message=(
+                    f"Merge nested submodule {path} branch '{branch}'"
+                    if not message else
+                    f"{message}\n\nNested submodule: {path}\nBranch: {branch}"
+                ),
+            )
+            if not merge_result.get("ok"):
+                return {
+                    "ok": False,
+                    "error": merge_result.get(
+                        "error",
+                        f"Nested submodule merge failed for {path}",
+                    ),
+                    "submodule": entry,
+                }
+            merged_sha = merge_result.get("sha", "")
+            push_base = await self._push_nested_submodule_ref(
+                entry.get("worktree_path", ""),
+                remote,
+                merged_sha,
+                base,
+            )
+            if not push_base.get("ok"):
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Nested submodule {path} merged locally but could "
+                        f"not push {base}: {push_base.get('error', '')}"
+                    ),
+                    "submodule": entry,
+                }
+            # Keep the worker submodule branch aligned with the merged base
+            # commit so subsequent refresh/remove/rebase checks see a coherent
+            # branch pair.  This is a fast-forward after the merge commit above.
+            await self._git_run(
+                entry.get("worktree_path", ""),
+                "reset",
+                "--hard",
+                merged_sha,
+            )
+            push_branch = await self._push_nested_submodule_ref(
+                entry.get("worktree_path", ""),
+                remote,
+                merged_sha,
+                branch,
+            )
+            if not push_branch.get("ok"):
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Nested submodule {path} merged locally but could "
+                        f"not push {branch}: {push_branch.get('error', '')}"
+                    ),
+                    "submodule": entry,
+                }
+            updates.append({"path": path, "sha": merged_sha})
+            merged.append({**entry, "merged_sha": merged_sha})
+
+        bump = await self._commit_superproject_gitlink_bumps(
+            wt_dir,
+            updates,
+            message="Update nested submodule gitlinks for merge",
+        )
+        if not bump.get("ok"):
+            return bump
+        return {
+            "ok": True,
+            "submodules": merged,
+            "gitlink_bump": bump,
+        }
+
     async def _commit_subject(self, repo_root: str, ref: str) -> str:
         code, stdout = await self._git_stdout(
             repo_root, "show", "-s", "--format=%s", ref
@@ -1798,7 +2407,7 @@ class WorktreeManager:
             return ""
         return stdout.splitlines()[0].strip() if stdout else ""
 
-    async def stale_base_info(self, cell) -> dict:
+    async def stale_base_info(self, cell, worktree_submodules=None) -> dict:
         """Return stale-base metadata for a worktree branch.
 
         A branch is considered stale when its merge-base/fork-point with the
@@ -1862,25 +2471,90 @@ class WorktreeManager:
             ),
         }
         if stale:
-            count_code, count_text = await self._git_stdout(
-                repo_root, "rev-list", "--count", f"{fork_point}..{base_head}"
-            )
-            if count_code == 0 and count_text:
-                try:
-                    info["commits_on_base"] = int(count_text.splitlines()[0])
-                except ValueError:
-                    info["commits_on_base"] = 0
-            files_code, files_text = await self._git_stdout(
-                repo_root, "diff", "--name-only", fork_point, base_head
-            )
-            if files_code == 0:
-                files = [
-                    line.strip() for line in files_text.splitlines()
-                    if line.strip()
-                ]
-                info["files_changed_on_base"] = len(files)
+            await self._populate_stale_base_counts(info, repo_root)
             info["warning"] = format_stale_base_warning(info)
+            return info
+
+        submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+        if not submodule_paths:
+            return info
+        infos = await self._nested_submodule_infos(
+            repo_root,
+            cell.worktree_path,
+            submodule_paths,
+            ref="HEAD",
+            require_worktree=True,
+            strict=False,
+        )
+        for sub_info in infos:
+            sub_wt = sub_info.get("worktree_path", "")
+            module_dir = sub_info.get("module_dir", "")
+            sub_branch = await self.get_current_branch(sub_wt)
+            if not sub_branch or sub_branch == "HEAD":
+                continue
+            sub_base_head = await self.rev_parse(module_dir, base) or ""
+            sub_branch_head = await self.rev_parse(module_dir, sub_branch) or ""
+            if not sub_base_head or not sub_branch_head:
+                continue
+            code, sub_fork = await self._git_stdout(
+                module_dir,
+                "merge-base",
+                base,
+                sub_branch,
+            )
+            if code != 0 or not sub_fork:
+                continue
+            if sub_fork == sub_base_head:
+                continue
+            sub_stale = {
+                "stale": True,
+                "branch": f"{sub_info.get('path', '')}:{sub_branch}",
+                "base_branch": base,
+                "fork_point": sub_fork,
+                "base_head": sub_base_head,
+                "branch_head": sub_branch_head,
+                "fork_point_subject": await self._commit_subject(
+                    module_dir,
+                    sub_fork,
+                ),
+                "base_head_subject": await self._commit_subject(
+                    module_dir,
+                    sub_base_head,
+                ),
+                "commits_on_base": 0,
+                "files_changed_on_base": 0,
+                "agent_hint": info.get("agent_hint", ""),
+                "submodule": sub_info.get("path", ""),
+                "submodule_branch": sub_branch,
+            }
+            await self._populate_stale_base_counts(sub_stale, module_dir)
+            sub_stale["warning"] = format_stale_base_warning(sub_stale)
+            return sub_stale
         return info
+
+    async def _populate_stale_base_counts(self, info: dict,
+                                          repo_root: str) -> None:
+        fork_point = str(info.get("fork_point", "") or "").strip()
+        base_head = str(info.get("base_head", "") or "").strip()
+        if not fork_point or not base_head:
+            return
+        count_code, count_text = await self._git_stdout(
+            repo_root, "rev-list", "--count", f"{fork_point}..{base_head}"
+        )
+        if count_code == 0 and count_text:
+            try:
+                info["commits_on_base"] = int(count_text.splitlines()[0])
+            except ValueError:
+                info["commits_on_base"] = 0
+        files_code, files_text = await self._git_stdout(
+            repo_root, "diff", "--name-only", fork_point, base_head
+        )
+        if files_code == 0:
+            files = [
+                line.strip() for line in files_text.splitlines()
+                if line.strip()
+            ]
+            info["files_changed_on_base"] = len(files)
 
     async def get_repo_root(self, directory: str) -> Optional[str]:
         """Find Torque's common repo root for a directory.
@@ -2967,7 +3641,8 @@ class WorktreeManager:
         except Exception:
             return False
 
-    async def has_uncommitted_changes(self, cell) -> bool:
+    async def has_uncommitted_changes(self, cell,
+                                      worktree_submodules=None) -> bool:
         """True if the worktree has staged, unstaged, or untracked changes."""
         if not cell.worktree_path:
             return False
@@ -2979,7 +3654,28 @@ class WorktreeManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await proc.communicate()
-            return bool(stdout.decode().strip())
+            if bool(stdout.decode().strip()):
+                return True
+            submodule_paths = _normalize_worktree_submodules(
+                worktree_submodules
+            )
+            if not submodule_paths:
+                return False
+            infos = await self._nested_submodule_infos_for_cell(
+                cell,
+                submodule_paths,
+                require_worktree=True,
+                strict=False,
+            )
+            for info in infos:
+                code, status = await self._git_stdout(
+                    info["worktree_path"],
+                    "status",
+                    "--porcelain",
+                )
+                if code == 0 and status.strip():
+                    return True
+            return False
         except Exception:
             return False
 
@@ -3486,7 +4182,7 @@ class WorktreeManager:
             log.exception("Rollback failed for '%s'", cell.name)
             return False
 
-    async def is_merged(self, cell) -> bool:
+    async def is_merged(self, cell, worktree_submodules=None) -> bool:
         """Check if the worktree branch has been merged into the base branch.
 
         Handles both regular merges (ancestry check) and squash merges
@@ -3522,7 +4218,11 @@ class WorktreeManager:
             )
             await proc.communicate()
             if proc.returncode == 0:
-                return True
+                return await self._nested_submodule_branches_merged(
+                    cell,
+                    repo_root,
+                    worktree_submodules,
+                )
 
             # Slow path: detect squash merges by simulating a merge.
             # If re-merging the branch into base produces base's exact
@@ -3558,10 +4258,43 @@ class WorktreeManager:
 
             # 3. If the simulated merge produces base's tree unchanged,
             #    the branch's changes are already in base.
-            return merge_tree == base_tree
+            super_merged = merge_tree == base_tree
+            if not super_merged:
+                return False
+            return await self._nested_submodule_branches_merged(
+                cell,
+                repo_root,
+                worktree_submodules,
+            )
         except Exception:
             log.debug("is_merged check failed for '%s'", cell.name)
             return False
+
+    async def _nested_submodule_branches_merged(self, cell, repo_root: str,
+                                                worktree_submodules=None) -> bool:
+        submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+        if not submodule_paths:
+            return True
+        infos = await self._nested_submodule_infos(
+            repo_root,
+            cell.worktree_path,
+            submodule_paths,
+            ref="HEAD",
+            require_worktree=True,
+            strict=False,
+        )
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        for info in infos:
+            sub_branch = await self.get_current_branch(info["worktree_path"])
+            if not sub_branch or sub_branch == "HEAD":
+                continue
+            if not await self.is_branch_merged(
+                    info["module_dir"],
+                    branch=sub_branch,
+                    base_branch=base,
+            ):
+                return False
+        return True
 
     async def is_branch_merged(self, repo_root: str, *,
                                branch: str,
@@ -3757,7 +4490,8 @@ class WorktreeManager:
             conflicts.append(conflict)
         return conflicts
 
-    async def check_merge_conflicts(self, cell) -> dict:
+    async def check_merge_conflicts(self, cell,
+                                    worktree_submodules=None) -> dict:
         """Dry-run merge of worktree branch into base.
 
         Returns dict with keys:
@@ -3774,6 +4508,23 @@ class WorktreeManager:
             return {"clean": False, "tree_sha": "",
                     "conflicts": [], "error": "Cannot find repo root"}
         try:
+            submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+            if submodule_paths:
+                preflight = await self.nested_submodule_merge_preflight(
+                    cell,
+                    submodule_paths,
+                )
+                if not preflight.get("ok"):
+                    return {
+                        "clean": False,
+                        "tree_sha": "",
+                        "conflicts": [],
+                        "error": preflight.get(
+                            "error",
+                            "Nested submodule merge preflight failed",
+                        ),
+                        "preflight": preflight,
+                    }
             base = cell.worktree_base_branch
             branch = cell.worktree_branch
             proc = await asyncio.create_subprocess_exec(
@@ -3795,8 +4546,23 @@ class WorktreeManager:
                 base_label=base,
                 branch_label=branch,
             )
-            return {"clean": False, "tree_sha": "",
-                    "conflicts": conflicts}
+            result = {"clean": False, "tree_sha": "",
+                      "conflicts": conflicts}
+            submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+            gitlink_conflicts = [
+                item for item in conflicts
+                if _normalize_repo_rel_path(item.get("path", "")) in submodule_paths
+            ]
+            if gitlink_conflicts:
+                paths = ", ".join(
+                    item.get("path", "") for item in gitlink_conflicts
+                )
+                result["error"] = (
+                    "Nested submodule gitlink conflict while merging "
+                    f"{branch} into {base}: {paths}. Rebase the worktree "
+                    "or merge the nested submodule branch pair first."
+                )
+            return result
         except Exception:
             log.exception("check_merge_conflicts failed for '%s'",
                           cell.name)
@@ -3804,7 +4570,8 @@ class WorktreeManager:
                     "conflicts": [], "error": "Merge check failed"}
 
     async def server_merge(self, cell, message: str,
-                           squash: bool = True) -> dict:
+                           squash: bool = True,
+                           worktree_submodules=None) -> dict:
         """Perform server-side merge of worktree branch into base.
 
         Uses git plumbing (merge-tree + commit-tree + update-ref)
@@ -3820,6 +4587,22 @@ class WorktreeManager:
 
         base = cell.worktree_base_branch
         branch = cell.worktree_branch
+        submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+        if submodule_paths:
+            nested_merge = await self._merge_nested_submodules_for_merge(
+                cell,
+                submodule_paths,
+                message=message,
+            )
+            if not nested_merge.get("ok"):
+                return {
+                    "ok": False,
+                    "error": nested_merge.get(
+                        "error",
+                        "Nested submodule merge failed",
+                    ),
+                    "nested_submodules": nested_merge,
+                }
 
         # 1. Verify clean merge (race-condition guard)
         check = await self.check_merge_conflicts(cell)
@@ -3922,12 +4705,15 @@ class WorktreeManager:
             log.info("Server-side %s of '%s' (%s) into %s: %s",
                      "squash merge" if squash else "merge",
                      cell.name, branch, base, new_sha[:8])
-            return {"ok": True, "sha": new_sha}
+            result = {"ok": True, "sha": new_sha}
+            if submodule_paths:
+                result["nested_submodules"] = nested_merge
+            return result
         except Exception:
             log.exception("server_merge failed for '%s'", cell.name)
             return {"ok": False, "error": "Server merge failed"}
 
-    async def reset_to_base(self, cell) -> bool:
+    async def reset_to_base(self, cell, worktree_submodules=None) -> bool:
         """Reset the worktree branch to the base branch tip.
 
         Used after merge: all old commits are already incorporated into
@@ -3960,6 +4746,12 @@ class WorktreeManager:
                 log.warning("reset_to_base failed for '%s': %s",
                             cell.name, err)
                 return False
+            if _normalize_worktree_submodules(worktree_submodules):
+                if not await self._reset_nested_submodules_to_super_gitlinks(
+                        cell,
+                        worktree_submodules,
+                ):
+                    return False
             log.info("Reset '%s' to %s after merge",
                      cell.name, base)
             return True
@@ -3967,7 +4759,38 @@ class WorktreeManager:
             log.exception("reset_to_base failed for '%s'", cell.name)
             return False
 
-    async def rebase_onto_base(self, cell) -> bool:
+    async def _reset_nested_submodules_to_super_gitlinks(
+            self,
+            cell,
+            worktree_submodules,
+    ) -> bool:
+        infos = await self._nested_submodule_infos_for_cell(
+            cell,
+            worktree_submodules,
+            require_worktree=True,
+            strict=False,
+        )
+        for info in infos:
+            target = info.get("gitlink_sha", "")
+            if not target:
+                continue
+            code, _out, err = await self._git_run(
+                info["worktree_path"],
+                "reset",
+                "--hard",
+                target,
+            )
+            if code != 0:
+                log.warning(
+                    "Nested submodule reset failed for '%s' %s: %s",
+                    getattr(cell, "name", ""),
+                    info.get("path", ""),
+                    err,
+                )
+                return False
+        return True
+
+    async def rebase_onto_base(self, cell, worktree_submodules=None) -> bool:
         """Rebase the worktree branch onto its base branch.
 
         Returns True on success, False on failure (e.g. conflicts).
@@ -3979,6 +4802,12 @@ class WorktreeManager:
         if not wt_dir:
             return False
         try:
+            submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+            if submodule_paths and not await self._rebase_nested_submodules(
+                    cell,
+                    submodule_paths,
+            ):
+                return False
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", wt_dir,
                 "rebase", cell.worktree_base_branch,
@@ -3998,12 +4827,72 @@ class WorktreeManager:
                 )
                 await abort.communicate()
                 return False
+            if submodule_paths:
+                bump = await self._commit_superproject_gitlink_bumps(
+                    wt_dir,
+                    [
+                        {
+                            "path": state.get("path", ""),
+                            "sha": state.get("commit_sha", ""),
+                        }
+                        for state in await self.nested_submodule_head_states(
+                            cell,
+                            submodule_paths,
+                        )
+                    ],
+                    message="Update nested submodule gitlinks after rebase",
+                )
+                if not bump.get("ok"):
+                    log.warning(
+                        "Nested submodule gitlink bump after rebase failed "
+                        "for '%s': %s",
+                        cell.name,
+                        bump.get("error", ""),
+                    )
+                    return False
             log.info("Rebased '%s' onto %s",
                      cell.name, cell.worktree_base_branch)
             return True
         except Exception:
             log.exception("Rebase failed for '%s'", cell.name)
             return False
+
+    async def _rebase_nested_submodules(self, cell,
+                                        worktree_submodules) -> bool:
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        if not base:
+            return True
+        infos = await self._nested_submodule_infos_for_cell(
+            cell,
+            worktree_submodules,
+            require_worktree=True,
+            strict=False,
+        )
+        for info in infos:
+            sub_wt = info["worktree_path"]
+            code, status = await self._git_stdout(
+                sub_wt,
+                "status",
+                "--porcelain",
+            )
+            if code != 0 or status.strip():
+                log.warning(
+                    "Nested submodule rebase refused for '%s' %s: dirty",
+                    getattr(cell, "name", ""),
+                    info.get("path", ""),
+                )
+                return False
+            code, _out, err = await self._git_run(sub_wt, "rebase", base)
+            if code != 0:
+                log.warning(
+                    "Nested submodule rebase failed for '%s' %s: %s",
+                    getattr(cell, "name", ""),
+                    info.get("path", ""),
+                    err,
+                )
+                await self._git_run(sub_wt, "rebase", "--abort")
+                return False
+        return True
 
     async def count_commits(self, cell) -> int:
         """Count commits on the worktree branch since the fork point."""
