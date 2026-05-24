@@ -976,6 +976,132 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(summary["files"][0]["signals"], ["config"])
 
+    async def test_diff_summary_flags_backend_task_touching_frontend(self):
+        # A2: a backend-scoped task whose diff reaches into frontend-only
+        # paths (ee/frontend, static/js) raises the out_of_scope flag.
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+
+        backend_file = Path(wt_path) / "torque" / "server.py"
+        backend_file.parent.mkdir(parents=True)
+        backend_file.write_text("x = 1\n")
+        drift_js = Path(wt_path) / "static" / "js" / "store.js"
+        drift_js.parent.mkdir(parents=True)
+        drift_js.write_text("export const x = 1;\n")
+        drift_ee = Path(wt_path) / "ee" / "frontend" / "widget.tsx"
+        drift_ee.parent.mkdir(parents=True)
+        drift_ee.write_text("export const W = () => null;\n")
+
+        await self._git("add", "-A", cwd=wt_path)
+        await self._git("commit", "-m", "Backend change plus frontend drift",
+                        cwd=wt_path)
+
+        summary = await self.mgr.diff_files_summary(
+            cell, scope_domain="backend")
+
+        oos = summary.get("out_of_scope")
+        self.assertIsNotNone(oos)
+        self.assertEqual(oos["domain"], "backend")
+        self.assertEqual(oos["count"], 2)
+        self.assertEqual(
+            oos["paths"],
+            ["ee/frontend/widget.tsx", "static/js/store.js"],
+        )
+        self.assertIn("outside declared backend scope", oos["digest_line"])
+        self.assertEqual(summary["signal_counts"].get("out_of_scope"), 2)
+        files = {item["path"]: item for item in summary["files"]}
+        self.assertIn("out_of_scope", files["static/js/store.js"]["signals"])
+        self.assertIn(
+            "out_of_scope", files["ee/frontend/widget.tsx"]["signals"])
+        self.assertNotIn(
+            "out_of_scope", files["torque/server.py"]["signals"])
+
+    async def test_diff_summary_in_scope_backend_diff_does_not_flag(self):
+        # A2: a backend task whose diff stays in torque/* is NOT flagged.
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+
+        backend_a = Path(wt_path) / "torque" / "server.py"
+        backend_a.parent.mkdir(parents=True)
+        backend_a.write_text("x = 1\n")
+        backend_b = Path(wt_path) / "torque" / "state.py"
+        backend_b.write_text("y = 2\n")
+
+        await self._git("add", "-A", cwd=wt_path)
+        await self._git("commit", "-m", "In-scope backend change", cwd=wt_path)
+
+        summary = await self.mgr.diff_files_summary(
+            cell, scope_domain="backend")
+
+        self.assertNotIn("out_of_scope", summary)
+        self.assertNotIn("out_of_scope", summary["signal_counts"])
+        for item in summary["files"]:
+            self.assertNotIn("out_of_scope", item["signals"])
+
+    async def test_diff_summary_no_scope_domain_never_flags(self):
+        # A2 bounding: without a resolved scope domain, nothing is flagged
+        # even when the diff touches frontend paths.
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+
+        drift_js = Path(wt_path) / "static" / "js" / "store.js"
+        drift_js.parent.mkdir(parents=True)
+        drift_js.write_text("export const x = 1;\n")
+        await self._git("add", "-A", cwd=wt_path)
+        await self._git("commit", "-m", "Frontend change", cwd=wt_path)
+
+        summary = await self.mgr.diff_files_summary(cell)
+        self.assertNotIn("out_of_scope", summary)
+
+    async def test_create_explicit_base_is_unchanged_no_warning(self):
+        # A1 HEALTHY: an explicit base is passed through byte-for-byte and
+        # no safety-guard warning is emitted.
+        cell = self._make_cell()
+        with self.assertNoLogs("torque", level="WARNING"):
+            wt_path = await self.mgr.create(
+                cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(cell.worktree_base_branch, "main")
+
+    async def test_create_no_base_on_main_is_unchanged_no_warning(self):
+        # A1 HEALTHY: no explicit base while repo HEAD is on main resolves to
+        # main with no guard warning (the common healthy path).
+        cell = self._make_cell()
+        with self.assertNoLogs("torque", level="WARNING"):
+            wt_path = await self.mgr.create(cell, str(self.repo_root))
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(cell.worktree_base_branch, "main")
+
+    async def test_create_refuses_worker_namespaced_head_as_base(self):
+        # A1 ANOMALOUS: repo-root HEAD left on a worker-namespaced branch.
+        # The fresh worktree must NOT fork off it — it falls back to main and
+        # a warning is emitted, and the worker-branch-only commit is excluded.
+        await self._git("checkout", "-b", "torque/courier/drift-abc123")
+        drift = self.repo_root / "drift_only.txt"
+        drift.write_text("contaminating worker commit\n")
+        await self._git("add", "drift_only.txt")
+        await self._git("commit", "-m", "Worker-branch-only commit")
+
+        cell = self._make_cell()
+        with self.assertLogs("torque", level="WARNING") as captured:
+            wt_path = await self.mgr.create(cell, str(self.repo_root))
+
+        self.assertIsNotNone(wt_path)
+        # Fell back to main, not the worker branch.
+        self.assertEqual(cell.worktree_base_branch, "main")
+        self.assertTrue(
+            any("refusing worker-branch base" in m for m in captured.output),
+            captured.output,
+        )
+        # The contaminating worker-branch commit is absent from the worktree.
+        self.assertFalse((Path(wt_path) / "drift_only.txt").exists())
+
     async def test_server_merge_and_reset_to_base_keep_future_work_clean(self):
         cell = self._make_cell()
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
@@ -1157,3 +1283,98 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await self._git("status", "--porcelain", cwd=wt_path),
             "",
         )
+
+
+class ScopeDomainClassifierTests(unittest.TestCase):
+    """Unit coverage for the out-of-scope diff classifier (TORQUE:604 A2)."""
+
+    def test_specialization_slug_wins(self):
+        from torque.worktree import classify_task_scope_domain
+        self.assertEqual(
+            classify_task_scope_domain(specialization="orchestration-core"),
+            "backend",
+        )
+        self.assertEqual(
+            classify_task_scope_domain(specialization="ui-ux"),
+            "frontend",
+        )
+        # Backend slug wins even when the description mentions frontend
+        # paths as exclusions (the motivating task's own shape).
+        self.assertEqual(
+            classify_task_scope_domain(
+                specialization="orchestration-core",
+                description="Backend only — NO ee/frontend / static/js.",
+            ),
+            "backend",
+        )
+
+    def test_text_heuristic_is_low_false_positive(self):
+        from torque.worktree import classify_task_scope_domain
+        self.assertEqual(
+            classify_task_scope_domain(
+                description="Refactor torque/server.py dispatch loop"),
+            "backend",
+        )
+        self.assertEqual(
+            classify_task_scope_domain(
+                description="Polish the frontend webview board cards"),
+            "frontend",
+        )
+        # Ambiguous / mixed mentions stay None (don't flag).
+        self.assertIsNone(
+            classify_task_scope_domain(
+                description="Wire backend endpoint into the frontend panel"))
+        self.assertIsNone(classify_task_scope_domain(description="Tidy docs"))
+        self.assertIsNone(classify_task_scope_domain())
+
+    def test_out_of_scope_diff_paths(self):
+        from torque.worktree import out_of_scope_diff_paths
+        paths = [
+            "torque/server.py",
+            "static/js/store.js",
+            "ee/frontend/app.tsx",
+            "docs/readme.md",
+        ]
+        self.assertEqual(
+            out_of_scope_diff_paths("backend", paths),
+            ["ee/frontend/app.tsx", "static/js/store.js"],
+        )
+        # Non-backend / unknown domains never flag.
+        self.assertEqual(out_of_scope_diff_paths("frontend", paths), [])
+        self.assertEqual(out_of_scope_diff_paths(None, paths), [])
+        # Pure backend diff yields nothing.
+        self.assertEqual(
+            out_of_scope_diff_paths(
+                "backend", ["torque/server.py", "torque/state.py"]),
+            [],
+        )
+
+    def test_path_is_frontend_domain(self):
+        from torque.worktree import path_is_frontend_domain
+        self.assertTrue(path_is_frontend_domain("static/js/store.js"))
+        self.assertTrue(path_is_frontend_domain("ee/frontend/app.tsx"))
+        self.assertTrue(path_is_frontend_domain("webview.html"))
+        self.assertFalse(path_is_frontend_domain("torque/server.py"))
+        self.assertFalse(path_is_frontend_domain("docs/guide.md"))
+        self.assertFalse(path_is_frontend_domain(""))
+
+
+class WorkerBranchDetectionTests(unittest.TestCase):
+    """Unit coverage for the A1 worker-branch base guard (TORQUE:604)."""
+
+    def test_worker_namespaced_branches_match(self):
+        from torque.worktree import is_worker_namespaced_branch
+        self.assertTrue(
+            is_worker_namespaced_branch("torque/courier/driftguard-ff9ba7e"))
+        self.assertTrue(
+            is_worker_namespaced_branch("torque/user/some-worker-123"))
+
+    def test_non_worker_branches_do_not_match(self):
+        from torque.worktree import is_worker_namespaced_branch
+        # Flat default / engineer branches, detached HEAD, and empties.
+        self.assertFalse(is_worker_namespaced_branch("main"))
+        self.assertFalse(is_worker_namespaced_branch("master"))
+        self.assertFalse(is_worker_namespaced_branch("HEAD"))
+        self.assertFalse(is_worker_namespaced_branch("torque/engineer-abc123"))
+        self.assertFalse(is_worker_namespaced_branch("feature/foo"))
+        self.assertFalse(is_worker_namespaced_branch(""))

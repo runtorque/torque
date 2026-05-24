@@ -73,7 +73,11 @@ from .events import (
 from .event_ingest_db import event_call_row_from_record, redact_event_for_mcp_call_log
 from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
-from .worktree import WorktreeManager, format_stale_base_warning
+from .worktree import (
+    WorktreeManager,
+    classify_task_scope_domain,
+    format_stale_base_warning,
+)
 from .worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
@@ -2128,6 +2132,32 @@ def _format_workflow_breach_message(*, subkind: str, source: str,
     if details:
         return f"{subkind}: {text} ({details})"
     return f"{subkind}: {text}"
+
+
+def _scope_domain_for_cell(state: MatrixState, cell) -> str | None:
+    """Resolve a cell's declared scope domain for the out-of-scope diff flag.
+
+    Observability only (TORQUE:604 A2): used to annotate the diff summary, not
+    to gate anything. Returns ``None`` when the task or its domain is ambiguous.
+    """
+    if not cell:
+        return None
+    task = None
+    task_id = str(getattr(cell, "current_task_id", "") or "").strip()
+    if task_id:
+        task = state.board_tasks.get(task_id)
+    if task is None:
+        try:
+            task = state.agent_current_task(getattr(cell, "id", ""))
+        except Exception:
+            task = None
+    if task is None:
+        return None
+    return classify_task_scope_domain(
+        specialization=getattr(task, "suggested_specialization", "") or "",
+        labels=getattr(task, "labels", None),
+        description=getattr(task, "description", "") or "",
+    )
 
 
 def _emit_workflow_breach_event(state: MatrixState, panel_event, *,
@@ -12044,10 +12074,20 @@ async def main(connection=None):
                     paths = data.get("paths", [])
                     stale_base = await worktree_mgr.stale_base_info(cell)
                     if summary_only:
+                        scope_domain = _scope_domain_for_cell(state, cell)
                         summary = await worktree_mgr.diff_files_summary(
                             cell,
                             paths=paths,
+                            scope_domain=scope_domain,
                         )
+                        out_of_scope = summary.get("out_of_scope") or {}
+                        if out_of_scope.get("count"):
+                            log.warning(
+                                "Out-of-scope diff for '%s' (%s task): %s",
+                                cell.name,
+                                out_of_scope.get("domain", ""),
+                                out_of_scope.get("digest_line", ""),
+                            )
                         result = {
                             "type": "ok",
                             "summary": {
