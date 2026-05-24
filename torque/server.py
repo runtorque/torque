@@ -1071,7 +1071,24 @@ async def _finalize_successful_worktree_merge(
         if t.agent_id == cell.id
         and t.lane in {"Backlog", "To Do"}
     ]
+    cleanup_overridden = False
+    orig_close_flag = close_flag
+    orig_remove_flag = remove_flag
     if queued_followups:
+        # ADDITIVE-ONLY surfacing: the override decision itself is unchanged
+        # (queued follow-ups always preserve agent + worktree). We only log
+        # and record it so a caller that passed close/remove flags can detect
+        # that they were not honored.
+        if orig_close_flag or orig_remove_flag:
+            cleanup_overridden = True
+            log.warning(
+                "merge cleanup flags overridden due to queued follow-ups "
+                "for agent=%s tasks=%d (close=%s→False, remove=%s→False)",
+                cell.slug or cell.id,
+                len(queued_followups),
+                orig_close_flag,
+                orig_remove_flag,
+            )
         close_flag = False
         remove_flag = False
     auto_done_decision = _maybe_auto_move_merged_task_to_done(
@@ -1103,12 +1120,17 @@ async def _finalize_successful_worktree_merge(
         "worktree_removed": False,
         "errors": [],
     }
+    if cleanup_overridden:
+        cleanup["cleanup_overridden"] = True
+        cleanup["override_reason"] = "queued_followups"
+        cleanup["queued_followup_count"] = len(queued_followups)
     if clear_flag and not close_flag and not remove_flag and cell.session_id:
         await bridge.send_text(cell.session_id, "/clear\r")
         cell.tasks_dispatched = 0
         state._emit_agent(cell)
         state._db_save_agent(cell)
         log.info("Cleared context for '%s' after merge", cell.name)
+    reset_failed_with_followups = False
     if close_flag or remove_flag:
         cleanup = await cleanup_after_merge(
             cell,
@@ -1130,6 +1152,12 @@ async def _finalize_successful_worktree_merge(
                 state._emit_agent(cell)
             else:
                 log.warning("Post-merge reset failed for '%s'", cell.name)
+                if queued_followups:
+                    # DEFENSIVE: a failed reset leaves the worktree dirty.
+                    # Skip this cycle's auto-resume + pump-drain so the next
+                    # follow-up doesn't land on the dirty tree; the next pump
+                    # cycle picks it up once the dirty state is resolved.
+                    reset_failed_with_followups = True
 
     if reviewer_cleanup.get("agents"):
         cleanup["reviewer_cleanup"] = reviewer_cleanup
@@ -1143,7 +1171,14 @@ async def _finalize_successful_worktree_merge(
         "cleanup": cleanup,
     }
     _attach_stale_base(result, stale_base)
-    if queued_followups:
+    if queued_followups and reset_failed_with_followups:
+        log.warning(
+            "Skipping post-merge follow-up dispatch for '%s': worktree reset "
+            "to base failed, so queued follow-ups would land on a dirty "
+            "worktree; deferring to the next pump cycle.",
+            cell.name,
+        )
+    elif queued_followups:
         await _maybe_auto_resume_targets(
             state,
             handle_command,

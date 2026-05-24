@@ -1760,6 +1760,255 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[queued.id].lane, "In Progress")
         self.assertNotIn("g", state.auto_dispatch_queues)
 
+    def _make_followup_override_state(self):
+        """State with a worker carrying one queued follow-up task."""
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        state.board_add_task(
+            "Shipped first task",
+            "g",
+            lane="Done",
+            id="TORQUE:392",
+            agent_id=worker.id,
+        )
+        queued = state.board_add_task(
+            "Queued followup",
+            "g",
+            lane="To Do",
+            id="TORQUE:393",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(queued)
+        return state, worker, queued
+
+    async def _run_followup_override_merge(
+        self, state, worker, *, command_extra, reset_ok, nested_dispatch
+    ):
+        """Drive a direct worktree_merge for the override/guard regressions."""
+
+        class FakeWorktreeManager:
+            async def has_uncommitted_changes(self, _cell):
+                return False
+
+            async def stale_base_info(self, _cell):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell):
+                return {"clean": True, "tree_sha": "tree-sha"}
+
+            async def merge_untracked_overwrite_paths(
+                self, _repo_root, _base_branch, _tree_sha
+            ):
+                return []
+
+            async def server_merge(self, _cell, _msg, squash=True):
+                return {"ok": True, "sha": "abc123"}
+
+            async def validate(self, _cell):
+                return True
+
+            async def reset_to_base(self, _cell):
+                return reset_ok
+
+            async def count_commits(self, _cell):
+                return 0
+
+        async def fake_broadcast_toast(*_args, **_kwargs):
+            return None
+
+        async def fake_latest_boundary_state(_cell):
+            return {"latest": None, "clean": True, "reason": ""}
+
+        async def fake_reviewer_cleanup(*_args, **_kwargs):
+            return {
+                "agents": [],
+                "agent_closed": 0,
+                "worktree_removed": 0,
+                "errors": [],
+            }
+
+        async def fake_sibling_gate(*_args, **_kwargs):
+            return None
+
+        cleanup_calls = []
+
+        async def fake_cleanup_after_merge(cell, *, close_agent, remove_worktree):
+            cleanup_calls.append((cell.id, close_agent, remove_worktree))
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        old_reviewer_cleanup = (
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell
+        )
+        old_sibling_gate = (
+            self.server_mod._sibling_branch_divergence_gate_for_merge
+        )
+        self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+            fake_reviewer_cleanup
+        )
+        self.server_mod._sibling_branch_divergence_gate_for_merge = (
+            fake_sibling_gate
+        )
+        try:
+            handle_command = self._extract_handle_command(
+                state,
+                _broadcast_toast=fake_broadcast_toast,
+                _cleanup_after_merge=fake_cleanup_after_merge,
+                _latest_boundary_state_for_cell=fake_latest_boundary_state,
+                _mark_branch_boundaries_merged=lambda *_a, **_k: None,
+                handle_command=nested_dispatch,
+                worktree_mgr=FakeWorktreeManager(),
+            )
+            command = {
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "force_direct": True,
+                "message": "Merge worker branch",
+            }
+            command.update(command_extra)
+            result = await handle_command(command)
+        finally:
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+                old_reviewer_cleanup
+            )
+            self.server_mod._sibling_branch_divergence_gate_for_merge = (
+                old_sibling_gate
+            )
+        return result, cleanup_calls
+
+    async def test_worktree_merge_surfaces_silent_cleanup_override(self):
+        # Part A (TORQUE:381 / :393): a caller passing
+        # remove_worktree_on_merge=true must learn the flag was silently
+        # overridden to preserve the agent for queued follow-ups.
+        state, worker, _queued = self._make_followup_override_state()
+
+        async def nested_dispatch(payload):
+            if payload["cmd"] == "dispatch_task":
+                task = state.board_tasks[payload["id"]]
+                task.agent_id = payload.get("agent_id", "")
+                task.lane = "In Progress"
+                return {"type": "ok", "task_id": task.id}
+            return {"type": "ok"}
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            result, cleanup_calls = await self._run_followup_override_merge(
+                state,
+                worker,
+                command_extra={
+                    "close_agent_on_merge": True,
+                    "remove_worktree_on_merge": True,
+                },
+                reset_ok=True,
+                nested_dispatch=nested_dispatch,
+            )
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertTrue(result["ok"])
+        cleanup = result["cleanup"]
+        # The override decision itself is unchanged: agent + worktree preserved.
+        self.assertFalse(cleanup["close_agent"])
+        self.assertFalse(cleanup["remove_worktree"])
+        self.assertEqual(cleanup_calls, [])  # cleanup_after_merge never ran
+        # ...but now the override is surfaced in the struct.
+        self.assertTrue(cleanup["cleanup_overridden"])
+        self.assertEqual(cleanup["override_reason"], "queued_followups")
+        self.assertEqual(cleanup["queued_followup_count"], 1)
+        self.assertTrue(
+            any(
+                "cleanup flags overridden due to queued follow-ups" in msg
+                and "agent=worker" in msg
+                for msg in logs.output
+            ),
+            logs.output,
+        )
+
+    async def test_worktree_merge_no_override_field_without_cleanup_flags(self):
+        # When no cleanup was requested there is nothing to override, so the
+        # surfacing fields must stay absent (no false alarms).
+        state, worker, _queued = self._make_followup_override_state()
+
+        async def nested_dispatch(payload):
+            if payload["cmd"] == "dispatch_task":
+                task = state.board_tasks[payload["id"]]
+                task.lane = "In Progress"
+                return {"type": "ok", "task_id": task.id}
+            return {"type": "ok"}
+
+        result, _calls = await self._run_followup_override_merge(
+            state,
+            worker,
+            command_extra={},
+            reset_ok=True,
+            nested_dispatch=nested_dispatch,
+        )
+
+        cleanup = result["cleanup"]
+        self.assertNotIn("cleanup_overridden", cleanup)
+        self.assertNotIn("override_reason", cleanup)
+        self.assertNotIn("queued_followup_count", cleanup)
+
+    async def test_worktree_merge_skips_followup_dispatch_when_reset_fails(self):
+        # Part B (TORQUE:381 / :423): if the post-merge reset_to_base fails
+        # while queued follow-ups exist, the auto-resume + pump-drain must be
+        # skipped this cycle so the next task does not land on a dirty worktree.
+        state, worker, queued = self._make_followup_override_state()
+        state.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=worker.id,
+            max_concurrent=1,
+        )
+
+        calls = []
+
+        async def nested_dispatch(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            result, _cleanup_calls = await self._run_followup_override_merge(
+                state,
+                worker,
+                command_extra={},
+                reset_ok=False,
+                nested_dispatch=nested_dispatch,
+            )
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertTrue(result["ok"])
+        # No follow-up dispatched onto the dirty worktree.
+        self.assertEqual(calls, [])
+        # Queue is preserved for the next pump cycle, not drained.
+        self.assertIn("g", state.auto_dispatch_queues)
+        self.assertEqual(state.board_tasks[queued.id].lane, "To Do")
+        self.assertTrue(
+            any(
+                "Skipping post-merge follow-up dispatch" in msg
+                for msg in logs.output
+            ),
+            logs.output,
+        )
+
     def _make_pr_merge_state(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
