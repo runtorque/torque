@@ -554,3 +554,123 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             await self._git_out("rev-parse", "HEAD", cwd=sub_wt),
             await self._gitlink_sha(wt, "HEAD"),
         )
+
+    async def test_rebase_both_handles_base_superproject_gitlink_advance(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nworker line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Worker submodule work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        old_worker_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+
+        base_sub = self.repo_root / self.sub_path
+        (base_sub / "base.txt").write_text("base submodule line\n")
+        await self._git("add", "base.txt", cwd=base_sub)
+        await self._git("commit", "-m", "Base submodule advance", cwd=base_sub)
+        await self._git("push", "origin", "main", cwd=base_sub)
+        base_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=base_sub)
+
+        await self._git("add", self.sub_path, cwd=self.repo_root)
+        await self._git(
+            "commit",
+            "--no-verify",
+            "-m",
+            "Base super gitlink advance",
+            cwd=self.repo_root,
+        )
+
+        self.assertTrue(
+            await self.mgr.rebase_onto_base(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        rebased_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        self.assertNotEqual(rebased_sub_sha, old_worker_sub_sha)
+        self.assertEqual(rebased_sub_sha, await self._gitlink_sha(wt, "HEAD"))
+        self.assertEqual("", await self._git_out("status", "--porcelain", cwd=wt))
+        self.assertEqual(
+            "",
+            await self._git_out("status", "--porcelain", cwd=sub_wt),
+        )
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "merge-base",
+                    "--is-ancestor",
+                    "main",
+                    "HEAD",
+                    cwd=wt,
+                    check=False,
+                )
+            )[0],
+        )
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "merge-base",
+                    "--is-ancestor",
+                    base_sub_sha,
+                    "HEAD",
+                    cwd=sub_wt,
+                    check=False,
+                )
+            )[0],
+        )
+
+    async def test_rebase_both_rolls_back_nested_branch_on_super_conflict(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nworker line\n")
+        (wt / "README.md").write_text("worker super line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Worker mixed work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        old_worker_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+
+        base_sub = self.repo_root / self.sub_path
+        (base_sub / "base.txt").write_text("base submodule line\n")
+        await self._git("add", "base.txt", cwd=base_sub)
+        await self._git("commit", "-m", "Base submodule advance", cwd=base_sub)
+        await self._git("push", "origin", "main", cwd=base_sub)
+        await self._git("add", self.sub_path, cwd=self.repo_root)
+
+        (self.repo_root / "README.md").write_text("base super line\n")
+        await self._git("add", "README.md", cwd=self.repo_root)
+        await self._git(
+            "commit",
+            "--no-verify",
+            "-m",
+            "Base conflicting super advance",
+            cwd=self.repo_root,
+        )
+
+        self.assertFalse(
+            await self.mgr.rebase_onto_base(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        self.assertEqual(old_worker_sub_sha, await self._gitlink_sha(wt, "HEAD"))
+        self.assertEqual(
+            old_worker_sub_sha,
+            await self._git_out("rev-parse", "HEAD", cwd=sub_wt),
+        )
+        self.assertEqual("", await self._git_out("status", "--porcelain", cwd=wt))
+        self.assertEqual(
+            "",
+            await self._git_out("status", "--porcelain", cwd=sub_wt),
+        )

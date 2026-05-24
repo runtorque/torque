@@ -1096,6 +1096,39 @@ class WorktreeManager:
         except OSError:
             return 0.0
 
+    @staticmethod
+    def _common_gitdir_from_gitdir(gitdir: str) -> str:
+        """Resolve the common git dir for a normal or linked worktree gitdir."""
+        if not gitdir:
+            return ""
+        common_file = os.path.join(gitdir, "commondir")
+        try:
+            with open(common_file) as f:
+                common = f.read().strip()
+        except OSError:
+            return gitdir
+        if not common:
+            return gitdir
+        if not os.path.isabs(common):
+            common = os.path.join(gitdir, common)
+        return os.path.realpath(common)
+
+    @staticmethod
+    def _ref_mtime_in_gitdir(gitdir: str, branch: str) -> float:
+        """Return branch ref mtime in a git dir/common dir. 0.0 on miss."""
+        if not gitdir or not branch:
+            return 0.0
+        loose = os.path.join(gitdir, "refs", "heads", branch)
+        try:
+            return os.path.getmtime(loose)
+        except OSError:
+            pass
+        packed = os.path.join(gitdir, "packed-refs")
+        try:
+            return os.path.getmtime(packed)
+        except OSError:
+            return 0.0
+
     def _refresh_fingerprint(self, cell, worktree_submodules=None) -> tuple:
         """Cheap fingerprint that changes only when the worktree or base moved."""
         gitdir = self._resolve_gitdir(cell.worktree_path or "")
@@ -1114,6 +1147,7 @@ class WorktreeManager:
             return (index_mtime, base_mtime)
 
         nested_mtimes: list[float] = []
+        base_branch = str(getattr(cell, "worktree_base_branch", "") or "")
         for sub_path in submodule_paths:
             sub_wt = self._join_repo_rel(cell.worktree_path or "", sub_path)
             sub_gitdir = self._resolve_gitdir(sub_wt)
@@ -1126,6 +1160,10 @@ class WorktreeManager:
                         os.path.join(sub_gitdir, rel)))
                 except OSError:
                     nested_mtimes.append(0.0)
+            common_gitdir = self._common_gitdir_from_gitdir(sub_gitdir)
+            nested_mtimes.append(
+                self._ref_mtime_in_gitdir(common_gitdir, base_branch)
+            )
         return (index_mtime, base_mtime, *nested_mtimes)
 
     async def refresh_state(self, cell, worktree_submodules=None) -> bool:
@@ -4807,39 +4845,44 @@ class WorktreeManager:
                     cell,
                     submodule_paths,
             ):
-                return False
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", wt_dir,
-                "rebase", cell.worktree_base_branch,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                err = stderr.decode().strip()
-                log.warning("Rebase failed for '%s': %s", cell.name, err)
-                # Abort to leave the worktree in a clean state
-                abort = await asyncio.create_subprocess_exec(
-                    "git", "-C", wt_dir,
-                    "rebase", "--abort",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
+                await self._reset_nested_submodules_to_super_gitlinks(
+                    cell,
+                    submodule_paths,
                 )
-                await abort.communicate()
                 return False
+
+            nested_updates: list[dict] = []
             if submodule_paths:
+                nested_updates = [
+                    {
+                        "path": state.get("path", ""),
+                        "sha": state.get("commit_sha", ""),
+                    }
+                    for state in await self.nested_submodule_head_states(
+                        cell,
+                        submodule_paths,
+                    )
+                ]
+
+            rebase_result = await self._rebase_superproject_onto_base(
+                wt_dir,
+                cell.worktree_base_branch,
+                nested_updates=nested_updates,
+            )
+            if not rebase_result.get("ok"):
+                err = rebase_result.get("error", "")
+                log.warning("Rebase failed for '%s': %s", cell.name, err)
+                await self._abort_superproject_rebase_and_reset_nested(
+                    wt_dir,
+                    cell,
+                    submodule_paths,
+                )
+                return False
+
+            if nested_updates:
                 bump = await self._commit_superproject_gitlink_bumps(
                     wt_dir,
-                    [
-                        {
-                            "path": state.get("path", ""),
-                            "sha": state.get("commit_sha", ""),
-                        }
-                        for state in await self.nested_submodule_head_states(
-                            cell,
-                            submodule_paths,
-                        )
-                    ],
+                    nested_updates,
                     message="Update nested submodule gitlinks after rebase",
                 )
                 if not bump.get("ok"):
@@ -4849,13 +4892,220 @@ class WorktreeManager:
                         cell.name,
                         bump.get("error", ""),
                     )
+                    await self._reset_nested_submodules_to_super_gitlinks(
+                        cell,
+                        submodule_paths,
+                    )
                     return False
             log.info("Rebased '%s' onto %s",
                      cell.name, cell.worktree_base_branch)
             return True
         except Exception:
             log.exception("Rebase failed for '%s'", cell.name)
+            await self._abort_superproject_rebase_and_reset_nested(
+                wt_dir,
+                cell,
+                _normalize_worktree_submodules(worktree_submodules),
+            )
             return False
+
+    async def _abort_superproject_rebase_and_reset_nested(
+            self,
+            wt_dir: str,
+            cell,
+            worktree_submodules,
+    ) -> None:
+        """Abort an in-progress superproject rebase and realign submodules."""
+        try:
+            await self._git_run(wt_dir, "rebase", "--abort")
+        except Exception:
+            log.debug("Superproject rebase abort failed for '%s'",
+                      getattr(cell, "name", ""), exc_info=True)
+        if _normalize_worktree_submodules(worktree_submodules):
+            try:
+                await self._reset_nested_submodules_to_super_gitlinks(
+                    cell,
+                    worktree_submodules,
+                )
+            except Exception:
+                log.debug("Nested submodule rollback failed for '%s'",
+                          getattr(cell, "name", ""), exc_info=True)
+
+    async def _rebase_superproject_onto_base(
+            self,
+            wt_dir: str,
+            base_branch: str,
+            *,
+            nested_updates: list[dict] | None = None,
+    ) -> dict:
+        """Rebase the superproject, resolving configured gitlink conflicts.
+
+        Nested submodule branches are rebased before the superproject.  When
+        the base superproject also advanced a gitlink, Git can stop while
+        replaying the old gitlink checkpoint.  If the only unmerged paths are
+        configured nested submodules, stage the already-rebased nested HEADs
+        and continue so the rebased superproject records the reachable SHA.
+        """
+        updates = [
+            {
+                "path": _normalize_repo_rel_path(update.get("path", "")),
+                "sha": update.get("sha", ""),
+            }
+            for update in (nested_updates or [])
+            if update.get("path") and update.get("sha")
+        ]
+        code, _out, err = await self._git_run(wt_dir, "rebase", base_branch)
+        if code == 0:
+            return {"ok": True}
+        if not updates:
+            return {"ok": False, "error": err}
+
+        last_error = err
+        for _attempt in range(max(8, len(updates) * 4)):
+            resolved = await self._resolve_nested_gitlink_rebase_conflicts(
+                wt_dir,
+                updates,
+            )
+            if not resolved.get("ok"):
+                return {
+                    "ok": False,
+                    "error": last_error or resolved.get("error", ""),
+                }
+
+            code, out, err = await self._git_run_with_env(
+                wt_dir,
+                {
+                    "GIT_EDITOR": "true",
+                    "GIT_SEQUENCE_EDITOR": "true",
+                },
+                "rebase",
+                "--continue",
+            )
+            if code == 0:
+                return {"ok": True}
+            last_error = err or out
+            if self._git_rebase_continue_needs_skip(last_error):
+                code, out, err = await self._git_run_with_env(
+                    wt_dir,
+                    {
+                        "GIT_EDITOR": "true",
+                        "GIT_SEQUENCE_EDITOR": "true",
+                    },
+                    "rebase",
+                    "--skip",
+                )
+                if code == 0:
+                    return {"ok": True}
+                last_error = err or out
+
+        return {
+            "ok": False,
+            "error": last_error or "git rebase did not converge",
+        }
+
+    async def _git_run_with_env(self, directory: str, env_updates: dict,
+                                *args: str) -> tuple[int, str, str]:
+        """Run git with additional environment variables."""
+        env = os.environ.copy()
+        env.update({str(k): str(v) for k, v in (env_updates or {}).items()})
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await proc.communicate()
+            return (
+                proc.returncode,
+                stdout.decode(errors="replace").strip(),
+                stderr.decode(errors="replace").strip(),
+            )
+        except Exception as exc:
+            log.debug("git command failed for %s: %s", directory, " ".join(args))
+            return 1, "", str(exc)
+
+    @staticmethod
+    def _git_rebase_continue_needs_skip(message: str) -> bool:
+        text = (message or "").lower()
+        return (
+            "previous cherry-pick is now empty" in text
+            or "no changes - did you forget to use 'git add'" in text
+            or "nothing to commit" in text and "rebase --skip" in text
+        )
+
+    async def _resolve_nested_gitlink_rebase_conflicts(
+            self,
+            wt_dir: str,
+            updates: list[dict],
+    ) -> dict:
+        allowed = {
+            _normalize_repo_rel_path(update.get("path", "")): update.get("sha", "")
+            for update in updates
+            if update.get("path") and update.get("sha")
+        }
+        code, out = await self._git_stdout(
+            wt_dir,
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+        )
+        if code != 0:
+            return {"ok": False, "error": "Could not inspect rebase conflicts"}
+        unmerged = [
+            _normalize_repo_rel_path(line.strip())
+            for line in out.splitlines()
+            if line.strip()
+        ]
+        if not unmerged:
+            return {"ok": False, "error": "Rebase failed without conflicts"}
+        unexpected = [path for path in unmerged if path not in allowed]
+        if unexpected:
+            return {
+                "ok": False,
+                "error": "Rebase has non-gitlink conflicts: "
+                         + ", ".join(unexpected),
+            }
+
+        for path in unmerged:
+            sha = allowed.get(path, "")
+            sub_wt = self._join_repo_rel(wt_dir, path)
+            code, _out, err = await self._git_run(
+                sub_wt,
+                "reset",
+                "--hard",
+                sha,
+            )
+            if code != 0:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Could not reset nested submodule {path} to "
+                        f"{sha[:12]} while resolving rebase: {err}"
+                    ),
+                }
+            code, _out, err = await self._git_run(wt_dir, "add", "--", path)
+            if code != 0:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Could not stage nested submodule {path} while "
+                        f"resolving rebase: {err}"
+                    ),
+                }
+
+        code, out = await self._git_stdout(
+            wt_dir,
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+        )
+        if code != 0 or out.strip():
+            return {
+                "ok": False,
+                "error": "Nested gitlink conflicts were not fully resolved",
+            }
+        return {"ok": True, "paths": unmerged}
 
     async def _rebase_nested_submodules(self, cell,
                                         worktree_submodules) -> bool:
