@@ -349,6 +349,8 @@ class AgentLaunchService:
                 "worktree_merge_squash", gs.worktree_merge_squash),
             "worktree_symlinks": resolved.get(
                 "worktree_symlinks", gs.worktree_symlinks),
+            "worktree_submodules": resolved.get(
+                "worktree_submodules", getattr(gs, "worktree_submodules", [])),
             "worktree_symlink_gitignored_paths": resolved.get(
                 "worktree_symlink_gitignored_paths",
                 getattr(gs, "worktree_symlink_gitignored_paths", False)),
@@ -627,6 +629,8 @@ class AgentLaunchService:
                     include_gitignored_symlinks=launch_cfg.get(
                         "worktree_symlink_gitignored_paths", False),
                     worktree_name=launch_cfg.get("worktree_name", ""),
+                    worktree_submodules=launch_cfg.get(
+                        "worktree_submodules", []),
                     state=self.state,
                 )
                 if worktree_path:
