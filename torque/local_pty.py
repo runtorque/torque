@@ -25,6 +25,7 @@ from .pty_core import (
     OSC7_RE as _OSC7_RE,
     PROMPT_HOOK_LIMIT as _PROMPT_HOOK_LIMIT,
     READINESS_BUFFER_LIMIT as _READINESS_BUFFER_LIMIT,
+    TerminalScreenBuffer as _TerminalScreenBuffer,
     Utf8IncrementalDecoder as _Utf8IncrementalDecoder,
     preexec_acquire_ctty as _preexec_acquire_ctty,
     set_winsize as _pty_set_winsize,
@@ -55,6 +56,10 @@ class _PtySession:
     decoder: codecs.IncrementalDecoder = field(
         default_factory=lambda: _Utf8IncrementalDecoder(errors="replace")
     )
+    screen: _TerminalScreenBuffer = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.screen = _TerminalScreenBuffer(cols=self.cols, rows=self.rows)
 
 
 class LocalPtyAdapter:
@@ -372,6 +377,8 @@ class LocalPtyAdapter:
         if body and (settled_submit or "\n" in body):
             await asyncio.sleep(submit_delay)
         await self.write_input(session_id, submit_key)
+        if cell:
+            self._mark_codex_turn_submitted(cell, session, clear_screen=True)
 
     async def write_input(self, session_id: str, data: str) -> None:
         session = self._sessions.get(session_id)
@@ -436,6 +443,7 @@ class LocalPtyAdapter:
             return
         session.cols = max(20, int(cols or 0))
         session.rows = max(4, int(rows or 0))
+        session.screen.resize(session.cols, session.rows)
         self._set_winsize(session.master_fd, session.cols, session.rows)
 
     def get_terminal_buffer(self, session_id: str) -> str:
@@ -627,14 +635,14 @@ class LocalPtyAdapter:
                 if not chunk:
                     text = session.decoder.decode(b"", final=True)
                     if text:
-                        session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
+                        self._record_terminal_output(session, text)
                         self._process_shell_integration(session, text)
                         await self._emit_terminal_output(session, text)
                     break
                 text = session.decoder.decode(chunk)
                 if not text:
                     continue
-                session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
+                self._record_terminal_output(session, text)
                 self._process_shell_integration(session, text)
                 await self._emit_terminal_output(session, text)
         except asyncio.CancelledError:
@@ -666,6 +674,20 @@ class LocalPtyAdapter:
         self.state._emit_agent(cell)
         await self.state.broadcast()
 
+    def _record_terminal_output(
+        self,
+        session: _PtySession,
+        text: str,
+        *,
+        snapshot: bool = False,
+    ) -> None:
+        if snapshot:
+            session.buffer = text[-_BUFFER_LIMIT:]
+            session.screen.reset()
+        else:
+            session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
+        session.screen.feed(text)
+
     async def _emit_terminal_output(self, session: _PtySession, text: str) -> None:
         if not self.on_terminal_output:
             return
@@ -686,7 +708,7 @@ class LocalPtyAdapter:
         cell = self.state.agents.get(session.cell_id)
         if cell:
             exit_note = "\r\n[process exited]\r\n"
-            session.buffer = (session.buffer + exit_note)[-_BUFFER_LIMIT:]
+            self._record_terminal_output(session, exit_note)
             await self._emit_terminal_output(session, exit_note)
             await self._mark_session_stopped(cell, session_id)
 
@@ -769,6 +791,9 @@ class LocalPtyAdapter:
             cell.git_root = ""
 
     async def _read_screen_text(self, session: _PtySession) -> str:
+        screen = getattr(session, "screen", None)
+        if screen is not None:
+            return screen.render()
         raw = getattr(session, "buffer", "") or ""
         if not raw:
             return ""
@@ -867,9 +892,19 @@ class LocalPtyAdapter:
         log.info("Input-ready wait timed out for '%s' (type=%s, session=%s)",
                  cell.name, cell.agent_type, cell.session_id)
 
-    def _mark_codex_turn_submitted(self, cell: AgentCell) -> None:
+    def _mark_codex_turn_submitted(
+        self,
+        cell: AgentCell,
+        session: _PtySession | None = None,
+        *,
+        clear_screen: bool = False,
+    ) -> None:
         if str(getattr(cell, "agent_type", "") or "") == "codex":
             self._codex_idle_detector.reset(cell.id, cell.session_id or "")
+            if clear_screen and session is not None:
+                screen = getattr(session, "screen", None)
+                if screen is not None:
+                    screen.reset()
 
     def _start_codex_idle_monitor(self, cell: AgentCell) -> None:
         if self.on_agent_session_end_detected is None:
@@ -1299,6 +1334,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             return
         session.cols = max(20, int(cols or 0))
         session.rows = max(4, int(rows or 0))
+        session.screen.resize(session.cols, session.rows)
         try:
             await self._client.resize(
                 session_id, session.cols, session.rows)
@@ -1336,10 +1372,11 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             return
         # Reset buffer to the supervisor's view on snapshot to avoid
         # doubling up if we adopted an existing session.
-        if msg.get("type") == "snapshot":
-            session.buffer = text[-_BUFFER_LIMIT:]
-        else:
-            session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
+        self._record_terminal_output(
+            session,
+            text,
+            snapshot=(msg.get("type") == "snapshot"),
+        )
         self._process_shell_integration(session, text)
         await self._emit_terminal_output(session, text)
 
@@ -1360,7 +1397,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         cell = self.state.agents.get(session.cell_id)
         if cell:
             exit_note = "\r\n[process exited]\r\n"
-            session.buffer = (session.buffer + exit_note)[-_BUFFER_LIMIT:]
+            self._record_terminal_output(session, exit_note)
             await self._emit_terminal_output(session, exit_note)
             await self._mark_session_stopped(
                 cell, session.session_id, announce=announce)
