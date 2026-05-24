@@ -5,6 +5,7 @@ import unittest
 from torque.worktree_boundaries import (
     attach_pr_metadata_to_latest_open_boundary,
     boundary_pr_metadata,
+    boundary_submodule_branches,
     boundary_summary,
     branch_boundary_tasks,
     clear_stale_successor_references,
@@ -15,6 +16,7 @@ from torque.worktree_boundaries import (
     refresh_latest_boundary_after_rebase,
     retarget_queued_successor_tasks,
     started_successor_tasks,
+    task_branch_keys,
 )
 
 
@@ -140,6 +142,44 @@ class WorktreeBoundaryTests(unittest.TestCase):
         )
 
         self.assertEqual([t.id for t in tasks], ["task-a"])
+
+    def test_branch_boundary_tasks_can_match_submodule_branch_pair(self):
+        task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/super",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "submodules": [
+                    {
+                        "path": "deps/sub",
+                        "repo_root": "/sub",
+                        "branch": "torque/submodules/deps-sub/torque/worker",
+                        "commit_sha": "sub-head",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(
+            boundary_submodule_branches(task.worktree_boundary)[0]["path"],
+            "deps/sub",
+        )
+        self.assertIn(
+            "/sub::torque/submodules/deps-sub/torque/worker",
+            task_branch_keys(task, include_submodules=True),
+        )
+        self.assertEqual(
+            branch_boundary_tasks(
+                [task],
+                repo_root="/sub",
+                branch="torque/submodules/deps-sub/torque/worker",
+                statuses={"open"},
+                include_submodules=True,
+            ),
+            [task],
+        )
 
     def test_attach_pr_metadata_to_latest_open_boundary_preserves_json_shape(self):
         older = _task(
@@ -341,6 +381,51 @@ class WorktreeBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(boundary_task.worktree_boundary["status"], "open")
         self.assertNotIn("reason", boundary_task.worktree_boundary)
+
+    def test_refresh_latest_boundary_after_rebase_updates_submodule_pair_tip(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "old-head",
+                "submodules": [
+                    {
+                        "path": "deps/sub",
+                        "repo_root": "/sub",
+                        "branch": "torque/submodules/deps-sub/torque/worker",
+                        "commit_sha": "old-sub-head",
+                    }
+                ],
+            },
+        )
+
+        refreshed = refresh_latest_boundary_after_rebase(
+            [boundary_task],
+            repo_root="/repo",
+            branch="torque/worker",
+            previous_head_sha="old-head",
+            rebased_head_sha="new-head",
+            previous_submodules=[
+                {"path": "deps/sub", "commit_sha": "old-sub-head"}
+            ],
+            rebased_submodules=[
+                {
+                    "path": "deps/sub",
+                    "repo_root": "/sub",
+                    "branch": "torque/submodules/deps-sub/torque/worker",
+                    "commit_sha": "new-sub-head",
+                }
+            ],
+        )
+
+        self.assertIs(refreshed, boundary_task)
+        self.assertEqual(
+            boundary_task.worktree_boundary["submodules"][0]["commit_sha"],
+            "new-sub-head",
+        )
 
     def test_refresh_latest_boundary_after_rebase_refuses_started_successor(self):
         boundary_task = _task(

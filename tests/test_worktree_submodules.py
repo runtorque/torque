@@ -98,8 +98,22 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
     def _module_dir(self) -> Path:
         return self.repo_root / ".git" / "modules" / "deps" / "sub"
 
-    async def _create_nested(self):
-        cell = self._make_cell()
+    async def _gitlink_sha(self, repo: Path, ref: str = "HEAD") -> str:
+        line = await self._git_out("ls-tree", ref, self.sub_path, cwd=repo)
+        parts = line.split()
+        self.assertGreaterEqual(len(parts), 3, line)
+        return parts[2]
+
+    async def _sub_branch(self, sub_wt: Path) -> str:
+        return await self._git_out("branch", "--show-current", cwd=sub_wt)
+
+    async def _push_sub_branch(self, sub_wt: Path) -> str:
+        branch = await self._sub_branch(sub_wt)
+        await self._git("push", "-u", "origin", branch, cwd=sub_wt)
+        return branch
+
+    async def _create_nested(self, agent_id="agent-123", name="Worker"):
+        cell = self._make_cell(agent_id=agent_id, name=name)
         wt_path = await self.mgr.create(
             cell,
             str(self.repo_root),
@@ -210,6 +224,67 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(cell.worktree_changed_files, ["deps/sub/lib.txt"])
 
+    async def test_refresh_state_counts_submodule_ahead_dimension(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nsub ahead line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Nested ahead checkpoint",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        self.assertTrue(
+            await self.mgr.refresh_state(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        # One superproject gitlink commit plus one nested submodule commit.
+        self.assertEqual(cell.worktree_ahead, 2)
+        self.assertEqual(cell.worktree_checkpoints, 2)
+
+    async def test_stale_base_info_detects_submodule_base_advance(self):
+        cell, _wt = await self._create_nested()
+        base_sub = self.repo_root / self.sub_path
+        (base_sub / "base.txt").write_text("base submodule line\n")
+        await self._git("add", "base.txt", cwd=base_sub)
+        await self._git("commit", "-m", "Advance submodule base", cwd=base_sub)
+
+        stale = await self.mgr.stale_base_info(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(stale["stale"], stale)
+        self.assertEqual(stale["submodule"], self.sub_path)
+
+    async def test_is_merged_requires_submodule_branch_dimension(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nunmerged sub line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Super gitlink only merge",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        merged = await self.mgr.server_merge(cell, "Merge super gitlink only")
+
+        self.assertTrue(merged["ok"], merged.get("error"))
+        self.assertTrue(await self.mgr.is_merged(cell))
+        self.assertFalse(
+            await self.mgr.is_merged(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
     async def test_remove_preserves_unpushed_submodule_commit_branch_ref(self):
         cell, wt = await self._create_nested()
         sub_wt = wt / self.sub_path
@@ -286,7 +361,316 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(
             self.mgr,
+            "nested_submodule_merge_preflight",
+            side_effect=AssertionError("nested merge preflight should be dormant"),
+        ):
+            check = await self.mgr.check_merge_conflicts(
+                cell,
+                worktree_submodules=[],
+            )
+        self.assertTrue(check["clean"], check)
+
+        with mock.patch.object(
+            self.mgr,
+            "_rebase_nested_submodules",
+            side_effect=AssertionError("nested rebase should be dormant"),
+        ):
+            self.assertTrue(
+                await self.mgr.rebase_onto_base(
+                    cell,
+                    worktree_submodules=[],
+                )
+            )
+
+        with mock.patch.object(
+            self.mgr,
             "_remove_nested_submodule_worktrees",
             side_effect=AssertionError("nested remove should be dormant"),
         ):
             self.assertTrue(await self.mgr.remove(cell, worktree_submodules=[]))
+
+    async def test_merge_both_merges_submodule_base_bumps_gitlink_and_super(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nmerged line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Nested merge work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        worker_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        await self._push_sub_branch(sub_wt)
+
+        merged = await self.mgr.server_merge(
+            cell,
+            "Merge nested submodule work",
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(merged["ok"], merged.get("error"))
+        origin_main = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "main",
+            cwd=self.root,
+        )
+        final_gitlink = await self._gitlink_sha(self.repo_root, "main")
+        self.assertEqual(final_gitlink, origin_main)
+        self.assertEqual(final_gitlink, worker_sub_sha)
+        self.assertIn(final_gitlink, await self._git_out("ls-tree", "main", self.sub_path))
+
+    async def test_merge_preflight_blocks_dirty_submodule(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\ndirty line\n")
+
+        check = await self.mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertFalse(check["clean"])
+        self.assertIn("DIRTY", check["error"])
+        self.assertIn(self.sub_path, check["error"])
+        self.assertIn("old_gitlink=", check["error"])
+        self.assertIn("new_gitlink=", check["error"])
+
+    async def test_merge_preflight_blocks_head_gitlink_mismatch(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nhead only line\n")
+        await self._git("add", "lib.txt", cwd=sub_wt)
+        await self._git("commit", "-m", "Submodule head only", cwd=sub_wt)
+
+        check = await self.mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertFalse(check["clean"])
+        self.assertIn("HEAD_MISMATCH", check["error"])
+        self.assertIn(self.sub_path, check["error"])
+
+    async def test_merge_preflight_blocks_unpushed_submodule_branch(self):
+        cell, wt = await self._create_nested()
+
+        check = await self.mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertFalse(check["clean"])
+        self.assertIn("UNPUSHED", check["error"])
+        self.assertIn(self.sub_path, check["error"])
+
+    async def test_merge_preflight_blocks_gitlink_missing_from_remote(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nlocal only line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Local-only submodule gitlink",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        check = await self.mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertFalse(check["clean"])
+        self.assertIn("MISSING_FROM_REMOTE", check["error"])
+        self.assertIn(self.sub_path, check["error"])
+
+    async def test_rebase_both_rebases_submodule_and_rebumps_gitlink(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nworker line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Worker submodule work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        base_sub = self.repo_root / self.sub_path
+        (base_sub / "base.txt").write_text("base submodule line\n")
+        await self._git("add", "base.txt", cwd=base_sub)
+        await self._git("commit", "-m", "Base submodule advance", cwd=base_sub)
+        await self._git("push", "origin", "main", cwd=base_sub)
+
+        (self.repo_root / "README.md").write_text(
+            "super line one\nbase super line\n"
+        )
+        await self._git("add", "README.md", cwd=self.repo_root)
+        await self._git(
+            "commit",
+            "--no-verify",
+            "-m",
+            "Base super advance",
+            cwd=self.repo_root,
+        )
+
+        self.assertTrue(
+            await self.mgr.rebase_onto_base(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "merge-base",
+                    "--is-ancestor",
+                    "main",
+                    "HEAD",
+                    cwd=sub_wt,
+                    check=False,
+                )
+            )[0],
+        )
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "merge-base",
+                    "--is-ancestor",
+                    "main",
+                    "HEAD",
+                    cwd=wt,
+                    check=False,
+                )
+            )[0],
+        )
+        self.assertEqual(
+            await self._git_out("rev-parse", "HEAD", cwd=sub_wt),
+            await self._gitlink_sha(wt, "HEAD"),
+        )
+
+    async def test_rebase_both_handles_base_superproject_gitlink_advance(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nworker line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Worker submodule work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        old_worker_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+
+        base_sub = self.repo_root / self.sub_path
+        (base_sub / "base.txt").write_text("base submodule line\n")
+        await self._git("add", "base.txt", cwd=base_sub)
+        await self._git("commit", "-m", "Base submodule advance", cwd=base_sub)
+        await self._git("push", "origin", "main", cwd=base_sub)
+        base_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=base_sub)
+
+        await self._git("add", self.sub_path, cwd=self.repo_root)
+        await self._git(
+            "commit",
+            "--no-verify",
+            "-m",
+            "Base super gitlink advance",
+            cwd=self.repo_root,
+        )
+
+        self.assertTrue(
+            await self.mgr.rebase_onto_base(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        rebased_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        self.assertNotEqual(rebased_sub_sha, old_worker_sub_sha)
+        self.assertEqual(rebased_sub_sha, await self._gitlink_sha(wt, "HEAD"))
+        self.assertEqual("", await self._git_out("status", "--porcelain", cwd=wt))
+        self.assertEqual(
+            "",
+            await self._git_out("status", "--porcelain", cwd=sub_wt),
+        )
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "merge-base",
+                    "--is-ancestor",
+                    "main",
+                    "HEAD",
+                    cwd=wt,
+                    check=False,
+                )
+            )[0],
+        )
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "merge-base",
+                    "--is-ancestor",
+                    base_sub_sha,
+                    "HEAD",
+                    cwd=sub_wt,
+                    check=False,
+                )
+            )[0],
+        )
+
+    async def test_rebase_both_rolls_back_nested_branch_on_super_conflict(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nworker line\n")
+        (wt / "README.md").write_text("worker super line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Worker mixed work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        old_worker_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+
+        base_sub = self.repo_root / self.sub_path
+        (base_sub / "base.txt").write_text("base submodule line\n")
+        await self._git("add", "base.txt", cwd=base_sub)
+        await self._git("commit", "-m", "Base submodule advance", cwd=base_sub)
+        await self._git("push", "origin", "main", cwd=base_sub)
+        await self._git("add", self.sub_path, cwd=self.repo_root)
+
+        (self.repo_root / "README.md").write_text("base super line\n")
+        await self._git("add", "README.md", cwd=self.repo_root)
+        await self._git(
+            "commit",
+            "--no-verify",
+            "-m",
+            "Base conflicting super advance",
+            cwd=self.repo_root,
+        )
+
+        self.assertFalse(
+            await self.mgr.rebase_onto_base(
+                cell,
+                worktree_submodules=[self.sub_path],
+            )
+        )
+
+        self.assertEqual(old_worker_sub_sha, await self._gitlink_sha(wt, "HEAD"))
+        self.assertEqual(
+            old_worker_sub_sha,
+            await self._git_out("rev-parse", "HEAD", cwd=sub_wt),
+        )
+        self.assertEqual("", await self._git_out("status", "--porcelain", cwd=wt))
+        self.assertEqual(
+            "",
+            await self._git_out("status", "--porcelain", cwd=sub_wt),
+        )

@@ -80,6 +80,7 @@ from .worktree import (
     format_stale_base_warning,
 )
 from .worktree_boundaries import (
+    boundary_submodule_branches,
     boundary_summary,
     branch_boundary_tasks,
     latest_boundary_base_branch,
@@ -811,8 +812,16 @@ async def _preflight_worktree_merge_gates(
             "result": _worktree_merge_error(aid, "Agent has no worktree."),
         }
 
+    worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
     boundary_state = await latest_boundary_state_for_cell(cell)
-    dirty = await worktree_mgr.has_uncommitted_changes(cell)
+    dirty = (
+        await worktree_mgr.has_uncommitted_changes(
+            cell,
+            worktree_submodules=worktree_submodules,
+        )
+        if worktree_submodules
+        else await worktree_mgr.has_uncommitted_changes(cell)
+    )
     if dirty:
         return {
             "ok": False,
@@ -850,7 +859,14 @@ async def _preflight_worktree_merge_gates(
             "result": sibling_gate,
         }
 
-    stale_base = await worktree_mgr.stale_base_info(cell)
+    stale_base = (
+        await worktree_mgr.stale_base_info(
+            cell,
+            worktree_submodules=worktree_submodules,
+        )
+        if worktree_submodules
+        else await worktree_mgr.stale_base_info(cell)
+    )
     if stale_base.get("stale") and not _stale_base_force_enabled(data):
         return {
             "ok": False,
@@ -870,7 +886,14 @@ async def _preflight_worktree_merge_gates(
             )
         )
 
-    precheck = await worktree_mgr.check_merge_conflicts(cell)
+    precheck = (
+        await worktree_mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=worktree_submodules,
+        )
+        if worktree_submodules
+        else await worktree_mgr.check_merge_conflicts(cell)
+    )
     if not precheck.get("clean"):
         result = _worktree_merge_error(
             aid,
@@ -1170,7 +1193,18 @@ async def _finalize_successful_worktree_merge(
         # re-merging already-merged commits).
         valid = await worktree_mgr.validate(cell)
         if valid:
-            ok = await worktree_mgr.reset_to_base(cell)
+            worktree_submodules = _configured_worktree_submodules_for_cell(
+                state,
+                cell,
+            )
+            ok = (
+                await worktree_mgr.reset_to_base(
+                    cell,
+                    worktree_submodules=worktree_submodules,
+                )
+                if worktree_submodules
+                else await worktree_mgr.reset_to_base(cell)
+            )
             if ok:
                 cell.worktree_checkpoints = await worktree_mgr.count_commits(cell)
                 cell.worktree_dirty = False
@@ -1283,7 +1317,17 @@ async def _run_direct_worktree_merge(
         data,
         preserve_merge_diff=preserve_merge_diff,
     )
-    merge_result = await worktree_mgr.server_merge(cell, msg, squash=squash)
+    worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
+    merge_result = (
+        await worktree_mgr.server_merge(
+            cell,
+            msg,
+            squash=squash,
+            worktree_submodules=worktree_submodules,
+        )
+        if worktree_submodules
+        else await worktree_mgr.server_merge(cell, msg, squash=squash)
+    )
     if merge_result.get("ok"):
         result = await _finalize_successful_worktree_merge(
             state=state,
@@ -1943,6 +1987,16 @@ def _agent_pipeline_root_ids(state: MatrixState, agent_id: str) -> set[str]:
     return root_ids
 
 
+def _configured_worktree_submodules_for_cell(state: MatrixState, cell) -> list[str]:
+    if not state or not cell:
+        return []
+    try:
+        gs = state.get_group_settings(getattr(cell, "group", "") or "")
+        return list(getattr(gs, "worktree_submodules", []) or [])
+    except Exception:
+        return []
+
+
 def _review_cycle_merge_sibling_candidates(
     state: MatrixState,
     cell,
@@ -2032,6 +2086,24 @@ async def _review_cycle_sibling_branch_divergence(
     if not repo_root:
         return []
 
+    submodule_paths = _configured_worktree_submodules_for_cell(state, cell)
+    target_submodules: dict[str, dict] = {}
+    if submodule_paths and hasattr(worktree_mgr, "nested_submodule_head_states"):
+        try:
+            target_submodules = {
+                item.get("path", ""): item
+                for item in await worktree_mgr.nested_submodule_head_states(
+                    cell,
+                    submodule_paths,
+                )
+                if item.get("path") and item.get("branch")
+            }
+        except Exception:
+            log.exception(
+                "Failed to inspect nested submodule branch state for '%s'",
+                getattr(cell, "name", ""),
+            )
+
     diverged: list[dict] = []
     for sibling in _review_cycle_merge_sibling_candidates(state, cell):
         branch = sibling.get("branch", "")
@@ -2046,15 +2118,82 @@ async def _review_cycle_sibling_branch_divergence(
             ahead = int((count_text.splitlines() or ["0"])[0] or 0)
         except ValueError:
             ahead = 0
-        if ahead <= 0:
+        if ahead > 0:
+            code, head_sha = await _git_stdout(repo_root, "rev-parse", branch)
+            if code != 0:
+                head_sha = ""
+            item = dict(sibling)
+            item["ahead"] = ahead
+            item["head_sha"] = head_sha
+            diverged.append(item)
+        # Also gate sibling review/implement branches on the nested submodule
+        # branch pair. A review sibling may have its superproject branch already
+        # diffed while still carrying unmerged fixes in the submodule branch.
+        if not target_submodules:
             continue
-        code, head_sha = await _git_stdout(repo_root, "rev-parse", branch)
-        if code != 0:
-            head_sha = ""
-        item = dict(sibling)
-        item["ahead"] = ahead
-        item["head_sha"] = head_sha
-        diverged.append(item)
+        sibling_agent = state.agents.get(sibling.get("agent_id", ""))
+        if not sibling_agent:
+            continue
+        try:
+            sibling_submodules = {
+                item.get("path", ""): item
+                for item in await worktree_mgr.nested_submodule_head_states(
+                    sibling_agent,
+                    submodule_paths,
+                )
+                if item.get("path") and item.get("branch")
+            }
+        except Exception:
+            log.exception(
+                "Failed to inspect sibling nested submodule branch state for '%s'",
+                sibling.get("agent_name", ""),
+            )
+            sibling_submodules = {}
+        for path, target_sub in target_submodules.items():
+            sibling_sub = sibling_submodules.get(path)
+            if not sibling_sub:
+                continue
+            sub_repo = sibling_sub.get("repo_root", "") or target_sub.get("repo_root", "")
+            target_sub_branch = target_sub.get("branch", "")
+            sibling_sub_branch = sibling_sub.get("branch", "")
+            if not sub_repo or not target_sub_branch or not sibling_sub_branch:
+                continue
+            if target_sub_branch == sibling_sub_branch:
+                continue
+            code, sub_count_text = await _git_stdout(
+                sub_repo,
+                "rev-list",
+                "--count",
+                f"{target_sub_branch}..{sibling_sub_branch}",
+            )
+            if code != 0:
+                continue
+            try:
+                sub_ahead = int(
+                    (sub_count_text.splitlines() or ["0"])[0] or 0
+                )
+            except ValueError:
+                sub_ahead = 0
+            if sub_ahead <= 0:
+                continue
+            code, sub_head_sha = await _git_stdout(
+                sub_repo,
+                "rev-parse",
+                sibling_sub_branch,
+            )
+            if code != 0:
+                sub_head_sha = ""
+            sub_item = dict(sibling)
+            sub_item.update({
+                "branch": sibling_sub_branch,
+                "superproject_branch": branch,
+                "submodule_path": path,
+                "submodule": path,
+                "repo_root": sub_repo,
+                "ahead": sub_ahead,
+                "head_sha": sub_head_sha,
+            })
+            diverged.append(sub_item)
     diverged.sort(key=lambda item: (item.get("branch", ""), item.get("task_id", "")))
     return diverged
 
@@ -10157,6 +10296,22 @@ async def main(connection=None):
 
         head_sha = await worktree_mgr.current_head(cell)
         summary["head_sha"] = head_sha or ""
+        submodules = _worktree_submodules_for_cell(cell)
+        current_submodules = []
+        if submodules and hasattr(worktree_mgr, "nested_submodule_head_states"):
+            try:
+                current_submodules = await worktree_mgr.nested_submodule_head_states(
+                    cell,
+                    submodules,
+                )
+            except Exception:
+                log.exception(
+                    "Failed to verify nested submodule boundary for '%s'",
+                    cell.name,
+                )
+                current_submodules = []
+        if current_submodules:
+            summary["submodules"] = current_submodules
         if started:
             summary["reason"] = "started_successor"
             return {
@@ -10178,6 +10333,32 @@ async def main(connection=None):
                 "clean": None,
                 "reason": summary["reason"],
             }
+        recorded_submodules = boundary_submodule_branches(boundary)
+        if recorded_submodules:
+            current_by_path = {
+                item.get("path", ""): item for item in current_submodules
+            }
+            for recorded in recorded_submodules:
+                current = current_by_path.get(recorded.get("path", ""))
+                if not current:
+                    summary["reason"] = "missing_submodule_head_sha"
+                    summary["submodule_mismatch"] = recorded
+                    return {
+                        "latest": summary,
+                        "clean": None,
+                        "reason": summary["reason"],
+                    }
+                if current.get("commit_sha", "") != recorded.get("commit_sha", ""):
+                    summary["reason"] = "submodule_branch_tip_moved"
+                    summary["submodule_mismatch"] = {
+                        "recorded": recorded,
+                        "current": current,
+                    }
+                    return {
+                        "latest": summary,
+                        "clean": None,
+                        "reason": summary["reason"],
+                    }
 
         summary["clean_mergeable"] = True
         return {"latest": summary, "clean": summary, "reason": ""}
@@ -10199,6 +10380,17 @@ async def main(connection=None):
             return (
                 "Latest task boundary no longer matches the branch tip. "
                 "A newer commit or external rewrite moved the branch."
+            )
+        if reason == "submodule_branch_tip_moved":
+            return (
+                "Latest task boundary no longer matches the nested submodule "
+                "branch tip. A newer submodule commit or external rewrite "
+                "moved the branch pair."
+            )
+        if reason == "missing_submodule_head_sha":
+            return (
+                "Cannot verify the nested submodule branch tip for the latest "
+                "task boundary."
             )
         if reason == "missing_head_sha":
             return "Cannot verify the current branch tip for the latest task boundary."
@@ -10242,6 +10434,19 @@ async def main(connection=None):
                 reason = "missing_head_sha"
 
         recorded_at = datetime.now(timezone.utc).isoformat()
+        submodule_states = []
+        submodules = _worktree_submodules_for_cell(cell)
+        if submodules and hasattr(worktree_mgr, "nested_submodule_head_states"):
+            try:
+                submodule_states = await worktree_mgr.nested_submodule_head_states(
+                    cell,
+                    submodules,
+                )
+            except Exception:
+                log.exception(
+                    "Failed to record nested submodule boundary for '%s'",
+                    cell.name,
+                )
 
         for older in _branch_boundary_tasks_for_cell(cell, statuses={"open"}):
             if older.id == task.id:
@@ -10269,6 +10474,8 @@ async def main(connection=None):
             "merge_commit_sha": "",
             "reason": reason,
         }
+        if submodule_states:
+            task.worktree_boundary["submodules"] = submodule_states
         _save_task_record(task)
 
         for queued_task in retarget_queued_successor_tasks(
@@ -12037,8 +12244,15 @@ async def main(connection=None):
                     boundary_state = await _latest_boundary_state_for_cell(
                         cell
                     )
-                    dirty = await worktree_mgr.has_uncommitted_changes(
-                        cell)
+                    submodules = _worktree_submodules_for_cell(cell)
+                    dirty = (
+                        await worktree_mgr.has_uncommitted_changes(
+                            cell,
+                            worktree_submodules=submodules,
+                        )
+                        if submodules
+                        else await worktree_mgr.has_uncommitted_changes(cell)
+                    )
                     if dirty:
                         result = {
                             "type": "worktree_check_merge",
@@ -12063,7 +12277,14 @@ async def main(connection=None):
                             ),
                         }
                     else:
-                        stale_base = await worktree_mgr.stale_base_info(cell)
+                        stale_base = (
+                            await worktree_mgr.stale_base_info(
+                                cell,
+                                worktree_submodules=submodules,
+                            )
+                            if submodules
+                            else await worktree_mgr.stale_base_info(cell)
+                        )
                         if stale_base.get("stale") \
                                 and not (
                                     data.get("allow_stale_base")
@@ -12075,8 +12296,14 @@ async def main(connection=None):
                             result["boundary"] = boundary_state.get("latest")
                             result["clean_boundary"] = boundary_state.get("clean")
                             return result
-                        check = await \
-                            worktree_mgr.check_merge_conflicts(cell)
+                        check = (
+                            await worktree_mgr.check_merge_conflicts(
+                                cell,
+                                worktree_submodules=submodules,
+                            )
+                            if submodules
+                            else await worktree_mgr.check_merge_conflicts(cell)
+                        )
                         if check.get("clean"):
                             overwrite_paths = (
                                 await worktree_mgr.merge_untracked_overwrite_paths(
@@ -12122,6 +12349,7 @@ async def main(connection=None):
                 aid = data.get("id", "")
                 await _reconcile_worktree_branch(state, worktree_mgr, cell)
                 if cell and cell.worktree_path:
+                    submodules = _worktree_submodules_for_cell(cell)
                     overwrite_paths = (
                         await worktree_mgr.rebase_untracked_overwrite_paths(cell)
                     )
@@ -12138,7 +12366,14 @@ async def main(connection=None):
                             "overwrite_paths": overwrite_paths,
                             "conflicts": [],
                         }
-                    elif await worktree_mgr.has_uncommitted_changes(cell):
+                    elif (
+                        await worktree_mgr.has_uncommitted_changes(
+                            cell,
+                            worktree_submodules=submodules,
+                        )
+                        if submodules
+                        else await worktree_mgr.has_uncommitted_changes(cell)
+                    ):
                         result = {
                             "type": "worktree_rebase",
                             "id": aid,
@@ -12154,24 +12389,74 @@ async def main(connection=None):
                             worktree_mgr, "stale_base_info", None)
                         if callable(stale_info):
                             try:
-                                stale_base_before_rebase = await stale_info(cell)
+                                stale_base_before_rebase = (
+                                    await stale_info(
+                                        cell,
+                                        worktree_submodules=submodules,
+                                    )
+                                    if submodules
+                                    else await stale_info(cell)
+                                )
                             except Exception:
                                 log.exception(
                                     "stale-base preflight failed before rebase "
                                     "for '%s'",
                                     cell.name,
                                 )
-                        check = await worktree_mgr.check_merge_conflicts(cell)
+                        check = (
+                            await worktree_mgr.check_merge_conflicts(
+                                cell,
+                                worktree_submodules=submodules,
+                            )
+                            if submodules
+                            else await worktree_mgr.check_merge_conflicts(cell)
+                        )
                         previous_head_sha = (
                             await worktree_mgr.current_head(cell) or ""
                         )
-                        ok = await worktree_mgr.rebase_onto_base(cell)
+                        previous_submodules = (
+                            await worktree_mgr.nested_submodule_head_states(
+                                cell,
+                                submodules,
+                            )
+                            if submodules
+                            and hasattr(
+                                worktree_mgr,
+                                "nested_submodule_head_states",
+                            )
+                            else []
+                        )
+                        ok = (
+                            await worktree_mgr.rebase_onto_base(
+                                cell,
+                                worktree_submodules=submodules,
+                            )
+                            if submodules
+                            else await worktree_mgr.rebase_onto_base(cell)
+                        )
                         if ok:
                             rebased_head_sha = (
                                 await worktree_mgr.current_head(cell) or ""
                             )
+                            rebased_submodules = (
+                                await worktree_mgr.nested_submodule_head_states(
+                                    cell,
+                                    submodules,
+                                )
+                                if submodules
+                                and hasattr(
+                                    worktree_mgr,
+                                    "nested_submodule_head_states",
+                                )
+                                else []
+                            )
                             dirty_after_rebase = (
-                                await worktree_mgr.has_uncommitted_changes(cell)
+                                await worktree_mgr.has_uncommitted_changes(
+                                    cell,
+                                    worktree_submodules=submodules,
+                                )
+                                if submodules
+                                else await worktree_mgr.has_uncommitted_changes(cell)
                             )
                             refreshed_boundary = None
                             if not dirty_after_rebase:
@@ -12186,6 +12471,8 @@ async def main(connection=None):
                                         branch=cell.worktree_branch or "",
                                         previous_head_sha=previous_head_sha,
                                         rebased_head_sha=rebased_head_sha,
+                                        previous_submodules=previous_submodules,
+                                        rebased_submodules=rebased_submodules,
                                     )
                                 )
                             if refreshed_boundary:
@@ -12242,7 +12529,15 @@ async def main(connection=None):
                     stat_only = data.get("stat_only", False)
                     summary_only = data.get("summary_only", False)
                     paths = data.get("paths", [])
-                    stale_base = await worktree_mgr.stale_base_info(cell)
+                    submodules = _worktree_submodules_for_cell(cell)
+                    stale_base = (
+                        await worktree_mgr.stale_base_info(
+                            cell,
+                            worktree_submodules=submodules,
+                        )
+                        if submodules
+                        else await worktree_mgr.stale_base_info(cell)
+                    )
                     if summary_only:
                         scope_domain = _scope_domain_for_cell(state, cell)
                         summary = await worktree_mgr.diff_files_summary(
@@ -12334,8 +12629,15 @@ async def main(connection=None):
                             "boundary": boundary_state.get("latest"),
                         }
                     else:
-                        conflict_info = \
-                            await worktree_mgr.check_merge_conflicts(cell)
+                        submodules = _worktree_submodules_for_cell(cell)
+                        conflict_info = (
+                            await worktree_mgr.check_merge_conflicts(
+                                cell,
+                                worktree_submodules=submodules,
+                            )
+                            if submodules
+                            else await worktree_mgr.check_merge_conflicts(cell)
+                        )
                         result = {
                             "type": "ok",
                             "clean": conflict_info.get("clean", True),
