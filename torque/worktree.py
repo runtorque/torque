@@ -66,6 +66,11 @@ _BUILD_TEST_RE = re.compile(
     r"(^|/)\.github/workflows/",
     re.IGNORECASE,
 )
+# Worker-namespaced branches: ``torque/<engineer-slug>/<worker>`` and
+# ``torque/user/<worker>`` (a two-level torque branch). Used by the A1
+# base-branch safety guard (TORQUE:604) to refuse forking a fresh worktree
+# off a repo-root HEAD that was left on another worker's branch.
+_WORKER_NAMESPACED_BRANCH_RE = re.compile(r"^torque/[^/]+/.+")
 _WORKTREE_NAME_MAX_LEN = 40
 _TEST_DIR_NAMES = {
     "__snapshots__",
@@ -543,6 +548,92 @@ def _diff_signals(path: str, *, old_path: str = "", status: str = "modified",
     if churn >= _HIGH_CHURN_THRESHOLD:
         signals.append("high_churn")
     return signals
+
+
+# --- Out-of-scope diff flag (TORQUE:604 A2) --------------------------------
+# Observability-only: a backend-scoped task whose diff reaches into
+# frontend-only paths (ee/frontend, static/js, webview.html) is the motivating
+# drift case. Deliberately COARSE and low-false-positive — when the task's
+# declared domain is ambiguous, nothing is flagged. This never blocks or
+# changes dispatch/merge/completion behavior.
+_FRONTEND_DOMAIN_RE = re.compile(
+    r"(^|/)(ee/frontend|static/js|static/css)(/|$)|(^|/)webview\.html$",
+    re.IGNORECASE,
+)
+_FRONTEND_SPECIALIZATIONS = frozenset({"ui-ux", "desktop-shell"})
+_BACKEND_SPECIALIZATIONS = frozenset({
+    "orchestration-core",
+    "worktree-release",
+    "quality-observability",
+    "prompts-config",
+    "runtime-pty",
+})
+_FRONTEND_HINT_RE = re.compile(
+    r"\b(frontend|webview|panelsmith)\b|ee/frontend|static/js|ui[-/ ]?ux",
+    re.IGNORECASE,
+)
+_BACKEND_HINT_RE = re.compile(
+    r"\b(backend|orchestration|daemon|mcp)\b|server\.py|state\.py|"
+    r"(^|\s|/)torque/\w",
+    re.IGNORECASE,
+)
+
+
+def is_worker_namespaced_branch(branch: str) -> bool:
+    """Return whether *branch* is a worker-namespaced torque branch.
+
+    Matches ``torque/<engineer-slug>/*`` and ``torque/user/*`` (a two-level
+    torque branch). Flat branches (``main``, ``torque/<engineer-slug>-<id>``,
+    detached ``HEAD``) are not worker-namespaced.
+    """
+    branch = str(branch or "").strip()
+    return bool(branch) and bool(_WORKER_NAMESPACED_BRANCH_RE.match(branch))
+
+
+def path_is_frontend_domain(path: str) -> bool:
+    """Return whether *path* is a frontend-only file (coarse classifier)."""
+    normalized = _normalize_repo_rel_path(path)
+    return bool(normalized) and bool(_FRONTEND_DOMAIN_RE.search(normalized))
+
+
+def classify_task_scope_domain(*, specialization: str = "",
+                               labels=None,
+                               description: str = "") -> Optional[str]:
+    """Coarsely classify a task's declared domain for out-of-scope flagging.
+
+    Returns ``"backend"`` or ``"frontend"`` only when the task carries a clear
+    domain signal; ``None`` (don't flag) when ambiguous. The structured
+    specialization slug wins; otherwise a low-false-positive text heuristic is
+    used, and a task that mentions BOTH domains stays ``None``.
+    """
+    spec = str(specialization or "").strip().lower()
+    if spec in _FRONTEND_SPECIALIZATIONS:
+        return "frontend"
+    if spec in _BACKEND_SPECIALIZATIONS:
+        return "backend"
+    text = " ".join([*(labels or []), str(description or "")])
+    has_frontend = bool(_FRONTEND_HINT_RE.search(text))
+    has_backend = bool(_BACKEND_HINT_RE.search(text))
+    if has_backend and not has_frontend:
+        return "backend"
+    if has_frontend and not has_backend:
+        return "frontend"
+    return None
+
+
+def out_of_scope_diff_paths(domain: Optional[str], paths) -> list[str]:
+    """Return diff paths that fall in a foreign domain for *domain*.
+
+    Coarse + low-false-positive: only the motivating backend->frontend case is
+    flagged today. An unknown/None domain never flags.
+    """
+    if domain != "backend":
+        return []
+    return sorted({
+        _normalize_repo_rel_path(p)
+        for p in (paths or [])
+        if p and path_is_frontend_domain(p)
+    })
 
 
 def ensure_git_exclude(directory: str) -> None:
@@ -1276,6 +1367,18 @@ class WorktreeManager:
             log.debug("Could not get current branch for %s", repo_root)
         return "HEAD"
 
+    async def _resolve_safe_default_base(self, repo_root: str) -> str:
+        """Resolve the repo's default base branch for the A1 safety guard.
+
+        Used only when refusing a worker-namespaced HEAD as a worktree base.
+        Prefers an existing ``main``/``master`` (the codebase's default-branch
+        convention) and falls back to ``main``.
+        """
+        for candidate in ("main", "master"):
+            if await self._branch_exists(repo_root, candidate):
+                return candidate
+        return "main"
+
     async def reconcile_worktree_branch(self, cell) -> bool:
         """Sync ``cell.worktree_branch`` with the worktree's live HEAD branch.
 
@@ -1501,6 +1604,28 @@ class WorktreeManager:
             torque_dir = os.path.join(repo_root, ".torque")
             os.makedirs(torque_dir, exist_ok=True)
 
+            # A1 base-branch safety guard (TORQUE:604). With no explicit base,
+            # the worktree forks from the repo-root HEAD. If that HEAD has been
+            # left on a worker-namespaced branch (orphan/race/manual checkout),
+            # forking off it would propagate another worker's in-flight commits
+            # into this fresh worktree (the basing-off complement to the :580
+            # commit-into-shared-main block). Refuse it and fork off the
+            # configured default branch instead. The healthy path — explicit
+            # base, or HEAD on main / a normal branch — is left untouched.
+            head_branch = ""
+            if not base_branch:
+                head_branch = (
+                    await self.get_current_branch(repo_root) or ""
+                ).strip()
+                if is_worker_namespaced_branch(head_branch):
+                    safe_base = await self._resolve_safe_default_base(repo_root)
+                    log.warning(
+                        "refusing worker-branch base '%s' for '%s'; "
+                        "basing off '%s'",
+                        head_branch, cell.name, safe_base,
+                    )
+                    base_branch = safe_base
+
             # Build the git worktree add command
             cmd = ["git", "-C", repo_root, "worktree", "add",
                    "-b", branch, wt_path]
@@ -1518,9 +1643,11 @@ class WorktreeManager:
                           cell.name, stderr.decode().strip())
                 return None
 
-            # Record the base branch for future reference
+            # Record the base branch for future reference. ``head_branch`` was
+            # already resolved above when no explicit base was given.
             if not base_branch:
-                base_branch = await self.get_current_branch(repo_root)
+                base_branch = head_branch or await self.get_current_branch(
+                    repo_root)
 
             cell.worktree_path = wt_path
             cell.worktree_branch = branch
@@ -2263,8 +2390,15 @@ class WorktreeManager:
             return {}
 
     async def diff_files_summary(self, cell,
-                                 paths: list[str] | None = None) -> dict:
-        """Return structured per-file diff summary for review planning."""
+                                 paths: list[str] | None = None,
+                                 *, scope_domain: str | None = None) -> dict:
+        """Return structured per-file diff summary for review planning.
+
+        ``scope_domain`` (optional) is the task's declared domain, used only to
+        add an observability-only ``out_of_scope`` signal/field when the diff
+        reaches into a clearly-foreign domain (TORQUE:604 A2). It never blocks
+        or changes any behavior; when ``None`` no scope flag is computed.
+        """
         if not cell.worktree_path or not cell.worktree_base_branch:
             return {}
         path_filters = list(paths or [])
@@ -2344,6 +2478,18 @@ class WorktreeManager:
                 )
                 files.append(file_info)
 
+            # Tag out-of-scope files before tallying so the signal flows into
+            # interesting_files / signal_counts naturally (observability only).
+            out_of_scope = out_of_scope_diff_paths(
+                scope_domain, [f["path"] for f in files]
+            )
+            if out_of_scope:
+                foreign = set(out_of_scope)
+                for file_info in files:
+                    if file_info["path"] in foreign \
+                            and "out_of_scope" not in file_info["signals"]:
+                        file_info["signals"].append("out_of_scope")
+
             stats = {
                 "files": len(files),
                 "insertions": sum(f["insertions"] for f in files),
@@ -2359,12 +2505,24 @@ class WorktreeManager:
                 for signal in file_info["signals"]:
                     signal_counts[signal] = signal_counts.get(signal, 0) + 1
 
-            return {
+            summary = {
                 "stats": stats,
                 "files": files,
                 "interesting_files": interesting_files,
                 "signal_counts": signal_counts,
             }
+            if out_of_scope:
+                summary["out_of_scope"] = {
+                    "domain": scope_domain,
+                    "paths": out_of_scope,
+                    "count": len(out_of_scope),
+                    "digest_line": (
+                        f"diff touches {len(out_of_scope)} file(s) outside "
+                        f"declared {scope_domain} scope: "
+                        f"{', '.join(out_of_scope)}"
+                    ),
+                }
+            return summary
         except Exception:
             log.debug("diff_files_summary failed for '%s'", cell.name)
             return {}
