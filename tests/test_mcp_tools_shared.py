@@ -358,3 +358,79 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         self.assertEqual(state.boot_head_commit, "boot-sha")
         self.assertEqual(state.boot_mainline_branch, "main")
         self.assertEqual(state.boot_head_error, "")
+
+
+class MCPToolsSharedMergePayloadTests(unittest.TestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
+        self.shared_mod = importlib.reload(self.shared_mod)
+
+    def _cell(self):
+        return self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+        )
+
+    def test_merge_payload_surfaces_cleanup_override_warning(self):
+        # Part A (TORQUE:381 / :393): the silent cleanup override must reach the
+        # MCP caller both as structured fields and as a human-readable WARNING.
+        result = {
+            "type": "worktree_merge",
+            "ok": True,
+            "sha": "abc123",
+            "cleanup": {
+                "close_agent": False,
+                "remove_worktree": False,
+                "agent_closed": False,
+                "worktree_removed": False,
+                "errors": [],
+                "cleanup_overridden": True,
+                "override_reason": "queued_followups",
+                "queued_followup_count": 2,
+            },
+        }
+        payload = self.shared_mod._worktree_merge_success_payload(
+            result, self._cell()
+        )
+        # Structured fields ride along in cleanup.
+        self.assertTrue(payload["cleanup"]["cleanup_overridden"])
+        self.assertEqual(
+            payload["cleanup"]["override_reason"], "queued_followups"
+        )
+        self.assertEqual(payload["cleanup"]["queued_followup_count"], 2)
+        # Human-readable WARNING is surfaced in both warning + message.
+        self.assertIn("WARNING", payload["warning"])
+        self.assertIn("2 queued follow-up", payload["warning"])
+        self.assertIn("WARNING", payload["message"])
+
+    def test_merge_payload_no_warning_without_override(self):
+        result = {
+            "type": "worktree_merge",
+            "ok": True,
+            "sha": "abc123",
+            "cleanup": {
+                "close_agent": True,
+                "remove_worktree": True,
+                "agent_closed": True,
+                "worktree_removed": True,
+                "errors": [],
+            },
+        }
+        payload = self.shared_mod._worktree_merge_success_payload(
+            result, self._cell()
+        )
+        self.assertNotIn("cleanup_overridden", payload["cleanup"])
+        self.assertNotIn("WARNING", payload.get("warning", ""))
+        self.assertNotIn("WARNING", payload["message"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3377,6 +3377,21 @@ def _worktree_merge_success_payload(result: dict | None, cell) -> dict:
         payload["stale_base_warning"] = str(
             result.get("stale_base_warning") or ""
         )
+    # Surface the silent merge cleanup-override (queued follow-ups preserve the
+    # agent + worktree even when close/remove flags were requested). The new
+    # fields ride along in ``cleanup``; also raise a human-readable WARNING so
+    # engineers detect it without deep-inspecting the struct.
+    if cleanup.get("cleanup_overridden"):
+        count = cleanup.get("queued_followup_count", 0)
+        warn = (
+            "WARNING: requested cleanup flags (close agent / remove worktree) "
+            f"were NOT honored because {count} queued follow-up task(s) remain "
+            "on this agent; the agent and its worktree were preserved for that "
+            "queued work."
+        )
+        existing = str(payload.get("warning") or "").strip()
+        payload["warning"] = f"{existing}\n{warn}".strip() if existing else warn
+        payload["message"] = f"{payload['message']}\n{warn}".strip()
     return payload
 
 
