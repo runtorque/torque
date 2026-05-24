@@ -1107,8 +1107,7 @@
       </div>
 
       <div class="gs-subpane active" data-subpane="gls-daemon">
-        <section class="daemon-status" aria-labelledby="gls-daemon-heading">
-          <h3 id="gls-daemon-heading">Daemon</h3>
+        <section class="daemon-status" aria-label="Daemon">
           <div class="daemon-status-grid">
             <div class="daemon-status-label">Status</div>
             <div class="daemon-status-value daemon-status-state">
@@ -1150,8 +1149,7 @@
         <!-- Relay detail (TORQUE:560 connection + TORQUE:603 config).
              Hidden when the daemon publishes neither `relay_connection` nor
              `relay_config` (pre-producer / community). -->
-        <section class="daemon-status" id="gls-relay-section" aria-labelledby="gls-relay-heading" hidden>
-          <h3 id="gls-relay-heading">Relay</h3>
+        <section class="daemon-status" id="gls-relay-section" aria-label="Relay" hidden>
           <!-- Connection status (TORQUE:560), driven by `state.relay_connection`. -->
           <div id="gls-relay-connection-block">
             <div class="daemon-status-grid">

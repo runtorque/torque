@@ -5677,6 +5677,18 @@ test('system settings splits Daemon and Relay into subtabs and keeps fields in p
   const daemonPaneHtml = html.slice(daemonPaneStart, relayPaneStart);
   const relayPaneEnd = html.indexOf('<div class="modal-actions"', relayPaneStart);
   const relayPaneHtml = html.slice(relayPaneStart, relayPaneEnd);
+  assert.doesNotMatch(daemonPaneHtml, /<h3[^>]*>\s*Daemon\s*<\/h3>/,
+    'Daemon subpane relies on the subtab label instead of a duplicate visible heading');
+  assert.doesNotMatch(relayPaneHtml, /<h3[^>]*>\s*Relay\s*<\/h3>/,
+    'Relay subpane relies on the subtab label instead of a duplicate visible heading');
+  assert.doesNotMatch(daemonPaneHtml, /aria-labelledby="gls-daemon-heading"/,
+    'Daemon section does not reference a removed heading id');
+  assert.doesNotMatch(relayPaneHtml, /aria-labelledby="gls-relay-heading"/,
+    'Relay section does not reference a removed heading id');
+  assert.match(daemonPaneHtml, /<section class="daemon-status"[^>]*aria-label="Daemon"/,
+    'Daemon section keeps an accessible name');
+  assert.match(relayPaneHtml, /<section class="daemon-status" id="gls-relay-section"[^>]*aria-label="Relay"/,
+    'Relay section keeps an accessible name');
   [
     'gls-daemon-status-dot',
     'gls-daemon-version',
