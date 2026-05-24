@@ -18918,7 +18918,7 @@ test('Library Specializations list refresh preserves unsaved editor draft and ca
 test('task modal and add-agent labels rename template UI to role UI', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /<label>Role<\/label>\s*<select id="add-template-select"/);
-  assert.match(html, /<label>Default worker role<\/label>\s*<select id="gs-default-agent-template"/);
+  assert.match(html, /<label>Default role<\/label>\s*<select id="gs-default-agent-template"/);
   assert.match(html, /<label>Role[\s\S]*Optional role used when this task creates a new agent during dispatch\./);
 });
 

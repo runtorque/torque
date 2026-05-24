@@ -70,11 +70,63 @@ function _engineerProviderForReasoning() {
   );
 }
 
+function _workerProviderForReasoning() {
+  return (
+    _getProviderValue('gs-worker-provider')
+    || _getProviderValue('gs-agent-provider')
+    || _runtimeDefaultProviderName()
+  );
+}
+
 function _architectProviderForReasoning() {
   return (
     _getProviderValue('gs-architect-provider')
     || _getProviderValue('gs-agent-provider')
     || _runtimeDefaultProviderName()
+  );
+}
+
+function _gsInputValue(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value || '').trim() : '';
+}
+
+function _providerDefaultCommand(providerName) {
+  const meta = providerName ? _findProviderMeta(providerName) : null;
+  return meta ? meta.command : _runtimeDefaultCommand();
+}
+
+function _gsGroupDefaultModelPreview() {
+  return _gsInputValue('gs-agent-model') || 'system default';
+}
+
+function _gsGroupDefaultCommandPreview(providerName) {
+  return _gsInputValue('gs-agent-boot-cmd')
+    || _providerDefaultCommand(providerName);
+}
+
+function _setInputPlaceholder(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.placeholder = text;
+}
+
+function refreshGsInheritedLaunchPlaceholders() {
+  const modelPreview = _gsGroupDefaultModelPreview();
+  _setInputPlaceholder('gs-worker-model', 'Group default: ' + modelPreview);
+  _setInputPlaceholder('gs-engineer-model', 'Group default: ' + modelPreview);
+  _setInputPlaceholder('gs-architect-model', 'Group default: ' + modelPreview);
+
+  _setInputPlaceholder(
+    'gs-worker-boot-command',
+    'Group default: ' + _gsGroupDefaultCommandPreview(_workerProviderForReasoning())
+  );
+  _setInputPlaceholder(
+    'gs-engineer-boot-cmd',
+    'Group default: ' + _gsGroupDefaultCommandPreview(_engineerProviderForReasoning())
+  );
+  _setInputPlaceholder(
+    'gs-architect-boot-cmd',
+    'Group default: ' + _gsGroupDefaultCommandPreview(_architectProviderForReasoning())
   );
 }
 
@@ -106,12 +158,14 @@ function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
 }
 
 function _getProviderValue(selectId) {
-  const v = document.getElementById(selectId).value;
+  const el = document.getElementById(selectId);
+  const v = el ? el.value : '';
   return v === '__custom__' ? '' : v;
 }
 
 function _getProviderCommand(selectId) {
-  const v = document.getElementById(selectId).value;
+  const el = document.getElementById(selectId);
+  const v = el ? el.value : '';
   if (!v) return _runtimeDefaultCommand();
   const p = _cachedProviders.find(p => p.name === v);
   return p ? p.command : '';
@@ -169,6 +223,10 @@ function onGsProviderChange() {
     'Provider default',
     'Not supported for this provider'
   );
+  refreshGsInheritedLaunchPlaceholders();
+  if (!_getProviderValue('gs-worker-provider')) {
+    onGsWorkerProviderChange();
+  }
   if (!_getProviderValue('gs-engineer-provider')) {
     onGsEngineerProviderChange();
   }
@@ -202,12 +260,7 @@ function onAddProviderChange() {
 }
 
 function onGsEngineerProviderChange() {
-  const input = document.getElementById('gs-engineer-boot-cmd');
-  if (input) {
-    const effectiveProvider = _engineerProviderForReasoning();
-    const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
-    input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
-  }
+  refreshGsInheritedLaunchPlaceholders();
   _populateReasoningEffortSelect(
     'gs-engineer-reasoning-effort',
     _engineerProviderForReasoning(),
@@ -217,13 +270,21 @@ function onGsEngineerProviderChange() {
   );
 }
 
+function onGsWorkerProviderChange(currentValue) {
+  refreshGsInheritedLaunchPlaceholders();
+  const reasoning = document.getElementById('gs-worker-reasoning-effort');
+  if (!reasoning) return;
+  _populateReasoningEffortSelect(
+    'gs-worker-reasoning-effort',
+    _workerProviderForReasoning(),
+    currentValue == null ? reasoning.value : currentValue,
+    'Provider default',
+    'Not supported for this provider'
+  );
+}
+
 function onGsArchitectProviderChange() {
-  const input = document.getElementById('gs-architect-boot-cmd');
-  if (input) {
-    const effectiveProvider = _architectProviderForReasoning();
-    const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
-    input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
-  }
+  refreshGsInheritedLaunchPlaceholders();
   _populateReasoningEffortSelect(
     'gs-architect-reasoning-effort',
     _architectProviderForReasoning(),
@@ -791,6 +852,7 @@ let _gsEngineerColor = '';
 let _gsArchitectColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
+let _gsActiveSubTabs = {};
 let _gsBoardSyncPreflightMode = '';
 let _gsBoardSyncProjectOptions = [];
 let _gsBoardSyncProjectsLoadedKey = '';
@@ -1270,13 +1332,18 @@ function switchGsTab(name) {
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
-  // Reset sub-tabs to first when switching main tabs
   const pane = document.querySelector(`.gs-pane[data-pane="${name}"]`);
   if (!pane) return;
-  if (pane) {
-    const firstSub = pane.querySelector('.gs-subtab');
-    if (firstSub) switchGsSubTab(name, firstSub);
+  const preferredSubtab = _gsActiveSubTabs[name] || '';
+  const subtabs = Array.prototype.slice.call(pane.querySelectorAll('.gs-subtab'));
+  let nextSubtab = null;
+  if (preferredSubtab) {
+    nextSubtab = subtabs.find(t => t.dataset && t.dataset.subtab === preferredSubtab) || null;
   }
+  if (!nextSubtab) {
+    nextSubtab = pane.querySelector('.gs-subtab');
+  }
+  if (nextSubtab) switchGsSubTab(name, nextSubtab);
 }
 
 function switchGsSubTab(pane, btn) {
@@ -1286,6 +1353,10 @@ function switchGsSubTab(pane, btn) {
   const target = btn.dataset.subtab;
   container.querySelectorAll('.gs-subpane').forEach(p =>
     p.classList.toggle('active', p.dataset.subpane === target));
+  const paneName = container.dataset && container.dataset.pane
+    ? container.dataset.pane
+    : pane;
+  if (paneName && target) _gsActiveSubTabs[paneName] = target;
   if (target === 'group-sync') _gsBoardSyncMaybeLoadProjects();
 }
 
@@ -1307,6 +1378,10 @@ function _groupSettingsPromptPreviewPayload() {
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_model: document.getElementById('gs-agent-model').value.trim(),
     agent_reasoning_effort: document.getElementById('gs-agent-reasoning-effort').value,
+    worker_provider: _getProviderValue('gs-worker-provider'),
+    worker_boot_command: document.getElementById('gs-worker-boot-command').value.trim(),
+    worker_model: document.getElementById('gs-worker-model').value.trim(),
+    worker_reasoning_effort: document.getElementById('gs-worker-reasoning-effort').value,
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
@@ -1996,7 +2071,7 @@ function _showGroupSettings(group, data) {
   _gsColor = s.tab_color || '';
   _renderSwatches('gs-color-swatches', _gsColor, 'selectGsColor');
 
-  /* -- Group > Agents (worker defaults) + Workers tab -- */
+  /* -- Group > Agents (all-kinds defaults) + Workers tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
@@ -2004,7 +2079,12 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
   document.getElementById('gs-agent-model').value = s.agent_model || '';
   document.getElementById('gs-agent-reasoning-effort').value = s.agent_reasoning_effort || '';
+  _populateProviderSelect('gs-worker-provider', s.worker_provider || '', true);
+  document.getElementById('gs-worker-boot-command').value = s.worker_boot_command || '';
+  document.getElementById('gs-worker-model').value = s.worker_model || '';
+  document.getElementById('gs-worker-reasoning-effort').value = s.worker_reasoning_effort || '';
   onGsProviderChange();
+  onGsWorkerProviderChange(s.worker_reasoning_effort || '');
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
   document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.torque/worktrees';
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
@@ -2138,7 +2218,6 @@ function _showGroupSettings(group, data) {
   );
   _setEngineerEventCheckboxes(ws.enabled_events || []);
   syncGsEngineerNotificationPreset();
-  _resetGsEngineerSections();
 
   /* -- Architect tab -- */
   _populateProviderSelect(
@@ -2205,7 +2284,6 @@ function _showGroupSettings(group, data) {
     architectSettings.architect_journal_checkpoint_frequency || 'every_10_actions'
   );
   onGsArchitectProviderChange();
-  _resetGsArchitectSections();
 
   const selection = _normalizeGsSelection(_gsInitialTab || 'group', _gsInitialSubtab || '');
   const initialTab = selection.tab;
@@ -2314,6 +2392,10 @@ function submitGroupSettings() {
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_model: document.getElementById('gs-agent-model').value.trim(),
     agent_reasoning_effort: document.getElementById('gs-agent-reasoning-effort').value,
+    worker_provider: _getProviderValue('gs-worker-provider'),
+    worker_boot_command: document.getElementById('gs-worker-boot-command').value.trim(),
+    worker_model: document.getElementById('gs-worker-model').value.trim(),
+    worker_reasoning_effort: document.getElementById('gs-worker-reasoning-effort').value,
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     agent_env_file: document.getElementById('gs-agent-env-file').value.trim(),
     git_worktree: document.getElementById('gs-worktree').checked,

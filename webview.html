@@ -392,8 +392,8 @@
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
       <button class="gs-tab" data-tab="workers" onclick="switchGsTab('workers')">Workers</button>
-      <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineer</button>
-      <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architect</button>
+      <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineers</button>
+      <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architects</button>
     </div>
 
     <!-- Group tab -->
@@ -437,20 +437,20 @@
       </label>
       </div>
 
-      <!-- Agents (worker defaults) sub-tab -->
+      <!-- Agents (all-kinds defaults) sub-tab -->
       <div class="gs-subpane" data-subpane="group-worker-defaults">
-        <div class="label-hint task-modal-section-intro">Group-wide defaults applied to newly spawned workers. Per-worker execution behavior lives under the Workers tab.</div>
-        <label>Default worker provider</label>
+        <div class="label-hint task-modal-section-intro">Group-wide defaults for all agents — workers, engineers, and architects — unless overridden per-kind.</div>
+        <label>Default provider</label>
         <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
-        <label>Default worker role</label>
+        <label>Default role</label>
         <select id="gs-default-agent-template"></select>
         <div id="gs-agent-boot-cmd-row" class="hidden">
           <label>Default boot command</label>
-          <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off">
+          <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
         </div>
-        <label>Default worker model</label>
-        <input id="gs-agent-model" placeholder="Use provider default" autocomplete="off">
-        <label>Default worker reasoning effort</label>
+        <label>Default model</label>
+        <input id="gs-agent-model" placeholder="Use provider default" autocomplete="off" oninput="refreshGsInheritedLaunchPlaceholders()">
+        <label>Default reasoning effort</label>
         <select id="gs-agent-reasoning-effort"></select>
       </div>
 
@@ -574,14 +574,23 @@
     <!-- Workers tab -->
     <div class="gs-pane" data-pane="workers">
       <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">Execution</button>
+        <button class="gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">General</button>
         <button class="gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
         <button class="gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
       </div>
 
       <!-- Execution sub-tab -->
       <div class="gs-subpane active" data-subpane="worker-execution">
-        <div class="label-hint task-modal-section-intro">Worker execution context defaults. Provider, model, command, and default role are group-wide policy under Group → Agents.</div>
+        <div class="label-hint task-modal-section-intro">Worker defaults can override the group-wide Agents defaults here. Leave provider, command, model, or reasoning effort blank to inherit Group → Agents.</div>
+        <label>Provider</label>
+        <select id="gs-worker-provider" onchange="onGsWorkerProviderChange()"></select>
+        <label>Command override</label>
+        <input id="gs-worker-boot-command" placeholder="Group default" autocomplete="off">
+        <label>Model</label>
+        <input id="gs-worker-model" placeholder="Group default" autocomplete="off">
+        <label>Reasoning effort</label>
+        <select id="gs-worker-reasoning-effort"></select>
+        <div class="label-hint task-modal-section-intro">Execution context defaults for worker sessions.</div>
         <label>Directory</label>
         <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
         <label class="iterm2-only">Profile</label>

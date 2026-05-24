@@ -538,6 +538,76 @@ test('group settings refreshes reasoning effort options when provider changes', 
   );
 });
 
+test('worker provider block inherits group default provider and previews model/command', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, [
+    {
+      name: 'codex',
+      display_name: 'Codex',
+      command: 'codex',
+      reasoning_efforts: ['low', 'medium', 'high'],
+    },
+    {
+      name: 'claude-code',
+      display_name: 'Claude Code',
+      command: 'claude',
+      reasoning_efforts: ['low', 'medium', 'high', 'max'],
+    },
+  ]);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      agent_provider: "codex",
+      agent_model: "gpt-5",
+      agent_boot_command: "codex --sandbox",
+      worker_provider: "",
+      worker_model: "",
+      worker_boot_command: "",
+      worker_reasoning_effort: "high"
+    },
+    engineer_settings: {},
+    architect_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-worker-provider').value, '');
+  assert.deepEqual(
+    ensure('gs-worker-provider').children.slice(0, 3).map((child) => ({
+      value: child.value,
+      text: child.textContent,
+    })),
+    [
+      { value: '', text: 'Group default' },
+      { value: 'codex', text: 'Codex' },
+      { value: 'claude-code', text: 'Claude Code' },
+    ],
+  );
+  assert.equal(ensure('gs-worker-model').value, '');
+  assert.equal(ensure('gs-worker-model').placeholder, 'Group default: gpt-5');
+  assert.equal(ensure('gs-worker-boot-command').value, '');
+  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Group default: codex --sandbox');
+  assert.deepEqual(
+    ensure('gs-worker-reasoning-effort').children.map((child) => child.value),
+    ['', 'low', 'medium', 'high'],
+  );
+  assert.equal(ensure('gs-worker-reasoning-effort').value, 'high');
+  assert.equal(ensure('gs-engineer-model').placeholder, 'Group default: gpt-5');
+  assert.equal(ensure('gs-architect-model').placeholder, 'Group default: gpt-5');
+
+  ensure('gs-agent-boot-cmd').value = '';
+  ensure('gs-agent-model').value = '';
+  ensure('gs-worker-provider').value = 'claude-code';
+  vm.runInContext('onGsWorkerProviderChange()', context);
+  assert.equal(ensure('gs-worker-model').placeholder, 'Group default: system default');
+  assert.equal(ensure('gs-worker-boot-command').placeholder, 'Group default: claude');
+  assert.deepEqual(
+    ensure('gs-worker-reasoning-effort').children.map((child) => child.value),
+    ['', 'low', 'medium', 'high', 'max'],
+  );
+});
+
 test('group settings modal populates engineer fields and honors engineer tab deep-link', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -686,7 +756,7 @@ test('architect checkpoint dropdown preserves custom persisted cadences', () => 
   );
 });
 
-test('group settings resets Engineer and Architect sub-tabs to General when reopened', () => {
+test('group settings preserves Engineer and Architect sub-tabs across refresh', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -704,19 +774,19 @@ test('group settings resets Engineer and Architect sub-tabs to General when reop
   })`, context);
 
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-general"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]').classList.contains('active'),
     true,
   );
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-general"]').classList.contains('active'),
     false,
   );
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-general"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-system"]').classList.contains('active'),
     true,
   );
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-system"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-general"]').classList.contains('active'),
     false,
   );
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
@@ -734,6 +804,10 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   assert.deepEqual(topTabs, ['group', 'workers', 'engineer', 'architect']);
   assert.doesNotMatch(topStrip, />Agents<\/button>/);
   assert.match(topStrip, />Workers<\/button>/);
+  assert.match(topStrip, />Engineers<\/button>/);
+  assert.match(topStrip, />Architects<\/button>/);
+  assert.doesNotMatch(topStrip, />Engineer<\/button>/);
+  assert.doesNotMatch(topStrip, />Architect<\/button>/);
 
   assert.match(
     html,
@@ -750,6 +824,8 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
     html,
     /<div class="gs-pane" data-pane="workers">[\s\S]*?data-subtab="worker-execution"[\s\S]*?data-subtab="worker-worktree"[\s\S]*?data-subtab="worker-notifications"/,
   );
+  assert.match(html, /data-subtab="worker-execution"[^>]*>General<\/button>/);
+  assert.doesNotMatch(html, /data-subtab="worker-execution"[^>]*>Execution<\/button>/);
   assert.match(html, /data-subpane="worker-execution"/);
   assert.match(html, /data-subpane="worker-worktree"/);
   assert.match(html, /data-subpane="worker-notifications"/);
@@ -800,7 +876,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   assert.ok(html.indexOf('id="gs-architect-digest-verbosity"') < html.indexOf('id="gs-architect-push-interval"'));
 });
 
-test('group settings places worker policy defaults and terminals under Group, leaving Workers execution-scoped', () => {
+test('group settings places all-kind defaults under Group and worker overrides under Workers General', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const groupStart = html.indexOf('<div class="gs-pane active" data-pane="group">');
   const workersStart = html.indexOf('<div class="gs-pane" data-pane="workers">');
@@ -821,11 +897,18 @@ test('group settings places worker policy defaults and terminals under Group, le
   assert.ok(terminals < groupPane.indexOf('id="gs-auto-terminals"'));
   assert.ok(terminals < groupPane.indexOf('id="gs-terminal-prefix"'));
   assert.ok(terminals < advanced);
-  assert.match(groupPane, /Default worker provider/);
-  assert.match(groupPane, /Default worker role/);
-  assert.match(groupPane, /Default worker model/);
+  assert.match(groupPane, /Group-wide defaults for all agents — workers, engineers, and architects — unless overridden per-kind\./);
+  assert.match(groupPane, /Default provider/);
+  assert.match(groupPane, /Default role/);
+  assert.match(groupPane, /Default model/);
+  assert.doesNotMatch(groupPane, /Default worker provider/);
+  assert.doesNotMatch(groupPane, /Default worker model/);
 
   assert.match(workersPane, /data-subpane="worker-execution"/);
+  assert.match(workersPane, /id="gs-worker-provider"/);
+  assert.match(workersPane, /id="gs-worker-boot-command"/);
+  assert.match(workersPane, /id="gs-worker-model"/);
+  assert.match(workersPane, /id="gs-worker-reasoning-effort"/);
   assert.match(workersPane, /id="gs-agent-directory"/);
   assert.match(workersPane, /id="gs-session-resume"/);
   assert.match(workersPane, /id="gs-agent-idle-timeout"/);
@@ -1148,6 +1231,10 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-default-agent-template').value = 'careful-reviewer';
   ensure('gs-agent-provider').value = 'codex';
   ensure('gs-agent-boot-cmd').value = 'codex --worker';
+  ensure('gs-worker-provider').value = 'codex';
+  ensure('gs-worker-boot-command').value = 'codex --worker-kind';
+  ensure('gs-worker-model').value = 'gpt-5-worker';
+  ensure('gs-worker-reasoning-effort').value = 'high';
   ensure('gs-terminal-prefix').value = 'Shell';
   ensure('gs-terminal-boot-cmd').value = 'npm run dev';
   ensure('gs-engineer-merge-mode').value = 'direct';
@@ -1208,6 +1295,10 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].settings.default_agent_template, 'careful-reviewer');
   assert.equal(sandbox.sendCalls[0].settings.agent_provider, 'codex');
   assert.equal(sandbox.sendCalls[0].settings.agent_boot_command, 'codex --worker');
+  assert.equal(sandbox.sendCalls[0].settings.worker_provider, 'codex');
+  assert.equal(sandbox.sendCalls[0].settings.worker_boot_command, 'codex --worker-kind');
+  assert.equal(sandbox.sendCalls[0].settings.worker_model, 'gpt-5-worker');
+  assert.equal(sandbox.sendCalls[0].settings.worker_reasoning_effort, 'high');
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
   assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
   assert.equal(sandbox.sendCalls[0].settings.engineer_merge_mode, 'direct');
@@ -1274,6 +1365,28 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
     ),
     false,
   );
+});
+
+test('submitGroupSettings sends empty worker launch overrides as group-default inheritance', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('gs-worker-provider').value = '';
+  ensure('gs-worker-boot-command').value = '';
+  ensure('gs-worker-model').value = '';
+  ensure('gs-worker-reasoning-effort').value = '';
+  ensure('gs-engineer-default-worker-concurrency').value = '2';
+
+  vm.runInContext('submitGroupSettings()', context);
+
+  assert.equal(sandbox.sendCalls[0].cmd, 'update_group_settings');
+  assert.equal(sandbox.sendCalls[0].settings.worker_provider, '');
+  assert.equal(sandbox.sendCalls[0].settings.worker_boot_command, '');
+  assert.equal(sandbox.sendCalls[0].settings.worker_model, '');
+  assert.equal(sandbox.sendCalls[0].settings.worker_reasoning_effort, '');
 });
 
 test('group settings notification presets rewrite detailed controls before submit', () => {
