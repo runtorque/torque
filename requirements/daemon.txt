@@ -1,0 +1,6 @@
+aiohttp
+jinja2
+pyyaml
+orjson
+certifi
+cryptography

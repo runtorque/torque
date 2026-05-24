@@ -360,5 +360,6 @@ class DesktopLauncherTests(unittest.TestCase):
                 )
             )
 
+        self.assertIn("make deps", str(ctx.exception))
         self.assertIn("make desktop-deps", str(ctx.exception))
         self.assertIn("--python", str(ctx.exception))

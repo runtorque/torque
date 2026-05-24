@@ -72,7 +72,7 @@ These answer three different questions:
 
 1. Run `make check` and confirm `pywebview` is installed.
 2. Install `pywebview` into the Python runtime that is launching the desktop shell:
-   - default runtime: `make desktop-deps`
+   - default runtime: `make deps`
    - custom runtime: `YOUR_PYTHON -m pip install pywebview`
 3. If you are using `torque desktop --attach`, make sure the target server is:
    - standalone, not the Toolbelt daemon

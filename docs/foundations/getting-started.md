@@ -19,12 +19,13 @@ git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
 cd iterm2-agent-orchestration
 make deps
 make deploy
-make desktop-deps
 ```
 
 `make deploy` installs the primary standalone/desktop app files under
 `~/.torque/app` and installs the `torque` CLI symlink into
-`~/.local/bin/torque`. Make sure that directory is on your `PATH`.
+`~/.local/bin/torque`. `make deps` creates or repairs the primary Python
+runtime at `~/.torque/runtime/venv`. Make sure `~/.local/bin` is on your
+`PATH`.
 
 ## Start Torque
 
