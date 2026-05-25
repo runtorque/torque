@@ -428,6 +428,9 @@ function closeModals() {
   // Display-once relay device-link (TORQUE:603 #3): drop any minted secret +
   // confirm gesture so nothing transient survives the modal close.
   if (typeof _relayDeviceLinkReset === 'function') _relayDeviceLinkReset();
+  // Daemon-credential pairing token is a one-time secret pasted into the modal;
+  // do not leave it in the DOM after close.
+  if (typeof _relayDaemonCredentialReset === 'function') _relayDaemonCredentialReset();
   _modalStack = [];
   _addEngineerGroup = '';
   _addEngineerArchitectId = '';

@@ -273,6 +273,13 @@ function _relaySectionUpdateVisibility() {
   // The probe result/button are owned solely by the probe handler below.
   var slot = document.getElementById('gls-relay-probe-slot');
   if (slot) slot.hidden = section.hidden;
+  // Daemon-credential provisioning (:676 client half) also rides the Relay
+  // section. The pasted pairing token is intentionally not stored in state; the
+  // control is reset only on success/modal close, while ordinary config deltas
+  // update button gating without touching the token input.
+  var credSlot = document.getElementById('gls-relay-daemon-credential-slot');
+  if (credSlot) credSlot.hidden = section.hidden;
+  relayDaemonCredentialRefreshButtonState();
   // The device-link slot (TORQUE:603 #3) likewise rides the section visibility.
   // _relayDeviceLinkRefreshButtonState() then flips ONLY the generate button's
   // enabled state from the gate; the displayed secret is left untouched and
@@ -574,6 +581,282 @@ function handleRelayTestResult(msg) {
   if (!msg || msg.type !== 'relay_test_result') return;
   _relayProbeSetInFlight(false);
   _relayProbeRenderResult(_relayProbeComputeView(msg));
+}
+
+/* ----------------------------------------------------------------------------
+ * Relay DAEMON CREDENTIAL provisioning (:676 client half).
+ *
+ * v1 flow: client generates an ES256 daemon key locally, operator pastes a
+ * one-time `pairing_token` minted OUT-OF-BAND by a relay admin
+ * (/v1/admin/pairing-tokens), daemon posts the PUBLIC JWK to /v1/pair, then
+ * stores ONLY {relay_credential_id, relay_private_key_path} in Global Settings.
+ *
+ * FUTURE follow-up (not v1): admin-authenticated in-app pairing-token minting.
+ * This client UI deliberately never calls /v1/admin/pairing-tokens.
+ * -------------------------------------------------------------------------- */
+
+var _relayDaemonCredentialInFlight = false;
+var _relayDaemonCredentialConfirming = false;
+
+function _relayConfigEffectiveValue(rc, key) {
+  if (!rc || typeof rc !== 'object') return '';
+  var config = (rc.config && typeof rc.config === 'object') ? rc.config : {};
+  if (Object.prototype.hasOwnProperty.call(config, key)) {
+    return config[key];
+  }
+  var sources = (rc.sources && typeof rc.sources === 'object') ? rc.sources : {};
+  var src = (sources[key] && typeof sources[key] === 'object') ? sources[key] : {};
+  return Object.prototype.hasOwnProperty.call(src, 'value') ? src.value : '';
+}
+
+function _relayDaemonCredentialComputeGate(rc) {
+  if (!rc || typeof rc !== 'object') {
+    return { visible: false, canGenerate: false, reason: '' };
+  }
+  var relayUrl = String(_relayConfigEffectiveValue(rc, 'relay_url') || '').trim();
+  var daemonId = String(_relayConfigEffectiveValue(rc, 'daemon_id') || '').trim();
+  if (!relayUrl && !daemonId) {
+    return { visible: true, canGenerate: false,
+      reason: 'Set the relay URL and daemon ID before generating a daemon credential.' };
+  }
+  if (!relayUrl) {
+    return { visible: true, canGenerate: false,
+      reason: 'Set the relay URL before generating a daemon credential.' };
+  }
+  if (!daemonId) {
+    return { visible: true, canGenerate: false,
+      reason: 'Set the daemon ID before generating a daemon credential.' };
+  }
+  return { visible: true, canGenerate: true, reason: '' };
+}
+
+function _relayDaemonCredentialTokenValue() {
+  if (typeof document === 'undefined' || !document.getElementById) return '';
+  var input = document.getElementById('gls-relay-daemon-credential-token');
+  return input ? String(input.value || '').trim() : '';
+}
+
+function _relayDaemonCredentialCurrentCredentialId(rc) {
+  return String(_relayConfigEffectiveValue(rc, 'credential_id') || '').trim();
+}
+
+function _relayDaemonCredentialClearError() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-daemon-credential-error');
+  if (el) { el.hidden = true; el.innerHTML = ''; }
+}
+
+function _relayDaemonCredentialClearResult() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-daemon-credential-result');
+  if (el) { el.hidden = true; el.innerHTML = ''; }
+}
+
+function _relayDaemonCredentialSetInFlight(on) {
+  _relayDaemonCredentialInFlight = !!on;
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var btn = document.getElementById('gls-relay-daemon-credential-generate');
+  if (btn) {
+    btn.textContent = on ? 'Generating…' : 'Generate';
+  }
+  relayDaemonCredentialRefreshButtonState();
+}
+
+function _relayDaemonCredentialSetConfirming(on, credentialId) {
+  _relayDaemonCredentialConfirming = !!on;
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var box = document.getElementById('gls-relay-daemon-credential-confirm');
+  if (box) box.hidden = !on;
+  var msg = document.getElementById('gls-relay-daemon-credential-confirm-msg');
+  if (msg) {
+    msg.textContent = on
+      ? 'This daemon already has a relay credential (' + String(credentialId || '')
+        + '). Re-generating registers a NEW credential and makes it active on the relay, '
+        + "which can disrupt this daemon's current live connection. Generate a new "
+        + 'credential anyway?'
+      : '';
+  }
+  var btn = document.getElementById('gls-relay-daemon-credential-generate');
+  if (btn) btn.hidden = !!on;
+}
+
+function relayDaemonCredentialRefreshButtonState() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var rc = (typeof state !== 'undefined' && state) ? state.relay_config : null;
+  var gate = _relayDaemonCredentialComputeGate(rc);
+  var tokenPresent = !!_relayDaemonCredentialTokenValue();
+  var btn = document.getElementById('gls-relay-daemon-credential-generate');
+  if (btn) {
+    btn.hidden = !!_relayDaemonCredentialConfirming;
+    btn.disabled = _relayDaemonCredentialInFlight || !gate.canGenerate || !tokenPresent;
+    if (typeof btn.setAttribute === 'function') {
+      var title = gate.canGenerate
+        ? (tokenPresent ? 'Generate a daemon credential from the pasted one-time token'
+          : 'Paste a one-time pairing token first')
+        : gate.reason;
+      btn.setAttribute('title', title);
+    }
+  }
+  var hint = document.getElementById('gls-relay-daemon-credential-hint');
+  if (hint) {
+    hint.hidden = !!gate.canGenerate;
+    hint.textContent = gate.canGenerate ? '' : gate.reason;
+  }
+}
+
+function _relayDaemonCredentialRenderError(view) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-daemon-credential-error');
+  if (!el) return;
+  var html = '<span class="gls-relay-daemon-credential-error-msg">'
+    + _relayProbeEsc(view.message) + '</span>';
+  if (view.detail) {
+    html += '<span class="gls-relay-daemon-credential-error-detail">'
+      + _relayProbeEsc(view.detail) + '</span>';
+  }
+  el.hidden = false;
+  el.innerHTML = html;
+}
+
+function _relayDaemonCredentialComputeView(msg) {
+  if (!msg || typeof msg !== 'object' || msg.type !== 'daemon_credential') {
+    return { kind: 'none' };
+  }
+  if (msg.ok === true) {
+    return {
+      kind: 'success',
+      credentialId: String(msg.credential_id || ''),
+      daemonId: String(msg.daemon_id || ''),
+      ownerUserId: String(msg.owner_user_id || ''),
+      privateKeyPath: String(msg.private_key_path || ''),
+      provenance: (msg.provenance && typeof msg.provenance === 'object')
+        ? msg.provenance : {},
+    };
+  }
+  return {
+    kind: 'error',
+    error: String(msg.error || ''),
+    message: String(msg.message || 'Could not generate a daemon credential.'),
+    detail: String(msg.detail || ''),
+  };
+}
+
+function _relayDaemonCredentialRenderSuccess(view) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-daemon-credential-result');
+  if (!el) return;
+  var provenanceLabel = 'stored in Settings';
+  if (view.provenance && view.provenance.private_key_path === 'local_keygen') {
+    provenanceLabel = 'local keygen → Settings';
+  }
+  var html = '<div class="gls-relay-daemon-credential-success-line">'
+    + '<span class="gls-relay-daemon-credential-badge">'
+    + _relayProbeEsc(provenanceLabel) + '</span>'
+    + '<span>Daemon credential generated. Settings now contain '
+    + '<code>relay_credential_id</code> and <code>relay_private_key_path</code>.</span>'
+    + '</div>';
+  html += '<div class="gls-relay-daemon-credential-field">'
+    + '<span>Credential ID</span><code>'
+    + _relayProbeEsc(view.credentialId) + '</code></div>';
+  html += '<div class="gls-relay-daemon-credential-field">'
+    + '<span>Private key path</span><code>'
+    + _relayProbeEsc(view.privateKeyPath) + '</code></div>';
+  if (view.ownerUserId) {
+    html += '<div class="gls-relay-daemon-credential-field">'
+      + '<span>Owner user</span><code>'
+      + _relayProbeEsc(view.ownerUserId) + '</code></div>';
+  }
+  el.hidden = false;
+  el.innerHTML = html;
+}
+
+function _relayDaemonCredentialApplyRelayConfig(msg) {
+  if (!msg || !msg.relay_config || typeof msg.relay_config !== 'object') return;
+  if (typeof state !== 'undefined' && state) {
+    state.relay_config = msg.relay_config;
+  }
+  if (typeof refreshRelayConfigModal === 'function') {
+    refreshRelayConfigModal({ force: true });
+  }
+}
+
+function _relayDaemonCredentialReset() {
+  _relayDaemonCredentialInFlight = false;
+  _relayDaemonCredentialSetConfirming(false);
+  if (typeof document !== 'undefined' && document.getElementById) {
+    var token = document.getElementById('gls-relay-daemon-credential-token');
+    if (token) token.value = '';
+    var btn = document.getElementById('gls-relay-daemon-credential-generate');
+    if (btn) btn.textContent = 'Generate';
+  }
+  _relayDaemonCredentialClearError();
+  _relayDaemonCredentialClearResult();
+  relayDaemonCredentialRefreshButtonState();
+}
+
+function _relayDaemonCredentialSubmit(skipExistingCredentialGuard) {
+  if (_relayDaemonCredentialInFlight) return;
+  var rc = (typeof state !== 'undefined' && state) ? state.relay_config : null;
+  var gate = _relayDaemonCredentialComputeGate(rc);
+  var token = _relayDaemonCredentialTokenValue();
+  _relayDaemonCredentialClearError();
+  _relayDaemonCredentialClearResult();
+  if (!gate.canGenerate) {
+    _relayDaemonCredentialRenderError({ message: gate.reason, detail: '' });
+    return;
+  }
+  if (!token) {
+    _relayDaemonCredentialRenderError({
+      message: 'Paste the one-time pairing token before generating a daemon credential.',
+      detail: '',
+    });
+    relayDaemonCredentialRefreshButtonState();
+    return;
+  }
+  var credentialId = _relayDaemonCredentialCurrentCredentialId(rc);
+  if (!skipExistingCredentialGuard && credentialId) {
+    _relayDaemonCredentialSetConfirming(true, credentialId);
+    relayDaemonCredentialRefreshButtonState();
+    return;
+  }
+  _relayDaemonCredentialSetConfirming(false);
+  _relayDaemonCredentialSetInFlight(true);
+  if (typeof send === 'function') {
+    send({ cmd: 'generate_daemon_credential', pairing_token: token });
+  }
+}
+
+function relayDaemonCredentialGenerate() {
+  _relayDaemonCredentialSubmit(false);
+}
+
+function relayDaemonCredentialCancelConfirm() {
+  _relayDaemonCredentialSetConfirming(false);
+  relayDaemonCredentialRefreshButtonState();
+}
+
+function relayDaemonCredentialConfirmGenerate() {
+  _relayDaemonCredentialSubmit(true);
+}
+
+function handleRelayDaemonCredential(msg) {
+  if (!msg || msg.type !== 'daemon_credential') return;
+  _relayDaemonCredentialSetInFlight(false);
+  _relayDaemonCredentialSetConfirming(false);
+  var view = _relayDaemonCredentialComputeView(msg);
+  if (view.kind === 'success') {
+    _relayDaemonCredentialClearError();
+    _relayDaemonCredentialApplyRelayConfig(msg);
+    if (typeof document !== 'undefined' && document.getElementById) {
+      var token = document.getElementById('gls-relay-daemon-credential-token');
+      if (token) token.value = '';
+    }
+    _relayDaemonCredentialRenderSuccess(view);
+    relayDaemonCredentialRefreshButtonState();
+  } else if (view.kind === 'error') {
+    _relayDaemonCredentialClearResult();
+    _relayDaemonCredentialRenderError(view);
+  }
 }
 
 /* ----------------------------------------------------------------------------
@@ -914,6 +1197,8 @@ if (typeof module !== 'undefined' && module.exports) {
     _relayStatusComputeView: _relayStatusComputeView,
     _relayConfigComputeView: _relayConfigComputeView,
     _relayProbeComputeView: _relayProbeComputeView,
+    _relayDaemonCredentialComputeGate: _relayDaemonCredentialComputeGate,
+    _relayDaemonCredentialComputeView: _relayDaemonCredentialComputeView,
     _relayDeviceLinkComputeGate: _relayDeviceLinkComputeGate,
     _relayDeviceLinkComputeView: _relayDeviceLinkComputeView,
     _relayDeviceLinkFormatExpiry: _relayDeviceLinkFormatExpiry,

@@ -581,6 +581,8 @@ function connect() {
       if (typeof handleRelayTestResult === 'function') handleRelayTestResult(msg);
     } else if (msg.type === 'relay_device_link') {
       if (typeof handleRelayDeviceLink === 'function') handleRelayDeviceLink(msg);
+    } else if (msg.type === 'daemon_credential') {
+      if (typeof handleRelayDaemonCredential === 'function') handleRelayDaemonCredential(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
     } else if (msg.type === 'memory_entries') {

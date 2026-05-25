@@ -11077,6 +11077,52 @@ async def main(connection=None):
             )
             return {"type": "relay_device_link", **result}
 
+        # generate_daemon_credential: client half of the :676 in-app daemon
+        # credential provisioning flow. The daemon generates the ES256 keypair
+        # locally, posts the PUBLIC JWK plus the pasted one-time pairing token to
+        # /v1/pair, and persists ONLY the resulting credential_id + private key
+        # FILE PATH into Global Settings. The raw private key is never stored in
+        # SQLite and never returned to the browser.
+        if cmd == "generate_daemon_credential":
+            result = await cloud_hooks.generate_daemon_credential(
+                state.global_settings,
+                pairing_token=str(data.get("pairing_token", "") or ""),
+                data_dir=str(DATA_DIR),
+            )
+            if result.get("ok"):
+                credential_id = str(result.get("credential_id", "") or "").strip()
+                private_key_path = str(result.get("private_key_path", "") or "").strip()
+                if credential_id and private_key_path:
+                    old_relay = _relay_settings_fingerprint()
+                    state.update_global_settings(
+                        relay_credential_id=credential_id,
+                        relay_private_key_path=private_key_path,
+                    )
+                    if _relay_settings_fingerprint() != old_relay:
+                        try:
+                            await _restart_cloud_connector()
+                        except Exception:
+                            log.exception(
+                                "Cloud connector apply-on-daemon-credential failed"
+                            )
+                else:
+                    result = {
+                        "ok": False,
+                        "error": "invalid_response",
+                        "message": (
+                            "Relay pairing did not return a credential_id and "
+                            "private key path to store."
+                        ),
+                    }
+            response = {"type": "daemon_credential", **result}
+            try:
+                response["relay_config"] = cloud_hooks.resolve_relay_config(
+                    state.global_settings, data_dir=str(DATA_DIR)
+                )
+            except Exception:
+                log.exception("Failed to resolve relay config after daemon credential generation")
+            return response
+
         if cmd == "doctor":
             return _handle_doctor_command(db)
 
