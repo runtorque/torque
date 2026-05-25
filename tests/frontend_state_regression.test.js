@@ -15729,6 +15729,34 @@ test('standalone sequence gap cancels pending batched renders and requests one r
   });
 });
 
+test('architect peer lifecycle deltas refresh focused architect Messages tab peer list', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'arch-focused';
+    focusedItemId = 'arch-focused';
+    _agentPanelActiveTab = function(kind) {
+      return kind === 'architect' ? 'messages' : '';
+    };
+    if (!state.agents) state.agents = {};
+    state.agents['arch-focused'] = { id: 'arch-focused', group: 'torque', kind: 'architect', cell_type: 'agent' };
+    state.agents['arch-peer'] = { id: 'arch-peer', group: 'torque', kind: 'architect', cell_type: 'agent' };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_dismissed',
+      architect_id: 'arch-peer',
+      group: 'torque',
+      dismissed_at: 123,
+    }],
+  });
+  flushRaf();
+
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'peer architect dismissal should refresh the focused Messages tab peer list');
+});
+
 test('ws invalidation skips rerendering the active context panel for off-group agent removals', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'context';
