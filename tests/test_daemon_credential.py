@@ -74,7 +74,10 @@ class _FakePairSession:
         self.__class__.calls.append({"url": url, "json": json})
         if not self.__class__.queue:
             raise AssertionError("no fake /v1/pair response queued")
-        return self.__class__.queue.pop(0)
+        response = self.__class__.queue.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class _FakeClientTimeout:
@@ -118,6 +121,58 @@ class DaemonCredentialKeygenTests(unittest.TestCase):
         for coord in ("x", "y"):
             padded = jwk[coord] + ("=" * ((4 - len(jwk[coord]) % 4) % 4))
             self.assertEqual(len(base64.urlsafe_b64decode(padded)), 32)
+
+    def test_commit_staged_key_uses_credential_path_without_clobbering_default(self):
+        relay_dir = Path(self.tmp.name) / "relay"
+        relay_dir.mkdir(parents=True)
+        active_path = relay_dir / "daemon-daemon-1.pem"
+        active_path.write_bytes(b"existing-active-key")
+        os.chmod(active_path, 0o600)
+        staged_path = relay_dir / ".daemon-daemon-1-stage.pem.tmp"
+        staged_path.write_bytes(b"new-accepted-key")
+        os.chmod(staged_path, 0o600)
+
+        final_path = Path(
+            self.cloud_hooks._commit_staged_daemon_keypair(
+                str(staged_path),
+                "daemon-1",
+                "cred-1",
+                data_dir=self.tmp.name,
+            )
+        )
+
+        self.assertEqual(
+            final_path,
+            relay_dir / "daemon-daemon-1-cred-1.pem",
+        )
+        self.assertEqual(final_path.read_bytes(), b"new-accepted-key")
+        self.assertEqual(stat.S_IMODE(final_path.stat().st_mode), 0o600)
+        self.assertFalse(staged_path.exists())
+        self.assertEqual(active_path.read_bytes(), b"existing-active-key")
+
+
+class RelayPairUrlTests(unittest.TestCase):
+    def setUp(self):
+        self.cloud_hooks = importlib.reload(importlib.import_module("torque.cloud_hooks"))
+
+    def test_pair_url_derivation_variants(self):
+        cases = [
+            ("relay.example", "https://relay.example/v1/pair"),
+            ("http://relay.example", "http://relay.example/v1/pair"),
+            ("https://relay.example/base", "https://relay.example/base/v1/pair"),
+            (
+                "ws://relay.example/v1/daemon/daemon-1/ws",
+                "http://relay.example/v1/pair",
+            ),
+            (
+                "wss://relay.example/scope/v1/daemon/daemon-1/ws",
+                "https://relay.example/scope/v1/pair",
+            ),
+            ("https://relay.example/v1/pair", "https://relay.example/v1/pair"),
+        ]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(self.cloud_hooks._relay_pair_url(raw), expected)
 
 
 class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
@@ -167,9 +222,13 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
         )
         with mock.patch.object(
             self.cloud_hooks,
-            "generate_daemon_keypair",
-            return_value={"private_key_path": "/tmp/daemon-1.pem", "public_key_jwk": jwk},
-        ):
+            "_stage_daemon_keypair",
+            return_value={"private_key_path": "/tmp/staged-daemon-1.pem", "public_key_jwk": jwk},
+        ) as stage, mock.patch.object(
+            self.cloud_hooks,
+            "_commit_staged_daemon_keypair",
+            return_value="/tmp/daemon-1-cred-1.pem",
+        ) as commit:
             result = await self.cloud_hooks.generate_daemon_credential(
                 _settings(),
                 pairing_token=" pair-token ",
@@ -178,9 +237,16 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["credential_id"], "cred-1")
-        self.assertEqual(result["private_key_path"], "/tmp/daemon-1.pem")
+        self.assertEqual(result["private_key_path"], "/tmp/daemon-1-cred-1.pem")
         self.assertEqual(result["owner_user_id"], "owner-1")
         self.assertEqual(result["provenance"]["private_key_path"], "local_keygen")
+        stage.assert_called_once_with("daemon-1", data_dir="/tmp/profile")
+        commit.assert_called_once_with(
+            "/tmp/staged-daemon-1.pem",
+            "daemon-1",
+            "cred-1",
+            data_dir="/tmp/profile",
+        )
 
         self.assertEqual(len(_FakePairSession.calls), 1)
         call = _FakePairSession.calls[0]
@@ -203,12 +269,15 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
                 _FakePairSession.calls = []
                 with mock.patch.object(
                     self.cloud_hooks,
-                    "generate_daemon_keypair",
+                    "_stage_daemon_keypair",
                     return_value={
-                        "private_key_path": "/tmp/daemon-1.pem",
+                        "private_key_path": "/tmp/staged-daemon-1.pem",
                         "public_key_jwk": {"kty": "EC", "crv": "P-256", "x": "x", "y": "y"},
                     },
-                ):
+                ), mock.patch.object(
+                    self.cloud_hooks,
+                    "_commit_staged_daemon_keypair",
+                ) as commit:
                     result = await self.cloud_hooks.generate_daemon_credential(
                         _settings(), pairing_token="pair-token"
                     )
@@ -216,9 +285,10 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["error"], error)
                 self.assertIn(message, result["message"])
                 self.assertEqual(len(_FakePairSession.calls), 1)
+                commit.assert_not_called()
 
     async def test_unset_relay_url_or_daemon_id_errors_before_keygen(self):
-        with mock.patch.object(self.cloud_hooks, "generate_daemon_keypair") as keygen:
+        with mock.patch.object(self.cloud_hooks, "_stage_daemon_keypair") as keygen:
             result = await self.cloud_hooks.generate_daemon_credential(
                 _settings(relay_url="", relay_daemon_id=""),
                 pairing_token="pair-token",
@@ -232,7 +302,7 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_crypto_dependency_returns_clear_error_before_post(self):
         with mock.patch.object(
             self.cloud_hooks,
-            "generate_daemon_keypair",
+            "_stage_daemon_keypair",
             side_effect=ImportError("No module named cryptography"),
         ):
             result = await self.cloud_hooks.generate_daemon_credential(
@@ -242,6 +312,79 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["error"], "crypto_missing")
         self.assertIn("cryptography", result["message"].lower())
         self.assertEqual(_FakePairSession.calls, [])
+
+    async def test_key_write_failure_is_distinct_from_missing_crypto(self):
+        with mock.patch.object(
+            self.cloud_hooks,
+            "_stage_daemon_keypair",
+            side_effect=PermissionError("permission denied"),
+        ):
+            result = await self.cloud_hooks.generate_daemon_credential(
+                _settings(), pairing_token="pair-token"
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "key_write_failed")
+        self.assertIn("private-key staging file", result["message"])
+        self.assertEqual(_FakePairSession.calls, [])
+
+    async def test_failed_pairing_preserves_existing_active_key_and_cleans_staging(self):
+        cases = [
+            ("401", _FakePairResponse(401, {"error": "bad"}), "pairing_token_rejected"),
+            ("403", _FakePairResponse(403, {"error": "mismatch"}), "pairing_token_daemon_mismatch"),
+            ("unreachable", ConnectionError("offline"), "relay_unreachable"),
+            (
+                "invalid-response",
+                _FakePairResponse(201, {"daemon_id": "daemon-1"}),
+                "invalid_response",
+            ),
+        ]
+        for label, fake_response, expected_error in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                relay_dir = Path(tmp) / "relay"
+                relay_dir.mkdir(parents=True)
+                active_path = relay_dir / "daemon-daemon-1.pem"
+                active_path.write_bytes(b"existing-valid-key")
+                os.chmod(active_path, 0o600)
+                staged_path = relay_dir / ".daemon-daemon-1-new.pem.tmp"
+
+                def fake_stage(daemon_id, *, data_dir=""):
+                    self.assertEqual(daemon_id, "daemon-1")
+                    self.assertEqual(data_dir, tmp)
+                    staged_path.write_bytes(b"new-unregistered-key")
+                    os.chmod(staged_path, 0o600)
+                    return {
+                        "private_key_path": str(staged_path),
+                        "public_key_jwk": {
+                            "kty": "EC",
+                            "crv": "P-256",
+                            "x": "x",
+                            "y": "y",
+                            "key_ops": ["verify"],
+                            "alg": "ES256",
+                        },
+                    }
+
+                _FakePairSession.queue = [fake_response]
+                _FakePairSession.calls = []
+                with mock.patch.object(
+                    self.cloud_hooks, "_stage_daemon_keypair", side_effect=fake_stage
+                ), mock.patch.object(
+                    self.cloud_hooks, "_commit_staged_daemon_keypair"
+                ) as commit:
+                    result = await self.cloud_hooks.generate_daemon_credential(
+                        _settings(
+                            relay_private_key_path=str(active_path),
+                            relay_credential_id="existing-cred",
+                        ),
+                        pairing_token="pair-token",
+                        data_dir=tmp,
+                    )
+
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error"], expected_error)
+                self.assertEqual(active_path.read_bytes(), b"existing-valid-key")
+                self.assertFalse(staged_path.exists())
+                commit.assert_not_called()
 
 
 class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):

@@ -16,7 +16,9 @@ import inspect
 import json
 import os
 import re
+import tempfile
 import types
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -458,11 +460,201 @@ def _base64url_no_padding(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-def _daemon_key_path(daemon_id: str, *, data_dir: str = "") -> Path:
-    safe_daemon_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(daemon_id or "").strip())
-    safe_daemon_id = safe_daemon_id.strip(".-_") or "default"
+def _safe_daemon_key_component(value: str, *, default: str = "default") -> str:
+    safe_value = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip())
+    return safe_value.strip(".-_") or default
+
+
+def _relay_key_dir(*, data_dir: str = "") -> Path:
     root = Path(data_dir).expanduser() if data_dir else Path(torque_config.DATA_DIR)
-    return root / "relay" / f"daemon-{safe_daemon_id}.pem"
+    return root / "relay"
+
+
+def _daemon_key_path(
+    daemon_id: str,
+    *,
+    data_dir: str = "",
+    credential_id: str = "",
+    unique_suffix: str = "",
+) -> Path:
+    safe_daemon_id = _safe_daemon_key_component(daemon_id)
+    name = f"daemon-{safe_daemon_id}"
+    if credential_id:
+        name += f"-{_safe_daemon_key_component(credential_id, default='credential')}"
+    if unique_suffix:
+        name += f"-{_safe_daemon_key_component(unique_suffix, default='key')}"
+    return _relay_key_dir(data_dir=data_dir) / f"{name}.pem"
+
+
+def _ensure_relay_key_dir(*, data_dir: str = "") -> Path:
+    key_dir = _relay_key_dir(data_dir=data_dir)
+    key_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(key_dir, 0o700)
+    except OSError:
+        log.debug("Could not chmod relay key directory %s", key_dir, exc_info=True)
+    return key_dir
+
+
+def _daemon_key_material() -> dict[str, Any]:
+    deps = _import_daemon_credential_crypto()
+    private_key = deps.ec.generate_private_key(deps.ec.SECP256R1())
+    private_pem = private_key.private_bytes(
+        encoding=deps.serialization.Encoding.PEM,
+        format=deps.serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=deps.serialization.NoEncryption(),
+    )
+
+    numbers = private_key.public_key().public_numbers()
+    x = int(numbers.x).to_bytes(32, "big")
+    y = int(numbers.y).to_bytes(32, "big")
+    public_key_jwk = {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": _base64url_no_padding(x),
+        "y": _base64url_no_padding(y),
+        "key_ops": ["verify"],
+        "alg": "ES256",
+    }
+    return {
+        "private_pem": private_pem,
+        "public_key_jwk": public_key_jwk,
+    }
+
+
+def _write_private_key_pem(path: Path, private_pem: bytes, *, exclusive: bool) -> None:
+    flags = os.O_WRONLY | os.O_CREAT
+    flags |= os.O_EXCL if exclusive else os.O_TRUNC
+    fd = os.open(str(path), flags, 0o600)
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            log.debug("Could not fchmod relay key file %s", path, exc_info=True)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(private_pem)
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        log.debug("Could not chmod relay key file %s", path, exc_info=True)
+
+
+def _stage_daemon_keypair(
+    daemon_id: str,
+    *,
+    data_dir: str = "",
+) -> dict[str, Any]:
+    """Generate a daemon keypair and write the private key to a staging file.
+
+    Pairing attempts must not mutate the configured/active private key path
+    until the relay has accepted the public key.  The staging file is unique,
+    mode 0600, and is cleaned up by the caller on failed pairing attempts.
+    """
+
+    material = _daemon_key_material()
+    key_dir = _ensure_relay_key_dir(data_dir=data_dir)
+    safe_daemon_id = _safe_daemon_key_component(daemon_id)
+    fd, raw_path = tempfile.mkstemp(
+        prefix=f".daemon-{safe_daemon_id}-",
+        suffix=".pem.tmp",
+        dir=str(key_dir),
+    )
+    staged_path = Path(raw_path)
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            log.debug("Could not fchmod staged relay key file %s", staged_path, exc_info=True)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(material["private_pem"])
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.chmod(staged_path, 0o600)
+        except OSError:
+            log.debug("Could not chmod staged relay key file %s", staged_path, exc_info=True)
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            staged_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    return {
+        "private_key_path": str(staged_path),
+        "public_key_jwk": material["public_key_jwk"],
+    }
+
+
+def _install_staged_private_key(staged_path: Path, final_path: Path) -> None:
+    try:
+        os.link(str(staged_path), str(final_path))
+    except FileExistsError:
+        raise
+    except OSError:
+        private_pem = staged_path.read_bytes()
+        try:
+            _write_private_key_pem(final_path, private_pem, exclusive=True)
+        except FileExistsError:
+            raise
+        except Exception:
+            try:
+                final_path.unlink()
+            except OSError:
+                pass
+            raise
+    try:
+        staged_path.unlink()
+    except OSError:
+        log.debug("Could not remove staged relay key file %s", staged_path, exc_info=True)
+    try:
+        os.chmod(final_path, 0o600)
+    except OSError:
+        log.debug("Could not chmod relay key file %s", final_path, exc_info=True)
+
+
+def _commit_staged_daemon_keypair(
+    staged_private_key_path: str,
+    daemon_id: str,
+    credential_id: str,
+    *,
+    data_dir: str = "",
+) -> str:
+    """Persist a relay-accepted staged key under a credential-specific path.
+
+    Successful provisioning stores a path that includes the relay credential ID
+    instead of replacing the legacy deterministic `daemon-<daemon_id>.pem` path.
+    That keeps any existing configured credential usable if Settings persistence
+    fails after the relay has accepted a new credential.
+    """
+
+    staged_path = Path(staged_private_key_path)
+    _ensure_relay_key_dir(data_dir=data_dir)
+    for attempt in range(20):
+        suffix = "" if attempt == 0 else uuid.uuid4().hex[:8]
+        final_path = _daemon_key_path(
+            daemon_id,
+            data_dir=data_dir,
+            credential_id=credential_id,
+            unique_suffix=suffix,
+        )
+        try:
+            _install_staged_private_key(staged_path, final_path)
+            return str(final_path)
+        except FileExistsError:
+            continue
+    raise FileExistsError(
+        f"could not allocate a unique daemon private key path for {credential_id!r}"
+    )
 
 
 def generate_daemon_keypair(
@@ -478,52 +670,28 @@ def generate_daemon_keypair(
     relay's :676 `/v1/pair` contract. The JWK intentionally omits private `d`.
     """
 
-    deps = _import_daemon_credential_crypto()
-    private_key = deps.ec.generate_private_key(deps.ec.SECP256R1())
-    private_pem = private_key.private_bytes(
-        encoding=deps.serialization.Encoding.PEM,
-        format=deps.serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=deps.serialization.NoEncryption(),
-    )
-
+    material = _daemon_key_material()
     key_path = _daemon_key_path(daemon_id, data_dir=data_dir)
-    key_path.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_relay_key_dir(data_dir=data_dir)
+    staged_path = key_path.with_name(
+        f".{key_path.stem}-{uuid.uuid4().hex[:8]}.pem.tmp"
+    )
+    _write_private_key_pem(staged_path, material["private_pem"], exclusive=True)
     try:
-        os.chmod(key_path.parent, 0o700)
-    except OSError:
-        log.debug("Could not chmod relay key directory %s", key_path.parent, exc_info=True)
-
-    fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
+        os.replace(str(staged_path), str(key_path))
+    except Exception:
         try:
-            os.fchmod(fd, 0o600)
+            staged_path.unlink()
         except OSError:
-            log.debug("Could not fchmod relay key file %s", key_path, exc_info=True)
-        with os.fdopen(fd, "wb") as handle:
-            fd = -1
-            handle.write(private_pem)
-    finally:
-        if fd >= 0:
-            os.close(fd)
+            pass
+        raise
     try:
         os.chmod(key_path, 0o600)
     except OSError:
         log.debug("Could not chmod relay key file %s", key_path, exc_info=True)
-
-    numbers = private_key.public_key().public_numbers()
-    x = int(numbers.x).to_bytes(32, "big")
-    y = int(numbers.y).to_bytes(32, "big")
-    public_key_jwk = {
-        "kty": "EC",
-        "crv": "P-256",
-        "x": _base64url_no_padding(x),
-        "y": _base64url_no_padding(y),
-        "key_ops": ["verify"],
-        "alg": "ES256",
-    }
     return {
         "private_key_path": str(key_path),
-        "public_key_jwk": public_key_jwk,
+        "public_key_jwk": material["public_key_jwk"],
     }
 
 
@@ -626,104 +794,161 @@ async def generate_daemon_credential(
             "detail": "missing=" + ",".join(missing),
         }
 
+    staged_private_key_path = ""
+    committed_private_key = False
     try:
-        keypair = generate_daemon_keypair(daemon_id, data_dir=data_dir)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": "crypto_missing",
-            "message": (
-                "Could not generate the local ES256 daemon keypair. Install the "
-                "cryptography dependency for this Torque daemon and retry."
-            ),
-            "detail": f"{type(exc).__name__}: {exc}",
-        }
-
-    pair_url = _relay_pair_url(relay_url)
-    payload = {
-        "pairing_token": token,
-        "daemon_id": daemon_id,
-        "public_key_jwk": keypair["public_key_jwk"],
-    }
-    try:
-        response = await _post_relay_pair(pair_url, payload, timeout=timeout)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": "relay_unreachable",
-            "message": (
-                "Could not reach the relay pairing endpoint. Check the relay URL "
-                "and network connection, then retry."
-            ),
-            "detail": f"{type(exc).__name__}: {exc}",
-        }
-
-    status = int(response.get("status", 0) or 0)
-    body = response.get("json") if isinstance(response.get("json"), dict) else {}
-    if status == 201:
-        credential_id = str(body.get("credential_id", "") or "").strip()
-        response_daemon_id = str(body.get("daemon_id", "") or "").strip()
-        owner_user_id = str(body.get("owner_user_id", "") or "").strip()
-        if not credential_id or not response_daemon_id:
+        try:
+            keypair = _stage_daemon_keypair(daemon_id, data_dir=data_dir)
+            staged_private_key_path = str(keypair.get("private_key_path", "") or "")
+        except (ImportError, ModuleNotFoundError) as exc:
             return {
                 "ok": False,
-                "error": "invalid_response",
-                "message": "Relay pairing succeeded but returned an incomplete credential response.",
-                "detail": "missing credential_id or daemon_id",
-            }
-        if response_daemon_id != daemon_id:
-            return {
-                "ok": False,
-                "error": "daemon_id_mismatch",
+                "error": "crypto_missing",
                 "message": (
-                    "Relay pairing returned a credential for a different daemon ID. "
-                    "Verify Settings → Relay daemon ID and retry."
+                    "Could not generate the local ES256 daemon keypair because "
+                    "the cryptography dependency is unavailable. Install the "
+                    "dependency for this Torque daemon and retry."
                 ),
-                "detail": f"expected={daemon_id}; got={response_daemon_id}",
+                "detail": f"{type(exc).__name__}: {exc}",
             }
-        return {
-            "ok": True,
-            "credential_id": credential_id,
-            "daemon_id": response_daemon_id,
-            "owner_user_id": owner_user_id,
-            "private_key_path": keypair["private_key_path"],
-            "provenance": {
-                "pairing_token": "out_of_band_admin_mint",
-                "credential_id": "relay_pair_response",
-                "private_key_path": "local_keygen",
-            },
-        }
+        except OSError as exc:
+            return {
+                "ok": False,
+                "error": "key_write_failed",
+                "message": (
+                    "Could not write a local daemon private-key staging file. "
+                    "Check the Torque profile relay directory permissions and retry."
+                ),
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": "keygen_failed",
+                "message": (
+                    "Could not generate the local ES256 daemon keypair. Check "
+                    "the daemon logs for details and retry."
+                ),
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
 
-    if status == 401:
+        pair_url = _relay_pair_url(relay_url)
+        payload = {
+            "pairing_token": token,
+            "daemon_id": daemon_id,
+            "public_key_jwk": keypair["public_key_jwk"],
+        }
+        try:
+            response = await _post_relay_pair(pair_url, payload, timeout=timeout)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": "relay_unreachable",
+                "message": (
+                    "Could not reach the relay pairing endpoint. Check the relay URL "
+                    "and network connection, then retry."
+                ),
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
+
+        status = int(response.get("status", 0) or 0)
+        body = response.get("json") if isinstance(response.get("json"), dict) else {}
+        if status == 201:
+            credential_id = str(body.get("credential_id", "") or "").strip()
+            response_daemon_id = str(body.get("daemon_id", "") or "").strip()
+            owner_user_id = str(body.get("owner_user_id", "") or "").strip()
+            if not credential_id or not response_daemon_id:
+                return {
+                    "ok": False,
+                    "error": "invalid_response",
+                    "message": "Relay pairing succeeded but returned an incomplete credential response.",
+                    "detail": "missing credential_id or daemon_id",
+                }
+            if response_daemon_id != daemon_id:
+                return {
+                    "ok": False,
+                    "error": "daemon_id_mismatch",
+                    "message": (
+                        "Relay pairing returned a credential for a different daemon ID. "
+                        "Verify Settings → Relay daemon ID and retry."
+                    ),
+                    "detail": f"expected={daemon_id}; got={response_daemon_id}",
+                }
+            try:
+                private_key_path = _commit_staged_daemon_keypair(
+                    staged_private_key_path,
+                    daemon_id,
+                    credential_id,
+                    data_dir=data_dir,
+                )
+                committed_private_key = True
+            except OSError as exc:
+                return {
+                    "ok": False,
+                    "error": "key_write_failed",
+                    "message": (
+                        "The relay accepted the daemon credential, but Torque "
+                        "could not persist the matching local private key. Ask "
+                        "the relay admin to revoke or replace the minted "
+                        "credential, then retry."
+                    ),
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            return {
+                "ok": True,
+                "credential_id": credential_id,
+                "daemon_id": response_daemon_id,
+                "owner_user_id": owner_user_id,
+                "private_key_path": private_key_path,
+                "provenance": {
+                    "pairing_token": "out_of_band_admin_mint",
+                    "credential_id": "relay_pair_response",
+                    "private_key_path": "local_keygen",
+                },
+            }
+
+        if status == 401:
+            return {
+                "ok": False,
+                "error": "pairing_token_rejected",
+                "message": (
+                    "The pairing token was invalid, expired, or already used. Ask "
+                    "the relay admin to mint a new one-time token and paste it here."
+                ),
+                "detail": "POST /v1/pair -> 401",
+            }
+        if status == 403:
+            return {
+                "ok": False,
+                "error": "pairing_token_daemon_mismatch",
+                "message": (
+                    "The pairing token is bound to a different daemon ID. Verify "
+                    "Settings → Relay daemon ID or ask the admin to mint a token "
+                    "for this daemon."
+                ),
+                "detail": "POST /v1/pair -> 403",
+            }
+        detail = str(response.get("text", "") or "")
+        if not detail and isinstance(body, dict):
+            detail = str(body.get("message") or body.get("error") or "")
         return {
             "ok": False,
-            "error": "pairing_token_rejected",
-            "message": (
-                "The pairing token was invalid, expired, or already used. Ask "
-                "the relay admin to mint a new one-time token and paste it here."
-            ),
-            "detail": "POST /v1/pair -> 401",
+            "error": "relay_pair_failed",
+            "message": f"Relay pairing failed with HTTP {status}. Check the token and relay URL, then retry.",
+            "detail": detail[:500],
         }
-    if status == 403:
-        return {
-            "ok": False,
-            "error": "pairing_token_daemon_mismatch",
-            "message": (
-                "The pairing token is bound to a different daemon ID. Verify "
-                "Settings → Relay daemon ID or ask the admin to mint a token "
-                "for this daemon."
-            ),
-            "detail": "POST /v1/pair -> 403",
-        }
-    detail = str(response.get("text", "") or "")
-    if not detail and isinstance(body, dict):
-        detail = str(body.get("message") or body.get("error") or "")
-    return {
-        "ok": False,
-        "error": "relay_pair_failed",
-        "message": f"Relay pairing failed with HTTP {status}. Check the token and relay URL, then retry.",
-        "detail": detail[:500],
-    }
+    finally:
+        if staged_private_key_path and not committed_private_key:
+            try:
+                Path(staged_private_key_path).unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                log.debug(
+                    "Could not remove failed daemon credential staging key %s",
+                    staged_private_key_path,
+                    exc_info=True,
+                )
 
 
 async def probe_relay_connection(
