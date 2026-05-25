@@ -780,7 +780,6 @@ function submitArchitectDecision() {
 /* -- Add agent / terminal modal extracted to static/js/modals/add-cell.js -- */
 /* -- Edit Agent / Terminal --------------------------------------------- */
 let _editCellId = null;
-let _editColor = '';
 let _editIcon = '';
 
 function selectEditIcon(icon) {
@@ -794,7 +793,6 @@ function openEditCell(id) {
   const cell = state.agents[id];
   if (!cell) return;
   _editCellId = id;
-  _editColor = cell.tab_color || '';
   _editIcon = cell.icon || '';
 
   document.getElementById('edit-title').textContent =
@@ -810,46 +808,22 @@ function openEditCell(id) {
     iconRow.classList.add('hidden');
   }
 
-  /* color swatches */
-  const sw = document.getElementById('edit-color-swatches');
-  let sh = '';
-  for (const c of TAB_COLORS) {
-    const sel = c.hex === _editColor ? ' selected' : '';
-    sh += `<button class="swatch${sel}" data-color="${c.hex}" style="background:${c.hex}"
-            onclick="selectEditColor('${c.hex}')" title="${c.name}"></button>`;
-  }
-  const noneSel = !_editColor ? ' selected' : '';
-  sh += `<button class="swatch swatch-none${noneSel}" data-color="" onclick="selectEditColor('')" title="None">\u2715</button>`;
-  sw.innerHTML = sh;
-
   document.getElementById('modal-edit').classList.add('visible');
   document.getElementById('edit-name-input').focus();
   document.getElementById('edit-name-input').select();
-}
-
-function selectEditColor(hex) {
-  _editColor = hex;
-  document.querySelectorAll('#edit-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
 }
 
 function submitEdit() {
   if (!_editCellId) return;
   const name = document.getElementById('edit-name-input').value.trim();
   if (!name) return;
-  send({ cmd: 'update_agent', id: _editCellId, name, tab_color: _editColor, icon: _editIcon });
+  send({ cmd: 'update_agent', id: _editCellId, name, icon: _editIcon });
   _editCellId = null;
   closeModals();
 }
 
 /* -- Group Settings ---------------------------------------------------- */
 let _settingsGroup = null;
-let _gsColor = '';
-let _gsAgentColor = '';
-let _gsTerminalColor = '';
-let _gsEngineerColor = '';
-let _gsArchitectColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
 let _gsActiveSubTabs = {};
@@ -1383,9 +1357,7 @@ function _groupSettingsPromptPreviewPayload() {
     worker_model: document.getElementById('gs-worker-model').value.trim(),
     worker_reasoning_effort: document.getElementById('gs-worker-reasoning-effort').value,
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
-    agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
-    agent_tab_color: _gsAgentColor,
     engineer_merge_mode: document.getElementById('gs-engineer-merge-mode').value,
     worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
     default_engineer_specializations: (_gsEngineerSpecs || []).slice(),
@@ -1399,9 +1371,7 @@ function _engineerSettingsPromptPreviewPayload() {
     engineer_model: document.getElementById('gs-engineer-model').value.trim(),
     engineer_reasoning_effort: document.getElementById('gs-engineer-reasoning-effort').value,
     engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
-    engineer_profile: document.getElementById('gs-engineer-profile').value,
     engineer_shell: document.getElementById('gs-engineer-shell').value,
-    engineer_tab_color: _gsEngineerColor,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
     restrict_to_created_agents: _getEngineerRestrictToCreatedAgentsFromPermission(),
     autonomy_mode: document.getElementById('gs-engineer-autonomy-mode').value,
@@ -1423,9 +1393,7 @@ function _architectSettingsPromptPreviewPayload() {
     architect_model: document.getElementById('gs-architect-model').value.trim(),
     architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
     architect_directory: document.getElementById('gs-architect-directory').value.trim(),
-    architect_profile: document.getElementById('gs-architect-profile').value,
     architect_shell: document.getElementById('gs-architect-shell').value,
-    architect_tab_color: _gsArchitectColor,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
     architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
     architect_digest_verbosity: document.getElementById('gs-architect-digest-verbosity').value,
@@ -1588,35 +1556,6 @@ async function deleteSettingsGroup() {
     _settingsGroup = null;
     closeModals();
   }
-}
-
-function _populateProfileSelect(el, profiles, selected, emptyLabel) {
-  el.innerHTML = `<option value="">${emptyLabel}</option>`;
-  for (const name of (profiles || [])) {
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    if (name === selected) opt.selected = true;
-    el.appendChild(opt);
-  }
-  el.value = selected || '';
-}
-
-function _renderSwatches(containerId, activeColor, onClick, showInherit) {
-  const sw = document.getElementById(containerId);
-  let sh = '';
-  if (showInherit) {
-    const iSel = activeColor === '' ? ' selected' : '';
-    sh += `<button class="swatch swatch-inherit${iSel}" data-color="" onclick="${onClick}('')" title="Same as group">\u2191</button>`;
-  }
-  for (const c of TAB_COLORS) {
-    const sel = c.hex === activeColor ? ' selected' : '';
-    sh += `<button class="swatch${sel}" data-color="${c.hex}" style="background:${c.hex}"
-            onclick="${onClick}('${c.hex}')" title="${c.name}"></button>`;
-  }
-  const noneVal = showInherit ? 'none' : '';
-  const noneSel = activeColor === noneVal ? ' selected' : '';
-  sh += `<button class="swatch swatch-none${noneSel}" data-color="${noneVal}" onclick="${onClick}('${noneVal}')" title="None">\u2715</button>`;
-  sw.innerHTML = sh;
 }
 
 function _envToText(obj) {
@@ -1962,9 +1901,7 @@ function _defaultArchitectSettings() {
     architect_model: '',
     architect_reasoning_effort: '',
     architect_directory: '',
-    architect_profile: '',
     architect_shell: '',
-    architect_tab_color: '',
     architect_custom_instructions: '',
     architect_autonomy_mode: 'dispatch_after_confirm',
     architect_digest_verbosity: 'balanced',
@@ -2067,9 +2004,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-filter-window').checked = s.filter_by_window || false;
   document.getElementById('gs-env-vars').value = _envToText(s.env_vars);
   document.getElementById('gs-env-file').value = s.env_file || '';
-  _populateProfileSelect(document.getElementById('gs-profile'), data.profiles, s.profile, 'System default');
-  _gsColor = s.tab_color || '';
-  _renderSwatches('gs-color-swatches', _gsColor, 'selectGsColor');
 
   /* -- Group > Agents (all-kinds defaults) + Workers tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
@@ -2109,9 +2043,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
   document.getElementById('gs-agent-env-vars').value = _envToText(s.agent_env_vars);
   document.getElementById('gs-agent-env-file').value = s.agent_env_file || '';
-  _populateProfileSelect(document.getElementById('gs-agent-profile'), data.profiles, s.agent_profile, 'Same as group');
-  _gsAgentColor = s.agent_tab_color || '';
-  _renderSwatches('gs-agent-color-swatches', _gsAgentColor, 'selectGsAgentColor', true);
 
   /* -- Group > Terminals sub-tab -- */
   document.getElementById('gs-terminal-prefix').value = s.terminal_name_prefix || '';
@@ -2121,12 +2052,8 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-terminal-directory').value = s.terminal_directory || '';
   document.getElementById('gs-terminal-shell').value = s.terminal_shell || '';
   document.getElementById('gs-terminal-always-custom').checked = s.terminal_always_custom_dialog || false;
-  document.getElementById('gs-terminal-close-on-disconnect').checked = s.terminal_close_on_disconnect || false;
   document.getElementById('gs-terminal-env-vars').value = _envToText(s.terminal_env_vars);
   document.getElementById('gs-terminal-env-file').value = s.terminal_env_file || '';
-  _populateProfileSelect(document.getElementById('gs-terminal-profile'), data.profiles, s.terminal_profile, 'Same as group');
-  _gsTerminalColor = s.terminal_tab_color || '';
-  _renderSwatches('gs-terminal-color-swatches', _gsTerminalColor, 'selectGsTerminalColor', true);
 
   /* -- Group > Sync provider sub-tab -- */
   const syncProvider = s.board_sync_provider || 'none';
@@ -2160,19 +2087,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-engineer-directory').value = ws.engineer_directory || '';
   document.getElementById('gs-engineer-shell').value = ws.engineer_shell || '';
   document.getElementById('gs-engineer-custom-instructions').value = ws.custom_instructions || '';
-  _populateProfileSelect(
-    document.getElementById('gs-engineer-profile'),
-    data.profiles,
-    ws.engineer_profile,
-    'Same as agent/group'
-  );
-  _gsEngineerColor = ws.engineer_tab_color || '';
-  _renderSwatches(
-    'gs-engineer-color-swatches',
-    _gsEngineerColor,
-    'selectGsEngineerColor',
-    true
-  );
   onGsEngineerProviderChange();
   // Default specializations picker state — primed from the group setting,
   // refreshed in place when state.specializations updates over WS.
@@ -2230,19 +2144,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-architect-reasoning-effort').value = architectSettings.architect_reasoning_effort || '';
   document.getElementById('gs-architect-directory').value = architectSettings.architect_directory || '';
   document.getElementById('gs-architect-shell').value = architectSettings.architect_shell || '';
-  _populateProfileSelect(
-    document.getElementById('gs-architect-profile'),
-    data.profiles,
-    architectSettings.architect_profile,
-    'Same as agent/group'
-  );
-  _gsArchitectColor = architectSettings.architect_tab_color || '';
-  _renderSwatches(
-    'gs-architect-color-swatches',
-    _gsArchitectColor,
-    'selectGsArchitectColor',
-    true
-  );
   document.getElementById('gs-architect-custom-instructions').value = architectSettings.architect_custom_instructions || '';
   _autoGrowTextArea('gs-architect-custom-instructions');
   _setSelectValue(
@@ -2318,37 +2219,6 @@ function _showGroupSettings(group, data) {
   }
 }
 
-function selectGsColor(hex) {
-  _gsColor = hex;
-  document.querySelectorAll('#gs-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
-}
-function selectGsAgentColor(hex) {
-  _gsAgentColor = hex;
-  document.querySelectorAll('#gs-agent-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
-}
-function selectGsTerminalColor(hex) {
-  _gsTerminalColor = hex;
-  document.querySelectorAll('#gs-terminal-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
-}
-function selectGsEngineerColor(hex) {
-  _gsEngineerColor = hex;
-  document.querySelectorAll('#gs-engineer-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
-}
-function selectGsArchitectColor(hex) {
-  _gsArchitectColor = hex;
-  document.querySelectorAll('#gs-architect-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
-}
-
 function submitGroupSettings() {
   if (!_settingsGroup) return;
   const boardSyncLaneMap = _gsParseJsonMap(
@@ -2373,9 +2243,7 @@ function submitGroupSettings() {
   const settings = {
     /* Group */
     default_directory: document.getElementById('gs-directory').value.trim(),
-    profile: document.getElementById('gs-profile').value,
     shell: document.getElementById('gs-shell').value,
-    tab_color: _gsColor,
     env_vars: _textToEnv('gs-env-vars'),
     env_file: document.getElementById('gs-env-file').value.trim(),
     auto_terminals: parseInt(document.getElementById('gs-auto-terminals').value) || 0,
@@ -2384,9 +2252,7 @@ function submitGroupSettings() {
     filter_by_window: document.getElementById('gs-filter-window').checked,
     /* Group-wide worker defaults + worker execution */
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
-    agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
-    agent_tab_color: _gsAgentColor,
     default_agent_template: document.getElementById('gs-default-agent-template').value,
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
@@ -2423,13 +2289,10 @@ function submitGroupSettings() {
     terminal_command_args: document.getElementById('gs-terminal-cmd-args').value.trim(),
     terminal_init_script: document.getElementById('gs-terminal-init-script').value.trim(),
     terminal_directory: document.getElementById('gs-terminal-directory').value.trim(),
-    terminal_profile: document.getElementById('gs-terminal-profile').value,
     terminal_shell: document.getElementById('gs-terminal-shell').value,
-    terminal_tab_color: _gsTerminalColor,
     terminal_env_vars: _textToEnv('gs-terminal-env-vars'),
     terminal_env_file: document.getElementById('gs-terminal-env-file').value.trim(),
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
-    terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
     /* Board sync */
     board_sync_provider: document.getElementById('gs-board-sync-provider').value || 'none',
     board_sync_enabled: document.getElementById('gs-board-sync-enabled').checked,
@@ -2452,9 +2315,7 @@ function submitGroupSettings() {
     engineer_model: document.getElementById('gs-engineer-model').value.trim(),
     engineer_reasoning_effort: document.getElementById('gs-engineer-reasoning-effort').value,
     engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
-    engineer_profile: document.getElementById('gs-engineer-profile').value,
     engineer_shell: document.getElementById('gs-engineer-shell').value,
-    engineer_tab_color: _gsEngineerColor,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
     restrict_to_created_agents: _getEngineerRestrictToCreatedAgentsFromPermission(),
     engineer_can_override_worker_provider: document.getElementById('gs-engineer-can-override-worker-provider').checked,
@@ -2475,9 +2336,7 @@ function submitGroupSettings() {
     architect_model: document.getElementById('gs-architect-model').value.trim(),
     architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
     architect_directory: document.getElementById('gs-architect-directory').value.trim(),
-    architect_profile: document.getElementById('gs-architect-profile').value,
     architect_shell: document.getElementById('gs-architect-shell').value,
-    architect_tab_color: _gsArchitectColor,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
     architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
     architect_digest_verbosity: document.getElementById('gs-architect-digest-verbosity').value,

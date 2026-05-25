@@ -1,6 +1,5 @@
 let addCellMode = 'agent';
 let _pendingModal = null;
-let _selectedColor = '';
 let _selectedIcon = '';
 let _pendingParentId = '';
 let _addModalConfig = null;
@@ -63,7 +62,6 @@ function _openAddModal(mode, group, parentId, templateName, options) {
 function _showAddModal(mode, group, config) {
   addCellMode = mode;
   _addModalConfig = config;
-  _selectedColor = '';
   _selectedIcon = '';
   _addTemplateApplied = '';
   _pendingParentId = (_pendingModal && _pendingModal.parentId) || '';
@@ -141,26 +139,6 @@ function _showAddModal(mode, group, config) {
   document.getElementById('add-dir-input').value = config.current_path || '';
   document.getElementById('add-dir-input').classList.add('hidden');
 
-  /* profile dropdown */
-  const psel = document.getElementById('add-profile-select');
-  psel.innerHTML = '';
-  for (const name of (config.profiles || ['Default'])) {
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    if (name === config.current_profile) opt.selected = true;
-    psel.appendChild(opt);
-  }
-
-  /* color swatches */
-  const sw = document.getElementById('add-color-swatches');
-  let sh = '';
-  for (const c of TAB_COLORS) {
-    sh += `<button class="swatch" data-color="${c.hex}" style="background:${c.hex}"
-            onclick="selectColor('${c.hex}')" title="${c.name}"></button>`;
-  }
-  sh += `<button class="swatch swatch-none" data-color="" onclick="selectColor('')" title="None">\u2715</button>`;
-  sw.innerHTML = sh;
-
   /* pre-fill from group settings */
   const gs = config.group_settings || {};
   const resolved = config.resolved_agent_defaults || {};
@@ -186,7 +164,7 @@ function _showAddModal(mode, group, config) {
   } else if (compactStandalone) {
     _setAddModalSummary('Uses this group’s defaults for CLI, shell, directory, environment, and worktree unless you expand Advanced.');
   } else if (isTerminal) {
-    _setAddModalSummary('Terminal sessions inherit this group’s shell, directory, and profile defaults unless you override them here.');
+    _setAddModalSummary('Terminal sessions inherit this group’s shell, directory, and environment defaults unless you override them here.');
   } else {
     _setAddModalSummary('');
   }
@@ -216,24 +194,10 @@ function _showAddModal(mode, group, config) {
     optGrp.selected = true;
   }
 
-  const prof = isAgent
-    ? (resolved.profile || gs.agent_profile || gs.profile)
-    : ((isAgent ? gs.agent_profile : gs.terminal_profile) || gs.profile);
-  if (prof) {
-    for (const opt of psel.options) {
-      if (opt.value === prof) { opt.selected = true; break; }
-    }
-  }
-
   const shell = isAgent
     ? (resolved.shell || gs.agent_shell || gs.shell)
     : ((isAgent ? gs.agent_shell : gs.terminal_shell) || gs.shell);
   document.getElementById('add-shell-select').value = shell || '';
-
-  const color = isAgent
-    ? (resolved.tab_color || gs.agent_tab_color || gs.tab_color)
-    : ((isAgent ? gs.agent_tab_color : gs.terminal_tab_color) || gs.tab_color);
-  if (color && color !== 'none') selectColor(color);
 
   const envObj = isAgent
     ? (resolved.env_vars || gs.agent_env_vars)
@@ -282,9 +246,6 @@ function _applyRenderedAddTemplate(config, templateName) {
   document.getElementById('add-wt-auto-checkpoint').checked = !!config.worktree_auto_checkpoint;
   document.getElementById('add-wt-checkpoint-on-progress').checked = !!config.checkpoint_on_progress;
   document.getElementById('add-wt-squash').checked = config.worktree_merge_squash !== false;
-  if (config.profile) document.getElementById('add-profile-select').value = config.profile;
-  if (config.tab_color) selectColor(config.tab_color);
-  else selectColor('');
   if (config.icon) selectIcon(config.icon);
   else selectIcon('');
   const dirSel = document.getElementById('add-dir-select');
@@ -349,12 +310,6 @@ function onDirChange() {
   }
 }
 
-function selectColor(hex) {
-  _selectedColor = hex;
-  document.querySelectorAll('#add-color-swatches .swatch').forEach(s => {
-    s.classList.toggle('selected', (s.dataset.color || '') === hex);
-  });
-}
 function openAddAgent(group, templateName) {
   _openAddModal('agent', group, '', templateName || '', { advanced: false });
 }
@@ -370,7 +325,6 @@ function submitAdd() {
   const name    = document.getElementById('add-name-input').value.trim();
   const group   = document.getElementById('add-group-select').value;
   const command = document.getElementById('add-cmd-input').value.trim();
-  const profile = document.getElementById('add-profile-select').value;
 
   const dirSel  = document.getElementById('add-dir-select');
   const directory = dirSel.value === '__custom__'
@@ -386,11 +340,10 @@ function submitAdd() {
     cmd: addCellMode === 'worker'
       ? 'add_worker'
       : addCellMode === 'agent' ? 'add_agent' : 'add_terminal',
-    name, group, profile,
+    name, group,
   };
   if (addCellMode === 'terminal' && _pendingParentId) msg.parent_id = _pendingParentId;
   if (directory) msg.directory = directory;
-  if (_selectedColor) msg.tab_color = _selectedColor;
   if (_selectedIcon) msg.icon = _selectedIcon;
   if (shell) msg.shell = shell;
   if (Object.keys(envVars).length > 0) msg.env_vars = envVars;

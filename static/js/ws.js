@@ -670,11 +670,9 @@ function _applyRuntimeMode() {
     ? _torqueUiMode()
     : (embedded ? 'standalone' : 'toolbelt');
   const standalone = mode === 'standalone' || mode === 'desktop';
-  const iterm2 = mode === 'toolbelt';
   if (!document.body) return;
   document.body.classList.toggle('runtime-embedded', embedded);
   document.body.classList.toggle('standalone-mode', standalone);
-  document.body.classList.toggle('iterm2-mode', iterm2);
   document.body.classList.toggle('tauri-mode', _isTauriMode());
   if (document.body.dataset) {
     document.body.dataset.torqueMode = mode;
@@ -1252,17 +1250,10 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'main', 'context', 'engineer');
         break;
       case 'focus_update':
-        // TORQUE:236 v14: focus_update carries iTerm2 session/window focus
-        // (`active_session_id` / `current_window_id`), NOT agent panel
-        // selection state. The engineer panel renders from
-        // `focusedItemId` / `selectedAgentId` (client-side); the only
-        // consumer of `active_session_id` is a deep fallback in
-        // `_agentPanelCurrentGroup()` that never fires when an agent is
-        // focused. iTerm2's FocusMonitor emits this op every time the
-        // active terminal session changes — high-frequency on user
-        // interaction. Mark only the surfaces that actually display
-        // active-terminal state (main grid for the active-terminal
-        // indicator, context panel for terminal-related views).
+        // focus_update carries PTY session/window focus
+        // (`active_session_id` / `current_window_id`), not agent-panel
+        // selection state. Mark only surfaces that display active-terminal
+        // state (main grid indicator and terminal-related context views).
         _markSurface(flags, 'main', 'context');
         break;
       case 'task_upsert':
