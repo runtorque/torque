@@ -11,7 +11,9 @@ from pathlib import Path
 
 import yaml
 
-DOCTOR_SCHEMA_VERSION = 2
+from . import install_locations
+
+DOCTOR_SCHEMA_VERSION = 3
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_BACKUP_NAME = "torque.db.pre-kinds.bak"
@@ -98,6 +100,98 @@ def _humanize_path(path: str) -> str:
     if expanded.startswith(home + os.sep):
         return "~/" + expanded[len(home) + 1:]
     return expanded
+
+
+def _resolve_path_for_compare(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve(strict=False)
+    except OSError:
+        return path.expanduser()
+
+
+def _path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        _resolve_path_for_compare(path).relative_to(_resolve_path_for_compare(parent))
+        return True
+    except ValueError:
+        return False
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return _resolve_path_for_compare(left) == _resolve_path_for_compare(right)
+
+
+def _classify_data_dir(data_dir: Path) -> tuple[str, str]:
+    legacy_dir = install_locations.legacy_toolbelt_dir()
+    if _same_path(data_dir, legacy_dir):
+        return "legacy_toolbelt", ""
+
+    profiles_root = install_locations.profiles_root()
+    try:
+        rel = _resolve_path_for_compare(data_dir).relative_to(
+            _resolve_path_for_compare(profiles_root)
+        )
+    except ValueError:
+        return "custom", ""
+    if rel.parts:
+        return "primary_profile", rel.parts[0]
+    return "unknown", ""
+
+
+def _classify_runtime_python(runtime_python: str | Path | None) -> str:
+    if not str(runtime_python or "").strip():
+        return "unknown"
+    path = Path(os.path.expanduser(str(runtime_python)))
+    if _same_path(path, install_locations.primary_runtime_python()):
+        return "primary_runtime"
+
+    path_text = str(path)
+    legacy_markers = (
+        "Library/Application Support/iTerm2",
+        ".config/iterm2/AppSupport",
+        "iterm2env",
+    )
+    if any(marker in path_text for marker in legacy_markers):
+        return "legacy_appsupport"
+    return "custom"
+
+
+def _collect_runtime_locations_section(
+    db_path: Path | str,
+    *,
+    runtime_python: str | Path | None = None,
+) -> dict:
+    db_path = Path(db_path).expanduser()
+    data_dir = db_path.parent
+    data_dir_kind, profile_guess = _classify_data_dir(data_dir)
+    primary_runtime_python = install_locations.primary_runtime_python()
+    legacy_candidates = install_locations.legacy_iterm2_python_candidates()
+    runtime_python_text = str(runtime_python or "").strip()
+    return {
+        "db_path": str(db_path),
+        "data_dir": str(data_dir),
+        "data_dir_kind": data_dir_kind,
+        "profile_guess": profile_guess,
+        "primary_runtime_python": str(primary_runtime_python),
+        "primary_runtime_python_exists": primary_runtime_python.is_file(),
+        "runtime_python": runtime_python_text,
+        "runtime_python_kind": _classify_runtime_python(runtime_python_text),
+        "legacy_toolbelt_dir": str(install_locations.legacy_toolbelt_dir()),
+        "legacy_toolbelt_dir_exists": install_locations.legacy_toolbelt_dir().exists(),
+        "legacy_toolbelt_db_exists": (
+            install_locations.legacy_toolbelt_dir() / "torque.db"
+        ).exists(),
+        "legacy_project_iterm2env": str(
+            install_locations.legacy_project_iterm2env_dir()
+        ),
+        "legacy_project_iterm2env_exists": (
+            install_locations.legacy_project_iterm2env_dir().exists()
+        ),
+        "legacy_iterm2_python_count": len(legacy_candidates),
+        "legacy_iterm2_python_samples": [
+            str(path) for path in legacy_candidates[:3]
+        ],
+    }
 
 
 def _iter_named_yaml_paths(root_dir: Path) -> list[tuple[str, Path]]:
@@ -1183,6 +1277,59 @@ def _warn_empty_kind_agents_with_task_history(report: dict) -> dict | None:
     }
 
 
+def _warn_legacy_toolbelt_data_dir(report: dict) -> dict | None:
+    runtime = report.get("runtime_locations", {}) or {}
+    if runtime.get("data_dir_kind") != "legacy_toolbelt":
+        return None
+    return {
+        "name": "legacy_toolbelt_data_dir",
+        "status": "warn",
+        "details": {
+            "data_dir": runtime.get("data_dir", ""),
+            "hint": (
+                "doctor is reading legacy Toolbelt data under iTerm2 "
+                "AppSupport; migrate deliberately with "
+                "scripts/migrate_toolbelt_to_profile.py before manual cleanup"
+            ),
+        },
+    }
+
+
+def _warn_legacy_appsupport_python_runtime(report: dict) -> dict | None:
+    runtime = report.get("runtime_locations", {}) or {}
+    if runtime.get("runtime_python_kind") != "legacy_appsupport":
+        return None
+    return {
+        "name": "legacy_appsupport_python_runtime",
+        "status": "warn",
+        "details": {
+            "runtime_python": runtime.get("runtime_python", ""),
+            "primary_runtime_python": runtime.get("primary_runtime_python", ""),
+            "hint": (
+                "live daemon is running from legacy iTerm2/AppSupport Python; "
+                "from a non-worker shell run make deps && make deploy, then "
+                "relaunch with make run or make standalone"
+            ),
+        },
+    }
+
+
+def _warn_primary_runtime_missing(report: dict) -> dict | None:
+    runtime = report.get("runtime_locations", {}) or {}
+    if runtime.get("primary_runtime_python_exists"):
+        return None
+    if runtime.get("runtime_python_kind") != "legacy_appsupport":
+        return None
+    return {
+        "name": "primary_runtime_missing",
+        "status": "warn",
+        "details": {
+            "primary_runtime_python": runtime.get("primary_runtime_python", ""),
+            "hint": "run make deps to create Torque's owned runtime",
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -1205,10 +1352,18 @@ _DOCTOR_WARNINGS = [
     _warn_nonconforming_worker_worktree_branches,
     _warn_worktree_isolation_guard_missing,
     _warn_empty_kind_agents_with_task_history,
+    _warn_legacy_toolbelt_data_dir,
+    _warn_legacy_appsupport_python_runtime,
+    _warn_primary_runtime_missing,
 ]
 
 
-def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
+def build_doctor_report(
+    conn: sqlite3.Connection,
+    db_path: Path | str,
+    *,
+    runtime_python: str | Path | None = None,
+) -> dict:
     db_path = Path(db_path)
     agents = _collect_agents_section(conn)
     tasks = _collect_tasks_section(conn, engineer_count=int(agents["engineer"] or 0))
@@ -1221,6 +1376,9 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
     report = {
         "schema_version": DOCTOR_SCHEMA_VERSION,
         "migration": _collect_migration_section(conn, db_path),
+        "runtime_locations": _collect_runtime_locations_section(
+            db_path, runtime_python=runtime_python
+        ),
         "agents": agents,
         "tasks": tasks,
         "task_aliases": _collect_task_aliases_section(conn),
@@ -1259,11 +1417,15 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
     return report
 
 
-def build_doctor_report_for_db(db_path: Path | str) -> dict:
+def build_doctor_report_for_db(
+    db_path: Path | str,
+    *,
+    runtime_python: str | Path | None = None,
+) -> dict:
     db_path = Path(db_path)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        return build_doctor_report(conn, db_path)
+        return build_doctor_report(conn, db_path, runtime_python=runtime_python)
     finally:
         conn.close()
 
@@ -1311,6 +1473,7 @@ def format_mcp_health_report(report: dict) -> str:
 
 def format_doctor_report(report: dict) -> str:
     migration = report.get("migration", {})
+    runtime_locations = report.get("runtime_locations", {}) or {}
     agents = report.get("agents", {})
     engineers = report.get("engineers", {}) or {}
     architects = report.get("architects", {}) or {}
@@ -1339,6 +1502,28 @@ def format_doctor_report(report: dict) -> str:
         "  migrated_at:                    "
         f"{migration.get('migrated_at_display') or migration.get('migrated_at', '')}",
         f"  backup:                         {migration.get('backup_display', '')}",
+        "",
+        "[runtime_locations]",
+        "  data_dir:                       "
+        f"{_humanize_path(str(runtime_locations.get('data_dir', '')))}",
+        "  data_dir_kind:                  "
+        f"{runtime_locations.get('data_dir_kind', '')}",
+        "  profile_guess:                  "
+        f"{runtime_locations.get('profile_guess', '')}",
+        "  db_path:                        "
+        f"{_humanize_path(str(runtime_locations.get('db_path', '')))}",
+        "  primary_runtime_python:         "
+        f"{_humanize_path(str(runtime_locations.get('primary_runtime_python', '')))}",
+        "  primary_runtime_python_exists:  "
+        f"{str(bool(runtime_locations.get('primary_runtime_python_exists'))).lower()}",
+        "  runtime_python:                 "
+        f"{_humanize_path(str(runtime_locations.get('runtime_python', '') or '(not supplied)'))}",
+        "  runtime_python_kind:            "
+        f"{runtime_locations.get('runtime_python_kind', '')}",
+        "  legacy_toolbelt_db_exists:      "
+        f"{str(bool(runtime_locations.get('legacy_toolbelt_db_exists'))).lower()}",
+        "  legacy_iterm2_python_count:     "
+        f"{int(runtime_locations.get('legacy_iterm2_python_count', 0) or 0)}",
         "",
         "[agents]",
         f"  total:       {int(agents.get('total', 0) or 0)}",
@@ -1552,6 +1737,32 @@ def format_doctor_report(report: dict) -> str:
                 if summary:
                     base += f": {summary}"
                 lines.append(base)
+            elif name == "legacy_toolbelt_data_dir":
+                lines.append(
+                    "  - doctor is reading legacy Toolbelt data under "
+                    "iTerm2/AppSupport; migrate with "
+                    "scripts/migrate_toolbelt_to_profile.py before manual cleanup"
+                )
+            elif name == "legacy_appsupport_python_runtime":
+                runtime_python = _humanize_path(
+                    str(details.get("runtime_python", "") or "")
+                )
+                line = (
+                    "  - live daemon is running from legacy iTerm2/AppSupport "
+                    "Python; run make deps && make deploy from a non-worker "
+                    "shell, then relaunch"
+                )
+                if runtime_python:
+                    line += f": {runtime_python}"
+                lines.append(line)
+            elif name == "primary_runtime_missing":
+                primary_python = _humanize_path(
+                    str(details.get("primary_runtime_python", "") or "")
+                )
+                line = "  - Torque-owned runtime is missing; run make deps"
+                if primary_python:
+                    line += f": {primary_python}"
+                lines.append(line)
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])

@@ -64,13 +64,15 @@ Torque has a few settings surfaces. The details live in the linked pages; this s
 
 ## File locations and logs
 
-Primary standalone/desktop installs use `~/.torque/app` for app files and
+Primary standalone/desktop installs use `~/.torque/app` for app files,
+`~/.torque/runtime/venv` for Torque's owned Python runtime, and
 profile-specific data dirs for runtime state. The legacy Scripts paths only
 matter for legacy Toolbelt data and one-off migration.
 
 | Item | Path |
 |---|---|
 | Primary app files | `~/.torque/app/` |
+| Primary Python runtime | `~/.torque/runtime/venv/bin/python` |
 | Desktop profile log / DB | `~/.torque/profiles/desktop/torque.log`, `~/.torque/profiles/desktop/torque.db` |
 | Standalone profile log / DB | `~/.torque/profiles/standalone/torque.log`, `~/.torque/profiles/standalone/torque.db` |
 | Legacy secondary Toolbelt install from older releases | `~/Library/Application Support/iTerm2/Scripts/torque/torque/` |
@@ -78,6 +80,9 @@ matter for legacy Toolbelt data and one-off migration.
 | Legacy Toolbelt auto-launch symlink directory | `~/Library/Application Support/iTerm2/Scripts/AutoLaunch/` |
 
 Use `torque logs` to read the daemon log without remembering the full path.
+The CLI defaults to the desktop profile for offline reads/logs; select
+standalone with `TORQUE_PORT=18932` / `--port 18932`, or select an explicit
+profile/data-dir with `TORQUE_PROFILE` / `TORQUE_DATA_DIR`.
 
 ## Testing, updating, and deployment notes
 
@@ -96,7 +101,7 @@ These are operator notes, not implementation details.
 | Attach the native shell to an existing standalone server | `torque desktop --attach` or `make desktop-attach` |
 
 !!! note
-    `make deploy` updates the primary app copy and stops the primary desktop port (`18933` by default), but you still need to relaunch Torque with `make run` or `make standalone` + `make open`. The old Toolbelt integration is decommissioned and the Makefile no longer installs or updates the old Scripts copy. Migrate Toolbelt data with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
+    `make deploy` updates the primary app copy and stops the primary desktop port (`18933` by default), but you still need to relaunch Torque with `make run` or `make standalone` + `make open`. The old Toolbelt integration is decommissioned and the Makefile no longer installs or updates the old Scripts copy. Migration is manual and non-destructive: migrate Toolbelt data with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b) before manually removing old AppSupport files.
 
 ## User-facing behavior versus implementation notes
 

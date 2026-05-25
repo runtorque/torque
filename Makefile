@@ -1,6 +1,3 @@
-ITERM2_SCRIPTS := $(HOME)/Library/Application Support/iTerm2/Scripts
-ITERM2_PROJECT := $(ITERM2_SCRIPTS)/torque
-SCRIPT_DIR     := $(ITERM2_PROJECT)/torque
 MAIN_SCRIPT    := torque.py
 PRIMARY_APP_DIR ?= $(HOME)/.torque/app
 TORQUE_RUNTIME_ROOT ?= $(HOME)/.torque/runtime
@@ -173,8 +170,7 @@ standalone-bg: deps install-standalone
 		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
-	@pid_file="$(SCRIPT_DIR)/standalone.pid"; \
-	profile="$(or $(TORQUE_PROFILE),standalone)"; \
+	@profile="$(or $(TORQUE_PROFILE),standalone)"; \
 	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
 		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
@@ -185,6 +181,7 @@ standalone-bg: deps install-standalone
 		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
 	mkdir -p "$$data_dir"; \
+	pid_file="$$data_dir/torque.pid"; \
 	nohup env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \

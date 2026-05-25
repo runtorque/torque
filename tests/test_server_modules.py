@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import os
+import sys
 import tempfile
 import types
 import unittest
@@ -797,10 +798,12 @@ prompt: |
 
             result = self.server_mod._handle_doctor_command(db)
 
-        self.assertEqual(result['schema_version'], 2)
+        self.assertEqual(result['schema_version'], 3)
         self.assertEqual(result['result'], 'pass')
         self.assertIn('migration', result)
+        self.assertIn('runtime_locations', result)
         self.assertIn('checks', result)
+        self.assertEqual(result['runtime_locations']['runtime_python'], sys.executable)
         self.assertEqual(result['agents']['engineer'], 1)
 
     def test_emit_task_artifact_uploaded_event_uses_digest_friendly_summary(self):
