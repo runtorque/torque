@@ -2069,7 +2069,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-board-sync-github-status-field').value = syncGithub.github_project_status_field || 'Status';
   document.getElementById('gs-board-sync-github-lane-map').value = _gsStringifyJsonMap(syncGithub.github_lane_status_map);
   document.getElementById('gs-board-sync-github-close-via-pr').checked = syncGithub.github_close_issues_via_pr !== false;
-  document.getElementById('gs-board-sync-github-create-labels').checked = !!syncGithub.github_create_missing_labels;
+  document.getElementById('gs-board-sync-github-create-labels').checked = syncGithub.github_create_missing_labels !== false;
   document.getElementById('gs-board-sync-github-assignee-map').value = _gsStringifyJsonMap(syncGithub.github_assignee_map);
   _gsBoardSyncProjectOptions = [];
   _gsBoardSyncProjectsLoadedKey = '';

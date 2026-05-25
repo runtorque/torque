@@ -89,7 +89,7 @@ def github_settings(**overrides):
         "github_project_status_field": "Status",
         "github_lane_status_map": {"In Progress": "Doing"},
         "github_close_issues_via_pr": True,
-        "github_create_missing_labels": False,
+        "github_create_missing_labels": True,
     }
     nested.update(overrides.pop("board_sync_github", {}))
     return GroupSettings(
@@ -385,13 +385,65 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commands[5][0:2], ["project", "item-add"])
         self.assertEqual(commands[6][0:2], ["project", "item-edit"])
 
+    async def test_push_creates_missing_user_labels_by_default_before_sync(self):
+        task = BoardTask(
+            id="T:1",
+            task="Task",
+            description="Body",
+            labels=[
+                "Research",
+                "MCP",
+                "Browser",
+                "Parked",
+                "do not dispatch",
+                "torque:blocked",
+            ],
+        )
+        settings = github_settings(board_sync_github={
+            "github_project_owner": "",
+            "github_project_number": 0,
+        })
+        runner = FakeGhRunner([
+            gh_ok({"items": [{"name": "parked"}]}),
+            gh_ok(""),
+            gh_ok(""),
+            gh_ok(""),
+            gh_ok(""),
+            gh_ok("https://github.com/owner/repo/issues/123\n"),
+            gh_ok(issue_view(number=123, title="Task", body=render_issue_body(task))),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(task, settings)
+
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["github"]["issue_number"], 123)
+        commands = [call[0] for call in runner.calls]
+        self.assertEqual(commands[0][:3], ["label", "list", "--repo"])
+        self.assertEqual(
+            [cmd[:3] for cmd in commands[1:5]],
+            [
+                ["label", "create", "Research"],
+                ["label", "create", "MCP"],
+                ["label", "create", "Browser"],
+                ["label", "create", "do not dispatch"],
+            ],
+        )
+        self.assertEqual(commands[5][0:2], ["issue", "create"])
+        self.assertIn("--label", commands[5])
+        self.assertIn("do not dispatch", ",".join(commands[5]))
+        self.assertNotIn("torque:blocked", " ".join(commands[5]))
+
     async def test_push_errors_when_user_label_missing_and_creation_disabled(self):
         task = BoardTask(id="T:1", task="Task", labels=["missing"])
         provider = GitHubBoardSyncProvider(FakeGhRunner([
             gh_ok({"items": [{"name": "bug"}]}),
         ]))
 
-        sync = await provider.push_task(task, github_settings())
+        sync = await provider.push_task(
+            task,
+            github_settings(board_sync_github={"github_create_missing_labels": False}),
+        )
 
         self.assertEqual(sync["sync_state"], "error")
         self.assertEqual(sync["phase"], "labels")

@@ -49,7 +49,7 @@ class GitHubSyncSettings:
     lane_status_map: dict[str, str] = field(default_factory=dict)
     sync_default: str = "linked"
     close_issues_via_pr: bool = True
-    create_missing_labels: bool = False
+    create_missing_labels: bool = True
     assignee_map: dict[str, str] = field(default_factory=dict)
     enabled: bool = False
 
@@ -193,7 +193,7 @@ def github_settings(group_settings) -> GitHubSyncSettings:
         sync_default=str(get("github_sync_default", "linked") or "linked").strip()
         or "linked",
         close_issues_via_pr=bool(get("github_close_issues_via_pr", True)),
-        create_missing_labels=bool(get("github_create_missing_labels", False)),
+        create_missing_labels=bool(get("github_create_missing_labels", True)),
         assignee_map=assignee_map if isinstance(assignee_map, dict) else {},
         enabled=bool(getattr(group_settings, "board_sync_enabled", False)),
     )
@@ -259,12 +259,25 @@ def render_issue_body(task) -> str:
     return f"{description}\n\n{footer}".strip() if description else footer
 
 
+def _label_key(label: str) -> str:
+    return str(label or "").strip().casefold()
+
+
+def _label_already_exists_error(error: str) -> bool:
+    lower = str(error or "").casefold()
+    return "already exists" in lower or "name already exists" in lower
+
+
 def _user_labels(task) -> list[str]:
     labels = []
+    seen = set()
     for label in getattr(task, "labels", []) or []:
         label = str(label or "").strip()
-        if label and not label.startswith("torque:"):
-            labels.append(label)
+        key = _label_key(label)
+        if not label or key.startswith("torque:") or key in seen:
+            continue
+        seen.add(key)
+        labels.append(label)
     return labels
 
 
@@ -754,10 +767,17 @@ class GitHubBoardSyncProvider:
         if not listed.get("ok"):
             return listed
         existing = {
-            str(item.get("name") or "").lower()
+            _label_key(str(item.get("name") or ""))
             for item in _as_json_items(listed.get("data"))
         }
-        missing = [label for label in labels if label.lower() not in existing]
+        missing = []
+        seen_missing = set()
+        for label in labels:
+            key = _label_key(label)
+            if not key or key in existing or key in seen_missing:
+                continue
+            missing.append(label)
+            seen_missing.add(key)
         if missing and not settings.create_missing_labels:
             return _error(
                 "labels",
@@ -779,6 +799,8 @@ class GitHubBoardSyncProvider:
                 "Created by Torque board sync",
             )
             if not created.get("ok"):
+                if _label_already_exists_error(created.get("error", "")):
+                    continue
                 return created
         return _ok("labels", labels=labels, missing_created=missing)
 
