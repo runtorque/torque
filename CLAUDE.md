@@ -4,7 +4,7 @@
 
 Torque is a local agent-orchestration workspace: a long-running Python daemon, an iTerm2/PTY terminal adapter, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
 
-Primary operator surfaces are standalone/browser and desktop app modes. The iTerm2 Toolbelt is a deprecated secondary integration that still works for rollback safety during migration.
+Primary operator surfaces are standalone/browser and desktop app modes. The iTerm2 Toolbelt is a deprecated secondary integration; the Makefile no longer installs or updates the old Scripts copy, and old data should be migrated with `scripts/migrate_toolbelt_to_profile.py`.
 
 ## Key commands
 

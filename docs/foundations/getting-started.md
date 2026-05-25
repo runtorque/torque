@@ -38,7 +38,7 @@ make run
 The Torque workspace should appear in a native desktop window. If it doesn't,
 check `~/.torque/profiles/desktop/torque.log` for errors.
 
-## Browser and Toolbelt alternatives
+## Browser mode and legacy Toolbelt migration
 
 For standalone browser mode:
 
@@ -47,18 +47,11 @@ make standalone
 make open
 ```
 
-For the deprecated secondary iTerm2 Toolbelt integration, which still works
-for rollback safety while you migrate to the desktop app or standalone browser
-mode:
-
-```bash
-make deploy-toolbelt
-```
-
-Then open iTerm2, run **Scripts → torque**, open **View → Show Toolbelt**, and
-enable **Torque** from the Toolbelt gear menu. Migrate Toolbelt data to a
-profile with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b). For
-more runtime modes, see [Operations](../operate/operations.md).
+The iTerm2 Toolbelt is deprecated and the Makefile no longer installs or
+updates the old iTerm2 Scripts copy. Use the desktop app or standalone browser
+mode for new installs. If you have old Toolbelt data, migrate it to a profile
+with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b). For more
+runtime modes, see [Operations](../operate/operations.md).
 
 ## Your first session
 
@@ -129,12 +122,13 @@ make deploy
 ```
 
 Then relaunch Torque with `make run` for the desktop app, or run
-`make standalone` followed by `make open` for browser-only mode. If you
-specifically use the deprecated iTerm2 Toolbelt integration, run
-`make deploy-toolbelt` and restart Torque from the **Scripts** menu in iTerm2.
+`make standalone` followed by `make open` for browser-only mode. If you are
+migrating from an old Toolbelt install, keep using
+`scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b) to move that data
+into a profile-backed primary surface.
 
 !!! warning "Don't deploy or stop from inside a Torque-managed worker"
-    If you're operating inside a Torque worktree (a tab the daemon spawned), running `make deploy`, `make deploy-toolbelt`, or `make stop` can kill the very daemon you're talking to and leave the new instance with corrupted in-memory state. The Makefile and HTTP layer both refuse the operation when called from a worker context. See [Operations](../operate/operations.md) for safer alternatives.
+    If you're operating inside a Torque worktree (a tab the daemon spawned), running `make deploy` or `make stop` can kill the very daemon you're talking to and leave the new instance with corrupted in-memory state. The Makefile and HTTP layer both refuse the operation when called from a worker context. See [Operations](../operate/operations.md) for safer alternatives.
 
 ## Where to next
 

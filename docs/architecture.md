@@ -115,11 +115,12 @@ The same daemon serves several deployment shapes:
 - **Standalone browser** — `make standalone` runs the daemon without Toolbelt
   registration and `make open` opens the browser UI. This is the primary
   browser-only path and supports headless development setups.
-- **iTerm2 Toolbelt** — the secondary integration. `make deploy-toolbelt`
-  copies the app into iTerm2's Scripts project and the UI renders in the
-  Toolbelt sidebar.
-- **Toolbelt + browser** — when the Toolbelt daemon is running, `make open`
-  opens a browser window connected to the same daemon.
+- **Legacy iTerm2 Toolbelt** — the deprecated secondary integration retained
+  for migration/rollback context. The Makefile no longer installs or updates
+  the old iTerm2 Scripts copy; migrate Toolbelt data with
+  `scripts/migrate_toolbelt_to_profile.py`.
+- **Legacy Toolbelt + browser** — when an already-installed Toolbelt daemon is
+  running, `make open` opens a browser window connected to the same daemon.
 
 The desktop and standalone paths use profile-scoped data directories under
 `~/.torque/profiles/` so they don't accidentally attach to a live Toolbelt

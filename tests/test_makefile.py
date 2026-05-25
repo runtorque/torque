@@ -1,3 +1,4 @@
+import re
 import shutil
 import subprocess
 import unittest
@@ -84,6 +85,26 @@ class MakefileInstallTests(unittest.TestCase):
         ):
             with self.subTest(snippet=snippet):
                 self.assertNotIn(snippet, proc.stdout)
+
+    def test_removed_toolbelt_make_targets_not_advertised_in_first_party_docs(self):
+        stale_target_re = re.compile(
+            r"deploy-toolbelt|run-toolbelt|install-toolbelt|toolbelt-legacy|"
+            r"make install\b|make autolaunch"
+        )
+        docs = [
+            ROOT / "AGENTS.md",
+            ROOT / "README.md",
+            ROOT / "CONTRIBUTING.md",
+            ROOT / "CLAUDE.md",
+            *sorted((ROOT / "docs").rglob("*.md")),
+        ]
+
+        for path in docs:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertIsNone(
+                    stale_target_re.search(path.read_text(encoding="utf-8")),
+                    f"{path.relative_to(ROOT)} advertises a removed Toolbelt Makefile target",
+                )
 
     def test_test_ee_target_runs_explicit_enterprise_suite(self):
         text = (ROOT / "Makefile").read_text(encoding="utf-8")

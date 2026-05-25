@@ -88,17 +88,15 @@ If you change persisted state or object shape, you usually need to update all of
 
 ## Commands
 
-- `make install`: copy files into the iTerm2 Scripts project
 - `make deploy`: primary standalone/desktop deploy; stop the primary daemon, install app files under `~/.torque/app`, refresh CLI
 - `make run`: launch the primary desktop app
-- `make deploy-toolbelt`: secondary iTerm2 Toolbelt deploy; preserves the old Scripts-project install flow
 - `make stop`: free port `18932`
 - `make standalone`: browser-only UI mode, still backed by iTerm2
 - `make open`: open the web UI in a browser
 - `make cli`: install the `torque` CLI symlink
 - `make test`: run the regression suite
 
-**Never deploy/stop from inside a worker/engineer shell.** The Makefile refuses `stop`/`deploy`/`deploy-toolbelt`/`restart` when `TORQUE_CELL_ID` is set or pwd is under `.torque/worktrees/` — killing the daemon you are talking to corrupts the in-memory dispatch state on the next boot and DOA's every subsequent worker. Override with `FORCE=1` only when you accept the risk. Alternative: commit to main and ask the user to deploy/relaunch from their own shell, or test on a different port (`TORQUE_PORT=18934`). See `CLAUDE.md → "Never deploy/stop mid-session"` for the full failure-mode notes.
+**Never deploy/stop from inside a worker/engineer shell.** The Makefile refuses `stop`/`deploy`/`restart` when `TORQUE_CELL_ID` is set or pwd is under `.torque/worktrees/` — killing the daemon you are talking to corrupts the in-memory dispatch state on the next boot and DOA's every subsequent worker. Override with `FORCE=1` only when you accept the risk. Alternative: commit to main and ask the user to deploy/relaunch from their own shell, or test on a different port (`TORQUE_PORT=18934`). See `CLAUDE.md → "Never deploy/stop mid-session"` for the full failure-mode notes.
 
 Useful runtime paths:
 

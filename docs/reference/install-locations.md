@@ -28,15 +28,15 @@ Primary runtime data is profile-scoped:
 ~/.torque/profiles/standalone/torque.log
 ```
 
-Deprecated secondary iTerm2 Toolbelt files are installed by
-`make deploy-toolbelt` to:
+Deprecated secondary iTerm2 Toolbelt files from older releases may still exist
+at:
 
 ```text
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/
 ```
 
-Toolbelt runtime data (created by the daemon, not installed by
-`make deploy-toolbelt`) remains in the Toolbelt script directory:
+Toolbelt runtime data created by those older daemons remains in the Toolbelt
+script directory:
 
 ```text
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db    # SQLite state
@@ -45,9 +45,8 @@ Toolbelt runtime data (created by the daemon, not installed by
 
 The iTerm2/AppSupport Python environment is legacy and Toolbelt-only. The
 primary surfaces are the desktop app (`make run`) and standalone browser mode
-(`make standalone`). The Toolbelt still works for now for rollback safety, and
-it stays discoverable for one deprecation cycle so `make deploy-toolbelt` and
-`make run-toolbelt` keep working. Migrate Toolbelt data to a profile with
+(`make standalone`). The Makefile no longer installs, updates, or launches the
+old Toolbelt Scripts copy. Migrate Toolbelt data to a profile with
 `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b):
 
 ```text
