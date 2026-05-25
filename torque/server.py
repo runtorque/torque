@@ -5857,6 +5857,18 @@ def _sanitize_engineer_worker_provider_override(
     return ""
 
 
+def _worker_provider_override_from_dispatch(data: dict) -> str:
+    """Return requested worker provider override from new/legacy API names."""
+    provider = str(data.get("provider", "") or "").strip()
+    agent_type = str(data.get("agent_type", "") or "").strip()
+    if provider and agent_type and provider != agent_type:
+        raise ValueError(
+            "provider and agent_type overrides disagree; use one provider "
+            "value for the new worker"
+        )
+    return provider or agent_type
+
+
 def _resolve_ai_report_task(state: MatrixState, cell, *,
                             task_id: str = "") -> Optional[BoardTask]:
     """Resolve the task an agent report should apply to.
@@ -13859,8 +13871,9 @@ async def main(connection=None):
                                 slug = _slugify(task.task)
                                 agent_name = slug or "agent"
                             launch_overrides = {}
-                            agent_type = (data.get("agent_type", "")
-                                          or "").strip()
+                            agent_type = _worker_provider_override_from_dispatch(
+                                data
+                            )
                             agent_type = _sanitize_engineer_worker_provider_override(
                                 state,
                                 group,

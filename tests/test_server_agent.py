@@ -492,6 +492,25 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["agent_type"], "claude-code")
         self.assertEqual(resolved["command"], "claude --explicit")
 
+    def test_resolve_worker_launch_config_rejects_provider_command_mismatch(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_provider="codex",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "Provider/command mismatch"):
+            service.resolve_worker_launch_config(
+                "backend",
+                overrides={
+                    "command": "claude --dangerously-skip-permissions",
+                },
+            )
+
     def test_resolve_worker_launch_config_explicit_model_reasoning_win(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(

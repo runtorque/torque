@@ -100,6 +100,7 @@ _DISPATCH_SHAPE_VALID_BATCH_STATUSES = {
 }
 _TASK_DISPATCH_LAUNCH_OVERRIDE_ARGS = (
     "name",
+    "provider",
     "agent_type",
     "command",
     "model",
@@ -2074,6 +2075,18 @@ def _sanitize_mcp_worker_provider_override(
         group,
     )
     return ""
+
+
+def _mcp_worker_provider_override_arg(args: dict) -> tuple[str, str]:
+    """Return requested provider override and an error message if ambiguous."""
+    provider = str(args.get("provider", "") or "").strip()
+    agent_type = str(args.get("agent_type", "") or "").strip()
+    if provider and agent_type and provider != agent_type:
+        return "", (
+            "provider and agent_type overrides disagree; use one provider "
+            "value for the new worker"
+        )
+    return provider or agent_type, ""
 
 
 _TASK_ID_REFERENCE_RE = re.compile(
@@ -5002,11 +5015,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     payload["target_session_id"] = _engineer_cell.session_id
                 if _engineer_cell.window_id:
                     payload["target_window_id"] = _engineer_cell.window_id
+            requested_provider, provider_error = (
+                _mcp_worker_provider_override_arg(args)
+            )
+            if provider_error:
+                return provider_error, True
             agent_type = _sanitize_mcp_worker_provider_override(
                 state,
                 _engineer_group,
                 _engineer_cell.id,
-                args.get("agent_type", ""),
+                requested_provider,
             )
             if agent_type:
                 payload["agent_type"] = agent_type

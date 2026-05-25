@@ -67,6 +67,7 @@ def _without_worker_provider_override_params(tools: list[dict]) -> list[dict]:
         )
         if name == "engineer_task_dispatch":
             properties.pop("agent_type", None)
+            properties.pop("provider", None)
         elif name == "engineer_batch_dispatch":
             properties.pop("provider", None)
         filtered.append(spec)
