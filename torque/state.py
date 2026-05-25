@@ -877,7 +877,7 @@ class AgentCell:
     group: str
     slug: str = ""              # auto-generated from name
     cell_type: str = "agent"  # "agent" | "terminal"
-    terminal_backend: str = "iterm2"  # "iterm2" | "pty" (future backends)
+    terminal_backend: str = "pty"  # "iterm2" | "pty" (future backends)
     session_id: Optional[str] = None
     profile: str = "Default"
     command: str = ""
@@ -1692,7 +1692,7 @@ class GroupSettings:
     """Default settings applied when creating agents/terminals in a group."""
     # Group-level defaults
     default_directory: str = ""
-    default_terminal_backend: str = "iterm2"
+    default_terminal_backend: str = "pty"
     profile: str = ""
     shell: str = ""
     tab_color: str = ""
@@ -7315,7 +7315,7 @@ class MatrixState:
             cell_type=cell_type,
             terminal_backend=terminal_backend
             or gs.default_terminal_backend
-            or "iterm2",
+            or "pty",
             profile=profile,
             command=command or (self.get_default_command() if cell_type == "agent" else ""),
             directory=directory,

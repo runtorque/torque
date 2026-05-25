@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS agents (
     slug                  TEXT NOT NULL DEFAULT '',
     group_name            TEXT NOT NULL,
     cell_type             TEXT NOT NULL DEFAULT 'agent',
-    terminal_backend      TEXT NOT NULL DEFAULT 'iterm2',
+    terminal_backend      TEXT NOT NULL DEFAULT 'pty',
     session_id            TEXT,
     profile               TEXT NOT NULL DEFAULT 'Default',
     command               TEXT NOT NULL DEFAULT '',
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS group_members (
 CREATE TABLE IF NOT EXISTS group_settings (
     group_name                  TEXT PRIMARY KEY,
     default_directory           TEXT NOT NULL DEFAULT '',
-    default_terminal_backend    TEXT NOT NULL DEFAULT 'iterm2',
+    default_terminal_backend    TEXT NOT NULL DEFAULT 'pty',
     profile                     TEXT NOT NULL DEFAULT '',
     shell                       TEXT NOT NULL DEFAULT '',
     tab_color                   TEXT NOT NULL DEFAULT '',
@@ -647,6 +647,131 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
         return True
     except sqlite3.OperationalError:
         return False
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _default_literal(default) -> str:
+    text = str(default or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text
+
+
+def _captured_table_supporting_sql(
+        conn: sqlite3.Connection, table: str) -> list[str]:
+    rows = conn.execute(
+        "SELECT type, name, sql FROM sqlite_master "
+        "WHERE tbl_name=? AND type IN ('index', 'trigger') "
+        "AND sql IS NOT NULL ORDER BY type, name",
+        (table,),
+    ).fetchall()
+    return [str(sql) for _type, _name, sql in rows if sql]
+
+
+def _rebuild_table_with_column_defaults(
+        conn: sqlite3.Connection, table: str,
+        defaults: dict[str, str]) -> bool:
+    columns = conn.execute(
+        f"PRAGMA table_info({_quote_ident(table)})"
+    ).fetchall()
+    if not columns:
+        return False
+
+    wanted = {str(k): str(v) for k, v in defaults.items()}
+    existing = {str(row[1]): row[4] for row in columns}
+    needs_rebuild = any(
+        col in existing and _default_literal(existing[col]) != _default_literal(default)
+        for col, default in wanted.items()
+    )
+    if not needs_rebuild:
+        return False
+
+    defs: list[str] = []
+    pk_columns: list[tuple[int, str]] = []
+    for _cid, name, col_type, notnull, default, pk in columns:
+        name = str(name)
+        parts = [_quote_ident(name)]
+        if col_type:
+            parts.append(str(col_type))
+        if notnull:
+            parts.append("NOT NULL")
+        default_sql = wanted.get(name, default)
+        if default_sql is not None:
+            parts.append(f"DEFAULT {default_sql}")
+        defs.append(" ".join(parts))
+        if pk:
+            pk_columns.append((int(pk), name))
+    if pk_columns:
+        ordered = ", ".join(
+            _quote_ident(name) for _pk, name in sorted(pk_columns)
+        )
+        defs.append(f"PRIMARY KEY ({ordered})")
+
+    new_table = f"__torque_{table}_defaults_migration"
+    create_sql = (
+        f"CREATE TABLE {_quote_ident(new_table)} (\n    "
+        + ",\n    ".join(defs)
+        + "\n)"
+    )
+    supporting_sql = _captured_table_supporting_sql(conn, table)
+    copy_columns = ", ".join(_quote_ident(row[1]) for row in columns)
+
+    try:
+        conn.execute("BEGIN")
+        conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(new_table)}")
+        conn.execute(create_sql)
+        conn.execute(
+            f"INSERT INTO {_quote_ident(new_table)} ({copy_columns}) "
+            f"SELECT {copy_columns} FROM {_quote_ident(table)}"
+        )
+        conn.execute(f"DROP TABLE {_quote_ident(table)}")
+        conn.execute(
+            f"ALTER TABLE {_quote_ident(new_table)} "
+            f"RENAME TO {_quote_ident(table)}"
+        )
+        for sql in supporting_sql:
+            conn.execute(sql)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return True
+
+
+def _ensure_terminal_backend_defaults_to_pty(
+        conn: sqlite3.Connection) -> None:
+    """Migrate persisted terminal backend defaults and legacy rows to pty."""
+    for table, col in (
+        ("agents", "terminal_backend"),
+        ("group_settings", "default_terminal_backend"),
+    ):
+        try:
+            conn.execute(f"SELECT {col} FROM {table} LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN "
+                f"{col} TEXT NOT NULL DEFAULT 'pty'")
+            conn.commit()
+
+    conn.execute(
+        "UPDATE agents SET terminal_backend='pty' "
+        "WHERE terminal_backend='iterm2'"
+    )
+    conn.execute(
+        "UPDATE group_settings SET default_terminal_backend='pty' "
+        "WHERE default_terminal_backend='iterm2'"
+    )
+    if conn.in_transaction:
+        conn.commit()
+
+    for table, col in (
+        ("agents", "terminal_backend"),
+        ("group_settings", "default_terminal_backend"),
+    ):
+        _rebuild_table_with_column_defaults(conn, table, {col: "'pty'"})
 
 
 def _rename_table_if_needed(
@@ -1367,17 +1492,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 f"ALTER TABLE {table} ADD COLUMN "
                 "checkpoint_on_progress INTEGER NOT NULL DEFAULT 0")
             conn.commit()
-    for table, col in (
-        ("agents", "terminal_backend"),
-        ("group_settings", "default_terminal_backend"),
-    ):
-        try:
-            conn.execute(f"SELECT {col} FROM {table} LIMIT 0")
-        except sqlite3.OperationalError:
-            conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN "
-                f"{col} TEXT NOT NULL DEFAULT 'iterm2'")
-            conn.commit()
+    _ensure_terminal_backend_defaults_to_pty(conn)
     # Migrate: add pending_question column to engineer_settings
     try:
         conn.execute(
