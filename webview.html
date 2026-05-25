@@ -1189,6 +1189,42 @@
             </p>
           </div>
 
+          <!-- Daemon credential provisioning (TORQUE:603 client half).
+             v1 intentionally does NOT mint pairing tokens in-app: the operator
+             obtains a one-time token out-of-band from the relay admin mint
+             (/v1/admin/pairing-tokens) and pastes it here. FUTURE follow-up:
+             add an admin-authenticated in-app token mint once that product flow
+             is approved; do not call the admin endpoint in v1. -->
+          <div id="gls-relay-daemon-credential-slot"
+               class="gls-relay-daemon-credential-slot" hidden>
+            <div class="gls-relay-daemon-credential-title">
+              Generate daemon credential
+            </div>
+            <p class="gls-relay-daemon-credential-help">
+              Paste a one-time pairing token obtained out-of-band from the relay
+              admin mint (<code>/v1/admin/pairing-tokens</code>) for v1. Torque
+              generates the daemon key locally and stores only the credential ID
+              plus private-key file path in Settings.
+            </p>
+            <div class="gls-relay-daemon-credential-row">
+              <input type="text" id="gls-relay-daemon-credential-token"
+                     autocomplete="off" spellcheck="false"
+                     placeholder="one-time pairing token"
+                     oninput="relayDaemonCredentialRefreshButtonState()">
+              <button type="button" class="btn-secondary"
+                      id="gls-relay-daemon-credential-generate"
+                      onclick="relayDaemonCredentialGenerate()">Generate</button>
+            </div>
+            <p id="gls-relay-daemon-credential-hint"
+               class="gls-relay-daemon-credential-hint" hidden></p>
+            <div id="gls-relay-daemon-credential-error"
+                 class="gls-relay-daemon-credential-error"
+                 role="status" aria-live="polite" hidden></div>
+            <div id="gls-relay-daemon-credential-result"
+                 class="gls-relay-daemon-credential-result"
+                 role="status" aria-live="polite" hidden></div>
+          </div>
+
           <!-- Test-connectivity probe (TORQUE:603 #2). Button sends the daemon
              `test_relay_connection` command; the daemon-side probe returns a
              structured {status, message, detail} that renders as an actionable

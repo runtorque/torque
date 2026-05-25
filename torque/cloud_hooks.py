@@ -10,10 +10,12 @@ direct-message observation logic.
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib
 import inspect
 import json
 import os
+import re
 import types
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -316,6 +318,7 @@ RELAY_PROBE_DISABLED = "disabled"
 RELAY_PROBE_MISCONFIGURED = "misconfigured"
 
 RELAY_PROBE_TIMEOUT_SECONDS = 10.0
+RELAY_PAIR_TIMEOUT_SECONDS = 15.0
 RELAY_CONNECTION_LAST_ERROR_MAX_CHARS = 240
 
 
@@ -430,6 +433,297 @@ async def _relay_probe_attach(
         async with session.ws_connect(ws_url, **kwargs) as ws:
             await ws.close()
             return {"status_code": 101}
+
+
+# ---------------------------------------------------------------------------
+# Relay daemon-credential provisioning (:676 /v1/pair client half)
+# ---------------------------------------------------------------------------
+
+
+def _import_daemon_credential_crypto() -> Any:
+    """Lazily import the cryptography helpers used for local ES256 keygen.
+
+    Kept behind a tiny indirection so tests can exercise the missing-dependency
+    path and community installs get an actionable command error instead of an
+    import-time crash.
+    """
+
+    from cryptography.hazmat.primitives import serialization  # type: ignore
+    from cryptography.hazmat.primitives.asymmetric import ec  # type: ignore
+
+    return types.SimpleNamespace(ec=ec, serialization=serialization)
+
+
+def _base64url_no_padding(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _daemon_key_path(daemon_id: str, *, data_dir: str = "") -> Path:
+    safe_daemon_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(daemon_id or "").strip())
+    safe_daemon_id = safe_daemon_id.strip(".-_") or "default"
+    root = Path(data_dir).expanduser() if data_dir else Path(torque_config.DATA_DIR)
+    return root / "relay" / f"daemon-{safe_daemon_id}.pem"
+
+
+def generate_daemon_keypair(
+    daemon_id: str,
+    *,
+    data_dir: str = "",
+) -> dict[str, Any]:
+    """Generate a local ES256 daemon keypair and persist the private key.
+
+    The PRIVATE key is written as unencrypted PKCS8 PEM with mode 0600 under
+    the runtime profile directory (`<DATA_DIR>/relay/daemon-<daemon_id>.pem`).
+    The PUBLIC key is returned as a public-only P-256 JWK suitable for the
+    relay's :676 `/v1/pair` contract. The JWK intentionally omits private `d`.
+    """
+
+    deps = _import_daemon_credential_crypto()
+    private_key = deps.ec.generate_private_key(deps.ec.SECP256R1())
+    private_pem = private_key.private_bytes(
+        encoding=deps.serialization.Encoding.PEM,
+        format=deps.serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=deps.serialization.NoEncryption(),
+    )
+
+    key_path = _daemon_key_path(daemon_id, data_dir=data_dir)
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(key_path.parent, 0o700)
+    except OSError:
+        log.debug("Could not chmod relay key directory %s", key_path.parent, exc_info=True)
+
+    fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            log.debug("Could not fchmod relay key file %s", key_path, exc_info=True)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(private_pem)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        log.debug("Could not chmod relay key file %s", key_path, exc_info=True)
+
+    numbers = private_key.public_key().public_numbers()
+    x = int(numbers.x).to_bytes(32, "big")
+    y = int(numbers.y).to_bytes(32, "big")
+    public_key_jwk = {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": _base64url_no_padding(x),
+        "y": _base64url_no_padding(y),
+        "key_ops": ["verify"],
+        "alg": "ES256",
+    }
+    return {
+        "private_key_path": str(key_path),
+        "public_key_jwk": public_key_jwk,
+    }
+
+
+def _relay_pair_url(relay_url: str) -> str:
+    """Return the HTTP(S) `/v1/pair` endpoint for a relay base/full WS URL."""
+
+    raw = str(relay_url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    scheme = (parsed.scheme or "https").lower()
+    if scheme == "wss":
+        scheme = "https"
+    elif scheme == "ws":
+        scheme = "http"
+    path = (parsed.path or "").rstrip("/")
+    if path.endswith("/v1/pair"):
+        pair_path = path
+    elif "/v1/daemon/" in path and path.endswith("/ws"):
+        pair_path = path.split("/v1/daemon/", 1)[0].rstrip("/") + "/v1/pair"
+    else:
+        pair_path = path + "/v1/pair"
+    if not pair_path.startswith("/"):
+        pair_path = "/" + pair_path
+    return urlunparse((scheme, parsed.netloc or parsed.path, pair_path, "", "", ""))
+
+
+async def _post_relay_pair(
+    pair_url: str,
+    payload: dict[str, Any],
+    *,
+    timeout: float,
+) -> dict[str, Any]:
+    import aiohttp  # type: ignore
+
+    client_timeout = aiohttp.ClientTimeout(total=timeout)
+    async with aiohttp.ClientSession(timeout=client_timeout) as session:
+        async with session.post(pair_url, json=payload) as resp:
+            try:
+                body = await resp.json(content_type=None)
+            except Exception:
+                body = None
+            text = ""
+            if not isinstance(body, dict):
+                try:
+                    text = await resp.text()
+                except Exception:
+                    text = ""
+            return {"status": int(resp.status), "json": body, "text": text}
+
+
+async def generate_daemon_credential(
+    settings: Any,
+    *,
+    pairing_token: str,
+    data_dir: str = "",
+    timeout: float = RELAY_PAIR_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Provision a relay daemon credential using an out-of-band pairing token.
+
+    Implements the locked :676 contract entirely in the superproject:
+    local P-256 keygen → POST `{relay_url}/v1/pair` with public JWK +
+    pairing_token + daemon_id → return the minted credential_id and local
+    private key path. The raw private key is never returned.
+    """
+
+    token = str(pairing_token or "").strip()
+    if not token:
+        return {
+            "ok": False,
+            "error": "missing_pairing_token",
+            "message": (
+                "Paste the one-time pairing token minted out-of-band by the "
+                "relay admin before generating a daemon credential."
+            ),
+        }
+
+    resolved = resolve_relay_config(settings, data_dir=data_dir)
+    sources = dict(resolved.get("sources", {}))
+
+    def _value(field_key: str) -> str:
+        entry = sources.get(field_key) or {}
+        return str(entry.get("value", "") or "").strip()
+
+    relay_url = _value("relay_url")
+    daemon_id = _value("daemon_id")
+    missing = []
+    if not relay_url:
+        missing.append("relay_url")
+    if not daemon_id:
+        missing.append("daemon_id")
+    if missing:
+        return {
+            "ok": False,
+            "error": "misconfigured",
+            "message": (
+                "Set the relay URL and daemon ID in Settings → Relay before "
+                "generating a daemon credential."
+            ),
+            "detail": "missing=" + ",".join(missing),
+        }
+
+    try:
+        keypair = generate_daemon_keypair(daemon_id, data_dir=data_dir)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": "crypto_missing",
+            "message": (
+                "Could not generate the local ES256 daemon keypair. Install the "
+                "cryptography dependency for this Torque daemon and retry."
+            ),
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    pair_url = _relay_pair_url(relay_url)
+    payload = {
+        "pairing_token": token,
+        "daemon_id": daemon_id,
+        "public_key_jwk": keypair["public_key_jwk"],
+    }
+    try:
+        response = await _post_relay_pair(pair_url, payload, timeout=timeout)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": "relay_unreachable",
+            "message": (
+                "Could not reach the relay pairing endpoint. Check the relay URL "
+                "and network connection, then retry."
+            ),
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    status = int(response.get("status", 0) or 0)
+    body = response.get("json") if isinstance(response.get("json"), dict) else {}
+    if status == 201:
+        credential_id = str(body.get("credential_id", "") or "").strip()
+        response_daemon_id = str(body.get("daemon_id", "") or "").strip()
+        owner_user_id = str(body.get("owner_user_id", "") or "").strip()
+        if not credential_id or not response_daemon_id:
+            return {
+                "ok": False,
+                "error": "invalid_response",
+                "message": "Relay pairing succeeded but returned an incomplete credential response.",
+                "detail": "missing credential_id or daemon_id",
+            }
+        if response_daemon_id != daemon_id:
+            return {
+                "ok": False,
+                "error": "daemon_id_mismatch",
+                "message": (
+                    "Relay pairing returned a credential for a different daemon ID. "
+                    "Verify Settings → Relay daemon ID and retry."
+                ),
+                "detail": f"expected={daemon_id}; got={response_daemon_id}",
+            }
+        return {
+            "ok": True,
+            "credential_id": credential_id,
+            "daemon_id": response_daemon_id,
+            "owner_user_id": owner_user_id,
+            "private_key_path": keypair["private_key_path"],
+            "provenance": {
+                "pairing_token": "out_of_band_admin_mint",
+                "credential_id": "relay_pair_response",
+                "private_key_path": "local_keygen",
+            },
+        }
+
+    if status == 401:
+        return {
+            "ok": False,
+            "error": "pairing_token_rejected",
+            "message": (
+                "The pairing token was invalid, expired, or already used. Ask "
+                "the relay admin to mint a new one-time token and paste it here."
+            ),
+            "detail": "POST /v1/pair -> 401",
+        }
+    if status == 403:
+        return {
+            "ok": False,
+            "error": "pairing_token_daemon_mismatch",
+            "message": (
+                "The pairing token is bound to a different daemon ID. Verify "
+                "Settings → Relay daemon ID or ask the admin to mint a token "
+                "for this daemon."
+            ),
+            "detail": "POST /v1/pair -> 403",
+        }
+    detail = str(response.get("text", "") or "")
+    if not detail and isinstance(body, dict):
+        detail = str(body.get("message") or body.get("error") or "")
+    return {
+        "ok": False,
+        "error": "relay_pair_failed",
+        "message": f"Relay pairing failed with HTTP {status}. Check the token and relay URL, then retry.",
+        "detail": detail[:500],
+    }
 
 
 async def probe_relay_connection(

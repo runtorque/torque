@@ -1015,6 +1015,13 @@ function createRelayStatusHarness() {
     // Test-connectivity probe sub-block (TORQUE:603 #2).
     'gls-relay-probe-test',
     'gls-relay-probe-result',
+    // Daemon credential provisioning (:676 client half).
+    'gls-relay-daemon-credential-slot',
+    'gls-relay-daemon-credential-token',
+    'gls-relay-daemon-credential-generate',
+    'gls-relay-daemon-credential-hint',
+    'gls-relay-daemon-credential-error',
+    'gls-relay-daemon-credential-result',
     // Device-link generator sub-block (TORQUE:603 #3).
     'gls-relay-device-link-slot',
     'gls-relay-device-link-generate',
@@ -6432,6 +6439,117 @@ test('relay probe slot is unhidden whenever the Relay section is shown, hidden o
   `);
   assert.equal(document.getElementById('gls-relay-section').hidden, false);
   assert.equal(document.getElementById('gls-relay-probe-slot').hidden, false);
+});
+
+/* -- Relay daemon credential provisioning (:676 client half) --------------- */
+
+function _relayDaemonCredentialGate(context, payload) {
+  context.__daemonCredGate = (payload === undefined) ? null : payload;
+  return jsonValue(context, '_relayDaemonCredentialComputeGate(__daemonCredGate)');
+}
+
+test('daemon credential gate requires relay URL + daemon ID but not relay enabled', () => {
+  const { context } = createRelayStatusHarness();
+  const ok = _relayDaemonCredentialGate(context, {
+    config: { enabled: false, relay_url: 'https://relay.runtorque.com', daemon_id: 'daemon-1' },
+  });
+  assert.equal(ok.visible, true);
+  assert.equal(ok.canGenerate, true, 'credential provisioning can run before enabling relay');
+
+  const noUrl = _relayDaemonCredentialGate(context, { config: { daemon_id: 'daemon-1' } });
+  assert.equal(noUrl.canGenerate, false);
+  assert.match(noUrl.reason, /relay URL/i);
+
+  const noDaemon = _relayDaemonCredentialGate(context, { config: { relay_url: 'https://relay' } });
+  assert.equal(noDaemon.canGenerate, false);
+  assert.match(noDaemon.reason, /daemon ID/i);
+
+  assert.equal(_relayDaemonCredentialGate(context, null).visible, false);
+});
+
+test('daemon credential generate sends pairing_token and renders Settings-populated success', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  context.__cfg = {
+    config: { relay_url: 'https://relay.runtorque.com', daemon_id: 'daemon-1' },
+    sources: {
+      relay_url: { value: 'https://relay.runtorque.com', source: 'settings' },
+      daemon_id: { value: 'daemon-1', source: 'settings' },
+    },
+  };
+  runInContext(context, 'state.relay_config = __cfg; refreshRelayConfigModal({ force: true });');
+  document.getElementById('gls-relay-daemon-credential-token').value = ' pair_tok_123 ';
+  runInContext(context, 'relayDaemonCredentialRefreshButtonState(); relayDaemonCredentialGenerate();');
+
+  assert.equal(context.sendCalls.length, 1);
+  assert.deepEqual(context.sendCalls[0], {
+    cmd: 'generate_daemon_credential',
+    pairing_token: 'pair_tok_123',
+  });
+  assert.equal(document.getElementById('gls-relay-daemon-credential-generate').disabled, true);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-generate').textContent, 'Generating…');
+
+  context.__success = {
+    type: 'daemon_credential',
+    ok: true,
+    credential_id: 'cred_123',
+    daemon_id: 'daemon-1',
+    owner_user_id: 'owner-1',
+    private_key_path: '/tmp/torque/relay/daemon-daemon-1.pem',
+    provenance: { private_key_path: 'local_keygen' },
+    relay_config: {
+      config: {
+        relay_url: 'https://relay.runtorque.com',
+        daemon_id: 'daemon-1',
+        credential_id: 'cred_123',
+        private_key_path: '/tmp/torque/relay/daemon-daemon-1.pem',
+      },
+      sources: {
+        credential_id: { value: 'cred_123', source: 'settings' },
+        private_key_path: { value: '/tmp/torque/relay/daemon-daemon-1.pem', source: 'settings' },
+      },
+    },
+  };
+  runInContext(context, 'handleRelayDaemonCredential(__success);');
+
+  assert.equal(document.getElementById('gls-relay-daemon-credential-token').value, '',
+    'one-time token cleared on success');
+  assert.equal(document.getElementById('gls-relay-daemon-credential-generate').textContent, 'Generate');
+  const resultHtml = document.getElementById('gls-relay-daemon-credential-result').innerHTML;
+  assert.match(resultHtml, /cred_123/);
+  assert.match(resultHtml, /relay_credential_id/);
+  assert.match(resultHtml, /relay_private_key_path/);
+  assert.match(resultHtml, /local keygen/i);
+  assert.equal(document.getElementById('gls-relay-credential-id').value, 'cred_123');
+  assert.equal(
+    document.getElementById('gls-relay-private-key-path').value,
+    '/tmp/torque/relay/daemon-daemon-1.pem',
+  );
+});
+
+test('daemon credential UI documents out-of-band token minting and no v1 admin call', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const js = fs.readFileSync(path.join(repoRoot, 'static/js/relay_status.js'), 'utf8');
+  assert.match(html, /out-of-band[\s\S]*\/v1\/admin\/pairing-tokens/i);
+  assert.match(js, /FUTURE follow-up[\s\S]*not v1/i);
+  assert.doesNotMatch(js, /cmd:\s*['"]mint_pairing_token['"]/);
+});
+
+test('daemon credential error rendering escapes server-supplied message/detail', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__err = {
+    type: 'daemon_credential',
+    ok: false,
+    error: 'relay_pair_failed',
+    message: '<img src=x onerror=alert(1)>',
+    detail: '"><script>boom()</script>',
+  };
+  runInContext(context, 'handleRelayDaemonCredential(__err);');
+  const html = document.getElementById('gls-relay-daemon-credential-error').innerHTML;
+  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;img/);
+  assert.match(html, /&lt;script&gt;/);
 });
 
 /* -- Relay device-link: display-once QR + URL (TORQUE:603 #3) -------------- */

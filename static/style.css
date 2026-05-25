@@ -3520,6 +3520,101 @@ body.runtime-embedded #modal-group .modal-summary {
   color: var(--text-dim);
   line-height: 1.4;
 }
+.gls-relay-daemon-credential-slot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.gls-relay-daemon-credential-slot[hidden] { display: none; }
+.gls-relay-daemon-credential-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.gls-relay-daemon-credential-help,
+.gls-relay-daemon-credential-hint {
+  margin: 0 0 7px;
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.gls-relay-daemon-credential-help code {
+  color: var(--text);
+  user-select: all;
+}
+.gls-relay-daemon-credential-hint[hidden] { display: none; }
+.gls-relay-daemon-credential-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gls-relay-daemon-credential-row input[type="text"] {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+.gls-relay-daemon-credential-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.gls-relay-daemon-credential-error[hidden] { display: none; }
+.gls-relay-daemon-credential-error-msg { color: var(--red); }
+.gls-relay-daemon-credential-error-detail {
+  color: var(--text-dim);
+  font-size: 10px;
+  word-break: break-word;
+}
+.gls-relay-daemon-credential-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  font-size: 11px;
+}
+.gls-relay-daemon-credential-result[hidden] { display: none; }
+.gls-relay-daemon-credential-success-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+.gls-relay-daemon-credential-badge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.gls-relay-daemon-credential-field {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.gls-relay-daemon-credential-field span {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.gls-relay-daemon-credential-field code {
+  color: var(--text);
+  word-break: break-all;
+  user-select: all;
+}
 .gls-relay-probe-slot { margin-top: 8px; }
 .gls-relay-probe-slot[hidden] { display: none; }
 .gls-relay-probe-result {
