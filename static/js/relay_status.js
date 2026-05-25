@@ -279,7 +279,7 @@ function _relaySectionUpdateVisibility() {
   // update button gating without touching the token input.
   var credSlot = document.getElementById('gls-relay-daemon-credential-slot');
   if (credSlot) credSlot.hidden = section.hidden;
-  _relayDaemonCredentialRefreshButtonState();
+  relayDaemonCredentialRefreshButtonState();
   // The device-link slot (TORQUE:603 #3) likewise rides the section visibility.
   // _relayDeviceLinkRefreshButtonState() then flips ONLY the generate button's
   // enabled state from the gate; the displayed secret is left untouched and

@@ -9,8 +9,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+try:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+except ModuleNotFoundError:  # Community test environments may not bootstrap deps.
+    serialization = None
+    ec = None
+
+_CRYPTOGRAPHY_AVAILABLE = serialization is not None and ec is not None
 
 try:
     from helpers import install_aiohttp_stub
@@ -82,6 +88,10 @@ class DaemonCredentialKeygenTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
+    @unittest.skipUnless(
+        _CRYPTOGRAPHY_AVAILABLE,
+        "cryptography not installed in this Python environment",
+    )
     def test_keygen_writes_loadable_p256_pkcs8_pem_and_public_only_jwk(self):
         result = self.cloud_hooks.generate_daemon_keypair(
             "daemon-1", data_dir=self.tmp.name
@@ -120,8 +130,17 @@ class GenerateDaemonCredentialTests(unittest.IsolatedAsyncioTestCase):
         sys.modules["aiohttp"] = aiohttp
         _FakePairSession.queue = []
         _FakePairSession.calls = []
+        self._patches = [
+            mock.patch.object(self.cloud_hooks.torque_config, "CLOUD_RELAY_URL", ""),
+            mock.patch.object(self.cloud_hooks.torque_config, "CLOUD_DAEMON_ID", ""),
+            mock.patch.dict(os.environ, {"TORQUE_EE_DAEMON_CREDENTIAL_ID": ""}, clear=False),
+        ]
+        for patcher in self._patches:
+            patcher.start()
 
     def tearDown(self):
+        for patcher in reversed(getattr(self, "_patches", [])):
+            patcher.stop()
         if self._old_aiohttp is None:
             sys.modules.pop("aiohttp", None)
         else:

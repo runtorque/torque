@@ -6482,10 +6482,9 @@ test('daemon credential generate sends pairing_token and renders Settings-popula
   runInContext(context, 'relayDaemonCredentialRefreshButtonState(); relayDaemonCredentialGenerate();');
 
   assert.equal(context.sendCalls.length, 1);
-  assert.deepEqual(context.sendCalls[0], {
-    cmd: 'generate_daemon_credential',
-    pairing_token: 'pair_tok_123',
-  });
+  assert.equal(context.sendCalls[0].cmd, 'generate_daemon_credential');
+  assert.equal(context.sendCalls[0].pairing_token, 'pair_tok_123');
+  assert.deepEqual(Object.keys(context.sendCalls[0]).sort(), ['cmd', 'pairing_token']);
   assert.equal(document.getElementById('gls-relay-daemon-credential-generate').disabled, true);
   assert.equal(document.getElementById('gls-relay-daemon-credential-generate').textContent, 'Generating…');
 
