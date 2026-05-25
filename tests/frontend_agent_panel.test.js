@@ -1013,6 +1013,58 @@ test('architect Messages peer-message rerenders remain display-only', () => {
   assert.equal(sendCalls.some((call) => call.cmd === 'architect_peer_message'), false);
 });
 
+test('architect peer compose options drop removed and dismissed peers from fallback/cache state', () => {
+  const { context } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'arch-active': {
+      id: 'arch-active',
+      name: 'Active Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'arch-dismissed': {
+      id: 'arch-dismissed',
+      name: 'Dismissed Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      dismissed_at: 123,
+    },
+  };
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      context._agentPanelArchitectPeerListFromState(context.state.agents['arch-1']).map((peer) => peer.id)
+    )),
+    ['arch-active']
+  );
+
+  context.agentPanelReceiveArchitectPeerList({
+    architect_id: 'arch-1',
+    architects: [
+      { id: 'arch-active', name: 'Active Cached', group: 'alpha' },
+      { id: 'arch-removed', name: 'Removed Cached', group: 'alpha' },
+      { id: 'arch-dismissed', name: 'Dismissed Cached', group: 'alpha' },
+    ],
+  });
+  context.agentPanelPeerComposeInput('arch-1', 'peer_id', 'arch-removed');
+
+  const html = context._agentPanelArchitectPeerComposeHtml(context.state.agents['arch-1']);
+
+  assert.match(html, /Active Cached/);
+  assert.doesNotMatch(html, /Removed Cached/);
+  assert.doesNotMatch(html, /Dismissed Cached/);
+  assert.equal(context._agentPanelArchitectPeerComposeDrafts['arch-1'].peer_id, '');
+});
+
 test('worker Messages tab renders inline task thread entries', () => {
   const { context, panel } = createHarness();
   context.state.agents = {

@@ -1348,6 +1348,9 @@ function _deltaSurfaceInvalidations(ops, hints) {
             && String(_archLifeFocused.id || '') === _archLifeId) {
           _markSurface(flags, 'engineer');
         }
+        if (_architectPeerRosterDeltaInvalidatesFocusedMessages(null, null, op)) {
+          _markSurface(flags, 'engineer');
+        }
         break;
       }
       case 'peer_message_upsert':
@@ -2049,6 +2052,26 @@ function _agentDeltaInvalidatesEngineer(previous, next, op) {
   return false;
 }
 
+function _architectPeerRosterDeltaInvalidatesFocusedMessages(previous, next, op) {
+  const focused = _focusedEngineerAgent();
+  if (!focused || _focusedEngineerAgentKind(focused) !== 'architect') return false;
+  if (_focusedEngineerActiveTab('architect') !== 'messages') return false;
+  const focusedGroup = String(focused.group || '');
+  if (!focusedGroup) return false;
+  if (op && (op.op === 'architect_dismissed' || op.op === 'architect_rehired')) {
+    const architectId = String(op.architect_id || '');
+    const architect = architectId && state && state.agents ? state.agents[architectId] : null;
+    const group = String(op.group || (architect && architect.group) || '');
+    return !!architectId && architectId !== String(focused.id || '') && group === focusedGroup;
+  }
+  const prevKind = String((previous && previous.kind) || '');
+  const nextKind = String((next && next.kind) || '');
+  if (prevKind !== 'architect' && nextKind !== 'architect') return false;
+  const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (agentId && agentId === String(focused.id || '')) return false;
+  return _agentTouchesGroup(previous, next, focusedGroup);
+}
+
 function _applyAgentSurfaceInvalidation(flags, op, hint) {
   const previous = hint && hint.agent ? hint.agent : null;
   const next = _agentNextFromDelta(op, previous);
@@ -2065,6 +2088,9 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
   if (_agentDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
   if (_agentDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
   if (_agentDeltaInvalidatesEngineer(previous, next, op)) _markSurface(flags, 'engineer');
+  if (_architectPeerRosterDeltaInvalidatesFocusedMessages(previous, next, op)) {
+    _markSurface(flags, 'engineer');
+  }
 }
 
 function _applyUiSurfaceInvalidation(flags, key) {
@@ -2294,12 +2320,17 @@ function _applyDelta(ops) {
         break;
       }
       case 'agent_remove':
+        var removedAgent = state.agents ? state.agents[op.id] : null;
         delete state.agents[op.id];
         if (state.agent_digest_settings) delete state.agent_digest_settings[op.id];
         if (state.digest_buffer_stats) delete state.digest_buffer_stats[op.id];
         if (state.digest_sent_events) delete state.digest_sent_events[op.id];
         if (state.agent_message_history) delete state.agent_message_history[op.id];
         if (state.direct_messages_by_agent) delete state.direct_messages_by_agent[op.id];
+        if (typeof _agentPanelInvalidateArchitectPeerListCache === 'function'
+            && (!removedAgent || String(removedAgent.kind || '') === 'architect')) {
+          _agentPanelInvalidateArchitectPeerListCache();
+        }
         // Selection/focus globals are browser-local — the server doesn't know
         // about them. Selections can be cleared immediately; focusedItemId is
         // left intact until render() can use previous grid-row metadata to pick
@@ -2748,6 +2779,14 @@ function _applyDelta(ops) {
 
       case 'architect_dismissed':
       case 'architect_rehired':
+        if (state && state.agents && op.architect_id && state.agents[op.architect_id]) {
+          state.agents[op.architect_id].dismissed_at = (
+            op.op === 'architect_dismissed' ? (op.dismissed_at || Date.now() / 1000) : 0
+          );
+        }
+        if (typeof _agentPanelInvalidateArchitectPeerListCache === 'function') {
+          _agentPanelInvalidateArchitectPeerListCache();
+        }
         break;
 
       case 'engineer_buffer_stats': {

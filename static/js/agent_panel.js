@@ -1626,10 +1626,12 @@ function _agentPanelInvalidateArchitectPeerListCache(architectId) {
   if (!key) {
     _agentPanelArchitectPeerListByArchitect = {};
     _agentPanelArchitectPeerListRequestedByArchitect = {};
+    _agentPanelPruneArchitectPeerDrafts();
     return;
   }
   delete _agentPanelArchitectPeerListByArchitect[key];
   delete _agentPanelArchitectPeerListRequestedByArchitect[key];
+  _agentPanelPruneArchitectPeerDraft(key);
 }
 
 function _agentPanelInvalidateArchitectJournalCache(architectId) {
@@ -1946,6 +1948,7 @@ function _agentPanelArchitectPeerListFromState(agent) {
     if (String(peer.kind || '') !== 'architect') continue;
     if (group && String(peer.group || '') !== group) continue;
     if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(peer)) continue;
+    if (Number(peer.dismissed_at || 0) > 0) continue;
     peers.push({
       id: peer.id || id,
       name: _agentPanelAgentDisplayName(peer, peer.id || id),
@@ -1963,6 +1966,35 @@ function _agentPanelArchitectPeerListFromState(agent) {
   return peers;
 }
 
+function _agentPanelArchitectPeerIsSelectable(agent, peer) {
+  var architectId = String((agent && agent.id) || '').trim();
+  var group = String((agent && agent.group) || '').trim();
+  var peerId = String((peer && peer.id) || '').trim();
+  if (!architectId || !peerId || peerId === architectId) return false;
+  var livePeer = null;
+  var hasLiveAgentIndex = !!(state && state.agents && Object.keys(state.agents).length);
+  if (hasLiveAgentIndex) {
+    livePeer = state.agents[peerId] || null;
+    if (!livePeer) return false;
+  }
+  var candidate = livePeer || peer || {};
+  if (livePeer) {
+    if (String(candidate.cell_type || '') !== 'agent') return false;
+    if (String(candidate.kind || '') !== 'architect') return false;
+  }
+  if (group && String(candidate.group || (peer && peer.group) || '') !== group) return false;
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(candidate)) return false;
+  if (Number(candidate.dismissed_at || (peer && peer.dismissed_at) || 0) > 0) return false;
+  return true;
+}
+
+function _agentPanelFilterArchitectPeerList(agent, peers) {
+  peers = Array.isArray(peers) ? peers : [];
+  return peers.filter(function(peer) {
+    return _agentPanelArchitectPeerIsSelectable(agent, peer);
+  });
+}
+
 function _agentPanelEnsureArchitectPeerList(agent) {
   var architectId = String((agent && agent.id) || '').trim();
   if (!architectId || _agentPanelArchitectPeerListRequestedByArchitect[architectId]) return;
@@ -1978,7 +2010,11 @@ function _agentPanelArchitectPeerList(agent) {
   var architectId = String((agent && agent.id) || '').trim();
   _agentPanelEnsureArchitectPeerList(agent);
   var cached = architectId ? _agentPanelArchitectPeerListByArchitect[architectId] : null;
-  if (Array.isArray(cached)) return cached.slice();
+  if (Array.isArray(cached)) {
+    return _agentPanelFilterArchitectPeerList(agent, cached).map(function(peer) {
+      return Object.assign({}, peer || {});
+    });
+  }
   return _agentPanelArchitectPeerListFromState(agent);
 }
 
@@ -2022,6 +2058,37 @@ function _agentPanelPeerDraft(architectId) {
     };
   }
   return _agentPanelArchitectPeerComposeDrafts[key];
+}
+
+function _agentPanelPruneArchitectPeerDraft(architectId) {
+  var key = String(architectId || '').trim();
+  var draft = key ? _agentPanelArchitectPeerComposeDrafts[key] : null;
+  if (!draft || !draft.peer_id) return false;
+  var agent = (state && state.agents) ? state.agents[key] : null;
+  if (agent && _agentPanelArchitectPeerIsSelectable(agent, { id: draft.peer_id })) {
+    return false;
+  }
+  draft.peer_id = '';
+  return true;
+}
+
+function _agentPanelPruneArchitectPeerDrafts() {
+  for (var architectId in _agentPanelArchitectPeerComposeDrafts) {
+    _agentPanelPruneArchitectPeerDraft(architectId);
+  }
+}
+
+function _agentPanelPruneArchitectPeerDraftForList(architectId, peers) {
+  var key = String(architectId || '').trim();
+  var draft = key ? _agentPanelArchitectPeerComposeDrafts[key] : null;
+  if (!draft || !draft.peer_id) return false;
+  var selected = String(draft.peer_id || '').trim();
+  peers = Array.isArray(peers) ? peers : [];
+  for (var i = 0; i < peers.length; i++) {
+    if (String((peers[i] && peers[i].id) || '').trim() === selected) return false;
+  }
+  draft.peer_id = '';
+  return true;
 }
 
 function _agentPanelSplitContextIds(value) {
@@ -2107,6 +2174,7 @@ function _agentPanelArchitectPeerComposeHtml(agent) {
   if (!architectId) return '';
   var draft = _agentPanelPeerDraft(architectId);
   var peers = _agentPanelArchitectPeerList(agent);
+  _agentPanelPruneArchitectPeerDraftForList(architectId, peers);
   var safeId = _agentPanelDomIdToken(architectId);
   var architectIdJs = _agentPanelJsString(architectId);
   var html = '<form class="agent-panel-peer-compose" onsubmit="'

@@ -1821,6 +1821,56 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         state.groups['g'] = []
         return state
 
+    async def test_architect_ui_peer_message_uses_sender_as_caller_and_architect_id_as_recipient(self):
+        state = self._make_state()
+        sender = self.state_mod.AgentCell(
+            id='arch-sender',
+            name='Sender Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+        )
+        recipient = self.state_mod.AgentCell(
+            id='arch-recipient',
+            name='Recipient Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-recipient',
+        )
+        state.agents[sender.id] = sender
+        state.agents[recipient.id] = recipient
+        state.groups['g'] = [sender.id, recipient.id]
+        injected = []
+
+        async def handle_command(payload):
+            injected.append(dict(payload))
+            return {'type': 'ok', 'delivered': True}
+
+        result = await self.server_mod._dispatch_architect_ui_tool(
+            'architect_peer_message',
+            {
+                'sender_architect_id': sender.id,
+                'architect_id': recipient.id,
+                'message': 'Please verify the peer routing.',
+                'ack_required': True,
+            },
+            state,
+            handle_command=handle_command,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['recipient_architect_id'], recipient.id)
+        persisted = self.db.load_agent_peer_message(result['message_id'])
+        self.assertEqual(persisted['sender_id'], sender.id)
+        self.assertEqual(persisted['recipient_id'], recipient.id)
+        self.assertEqual(persisted['sender_kind'], 'architect')
+        self.assertEqual(persisted['recipient_kind'], 'architect')
+        self.assertEqual(injected[0]['cmd'], 'inject_mcp_message')
+        self.assertEqual(injected[0]['agent_id'], recipient.id)
+        self.assertEqual(injected[0]['sender_name'], sender.name)
+        self.assertTrue(injected[0]['ack_required'])
+
     def _make_agent_launch_service(self, state, bridge):
         class FakeTemplateManager:
             pass
