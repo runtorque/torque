@@ -596,6 +596,7 @@ function handleRelayTestResult(msg) {
  * -------------------------------------------------------------------------- */
 
 var _relayDaemonCredentialInFlight = false;
+var _relayDaemonCredentialConfirming = false;
 
 function _relayConfigEffectiveValue(rc, key) {
   if (!rc || typeof rc !== 'object') return '';
@@ -635,6 +636,10 @@ function _relayDaemonCredentialTokenValue() {
   return input ? String(input.value || '').trim() : '';
 }
 
+function _relayDaemonCredentialCurrentCredentialId(rc) {
+  return String(_relayConfigEffectiveValue(rc, 'credential_id') || '').trim();
+}
+
 function _relayDaemonCredentialClearError() {
   if (typeof document === 'undefined' || !document.getElementById) return;
   var el = document.getElementById('gls-relay-daemon-credential-error');
@@ -657,6 +662,24 @@ function _relayDaemonCredentialSetInFlight(on) {
   relayDaemonCredentialRefreshButtonState();
 }
 
+function _relayDaemonCredentialSetConfirming(on, credentialId) {
+  _relayDaemonCredentialConfirming = !!on;
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var box = document.getElementById('gls-relay-daemon-credential-confirm');
+  if (box) box.hidden = !on;
+  var msg = document.getElementById('gls-relay-daemon-credential-confirm-msg');
+  if (msg) {
+    msg.textContent = on
+      ? 'This daemon already has a relay credential (' + String(credentialId || '')
+        + '). Re-generating registers a NEW credential and makes it active on the relay, '
+        + "which can disrupt this daemon's current live connection. Generate a new "
+        + 'credential anyway?'
+      : '';
+  }
+  var btn = document.getElementById('gls-relay-daemon-credential-generate');
+  if (btn) btn.hidden = !!on;
+}
+
 function relayDaemonCredentialRefreshButtonState() {
   if (typeof document === 'undefined' || !document.getElementById) return;
   var rc = (typeof state !== 'undefined' && state) ? state.relay_config : null;
@@ -664,6 +687,7 @@ function relayDaemonCredentialRefreshButtonState() {
   var tokenPresent = !!_relayDaemonCredentialTokenValue();
   var btn = document.getElementById('gls-relay-daemon-credential-generate');
   if (btn) {
+    btn.hidden = !!_relayDaemonCredentialConfirming;
     btn.disabled = _relayDaemonCredentialInFlight || !gate.canGenerate || !tokenPresent;
     if (typeof btn.setAttribute === 'function') {
       var title = gate.canGenerate
@@ -758,6 +782,7 @@ function _relayDaemonCredentialApplyRelayConfig(msg) {
 
 function _relayDaemonCredentialReset() {
   _relayDaemonCredentialInFlight = false;
+  _relayDaemonCredentialSetConfirming(false);
   if (typeof document !== 'undefined' && document.getElementById) {
     var token = document.getElementById('gls-relay-daemon-credential-token');
     if (token) token.value = '';
@@ -769,7 +794,7 @@ function _relayDaemonCredentialReset() {
   relayDaemonCredentialRefreshButtonState();
 }
 
-function relayDaemonCredentialGenerate() {
+function _relayDaemonCredentialSubmit(skipExistingCredentialGuard) {
   if (_relayDaemonCredentialInFlight) return;
   var rc = (typeof state !== 'undefined' && state) ? state.relay_config : null;
   var gate = _relayDaemonCredentialComputeGate(rc);
@@ -788,15 +813,36 @@ function relayDaemonCredentialGenerate() {
     relayDaemonCredentialRefreshButtonState();
     return;
   }
+  var credentialId = _relayDaemonCredentialCurrentCredentialId(rc);
+  if (!skipExistingCredentialGuard && credentialId) {
+    _relayDaemonCredentialSetConfirming(true, credentialId);
+    relayDaemonCredentialRefreshButtonState();
+    return;
+  }
+  _relayDaemonCredentialSetConfirming(false);
   _relayDaemonCredentialSetInFlight(true);
   if (typeof send === 'function') {
     send({ cmd: 'generate_daemon_credential', pairing_token: token });
   }
 }
 
+function relayDaemonCredentialGenerate() {
+  _relayDaemonCredentialSubmit(false);
+}
+
+function relayDaemonCredentialCancelConfirm() {
+  _relayDaemonCredentialSetConfirming(false);
+  relayDaemonCredentialRefreshButtonState();
+}
+
+function relayDaemonCredentialConfirmGenerate() {
+  _relayDaemonCredentialSubmit(true);
+}
+
 function handleRelayDaemonCredential(msg) {
   if (!msg || msg.type !== 'daemon_credential') return;
   _relayDaemonCredentialSetInFlight(false);
+  _relayDaemonCredentialSetConfirming(false);
   var view = _relayDaemonCredentialComputeView(msg);
   if (view.kind === 'success') {
     _relayDaemonCredentialClearError();

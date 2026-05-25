@@ -1217,6 +1217,20 @@
             </div>
             <p id="gls-relay-daemon-credential-hint"
                class="gls-relay-daemon-credential-hint" hidden></p>
+            <div id="gls-relay-daemon-credential-confirm"
+                 class="gls-relay-daemon-credential-confirm"
+                 role="group" aria-label="Confirm daemon credential regeneration" hidden>
+              <span id="gls-relay-daemon-credential-confirm-msg"
+                    class="gls-relay-daemon-credential-confirm-msg"></span>
+              <span class="gls-relay-daemon-credential-confirm-actions">
+                <button type="button" class="btn-primary"
+                        id="gls-relay-daemon-credential-confirm-yes"
+                        onclick="relayDaemonCredentialConfirmGenerate()">Generate new credential</button>
+                <button type="button" class="btn-secondary"
+                        id="gls-relay-daemon-credential-confirm-no"
+                        onclick="relayDaemonCredentialCancelConfirm()">Cancel</button>
+              </span>
+            </div>
             <div id="gls-relay-daemon-credential-error"
                  class="gls-relay-daemon-credential-error"
                  role="status" aria-live="polite" hidden></div>

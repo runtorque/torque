@@ -1020,6 +1020,10 @@ function createRelayStatusHarness() {
     'gls-relay-daemon-credential-token',
     'gls-relay-daemon-credential-generate',
     'gls-relay-daemon-credential-hint',
+    'gls-relay-daemon-credential-confirm',
+    'gls-relay-daemon-credential-confirm-msg',
+    'gls-relay-daemon-credential-confirm-yes',
+    'gls-relay-daemon-credential-confirm-no',
     'gls-relay-daemon-credential-error',
     'gls-relay-daemon-credential-result',
     // Device-link generator sub-block (TORQUE:603 #3).
@@ -6485,6 +6489,8 @@ test('daemon credential generate sends pairing_token and renders Settings-popula
   assert.equal(context.sendCalls[0].cmd, 'generate_daemon_credential');
   assert.equal(context.sendCalls[0].pairing_token, 'pair_tok_123');
   assert.deepEqual(Object.keys(context.sendCalls[0]).sort(), ['cmd', 'pairing_token']);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-confirm').hidden, true,
+    'first-time provisioning proceeds directly without the re-provision guard');
   assert.equal(document.getElementById('gls-relay-daemon-credential-generate').disabled, true);
   assert.equal(document.getElementById('gls-relay-daemon-credential-generate').textContent, 'Generating…');
 
@@ -6524,6 +6530,67 @@ test('daemon credential generate sends pairing_token and renders Settings-popula
     document.getElementById('gls-relay-private-key-path').value,
     '/tmp/torque/relay/daemon-daemon-1.pem',
   );
+});
+
+test('daemon credential re-provision guard requires explicit confirm when credential exists', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  context.__cfg = {
+    config: {
+      relay_url: 'https://relay.runtorque.com',
+      daemon_id: 'daemon-1',
+      credential_id: 'cred_existing',
+    },
+    sources: {
+      relay_url: { value: 'https://relay.runtorque.com', source: 'settings' },
+      daemon_id: { value: 'daemon-1', source: 'settings' },
+      credential_id: { value: 'cred_existing', source: 'settings' },
+    },
+  };
+  runInContext(context, 'state.relay_config = __cfg; refreshRelayConfigModal({ force: true });');
+  document.getElementById('gls-relay-daemon-credential-token').value = ' pair_tok_123 ';
+
+  runInContext(context, 'relayDaemonCredentialRefreshButtonState(); relayDaemonCredentialGenerate();');
+
+  assert.equal(context.sendCalls.length, 0, 'initial click only opens local guard');
+  assert.equal(document.getElementById('gls-relay-daemon-credential-confirm').hidden, false);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-generate').hidden, true);
+  assert.match(
+    document.getElementById('gls-relay-daemon-credential-confirm-msg').textContent,
+    /cred_existing/,
+  );
+  assert.match(
+    document.getElementById('gls-relay-daemon-credential-confirm-msg').textContent,
+    /disrupt this daemon's current live connection/i,
+  );
+
+  runInContext(context, 'relayDaemonCredentialConfirmGenerate();');
+
+  assert.equal(context.sendCalls.length, 1, 'confirm sends the command');
+  assert.equal(context.sendCalls[0].cmd, 'generate_daemon_credential');
+  assert.equal(context.sendCalls[0].pairing_token, 'pair_tok_123');
+  assert.equal(document.getElementById('gls-relay-daemon-credential-confirm').hidden, true);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-generate').hidden, false);
+});
+
+test('daemon credential re-provision guard cancel aborts without command', () => {
+  const { context, document } = createRelayStatusHarness();
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  context.__cfg = {
+    config: {
+      relay_url: 'https://relay.runtorque.com',
+      daemon_id: 'daemon-1',
+      credential_id: 'cred_existing',
+    },
+  };
+  runInContext(context, 'state.relay_config = __cfg; refreshRelayConfigModal({ force: true });');
+  document.getElementById('gls-relay-daemon-credential-token').value = ' pair_tok_123 ';
+
+  runInContext(context, 'relayDaemonCredentialGenerate(); relayDaemonCredentialCancelConfirm();');
+
+  assert.equal(context.sendCalls.length, 0);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-confirm').hidden, true);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-generate').hidden, false);
 });
 
 test('daemon credential UI documents out-of-band token minting and no v1 admin call', () => {

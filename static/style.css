@@ -3555,6 +3555,24 @@ body.runtime-embedded #modal-group .modal-summary {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 11px;
 }
+.gls-relay-daemon-credential-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.gls-relay-daemon-credential-confirm[hidden] { display: none; }
+.gls-relay-daemon-credential-confirm-msg { color: var(--text); }
+.gls-relay-daemon-credential-confirm-actions { display: flex; gap: 6px; }
+.gls-relay-daemon-credential-confirm-actions .btn-primary,
+.gls-relay-daemon-credential-confirm-actions .btn-secondary {
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 600;
+}
 .gls-relay-daemon-credential-error {
   display: flex;
   flex-direction: column;
