@@ -872,6 +872,68 @@ async def _preflight_worktree_merge_gates(
             )
         )
 
+    # Always run the initial superproject merge/overwrite guard before any
+    # nested submodule publish/merge side effects.  Do not pass
+    # worktree_submodules here: that variant runs nested publish preflight
+    # first and can reject the PR path before it gets a chance to publish the
+    # worker's nested branch.  The only conflict we may defer is the configured
+    # nested gitlink conflict that the later nested reconciliation is designed
+    # to resolve.
+    precheck = await worktree_mgr.check_merge_conflicts(cell)
+    nested_gitlink_reconciliation_required = False
+    if not precheck.get("clean"):
+        nested_gitlink_reconciliation_required = bool(
+            worktree_submodules
+            and _is_reconcilable_nested_gitlink_conflict(
+                precheck,
+                worktree_submodules,
+            )
+        )
+        if nested_gitlink_reconciliation_required:
+            precheck["nested_submodule_reconciliation_required"] = True
+        else:
+            result = _worktree_merge_error(
+                aid,
+                precheck.get("error", "Conflicts detected"),
+            )
+            _attach_stale_base(result, stale_base)
+            return {
+                "ok": False,
+                "boundary_state": boundary_state,
+                "stale_base": stale_base,
+                "precheck": precheck,
+                "workflow_breach": stale_base_override_event,
+                "result": result,
+            }
+
+    if precheck.get("clean") and precheck.get("tree_sha"):
+        overwrite_paths = (
+            await worktree_mgr.merge_untracked_overwrite_paths(
+                cell.worktree_repo_root or cell.git_root or "",
+                cell.worktree_base_branch or "",
+                precheck.get("tree_sha", ""),
+            )
+        )
+        if overwrite_paths:
+            result = _worktree_merge_error(
+                aid,
+                _untracked_overwrite_message(
+                    overwrite_paths,
+                    operation="merge",
+                    location="the checked-out base repo",
+                ),
+                overwrite_paths=overwrite_paths,
+            )
+            _attach_stale_base(result, stale_base)
+            return {
+                "ok": False,
+                "boundary_state": boundary_state,
+                "stale_base": stale_base,
+                "precheck": precheck,
+                "workflow_breach": stale_base_override_event,
+                "result": result,
+            }
+
     if worktree_submodules and publish_nested_submodule_branches:
         publish_nested = getattr(
             worktree_mgr,
@@ -911,56 +973,6 @@ async def _preflight_worktree_merge_gates(
                 "workflow_breach": stale_base_override_event,
                 "result": result,
             }
-
-    precheck = (
-        await worktree_mgr.check_merge_conflicts(
-            cell,
-            worktree_submodules=worktree_submodules,
-        )
-        if worktree_submodules
-        else await worktree_mgr.check_merge_conflicts(cell)
-    )
-    if not precheck.get("clean"):
-        result = _worktree_merge_error(
-            aid,
-            precheck.get("error", "Conflicts detected"),
-        )
-        _attach_stale_base(result, stale_base)
-        return {
-            "ok": False,
-            "boundary_state": boundary_state,
-            "stale_base": stale_base,
-            "precheck": precheck,
-            "workflow_breach": stale_base_override_event,
-            "result": result,
-        }
-
-    overwrite_paths = (
-        await worktree_mgr.merge_untracked_overwrite_paths(
-            cell.worktree_repo_root or cell.git_root or "",
-            cell.worktree_base_branch or "",
-            precheck.get("tree_sha", ""),
-        )
-    )
-    if overwrite_paths:
-        result = _worktree_merge_error(
-            aid,
-            _untracked_overwrite_message(
-                overwrite_paths,
-                operation="merge",
-                location="the checked-out base repo",
-            ),
-            overwrite_paths=overwrite_paths,
-        )
-        _attach_stale_base(result, stale_base)
-        return {
-            "ok": False,
-            "boundary_state": boundary_state,
-            "stale_base": stale_base,
-            "precheck": precheck,
-            "workflow_breach": stale_base_override_event,
-            "result": result,
-        }
 
     return {
         "ok": True,
@@ -2116,6 +2128,28 @@ def _configured_worktree_submodules_for_cell(state: MatrixState, cell) -> list[s
         return list(getattr(gs, "worktree_submodules", []) or [])
     except Exception:
         return []
+
+
+def _repo_rel_path(value: str) -> str:
+    return str(value or "").strip().replace("\\", "/").strip("/")
+
+
+def _is_reconcilable_nested_gitlink_conflict(check: dict,
+                                             submodules: list[str]) -> bool:
+    if not check or check.get("clean"):
+        return False
+    allowed = {_repo_rel_path(path) for path in (submodules or []) if path}
+    if not allowed:
+        return False
+    conflicts = check.get("conflicts", []) or []
+    if not conflicts:
+        return False
+    conflict_paths = [
+        _repo_rel_path(item.get("path", ""))
+        for item in conflicts
+        if isinstance(item, dict) and item.get("path")
+    ]
+    return bool(conflict_paths) and all(path in allowed for path in conflict_paths)
 
 
 def _review_cycle_merge_sibling_candidates(
@@ -10496,6 +10530,37 @@ async def main(connection=None):
                 "reason": summary["reason"],
             }
         if head_sha != commit_sha:
+            recorded_submodules = boundary_submodule_branches(boundary)
+            reconcile_check = getattr(
+                worktree_mgr,
+                "gitlink_reconciliation_boundary_state",
+                None,
+            )
+            if (
+                submodules
+                and recorded_submodules
+                and callable(reconcile_check)
+            ):
+                try:
+                    reconciliation = await reconcile_check(
+                        cell,
+                        boundary_commit_sha=commit_sha,
+                        head_sha=head_sha,
+                        recorded_submodules=recorded_submodules,
+                        current_submodules=current_submodules,
+                        worktree_submodules=submodules,
+                    )
+                except Exception:
+                    log.exception(
+                        "Failed to verify gitlink reconciliation boundary "
+                        "for '%s'",
+                        cell.name,
+                    )
+                    reconciliation = {}
+                if reconciliation.get("ok"):
+                    summary["clean_mergeable"] = True
+                    summary["gitlink_reconciliation"] = reconciliation
+                    return {"latest": summary, "clean": summary, "reason": ""}
             summary["reason"] = "branch_tip_moved"
             return {
                 "latest": summary,
@@ -12448,7 +12513,35 @@ async def main(connection=None):
                             if submodules
                             else await worktree_mgr.check_merge_conflicts(cell)
                         )
-                        if check.get("clean"):
+                        nested_merge_preflight = getattr(
+                            worktree_mgr,
+                            "nested_submodule_merge_preflight",
+                            None,
+                        )
+                        if (
+                            submodules
+                            and _is_reconcilable_nested_gitlink_conflict(
+                                check,
+                                submodules,
+                            )
+                            and callable(nested_merge_preflight)
+                        ):
+                            nested_preflight = (
+                                await nested_merge_preflight(
+                                    cell,
+                                    submodules,
+                                )
+                            )
+                            if nested_preflight.get("ok"):
+                                check = {
+                                    "clean": True,
+                                    "tree_sha": "",
+                                    "conflicts": [],
+                                    "nested_submodule_reconciliation_required": True,
+                                    "nested_submodules": nested_preflight,
+                                    "precheck": check,
+                                }
+                        if check.get("clean") and check.get("tree_sha"):
                             overwrite_paths = (
                                 await worktree_mgr.merge_untracked_overwrite_paths(
                                     cell.worktree_repo_root

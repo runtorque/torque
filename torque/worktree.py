@@ -2162,6 +2162,293 @@ class WorktreeManager:
             })
         return states
 
+    async def gitlink_reconciliation_boundary_state(
+            self,
+            cell,
+            *,
+            boundary_commit_sha: str,
+            head_sha: str,
+            recorded_submodules: list[dict] | None = None,
+            current_submodules: list[dict] | None = None,
+            worktree_submodules=None,
+    ) -> dict:
+        """Validate a branch-tip move as a pure nested-gitlink reconciliation.
+
+        Review boundaries normally require the worktree branch tip to stay
+        fixed.  The one safe exception is Torque's merge-time nested submodule
+        reconciliation: the superproject branch gains only gitlink bumps, and
+        each bumped submodule commit is the clean merge of the reviewed nested
+        branch tip with the already-landed base submodule tip.
+        """
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        if not repo_root and getattr(cell, "worktree_path", ""):
+            repo_root = await self.get_repo_root(cell.worktree_path) or ""
+        wt_dir = str(getattr(cell, "worktree_path", "") or "").strip()
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        boundary_commit_sha = str(boundary_commit_sha or "").strip()
+        head_sha = str(head_sha or "").strip()
+        if not repo_root or not wt_dir or not base:
+            return {"ok": False, "reason": "missing_worktree"}
+        if not boundary_commit_sha or not head_sha:
+            return {"ok": False, "reason": "missing_commit"}
+        if boundary_commit_sha == head_sha:
+            return {"ok": False, "reason": "unchanged"}
+
+        code, _out = await self._git_stdout(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            boundary_commit_sha,
+            head_sha,
+        )
+        if code != 0:
+            return {"ok": False, "reason": "boundary_not_ancestor"}
+
+        configured_paths = set(_normalize_worktree_submodules(worktree_submodules))
+        recorded_by_path = {
+            _normalize_repo_rel_path(item.get("path", "")): item
+            for item in (recorded_submodules or [])
+            if isinstance(item, dict) and _normalize_repo_rel_path(
+                item.get("path", "")
+            )
+        }
+        current_by_path = {
+            _normalize_repo_rel_path(item.get("path", "")): item
+            for item in (current_submodules or [])
+            if isinstance(item, dict) and _normalize_repo_rel_path(
+                item.get("path", "")
+            )
+        }
+        allowed_paths = configured_paths | set(recorded_by_path)
+        if not allowed_paths:
+            return {"ok": False, "reason": "missing_submodules"}
+
+        changed_paths = await self._diff_name_only(
+            repo_root,
+            boundary_commit_sha,
+            head_sha,
+        )
+        if not changed_paths:
+            return {"ok": False, "reason": "no_changed_paths"}
+        unexpected = [path for path in changed_paths if path not in allowed_paths]
+        if unexpected:
+            return {
+                "ok": False,
+                "reason": "non_gitlink_changes",
+                "paths": changed_paths,
+                "unexpected_paths": unexpected,
+            }
+
+        changed_by_commit = await self._gitlink_reconciliation_commit_paths(
+            repo_root,
+            boundary_commit_sha,
+            head_sha,
+        )
+        unexpected_commits = [
+            item for item in changed_by_commit
+            if any(path not in allowed_paths for path in item.get("paths", []))
+        ]
+        if unexpected_commits:
+            return {
+                "ok": False,
+                "reason": "non_gitlink_commit",
+                "commits": unexpected_commits,
+            }
+
+        reconciled: list[dict] = []
+        for path in changed_paths:
+            recorded = recorded_by_path.get(path, {})
+            current = current_by_path.get(path, {})
+            module_dir = (
+                str(current.get("repo_root", "") or "").strip()
+                or str(recorded.get("repo_root", "") or "").strip()
+            )
+            old_gitlink = await self._gitlink_sha(wt_dir, boundary_commit_sha, path)
+            new_gitlink = await self._gitlink_sha(wt_dir, head_sha, path)
+            base_gitlink = await self._gitlink_sha(wt_dir, base, path)
+            recorded_sha = str(
+                recorded.get("commit_sha", "")
+                or recorded.get("head_sha", "")
+                or old_gitlink
+            ).strip()
+            current_sha = str(
+                current.get("commit_sha", "")
+                or current.get("head_sha", "")
+                or new_gitlink
+            ).strip()
+            if not module_dir:
+                sub_wt = self._join_repo_rel(wt_dir, path)
+                module_dir = await self.get_repo_root(sub_wt) or ""
+            if not old_gitlink or not new_gitlink or not module_dir:
+                return {
+                    "ok": False,
+                    "reason": "missing_gitlink",
+                    "path": path,
+                }
+            if current_sha and current_sha != new_gitlink:
+                return {
+                    "ok": False,
+                    "reason": "head_gitlink_mismatch",
+                    "path": path,
+                    "current_sha": current_sha,
+                    "new_gitlink_sha": new_gitlink,
+                }
+            if recorded_sha and old_gitlink and recorded_sha != old_gitlink:
+                return {
+                    "ok": False,
+                    "reason": "recorded_gitlink_mismatch",
+                    "path": path,
+                    "recorded_sha": recorded_sha,
+                    "old_gitlink_sha": old_gitlink,
+                }
+            if not await self._commit_is_ancestor(
+                    module_dir,
+                    old_gitlink,
+                    new_gitlink,
+            ):
+                return {
+                    "ok": False,
+                    "reason": "reviewed_submodule_not_ancestor",
+                    "path": path,
+                }
+            if (
+                base_gitlink
+                and base_gitlink != old_gitlink
+                and not await self._commit_is_ancestor(
+                    module_dir,
+                    base_gitlink,
+                    new_gitlink,
+                )
+            ):
+                return {
+                    "ok": False,
+                    "reason": "base_submodule_not_ancestor",
+                    "path": path,
+                }
+            if (
+                base_gitlink
+                and not await self._merge_tree_matches_commit(
+                    module_dir,
+                    base_gitlink,
+                    old_gitlink,
+                    new_gitlink,
+                )
+            ):
+                return {
+                    "ok": False,
+                    "reason": "submodule_tree_not_clean_merge",
+                    "path": path,
+                }
+            reconciled.append({
+                "path": path,
+                "old_gitlink_sha": old_gitlink,
+                "new_gitlink_sha": new_gitlink,
+                "base_gitlink_sha": base_gitlink,
+            })
+
+        for path, recorded in recorded_by_path.items():
+            if path in changed_paths:
+                continue
+            current = current_by_path.get(path)
+            if not current:
+                return {
+                    "ok": False,
+                    "reason": "missing_current_submodule",
+                    "path": path,
+                }
+            recorded_sha = str(
+                recorded.get("commit_sha", "")
+                or recorded.get("head_sha", "")
+            ).strip()
+            current_sha = str(
+                current.get("commit_sha", "")
+                or current.get("head_sha", "")
+            ).strip()
+            if recorded_sha and current_sha and recorded_sha != current_sha:
+                return {
+                    "ok": False,
+                    "reason": "unrelated_submodule_tip_moved",
+                    "path": path,
+                    "recorded_sha": recorded_sha,
+                    "current_sha": current_sha,
+                }
+
+        return {
+            "ok": True,
+            "reason": "gitlink_reconciliation",
+            "paths": changed_paths,
+            "submodules": reconciled,
+            "commits": changed_by_commit,
+        }
+
+    async def _gitlink_reconciliation_commit_paths(
+            self,
+            repo_root: str,
+            old_ref: str,
+            new_ref: str) -> list[dict]:
+        code, stdout = await self._git_stdout(
+            repo_root,
+            "rev-list",
+            "--reverse",
+            f"{old_ref}..{new_ref}",
+        )
+        if code != 0:
+            return []
+        commits = [line.strip() for line in stdout.splitlines() if line.strip()]
+        out: list[dict] = []
+        for commit in commits:
+            path_code, path_out = await self._git_stdout(
+                repo_root,
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                f"{commit}^!",
+            )
+            if path_code != 0:
+                paths = await self._diff_name_only(repo_root, f"{commit}^", commit)
+            else:
+                paths = [
+                    _normalize_repo_rel_path(line.strip())
+                    for line in path_out.splitlines()
+                    if _normalize_repo_rel_path(line.strip())
+                ]
+            out.append({"commit_sha": commit, "paths": paths})
+        return out
+
+    async def _commit_is_ancestor(self, repo_root: str, ancestor: str,
+                                  descendant: str) -> bool:
+        if not repo_root or not ancestor or not descendant:
+            return False
+        if ancestor == descendant:
+            return True
+        code, _out = await self._git_stdout(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+        )
+        return code == 0
+
+    async def _merge_tree_matches_commit(self, repo_root: str, base_ref: str,
+                                         branch_ref: str,
+                                         expected_ref: str) -> bool:
+        if not repo_root or not base_ref or not branch_ref or not expected_ref:
+            return False
+        code, tree_out, _err = await self._git_run(
+            repo_root,
+            "merge-tree",
+            "--write-tree",
+            base_ref,
+            branch_ref,
+        )
+        if code != 0 or not tree_out:
+            return False
+        merge_tree = tree_out.splitlines()[0].strip()
+        expected_tree = await self.rev_parse(repo_root, f"{expected_ref}^{{tree}}")
+        return bool(merge_tree and expected_tree and merge_tree == expected_tree)
+
     async def _nested_submodule_base_gitlink(self, cell, path: str) -> str:
         base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
         if not base:
@@ -2348,6 +2635,11 @@ class WorktreeManager:
                 entry["branch"],
             )
             entry["remote_branch_sha"] = remote_branch_sha
+            entry["remote_base_sha"] = await self._remote_branch_sha(
+                info["module_dir"],
+                remote,
+                entry["base_branch"],
+            )
             if entry["branch"] and remote_branch_sha != head:
                 return self._nested_preflight_error(
                     entry,
@@ -2395,6 +2687,106 @@ class WorktreeManager:
         if code != 0:
             return False, err or "update-ref failed"
         return True, ""
+
+    async def _set_branch_to_commit(self, repo_root: str, branch: str,
+                                    sha: str) -> tuple[bool, str]:
+        """Move a local branch to *sha*, updating a checked-out worktree too."""
+        checkout = await self._checked_out_worktree_for_branch(repo_root, branch)
+        if checkout:
+            status_code, status_out = await self._git_stdout(
+                checkout,
+                "status",
+                "--porcelain",
+            )
+            if status_code != 0:
+                return False, "status --porcelain failed"
+            if status_out.strip():
+                return (
+                    False,
+                    f"Cannot reset checked-out branch {branch}: "
+                    "worktree has uncommitted changes.",
+                )
+            code, _out, err = await self._git_run(
+                checkout,
+                "reset",
+                "--hard",
+                sha,
+            )
+            if code != 0:
+                return False, err or "reset --hard failed"
+            return True, ""
+        code, _out, err = await self._git_run(
+            repo_root,
+            "update-ref",
+            f"refs/heads/{branch}",
+            sha,
+        )
+        if code != 0:
+            return False, err or "update-ref failed"
+        return True, ""
+
+    async def _sync_branch_to_remote(self, repo_root: str, *,
+                                     remote: str,
+                                     branch: str,
+                                     force: bool = False) -> dict:
+        remote_sha = await self._remote_branch_sha(repo_root, remote, branch)
+        if not remote_sha:
+            return {"ok": True, "changed": False, "remote_sha": ""}
+
+        local_sha = await self.rev_parse(repo_root, branch) or ""
+        if local_sha == remote_sha:
+            return {
+                "ok": True,
+                "changed": False,
+                "local_sha": local_sha,
+                "remote_sha": remote_sha,
+            }
+
+        if local_sha and not force:
+            code, _out = await self._git_stdout(
+                repo_root,
+                "merge-base",
+                "--is-ancestor",
+                local_sha,
+                remote_sha,
+            )
+            if code != 0:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Local {branch} is not a fast-forward of "
+                        f"{remote}/{branch}."
+                    ),
+                    "local_sha": local_sha,
+                    "remote_sha": remote_sha,
+                }
+
+        if force:
+            moved, error = await self._set_branch_to_commit(
+                repo_root,
+                branch,
+                remote_sha,
+            )
+        else:
+            moved, error = await self._advance_branch_to_commit(
+                repo_root,
+                branch,
+                remote_sha,
+            )
+        if not moved:
+            return {
+                "ok": False,
+                "error": error,
+                "local_sha": local_sha,
+                "remote_sha": remote_sha,
+            }
+        return {
+            "ok": True,
+            "changed": True,
+            "local_sha": local_sha,
+            "remote_sha": remote_sha,
+            "forced": bool(force),
+        }
 
     async def _merge_branch_into_base_repo(self, repo_root: str, *,
                                            base_branch: str,
@@ -2502,6 +2894,16 @@ class WorktreeManager:
             }
         return {"ok": True}
 
+    @staticmethod
+    def _push_rejected_non_fast_forward(message: str) -> bool:
+        text = (message or "").lower()
+        return (
+            "non-fast-forward" in text
+            or "fetch first" in text
+            or "stale info" in text
+            or "failed to push some refs" in text
+        )
+
     async def publish_nested_submodule_branches_for_merge(
             self,
             cell,
@@ -2589,6 +2991,13 @@ class WorktreeManager:
                     "submodule": entry,
                 }
             if not entry["branch"]:
+                if old_gitlink and old_gitlink == new_gitlink == head:
+                    published.append({
+                        **entry,
+                        "skipped": True,
+                        "skip_reason": "no_gitlink_change_detached_head",
+                    })
+                    continue
                 return {
                     "ok": False,
                     "phase": "nested_submodule_publish",
@@ -2711,32 +3120,98 @@ class WorktreeManager:
             branch = entry.get("branch", "")
             module_dir = entry.get("repo_root", "")
             remote = entry.get("remote", "") or "origin"
-            merge_result = await self._merge_branch_into_base_repo(
-                module_dir,
-                base_branch=base,
-                branch=branch,
-                message=(
-                    f"Merge nested submodule {path} branch '{branch}'"
-                    if not message else
-                    f"{message}\n\nNested submodule: {path}\nBranch: {branch}"
-                ),
-            )
-            if not merge_result.get("ok"):
+            head = entry.get("head_sha", "")
+            old_gitlink = entry.get("old_gitlink_sha", "")
+            new_gitlink = entry.get("new_gitlink_sha", "")
+            if not branch:
+                if old_gitlink and old_gitlink == new_gitlink == head:
+                    merged.append({
+                        **entry,
+                        "skipped": True,
+                        "skip_reason": "no_gitlink_change_detached_head",
+                    })
+                    continue
                 return {
                     "ok": False,
-                    "error": merge_result.get(
-                        "error",
-                        f"Nested submodule merge failed for {path}",
+                    "error": (
+                        f"Nested submodule merge failed for {path}: "
+                        "submodule HEAD is detached."
                     ),
                     "submodule": entry,
                 }
-            merged_sha = merge_result.get("sha", "")
-            push_base = await self._push_nested_submodule_ref(
-                entry.get("worktree_path", ""),
-                remote,
-                merged_sha,
-                base,
-            )
+
+            merge_result: dict = {}
+            push_base: dict = {}
+            base_sync: dict = {}
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                fetched, fetch_error = await self._nested_submodule_fetch_remote(
+                    entry.get("worktree_path", ""),
+                    remote,
+                )
+                if not fetched:
+                    return {
+                        "ok": False,
+                        "error": (
+                            f"Nested submodule {path} remote sync failed: "
+                            f"{fetch_error}"
+                        ),
+                        "submodule": entry,
+                    }
+                base_sync = await self._sync_branch_to_remote(
+                    module_dir,
+                    remote=remote,
+                    branch=base,
+                    force=attempt > 0,
+                )
+                if not base_sync.get("ok"):
+                    return {
+                        "ok": False,
+                        "error": (
+                            f"Nested submodule {path} base sync failed: "
+                            f"{base_sync.get('error', '')}"
+                        ).strip(),
+                        "submodule": entry,
+                        "base_sync": base_sync,
+                    }
+                if base_sync.get("remote_sha"):
+                    entry["remote_base_sha"] = base_sync.get("remote_sha", "")
+
+                merge_result = await self._merge_branch_into_base_repo(
+                    module_dir,
+                    base_branch=base,
+                    branch=branch,
+                    message=(
+                        f"Merge nested submodule {path} branch '{branch}'"
+                        if not message else
+                        f"{message}\n\nNested submodule: {path}\nBranch: {branch}"
+                    ),
+                )
+                if not merge_result.get("ok"):
+                    return {
+                        "ok": False,
+                        "error": merge_result.get(
+                            "error",
+                            f"Nested submodule merge failed for {path}",
+                        ),
+                        "submodule": entry,
+                    }
+                merged_sha = merge_result.get("sha", "")
+                push_base = await self._push_nested_submodule_ref(
+                    entry.get("worktree_path", ""),
+                    remote,
+                    merged_sha,
+                    base,
+                )
+                if push_base.get("ok"):
+                    break
+                push_error = push_base.get("error", "")
+                if (
+                    attempt >= max_attempts - 1
+                    or not self._push_rejected_non_fast_forward(push_error)
+                ):
+                    break
+
             if not push_base.get("ok"):
                 return {
                     "ok": False,
@@ -2749,12 +3224,21 @@ class WorktreeManager:
             # Keep the worker submodule branch aligned with the merged base
             # commit so subsequent refresh/remove/rebase checks see a coherent
             # branch pair.  This is a fast-forward after the merge commit above.
-            await self._git_run(
+            reset_code, _reset_out, reset_err = await self._git_run(
                 entry.get("worktree_path", ""),
                 "reset",
                 "--hard",
                 merged_sha,
             )
+            if reset_code != 0:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Nested submodule {path} merged locally but could "
+                        f"not reset {branch}: {reset_err}"
+                    ),
+                    "submodule": entry,
+                }
             push_branch = await self._push_nested_submodule_ref(
                 entry.get("worktree_path", ""),
                 remote,
@@ -2771,7 +3255,12 @@ class WorktreeManager:
                     "submodule": entry,
                 }
             updates.append({"path": path, "sha": merged_sha})
-            merged.append({**entry, "merged_sha": merged_sha})
+            merged.append({
+                **entry,
+                "merged_sha": merged_sha,
+                "base_sync": base_sync,
+                "merge_changed": bool(merge_result.get("changed")),
+            })
 
         bump = await self._commit_superproject_gitlink_bumps(
             wt_dir,
