@@ -111,14 +111,14 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_supervised_bridge_returns_non_error_unavailable(self):
         payload = await self.server_supervisor.build_supervisor_sessions_payload(
             object(), self.MatrixState(), lambda **_: {
-                "mode": "toolbelt",
-                "terminal_backend": "iterm2",
+                "mode": "standalone",
+                "terminal_backend": "pty",
             })
 
         self.assertEqual(payload["type"], "supervisor_sessions")
         self.assertFalse(payload["available"])
-        self.assertEqual(payload["mode"], "toolbelt")
-        self.assertEqual(payload["terminal_backend"], "iterm2")
+        self.assertEqual(payload["mode"], "standalone")
+        self.assertEqual(payload["terminal_backend"], "pty")
         self.assertEqual(payload["sessions"], [])
         self.assertIn("only available", payload["message"])
 

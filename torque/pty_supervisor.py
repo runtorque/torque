@@ -11,9 +11,9 @@ crashes: if the daemon goes away, sessions keep running; when a new
 daemon starts, it pings the existing socket and re-subscribes to
 existing sessions.
 
-Scope: STANDALONE mode only. The toolbelt/iTerm2 path does not use
-this — ``ITerm2Adapter`` continues to own its sessions via the iTerm2
-Python API.
+Scope: standalone PTY sessions. The foreground daemon owns its sessions through
+the supervised PTY adapter while this helper isolates child processes across
+daemon restarts.
 """
 
 from __future__ import annotations

@@ -254,9 +254,8 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             await adapter_b.shutdown()
 
     async def test_adopt_supervisor_session_reinstalls_mcp_and_hooks(self):
-        """Parity with ITerm2Adapter.reconnect_orphans: when the daemon
-        restarts and adopts a live supervisor session for an awareness
-        agent, it must re-install hooks, MCP config, and skills in the
+        """When the daemon restarts and adopts a live supervisor session for an
+        awareness agent, it must re-install hooks, MCP config, and skills in the
         agent's working directory so files removed between restarts are
         recreated.
         """

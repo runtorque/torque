@@ -877,15 +877,15 @@ class AgentCell:
     group: str
     slug: str = ""              # auto-generated from name
     cell_type: str = "agent"  # "agent" | "terminal"
-    terminal_backend: str = "pty"  # "iterm2" | "pty" (future backends)
+    terminal_backend: str = "pty"  # current default; reserved for future backends
     session_id: Optional[str] = None
     profile: str = "Default"
     command: str = ""
     directory: str = ""  # working dir on create/relaunch
-    tab_color: str = ""  # hex color for iTerm2 tab (e.g. "#f85149")
+    tab_color: str = ""  # optional UI/session accent color (e.g. "#f85149")
     icon: str = ""  # custom icon character (from AGENT_ICONS set)
     template: str = ""  # template used to create this agent
-    window_id: str = ""  # iTerm2 window this session lives in
+    window_id: str = ""  # terminal/UI window this session lives in
     parent_id: str = ""  # for child terminals: the owning agent's ID
     status: str = "stopped"  # idle | running | error | stopped
     current_process: str = ""  # foreground job name (tracked for terminals)
@@ -1898,7 +1898,7 @@ class GlobalSettings:
     default_command: str = ""        # empty = use config.DEFAULT_COMMAND (env var fallback)
     filter_by_window: bool = True    # global default for window filtering
     focus_new_tabs: bool = True      # switch focus to newly created tabs
-    focus_on_click: bool = False     # single click also focuses the iTerm2 tab
+    focus_on_click: bool = False     # single click also focuses the terminal
     xterm_scrollback: int = XTERM_SCROLLBACK_DEFAULT  # embedded xterm.js history lines
     # General > Board
     default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))

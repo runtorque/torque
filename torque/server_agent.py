@@ -198,7 +198,7 @@ class AgentLaunchService:
         self._prompt_queue_tails: dict[str, asyncio.Task] = {}
 
     def _runtime_terminal_backend(self) -> str:
-        return "pty" if self.bridge.capabilities.supports_embedded_terminal else "iterm2"
+        return "pty"
 
     async def resolve_base_dir(self, group: str = "") -> str:
         """Resolve a base directory for action and template discovery."""

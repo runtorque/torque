@@ -1,8 +1,8 @@
 """Terminal adapter protocol — abstracts the terminal emulator backend.
 
 This protocol defines the interface that bridge implementations must satisfy.
-The iTerm2 adapter (bridge.py) is the current implementation; future adapters
-(e.g. Ghostty) can implement the same protocol to support different terminals.
+The supervised PTY adapter is the current implementation; future adapters can
+implement the same protocol to support different terminal runtimes.
 
 Note: this is a *terminal emulator* adapter, distinct from the *agent type*
 adapters in torque/adapters/ which handle AI agent awareness (Claude Code, etc.).

@@ -47,7 +47,7 @@ log = logging.getLogger("torque")
 PROTOCOL_VERSION = "2025-03-26"
 SERVER_INFO = {"name": "torque", "version": __version__}
 INSTRUCTIONS = (
-    "Torque manages AI agent sessions and tasks in iTerm2. "
+    "Torque manages AI agent sessions and tasks in local terminals. "
     "Use these tools to report progress, complete tasks, derive "
     "subtasks, and coordinate with other agents in the pipeline."
 )

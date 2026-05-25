@@ -250,31 +250,6 @@ prompt: |
         self.assertEqual(state.board_tasks['task-1'].lane, 'In Progress')
         self.assertEqual(state.board_tasks['task-2'].lane, 'In Progress')
 
-    def test_standalone_mode_skips_keybinding_installation(self):
-        old = self.server_mod.STANDALONE
-        try:
-            self.server_mod.STANDALONE = False
-            self.assertTrue(self.server_mod._should_install_keybindings())
-            self.server_mod.STANDALONE = True
-            self.assertFalse(self.server_mod._should_install_keybindings())
-        finally:
-            self.server_mod.STANDALONE = old
-
-    def test_get_keybinding_defaults_in_standalone_mode_returns_empty_dict(self):
-        # Standalone mode leaves the keybindings module unimported;
-        # the helper must not call get_default_bindings() on None.
-        self.assertEqual(self.server_mod._get_keybinding_defaults(None), {})
-
-    def test_get_keybinding_defaults_delegates_to_module_when_present(self):
-        sentinel = {'add_agent': {'modifiers': ['cmd'], 'character': 'a'}}
-        fake_module = types.SimpleNamespace(
-            get_default_bindings=lambda: sentinel,
-        )
-        self.assertEqual(
-            self.server_mod._get_keybinding_defaults(fake_module),
-            sentinel,
-        )
-
     def test_compact_snapshot_opt_in_from_query_or_payload(self):
         request = types.SimpleNamespace(query={'compact': '1'})
         self.assertTrue(self.server_mod._request_wants_compact_snapshot(request))
@@ -332,10 +307,6 @@ prompt: |
         stop_state = self.server_mod._DaemonStopState()
         scheduled = []
 
-        class BadKeybindings:
-            async def remove(self, _connection, _displaced):
-                raise RuntimeError("keybinding boom")
-
         class BadState:
             agents = {"agent-1": types.SimpleNamespace(id="agent-1")}
 
@@ -350,16 +321,11 @@ prompt: |
                 daemon_stop_state=stop_state,
                 schedule_daemon_stop=schedule_stop,
                 state=BadState(),
-                keybindings_module=BadKeybindings(),
-                connection=object(),
-                displaced=[["old-binding"]],
-                install_keybindings=True,
             ))
 
         self.assertTrue(self.server_mod._is_daemon_stop_result(result))
         self.assertEqual(scheduled, ["scheduled"])
         self.assertTrue(stop_state.should_reject_api_request("get_config"))
-        self.assertIn("Keybinding cleanup", "\n".join(logs.output))
         self.assertIn("Failed to persist agent", "\n".join(logs.output))
 
         scheduled.clear()

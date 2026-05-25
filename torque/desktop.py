@@ -291,9 +291,9 @@ class DesktopLauncher:
             if not runtime.get("standalone"):
                 raise RuntimeError(
                     f"Port {self.settings.port} is already serving an "
-                    "iTerm2-hosted Torque instance. The desktop shell uses its "
+                    "unsupported Torque instance. The desktop shell uses its "
                     "own standalone profile and port by default so it does not "
-                    "attach to the live toolbelt daemon."
+                    "attach to another live daemon."
                 )
 
             matches_target, mismatches = self._runtime_matches_target(runtime)
