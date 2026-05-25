@@ -63,6 +63,36 @@ function labels(items) {
   return items.filter((item) => item && item.label).map((item) => item.label);
 }
 
+test('canvas empty menu actions invoke the create handlers for the canvas group', () => {
+  const context = createContext();
+  vm.runInContext(`
+    var createCalls = [];
+    openAddArchitectForGroup = function(group) { createCalls.push({ type: 'architect', group: group }); };
+    openAddEngineerForSection = function(group, architectId) { createCalls.push({ type: 'engineer', group: group, architectId: architectId || '' }); };
+    openAddWorkerForSection = function(group) { createCalls.push({ type: 'worker', group: group }); };
+  `, context);
+
+  vm.runInContext("_canvasShowEmptyMenu(56, 78, 'alpha')", context);
+
+  assert.equal(context.contextMenuCalls.length, 1);
+  assert.equal(context.contextMenuCalls[0].x, 56);
+  assert.equal(context.contextMenuCalls[0].y, 78);
+  assert.deepEqual(JSON.parse(JSON.stringify(labels(context.contextMenuCalls[0].items))), [
+    'New architect',
+    'New engineer',
+    'New worker',
+  ]);
+
+  for (const item of context.contextMenuCalls[0].items) {
+    vm.runInContext(item.action, context);
+  }
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(createCalls)', context)), [
+    { type: 'architect', group: 'alpha' },
+    { type: 'engineer', group: 'alpha', architectId: '' },
+    { type: 'worker', group: 'alpha' },
+  ]);
+});
+
 test('canvas card menu reuses grid worktree, task, context, and edit actions', () => {
   const context = createContext();
   context.state.group_settings.alpha = { git_worktree: true };
@@ -140,6 +170,10 @@ test('canvas menu gates architect-only actions by cell.kind from state', () => {
     cell_type: 'agent',
     status: 'running',
   };
+  context.createCalls = [];
+  context.openAddEngineerForSection = function(group, architectId) {
+    context.createCalls.push({ group, architectId: architectId || '' });
+  };
 
   const items = showCanvasMenu(context, 'worker', 'arch-1');
   const itemLabels = labels(items);
@@ -149,4 +183,8 @@ test('canvas menu gates architect-only actions by cell.kind from state', () => {
   assert.equal(itemLabels.includes('Dismiss…'), true);
   const newEngineerItem = items.find((item) => item.label === 'New engineer');
   assert.equal(newEngineerItem.action, 'openAddEngineerForSection("alpha", "arch-1")');
+  vm.runInContext(newEngineerItem.action, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.createCalls)), [
+    { group: 'alpha', architectId: 'arch-1' },
+  ]);
 });

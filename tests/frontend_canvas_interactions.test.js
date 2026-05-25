@@ -103,6 +103,28 @@ function buildTrees(context, groupName) {
   return JSON.parse(json);
 }
 
+function renderCanvasHtml(context, groupName) {
+  const json = vm.runInContext(
+    `JSON.stringify(_canvasRenderHtml(${JSON.stringify(groupName)}, _canvasBuildTrees(${JSON.stringify(groupName)})))`,
+    context,
+  );
+  return JSON.parse(json);
+}
+
+function guideRows(html) {
+  const rows = [];
+  const re = /<div class="canvas-row">((?:<div class="canvas-guide canvas-guide--(?:through|empty|corner|tee)"><\/div>)*)/g;
+  let match;
+  while ((match = re.exec(html)) !== null) {
+    const guides = [];
+    const guideRe = /canvas-guide--(through|empty|corner|tee)/g;
+    let guideMatch;
+    while ((guideMatch = guideRe.exec(match[1])) !== null) guides.push(guideMatch[1]);
+    rows.push(guides);
+  }
+  return rows;
+}
+
 // Count how many times a given card id appears anywhere in the assembled
 // model (architect spines, hired-engineer rows + their workers, loose
 // engineers + their workers, and the loose-workers bar). Used as a
@@ -338,12 +360,101 @@ test('canvas tree model orders architects, engineers, and workers by created_at 
   assert.deepEqual(engA.workers.map((w) => w.id), ['worker-y', 'worker-z']);
 });
 
+test('canvas tree model handles multiple architects, engineers, and workers without duplicating cards', () => {
+  const context = createContext();
+  seed(context, [
+    architect('arch-a', 'Architect A', 1),
+    architect('arch-b', 'Architect B', 2),
+    engineer('eng-a1', 'Engineer A1', 'arch-a', 3),
+    engineer('eng-a2', 'Engineer A2', 'arch-a', 4),
+    engineer('eng-b1', 'Engineer B1', 'arch-b', 5),
+    engineer('eng-loose', 'Loose Engineer', '', 6),
+    worker('worker-a1-1', 'A1 Worker 1', 'eng-a1', 7),
+    worker('worker-a1-2', 'A1 Worker 2', 'eng-a1', 8),
+    worker('worker-a2-1', 'A2 Worker 1', 'eng-a2', 9),
+    worker('worker-b1-1', 'B1 Worker 1', 'eng-b1', 10),
+    worker('worker-loose-eng', 'Loose Engineer Worker', 'eng-loose', 11),
+    worker('worker-user', 'User Worker', '', 12),
+  ]);
+
+  const model = buildTrees(context, 'alpha');
+
+  assert.deepEqual(model.trees.map((tree) => tree.architect.id), ['arch-a', 'arch-b']);
+  assert.deepEqual(
+    model.trees[0].engineers.map((row) => ({
+      engineer: row.engineer.id,
+      workers: row.workers.map((w) => w.id),
+    })),
+    [
+      { engineer: 'eng-a1', workers: ['worker-a1-1', 'worker-a1-2'] },
+      { engineer: 'eng-a2', workers: ['worker-a2-1'] },
+    ],
+  );
+  assert.deepEqual(
+    model.trees[1].engineers.map((row) => ({
+      engineer: row.engineer.id,
+      workers: row.workers.map((w) => w.id),
+    })),
+    [{ engineer: 'eng-b1', workers: ['worker-b1-1'] }],
+  );
+  assert.deepEqual(
+    model.standalone.engineers.map((row) => ({
+      engineer: row.engineer.id,
+      workers: row.workers.map((w) => w.id),
+    })),
+    [{ engineer: 'eng-loose', workers: ['worker-loose-eng'] }],
+  );
+  assert.deepEqual(model.standalone.workers.map((w) => w.id), ['worker-user']);
+
+  for (const id of [
+    'arch-a', 'arch-b', 'eng-a1', 'eng-a2', 'eng-b1', 'eng-loose',
+    'worker-a1-1', 'worker-a1-2', 'worker-a2-1', 'worker-b1-1',
+    'worker-loose-eng', 'worker-user',
+  ]) {
+    assert.equal(countCardOccurrences(model, id), 1, `${id} should appear exactly once`);
+  }
+});
+
 test('canvas tree model returns empty buckets when state has no agents', () => {
   const context = createContext();
   const model = buildTrees(context, 'alpha');
   assert.deepEqual(model.trees, []);
   assert.deepEqual(model.standalone.engineers, []);
   assert.deepEqual(model.standalone.workers, []);
+});
+
+test('canvas render html uses production canvas selectors and keeps guide spines continuous', () => {
+  const context = createContext();
+  seed(context, [
+    architect('arch-1', 'Architect One', 1),
+    engineer('eng-1', 'Engineer One', 'arch-1', 2),
+    engineer('eng-2', 'Engineer Two', 'arch-1', 3),
+    worker('worker-1', 'Worker One', 'eng-1', 4),
+    worker('worker-2', 'Worker Two', 'eng-1', 5),
+    worker('worker-3', 'Worker Three', 'eng-2', 6),
+  ]);
+
+  const html = renderCanvasHtml(context, 'alpha');
+
+  assert.match(html, /class="agent-canvas" data-canvas-group="alpha"/);
+  assert.match(html, /class="canvas-tree" data-canvas-tree="arch-1"/);
+  for (const id of ['arch-1', 'eng-1', 'eng-2', 'worker-1', 'worker-2', 'worker-3']) {
+    assert.match(html, new RegExp('data-canvas-card-id="' + id + '"'));
+  }
+
+  // Row guide cells are the DOM contract that draws the tree spines:
+  // architect(no guide), first engineer(T), first-worker(through+T),
+  // last-worker(through+corner), last engineer(corner), and that engineer's
+  // only worker(empty ancestor + corner). Regressions here break the visual
+  // continuity without changing card content.
+  assert.deepEqual(guideRows(html), [
+    [],
+    ['tee'],
+    ['through', 'tee'],
+    ['through', 'corner'],
+    ['corner'],
+    ['empty', 'corner'],
+  ]);
 });
 
 /* -- Interaction routing: _canvasAttachInteractions --------------------- */
@@ -363,7 +474,9 @@ function attachInteractionHarness(context, opts) {
   };
 
   const calls = { onAgentClick: [], focusAgent: [], cardMenu: [], emptyMenu: [] };
-  if (options.withOnAgentClick !== false) {
+  if (options.preserveOnAgentClick) {
+    // Use the production onAgentClick already loaded into the VM.
+  } else if (options.withOnAgentClick !== false) {
     context.onAgentClick = function(id) { calls.onAgentClick.push(id); };
   } else {
     context.onAgentClick = undefined;
@@ -423,6 +536,38 @@ test('canvas click on a card routes to onAgentClick with the card id', () => {
 
   assert.deepEqual(calls.onAgentClick, ['worker-1']);
   assert.deepEqual(calls.focusAgent, []);
+});
+
+test('canvas click selects an agent through the production onAgentClick handler', () => {
+  const context = createContext();
+  context.selectedAgentId = null;
+  context.selectedTerminalId = null;
+  context.focusedItemId = null;
+  context.sendCalls = [];
+  context.send = function(message) { context.sendCalls.push(message); };
+  context.renderAgentFocusPanel = function() {};
+  context.renderTerminalWorkspace = function() {};
+  context.isEmbeddedTerminalMode = function() { return false; };
+  context.state.global_settings = {};
+  context.state.agents['worker-1'] = {
+    id: 'worker-1',
+    name: 'Worker One',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  };
+  loadScript(context, 'static/js/commands.js');
+  const { handlers } = attachInteractionHarness(context, { preserveOnAgentClick: true });
+
+  fireEvent(handlers.click, cardTarget('worker-1', 'worker'));
+
+  assert.equal(context.selectedAgentId, 'worker-1');
+  assert.equal(context.selectedTerminalId, 'worker-1');
+  assert.equal(context.focusedItemId, 'worker-1');
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls)), [
+    { cmd: 'select_agent', id: 'worker-1' },
+  ]);
 });
 
 test('canvas click falls back to focusAgent when onAgentClick is absent', () => {
@@ -486,19 +631,65 @@ test('canvas attach is a no-op when there is no .agent-canvas root', () => {
 
 /* -- View-mode persistence (smoke only) --------------------------------- */
 
-test('toggleAgentCanvasView flips persisted grid <-> canvas mode (smoke)', () => {
-  const context = createContext();
-  const store = {};
+function makeToggleButton(mode) {
+  const classes = new Set();
+  return {
+    getAttribute(name) {
+      return name === 'data-agent-view-toggle' ? mode : null;
+    },
+    classList: {
+      add(cls) { classes.add(cls); },
+      remove(cls) { classes.delete(cls); },
+      contains(cls) { return classes.has(cls); },
+    },
+  };
+}
+
+function installCanvasViewStorage(context, store) {
+  const buttons = {
+    grid: makeToggleButton('grid'),
+    canvas: makeToggleButton('canvas'),
+  };
+  context.renderCalls = 0;
   context.localStorage = {
     getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
     setItem(k, v) { store[k] = String(v); },
   };
-  context.document = { querySelectorAll() { return []; } };
-  context.render = function() {};
+  context.document = {
+    querySelectorAll(sel) {
+      return sel === '[data-agent-view-toggle]' ? [buttons.grid, buttons.canvas] : [];
+    },
+  };
+  context.render = function() { context.renderCalls += 1; };
+  return buttons;
+}
 
-  assert.equal(vm.runInContext('_torqueAgentViewMode()', context), 'grid');
-  vm.runInContext('toggleAgentCanvasView()', context);
-  assert.equal(vm.runInContext('_torqueAgentViewMode()', context), 'canvas');
-  vm.runInContext('toggleAgentCanvasView()', context);
-  assert.equal(vm.runInContext('_torqueAgentViewMode()', context), 'grid');
+test('toggleAgentCanvasView persists grid <-> canvas mode across a fresh VM reload', () => {
+  const store = {};
+  const first = createContext();
+  const firstButtons = installCanvasViewStorage(first, store);
+  const storageKey = vm.runInContext('CANVAS_VIEW_STORAGE_KEY', first);
+
+  assert.equal(vm.runInContext('_torqueAgentViewMode()', first), 'grid');
+  vm.runInContext('toggleAgentCanvasView()', first);
+  assert.equal(store[storageKey], 'canvas');
+  assert.equal(vm.runInContext('_torqueAgentViewMode()', first), 'canvas');
+  assert.equal(firstButtons.canvas.classList.contains('is-active'), true);
+  assert.equal(firstButtons.grid.classList.contains('is-active'), false);
+  assert.equal(first.renderCalls, 1);
+
+  // Simulate a browser reload: a brand-new JS realm reads the same persisted
+  // storage key before any in-memory state from the old context exists.
+  const reloaded = createContext();
+  const reloadedButtons = installCanvasViewStorage(reloaded, store);
+  assert.equal(vm.runInContext('_torqueAgentViewMode()', reloaded), 'canvas');
+  vm.runInContext('_torqueRefreshViewToggleButtons()', reloaded);
+  assert.equal(reloadedButtons.canvas.classList.contains('is-active'), true);
+  assert.equal(reloadedButtons.grid.classList.contains('is-active'), false);
+
+  vm.runInContext('toggleAgentCanvasView()', reloaded);
+  assert.equal(store[storageKey], 'grid');
+  const reloadedAgain = createContext();
+  installCanvasViewStorage(reloadedAgain, store);
+  assert.equal(vm.runInContext('_torqueAgentViewMode()', reloadedAgain), 'grid');
 });
