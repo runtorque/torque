@@ -322,6 +322,37 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
         return False
 
 
+def _legacy_toolbelt_agent_ids(conn: sqlite3.Connection) -> list[str]:
+    if not _column_exists(conn, "agents", "terminal_backend"):
+        return []
+    return [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT id FROM agents "
+            "WHERE COALESCE(terminal_backend, 'iterm2') = 'iterm2'"
+        ).fetchall()
+    ]
+
+
+def _legacy_toolbelt_group_names(conn: sqlite3.Connection) -> list[str]:
+    if not _column_exists(
+        conn, "group_settings", "default_terminal_backend"
+    ):
+        return []
+    return [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT group_name FROM group_settings "
+            "WHERE COALESCE(default_terminal_backend, 'iterm2') = 'iterm2'"
+        ).fetchall()
+    ]
+
+
+def _in_clause(values: list[str]) -> tuple[str, list[str]]:
+    placeholders = ",".join(["?"] * len(values))
+    return f"({placeholders})", values
+
+
 def _backfill_agent_history(conn: sqlite3.Connection) -> None:
     if _column_exists(conn, "agents", "role") and _column_exists(
         conn, "agents", "template"
@@ -370,51 +401,70 @@ def _backfill_agent_history(conn: sqlite3.Connection) -> None:
 def _run_schema_and_normalize(target_db: Path) -> dict[str, int]:
     conn = sqlite3.connect(str(target_db))
     try:
+        has_legacy_agent_backend = _column_exists(
+            conn, "agents", "terminal_backend"
+        )
+        legacy_agent_ids = _legacy_toolbelt_agent_ids(conn)
+        legacy_group_names = _legacy_toolbelt_group_names(conn)
+        legacy_agent_where = (
+            "COALESCE(terminal_backend, 'iterm2') = 'iterm2'"
+        )
+        agents_marked_stopped = (
+            _count(
+                conn,
+                "SELECT COUNT(*) FROM agents "
+                f"WHERE {legacy_agent_where} AND status != 'stopped'",
+            )
+            if has_legacy_agent_backend
+            and _column_exists(conn, "agents", "status")
+            else 0
+        )
+        agent_sessions_cleared = (
+            _count(
+                conn,
+                "SELECT COUNT(*) FROM agents "
+                f"WHERE {legacy_agent_where} AND session_id IS NOT NULL",
+            )
+            if has_legacy_agent_backend
+            and _column_exists(conn, "agents", "session_id")
+            else 0
+        )
+        agent_windows_cleared = (
+            _count(
+                conn,
+                "SELECT COUNT(*) FROM agents "
+                f"WHERE {legacy_agent_where} "
+                "AND COALESCE(window_id, '') != ''",
+            )
+            if has_legacy_agent_backend
+            and _column_exists(conn, "agents", "window_id")
+            else 0
+        )
+
         initialize_database(conn, lambda: _backfill_agent_history(conn))
         imported_agents = _count(conn, "SELECT COUNT(*) FROM agents")
         imported_group_settings = _count(
             conn, "SELECT COUNT(*) FROM group_settings"
         )
 
-        legacy_agent_where = "COALESCE(terminal_backend, 'iterm2') = 'iterm2'"
-        agents_marked_stopped = _count(
-            conn,
-            "SELECT COUNT(*) FROM agents "
-            f"WHERE {legacy_agent_where} AND status != 'stopped'",
-        )
-        agent_sessions_cleared = _count(
-            conn,
-            "SELECT COUNT(*) FROM agents "
-            f"WHERE {legacy_agent_where} AND session_id IS NOT NULL",
-        )
-        agent_windows_cleared = _count(
-            conn,
-            "SELECT COUNT(*) FROM agents "
-            f"WHERE {legacy_agent_where} AND COALESCE(window_id, '') != ''",
-        )
-        agent_backends_rewritten = _count(
-            conn,
-            "SELECT COUNT(*) FROM agents "
-            f"WHERE {legacy_agent_where}",
-        )
-        group_backends_rewritten = _count(
-            conn,
-            "SELECT COUNT(*) FROM group_settings "
-            "WHERE COALESCE(default_terminal_backend, 'iterm2') = 'iterm2'",
-        )
-
-        conn.execute(
-            "UPDATE agents SET "
-            "status = 'stopped', "
-            "session_id = NULL, "
-            "window_id = '', "
-            "terminal_backend = 'pty' "
-            f"WHERE {legacy_agent_where}"
-        )
-        conn.execute(
-            "UPDATE group_settings SET default_terminal_backend = 'pty' "
-            "WHERE COALESCE(default_terminal_backend, 'iterm2') = 'iterm2'"
-        )
+        if legacy_agent_ids:
+            clause, params = _in_clause(legacy_agent_ids)
+            conn.execute(
+                "UPDATE agents SET "
+                "status = 'stopped', "
+                "session_id = NULL, "
+                "window_id = '', "
+                "terminal_backend = 'pty' "
+                f"WHERE id IN {clause}",
+                params,
+            )
+        if legacy_group_names:
+            clause, params = _in_clause(legacy_group_names)
+            conn.execute(
+                "UPDATE group_settings SET default_terminal_backend = 'pty' "
+                f"WHERE group_name IN {clause}",
+                params,
+            )
         conn.commit()
         return {
             "imported_agents": imported_agents,
@@ -422,8 +472,8 @@ def _run_schema_and_normalize(target_db: Path) -> dict[str, int]:
             "agents_marked_stopped": agents_marked_stopped,
             "agent_sessions_cleared": agent_sessions_cleared,
             "agent_windows_cleared": agent_windows_cleared,
-            "agent_backends_rewritten": agent_backends_rewritten,
-            "group_backends_rewritten": group_backends_rewritten,
+            "agent_backends_rewritten": len(legacy_agent_ids),
+            "group_backends_rewritten": len(legacy_group_names),
         }
     finally:
         conn.close()

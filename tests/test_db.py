@@ -1318,6 +1318,135 @@ class TorqueDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(json.loads(row[0]), {})
 
+    def test_terminal_backend_schema_defaults_to_pty(self):
+        def column_default(table: str, column: str) -> str:
+            for row in self.db._conn.execute(f"PRAGMA table_info({table})"):
+                if row[1] == column:
+                    return row[4]
+            self.fail(f"{table}.{column} not found")
+
+        self.assertEqual(column_default("agents", "terminal_backend"), "'pty'")
+        self.assertEqual(
+            column_default("group_settings", "default_terminal_backend"),
+            "'pty'",
+        )
+
+        self.db._conn.execute(
+            "INSERT INTO agents (id, name, slug, group_name) "
+            "VALUES ('agent-default', 'Worker', 'worker', 'g')"
+        )
+        self.db._conn.execute(
+            "INSERT INTO group_settings (group_name) VALUES ('g')"
+        )
+        self.db._conn.commit()
+
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT terminal_backend FROM agents WHERE id='agent-default'"
+            ).fetchone()[0],
+            "pty",
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT default_terminal_backend FROM group_settings "
+                "WHERE group_name='g'"
+            ).fetchone()[0],
+            "pty",
+        )
+
+    def test_terminal_backend_migration_rewrites_iterm2_rows_idempotently(self):
+        legacy_path = Path(self.tmp.name) / "legacy-terminal-backend.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        legacy.save_agent(
+            AgentCell(
+                id="agent-legacy",
+                name="Worker",
+                group="g",
+                slug="worker",
+                terminal_backend="iterm2",
+            )
+        )
+        legacy.save_group_settings(
+            "g",
+            GroupSettings(default_terminal_backend="iterm2"),
+        )
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        migrated.init()
+        migrated.close()
+        migrated_again = TorqueDB(legacy_path)
+        self.addCleanup(migrated_again.close)
+        migrated_again.init()
+
+        self.assertEqual(
+            migrated_again._conn.execute(
+                "SELECT terminal_backend FROM agents WHERE id='agent-legacy'"
+            ).fetchone()[0],
+            "pty",
+        )
+        self.assertEqual(
+            migrated_again._conn.execute(
+                "SELECT default_terminal_backend FROM group_settings "
+                "WHERE group_name='g'"
+            ).fetchone()[0],
+            "pty",
+        )
+
+    def test_terminal_backend_migration_updates_legacy_sqlite_defaults(self):
+        legacy_path = Path(self.tmp.name) / "legacy-terminal-default.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        for table, old, new in (
+            (
+                "agents",
+                "terminal_backend      TEXT NOT NULL DEFAULT 'pty'",
+                "terminal_backend      TEXT NOT NULL DEFAULT 'iterm2'",
+            ),
+            (
+                "group_settings",
+                "default_terminal_backend    TEXT NOT NULL DEFAULT 'pty'",
+                "default_terminal_backend    TEXT NOT NULL DEFAULT 'iterm2'",
+            ),
+        ):
+            sql = legacy._conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()[0]
+            self.assertIn(old, sql)
+            legacy._conn.execute("PRAGMA writable_schema=ON")
+            legacy._conn.execute(
+                "UPDATE sqlite_master SET sql=? "
+                "WHERE type='table' AND name=?",
+                (sql.replace(old, new), table),
+            )
+            legacy._conn.execute("PRAGMA writable_schema=OFF")
+        schema_version = legacy._conn.execute(
+            "PRAGMA schema_version"
+        ).fetchone()[0]
+        legacy._conn.execute(f"PRAGMA schema_version = {schema_version + 1}")
+        legacy._conn.commit()
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        defaults = {}
+        for table, column in (
+            ("agents", "terminal_backend"),
+            ("group_settings", "default_terminal_backend"),
+        ):
+            for row in migrated._conn.execute(f"PRAGMA table_info({table})"):
+                if row[1] == column:
+                    defaults[(table, column)] = row[4]
+        self.assertEqual(defaults[("agents", "terminal_backend")], "'pty'")
+        self.assertEqual(
+            defaults[("group_settings", "default_terminal_backend")],
+            "'pty'",
+        )
+
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
             id="agent-1",

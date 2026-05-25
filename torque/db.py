@@ -389,7 +389,7 @@ def _serialize_agent_cell(cell):
         d.get("slug", ""),
         group_name,
         d.get("cell_type", "agent"),
-        d.get("terminal_backend", "iterm2"),
+        d.get("terminal_backend", "pty"),
         d.get("session_id"),
         d.get("profile", "Default"),
         d.get("command", ""),
