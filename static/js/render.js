@@ -1614,6 +1614,251 @@ function _agentCardLatestMcpMessage(agent) {
   return latest ? { entry: latest, timestamp: latestTs } : null;
 }
 
+var _AGENT_CARD_TOOL_LABELS = {
+  torque_context: 'Checking context',
+  torque_progress: 'Reporting progress',
+  torque_done: 'Completing task',
+  torque_ready: 'Completing task',
+  torque_derive: 'Deriving subtask',
+  torque_ask: 'Asking',
+  torque_blocked: 'Reporting blocker',
+  torque_error: 'Reporting error',
+  torque_message_user: 'Messaging user',
+  torque_verify: 'Verifying',
+  torque_memory_publish: 'Publishing memory',
+  torque_memory_pin: 'Pinning memory',
+  torque_memory_link: 'Linking memory',
+
+  architect_journal: 'Journaling',
+  architect_journal_read: 'Reading journal',
+  architect_engineer_journal_read: 'Reading engineer journal',
+  architect_message_engineer: 'Messaging engineer',
+  architect_message_user: 'Messaging user',
+  architect_reply: 'Replying',
+  architect_peer_message: 'Messaging peer architect',
+  architect_peer_inbox: 'Checking peer inbox',
+  architect_ask: 'Asking',
+  architect_engineer_list: 'Reviewing engineers',
+  architect_engineer_hire: 'Hiring engineer',
+  architect_engineer_dismiss: 'Dismissing engineer',
+  architect_engineer_rehire: 'Rehiring engineer',
+  architect_engineer_restore: 'Restoring engineer',
+  architect_decision_create: 'Creating decision',
+  architect_decision_update: 'Updating decision',
+  architect_decision_link: 'Linking decision',
+  architect_decision_list: 'Reviewing decisions',
+  architect_task_create: 'Creating task',
+  architect_task_update: 'Updating task',
+  architect_task_dispatch: 'Dispatching',
+  architect_batch_dispatch: 'Dispatching batch',
+  architect_task_move: 'Moving task',
+  architect_task_show: 'Reviewing task',
+  architect_task_list: 'Reviewing tasks',
+  architect_task_reassign: 'Reassigning task',
+  architect_task_edit: 'Editing task',
+  architect_task_upload_artifact: 'Uploading artifact',
+  architect_task_verify: 'Verifying task',
+  architect_task_resolve: 'Resolving task',
+  architect_board_summary: 'Reviewing board',
+  architect_board_list: 'Reviewing board',
+  architect_events: 'Reviewing events',
+  architect_events_recent: 'Reviewing events',
+  architect_mcp_calls: 'Reviewing MCP calls',
+  architect_session_map: 'Reviewing sessions',
+  architect_agent_show: 'Inspecting agent',
+  architect_agents_list: 'Reviewing agents',
+  architect_actions_list: 'Reviewing actions',
+  architect_action_show: 'Reviewing action',
+  architect_specializations_list: 'Reviewing specializations',
+  architect_specialization_show: 'Reviewing specialization',
+  architect_specialization_save: 'Saving specialization',
+  architect_specialization_delete: 'Deleting specialization',
+  architect_streams_list: 'Reviewing streams',
+  architect_stream_show: 'Reviewing stream',
+  architect_deploy_state: 'Checking deploy state',
+  architect_get_architect_settings: 'Checking architect settings',
+  architect_task_chain: 'Reviewing task chain',
+  architect_pending_hire_status: 'Checking hire status',
+  architect_pending_hire_list: 'Reviewing pending hires',
+  architect_notifications: 'Checking notifications',
+  architect_resume: 'Resuming',
+  architect_note: 'Recording note',
+  architect_agent_message: 'Messaging agent',
+  architect_agent_close: 'Closing agent',
+
+  engineer_journal: 'Journaling',
+  engineer_journal_read: 'Reading journal',
+  engineer_task_dispatch: 'Dispatching',
+  engineer_batch_dispatch: 'Dispatching batch',
+  engineer_task_create: 'Creating task',
+  engineer_task_update: 'Updating task',
+  engineer_task_move: 'Moving task',
+  engineer_task_show: 'Reviewing task',
+  engineer_task_list: 'Reviewing tasks',
+  engineer_task_reassign: 'Reassigning task',
+  engineer_task_edit: 'Editing task',
+  engineer_task_upload_artifact: 'Uploading artifact',
+  engineer_task_verify: 'Verifying task',
+  engineer_task_resolve: 'Resolving task',
+  engineer_message_architect: 'Messaging architect',
+  engineer_message_user: 'Messaging user',
+  engineer_reply: 'Replying',
+  engineer_ask: 'Asking',
+  engineer_pending_question: 'Checking question',
+  engineer_answer: 'Answering question',
+  engineer_diff: 'Reviewing diff',
+  engineer_merge: 'Merging',
+  engineer_session_map: 'Reviewing sessions',
+  engineer_events: 'Reviewing events',
+  engineer_events_recent: 'Reviewing events',
+  engineer_notifications: 'Checking notifications',
+  engineer_board_summary: 'Reviewing board',
+  engineer_board_list: 'Reviewing board',
+  engineer_agents_list: 'Reviewing agents',
+  engineer_agent_show: 'Inspecting agent',
+  engineer_actions_list: 'Reviewing actions',
+  engineer_action_show: 'Reviewing action',
+  engineer_specializations_list: 'Reviewing specializations',
+  engineer_specialization_show: 'Reviewing specialization',
+  engineer_streams_list: 'Reviewing streams',
+  engineer_stream_show: 'Reviewing stream',
+  engineer_mcp_calls: 'Reviewing MCP calls',
+  engineer_deploy_state: 'Checking deploy state',
+  engineer_launch_settings: 'Checking launch settings',
+  engineer_task_chain: 'Reviewing task chain',
+  engineer_note: 'Recording note',
+  engineer_agent_message: 'Messaging agent',
+  engineer_agent_close: 'Closing agent',
+
+  journal: 'Journaling',
+  journal_read: 'Reading journal',
+  task_dispatch: 'Dispatching',
+  batch_dispatch: 'Dispatching batch',
+  task_create: 'Creating task',
+  task_update: 'Updating task',
+  task_move: 'Moving task',
+  task_show: 'Reviewing task',
+  task_list: 'Reviewing tasks',
+  task_reassign: 'Reassigning task',
+  task_edit: 'Editing task',
+  task_upload_artifact: 'Uploading artifact',
+  task_verify: 'Verifying task',
+  task_resolve: 'Resolving task',
+  message_user: 'Messaging user',
+  reply: 'Replying',
+  ask: 'Asking',
+  note: 'Recording note',
+  diff: 'Reviewing diff',
+  merge: 'Merging',
+  board_summary: 'Reviewing board',
+  board_list: 'Reviewing board',
+  events: 'Reviewing events',
+  events_recent: 'Reviewing events',
+  mcp_calls: 'Reviewing MCP calls',
+  session_map: 'Reviewing sessions',
+  agent_show: 'Inspecting agent',
+  agents_list: 'Reviewing agents',
+  notifications: 'Checking notifications',
+  resume: 'Resuming',
+
+  'claude-in-chrome:navigate': 'Navigating',
+  'claude-in-chrome:click': 'Clicking',
+  'claude-in-chrome:type': 'Typing',
+  'claude-in-chrome:press_key': 'Pressing key',
+  'claude-in-chrome:screenshot': 'Taking screenshot',
+  'claude-in-chrome:get_page': 'Reading page',
+  'claude-in-chrome:get_page_snapshot': 'Reading page',
+  'claude-in-chrome:get_console_logs': 'Reading console logs',
+  'claude-in-chrome:select_tab': 'Selecting tab',
+};
+
+function _mcpToolParts(tool) {
+  const value = String(tool || '').trim();
+  const match = /^mcp__(.+?)__(.+)$/.exec(value);
+  if (match) {
+    return {
+      raw: value,
+      server: match[1],
+      name: match[2],
+      isMcp: true,
+    };
+  }
+  return {
+    raw: value,
+    server: '',
+    name: value,
+    isMcp: false,
+  };
+}
+
+function _stripFriendlyToolPrefix(name) {
+  return String(name || '').trim().replace(/^(torque|engineer|architect)_/, '');
+}
+
+function _prettifyToolName(name) {
+  const value = _stripFriendlyToolPrefix(name)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!value) return '';
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+function _agentCardLooksLikeToolIdentifier(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  if (/^mcp__.+?__.+$/.test(value)) return true;
+  if (/^(torque|engineer|architect)_[a-z0-9_]+$/i.test(value)) return true;
+  if (Object.prototype.hasOwnProperty.call(_AGENT_CARD_TOOL_LABELS, value)) return true;
+  return false;
+}
+
+function _humanizeBareToolLabel(tool) {
+  const parts = _mcpToolParts(tool);
+  const name = String(parts.name || '').trim();
+  if (!name) return '';
+  const serverKey = parts.server ? parts.server + ':' + name : '';
+  if (serverKey && Object.prototype.hasOwnProperty.call(_AGENT_CARD_TOOL_LABELS, serverKey)) {
+    return _AGENT_CARD_TOOL_LABELS[serverKey];
+  }
+  if (Object.prototype.hasOwnProperty.call(_AGENT_CARD_TOOL_LABELS, name)) {
+    return _AGENT_CARD_TOOL_LABELS[name];
+  }
+  const stripped = _stripFriendlyToolPrefix(name);
+  const strippedServerKey = parts.server ? parts.server + ':' + stripped : '';
+  if (strippedServerKey && Object.prototype.hasOwnProperty.call(_AGENT_CARD_TOOL_LABELS, strippedServerKey)) {
+    return _AGENT_CARD_TOOL_LABELS[strippedServerKey];
+  }
+  if (Object.prototype.hasOwnProperty.call(_AGENT_CARD_TOOL_LABELS, stripped)) {
+    return _AGENT_CARD_TOOL_LABELS[stripped];
+  }
+  return _prettifyToolName(name);
+}
+
+function _humanizeToolLabel(tool) {
+  const value = String(tool || '').trim();
+  if (!value) return '';
+
+  const usingMatch = /^Using\s+(.+)$/.exec(value);
+  if (usingMatch) {
+    const wrapped = usingMatch[1].trim();
+    return _agentCardLooksLikeToolIdentifier(wrapped)
+      ? _humanizeToolLabel(wrapped)
+      : value;
+  }
+
+  const endMatch = /^(.+?)\s+(finished|failed)$/i.exec(value);
+  if (endMatch && _agentCardLooksLikeToolIdentifier(endMatch[1])) {
+    const label = _humanizeToolLabel(endMatch[1]);
+    return endMatch[2].toLowerCase() === 'failed'
+      ? label + ' failed'
+      : label;
+  }
+
+  if (!_agentCardLooksLikeToolIdentifier(value)) return value;
+  return _humanizeBareToolLabel(value) || value;
+}
+
 function _agentProviderMeta(provider) {
   const key = String(provider || '').trim().toLowerCase();
   if (key === 'claude-code') {
@@ -1827,18 +2072,22 @@ function _agentCardActionTextFromMcp(entry) {
   if (!entry) return '';
   const action = String(entry.action || '').trim();
   const message = String(entry.message || '').trim();
-  if (action === 'progress' && message) return message;
+  const rawToolText = String(entry.tool || entry.tool_name || entry.name || '').trim();
+  const toolText = _agentCardLooksLikeToolIdentifier(rawToolText)
+    ? _humanizeToolLabel(rawToolText)
+    : '';
+  if (action === 'progress' && message) return _humanizeToolLabel(message);
   if (action === 'derive') {
-    if (message) return message;
+    if (message) return _humanizeToolLabel(message);
     return 'derived follow-up';
   }
-  if (action === 'verify') return message || 'verified';
-  if (action === 'ask') return message || 'asked for input';
-  if (action === 'blocked') return message || 'blocked';
-  if (action === 'error') return message || 'error';
-  if (action === 'done') return message && message !== 'Done' ? message : 'done';
-  if (action === 'ready') return message && message !== 'Ready' ? message : 'ready';
-  return message || action;
+  if (action === 'verify') return message ? _humanizeToolLabel(message) : (toolText || 'verified');
+  if (action === 'ask') return message ? _humanizeToolLabel(message) : (toolText || 'asked for input');
+  if (action === 'blocked') return message ? _humanizeToolLabel(message) : (toolText || 'blocked');
+  if (action === 'error') return message ? _humanizeToolLabel(message) : (toolText || 'error');
+  if (action === 'done') return message && message !== 'Done' ? _humanizeToolLabel(message) : (toolText || 'done');
+  if (action === 'ready') return message && message !== 'Ready' ? _humanizeToolLabel(message) : (toolText || 'ready');
+  return _humanizeToolLabel(message || toolText || action);
 }
 
 function _agentCardFallbackActionText(agent) {
@@ -1854,7 +2103,7 @@ function _agentCardFallbackActionText(agent) {
 }
 
 function _agentCardActionCandidate(text, timestamp, priority) {
-  const value = String(text || '').trim();
+  const value = _humanizeToolLabel(text);
   if (!value) return null;
   return {
     text: value,
