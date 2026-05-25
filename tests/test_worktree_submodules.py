@@ -150,6 +150,55 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
     def _module_dir(self) -> Path:
         return self.repo_root / ".git" / "modules" / "deps" / "sub"
 
+    async def _module_core_worktree(self) -> str:
+        return await self._git_out(
+            "config",
+            "--file",
+            str(self._module_dir() / "config"),
+            "--get",
+            "core.worktree",
+            cwd=self.root,
+        )
+
+    def _resolve_module_core_worktree(self, value: str) -> Path:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = self._module_dir() / path
+        return path.resolve()
+
+    async def _assert_module_core_worktree_pinned(self):
+        value = await self._module_core_worktree()
+        self.assertEqual(
+            self._resolve_module_core_worktree(value),
+            (self.repo_root / self.sub_path).resolve(),
+            value,
+        )
+        status_code, _status_out, status_err = await self._git(
+            "status",
+            "--short",
+            cwd=self.repo_root / self.sub_path,
+            check=False,
+        )
+        self.assertEqual(0, status_code, status_err)
+        list_code, _list_out, list_err = await self._git(
+            "worktree",
+            "list",
+            "--porcelain",
+            cwd=self._module_dir(),
+            check=False,
+        )
+        self.assertEqual(0, list_code, list_err)
+
+    async def _hijack_module_core_worktree(self, target: Path):
+        await self._git(
+            "config",
+            "--file",
+            str(self._module_dir() / "config"),
+            "core.worktree",
+            str(Path(target).resolve()),
+            cwd=self.root,
+        )
+
     async def _gitlink_sha(self, repo: Path, ref: str = "HEAD") -> str:
         line = await self._git_out("ls-tree", ref, self.sub_path, cwd=repo)
         parts = line.split()
@@ -221,6 +270,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             cwd=self._module_dir(),
         )
         self.assertIn(str(sub_wt), module_worktrees)
+        await self._assert_module_core_worktree_pinned()
 
     async def test_checkpoint_commits_submodule_first_and_bumps_gitlink(self):
         cell, wt = await self._create_nested()
@@ -377,6 +427,156 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             cwd=self._module_dir(),
         )
         self.assertNotIn(str(sub_wt), module_worktrees)
+
+    async def test_remove_repairs_hijacked_submodule_module_core_worktree(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        await self._hijack_module_core_worktree(sub_wt)
+        self.assertEqual(
+            self._resolve_module_core_worktree(await self._module_core_worktree()),
+            sub_wt.resolve(),
+        )
+
+        result = await self.mgr.remove_result(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(result["worktree_removed"], result)
+        self.assertFalse(sub_wt.exists())
+        await self._assert_module_core_worktree_pinned()
+
+    async def test_multi_worker_remove_keeps_submodule_module_core_worktree_pinned(self):
+        await self._assert_module_core_worktree_pinned()
+        cell_a, wt_a = await self._create_nested(
+            agent_id="agent-a",
+            name="Worker A",
+        )
+        sub_a = wt_a / self.sub_path
+        await self._assert_module_core_worktree_pinned()
+
+        cell_b, wt_b = await self._create_nested(
+            agent_id="agent-b",
+            name="Worker B",
+        )
+        sub_b = wt_b / self.sub_path
+        await self._assert_module_core_worktree_pinned()
+
+        result = await self.mgr.remove_result(
+            cell_a,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(result["worktree_removed"], result)
+        self.assertFalse(sub_a.exists())
+        self.assertTrue(sub_b.exists())
+        await self._assert_module_core_worktree_pinned()
+        module_worktrees = await self._git_out(
+            "worktree",
+            "list",
+            "--porcelain",
+            cwd=self._module_dir(),
+        )
+        self.assertNotIn(str(sub_a), module_worktrees)
+        self.assertIn(str(sub_b), module_worktrees)
+
+    async def test_multi_worker_remove_recovers_after_submodule_update_hijack(self):
+        cell_a, wt_a = await self._create_nested(
+            agent_id="agent-a",
+            name="Worker A",
+        )
+        sub_a = wt_a / self.sub_path
+        cell_b, wt_b = await self._create_nested(
+            agent_id="agent-b",
+            name="Worker B",
+        )
+        sub_b = wt_b / self.sub_path
+        code, _out, err = await self._git(
+            "submodule",
+            "update",
+            "--init",
+            self.sub_path,
+            cwd=wt_a,
+            check=False,
+        )
+        self.assertEqual(0, code, err)
+        self.assertNotEqual(
+            self._resolve_module_core_worktree(await self._module_core_worktree()),
+            (self.repo_root / self.sub_path).resolve(),
+        )
+
+        result = await self.mgr.remove_result(
+            cell_a,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(result["worktree_removed"], result)
+        self.assertFalse(sub_a.exists())
+        self.assertTrue(sub_b.exists())
+        await self._assert_module_core_worktree_pinned()
+
+    async def test_checkpoint_resets_clean_submodule_head_drift_to_base_gitlink(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        base_gitlink = await self._gitlink_sha(wt, "main")
+        (self.repo_root / self.sub_path / "base.txt").write_text("base-only\n")
+        await self._git("add", "base.txt", cwd=self.repo_root / self.sub_path)
+        await self._git(
+            "commit",
+            "-m",
+            "Advance main submodule outside worker",
+            cwd=self.repo_root / self.sub_path,
+        )
+        drift_sha = await self._git_out(
+            "rev-parse",
+            "HEAD",
+            cwd=self.repo_root / self.sub_path,
+        )
+        await self._git(
+            "fetch",
+            str(self.repo_root / self.sub_path),
+            "main",
+            cwd=sub_wt,
+        )
+        await self._git("reset", "--hard", drift_sha, cwd=sub_wt)
+        self.assertEqual(
+            drift_sha,
+            await self._git_out("rev-parse", "HEAD", cwd=sub_wt),
+        )
+        (wt / "README.md").write_text("super line one\nworker-only\n")
+
+        sha = await self.mgr.checkpoint(
+            cell,
+            message="Super-only checkpoint with clean submodule drift",
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(sha)
+        self.assertEqual(base_gitlink, await self._gitlink_sha(wt, "HEAD"))
+        self.assertEqual(
+            base_gitlink,
+            await self._git_out("rev-parse", "HEAD", cwd=sub_wt),
+        )
+        preserved = await self._git_out(
+            "for-each-ref",
+            "--format=%(objectname) %(refname:short)",
+            "refs/heads/torque/preserved/deps-sub",
+            cwd=self._module_dir(),
+        )
+        self.assertIn(drift_sha, preserved)
+        self.assertEqual(
+            ["README.md"],
+            (
+                await self._git_out(
+                    "diff-tree",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    "HEAD",
+                    cwd=wt,
+                )
+            ).splitlines(),
+        )
 
     async def test_empty_worktree_submodules_keeps_nested_machinery_dormant(self):
         cell = self._make_cell()
