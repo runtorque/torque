@@ -35,6 +35,17 @@ _CLOSING_KEYWORDS_RE = re.compile(
     r"(?P<ref>[\w.-]+/[\w.-]+#\d+|#\d+)",
     re.IGNORECASE,
 )
+_GITHUB_ISSUE_VIEW_FIELDS = ",".join([
+    "id",
+    "number",
+    "title",
+    "body",
+    "url",
+    "labels",
+    "assignees",
+    "state",
+    "updatedAt",
+])
 
 GhRunner = Callable[[Sequence[str], str | None], Awaitable[dict]]
 
@@ -879,7 +890,7 @@ class GitHubBoardSyncProvider:
             "--repo",
             repo,
             "--json",
-            "id,number,title,body,url,labels,assignees,state,updatedAt,repository",
+            _GITHUB_ISSUE_VIEW_FIELDS,
         )
         if not viewed.get("ok"):
             return viewed

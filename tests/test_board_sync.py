@@ -81,6 +81,20 @@ def gh_fail(message, code=1):
     return {"returncode": code, "stdout": "", "stderr": message}
 
 
+def gh_issue_view_rejecting_repository(payload):
+    def _response(args, _cwd=None):
+        if args[:2] != ["issue", "view"]:
+            raise AssertionError(f"Expected issue view call, got: {args}")
+        fields = args[args.index("--json") + 1]
+        if "repository" in fields.split(","):
+            return gh_fail(
+                'Unknown JSON field: "repository"\nAvailable fields: assignees, body, labels, number, title, url',
+            )
+        return gh_ok(payload)
+
+    return _response
+
+
 def github_settings(**overrides):
     nested = {
         "github_repo": "owner/repo",
@@ -384,6 +398,37 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("torque:blocked", " ".join(commands[1]))
         self.assertEqual(commands[5][0:2], ["project", "item-add"])
         self.assertEqual(commands[6][0:2], ["project", "item-edit"])
+
+    async def test_push_issue_view_uses_valid_gh_json_fields(self):
+        task = BoardTask(
+            id="T:valid-fields",
+            task="Valid gh fields",
+            description="No repository JSON field",
+        )
+        settings = github_settings(board_sync_github={
+            "github_project_owner": "",
+            "github_project_number": 0,
+        })
+        runner = FakeGhRunner([
+            gh_ok("https://github.com/owner/repo/issues/125\n"),
+            gh_issue_view_rejecting_repository(
+                issue_view(
+                    number=125,
+                    title="Valid gh fields",
+                    body=render_issue_body(task),
+                )
+            ),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(task, settings)
+
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["github"]["issue_number"], 125)
+        issue_view_cmd = runner.calls[1][0]
+        issue_view_fields = issue_view_cmd[issue_view_cmd.index("--json") + 1]
+        self.assertNotIn("repository", issue_view_fields.split(","))
+        self.assertNotIn("Unknown JSON field", sync.get("last_error", ""))
 
     async def test_push_creates_missing_user_labels_by_default_before_sync(self):
         task = BoardTask(
