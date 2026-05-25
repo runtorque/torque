@@ -4585,31 +4585,6 @@ async def _queue_user_direct_message_to_agent(
             reason="send_prompt_unavailable",
             emit=emit,
         ) or row
-    previous_status = str(getattr(target, "status", "") or "")
-    optimistic_at = time.time()
-    optimistic_marked = state.mark_agent_optimistic_running(
-        target,
-        optimistic_at,
-        emit=emit,
-        persist=False,
-    )
-    if optimistic_marked and emit:
-        await state.broadcast()
-
-    async def _rollback_optimistic_running():
-        if not optimistic_marked or previous_status == "running":
-            return
-        if getattr(target, "status", "") != "running":
-            return
-        if getattr(target, "activity", ""):
-            return
-        if float(getattr(target, "last_progress_at", 0) or 0) > optimistic_at:
-            return
-        target.status = previous_status or "idle"
-        state._emit_agent(target)
-        if emit:
-            await state.broadcast()
-
     prompt = _format_user_direct_message_prompt(
         row,
         str(getattr(target, "kind", "") or "worker").strip() or "worker",
@@ -4635,7 +4610,6 @@ async def _queue_user_direct_message_to_agent(
             message_id,
             getattr(target, "id", ""),
         )
-        await _rollback_optimistic_running()
         return state.update_direct_message_delivery(
             message_id,
             "buffered",
@@ -4643,7 +4617,6 @@ async def _queue_user_direct_message_to_agent(
             emit=emit,
         ) or row
     if not queued:
-        await _rollback_optimistic_running()
         return state.update_direct_message_delivery(
             message_id,
             "buffered",
@@ -5676,6 +5649,15 @@ async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
     if wait_for_delivery and delivery is not None:
         await delivery
     return True
+
+
+async def _handle_send_text_command(data, state: MatrixState, send_prompt) -> bool:
+    cell = state.agents.get(data.get("id"))
+    return await _queue_cell_prompt_send(
+        cell,
+        data.get("text", ""),
+        send_prompt,
+    )
 
 
 async def _handle_send_user_message_command(data, state: MatrixState,
@@ -11991,18 +11973,7 @@ async def main(connection=None):
                         await bridge.focus_session(cell.session_id)
 
             elif cmd == "send_text":
-                cell = state.agents.get(data["id"])
-                if cell and cell.session_id:
-                    state.mark_agent_optimistic_running(
-                        cell,
-                        emit=True,
-                        persist=False,
-                    )
-                await _queue_cell_prompt_send(
-                    cell,
-                    data.get("text", ""),
-                    _send_agent_prompt,
-                )
+                await _handle_send_text_command(data, state, _send_agent_prompt)
 
             elif cmd == "send_user_message":
                 await _handle_send_user_message_command(data, state, bridge)

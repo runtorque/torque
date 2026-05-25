@@ -1806,6 +1806,8 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
+        self.server_agent_mod = importlib.import_module('torque.server_agent')
+        self.server_agent_mod = importlib.reload(self.server_agent_mod)
         from torque.db import TorqueDB
 
         self.tmp = tempfile.TemporaryDirectory()
@@ -1818,6 +1820,18 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState(db=self.db)
         state.groups['g'] = []
         return state
+
+    def _make_agent_launch_service(self, state, bridge):
+        class FakeTemplateManager:
+            pass
+
+        return self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
 
     def _add_engineer_and_worker(self, state, *, current_task_id=''):
         engineer = self.state_mod.AgentCell(
@@ -2150,6 +2164,50 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_send_text_command_rolls_back_when_background_send_fails(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        send_started = asyncio.Event()
+        release_delivery = asyncio.Event()
+
+        class FailingBridge:
+            async def send_text(self, _session_id, _text, **_kwargs):
+                send_started.set()
+                await release_delivery.wait()
+                raise RuntimeError('terminal unavailable')
+
+        service = self._make_agent_launch_service(state, FailingBridge())
+        queued = await self.server_mod._handle_send_text_command(
+            {
+                'cmd': 'send_text',
+                'id': worker.id,
+                'text': 'start this',
+            },
+            state,
+            service.send_agent_prompt,
+        )
+
+        self.assertTrue(queued)
+        self.assertEqual(worker.status, 'running')
+        self.assertEqual(len(service._background_prompt_tasks), 1)
+        task = next(iter(service._background_prompt_tasks))
+
+        await asyncio.wait_for(send_started.wait(), timeout=1.0)
+        release_delivery.set()
+        result = await asyncio.gather(task, return_exceptions=True)
+
+        self.assertIsInstance(result[0], RuntimeError)
+        self.assertEqual(worker.status, 'idle')
+
     async def test_user_agent_message_persists_and_queues_wrapped_prompt(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -2245,15 +2303,12 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         send_entered = asyncio.Event()
         release_delivery = asyncio.Event()
 
-        async def fake_send_prompt(cell, prompt, **kwargs):
-            self.assertEqual(worker.status, 'running')
-            send_entered.set()
-
-            async def _delivered():
+        class BlockingBridge:
+            async def send_text(self, _session_id, _text, **_kwargs):
+                send_entered.set()
                 await release_delivery.wait()
 
-            return asyncio.create_task(_delivered())
-
+        service = self._make_agent_launch_service(state, BlockingBridge())
         command_task = asyncio.create_task(
             self.server_mod._handle_user_agent_message_command(
                 {
@@ -2263,7 +2318,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                     'idempotency_key': 'optimistic-submit',
                 },
                 state,
-                fake_send_prompt,
+                service.send_agent_prompt,
             )
         )
 
@@ -2564,9 +2619,11 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         state.agents[engineer.id] = engineer
         state.groups['g'] = [engineer.id]
 
-        async def failing_send_prompt(*_args, **_kwargs):
-            raise RuntimeError('terminal unavailable')
+        class FailingBridge:
+            async def send_text(self, _session_id, _text, **_kwargs):
+                raise RuntimeError('terminal unavailable')
 
+        service = self._make_agent_launch_service(state, FailingBridge())
         result = await self.server_mod._handle_user_agent_message_command(
             {
                 'cmd': 'user_agent_message',
@@ -2575,7 +2632,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 'idempotency_key': 'failure-submit',
             },
             state,
-            failing_send_prompt,
+            service.send_agent_prompt,
         )
 
         self.assertEqual(result['delivery_state'], 'buffered')
