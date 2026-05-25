@@ -1025,6 +1025,7 @@ function createRelayStatusHarness() {
     'gls-relay-daemon-credential-confirm-yes',
     'gls-relay-daemon-credential-confirm-no',
     'gls-relay-daemon-credential-error',
+    'gls-relay-daemon-credential-recovery',
     'gls-relay-daemon-credential-result',
     // Device-link generator sub-block (TORQUE:603 #3).
     'gls-relay-device-link-slot',
@@ -6530,6 +6531,73 @@ test('daemon credential generate sends pairing_token and renders Settings-popula
     document.getElementById('gls-relay-private-key-path').value,
     '/tmp/torque/relay/daemon-daemon-1.pem',
   );
+});
+
+test('daemon credential settings-write failure renders recovery handle and survives relay_config delta', () => {
+  const { context, document } = createRelayStatusHarness();
+  context.__cfg = {
+    config: { relay_url: 'https://relay.runtorque.com', daemon_id: 'daemon-1' },
+    sources: {
+      relay_url: { value: 'https://relay.runtorque.com', source: 'settings' },
+      daemon_id: { value: 'daemon-1', source: 'settings' },
+    },
+  };
+  context.__recovery = {
+    type: 'daemon_credential',
+    ok: false,
+    error: 'settings_write_failed',
+    recoverable: true,
+    message: "Relay accepted the credential but Torque couldn't save it to Settings.",
+    credential_id: 'cred_orphan_123',
+    private_key_path: '/tmp/torque/relay/daemon-daemon-1-cred_orphan_123.pem',
+    detail: 'Settings database is read-only.',
+    private_key: '-----BEGIN PRIVATE KEY----- raw secret must never render',
+  };
+  runInContext(context, 'state.relay_config = __cfg; refreshRelayConfigModal({ force: true });');
+  document.getElementById('gls-relay-daemon-credential-token').value = ' pair_tok_123 ';
+
+  const view = jsonValue(context, '_relayDaemonCredentialComputeView(__recovery)');
+  assert.equal(view.kind, 'recovery');
+  assert.equal(view.credentialId, 'cred_orphan_123');
+  assert.equal(
+    view.privateKeyPath,
+    '/tmp/torque/relay/daemon-daemon-1-cred_orphan_123.pem',
+  );
+
+  runInContext(context, 'handleRelayDaemonCredential(__recovery);');
+
+  assert.equal(document.getElementById('gls-relay-daemon-credential-token').value, ' pair_tok_123 ',
+    'recoverable local settings failure leaves pasted token in place for retry');
+  assert.equal(document.getElementById('gls-relay-daemon-credential-result').hidden, true);
+  assert.equal(document.getElementById('gls-relay-daemon-credential-error').hidden, true);
+  const recovery = document.getElementById('gls-relay-daemon-credential-recovery');
+  assert.equal(recovery.hidden, false);
+  const recoveryHtml = recovery.innerHTML;
+  assert.match(recoveryHtml, /Recovery/);
+  assert.match(recoveryHtml, /cred_orphan_123/);
+  assert.match(recoveryHtml, /daemon-daemon-1-cred_orphan_123\.pem/);
+  assert.match(recoveryHtml, /Settings database is read-only/);
+  assert.doesNotMatch(recoveryHtml, /BEGIN PRIVATE KEY/);
+
+  runInContext(context, `
+    _expectedSeq = 1;
+    _handleDelta({
+      seq: 1,
+      ops: [{
+        op: 'relay_config',
+        config: { relay_url: 'https://relay.runtorque.com', daemon_id: 'daemon-1' },
+        sources: {
+          relay_url: { value: 'https://relay.runtorque.com', source: 'settings' },
+          daemon_id: { value: 'daemon-1', source: 'settings' },
+        },
+      }],
+    });
+  `);
+
+  assert.equal(recovery.hidden, false,
+    'relay_config refresh must not hide the recovery handle');
+  assert.equal(recovery.innerHTML, recoveryHtml,
+    'relay_config refresh must not wipe the recovery fields the operator needs to copy');
 });
 
 test('daemon credential re-provision guard requires explicit confirm when credential exists', () => {

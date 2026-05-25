@@ -480,6 +480,79 @@ class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("relay_config", result)
 
+    async def test_settings_write_failure_returns_recoverable_credential_handle(self):
+        updates = []
+
+        class FakeState:
+            def __init__(self):
+                self.global_settings = _settings()
+
+            def update_global_settings(self, **fields):
+                updates.append(dict(fields))
+                raise OSError("settings database is read-only")
+
+        fake_state = FakeState()
+
+        def fingerprint():
+            gs = fake_state.global_settings
+            return (
+                bool(gs.relay_enabled),
+                gs.relay_url,
+                gs.relay_daemon_id,
+                gs.relay_credential_id,
+                gs.relay_private_key_path,
+            )
+
+        restart = mock.AsyncMock()
+        handle_command = self._extract_handle_command(
+            state=fake_state,
+            _relay_settings_fingerprint=fingerprint,
+            _restart_cloud_connector=restart,
+        )
+        generated = {
+            "ok": True,
+            "credential_id": "cred-orphan",
+            "daemon_id": "daemon-1",
+            "owner_user_id": "owner-1",
+            "private_key_path": "/tmp/profile/relay/daemon-daemon-1-cred-orphan.pem",
+            "provenance": {"private_key_path": "local_keygen"},
+        }
+        with mock.patch.object(
+            self.server_mod.cloud_hooks,
+            "generate_daemon_credential",
+            mock.AsyncMock(return_value=generated),
+        ), self.assertLogs("torque", level="ERROR") as logs:
+            result = await handle_command({
+                "cmd": "generate_daemon_credential",
+                "pairing_token": "pair-token",
+            })
+
+        self.assertEqual(result["type"], "daemon_credential")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "settings_write_failed")
+        self.assertTrue(result["recoverable"])
+        self.assertEqual(result["credential_id"], "cred-orphan")
+        self.assertEqual(
+            result["private_key_path"],
+            "/tmp/profile/relay/daemon-daemon-1-cred-orphan.pem",
+        )
+        self.assertIn("Relay accepted the credential", result["message"])
+        self.assertIn("relay admin to revoke", result["message"])
+        self.assertEqual(updates, [{
+            "relay_credential_id": "cred-orphan",
+            "relay_private_key_path": "/tmp/profile/relay/daemon-daemon-1-cred-orphan.pem",
+        }])
+        restart.assert_not_awaited()
+        self.assertEqual(fake_state.global_settings.relay_credential_id, "")
+        self.assertEqual(fake_state.global_settings.relay_private_key_path, "")
+        self.assertIn("relay_config", result)
+        joined_logs = "\n".join(logs.output)
+        self.assertIn("cred-orphan", joined_logs)
+        self.assertIn(
+            "/tmp/profile/relay/daemon-daemon-1-cred-orphan.pem",
+            joined_logs,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11094,10 +11094,41 @@ async def main(connection=None):
                 private_key_path = str(result.get("private_key_path", "") or "").strip()
                 if credential_id and private_key_path:
                     old_relay = _relay_settings_fingerprint()
-                    state.update_global_settings(
-                        relay_credential_id=credential_id,
-                        relay_private_key_path=private_key_path,
-                    )
+                    try:
+                        state.update_global_settings(
+                            relay_credential_id=credential_id,
+                            relay_private_key_path=private_key_path,
+                        )
+                    except Exception:
+                        log.exception(
+                            "Relay accepted daemon credential but Torque could not save "
+                            "it to Settings; credential_id=%s private_key_path=%s",
+                            credential_id,
+                            private_key_path,
+                        )
+                        result = {
+                            "ok": False,
+                            "error": "settings_write_failed",
+                            "recoverable": True,
+                            "credential_id": credential_id,
+                            "private_key_path": private_key_path,
+                            "message": (
+                                "Relay accepted the credential but Torque couldn't save "
+                                "it to Settings. Recover by setting Settings → Relay "
+                                "credential ID and private key path to the values shown, "
+                                "or ask the relay admin to revoke the credential, then retry."
+                            ),
+                        }
+                        response = {"type": "daemon_credential", **result}
+                        try:
+                            response["relay_config"] = cloud_hooks.resolve_relay_config(
+                                state.global_settings, data_dir=str(DATA_DIR)
+                            )
+                        except Exception:
+                            log.exception(
+                                "Failed to resolve relay config after daemon credential generation"
+                            )
+                        return response
                     if _relay_settings_fingerprint() != old_relay:
                         try:
                             await _restart_cloud_connector()

@@ -3588,7 +3588,8 @@ body.runtime-embedded #modal-group .modal-summary {
   font-size: 10px;
   word-break: break-word;
 }
-.gls-relay-daemon-credential-result {
+.gls-relay-daemon-credential-result,
+.gls-relay-daemon-credential-recovery {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3599,8 +3600,14 @@ body.runtime-embedded #modal-group .modal-summary {
   background: var(--bg-cell);
   font-size: 11px;
 }
-.gls-relay-daemon-credential-result[hidden] { display: none; }
-.gls-relay-daemon-credential-success-line {
+.gls-relay-daemon-credential-recovery {
+  border-color: color-mix(in srgb, var(--amber) 48%, var(--border) 52%);
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-cell) 90%);
+}
+.gls-relay-daemon-credential-result[hidden],
+.gls-relay-daemon-credential-recovery[hidden] { display: none; }
+.gls-relay-daemon-credential-success-line,
+.gls-relay-daemon-credential-recovery-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3617,6 +3624,16 @@ body.runtime-embedded #modal-group .modal-summary {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .02em;
+}
+.gls-relay-daemon-credential-badge--warning {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+.gls-relay-daemon-credential-recovery-detail {
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.35;
+  word-break: break-word;
 }
 .gls-relay-daemon-credential-field {
   display: grid;
