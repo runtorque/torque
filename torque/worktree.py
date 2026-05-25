@@ -1458,6 +1458,63 @@ class WorktreeManager:
         code, _stdout = await self._git_stdout(directory, "rev-parse", "--git-dir")
         return code == 0
 
+    def _nested_submodule_gitdir_path(self, sub_wt_path: str) -> str:
+        """Return the local gitdir for a submodule checkout without walking up.
+
+        ``git -C <empty-submodule-dir> rev-parse`` resolves against the parent
+        superproject.  For nested submodule worktree discovery we only want
+        git metadata that is anchored at the submodule path itself.
+        """
+        if not sub_wt_path:
+            return ""
+        dot_git = os.path.join(sub_wt_path, ".git")
+        if os.path.isdir(dot_git):
+            return os.path.realpath(dot_git)
+        if not os.path.isfile(dot_git):
+            return ""
+        try:
+            with open(dot_git, encoding="utf-8") as f:
+                first_line = f.readline().strip()
+        except OSError:
+            return ""
+        prefix = "gitdir:"
+        if not first_line.lower().startswith(prefix):
+            return ""
+        return self._resolve_path_from_config_base(
+            sub_wt_path,
+            first_line[len(prefix):].strip(),
+        )
+
+    async def _is_nested_submodule_linked_worktree(
+            self,
+            module_dir: str,
+            sub_wt_path: str) -> bool:
+        """Return True only for a registered linked submodule worktree.
+
+        Empty/uninitialized submodule directories inside a superproject worktree
+        must not be treated as git repositories: git would otherwise walk up to
+        the superproject and report the wrong HEAD.
+        """
+        module_dir = os.path.realpath(os.path.expanduser(module_dir or ""))
+        sub_wt_path = os.path.realpath(os.path.expanduser(sub_wt_path or ""))
+        if not module_dir or not sub_wt_path or not os.path.isdir(sub_wt_path):
+            return False
+        gitdir = self._nested_submodule_gitdir_path(sub_wt_path)
+        if not gitdir:
+            return False
+        worktrees_dir = os.path.join(module_dir, "worktrees")
+        try:
+            if os.path.commonpath([worktrees_dir, gitdir]) == worktrees_dir:
+                return True
+        except ValueError:
+            return False
+        entries = await self.list_worktrees(module_dir)
+        return any(
+            self._same_worktree_path(str(entry.get("path", "") or ""),
+                                     sub_wt_path)
+            for entry in entries
+        )
+
     @staticmethod
     def _join_repo_rel(root: str, rel_path: str) -> str:
         root = os.path.realpath(os.path.expanduser(root or ""))
@@ -1672,6 +1729,14 @@ class WorktreeManager:
                 super_wt,
                 sub_path,
             )
+            sub_wt_path = self._join_repo_rel(super_wt, sub_path)
+            if require_worktree and not (
+                await self._is_nested_submodule_linked_worktree(
+                    module_dir,
+                    sub_wt_path,
+                )
+            ):
+                continue
             await self._ensure_submodule_module_core_worktree(
                 repo_root,
                 module_dir,
@@ -1686,9 +1751,6 @@ class WorktreeManager:
                 if strict:
                     raise RuntimeError(message)
                 log.warning(message)
-                continue
-            sub_wt_path = self._join_repo_rel(super_wt, sub_path)
-            if require_worktree and not await self._is_git_repo(sub_wt_path):
                 continue
             infos.append({
                 "path": sub_path,

@@ -446,6 +446,35 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(sub_wt.exists())
         await self._assert_module_core_worktree_pinned()
 
+    async def test_remove_skips_empty_uninitialized_submodule_dir(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            str(self.repo_root),
+            base_branch="main",
+            worktree_submodules=[],
+        )
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        sub_wt = wt / self.sub_path
+        sub_wt.mkdir(parents=True, exist_ok=True)
+        self.assertFalse((sub_wt / ".git").exists())
+        self.assertEqual([], list(sub_wt.iterdir()))
+        await self._hijack_module_core_worktree(wt / "not-a-submodule-worktree")
+        core_worktree_before = await self._module_core_worktree()
+
+        result = await self.mgr.remove_result(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["worktree_removed"], result)
+        self.assertEqual([], result["nested_submodules"])
+        self.assertFalse(wt.exists())
+        self.assertEqual(core_worktree_before, await self._module_core_worktree())
+
     async def test_multi_worker_remove_keeps_submodule_module_core_worktree_pinned(self):
         await self._assert_module_core_worktree_pinned()
         cell_a, wt_a = await self._create_nested(
