@@ -59,6 +59,37 @@ test('agentListHtml: empty state + populated rows', () => {
   assert.match(html, /worker-a/);
 });
 
+test('agentPickerHtml: one option per agent with the active agent selected', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+      { id: 'worker-b', name: 'Worker Beta', kind: 'worker' },
+    ] },
+  });
+  store.setActiveAgent('worker-b');
+
+  const html = s.RemoteRender.agentPickerHtml(store);
+
+  assert.equal((html.match(/<option/g) || []).length, 2);
+  assert.match(html, /<select[^>]+data-agent-picker/);
+  assert.match(html, /<option value="worker-a">Worker Alpha<\/option>/);
+  assert.match(html, /<option value="worker-b" selected>Worker Beta<\/option>/);
+});
+
+test('agentListHtml remains the desktop list render path', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestInbound(agentMsg('m1', 'worker-a', 'hello'));
+
+  assert.equal(s.RemoteRender.agentListHtml(store),
+    '<button type="button" class="remote-agent-item is-active" data-agent-id="worker-a">'
+      + '<span class="remote-agent-name">worker-a</span>'
+      + '<span class="remote-agent-preview">hello</span></button>');
+});
+
 test('ask cards are gated behind cfg.askEnabled (no client-side recipient filtering)', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
