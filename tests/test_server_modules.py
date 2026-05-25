@@ -1966,6 +1966,38 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.group, 'g')
         self.assertEqual(follow_up.labels, ['torque:engineer-message'])
 
+    async def test_send_engineer_message_failure_restores_progress_clocks(self):
+        state = self._make_state()
+        _engineer, worker = self._add_engineer_and_worker(state)
+        worker.status = 'running'
+        worker.last_progress_at = 123.0
+        worker.last_heartbeat_at = 124.0
+        worker.last_activity_at = 124.0
+        worker.last_event_at = 124.0
+
+        class FailingBridge:
+            def prime_input_ready(self, _session_id):
+                pass
+
+            async def send_text(self, _session_id, _text):
+                raise RuntimeError('terminal unavailable')
+
+        result = await self.server_mod._send_engineer_message_to_agent(
+            state,
+            FailingBridge(),
+            worker,
+            'Need a quick status update',
+            lambda *args, **kwargs: None,
+        )
+
+        self.assertEqual(result['type'], 'error')
+        self.assertEqual(worker.status, 'running')
+        self.assertEqual(worker.last_progress_at, 123.0)
+        self.assertEqual(worker.last_heartbeat_at, 124.0)
+        self.assertEqual(worker.last_activity_at, 124.0)
+        self.assertEqual(worker.last_event_at, 124.0)
+        self.assertEqual(state.board_tasks, {})
+
     async def test_send_engineer_message_reply_not_required_appends_inline_thread(self):
         state = self._make_state()
         parent = state.board_add_task(
@@ -2164,6 +2196,43 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_send_user_message_failure_restores_progress_clocks(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+            status='idle',
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+
+        class FailingBridge:
+            async def send_text(self, _session_id, _text):
+                raise RuntimeError('terminal unavailable')
+
+        with self.assertRaises(RuntimeError):
+            await self.server_mod._handle_send_user_message_command(
+                {
+                    'cmd': 'send_user_message',
+                    'cell_id': worker.id,
+                    'text': 'line one',
+                },
+                state,
+                FailingBridge(),
+            )
+
+        self.assertEqual(worker.status, 'idle')
+        self.assertEqual(worker.last_progress_at, 123.0)
+        self.assertEqual(worker.last_heartbeat_at, 124.0)
+        self.assertEqual(worker.last_activity_at, 124.0)
+        self.assertEqual(worker.last_event_at, 124.0)
+        self.assertEqual(state.agent_message_history_read(worker.id), [])
+
     async def test_send_text_command_rolls_back_when_background_send_fails(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -2173,6 +2242,8 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             cell_type='agent',
             session_id='session-1',
             status='idle',
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
         )
         state.agents[worker.id] = worker
         state.groups['g'] = [worker.id]
@@ -2207,6 +2278,10 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result[0], RuntimeError)
         self.assertEqual(worker.status, 'idle')
+        self.assertEqual(worker.last_progress_at, 123.0)
+        self.assertEqual(worker.last_heartbeat_at, 124.0)
+        self.assertEqual(worker.last_activity_at, 124.0)
+        self.assertEqual(worker.last_event_at, 124.0)
 
     async def test_user_agent_message_persists_and_queues_wrapped_prompt(self):
         state = self._make_state()

@@ -3787,6 +3787,50 @@ class MatrixState:
                 self._db_save_agent(cell)
         return changed
 
+    def snapshot_agent_optimistic_state(self, cell_or_id) -> dict:
+        """Capture the fields an optimistic Running mark may need to restore."""
+        cell = self.agents.get(cell_or_id) if isinstance(cell_or_id, str) \
+            else cell_or_id
+        if not cell:
+            return {}
+        return {
+            "status": str(getattr(cell, "status", "") or ""),
+            "last_progress_at": _safe_float(getattr(
+                cell, "last_progress_at", 0) or 0),
+            "last_heartbeat_at": _safe_float(getattr(
+                cell, "last_heartbeat_at", 0) or 0),
+            "last_activity_at": _safe_float(getattr(
+                cell, "last_activity_at", 0) or 0),
+            "last_event_at": _safe_float(getattr(
+                cell, "last_event_at", 0) or 0),
+        }
+
+    def restore_agent_optimistic_state(self, cell_or_id, snapshot: dict,
+                                       *, emit: bool = True,
+                                       persist: bool = False) -> bool:
+        """Restore a cell to a pre-optimistic-send status/clock snapshot."""
+        cell = self.agents.get(cell_or_id) if isinstance(cell_or_id, str) \
+            else cell_or_id
+        if not cell or not snapshot:
+            return False
+        before = self.snapshot_agent_optimistic_state(cell)
+        cell.status = str(snapshot.get("status", "") or "idle")
+        cell.last_progress_at = _safe_float(snapshot.get(
+            "last_progress_at", 0) or 0)
+        cell.last_heartbeat_at = _safe_float(snapshot.get(
+            "last_heartbeat_at", 0) or 0)
+        cell.last_activity_at = _safe_float(snapshot.get(
+            "last_activity_at", 0) or 0)
+        cell.last_event_at = _safe_float(snapshot.get(
+            "last_event_at", 0) or 0)
+        changed = before != self.snapshot_agent_optimistic_state(cell)
+        if changed:
+            if emit:
+                self._emit_agent(cell)
+            if persist:
+                self._db_save_agent(cell)
+        return changed
+
     def mark_agent_optimistic_running(
             self, cell_or_id, timestamp: float | None = None, *,
             emit: bool = True, persist: bool = False) -> bool:

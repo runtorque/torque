@@ -5089,6 +5089,8 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             session_id="session-1",
             status="idle",
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
         )
         state.agents[cell.id] = cell
 
@@ -5096,7 +5098,80 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
             await service.send_agent_prompt(cell, "start work")
 
         self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.last_progress_at, 123.0)
+        self.assertEqual(cell.last_heartbeat_at, 124.0)
+        self.assertEqual(cell.last_activity_at, 124.0)
+        self.assertEqual(cell.last_event_at, 124.0)
         self.assertGreaterEqual(state._seq, 2)
+
+    async def test_send_agent_prompt_rolls_back_queued_all_fail_chain(self):
+        state = self.state_mod.MatrixState()
+        first_send_entered = asyncio.Event()
+        release_failures = asyncio.Event()
+        attempts = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload):
+                attempts.append((session_id, payload))
+                first_send_entered.set()
+                await release_failures.wait()
+                raise RuntimeError("terminal unavailable")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+            status="idle",
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
+        )
+        state.agents[cell.id] = cell
+
+        first = await service.send_agent_prompt(
+            cell,
+            "first work",
+            background=True,
+        )
+        await asyncio.wait_for(first_send_entered.wait(), timeout=1.0)
+        second = await service.send_agent_prompt(
+            cell,
+            "second work",
+            background=True,
+        )
+
+        self.assertEqual(cell.status, "running")
+        self.assertGreater(cell.last_progress_at, 124.0)
+
+        release_failures.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+
+        self.assertTrue(all(isinstance(item, RuntimeError) for item in results))
+        self.assertEqual(
+            attempts,
+            [
+                ("session-1", "first work\r"),
+                ("session-1", "second work\r"),
+            ],
+        )
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.last_progress_at, 123.0)
+        self.assertEqual(cell.last_heartbeat_at, 124.0)
+        self.assertEqual(cell.last_activity_at, 124.0)
+        self.assertEqual(cell.last_event_at, 124.0)
+        self.assertEqual(service._prompt_queue_tails, {})
+        self.assertEqual(service._prompt_queue_optimistic_baselines, {})
 
     async def test_background_prompt_task_is_retained_until_send_completes(self):
         state = self.state_mod.MatrixState()

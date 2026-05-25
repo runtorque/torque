@@ -4943,7 +4943,7 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
             "",
             reply_required=False,
         )
-    previous_status = str(getattr(target, "status", "") or "")
+    optimistic_baseline = state.snapshot_agent_optimistic_state(target)
     optimistic_at = time.time()
     optimistic_marked = state.mark_agent_optimistic_running(
         target,
@@ -4961,14 +4961,16 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
         log.exception("Failed to send Engineer message to agent %s", target.id)
         if (
             optimistic_marked
-            and previous_status != "running"
             and getattr(target, "status", "") == "running"
             and not getattr(target, "activity", "")
             and float(getattr(target, "last_progress_at", 0) or 0) <= optimistic_at
         ):
-            target.status = previous_status or "idle"
-            state._emit_agent(target)
-            await state.broadcast()
+            if state.restore_agent_optimistic_state(
+                    target,
+                    optimistic_baseline,
+                    emit=True,
+                    persist=False):
+                await state.broadcast()
         if follow_up:
             state.board_remove_task(follow_up.id)
         return {
@@ -5669,7 +5671,7 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     cell = state.agents.get(cell_id)
     if not cell or not getattr(cell, "session_id", ""):
         return False
-    previous_status = str(getattr(cell, "status", "") or "")
+    optimistic_baseline = state.snapshot_agent_optimistic_state(cell)
     optimistic_at = time.time()
     optimistic_marked = state.mark_agent_optimistic_running(
         cell,
@@ -5684,14 +5686,16 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     except Exception:
         if (
             optimistic_marked
-            and previous_status != "running"
             and getattr(cell, "status", "") == "running"
             and not getattr(cell, "activity", "")
             and float(getattr(cell, "last_progress_at", 0) or 0) <= optimistic_at
         ):
-            cell.status = previous_status or "idle"
-            state._emit_agent(cell)
-            await state.broadcast()
+            if state.restore_agent_optimistic_state(
+                    cell,
+                    optimistic_baseline,
+                    emit=True,
+                    persist=False):
+                await state.broadcast()
         raise
     state.record_message_history(cell.id, text)
     return True
