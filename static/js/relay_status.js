@@ -739,14 +739,17 @@ function _relayDaemonCredentialComputeView(msg) {
         ? msg.provenance : {},
     };
   }
-  if (msg.error === 'settings_write_failed' || msg.recoverable === true) {
+  var recoveryCredentialId = String(msg.credential_id || '');
+  var recoveryPrivateKeyPath = String(msg.private_key_path || '');
+  if (msg.error === 'settings_write_failed'
+      && recoveryCredentialId && recoveryPrivateKeyPath) {
     return {
       kind: 'recovery',
       message: String(msg.message || (
         "Relay accepted the credential, but Torque couldn't save it to Settings."
       )),
-      credentialId: String(msg.credential_id || ''),
-      privateKeyPath: String(msg.private_key_path || ''),
+      credentialId: recoveryCredentialId,
+      privateKeyPath: recoveryPrivateKeyPath,
       detail: String(msg.detail || ''),
     };
   }

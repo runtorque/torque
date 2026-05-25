@@ -6563,6 +6563,18 @@ test('daemon credential settings-write failure renders recovery handle and survi
     view.privateKeyPath,
     '/tmp/torque/relay/daemon-daemon-1-cred_orphan_123.pem',
   );
+  context.__recoverableOther = {
+    type: 'daemon_credential',
+    ok: false,
+    error: 'relay_pair_failed',
+    recoverable: true,
+    message: 'The relay rejected this token; retry with a fresh token.',
+  };
+  assert.equal(
+    jsonValue(context, '_relayDaemonCredentialComputeView(__recoverableOther)').kind,
+    'error',
+    'recoverable non-settings errors must not render an empty recovery handle',
+  );
 
   runInContext(context, 'handleRelayDaemonCredential(__recovery);');
 

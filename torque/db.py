@@ -1706,6 +1706,14 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             dict(kwargs),
         )
 
+    async def save_global_settings_durable(self, gs):
+        """Persist global settings and propagate write failures to the caller."""
+        return await self._enqueue_async_write(
+            "global_settings",
+            "save_global_settings",
+            _snapshot_db_payload(gs),
+        )
+
     def _get_async_writer(self) -> "_QueuedAsyncDBWriter":
         loop = asyncio.get_running_loop()
         writer = self._async_writer

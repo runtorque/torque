@@ -11095,7 +11095,7 @@ async def main(connection=None):
                 if credential_id and private_key_path:
                     old_relay = _relay_settings_fingerprint()
                     try:
-                        state.update_global_settings(
+                        await state.update_global_settings_durable(
                             relay_credential_id=credential_id,
                             relay_private_key_path=private_key_path,
                         )

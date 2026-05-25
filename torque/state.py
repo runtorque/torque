@@ -6880,8 +6880,7 @@ class MatrixState:
         """
         return self.global_settings.default_command or DEFAULT_COMMAND
 
-    def update_global_settings(self, **fields):
-        """Update global settings fields."""
+    def _normalize_global_settings_updates(self, fields: dict) -> dict:
         valid = set(GlobalSettings.__dataclass_fields__)
         updates = {}
         for key, value in fields.items():
@@ -6906,11 +6905,49 @@ class MatrixState:
                 ):
                     value = normalize_relay_text(value)
                 updates[key] = value
+        return updates
+
+    def _apply_global_settings_updates(self, updates: dict) -> None:
         for key, value in updates.items():
             setattr(self.global_settings, key, value)
         self._emit("global_settings_update",
                     **asdict(self.global_settings))
+
+    def update_global_settings(self, **fields):
+        """Update global settings fields."""
+        updates = self._normalize_global_settings_updates(fields)
+        self._apply_global_settings_updates(updates)
         self._db_save_global_settings()
+
+    async def update_global_settings_durable(self, **fields):
+        """Update global settings only after the durable write succeeds.
+
+        Most settings writes are UI best-effort and can use the fire-and-forget
+        async DB queue. Daemon credential provisioning is different: the relay
+        has already accepted a new credential and the private key has been
+        committed to disk, so a failed local Settings write must surface a
+        recovery handle instead of mutating in-memory state and restarting the
+        connector as though the credential were saved.
+        """
+        updates = self._normalize_global_settings_updates(fields)
+        if self.db:
+            candidate = GlobalSettings(
+                **{**asdict(self.global_settings), **updates}
+            )
+            save_durable = getattr(self.db, "save_global_settings_durable", None)
+            if callable(save_durable):
+                await save_durable(candidate)
+            else:
+                enqueue = getattr(self.db, "_enqueue_async_write", None)
+                if callable(enqueue):
+                    await enqueue(
+                        "global_settings",
+                        "save_global_settings",
+                        candidate,
+                    )
+                else:
+                    self.db.save_global_settings(candidate)
+        self._apply_global_settings_updates(updates)
 
     def next_cell_name(self, group: str, cell_type: str) -> str:
         """Generate the next auto-name based on group prefix settings."""

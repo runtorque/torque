@@ -421,7 +421,7 @@ class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.global_settings = _settings()
 
-            def update_global_settings(self, **fields):
+            async def update_global_settings_durable(self, **fields):
                 updates.append(dict(fields))
                 for key, value in fields.items():
                     setattr(self.global_settings, key, value)
@@ -480,18 +480,25 @@ class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("relay_config", result)
 
-    async def test_settings_write_failure_returns_recoverable_credential_handle(self):
-        updates = []
+    async def test_durable_settings_write_failure_returns_recoverable_credential_handle(self):
+        durable_write_attempts = []
 
-        class FakeState:
-            def __init__(self):
-                self.global_settings = _settings()
-
-            def update_global_settings(self, **fields):
-                updates.append(dict(fields))
+        class BadSettingsDB:
+            async def save_global_settings_durable(self, gs):
+                durable_write_attempts.append(
+                    {
+                        "relay_credential_id": gs.relay_credential_id,
+                        "relay_private_key_path": gs.relay_private_key_path,
+                    }
+                )
                 raise OSError("settings database is read-only")
 
-        fake_state = FakeState()
+        fake_state = self.state_mod.MatrixState(db=BadSettingsDB())
+        fake_state.global_settings = self.state_mod.GlobalSettings(
+            relay_enabled=True,
+            relay_url="https://relay.example",
+            relay_daemon_id="daemon-1",
+        )
 
         def fingerprint():
             gs = fake_state.global_settings
@@ -538,7 +545,7 @@ class GenerateDaemonCredentialCommandTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Relay accepted the credential", result["message"])
         self.assertIn("relay admin to revoke", result["message"])
-        self.assertEqual(updates, [{
+        self.assertEqual(durable_write_attempts, [{
             "relay_credential_id": "cred-orphan",
             "relay_private_key_path": "/tmp/profile/relay/daemon-daemon-1-cred-orphan.pem",
         }])
