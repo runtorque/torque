@@ -59,6 +59,45 @@ test('agentListHtml: empty state + populated rows', () => {
   assert.match(html, /worker-a/);
 });
 
+test('agentListHtml: renders role-kind badges for each known agent kind', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'architect-a', name: 'Architect Alpha', kind: 'architect' },
+      { id: 'engineer-a', name: 'Engineer Alpha', kind: 'engineer' },
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+      { id: 'terminal-a', name: 'Terminal Alpha', kind: 'terminal' },
+    ] },
+  });
+
+  const html = s.RemoteRender.agentListHtml(store);
+
+  assert.match(html, /class="remote-badge remote-badge-kind remote-badge-kind-architect">Architect<\/span>/);
+  assert.match(html, /class="remote-badge remote-badge-kind remote-badge-kind-engineer">Engineer<\/span>/);
+  assert.match(html, /class="remote-badge remote-badge-kind remote-badge-kind-worker">Worker<\/span>/);
+  assert.match(html, /class="remote-badge remote-badge-kind remote-badge-kind-terminal">Terminal<\/span>/);
+});
+
+test('agentListHtml: omits role-kind badges for blank or unknown agent kinds', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'agent-blank', name: 'Blank Kind', kind: '' },
+      { id: 'agent-unknown', name: 'Unknown Kind', kind: 'bot' },
+    ] },
+  });
+
+  const html = s.RemoteRender.agentListHtml(store);
+
+  assert.match(html, /Blank Kind/);
+  assert.match(html, /Unknown Kind/);
+  assert.doesNotMatch(html, /remote-badge-kind/);
+});
+
 test('agentPickerHtml: one option per agent with the active agent selected', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
@@ -75,8 +114,33 @@ test('agentPickerHtml: one option per agent with the active agent selected', () 
 
   assert.equal((html.match(/<option/g) || []).length, 2);
   assert.match(html, /<select[^>]+data-agent-picker/);
-  assert.match(html, /<option value="worker-a">Worker Alpha<\/option>/);
-  assert.match(html, /<option value="worker-b" selected>Worker Beta<\/option>/);
+  assert.match(html, /<option value="worker-a">Worker · Worker Alpha<\/option>/);
+  assert.match(html, /<option value="worker-b" selected>Worker · Worker Beta<\/option>/);
+});
+
+test('agentPickerHtml: prefixes options with known kind labels only', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'architect-a', name: 'Architect Alpha', kind: 'architect' },
+      { id: 'engineer-a', name: 'Engineer Alpha', kind: 'engineer' },
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+      { id: 'terminal-a', name: 'Terminal Alpha', kind: 'terminal' },
+      { id: 'agent-unknown', name: 'Unknown Kind', kind: 'bot' },
+      { id: 'agent-blank', name: 'Blank Kind', kind: '' },
+    ] },
+  });
+
+  const html = s.RemoteRender.agentPickerHtml(store);
+
+  assert.match(html, /<option value="architect-a" selected>Architect · Architect Alpha<\/option>/);
+  assert.match(html, /<option value="engineer-a">Engineer · Engineer Alpha<\/option>/);
+  assert.match(html, /<option value="worker-a">Worker · Worker Alpha<\/option>/);
+  assert.match(html, /<option value="terminal-a">Terminal · Terminal Alpha<\/option>/);
+  assert.match(html, /<option value="agent-unknown">Unknown Kind<\/option>/);
+  assert.match(html, /<option value="agent-blank">Blank Kind<\/option>/);
 });
 
 test('agentListHtml remains the desktop list render path', () => {
@@ -86,7 +150,9 @@ test('agentListHtml remains the desktop list render path', () => {
 
   assert.equal(s.RemoteRender.agentListHtml(store),
     '<button type="button" class="remote-agent-item is-active" data-agent-id="worker-a">'
+      + '<span class="remote-agent-heading">'
       + '<span class="remote-agent-name">worker-a</span>'
+      + '</span>'
       + '<span class="remote-agent-preview">hello</span></button>');
 });
 
