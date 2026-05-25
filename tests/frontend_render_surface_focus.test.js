@@ -40,6 +40,48 @@ function makeFakeTextarea(id) {
   };
 }
 
+function makeClassList(initial) {
+  const classes = new Set(initial || []);
+  return {
+    add(cls) { classes.add(cls); },
+    remove(cls) { classes.delete(cls); },
+    contains(cls) { return classes.has(cls); },
+    toggle(cls, force) {
+      const shouldAdd = force === undefined ? !classes.has(cls) : !!force;
+      if (shouldAdd) classes.add(cls);
+      else classes.delete(cls);
+      return shouldAdd;
+    },
+    values() { return Array.from(classes); },
+  };
+}
+
+function makeSplitPart(id, opts) {
+  const options = opts || {};
+  return {
+    id,
+    classList: makeClassList(options.classes || []),
+    style: {},
+    attributes: {},
+    children: options.children || [],
+    scrollHeight: options.scrollHeight || 0,
+    offsetHeight: options.offsetHeight || 0,
+    clientHeight: options.clientHeight || 0,
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name] || null; },
+    getBoundingClientRect() {
+      return {
+        top: 0,
+        left: 0,
+        width: options.width || 0,
+        height: options.height || 0,
+      };
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+}
+
 function makePanel(_textarea) {
   // _findSurfaceNode resolves '#id' selectors via the global document.getElementById,
   // which the sandbox below stubs. The panel just needs to claim it contains the
@@ -68,6 +110,98 @@ function buildSandbox(activeElement, lookup) {
   vm.createContext(sandbox);
   loadScript(sandbox, 'static/js/render.js');
   return sandbox;
+}
+
+function buildFocusSplitSandbox(options) {
+  const opts = Object.assign({
+    focusContentHeight: 260,
+    splitHeight: 800,
+    handleHeight: 10,
+    viewportHeight: 900,
+  }, options || {});
+  const store = {};
+  const tabsHost = makeSplitPart('agent-group-tabs-host');
+  const grid = makeSplitPart('agent-grid-pane');
+  const handle = makeSplitPart('agent-focus-resizer', { height: opts.handleHeight });
+  const focus = makeSplitPart('agent-focus-panel', { height: opts.focusPanelHeight || 0 });
+  const focusScroll = makeSplitPart('agent-focus-scroll', {
+    scrollHeight: opts.focusContentHeight,
+    offsetHeight: opts.focusContentHeight,
+    clientHeight: opts.focusContentHeight,
+  });
+  const split = makeSplitPart('agent-split', {
+    classes: ['agent-split'],
+    height: opts.splitHeight,
+  });
+  const main = makeSplitPart('main');
+  const byId = {
+    main,
+    'agent-group-tabs-host': tabsHost,
+    'app-group-tabs-host': null,
+    'agent-grid-pane': grid,
+    'agent-focus-resizer': handle,
+    'agent-focus-panel': focus,
+    'agent-focus-scroll': focusScroll,
+  };
+  main.querySelector = function(selector) {
+    if (selector === '[data-agent-split]') return split;
+    if (selector === '[data-agent-grid-pane]') return grid;
+    if (selector === '[data-agent-focus-resizer]') return handle;
+    if (selector === '[data-agent-focus-panel]') return focus;
+    if (selector === '[data-agent-focus-scroll]') return focusScroll;
+    if (selector === '[data-agent-group-tabs-host]') return tabsHost;
+    return null;
+  };
+  const body = {
+    classList: makeClassList(),
+    style: {},
+  };
+  const document = {
+    activeElement: null,
+    body,
+    getElementById(id) {
+      return Object.prototype.hasOwnProperty.call(byId, id) ? byId[id] : null;
+    },
+    querySelector() { return null; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  main.ownerDocument = document;
+  const sandbox = {
+    console,
+    Date,
+    JSON,
+    Math,
+    location: { host: 'localhost:18932' },
+    localStorage: {
+      getItem(key) {
+        return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+      },
+      setItem(key, value) { store[key] = String(value); },
+    },
+    getComputedStyle() {
+      return {
+        paddingTop: '0px',
+        paddingBottom: '0px',
+        marginTop: '0px',
+        marginBottom: '0px',
+      };
+    },
+    window: { innerHeight: opts.viewportHeight },
+    document,
+    state: {
+      runtime: { profile: 'focus-test', port: '18932' },
+    },
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  loadScript(sandbox, 'static/js/render.js');
+  return {
+    sandbox,
+    store,
+    parts: { main, split, tabsHost, grid, handle, focus, focusScroll, body },
+  };
 }
 
 test('_restoreSurfaceState focuses the captured input with preventScroll', () => {
@@ -120,4 +254,104 @@ test('_restoreSurfaceState falls back to no-arg focus if focus(opts) throws', ()
     'first attempt should pass {preventScroll: true}');
   assert.equal(textarea.focusCalls[1], null,
     'fallback should call focus() with no arguments');
+});
+
+test('_restoreSurfaceState preserves textarea draft, caret, input scroll, and panel scroll positions', () => {
+  const activeTextarea = makeFakeTextarea('agent-detail-draft');
+  activeTextarea.value = 'draft reply';
+  activeTextarea.selectionStart = 2;
+  activeTextarea.selectionEnd = 7;
+  activeTextarea.scrollTop = 33;
+  activeTextarea.scrollLeft = 4;
+  const restoredTextarea = makeFakeTextarea('agent-detail-draft');
+  restoredTextarea.value = '';
+  restoredTextarea.selectionStart = 0;
+  restoredTextarea.selectionEnd = 0;
+  restoredTextarea.scrollTop = 0;
+  restoredTextarea.scrollLeft = 0;
+  const log = { scrollTop: 81, scrollLeft: 5 };
+  const panel = {
+    scrollTop: 140,
+    scrollLeft: 9,
+    contains(node) { return node === activeTextarea; },
+    querySelector(selector) {
+      return selector === '.mcp-log' ? log : null;
+    },
+  };
+  const sandbox = buildSandbox(activeTextarea, { [activeTextarea.id]: activeTextarea });
+
+  const snapshot = sandbox._captureSurfaceState(panel, {
+    scrollSelectors: [':root', '.mcp-log'],
+  });
+
+  // Simulate a repaint: the focused textarea resolves to a new node and the
+  // panel/log scroll containers have drifted to the top.
+  sandbox.document.activeElement = null;
+  sandbox.document.getElementById = function(id) {
+    return id === restoredTextarea.id ? restoredTextarea : null;
+  };
+  panel.scrollTop = 0;
+  panel.scrollLeft = 0;
+  log.scrollTop = 0;
+  log.scrollLeft = 0;
+
+  sandbox._restoreSurfaceState(panel, snapshot, {
+    scrollSelectors: [':root', '.mcp-log'],
+  });
+
+  assert.equal(restoredTextarea.value, 'draft reply');
+  assert.equal(restoredTextarea.selectionStart, 2);
+  assert.equal(restoredTextarea.selectionEnd, 7);
+  assert.equal(restoredTextarea.scrollTop, 33);
+  assert.equal(restoredTextarea.scrollLeft, 4);
+  assert.deepEqual(JSON.parse(JSON.stringify(restoredTextarea.focusCalls)), [
+    { preventScroll: true },
+  ]);
+  assert.equal(panel.scrollTop, 140);
+  assert.equal(panel.scrollLeft, 9);
+  assert.equal(log.scrollTop, 81);
+  assert.equal(log.scrollLeft, 5);
+});
+
+test('focus panel resizer click collapses and expands with persisted collapsed UI state', () => {
+  const { sandbox, parts } = buildFocusSplitSandbox({ focusContentHeight: 260 });
+  let prevented = 0;
+
+  sandbox._agentFocusResizerClick({ preventDefault() { prevented += 1; } });
+
+  assert.equal(prevented, 1);
+  assert.equal(sandbox._agentFocusIsCollapsed(), true);
+  assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), true);
+  assert.equal(parts.handle.getAttribute('role'), 'button');
+  assert.equal(parts.handle.getAttribute('aria-label'), 'Expand focus panel');
+  assert.equal(parts.handle.getAttribute('aria-expanded'), 'false');
+  assert.equal(parts.focus.style.height || '', '');
+
+  sandbox._agentFocusResizerClick({ preventDefault() { prevented += 1; } });
+
+  assert.equal(prevented, 2);
+  assert.equal(sandbox._agentFocusIsCollapsed(), false);
+  assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), false);
+  assert.equal(parts.handle.getAttribute('role'), 'separator');
+  assert.equal(parts.handle.getAttribute('aria-label'), 'Resize or collapse focus panel');
+  assert.equal(parts.handle.getAttribute('aria-expanded'), 'true');
+  assert.equal(sandbox._agentFocusMode(), 'auto');
+  assert.equal(parts.focus.style.height, '260px');
+  assert.equal(parts.focus.style.flexBasis, '260px');
+});
+
+test('focus panel auto-size clamps tall content to the viewport cap in auto mode', () => {
+  const { sandbox, parts } = buildFocusSplitSandbox({
+    focusContentHeight: 700,
+    splitHeight: 800,
+    handleHeight: 10,
+    viewportHeight: 900,
+  });
+
+  sandbox._agentFocusApplyPersistedSplit();
+
+  // min(content 700, viewport 45% cap 405, split available 590) => 405.
+  assert.equal(parts.focus.style.height, '405px');
+  assert.equal(parts.focus.style.flexBasis, '405px');
+  assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), false);
 });
