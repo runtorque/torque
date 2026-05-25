@@ -23024,6 +23024,59 @@ test('agent card action line renders no-timestamp action without old prefix in r
   assert.doesNotMatch(noTimestampHtml, /Last action:/);
 });
 
+test('agent card humanizes MCP tool activity labels without exposing raw ids', () => {
+  const { context, sandbox } = createMainRenderHarness();
+
+  const cases = [
+    ['mcp__torque__torque_progress', 'Reporting progress'],
+    ['mcp__torque__engineer_task_dispatch', 'Dispatching'],
+    ['mcp__torque__engineer_merge', 'Merging'],
+    ['mcp__torque__architect_journal', 'Journaling'],
+    ['mcp__torque__architect_message_engineer', 'Messaging engineer'],
+    ['mcp__claude-in-chrome__navigate', 'Navigating'],
+    ['mcp__random-server__some_new_tool', 'Some new tool'],
+    ['engineer_some_new_tool', 'Some new tool'],
+    ['Using mcp__torque__architect_journal', 'Journaling'],
+    ['mcp__torque__architect_journal failed', 'Journaling failed'],
+    ['Reviewing patch', 'Reviewing patch'],
+  ];
+
+  for (const [input, expected] of cases) {
+    const actual = vm.runInContext(`_humanizeToolLabel(${JSON.stringify(input)})`, context);
+    assert.equal(actual, expected, input);
+    if (String(input).includes('mcp__')) {
+      assert.doesNotMatch(actual, /mcp__/);
+    }
+  }
+
+  assert.equal(
+    vm.runInContext(`_agentCardActionTextFromMcp({
+      action: 'tool_start',
+      tool_name: 'mcp__torque__engineer_task_dispatch',
+      timestamp: 123
+    })`, context),
+    'Dispatching',
+  );
+
+  sandbox.state.children = {};
+  sandbox.state.board_tasks = {};
+  sandbox.rawToolWorker = {
+    id: 'worker-raw-tool',
+    name: 'Raw Tool Worker',
+    kind: 'worker',
+    group: 'torque',
+    cell_type: 'agent',
+    status: 'running',
+    activity_detail: 'Using mcp__torque__architect_journal',
+    last_progress_at: Date.now() / 1000,
+  };
+
+  const rawToolHtml = vm.runInContext('renderAgentCell(rawToolWorker)', context);
+
+  assert.match(rawToolHtml, /cell-worker-activity" title="Journaling">Journaling<\/div>/);
+  assert.doesNotMatch(rawToolHtml, /cell-worker-activity[^>]*mcp__torque__architect_journal/);
+});
+
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
