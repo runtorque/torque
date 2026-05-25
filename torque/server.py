@@ -4585,6 +4585,31 @@ async def _queue_user_direct_message_to_agent(
             reason="send_prompt_unavailable",
             emit=emit,
         ) or row
+    previous_status = str(getattr(target, "status", "") or "")
+    optimistic_at = time.time()
+    optimistic_marked = state.mark_agent_optimistic_running(
+        target,
+        optimistic_at,
+        emit=emit,
+        persist=False,
+    )
+    if optimistic_marked and emit:
+        await state.broadcast()
+
+    async def _rollback_optimistic_running():
+        if not optimistic_marked or previous_status == "running":
+            return
+        if getattr(target, "status", "") != "running":
+            return
+        if getattr(target, "activity", ""):
+            return
+        if float(getattr(target, "last_progress_at", 0) or 0) > optimistic_at:
+            return
+        target.status = previous_status or "idle"
+        state._emit_agent(target)
+        if emit:
+            await state.broadcast()
+
     prompt = _format_user_direct_message_prompt(
         row,
         str(getattr(target, "kind", "") or "worker").strip() or "worker",
@@ -4610,6 +4635,7 @@ async def _queue_user_direct_message_to_agent(
             message_id,
             getattr(target, "id", ""),
         )
+        await _rollback_optimistic_running()
         return state.update_direct_message_delivery(
             message_id,
             "buffered",
@@ -4617,6 +4643,7 @@ async def _queue_user_direct_message_to_agent(
             emit=emit,
         ) or row
     if not queued:
+        await _rollback_optimistic_running()
         return state.update_direct_message_delivery(
             message_id,
             "buffered",
@@ -4943,12 +4970,32 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
             "",
             reply_required=False,
         )
+    previous_status = str(getattr(target, "status", "") or "")
+    optimistic_at = time.time()
+    optimistic_marked = state.mark_agent_optimistic_running(
+        target,
+        optimistic_at,
+        emit=True,
+        persist=False,
+    )
+    if optimistic_marked:
+        await state.broadcast()
     try:
         if hasattr(bridge, "prime_input_ready"):
             bridge.prime_input_ready(target.session_id)
         await bridge.send_text(target.session_id, prompt)
     except Exception as exc:
         log.exception("Failed to send Engineer message to agent %s", target.id)
+        if (
+            optimistic_marked
+            and previous_status != "running"
+            and getattr(target, "status", "") == "running"
+            and not getattr(target, "activity", "")
+            and float(getattr(target, "last_progress_at", 0) or 0) <= optimistic_at
+        ):
+            target.status = previous_status or "idle"
+            state._emit_agent(target)
+            await state.broadcast()
         if follow_up:
             state.board_remove_task(follow_up.id)
         return {
@@ -5640,10 +5687,30 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     cell = state.agents.get(cell_id)
     if not cell or not getattr(cell, "session_id", ""):
         return False
-    cell.status = "running"
-    state.mark_agent_progress(cell, emit=False)
-    state._emit_agent(cell)
-    await bridge.send_text(cell.session_id, text)
+    previous_status = str(getattr(cell, "status", "") or "")
+    optimistic_at = time.time()
+    optimistic_marked = state.mark_agent_optimistic_running(
+        cell,
+        optimistic_at,
+        emit=True,
+        persist=False,
+    )
+    if optimistic_marked:
+        await state.broadcast()
+    try:
+        await bridge.send_text(cell.session_id, text)
+    except Exception:
+        if (
+            optimistic_marked
+            and previous_status != "running"
+            and getattr(cell, "status", "") == "running"
+            and not getattr(cell, "activity", "")
+            and float(getattr(cell, "last_progress_at", 0) or 0) <= optimistic_at
+        ):
+            cell.status = previous_status or "idle"
+            state._emit_agent(cell)
+            await state.broadcast()
+        raise
     state.record_message_history(cell.id, text)
     return True
 
@@ -11926,9 +11993,11 @@ async def main(connection=None):
             elif cmd == "send_text":
                 cell = state.agents.get(data["id"])
                 if cell and cell.session_id:
-                    cell.status = "running"
-                    state.mark_agent_progress(cell, emit=False)
-                    state._emit_agent(cell)
+                    state.mark_agent_optimistic_running(
+                        cell,
+                        emit=True,
+                        persist=False,
+                    )
                 await _queue_cell_prompt_send(
                     cell,
                     data.get("text", ""),

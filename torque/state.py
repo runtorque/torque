@@ -3787,6 +3787,33 @@ class MatrixState:
                 self._db_save_agent(cell)
         return changed
 
+    def mark_agent_optimistic_running(
+            self, cell_or_id, timestamp: float | None = None, *,
+            emit: bool = True, persist: bool = False) -> bool:
+        """Mark a live prompt target Running at enqueue/send time.
+
+        A user or dispatcher sending text is the start edge of an agent turn,
+        even before adapter hooks report the first real activity event.  This
+        helper keeps that optimistic transition server-side so all clients see
+        the same status delta, while normal session/activity events still
+        reconcile the cell afterward.
+        """
+        cell = self.agents.get(cell_or_id) if isinstance(cell_or_id, str) \
+            else cell_or_id
+        if not cell:
+            return False
+        status_changed = cell.status != "running"
+        if status_changed:
+            cell.status = "running"
+        progress_changed = cell.mark_progress(timestamp)
+        changed = status_changed or progress_changed
+        if changed:
+            if emit:
+                self._emit_agent(cell)
+            if persist:
+                self._db_save_agent(cell)
+        return changed
+
     def mark_agent_heartbeat(self, cell_or_id, timestamp: float | None = None,
                              *, emit: bool = True,
                              persist: bool = False) -> bool:

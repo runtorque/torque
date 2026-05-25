@@ -5020,6 +5020,84 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
 
+    async def test_send_agent_prompt_marks_running_before_delivery_finishes(self):
+        state = self.state_mod.MatrixState()
+        bridge_started = asyncio.Event()
+        bridge_release = asyncio.Event()
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload):
+                bridge_started.set()
+                await bridge_release.wait()
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+            status="idle",
+        )
+        state.agents[cell.id] = cell
+
+        task = await service.send_agent_prompt(
+            cell,
+            "start work",
+            background=True,
+        )
+
+        self.assertEqual(cell.status, "running")
+        self.assertGreater(cell.last_progress_at, 0)
+        self.assertGreaterEqual(state._seq, 1)
+        self.assertFalse(bridge_started.is_set())
+
+        await bridge_started.wait()
+        bridge_release.set()
+        await task
+
+    async def test_send_agent_prompt_rolls_back_running_when_send_fails(self):
+        state = self.state_mod.MatrixState()
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload):
+                raise RuntimeError("terminal unavailable")
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+            status="idle",
+        )
+        state.agents[cell.id] = cell
+
+        with self.assertRaises(RuntimeError):
+            await service.send_agent_prompt(cell, "start work")
+
+        self.assertEqual(cell.status, "idle")
+        self.assertGreaterEqual(state._seq, 2)
+
     async def test_background_prompt_task_is_retained_until_send_completes(self):
         state = self.state_mod.MatrixState()
         bridge_started = asyncio.Event()

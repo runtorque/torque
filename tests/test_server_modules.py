@@ -2055,7 +2055,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(
             self.server_mod.time,
             'time',
-            side_effect=[10.0, 10.5, 20.0, 20.5],
+            side_effect=[9.0, 10.0, 10.5, 19.0, 20.0, 20.5],
         ):
             await self.server_mod._send_engineer_message_to_agent(
                 state,
@@ -2228,6 +2228,55 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             'delivered',
         )
         self.assertEqual(direct_notifications, [])
+
+    async def test_user_agent_message_marks_agent_running_before_delivery_finishes(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        send_entered = asyncio.Event()
+        release_delivery = asyncio.Event()
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            self.assertEqual(worker.status, 'running')
+            send_entered.set()
+
+            async def _delivered():
+                await release_delivery.wait()
+
+            return asyncio.create_task(_delivered())
+
+        command_task = asyncio.create_task(
+            self.server_mod._handle_user_agent_message_command(
+                {
+                    'cmd': 'user_agent_message',
+                    'agent_id': worker.id,
+                    'message': 'Start this now.',
+                    'idempotency_key': 'optimistic-submit',
+                },
+                state,
+                fake_send_prompt,
+            )
+        )
+
+        await asyncio.wait_for(send_entered.wait(), timeout=1.0)
+        self.assertFalse(command_task.done())
+        self.assertEqual(worker.status, 'running')
+        self.assertGreater(worker.last_progress_at, 0)
+        self.assertGreaterEqual(state._seq, 1)
+
+        release_delivery.set()
+        result = await command_task
+        self.assertEqual(result['delivery_state'], 'delivered')
+        self.assertEqual(worker.status, 'running')
 
     async def test_user_agent_message_reply_hint_cadence_and_replay(self):
         state = self._make_state()
@@ -2510,6 +2559,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             cell_type='agent',
             kind='engineer',
             session_id='session-eng',
+            status='idle',
         )
         state.agents[engineer.id] = engineer
         state.groups['g'] = [engineer.id]
@@ -2537,6 +2587,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             state.direct_messages_by_agent[engineer.id][0]['delivery_reason'],
             'terminal unavailable',
         )
+        self.assertEqual(engineer.status, 'idle')
 
     async def test_user_agent_message_aliases_prompt_unavailable_and_idempotency_conflict(self):
         state = self._make_state()

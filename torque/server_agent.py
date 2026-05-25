@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import time
 from typing import Any
 
 from . import config as torque_config
@@ -734,7 +735,41 @@ class AgentLaunchService:
         payload = prompt if prompt.endswith("\r") else prompt + "\r"
         target_session_id = cell.session_id or ""
         previous = self._prompt_queue_tails.get(target_session_id)
+        previous_status = str(getattr(cell, "status", "") or "")
+        optimistic_at = time.time()
+        optimistic_marked = False
+        if target_session_id:
+            optimistic_marked = self.state.mark_agent_optimistic_running(
+                cell,
+                optimistic_at,
+                emit=True,
+                persist=persist,
+            )
+            if optimistic_marked:
+                await self.state.broadcast()
         task_ref = None
+
+        async def _rollback_optimistic_running():
+            if not optimistic_marked or previous_status == "running":
+                return
+            if getattr(cell, "status", "") != "running":
+                return
+            if getattr(cell, "activity", ""):
+                return
+            if target_session_id \
+                    and self._prompt_queue_tails.get(target_session_id) is not task_ref:
+                # A newer prompt is queued for the same session; keep the
+                # optimistic Running status for that pending work.
+                return
+            if float(getattr(cell, "last_progress_at", 0) or 0) > optimistic_at:
+                # A real activity/progress event arrived after the optimistic
+                # mark, so do not roll the cell back underneath it.
+                return
+            cell.status = previous_status or "idle"
+            self.state._emit_agent(cell)
+            if persist:
+                self.state._db_save_agent(cell)
+            await self.state.broadcast()
 
         async def _run():
             try:
@@ -762,6 +797,7 @@ class AgentLaunchService:
                         cell.session_id or "<empty>",
                         len(prompt),
                     )
+                    await _rollback_optimistic_running()
                     return
                 if prime_input_ready \
                         and hasattr(self.bridge, "prime_input_ready"):
@@ -774,12 +810,18 @@ class AgentLaunchService:
                     )
                 else:
                     await self.bridge.send_text(target_session_id, payload)
-                cell.status = "running"
-                self.state.mark_agent_progress(cell, emit=False, persist=persist)
+                self.state.mark_agent_optimistic_running(
+                    cell,
+                    emit=False,
+                    persist=persist,
+                )
                 self.state._emit_agent(cell)
                 if persist:
                     self.state._db_save_agent(cell)
                 await self.state.broadcast()
+            except Exception:
+                await _rollback_optimistic_running()
+                raise
             finally:
                 if target_session_id \
                         and self._prompt_queue_tails.get(target_session_id) is task_ref:
