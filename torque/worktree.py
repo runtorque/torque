@@ -1507,6 +1507,133 @@ class WorktreeManager:
             ]
         return os.path.realpath(os.path.join(common_dir, "modules", *parts))
 
+    @staticmethod
+    def _resolve_path_from_config_base(base_dir: str, value: str) -> str:
+        value = str(value or "").strip()
+        if not value:
+            return ""
+        path = os.path.expanduser(value)
+        if not os.path.isabs(path):
+            path = os.path.join(base_dir, path)
+        return os.path.realpath(path)
+
+    async def _git_config_file_get(self, config_path: str,
+                                   key: str) -> tuple[int, str]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "config", "--file", config_path, "--get", key,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _stderr = await proc.communicate()
+            return proc.returncode, stdout.decode(errors="replace").strip()
+        except Exception:
+            log.debug("git config --file get failed for %s", config_path)
+            return 1, ""
+
+    async def _git_config_file_set(self, config_path: str, key: str,
+                                   value: str) -> tuple[int, str]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "config", "--file", config_path, key, value,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _stdout, stderr = await proc.communicate()
+            return (
+                proc.returncode,
+                stderr.decode(errors="replace").strip(),
+            )
+        except Exception as exc:
+            log.debug("git config --file set failed for %s", config_path)
+            return 1, str(exc)
+
+    async def _ensure_submodule_module_core_worktree(
+            self,
+            repo_root: str,
+            module_dir: str,
+            submodule_path: str) -> dict:
+        """Keep a submodule's shared module config pinned to the main checkout.
+
+        Git stores submodule linked worktrees below ``.git/modules/<name>``.
+        Commands such as ``git submodule update --init`` invoked from a worker
+        superproject checkout can rewrite the module-level ``core.worktree`` to
+        that transient worker checkout.  If that worker is later removed, every
+        future submodule command can fail while trying to chdir into the
+        dangling path.  The shared config must instead keep pointing at the
+        superproject's main submodule checkout; linked worker worktrees carry
+        their own gitdir metadata under ``worktrees/``.
+        """
+        module_dir = os.path.realpath(os.path.expanduser(module_dir or ""))
+        repo_root = os.path.realpath(os.path.expanduser(repo_root or ""))
+        path = _normalize_repo_rel_path(submodule_path)
+        main_worktree = self._join_repo_rel(repo_root, path)
+        result = {
+            "ok": False,
+            "changed": False,
+            "module_dir": module_dir,
+            "config_path": "",
+            "expected_worktree": main_worktree,
+            "expected_value": "",
+            "previous_value": "",
+            "previous_resolved": "",
+            "error": "",
+        }
+        if not module_dir or not repo_root or not path:
+            result["error"] = "missing module_dir, repo_root, or submodule path"
+            return result
+        config_path = os.path.join(module_dir, "config")
+        result["config_path"] = config_path
+        if not os.path.isfile(config_path):
+            result["error"] = f"missing submodule module config: {config_path}"
+            return result
+
+        expected_value = os.path.relpath(main_worktree, module_dir)
+        expected_value = expected_value.replace(os.sep, "/")
+        result["expected_value"] = expected_value
+
+        code, current = await self._git_config_file_get(
+            config_path,
+            "core.worktree",
+        )
+        if code == 0:
+            result["previous_value"] = current
+            result["previous_resolved"] = self._resolve_path_from_config_base(
+                module_dir,
+                current,
+            )
+            if result["previous_resolved"] == main_worktree:
+                result["ok"] = True
+                return result
+
+        set_code, err = await self._git_config_file_set(
+            config_path,
+            "core.worktree",
+            expected_value,
+        )
+        if set_code != 0:
+            result["error"] = err or "could not set core.worktree"
+            return result
+        result["ok"] = True
+        result["changed"] = True
+        if result["previous_resolved"] and result["previous_resolved"] != main_worktree:
+            log.warning(
+                "Repaired submodule module core.worktree for %s: %s -> %s",
+                path,
+                result["previous_resolved"],
+                main_worktree,
+            )
+        return result
+
+    async def _ensure_submodule_module_core_worktree_for_info(
+            self,
+            info: dict) -> dict:
+        return await self._ensure_submodule_module_core_worktree(
+            info.get("repo_root", ""),
+            info.get("module_dir", ""),
+            info.get("path", ""),
+        )
+
     async def _gitlink_sha(self, super_wt: str, ref: str,
                            submodule_path: str) -> str:
         """Return the gitlink SHA for a submodule path at *ref*."""
@@ -1545,6 +1672,11 @@ class WorktreeManager:
                 super_wt,
                 sub_path,
             )
+            await self._ensure_submodule_module_core_worktree(
+                repo_root,
+                module_dir,
+                sub_path,
+            )
             module_ok = await self._is_git_repo(module_dir)
             if not module_ok:
                 message = (
@@ -1560,6 +1692,7 @@ class WorktreeManager:
                 continue
             infos.append({
                 "path": sub_path,
+                "repo_root": os.path.realpath(os.path.expanduser(repo_root)),
                 "worktree_path": sub_wt_path,
                 "module_dir": module_dir,
                 "gitlink_sha": gitlink_sha,
@@ -1639,6 +1772,7 @@ class WorktreeManager:
                     info["path"],
                     super_branch,
                 )
+                await self._ensure_submodule_module_core_worktree_for_info(info)
                 cmd = [
                     "git", "-C", info["module_dir"],
                     "worktree", "add",
@@ -1659,12 +1793,43 @@ class WorktreeManager:
                     "git_stdout": stdout.decode(errors="replace").strip(),
                     "git_stderr": stderr.decode(errors="replace").strip(),
                 }
+                entry["module_core_worktree_after_add"] = (
+                    await self._ensure_submodule_module_core_worktree_for_info(info)
+                )
                 if proc.returncode != 0:
                     raise RuntimeError(
                         "git submodule worktree add failed for "
                         f"{info['path']}: {entry['git_stderr']}"
                     )
                 created.append(entry)
+                if not entry["module_core_worktree_after_add"].get("ok"):
+                    raise RuntimeError(
+                        "git submodule worktree add left shared "
+                        f"core.worktree invalid for {info['path']}: "
+                        f"{entry['module_core_worktree_after_add'].get('error', '')}"
+                    )
+                code, _out, err = await self._git_run(
+                    sub_wt_path,
+                    "reset",
+                    "--hard",
+                    info["gitlink_sha"],
+                )
+                entry["pinned_gitlink_sha"] = info["gitlink_sha"]
+                entry["pin_returncode"] = code
+                if code != 0:
+                    raise RuntimeError(
+                        "git submodule worktree pin failed for "
+                        f"{info['path']} at {info['gitlink_sha'][:12]}: {err}"
+                    )
+                entry["module_core_worktree_after_pin"] = (
+                    await self._ensure_submodule_module_core_worktree_for_info(info)
+                )
+                if not entry["module_core_worktree_after_pin"].get("ok"):
+                    raise RuntimeError(
+                        "git submodule worktree pin left shared "
+                        f"core.worktree invalid for {info['path']}: "
+                        f"{entry['module_core_worktree_after_pin'].get('error', '')}"
+                    )
                 log.info(
                     "Created nested submodule worktree %s on %s",
                     sub_wt_path,
@@ -1701,6 +1866,53 @@ class WorktreeManager:
         except Exception:
             return False
 
+    async def _create_preserved_nested_submodule_ref(self, info: dict,
+                                                     head: str = "") -> dict:
+        """Create a stable branch ref for a nested-submodule HEAD."""
+        module_dir = info.get("module_dir", "")
+        head = (
+            head
+            or await self.rev_parse(info.get("worktree_path", ""), "HEAD")
+            or ""
+        )
+        result = {
+            "head": head,
+            "branch": "",
+            "branch_created": False,
+        }
+        if not module_dir or not head:
+            return result
+        base = (
+            f"torque/preserved/"
+            f"{_slugify_worktree_name(info.get('path', '').replace('/', '-'), max_len=60) or 'submodule'}/"
+            f"{head[:12] or 'head'}"
+        )
+        preserve_branch = base
+        suffix = 2
+        while await self._branch_exists(module_dir, preserve_branch):
+            existing = await self.rev_parse(module_dir, preserve_branch) or ""
+            if existing == head:
+                result["branch"] = preserve_branch
+                return result
+            preserve_branch = f"{base}-{suffix}"
+            suffix += 1
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", module_dir, "branch", preserve_branch, head,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "Could not preserve nested submodule HEAD "
+                f"{head[:12]}: {stderr.decode(errors='replace').strip()}"
+            )
+        result.update({
+            "branch": preserve_branch,
+            "branch_created": True,
+        })
+        return result
+
     async def _preserve_nested_submodule_head(self, info: dict) -> dict:
         """Ensure the nested submodule HEAD remains reachable by a branch ref."""
         sub_wt_path = info.get("worktree_path", "")
@@ -1711,29 +1923,12 @@ class WorktreeManager:
         preserve_branch = branch if branch and branch != "HEAD" else ""
         if not preserve_branch or not await self._branch_exists(
                 module_dir, preserve_branch):
-            base = (
-                f"torque/preserved/"
-                f"{_slugify_worktree_name(info.get('path', '').replace('/', '-'), max_len=60) or 'submodule'}/"
-                f"{head[:12] or 'head'}"
+            preserved = await self._create_preserved_nested_submodule_ref(
+                info,
+                head,
             )
-            preserve_branch = base
-            suffix = 2
-            while await self._branch_exists(module_dir, preserve_branch):
-                preserve_branch = f"{base}-{suffix}"
-                suffix += 1
-            if head:
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "-C", module_dir, "branch", preserve_branch, head,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _stdout, stderr = await proc.communicate()
-                if proc.returncode != 0:
-                    raise RuntimeError(
-                        "Could not preserve nested submodule HEAD "
-                        f"{head[:12]}: {stderr.decode(errors='replace').strip()}"
-                    )
-                created_branch = True
+            preserve_branch = preserved.get("branch", "")
+            created_branch = bool(preserved.get("branch_created"))
 
         return {
             "head": head,
@@ -1763,8 +1958,13 @@ class WorktreeManager:
             "git_stderr": "",
             "pre_state": {},
             "post_state": {},
+            "module_core_worktree": {},
             "message": "",
         }
+        if info.get("repo_root"):
+            result["module_core_worktree"] = (
+                await self._ensure_submodule_module_core_worktree_for_info(info)
+            )
         guard = await self._preserve_nested_submodule_head(info)
         result.update({
             "branch": guard.get("branch", ""),
@@ -1800,6 +2000,10 @@ class WorktreeManager:
                           sub_wt_path)
             result["git_returncode"] = -1
 
+        if info.get("repo_root"):
+            result["module_core_worktree"] = (
+                await self._ensure_submodule_module_core_worktree_for_info(info)
+            )
         result["post_state"] = await self.removal_state(
             module_dir,
             sub_wt_path,
@@ -1818,6 +2022,10 @@ class WorktreeManager:
         result["branch_preserved"] = bool(branch_exists and head_reachable)
         result["ok"] = bool(
             result["worktree_removed"] and result["branch_preserved"]
+            and (
+                not result["module_core_worktree"]
+                or result["module_core_worktree"].get("ok")
+            )
         )
         result["message"] = (
             "Nested submodule worktree removed and branch preserved"
@@ -4159,6 +4367,108 @@ class WorktreeManager:
             )
         return results
 
+    async def _guard_checkpoint_nested_gitlinks(self, repo_root: str,
+                                               wt_dir: str,
+                                               base_branch: str,
+                                               worktree_submodules,
+                                               checkpoint_results: list[dict]
+                                               | None = None) -> list[dict]:
+        """Reset clean, uncheckpointed nested HEAD drift before super add -A.
+
+        A broad superproject ``git add -A`` records a submodule gitlink whenever
+        the nested checkout's HEAD differs from the current superproject gitlink,
+        even when the worker never edited that submodule.  Only nested submodules
+        that this checkpoint just committed are allowed to bump their
+        superproject gitlink; clean incidental drift is preserved on a backup
+        branch, then reset to the current superproject gitlink so the checkpoint
+        cannot capture it.
+        """
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths:
+            return []
+        committed_paths = {
+            _normalize_repo_rel_path(item.get("path", ""))
+            for item in (checkpoint_results or [])
+            if item.get("committed")
+        }
+        infos = await self._nested_submodule_infos(
+            repo_root,
+            wt_dir,
+            paths,
+            ref="HEAD",
+            require_worktree=True,
+            strict=False,
+        )
+        guarded: list[dict] = []
+        for info in infos:
+            path = info["path"]
+            if path in committed_paths:
+                continue
+            current_sha = info.get("gitlink_sha", "")
+            if not current_sha:
+                current_sha = await self._gitlink_sha(wt_dir, "HEAD", path)
+            base_sha = await self._gitlink_sha(wt_dir, base_branch, path)
+            head = await self.rev_parse(info["worktree_path"], "HEAD") or ""
+            entry = {
+                "path": path,
+                "worktree_path": info["worktree_path"],
+                "head": head,
+                "current_gitlink": current_sha,
+                "base_gitlink": base_sha,
+                "reset": False,
+                "preserve_branch": "",
+                "message": "",
+            }
+            if not current_sha or not head or head == current_sha:
+                continue
+            code, status = await self._git_stdout(
+                info["worktree_path"],
+                "status",
+                "--porcelain",
+            )
+            if code != 0:
+                entry["message"] = "Could not inspect nested submodule status"
+                guarded.append(entry)
+                continue
+            if status.strip():
+                # _checkpoint_nested_submodules should have handled dirty
+                # nested work before this guard. Avoid discarding anything if a
+                # submodule is still unexpectedly dirty.
+                entry["message"] = "Nested submodule still dirty; not reset"
+                guarded.append(entry)
+                continue
+            preserved = await self._create_preserved_nested_submodule_ref(
+                info,
+                head,
+            )
+            entry["preserve_branch"] = preserved.get("branch", "")
+            code, _out, err = await self._git_run(
+                info["worktree_path"],
+                "reset",
+                "--hard",
+                current_sha,
+            )
+            if code != 0:
+                raise RuntimeError(
+                    "Could not reset clean nested submodule drift for "
+                    f"{path} to current gitlink {current_sha[:12]}: {err}"
+                )
+            await self._git_run(wt_dir, "reset", "-q", "--", path)
+            entry["reset"] = True
+            entry["message"] = (
+                "Reset clean nested submodule HEAD drift to current gitlink"
+            )
+            guarded.append(entry)
+            log.warning(
+                "Reset clean nested submodule drift before checkpoint: "
+                "%s %s -> %s (preserved on %s)",
+                path,
+                head[:12],
+                current_sha[:12],
+                entry["preserve_branch"],
+            )
+        return guarded
+
     async def _assert_nested_gitlinks_match_heads(self, wt_dir: str,
                                                   worktree_submodules) -> bool:
         paths = _normalize_worktree_submodules(worktree_submodules)
@@ -4199,12 +4509,20 @@ class WorktreeManager:
             repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
             if not repo_root:
                 repo_root = await self.get_repo_root(wt_dir) or ""
+            nested_checkpoint_results: list[dict] = []
             if _normalize_worktree_submodules(worktree_submodules):
-                await self._checkpoint_nested_submodules(
+                nested_checkpoint_results = await self._checkpoint_nested_submodules(
                     repo_root,
                     wt_dir,
                     worktree_submodules,
                     message,
+                )
+                await self._guard_checkpoint_nested_gitlinks(
+                    repo_root,
+                    wt_dir,
+                    getattr(cell, "worktree_base_branch", "") or "HEAD",
+                    worktree_submodules,
+                    nested_checkpoint_results,
                 )
 
             # Stage everything
