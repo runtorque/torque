@@ -25,8 +25,6 @@ These answer three different questions:
 ### Symptoms
 
 - The desktop app or standalone browser daemon fails to start.
-- The optional Scripts menu launch fails immediately.
-- The Toolbelt panel stays empty.
 - `torque` commands that need the daemon report that they cannot connect.
 
 ### Recovery
@@ -39,11 +37,10 @@ These answer three different questions:
 
 ### Common causes
 
-- iTerm2 Python API is not enabled.
 - Torque was updated in the repo, but the primary app copy was not refreshed with `make deploy`.
 - Another process is still listening on Torque's port.
 
-## The Toolbelt panel, browser, or desktop UI does not appear
+## The browser or desktop UI does not appear
 
 ### Symptoms
 
@@ -54,9 +51,8 @@ These answer three different questions:
 
 1. For the primary desktop app, run `make run` and check `~/.torque/profiles/desktop/torque.log`.
 2. For standalone/browser mode, run `make open` after `make standalone`.
-3. For an already-installed legacy Toolbelt daemon, open **View > Show Toolbelt** and make sure **Torque** is enabled in the Toolbelt gear menu.
-4. Confirm the port with `TORQUE_PORT` if you changed it from the default.
-5. Check the daemon log for startup or bind errors.
+3. Confirm the port with `TORQUE_PORT` if you changed it from the default.
+4. Check the daemon log for startup or bind errors.
 
 ## The native desktop shell refuses to start or attach
 
@@ -73,7 +69,7 @@ These answer three different questions:
    - default runtime: `make deps`
    - custom runtime: `YOUR_PYTHON -m pip install pywebview`
 3. If you are using `torque desktop --attach`, make sure the target server is:
-   - standalone, not the Toolbelt daemon
+   - standalone
    - on the exact port you passed
    - using the same profile and data dir as the desktop shell
 4. If you only want a native window and do not need to reuse an existing server, run plain `torque desktop` so Torque spawns a desktop-owned child server with safe defaults.
@@ -100,7 +96,7 @@ These answer three different questions:
 
 ### Why this happens
 
-This usually means the UI is connected to an old daemon instance or the daemon lost contact with iTerm2 state.
+This usually means the UI is connected to an old daemon instance or the daemon lost contact with PTY state.
 
 ## An agent is stopped, missing, or linked to the wrong live tab
 
@@ -120,7 +116,7 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 
 ### Notes
 
-- Relaunch creates a fresh iTerm2 tab.
+- Relaunch creates a fresh PTY session.
 - Resume only happens when the provider adapter supports it and Torque still has a valid provider session ID.
 - A stale tab title or a terminated terminal session can leave a saved agent record behind even though the live tab is gone.
 
@@ -250,7 +246,7 @@ The most useful operator-level diagnostics are:
 - `make check`
 - the primary daemon log at `~/.torque/profiles/desktop/torque.log` or `~/.torque/profiles/standalone/torque.log`
 - the primary state database at `~/.torque/profiles/desktop/torque.db` or `~/.torque/profiles/standalone/torque.db`
-- the secondary Toolbelt log/database under `~/Library/Application Support/iTerm2/Scripts/torque/torque/` when you are diagnosing Toolbelt mode
+- the legacy Toolbelt log/database under `~/Library/Application Support/iTerm2/Scripts/torque/torque/` when you are migrating old data
 
 !!! note
     The log file and database are useful for diagnosis, but most operators should treat them as read-only. Use Torque commands and UI actions for normal recovery instead of editing runtime files directly.

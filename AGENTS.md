@@ -5,7 +5,7 @@
 Torque is a local agent-orchestration workspace built around:
 
 - a long-running Python daemon
-- an iTerm2 terminal adapter
+- a PTY-backed terminal runtime
 - a no-build-step HTML/CSS/JS frontend
 - SQLite as the persistent source of truth
 
@@ -91,7 +91,7 @@ If you change persisted state or object shape, you usually need to update all of
 - `make deploy`: primary standalone/desktop deploy; stop the primary daemon, install app files under `~/.torque/app`, refresh CLI
 - `make run`: launch the primary desktop app
 - `make stop`: free port `18932`
-- `make standalone`: browser-only UI mode, still backed by iTerm2
+- `make standalone`: browser-only UI mode, backed by the PTY supervisor
 - `make open`: open the web UI in a browser
 - `make cli`: install the `torque` CLI symlink
 - `make test`: run the regression suite
@@ -102,7 +102,6 @@ Useful runtime paths:
 
 - primary desktop log/DB: `~/.torque/profiles/desktop/torque.log`, `~/.torque/profiles/desktop/torque.db`
 - primary standalone log/DB: `~/.torque/profiles/standalone/torque.log`, `~/.torque/profiles/standalone/torque.db`
-- secondary Toolbelt log/DB: `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log`, `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db`
 
 ## Testing
 

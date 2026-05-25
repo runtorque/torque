@@ -6,7 +6,7 @@ The Architect is the layer above the Engineer. It plans, hires, and decides — 
 
 ## What an Architect does
 
-An Architect runs in its own iTerm2 tab, persistent, with the `architect_*` MCP toolkit. It maintains:
+An Architect runs in its own managed PTY session, persistent, with the `architect_*` MCP toolkit. It maintains:
 
 1. **A decision log** — durable record of cross-cutting product decisions, with status (`proposed`, `accepted`, `revised`, `rejected`) and links to the tasks and engineers they affect.
 2. **A private journal** — checkpoints, observations, plans. Same shape as an Engineer's journal but architect-scoped.
@@ -169,7 +169,7 @@ Configurable per group:
 | `architect_review_gate_thresholds` | `{ship_direct_max, review_default_above, self_review_bypass_allowed}` | Informational gates the Architect uses when reasoning about review depth — not auto-enforced. |
 | `architect_enabled_events` | list | Which event kinds appear in digests. |
 
-Beyond those, launch settings (provider, boot command, model, reasoning effort, working directory, profile, shell, tab color, custom instructions) live in the Architect tab of the relevant group settings.
+Beyond those, launch settings (provider, boot command, model, reasoning effort, working directory, shell, and custom instructions) live in the Architect tab of the relevant group settings.
 
 ## Gotchas
 

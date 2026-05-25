@@ -6,7 +6,7 @@ If you're already convinced and just want the mechanics, jump to [The team model
 
 ## Step 1: One developer, several AI subscriptions
 
-The starting point is the modern solo developer. You have a Claude subscription, a Codex subscription, maybe a Gemini one. You can spin up three agents in three iTerm2 tabs and have them all working at once. You're, on paper, three engineers.
+The starting point is the modern solo developer. You have a Claude subscription, a Codex subscription, maybe a Gemini one. You can spin up three agents in three terminal sessions and have them all working at once. You're, on paper, three engineers.
 
 In practice you're a switchboard. You context-switch between tabs every fifteen seconds. You forget which one is doing the auth refactor and which one is patching the flaky test. You paste the same context into two of them because the third one already had it but you can't remember which one.
 

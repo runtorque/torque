@@ -4,7 +4,7 @@ Torque is a **single-user project management powerhouse** built for the era wher
 
 You install Torque, point it at your repo, and you stop being the engineer typing into a single chat window. You become the operator of a small org chart: an Architect plans the next release, Engineers coordinate within their slice of the work, Workers go off and write the code, and Torque keeps the whole thing legible. Every conversation, every diff, every handoff is a structured task on a board you can scroll back through later.
 
-Torque runs locally as a Python daemon paired with a web UI in a native desktop window, a browser, or the secondary iTerm2 Toolbelt integration. The agents are real terminal sessions running `claude`, `codex`, or whatever else you've configured. The daemon's job is to keep that team coordinated, on-task, and out of each other's way.
+Torque runs locally as a Python daemon paired with a web UI in a native desktop window or a browser. The agents are real PTY sessions running `claude`, `codex`, or whatever else you've configured. The daemon's job is to keep that team coordinated, on-task, and out of each other's way.
 
 ## The 60-second tour
 
@@ -14,7 +14,7 @@ This is the full Torque UI:
 
 You're looking at three things at once:
 
-1. **The team grid** (top). Each cell is an agent. They're laid out left-to-right by seniority — your Architect first, then their Engineers, then the Workers each Engineer is currently coordinating. The colored borders, status dots, and tab colors all encode live state: running, idle, waiting on input, errored.
+1. **The team grid** (top). Each cell is an agent. They're laid out left-to-right by seniority — your Architect first, then their Engineers, then the Workers each Engineer is currently coordinating. The colored borders, status dots, and activity text encode live state: running, idle, waiting on input, errored.
 2. **The focus pane** (bottom-left). When you click an agent, this pane shows its live activity: the last few messages, current path, which provider it's running, whether it has a worktree open. It's how you peek at one teammate without context-switching to their tab.
 3. **The board / agent panel** (right). Either the task board (Backlog → In Progress → Done with all the rich cards) or the panel of whichever Engineer or Architect you're focused on (their journal, their event stream, their worklog).
 

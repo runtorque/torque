@@ -1,6 +1,6 @@
 # Roadmap
 
-Torque started as a tab manager. The vision is to make it a full **agent orchestrator** — one that manages agent lifecycles, coordinates multi-agent workflows, integrates with external tools, and turns the desktop/browser workspace (with iTerm2 Toolbelt support for terminal-native users) into a mission control panel.
+Torque started as a tab manager. The vision is to make it a full **agent orchestrator** — one that manages agent lifecycles, coordinates multi-agent workflows, integrates with external tools, and turns the desktop/browser workspace into a mission control panel.
 
 This roadmap is organized into phases. Earlier phases lay the foundation that later phases build on. Items within each phase are roughly ordered by priority.
 
@@ -99,7 +99,7 @@ Install with `make cli` (symlinks to `~/.local/bin/torque`).
 
 ### Remote Server Mode
 
-Expose Torque over the network (local or internet) as an HTTP/WebSocket API. Same capabilities as the CLI, but accessible from anywhere. This turns a single developer's iTerm2 into a shared agent execution environment.
+Expose Torque over the network (local or internet) as an HTTP/WebSocket API. Same capabilities as the CLI, but accessible from anywhere. This turns a single developer's local agent workspace into a shared agent execution environment.
 
 - API key authentication
 - TLS support
@@ -372,7 +372,7 @@ Important when agents run untrusted code or when operating in a shared environme
 
 ## Phase 10 — Workspace UX
 
-The desktop/browser workspace is Torque's primary interface, with the Toolbelt as a secondary embedded surface. It should scale from 1 agent to 50.
+The desktop/browser workspace is Torque's primary interface. It should scale from 1 agent to 50.
 
 ### Command Palette
 
@@ -398,5 +398,5 @@ These apply across all phases:
 
 - **Backward compatibility** — each phase should be independently useful. Users who only want tab management shouldn't be forced into worktree workflows.
 - **Configuration over convention** — features are opt-in. Torque works out of the box with zero config, and each capability is enabled as needed.
-- **Performance** — the UI can run in a native desktop shell, browser, or Toolbelt WKWebView. It must stay snappy even with dozens of agents. Heavy work (git operations, API calls, recording) happens in the Python daemon.
+- **Performance** — the UI can run in a native desktop shell or browser. It must stay snappy even with dozens of agents. Heavy work (git operations, API calls, recording) happens in the Python daemon.
 - **Dogfooding** — Torque should be used to build Torque. Each phase should be tested by using Torque to coordinate the agents implementing the next phase.

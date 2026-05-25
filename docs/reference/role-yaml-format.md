@@ -52,7 +52,7 @@ group settings, action settings, or provider defaults when omitted.
 | `priorities` | list of strings | Ordered reminders rendered below `preamble` as bullet points. |
 | `session_resume` | bool | Whether supported providers should resume prior session state on relaunch. |
 | `idle_timeout` | int | Idle timeout in minutes; `0` means no role-specific timeout. |
-| `tab_color` | string | UI/iTerm tab color, commonly a hex color. |
+| `tab_color` | string | Legacy color metadata retained for compatibility; ignored by the PTY runtime. |
 | `icon` | string | UI icon/emoji for the agent. |
 | `worktree` | bool | Request a git worktree for agents launched with this role. |
 | `worktree_base_branch` | string | Base branch override for role worktrees. |
@@ -179,7 +179,6 @@ provider: codex
 worktree: true
 worktree_auto_checkpoint: true
 checkpoint_on_progress: true
-tab_color: "#3fb950"
 env_vars:
   TORQUE_EXAMPLE_MODE: "1"
 terminals:

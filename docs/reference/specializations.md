@@ -11,7 +11,7 @@ Torque uses two related, but separate, routing concepts:
 |---|---|---|
 | `ui-ux` | Operator-facing webview and desktop UI. | Board/card UI, modals, canvas/grid, agent panel, CSS/JS refactors, focus/scroll/caret preservation, frontend regression tests. |
 | `orchestration-core` | Daemon orchestration and workflow semantics. | `server.py`, `state.py`, MCP tools, Architect/Engineer flows, dispatch, board scoping, events, digests, journals. |
-| `runtime-pty` | Terminal and session runtime behavior. | iTerm2 bridge, standalone/supervised PTY, provider adapters, worker boot DOA, reconnect/session resume, prompt send timing. |
+| `runtime-pty` | Terminal and session runtime behavior. | Supervised PTY, embedded terminal streaming, provider adapters, worker boot DOA, reconnect/session resume, prompt send timing. |
 | `desktop-shell` | Native shell and windowing behavior. | Tauri, pywebview, detached windows/panels, macOS menu/quit/activation, native capability and desktop/browser parity. |
 | `worktree-release` | Git worktree and release safety. | Worktree lifecycle, checkpoints, rebase/merge, branch boundaries, review gates, PR cleanup, merge conflict handling. |
 | `prompts-config` | Prompt/config surfaces. | Actions, roles, specializations, templates, system prompts, shared memory prompt blocks, prompt preview behavior. |

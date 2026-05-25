@@ -1,6 +1,6 @@
 # Torque
 
-Torque is a single-user project management powerhouse for shipping software with AI agents. You sit at the center of a small team you built yourself — architects, engineers, and workers — managed from a desktop/browser workspace (or the iTerm2 Toolbelt), coordinated by a local daemon, and talking to each other through structured tasks instead of through your shoulder.
+Torque is a single-user project management powerhouse for shipping software with AI agents. You sit at the center of a small team you built yourself — architects, engineers, and workers — managed from a desktop/browser workspace, coordinated by a local daemon, and talking to each other through structured tasks instead of through your shoulder.
 
 ![Torque's workspace showing a User column at left, an Architect named Loomer, and a row of Engineers and Workers below.](images/grid.png)
 

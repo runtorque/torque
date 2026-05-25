@@ -9,14 +9,14 @@ Please also read and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Start with the setup path in the [README](README.md#quickstart) and the
 [Getting Started guide](docs/foundations/getting-started.md). The primary
-supported development target is macOS desktop/standalone operation with iTerm2
-and the iTerm2 Python API enabled for terminal control.
+supported development target is macOS desktop/standalone operation with the
+PTY-backed terminal runtime.
 
 The canonical install path is:
 
 ```bash
-git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
-cd iterm2-agent-orchestration
+git clone git@github.com:runtorque/torque.git
+cd torque
 make deps
 make deploy
 make desktop-deps
@@ -26,7 +26,7 @@ Useful local commands:
 
 - `make check` verifies the primary app copy and runtime deps.
 - `make run` launches the primary desktop app.
-- `make standalone` starts a browser-only Torque server backed by iTerm2.
+- `make standalone` starts a browser-only Torque server backed by the PTY supervisor.
 - `make open` opens the web UI for the current Torque port.
 - `make desktop-deps` installs the optional native desktop shell dependency.
 
@@ -93,7 +93,7 @@ feature requests. If templates are not visible yet, include:
 - what you expected to happen
 - what actually happened
 - steps to reproduce the issue
-- your macOS, iTerm2, Python, and Torque version or commit
+- your macOS, Python, and Torque version or commit
 - relevant logs, screenshots, or terminal output
 
 For feature requests, describe the workflow you are trying to support, why the

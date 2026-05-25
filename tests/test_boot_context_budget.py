@@ -15,7 +15,6 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "CLAUDE.md is injected into agent boot; keep reference detail in docs/.",
         )
         for moved_heading in (
-            "## iTerm2 API gotchas",
             "## Claude Code hooks gotchas",
             "## Install location",
         ):
@@ -24,7 +23,6 @@ class BootContextBudgetDocsTest(unittest.TestCase):
 
         for reference in (
             "docs/reference/architecture.md",
-            "docs/reference/iterm2-gotchas.md",
             "docs/reference/hooks-gotchas.md",
             "docs/reference/install-locations.md",
             "docs/operate/manual-testing.md",
@@ -36,7 +34,6 @@ class BootContextBudgetDocsTest(unittest.TestCase):
         nav = (ROOT / "mkdocs.yml").read_text()
         for reference in (
             "reference/architecture.md",
-            "reference/iterm2-gotchas.md",
             "reference/hooks-gotchas.md",
             "reference/install-locations.md",
             "operate/manual-testing.md",

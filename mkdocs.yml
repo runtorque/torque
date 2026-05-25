@@ -1,5 +1,5 @@
 site_name: Torque
-site_description: iTerm2 agent and terminal orchestration
+site_description: Local AI agent orchestration workspace
 repo_url: https://github.com/runtorque/torque
 
 theme:
@@ -71,7 +71,6 @@ nav:
       - Action YAML format: reference/action-yaml-format.md
       - Role YAML format: reference/role-yaml-format.md
       - Reference Guide: reference/reference-guide.md
-      - iTerm2 API gotchas: reference/iterm2-gotchas.md
       - Claude Code hooks gotchas: reference/hooks-gotchas.md
       - Install locations: reference/install-locations.md
       - Troubleshooting: reference/troubleshooting.md
