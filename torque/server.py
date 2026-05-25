@@ -804,6 +804,7 @@ async def _preflight_worktree_merge_gates(
     latest_boundary_state_for_cell,
     boundary_reason_message,
     panel_event=None,
+    publish_nested_submodule_branches: bool = False,
 ) -> dict:
     """Run shared local merge gates before either direct or PR merge paths."""
     if not (cell and cell.worktree_path and cell.worktree_branch):
@@ -885,6 +886,46 @@ async def _preflight_worktree_merge_gates(
                 stale_base,
             )
         )
+
+    if worktree_submodules and publish_nested_submodule_branches:
+        publish_nested = getattr(
+            worktree_mgr,
+            "publish_nested_submodule_branches_for_merge",
+            None,
+        )
+        if not callable(publish_nested):
+            result = _worktree_merge_error(
+                aid,
+                "Nested submodule branch publishing is unavailable.",
+                phase="nested_submodule_publish",
+            )
+            _attach_stale_base(result, stale_base)
+            return {
+                "ok": False,
+                "boundary_state": boundary_state,
+                "stale_base": stale_base,
+                "workflow_breach": stale_base_override_event,
+                "result": result,
+            }
+        published = await publish_nested(cell, worktree_submodules)
+        if not published.get("ok"):
+            result = _worktree_merge_error(
+                aid,
+                published.get(
+                    "error",
+                    "Nested submodule branch publish failed.",
+                ),
+                phase=published.get("phase", "nested_submodule_publish"),
+                nested_submodules=published,
+            )
+            _attach_stale_base(result, stale_base)
+            return {
+                "ok": False,
+                "boundary_state": boundary_state,
+                "stale_base": stale_base,
+                "workflow_breach": stale_base_override_event,
+                "result": result,
+            }
 
     precheck = (
         await worktree_mgr.check_merge_conflicts(
@@ -1428,6 +1469,7 @@ async def _run_pr_worktree_merge(
         latest_boundary_state_for_cell=latest_boundary_state_for_cell,
         boundary_reason_message=boundary_reason_message,
         panel_event=panel_event,
+        publish_nested_submodule_branches=True,
     )
     if not gates.get("ok"):
         result = gates.get("result") or _worktree_merge_error(
@@ -1484,6 +1526,88 @@ async def _run_pr_worktree_merge(
             linked_issues=linked_issues,
             group_settings=group_settings,
         )
+
+    worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
+    nested_merge_result = None
+    if worktree_submodules:
+        merge_nested = getattr(
+            worktree_mgr,
+            "_merge_nested_submodules_for_merge",
+            None,
+        )
+        if not callable(merge_nested):
+            result = _worktree_merge_error(
+                aid,
+                "Nested submodule merge integration is unavailable.",
+                mode="pull_request",
+                phase="nested_submodule_merge",
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+        nested_merge_result = await merge_nested(
+            cell,
+            worktree_submodules,
+            message=msg,
+        )
+        if not nested_merge_result.get("ok"):
+            result = _worktree_merge_error(
+                aid,
+                nested_merge_result.get(
+                    "error",
+                    "Nested submodule merge failed.",
+                ),
+                mode="pull_request",
+                phase="nested_submodule_merge",
+                nested_submodules=nested_merge_result,
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+
+        # The nested merge can add a final superproject gitlink commit. Re-run
+        # the cheap superproject conflict/overwrite guards against that final
+        # branch tip before publishing the PR branch.
+        post_nested_check = await worktree_mgr.check_merge_conflicts(cell)
+        if not post_nested_check.get("clean"):
+            result = _worktree_merge_error(
+                aid,
+                post_nested_check.get(
+                    "error",
+                    "Conflicts detected after nested submodule merge.",
+                ),
+                mode="pull_request",
+                phase="nested_submodule_postcheck",
+                nested_submodules=nested_merge_result,
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+        overwrite_paths = await worktree_mgr.merge_untracked_overwrite_paths(
+            repo_root or wt,
+            base_branch,
+            post_nested_check.get("tree_sha", ""),
+        )
+        if overwrite_paths:
+            result = _worktree_merge_error(
+                aid,
+                _untracked_overwrite_message(
+                    overwrite_paths,
+                    operation="merge",
+                    location="the checked-out base repo",
+                ),
+                mode="pull_request",
+                phase="nested_submodule_postcheck",
+                overwrite_paths=overwrite_paths,
+                nested_submodules=nested_merge_result,
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
 
     preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot = (
         await _capture_worktree_merge_preserve_diff(
@@ -1692,6 +1816,8 @@ async def _run_pr_worktree_merge(
             "pr": pr_metadata,
             "message": "Pull request is open with auto-merge pending.",
         }
+        if nested_merge_result:
+            result["nested_submodules"] = nested_merge_result
         _attach_auto_force_push_metadata(result, push_metadata_result)
         _attach_stale_base(result, gates.get("stale_base"))
         if gates.get("workflow_breach"):
@@ -1786,6 +1912,8 @@ async def _run_pr_worktree_merge(
         "pr_url": pr_metadata.get("url", ""),
         "pr": pr_metadata,
     })
+    if nested_merge_result:
+        result["nested_submodules"] = nested_merge_result
     _attach_auto_force_push_metadata(result, push_metadata_result)
     if gates.get("workflow_breach"):
         result["workflow_breach"] = gates["workflow_breach"]

@@ -2294,6 +2294,147 @@ class WorktreeManager:
             }
         return {"ok": True}
 
+    async def publish_nested_submodule_branches_for_merge(
+            self,
+            cell,
+            worktree_submodules,
+    ) -> dict:
+        """Publish nested submodule worktree branches before PR preflight.
+
+        The regular nested merge preflight requires the superproject gitlink
+        commit to be reachable from the nested submodule remote and from the
+        worker's nested branch.  Direct merges historically relied on callers
+        having pushed that branch already; the PR path owns branch publication,
+        so it calls this helper before running the shared gate.
+        """
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths:
+            return {"ok": True, "phase": "nested_submodule_publish",
+                    "submodules": []}
+        infos = await self._nested_submodule_infos_for_cell(
+            cell,
+            paths,
+            require_worktree=True,
+            strict=False,
+        )
+        published: list[dict] = []
+        for info in infos:
+            sub_wt = info["worktree_path"]
+            path = info["path"]
+            branch = await self.get_current_branch(sub_wt)
+            head = await self.rev_parse(sub_wt, "HEAD") or ""
+            old_gitlink = await self._nested_submodule_base_gitlink(cell, path)
+            new_gitlink = info.get("gitlink_sha", "")
+            entry = {
+                "path": path,
+                "worktree_path": sub_wt,
+                "repo_root": info.get("module_dir", ""),
+                "branch": "" if branch == "HEAD" else branch,
+                "base_branch": str(
+                    getattr(cell, "worktree_base_branch", "") or ""
+                ).strip(),
+                "old_gitlink_sha": old_gitlink,
+                "new_gitlink_sha": new_gitlink,
+                "head_sha": head,
+                "remote": "",
+            }
+
+            code, status = await self._git_stdout(
+                sub_wt,
+                "status",
+                "--porcelain",
+            )
+            if code != 0:
+                error = self._nested_preflight_error(
+                    entry,
+                    "STATUS_FAILED",
+                    "Could not read submodule status.",
+                )
+                error["phase"] = "nested_submodule_publish"
+                return error
+            if status.strip():
+                error = self._nested_preflight_error(
+                    entry,
+                    "DIRTY",
+                    "Commit or checkpoint nested submodule changes first.",
+                )
+                error["phase"] = "nested_submodule_publish"
+                return error
+
+            if head and new_gitlink and head != new_gitlink:
+                error = self._nested_preflight_error(
+                    entry,
+                    "HEAD_MISMATCH",
+                    "Submodule HEAD does not match the superproject gitlink.",
+                )
+                error["phase"] = "nested_submodule_publish"
+                return error
+            if not head or not new_gitlink:
+                return {
+                    "ok": False,
+                    "phase": "nested_submodule_publish",
+                    "condition": "MISSING_HEAD",
+                    "error": (
+                        f"Nested submodule branch publish failed for {path}: "
+                        "could not resolve submodule HEAD/gitlink."
+                    ),
+                    "submodule": entry,
+                }
+            if not entry["branch"]:
+                return {
+                    "ok": False,
+                    "phase": "nested_submodule_publish",
+                    "condition": "DETACHED_HEAD",
+                    "error": (
+                        f"Nested submodule branch publish failed for {path}: "
+                        "submodule HEAD is detached."
+                    ),
+                    "submodule": entry,
+                }
+
+            remote = await self._nested_submodule_remote_name(sub_wt)
+            entry["remote"] = remote
+            fetched, fetch_error = await self._nested_submodule_fetch_remote(
+                sub_wt,
+                remote,
+            )
+            if not fetched:
+                error = self._nested_preflight_error(
+                    entry,
+                    "REMOTE_UNAVAILABLE",
+                    fetch_error,
+                )
+                error["phase"] = "nested_submodule_publish"
+                return error
+
+            pushed = await self._push_nested_submodule_ref(
+                sub_wt,
+                remote,
+                head,
+                entry["branch"],
+            )
+            if not pushed.get("ok"):
+                return {
+                    "ok": False,
+                    "phase": "nested_submodule_publish",
+                    "condition": "PUSH_FAILED",
+                    "error": (
+                        f"Could not push nested submodule {path} branch "
+                        f"{entry['branch']} to {remote}: "
+                        f"{pushed.get('error', '')}"
+                    ).strip(),
+                    "submodule": entry,
+                }
+            published.append({
+                **entry,
+                "pushed_sha": head,
+            })
+        return {
+            "ok": True,
+            "phase": "nested_submodule_publish",
+            "submodules": published,
+        }
+
     async def _commit_superproject_gitlink_bumps(self, wt_dir: str,
                                                  updates: list[dict],
                                                  *,
