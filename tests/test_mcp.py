@@ -984,7 +984,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool = next(t for t in tools if t["name"] == tool_name)
             return tool["inputSchema"]["properties"]
 
-        self.assertIn("agent_type", await props_for("engineer_task_dispatch"))
+        task_dispatch_props = await props_for("engineer_task_dispatch")
+        self.assertIn("agent_type", task_dispatch_props)
+        self.assertIn("provider", task_dispatch_props)
         self.assertIn("provider", await props_for("engineer_batch_dispatch"))
         agent_message_props = await props_for("engineer_agent_message")
         self.assertIn("reply_required", agent_message_props)
@@ -995,7 +997,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             engineer_can_override_worker_provider=False,
         )
 
-        self.assertNotIn("agent_type", await props_for("engineer_task_dispatch"))
+        task_dispatch_props = await props_for("engineer_task_dispatch")
+        self.assertNotIn("agent_type", task_dispatch_props)
+        self.assertNotIn("provider", task_dispatch_props)
         self.assertNotIn("provider", await props_for("engineer_batch_dispatch"))
 
         state.update_engineer_settings(
@@ -1003,7 +1007,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             engineer_can_override_worker_provider=True,
         )
 
-        self.assertIn("agent_type", await props_for("engineer_task_dispatch"))
+        task_dispatch_props = await props_for("engineer_task_dispatch")
+        self.assertIn("agent_type", task_dispatch_props)
+        self.assertIn("provider", task_dispatch_props)
         self.assertIn("provider", await props_for("engineer_batch_dispatch"))
 
     async def test_engineer_batch_dispatch_schema_frames_parallel_waves(self):
@@ -1276,6 +1282,47 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                             "tasks": [{"task": task.id}],
                             "provider": "claude-code",
                             "max_concurrent": 1,
+                        },
+                    },
+                },
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+
+        self.assertFalse(response.payload["result"]["isError"])
+        self.assertEqual(calls[0]["agent_type"], "claude-code")
+
+    async def test_engineer_task_dispatch_provider_alias_reaches_dispatch_payload(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        task = state.board_add_task("Task provider worker", "g", lane="Backlog")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_task_dispatch",
+                        "arguments": {
+                            "task": task.id,
+                            "provider": "claude-code",
                         },
                     },
                 },

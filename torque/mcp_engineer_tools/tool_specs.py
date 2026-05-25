@@ -555,8 +555,18 @@ ENGINEER_TOOLS = [
                 "agent_type": {
                     "type": "string",
                     "description": (
-                        "Agent backend for a new agent "
-                        "(e.g. 'claude-code', 'codex')."
+                        "Deprecated alias for `provider`: agent backend "
+                        "for a new agent (e.g. 'claude-code', 'codex')."
+                    ),
+                },
+                "provider": {
+                    "type": "string",
+                    "description": (
+                        "Provider/backend override for a new worker agent "
+                        "(for example 'codex' or 'claude-code'). Use this "
+                        "with `command` when booting a different provider "
+                        "than the group default so Torque selects the "
+                        "matching adapter."
                     ),
                 },
                 "command": {

@@ -226,6 +226,33 @@ class AgentLaunchService:
                 return (boot_command or adapter_cmd, provider)
         return (boot_command or default_command, "")
 
+    @staticmethod
+    def validate_provider_command_match(provider: str, command: str) -> None:
+        """Reject direct provider/command mismatches before booting a TUI.
+
+        A provider selects Torque's adapter (hooks, MCP config, and the
+        input-ready policy).  If a raw command clearly names a different
+        provider, the worker can boot under the wrong adapter and never
+        receive its first prompt.  Custom wrapper commands are allowed: this
+        guard only fires when the command can be positively detected as a
+        different known provider.
+        """
+        provider = str(provider or "").strip()
+        command = str(command or "").strip()
+        if not provider or not command:
+            return
+        detected = detect_by_command(command)
+        if not detected or detected.name == provider:
+            return
+        raise ValueError(
+            "Provider/command mismatch: provider "
+            f"'{provider}' selects the {provider} adapter, but command "
+            f"{command!r} looks like provider '{detected.name}'. Pass "
+            f"provider='{detected.name}' (or agent_type='{detected.name}' "
+            "on dispatch) with this command, or use a command matching "
+            f"provider '{provider}'."
+        )
+
     def suggest_template_agent_name(self, group: str, template_name: str,
                                     base_dir: str = "") -> str:
         """Return a unique display name for a template-launched agent."""
@@ -257,11 +284,16 @@ class AgentLaunchService:
             explicit_template, gs, overrides or {}, base_dir=base_dir
         )
 
-        provider = resolved.get("provider", "") or gs.agent_provider
-        raw_command = resolved.get("command", "") or gs.agent_boot_command
+        provider = str(
+            resolved.get("provider", "") or gs.agent_provider or ""
+        ).strip()
+        raw_command = str(
+            resolved.get("command", "") or gs.agent_boot_command or ""
+        ).strip()
         command, agent_type = self.resolve_provider_command(
             provider, raw_command, self.state.get_default_command()
         )
+        self.validate_provider_command_match(provider, command)
         detected = detect_by_command(command) if command else None
         effective_agent_type = agent_type or provider or (
             detected.name if detected else ""
