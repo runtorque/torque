@@ -17,8 +17,7 @@ torque logs -f
 These answer three different questions:
 
 - `torque status` tells you what Torque thinks exists right now.
-- `make check` verifies the primary app copy, the optional Toolbelt install,
-  and the Python environment.
+- `make check` verifies the primary app copy and the Python environment.
 - `torque logs -f` shows daemon-side errors while you reproduce the problem.
 
 ## Torque will not start
@@ -35,14 +34,13 @@ These answer three different questions:
 1. Run `make check`.
 2. If Python dependencies are missing, run `make deps`; if the primary app copy is missing, run `make deploy`.
 3. If the desktop port `18933` is already in use, run `make stop TORQUE_PORT=18933`. For browser standalone on `18932`, run `make stop`.
-4. Start Torque again with `make run` (desktop) or `make standalone` + `make open`. For Toolbelt mode, run `make deploy-toolbelt` and restart from the Scripts menu.
+4. Start Torque again with `make run` (desktop) or `make standalone` + `make open`.
 5. Tail `torque logs -f` while starting it again.
 
 ### Common causes
 
 - iTerm2 Python API is not enabled.
 - Torque was updated in the repo, but the primary app copy was not refreshed with `make deploy`.
-- Toolbelt-only: the installed copy under iTerm2 Scripts was not refreshed with `make deploy-toolbelt`.
 - Another process is still listening on Torque's port.
 
 ## The Toolbelt panel, browser, or desktop UI does not appear
@@ -56,7 +54,7 @@ These answer three different questions:
 
 1. For the primary desktop app, run `make run` and check `~/.torque/profiles/desktop/torque.log`.
 2. For standalone/browser mode, run `make open` after `make standalone`.
-3. For Toolbelt mode, open **View > Show Toolbelt** and make sure **Torque** is enabled in the Toolbelt gear menu.
+3. For an already-installed legacy Toolbelt daemon, open **View > Show Toolbelt** and make sure **Torque** is enabled in the Toolbelt gear menu.
 4. Confirm the port with `TORQUE_PORT` if you changed it from the default.
 5. Check the daemon log for startup or bind errors.
 
@@ -264,7 +262,6 @@ When you are operating Torque rather than developing Torque, these are the pract
 - Run `make check` before assuming a runtime bug.
 - Run `make deploy` after pulling repo changes so the primary standalone/desktop app copy matches the repo.
 - Relaunch Torque after `make deploy` with `make run` or `make standalone` + `make open`.
-- Run `make deploy-toolbelt` only when you need to refresh the secondary iTerm2 Toolbelt copy, then restart from the Scripts menu.
 - Use `make stop` only to clear a stuck daemon or port conflict.
 - Use `make standalone` and `make open` when you intentionally want the browser UI.
 

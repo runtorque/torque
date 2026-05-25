@@ -24,12 +24,11 @@ make desktop-deps
 
 Useful local commands:
 
-- `make check` verifies the primary app copy, optional Toolbelt install, and runtime deps.
+- `make check` verifies the primary app copy and runtime deps.
 - `make run` launches the primary desktop app.
 - `make standalone` starts a browser-only Torque server backed by iTerm2.
 - `make open` opens the web UI for the current Torque port.
 - `make desktop-deps` installs the optional native desktop shell dependency.
-- `make deploy-toolbelt` refreshes the secondary iTerm2 Toolbelt install.
 
 Torque has no frontend build step: edit `webview.html`, `static/js/*`, and
 `static/style.css` directly. Script order in `webview.html` matters. When

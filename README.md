@@ -105,28 +105,13 @@ Standalone mode launches the daemon and opens Torque in your default browser.
 It is useful when you want a wider workspace or are running on a remote /
 shared machine.
 
-### iTerm2 Toolbelt mode (deprecated secondary)
+### Migrating from old iTerm2 Toolbelt installs
 
-The iTerm2 Toolbelt still works for now, but it is deprecated. The primary
-surfaces are standalone browser mode (`make standalone`) and the desktop app
-(`make run`). If you still use the Toolbelt, migrate its data to a profile
-with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
-
-```bash
-make deps
-make deploy-toolbelt
-make cli
-```
-
-Then in iTerm2:
-
-1. Open **Scripts → torque** to launch the daemon.
-2. Open **View → Show Toolbelt**.
-3. Enable **Torque** from the Toolbelt gear menu.
-
-Use `make deploy-toolbelt` again after pulling changes when you specifically
-want to refresh the iTerm2 Scripts copy. The general `make deploy` target is
-for the primary standalone/desktop app.
+The iTerm2 Toolbelt is a deprecated secondary integration and the Makefile no
+longer installs or updates the iTerm2 Scripts copy. Use the primary desktop
+app (`make run`) or standalone browser mode (`make standalone` + `make open`).
+If you still have old Toolbelt data, migrate it to a profile with
+`scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
 
 For more install variants and runtime modes, see
 [Getting Started](docs/foundations/getting-started.md) and
@@ -209,8 +194,9 @@ requests use the templates in [`.github/`](.github/).
 
 Torque is single-user, local-first, and currently macOS-focused. The native
 desktop app and the standalone browser mode are the recommended entry points;
-the iTerm2 Toolbelt integration is a deprecated secondary surface kept working
-for rollback safety during the migration window.
+the iTerm2 Toolbelt integration is a deprecated secondary surface whose
+Makefile install/update surface has been removed. Migrate old Toolbelt data
+with `scripts/migrate_toolbelt_to_profile.py`.
 Linux and Windows are follow-up targets: the daemon itself is portable, but
 the terminal-control layer (iTerm2 today, Ghostty next) is the strongest
 platform dependency.

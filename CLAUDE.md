@@ -4,7 +4,7 @@
 
 Torque is a local agent-orchestration workspace: a long-running Python daemon, an iTerm2/PTY terminal adapter, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
 
-Primary operator surfaces are standalone/browser and desktop app modes. The iTerm2 Toolbelt is a deprecated secondary integration that still works for rollback safety during migration.
+Primary operator surfaces are standalone/browser and desktop app modes. The iTerm2 Toolbelt is a deprecated secondary integration; the Makefile no longer installs or updates the old Scripts copy, and old data should be migrated with `scripts/migrate_toolbelt_to_profile.py`.
 
 ## Key commands
 
@@ -12,20 +12,19 @@ Primary operator surfaces are standalone/browser and desktop app modes. The iTer
 make deploy          # Primary install/update: ~/.torque/app + CLI refresh
 make run             # Launch the desktop app (standalone daemon, desktop profile)
 make standalone      # Foreground browser-only daemon (then make open)
-make deploy-toolbelt # Deprecated secondary iTerm2 Toolbelt install/update
 make stop            # Free TORQUE_PORT (18932 unless overridden)
 make check           # Python path, dependency, install status
 make open            # Open standalone/browser UI
 make test            # Full regression suite
 ```
 
-After `make deploy`, relaunch with `make run` or `make standalone` + `make open`. After `make deploy-toolbelt`, restart from **iTerm2 → Scripts menu → torque** and enable **View → Show Toolbelt** if needed. Migrate Toolbelt data with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
+After `make deploy`, relaunch with `make run` or `make standalone` + `make open`. Migrate old Toolbelt data with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
 
 ## Never deploy/stop mid-session
 
-If you are a Torque worker or engineer running inside the live daemon, do **not** run `make deploy`, `make deploy-toolbelt`, `make stop`, or `make restart` against the daemon that spawned you. Killing that daemon corrupts in-memory dispatch state (PTY subscriptions, pending-prompt queues, session cache) and can make subsequent workers boot DOA.
+If you are a Torque worker or engineer running inside the live daemon, do **not** run `make deploy`, `make stop`, or `make restart` against the daemon that spawned you. Killing that daemon corrupts in-memory dispatch state (PTY subscriptions, pending-prompt queues, session cache) and can make subsequent workers boot DOA.
 
-The Makefile refuses `stop` / `deploy` / `deploy-toolbelt` / `restart` when `TORQUE_CELL_ID` is set or when pwd is under `.torque/worktrees/`; HTTP lifecycle commands reject worker-context requests unless `force=true`. Override (`FORCE=1` / `force=true`) only with a specific reason and explicit acceptance of the corruption risk.
+The Makefile refuses `stop` / `deploy` / `restart` when `TORQUE_CELL_ID` is set or when pwd is under `.torque/worktrees/`; HTTP lifecycle commands reject worker-context requests unless `force=true`. Override (`FORCE=1` / `force=true`) only with a specific reason and explicit acceptance of the corruption risk.
 
 Safe alternatives:
 

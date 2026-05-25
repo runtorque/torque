@@ -35,25 +35,18 @@ make open
 This still controls the configured terminal backend, but the UI is served only
 in the browser. Runtime data defaults to `~/.torque/profiles/standalone`.
 
-### iTerm2 Toolbelt mode (deprecated secondary)
+### Legacy iTerm2 Toolbelt migration
 
-The iTerm2 Toolbelt integration is a deprecated secondary surface. It still
-works for now and embeds the same UI next to your terminal tabs for operators
-who need that rollback-safe workflow, but the primary surfaces are the desktop
-app (`make run`) and standalone browser mode (`make standalone`). Migrate
-Toolbelt data to a profile with `scripts/migrate_toolbelt_to_profile.py`
-(TORQUE:645 P1b):
+The iTerm2 Toolbelt integration is deprecated and the Makefile no longer
+installs or updates the old iTerm2 Scripts copy. The primary surfaces are the
+desktop app (`make run`) and standalone browser mode (`make standalone`).
+Migrate old Toolbelt data to a profile with
+`scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
 
-```bash
-make deploy-toolbelt
-```
+### Legacy Toolbelt + browser mode
 
-Then restart from **iTerm2 -> Scripts -> torque**, open **View -> Show
-Toolbelt**, and enable **Torque** from the Toolbelt gear menu.
-
-### Dual mode
-
-Run Torque in the Toolbelt, then open the same daemon in a browser:
+If you still have an already-installed legacy Toolbelt daemon running, you can
+open the same daemon in a browser:
 
 ```bash
 make open
@@ -100,24 +93,14 @@ make deploy
 Then relaunch with `make run` for the desktop app, or `make standalone` +
 `make open` for browser-only mode.
 
-Deprecated secondary iTerm2 Toolbelt update:
-
-```bash
-make deploy-toolbelt
-```
-
-Then restart from **Scripts -> torque**.
-
 Useful maintenance targets:
 
 - `make stop`
 - `make check`
-- `make autolaunch`
 - `make uninstall`
 - `make restart`
 - `make run`
 - `make standalone`
-- `make deploy-toolbelt`
 - `make desktop-deps` (compatibility alias for `make deps`)
 - `make desktop`
 - `make desktop-attach`
@@ -184,14 +167,15 @@ make stop
 make stop TORQUE_PORT=18933
 ```
 
-### Toolbelt panel missing
+### Legacy Toolbelt panel missing
 
-Make sure:
+The primary recovery path is to migrate Toolbelt data to a profile and relaunch
+with the desktop app or standalone browser mode. If you are intentionally
+diagnosing an already-installed legacy Toolbelt copy, make sure:
 
 1. iTerm2's Python API is enabled
-2. You deployed with `make deploy-toolbelt`
-3. Torque was started from **Scripts -> torque**
-4. The Toolbelt entry is enabled from the gear menu
+2. Torque was started from **Scripts -> torque**
+3. The Toolbelt entry is enabled from the gear menu
 
 ### CLI cannot talk to the daemon
 
