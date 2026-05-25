@@ -97,6 +97,75 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([r for r in captured.records if r.levelname == "ERROR"])
         self.assertIsNone(warning.exc_info)
 
+    async def test_missing_module_reports_visible_relay_connection_error(self):
+        module_name = "missing_ee_for_relay_state_test"
+        reports = []
+
+        with mock.patch.object(self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", True), \
+             mock.patch.object(self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_MODULE", module_name):
+            context = self.cloud_hooks.CloudConnectorContext(
+                state=object(),
+                remote_user_agent_message=_remote_user_agent_message,
+                register_direct_message_observer=self.cloud_hooks.register_direct_message_observer,
+                config={
+                    "enabled": True,
+                    "relay_url": "wss://relay.example/v1/daemon/d1/ws",
+                    "daemon_id": "d1",
+                },
+                report_connection_state=reports.append,
+            )
+            with self.assertLogs(self.cloud_hooks.log, level="DEBUG"):
+                runtime = await self.cloud_hooks.start_cloud_connector(context)
+
+        self.assertTrue(runtime.enabled)
+        self.assertFalse(runtime.started)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["status"], "error")
+        self.assertTrue(reports[0]["enabled"])
+        self.assertEqual(reports[0]["relay_host"], "relay.example")
+        self.assertEqual(reports[0]["daemon_id"], "d1")
+        self.assertIn("PYTHONPATH", reports[0]["last_error"])
+        self.assertIn("cryptography", reports[0]["last_error"])
+
+    async def test_startup_failure_reports_visible_relay_connection_error(self):
+        module_name = "fake_relay_connector_startup_failure"
+        module = types.ModuleType(module_name)
+        reports = []
+
+        class FakeConnector:
+            async def start(self):
+                raise ValueError(
+                    "cryptography is unavailable; signed relay attach is disabled cleanly"
+                )
+
+        module.create_connector = lambda context: FakeConnector()
+        sys.modules[module_name] = module
+        self.addCleanup(lambda: sys.modules.pop(module_name, None))
+
+        with mock.patch.object(self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_ENABLED", True), \
+             mock.patch.object(self.cloud_hooks.torque_config, "CLOUD_CONNECTOR_MODULE", module_name):
+            context = self.cloud_hooks.CloudConnectorContext(
+                state=object(),
+                remote_user_agent_message=_remote_user_agent_message,
+                register_direct_message_observer=self.cloud_hooks.register_direct_message_observer,
+                config={
+                    "enabled": True,
+                    "relay_url": "https://relay.example",
+                    "daemon_id": "daemon-1",
+                },
+                report_connection_state=reports.append,
+            )
+            with self.assertLogs(self.cloud_hooks.log, level="ERROR"):
+                runtime = await self.cloud_hooks.start_cloud_connector(context)
+
+        self.assertTrue(runtime.enabled)
+        self.assertFalse(runtime.started)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["status"], "error")
+        self.assertEqual(reports[0]["relay_host"], "relay.example")
+        self.assertEqual(reports[0]["daemon_id"], "daemon-1")
+        self.assertIn("cryptography is unavailable", reports[0]["last_error"])
+
     async def test_enabled_connector_imports_factory_and_unregisters_observer_on_stop(self):
         module_name = "fake_torque_ee_connector_for_test"
         module = types.ModuleType(module_name)

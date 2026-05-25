@@ -164,13 +164,40 @@ class RelayProbeTests(unittest.IsolatedAsyncioTestCase):
         async def health(url, *, ssl_ctx, timeout):
             return {"status_code": 200, "json": {"auth_mode": "required"}}
 
+        attach = mock.AsyncMock()
         with mock.patch.object(self.cloud_hooks, "_import_relay_probe_deps", return_value=_fake_deps()), \
-             mock.patch.object(self.cloud_hooks, "_relay_probe_health", side_effect=health):
+             mock.patch.object(self.cloud_hooks, "_relay_probe_health", side_effect=health), \
+             mock.patch.object(self.cloud_hooks, "_relay_probe_attach", side_effect=attach):
             # No credential_id / private_key_path configured.
             result = await self._probe(_settings())
         self.assertEqual(
             result["status"], self.cloud_hooks.RELAY_PROBE_REACHABLE_UNAUTHED
         )
+        self.assertIn("credential_id", result["message"])
+        self.assertIn("private_key_path", result["message"])
+        self.assertIn("auth_not_tested", result["detail"])
+        attach.assert_not_called()
+
+    async def test_reachable_unauthed_when_either_auth_field_missing(self):
+        async def health(url, *, ssl_ctx, timeout):
+            return {"status_code": 200, "json": {"auth_mode": "required"}}
+
+        for settings, missing in (
+            (_settings(relay_credential_id="cred-1"), "private_key_path"),
+            (_settings(relay_private_key_path="/keys/relay.pem"), "credential_id"),
+        ):
+            attach = mock.AsyncMock()
+            with self.subTest(missing=missing), \
+                 mock.patch.object(self.cloud_hooks, "_import_relay_probe_deps", return_value=_fake_deps()), \
+                 mock.patch.object(self.cloud_hooks, "_relay_probe_health", side_effect=health), \
+                 mock.patch.object(self.cloud_hooks, "_relay_probe_attach", side_effect=attach):
+                result = await self._probe(settings)
+            self.assertEqual(
+                result["status"], self.cloud_hooks.RELAY_PROBE_REACHABLE_UNAUTHED
+            )
+            self.assertIn(missing, result["message"])
+            self.assertIn(f"missing={missing}", result["detail"])
+            attach.assert_not_called()
 
     async def test_ok_on_successful_attach(self):
         async def health(url, *, ssl_ctx, timeout):

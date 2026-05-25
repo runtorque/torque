@@ -16,6 +16,7 @@ import json
 import os
 import types
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse, urlunparse
@@ -315,6 +316,7 @@ RELAY_PROBE_DISABLED = "disabled"
 RELAY_PROBE_MISCONFIGURED = "misconfigured"
 
 RELAY_PROBE_TIMEOUT_SECONDS = 10.0
+RELAY_CONNECTION_LAST_ERROR_MAX_CHARS = 240
 
 
 def _relay_probe_result(status: str, message: str, detail: str = "") -> dict[str, str]:
@@ -339,6 +341,23 @@ def _relay_health_url(relay_url: str) -> str:
     http_scheme = "https" if scheme in ("https", "wss") else "http"
     netloc = parsed.netloc or parsed.path
     return urlunparse((http_scheme, netloc, "/health", "", "", ""))
+
+
+def _missing_relay_auth_message_fields(
+    *, credential_id: str, private_key_path: str
+) -> tuple[str, str]:
+    """Return operator/detail text for the missing signed-attach inputs."""
+
+    missing = []
+    if not credential_id:
+        missing.append("credential_id")
+    if not private_key_path:
+        missing.append("private_key_path")
+    if not missing:
+        return "", ""
+    if len(missing) == 1:
+        return missing[0], missing[0]
+    return " and ".join(missing), ",".join(missing)
 
 
 def _import_relay_probe_deps() -> Any:
@@ -544,12 +563,20 @@ async def _probe_relay_connection_inner(
 
     # (b) Auth dry-run only when both credential_id and private_key_path are set.
     if not (credential_id and private_key_path):
+        missing_text, missing_detail = _missing_relay_auth_message_fields(
+            credential_id=credential_id,
+            private_key_path=private_key_path,
+        )
+        missing_verb = "are" if " and " in missing_text else "is"
+        detail_parts = [f"missing={missing_detail}", "auth_not_tested"]
+        if auth_mode:
+            detail_parts.append(f"auth_mode={auth_mode}")
         return _relay_probe_result(
             RELAY_PROBE_REACHABLE_UNAUTHED,
-            f"Relay at {host} is reachable{certifi_note}. No daemon credentials are configured, "
-            "so authentication was not tested. Set credential_id and private_key_path in "
-            "Settings → Relay to verify the signed attach.",
-            f"auth_mode={auth_mode}" if auth_mode else "",
+            f"Relay at {host} is reachable{certifi_note}, but signed attach was not tested "
+            f"because {missing_text} {missing_verb} not configured. Set credential_id and "
+            "private_key_path in Settings → Relay to verify the daemon credentials.",
+            "; ".join(part for part in detail_parts if part),
         )
 
     try:
@@ -671,6 +698,74 @@ async def mint_relay_device_link(
     return {"ok": False, "error": "mint_invalid_response", "message": "Connector returned an unexpected mint result."}
 
 
+def _cloud_connector_context_config(context: Any) -> dict[str, Any]:
+    config = getattr(context, "config", None)
+    if isinstance(context, dict):
+        config = context.get("config", config)
+    return dict(config) if isinstance(config, dict) else {}
+
+
+def _relay_host_only_from_config_url(relay_url: str) -> str:
+    raw = str(relay_url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    return parsed.netloc or parsed.path.split("/", 1)[0] or raw
+
+
+def _relay_error_payload_from_context(
+    context: Any, *, last_error: str
+) -> dict[str, Any]:
+    config = _cloud_connector_context_config(context)
+    relay_url = str(
+        config.get("relay_url")
+        or getattr(torque_config, "CLOUD_RELAY_URL", "")
+        or ""
+    ).strip()
+    daemon_id = str(
+        config.get("daemon_id")
+        or getattr(torque_config, "CLOUD_DAEMON_ID", "")
+        or getattr(context, "profile", "")
+        or ""
+    ).strip()
+    return {
+        "status": "error",
+        "enabled": True,
+        "relay_host": _relay_host_only_from_config_url(relay_url),
+        "daemon_id": daemon_id,
+        "last_connected_at": "",
+        "last_error": str(last_error or "")[:RELAY_CONNECTION_LAST_ERROR_MAX_CHARS],
+        "retry_count": 0,
+        "since": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def _report_cloud_connector_start_failure(
+    context: Any, *, last_error: str
+) -> None:
+    """Surface bootstrap failures through the same relay_connection UI signal.
+
+    The EE connector normally reports its own connect/auth state after it is
+    imported.  Import/factory failures happen before that producer exists, so
+    the daemon shim publishes an equivalent red/error state instead of leaving
+    the UI stuck at the default grey "disabled" state.
+    """
+
+    report = getattr(context, "report_connection_state", None)
+    if isinstance(context, dict) and not callable(report):
+        report = context.get("report_connection_state")
+    if not callable(report):
+        return
+    try:
+        result = report(
+            _relay_error_payload_from_context(context, last_error=last_error)
+        )
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        log.exception("Cloud connector failure-state callback failed")
+
+
 async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnectorRuntime:
     """Load and start the optional enterprise cloud connector.
 
@@ -729,6 +824,14 @@ async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnecto
                 "Cloud connector enabled but module %s could not be imported",
                 module_name,
             )
+        await _report_cloud_connector_start_failure(
+            context,
+            last_error=(
+                f"Relay connector package is not importable: {runtime.error}. "
+                "Ensure PYTHONPATH includes <repo>/ee/python and required "
+                "dependencies (cryptography) are installed in this interpreter."
+            ),
+        )
         return runtime
 
     try:
@@ -753,6 +856,10 @@ async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnecto
     except Exception as exc:
         runtime.error = str(exc) or type(exc).__name__
         log.exception("Cloud connector startup failed for %s", module_name)
+        await _report_cloud_connector_start_failure(
+            context,
+            last_error=f"Relay connector failed to start: {runtime.error}",
+        )
     return runtime
 
 
