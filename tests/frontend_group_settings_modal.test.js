@@ -160,11 +160,6 @@ function createSandbox() {
         if (selector === '.gs-tab') return gsTabs;
         if (selector === '.gs-pane') return gsPanes;
         if (selector === '.overlay' || selector === '.hint-pop') return [];
-        if (selector === '#gs-color-swatches .swatch'
-          || selector === '#gs-agent-color-swatches .swatch'
-          || selector === '#gs-terminal-color-swatches .swatch'
-          || selector === '#gs-engineer-color-swatches .swatch'
-          || selector === '#gs-architect-color-swatches .swatch') return [];
         return [];
       },
       querySelector(selector) {
@@ -312,7 +307,6 @@ test('system prompt preview popup sends unsaved form state and closes as nested 
   ensure('gs-agent-model').value = 'gpt-5';
   ensure('gs-agent-reasoning-effort').value = 'high';
   ensure('gs-agent-directory').value = '/repo';
-  ensure('gs-agent-profile').value = 'Ops';
   ensure('gs-agent-shell').value = 'zsh';
   ensure('gs-engineer-merge-mode').value = 'direct';
   ensure('gs-wt-merge-cleanup').value = 'close_remove';
@@ -321,7 +315,6 @@ test('system prompt preview popup sends unsaved form state and closes as nested 
   ensure('gs-engineer-model').value = 'gpt-5.1';
   ensure('gs-engineer-reasoning-effort').value = 'xhigh';
   ensure('gs-engineer-directory').value = '/repo/.torque/engineer';
-  ensure('gs-engineer-profile').value = 'Ops';
   ensure('gs-engineer-shell').value = 'fish';
   ensure('gs-engineer-custom-instructions').value = 'UNSAVED engineer instructions';
   ensure('gs-engineer-restrict-to-created-agents').checked = true;
@@ -469,7 +462,6 @@ test('architect system prompt preview uses architect form values', () => {
   ensure('gs-architect-model').value = 'gpt-5.1-architect';
   ensure('gs-architect-reasoning-effort').value = 'high';
   ensure('gs-architect-directory').value = '/repo/.torque/architect';
-  ensure('gs-architect-profile').value = 'Ops';
   ensure('gs-architect-shell').value = 'zsh';
   ensure('gs-architect-custom-instructions').value = 'UNSAVED architect instructions';
   ensure('gs-architect-autonomy-mode').value = 'ask_always';
@@ -681,7 +673,6 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-model').value, 'gpt-5.1-codex');
   assert.equal(ensure('gs-engineer-reasoning-effort').value, 'xhigh');
   assert.equal(ensure('gs-engineer-directory').value, '/repo/.torque/engineer');
-  assert.equal(ensure('gs-engineer-profile').value, 'Ops');
   assert.equal(ensure('gs-engineer-shell').value, 'fish');
   assert.deepEqual(
     ensure('gs-engineer-reasoning-effort').children.map((child) => child.value),
@@ -715,7 +706,6 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-architect-model').value, 'gpt-5.1-architect');
   assert.equal(ensure('gs-architect-reasoning-effort').value, 'high');
   assert.equal(ensure('gs-architect-directory').value, '/repo/.torque/architect');
-  assert.equal(ensure('gs-architect-profile').value, 'Ops');
   assert.equal(ensure('gs-architect-shell').value, 'fish');
   assert.equal(ensure('gs-architect-custom-instructions').value, 'Own scope crisply.');
   assert.equal(ensure('gs-architect-autonomy-mode').value, 'ask_always');
@@ -978,17 +968,9 @@ test('architect System sub-tab groups terminal overrides and digest settings', (
   assert.equal(architectPane.indexOf('>Digests</button>'), -1);
   assert.match(architectPane, /data-subtab="architect-system"[\s\S]*>System<\/button>/);
   assert.ok(terminalOverrides < architectPane.indexOf('id="gs-architect-directory"'));
-  assert.ok(architectPane.indexOf('id="gs-architect-directory"') < architectPane.indexOf('id="gs-architect-profile"'));
-  assert.ok(architectPane.indexOf('id="gs-architect-profile"') < architectPane.indexOf('id="gs-architect-shell"'));
-  assert.ok(architectPane.indexOf('id="gs-architect-shell"') < architectPane.indexOf('id="gs-architect-color-swatches"'));
-  assert.match(
-    architectPane,
-    /<label class="iterm2-only">Profile<\/label>\s*<select id="gs-architect-profile" class="iterm2-only"><\/select>/,
-  );
-  assert.match(
-    architectPane,
-    /<label class="iterm2-only">Tab color<\/label>\s*<div class="color-swatches iterm2-only" id="gs-architect-color-swatches"><\/div>/,
-  );
+  assert.ok(architectPane.indexOf('id="gs-architect-directory"') < architectPane.indexOf('id="gs-architect-shell"'));
+  assert.equal(architectPane.indexOf('id="gs-architect-profile"'), -1);
+  assert.equal(architectPane.indexOf('id="gs-architect-color-swatches"'), -1);
   assert.ok(digestSettings < architectPane.indexOf('id="gs-architect-digest-verbosity"'));
   assert.ok(architectPane.indexOf('id="gs-architect-digest-verbosity"') < architectPane.indexOf('id="gs-architect-push-interval"'));
   assert.ok(behavior < architectPane.indexOf('id="gs-architect-journal-checkpoint"'));
@@ -1144,7 +1126,7 @@ test('group settings sub-tab CSS remains reusable in narrow toolbelt layouts', (
   assert.match(css, /\.gs-subpane\.active\s*\{\s*display:\s*block;\s*\}/);
 });
 
-test('group settings marks iTerm2-only controls for standalone mode gating', () => {
+test('group settings removes terminal-backend-only profile and tab-color controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws.js'), 'utf8');
@@ -1152,53 +1134,26 @@ test('group settings marks iTerm2-only controls for standalone mode gating', () 
   const end = html.indexOf('<!-- Global Settings modal -->', start);
   const modal = html.slice(start, end === -1 ? html.indexOf('<!-- Confirm dialog', start) : end);
 
-  function assertControlMarked(id, labelText) {
-    const controlMatch = modal.match(new RegExp(`<[^>]+id="${id}"[^>]*>`));
-    assert.ok(controlMatch, `${id} control should exist`);
-    assert.match(
-      controlMatch[0],
-      /class="[^"]*\biterm2-only\b[^"]*"/,
-      `${id} control should carry iterm2-only`,
-    );
-    const before = modal.slice(Math.max(0, controlMatch.index - 220), controlMatch.index);
-    assert.match(
-      before,
-      new RegExp(`<label class="[^"]*iterm2-only[^"]*">\\s*${labelText}\\s*</label>\\s*$`),
-      `${id} label should carry iterm2-only`,
-    );
-  }
-
   [
-    ['gs-profile', 'Profile'],
-    ['gs-agent-profile', 'Profile'],
-    ['gs-terminal-profile', 'Profile'],
-    ['gs-engineer-profile', 'Profile'],
-    ['gs-architect-profile', 'Profile'],
-    ['gs-color-swatches', 'Tab color'],
-    ['gs-agent-color-swatches', 'Tab color'],
-    ['gs-terminal-color-swatches', 'Tab color'],
-    ['gs-engineer-color-swatches', 'Tab color'],
-    ['gs-architect-color-swatches', 'Tab color'],
-  ].forEach(([id, label]) => assertControlMarked(id, label));
-
-  [
-    ['gs-collapsed', 'Start collapsed on load'],
-    ['gs-filter-window', 'Pin to active window'],
-    ['gs-terminal-close-on-disconnect', 'Close on disconnect'],
-  ].forEach(([id, label]) => {
-    assert.match(
-      modal,
-      new RegExp(`<label class="[^"]*iterm2-only[^"]*">\\s*<input id="${id}"[^>]*>\\s*${label}`),
-      `${id} checkbox row should carry iterm2-only`,
-    );
+    'gs-profile',
+    'gs-agent-profile',
+    'gs-terminal-profile',
+    'gs-engineer-profile',
+    'gs-architect-profile',
+    'gs-color-swatches',
+    'gs-agent-color-swatches',
+    'gs-terminal-color-swatches',
+    'gs-engineer-color-swatches',
+    'gs-architect-color-swatches',
+    'gs-terminal-close-on-disconnect',
+  ].forEach((id) => {
+    assert.equal(modal.indexOf(`id="${id}"`), -1, `${id} should be removed`);
   });
 
-  assert.match(
-    css,
-    /body\.standalone-mode \.iterm2-only,\s*body\[data-torque-mode="standalone"\] \.iterm2-only,\s*body\[data-torque-mode="desktop"\] \.iterm2-only\s*\{[^}]*display:\s*none\s*!important;/s,
-  );
+  assert.doesNotMatch(html, /\biterm2-only\b/);
+  assert.doesNotMatch(css, /\biterm2-only\b/);
   assert.match(ws, /classList\.toggle\('standalone-mode',\s*standalone\)/);
-  assert.match(ws, /classList\.toggle\('iterm2-mode',\s*iterm2\)/);
+  assert.doesNotMatch(ws, /iterm2-mode/);
 });
 
 test('architect behavior sub-tab keeps policy fields without fallback review-gate controls', () => {
@@ -1226,7 +1181,6 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   vm.runInContext('_settingsGroup = "alpha"; _gsWtSymlinks = ["etl/**/node_modules"];', context);
   ensure('gs-directory').value = '/repo';
   ensure('gs-agent-directory').value = '/repo/agents';
-  ensure('gs-agent-profile').value = 'Ops';
   ensure('gs-agent-shell').value = 'zsh';
   ensure('gs-default-agent-template').value = 'careful-reviewer';
   ensure('gs-agent-provider').value = 'codex';
@@ -1254,9 +1208,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-engineer-model').value = 'gpt-5.1';
   ensure('gs-engineer-reasoning-effort').value = 'xhigh';
   ensure('gs-engineer-directory').value = '/repo/.torque/engineer';
-  ensure('gs-engineer-profile').value = 'Ops';
   ensure('gs-engineer-shell').value = 'fish';
-  vm.runInContext(`_gsEngineerColor = 'none';`, context);
   ensure('gs-engineer-custom-instructions').value = 'Stay focused';
   ensure('gs-engineer-restrict-to-created-agents').checked = false;
   ensure('gs-engineer-can-override-worker-provider').checked = false;
@@ -1276,9 +1228,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-architect-model').value = 'gpt-5.1-architect';
   ensure('gs-architect-reasoning-effort').value = 'high';
   ensure('gs-architect-directory').value = '/repo/.torque/architect';
-  ensure('gs-architect-profile').value = 'Ops';
   ensure('gs-architect-shell').value = 'zsh';
-  vm.runInContext(`_gsArchitectColor = 'none';`, context);
   ensure('gs-architect-custom-instructions').value = 'Own scope';
   ensure('gs-architect-autonomy-mode').value = 'dispatch_freely';
   ensure('gs-architect-digest-verbosity').value = 'terse';
@@ -1290,8 +1240,9 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].cmd, 'update_group_settings');
   assert.equal(sandbox.sendCalls[0].group, 'alpha');
   assert.equal(sandbox.sendCalls[0].settings.agent_directory, '/repo/agents');
-  assert.equal(sandbox.sendCalls[0].settings.agent_profile, 'Ops');
   assert.equal(sandbox.sendCalls[0].settings.agent_shell, 'zsh');
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'agent_profile'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'agent_tab_color'), false);
   assert.equal(sandbox.sendCalls[0].settings.default_agent_template, 'careful-reviewer');
   assert.equal(sandbox.sendCalls[0].settings.agent_provider, 'codex');
   assert.equal(sandbox.sendCalls[0].settings.agent_boot_command, 'codex --worker');
@@ -1324,9 +1275,9 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[1].engineer_model, 'gpt-5.1');
   assert.equal(sandbox.sendCalls[1].engineer_reasoning_effort, 'xhigh');
   assert.equal(sandbox.sendCalls[1].engineer_directory, '/repo/.torque/engineer');
-  assert.equal(sandbox.sendCalls[1].engineer_profile, 'Ops');
   assert.equal(sandbox.sendCalls[1].engineer_shell, 'fish');
-  assert.equal(sandbox.sendCalls[1].engineer_tab_color, 'none');
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[1], 'engineer_profile'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[1], 'engineer_tab_color'), false);
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
   assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
   assert.equal(sandbox.sendCalls[1].engineer_can_override_worker_provider, false);
@@ -1344,9 +1295,9 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[2].settings.architect_model, 'gpt-5.1-architect');
   assert.equal(sandbox.sendCalls[2].settings.architect_reasoning_effort, 'high');
   assert.equal(sandbox.sendCalls[2].settings.architect_directory, '/repo/.torque/architect');
-  assert.equal(sandbox.sendCalls[2].settings.architect_profile, 'Ops');
   assert.equal(sandbox.sendCalls[2].settings.architect_shell, 'zsh');
-  assert.equal(sandbox.sendCalls[2].settings.architect_tab_color, 'none');
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[2].settings, 'architect_profile'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[2].settings, 'architect_tab_color'), false);
   assert.equal(sandbox.sendCalls[2].settings.architect_custom_instructions, 'Own scope');
   assert.equal(sandbox.sendCalls[2].settings.architect_autonomy_mode, 'dispatch_freely');
   assert.equal(

@@ -1608,9 +1608,7 @@ function registerAddCellModalElements(document) {
     'add-init-input',
     'add-dir-select',
     'add-dir-input',
-    'add-profile-select',
     'add-shell-select',
-    'add-color-swatches',
     'add-env-vars',
     'add-wt-section',
     'add-wt-enabled',
@@ -20247,7 +20245,6 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
   document.register('add-name-input').value = 'Worker';
   document.register('add-group-select').value = 'alpha';
   document.register('add-cmd-input').value = '';
-  document.register('add-profile-select').value = 'Default';
   document.register('add-dir-select').value = '/repo';
   document.register('add-dir-input').value = '';
   document.register('add-shell-select').value = '';
@@ -20270,7 +20267,6 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
     cmd: 'add_agent',
     name: 'Worker',
     group: 'alpha',
-    profile: 'Default',
     directory: '/repo',
     model: 'gpt-5',
     reasoning_effort: 'high',
@@ -20290,7 +20286,6 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
   document.register('add-name-input').value = 'Worker';
   document.register('add-group-select').value = 'alpha';
   document.register('add-cmd-input').value = '';
-  document.register('add-profile-select').value = 'Default';
   document.register('add-dir-select').value = '/repo';
   document.register('add-dir-input').value = '';
   document.register('add-shell-select').value = '';
@@ -20346,7 +20341,6 @@ test('rendered add-agent templates apply model and reasoning effort overrides', 
     'add-wt-auto-checkpoint',
     'add-wt-checkpoint-on-progress',
     'add-wt-squash',
-    'add-profile-select',
     'add-dir-select',
     'add-dir-input',
     'add-name-input',
@@ -21358,7 +21352,6 @@ test('full state toggles runtime body mode classes', () => {
 
   assert.equal(document.body.classList.contains('runtime-embedded'), true);
   assert.equal(document.body.classList.contains('standalone-mode'), true);
-  assert.equal(document.body.classList.contains('iterm2-mode'), false);
   assert.equal(document.body.classList.contains('tauri-mode'), false);
   assert.equal(document.body.dataset.torqueMode, 'standalone');
 
@@ -21377,7 +21370,6 @@ test('full state toggles runtime body mode classes', () => {
 
   assert.equal(document.body.classList.contains('runtime-embedded'), true);
   assert.equal(document.body.classList.contains('standalone-mode'), true);
-  assert.equal(document.body.classList.contains('iterm2-mode'), false);
   assert.equal(document.body.classList.contains('tauri-mode'), true);
   assert.equal(document.body.dataset.torqueMode, 'desktop');
 
@@ -21396,7 +21388,7 @@ test('full state toggles runtime body mode classes', () => {
 
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
   assert.equal(document.body.classList.contains('standalone-mode'), false);
-  assert.equal(document.body.classList.contains('iterm2-mode'), true);
+  assert.equal(document.body.classList.contains('iterm2-mode'), false);
   assert.equal(document.body.classList.contains('tauri-mode'), false);
   assert.equal(document.body.dataset.torqueMode, 'toolbelt');
 });
@@ -22715,7 +22707,6 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
   );
   document.getElementById('add-name-input').value = 'Standalone Worker';
   document.getElementById('add-group-select').value = 'torque';
-  document.getElementById('add-profile-select').value = 'Default';
 
   runInContext(context, `submitAdd();`);
 
@@ -22724,7 +22715,6 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
     cmd: 'add_worker',
     name: 'Standalone Worker',
     group: 'torque',
-    profile: 'Default',
     worktree: false,
   });
   assert.equal(Object.prototype.hasOwnProperty.call(createPayload, 'owner_engineer_id'), false);

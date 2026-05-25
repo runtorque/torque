@@ -117,8 +117,6 @@
           <select id="add-dir-select" onchange="onDirChange()"></select>
           <input id="add-dir-input" class="hidden" placeholder="Same as group"
                  autocomplete="off" style="margin-top:4px">
-          <label>Profile</label>
-          <select id="add-profile-select"></select>
           <label>Shell</label>
           <select id="add-shell-select">
             <option value="">Same as group</option>
@@ -126,8 +124,6 @@
             <option value="bash">bash</option>
             <option value="fish">fish</option>
           </select>
-          <label>Tab color</label>
-          <div class="color-swatches" id="add-color-swatches"></div>
           <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
           <textarea id="add-env-vars" rows="2" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
           <div id="add-wt-section" class="add-wt-section">
@@ -376,8 +372,6 @@
       <label>Icon</label>
       <div class="icon-picker" id="edit-icon-picker"></div>
     </div>
-    <label>Tab color</label>
-    <div class="color-swatches" id="edit-color-swatches"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitEdit()">Save</button>
@@ -410,8 +404,6 @@
       <div class="gs-subpane active" data-subpane="group-general">
       <label>Directory</label>
       <input id="gs-directory" placeholder="/path/to/project" autocomplete="off">
-      <label class="iterm2-only">Profile</label>
-      <select id="gs-profile" class="iterm2-only"></select>
       <label>Shell</label>
       <select id="gs-shell">
         <option value="">Default</option>
@@ -419,19 +411,17 @@
         <option value="bash">bash</option>
         <option value="fish">fish</option>
       </select>
-      <label class="iterm2-only">Tab color</label>
-      <div class="color-swatches iterm2-only" id="gs-color-swatches"></div>
       <label>Environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
       <label>Env file <span class="label-hint">sourced on session start</span></label>
       <input id="gs-env-file" placeholder=".env" autocomplete="off">
       <label>Max workers <span class="label-hint">0 = unlimited</span></label>
       <input id="gs-max-agents" type="number" min="0" max="100" value="0">
-      <label class="gs-checkbox iterm2-only">
+      <label class="gs-checkbox">
         <input id="gs-collapsed" type="checkbox"> Start collapsed on load
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Collapse this group automatically when the page loads. You can still expand it manually at any time.">?</span>
       </label>
-      <label class="gs-checkbox iterm2-only">
+      <label class="gs-checkbox">
         <input id="gs-filter-window" type="checkbox"> Pin to active window
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
       </label>
@@ -469,8 +459,6 @@
         <input id="gs-terminal-init-script" placeholder="/path/to/script.sh" autocomplete="off">
         <label>Directory</label>
         <input id="gs-terminal-directory" placeholder="Same as group" autocomplete="off">
-        <label class="iterm2-only">Profile</label>
-        <select id="gs-terminal-profile" class="iterm2-only"></select>
         <label>Shell</label>
         <select id="gs-terminal-shell">
           <option value="">Same as group</option>
@@ -478,8 +466,6 @@
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label class="iterm2-only">Tab color</label>
-        <div class="color-swatches iterm2-only" id="gs-terminal-color-swatches"></div>
         <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-terminal-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
         <label>Env file</label>
@@ -487,10 +473,6 @@
         <label class="gs-checkbox">
           <input id="gs-terminal-always-custom" type="checkbox"> Always open custom dialog
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating a terminal with default settings.">?</span>
-        </label>
-        <label class="gs-checkbox iterm2-only">
-          <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically delete the terminal from Torque when its iTerm2 tab is closed.">?</span>
         </label>
       </div>
 
@@ -593,8 +575,6 @@
         <div class="label-hint task-modal-section-intro">Execution context defaults for worker sessions.</div>
         <label>Directory</label>
         <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
-        <label class="iterm2-only">Profile</label>
-        <select id="gs-agent-profile" class="iterm2-only"></select>
         <label>Shell</label>
         <select id="gs-agent-shell">
           <option value="">Same as group</option>
@@ -602,8 +582,6 @@
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label class="iterm2-only">Tab color</label>
-        <div class="color-swatches iterm2-only" id="gs-agent-color-swatches"></div>
         <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
         <label>Env file</label>
@@ -731,8 +709,6 @@
         <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Engineer only. Leave blank to inherit the usual agent/group defaults.</div>
         <label>Directory</label>
         <input id="gs-engineer-directory" placeholder="Same as agent/group" autocomplete="off">
-        <label class="iterm2-only">Profile</label>
-        <select id="gs-engineer-profile" class="iterm2-only"></select>
         <label>Shell</label>
         <select id="gs-engineer-shell">
           <option value="">Same as agent/group</option>
@@ -740,8 +716,6 @@
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label class="iterm2-only">Tab color</label>
-        <div class="color-swatches iterm2-only" id="gs-engineer-color-swatches"></div>
       </div>
 
       <!-- Behavior sub-tab -->
@@ -934,8 +908,6 @@
             <div class="label-hint task-modal-section-intro">Optional launch overrides for Architect agents only. Leave blank to inherit the usual agent/group defaults.</div>
             <label>Directory</label>
             <input id="gs-architect-directory" placeholder="Same as agent/group" autocomplete="off">
-            <label class="iterm2-only">Profile</label>
-            <select id="gs-architect-profile" class="iterm2-only"></select>
             <label>Shell</label>
             <select id="gs-architect-shell">
               <option value="">Same as agent/group</option>
@@ -943,8 +915,6 @@
               <option value="bash">bash</option>
               <option value="fish">fish</option>
             </select>
-            <label class="iterm2-only">Tab color</label>
-            <div class="color-swatches iterm2-only" id="gs-architect-color-swatches"></div>
           </div>
         </div>
         <div class="gs-settings-section">
@@ -1045,7 +1015,7 @@
         <label class="gs-checkbox">
           <input id="gls-filter-window" type="checkbox" checked> Filter by active window
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
-            data-hint="When enabled, only show agents belonging to the current iTerm2 window. Per-group 'Pin to active window' overrides this.">?</span>
+            data-hint="When enabled, only show agents belonging to the current desktop window. Per-group 'Pin to active window' overrides this.">?</span>
         </label>
         <label class="gs-checkbox">
           <input id="gls-focus-new-tabs" type="checkbox" checked> Focus new tabs
@@ -1055,7 +1025,7 @@
         <label class="gs-checkbox">
           <input id="gls-focus-on-click" type="checkbox"> Focus tab on click
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
-            data-hint="When enabled, clicking an agent or terminal also focuses its iTerm2 tab. When disabled, single click only selects (double click to focus).">?</span>
+            data-hint="When enabled, clicking an agent or terminal also focuses its terminal session. When disabled, single click only selects (double click to focus).">?</span>
         </label>
         <label>Max event log entries
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"

@@ -170,7 +170,7 @@ function onAgentClick(id) {
     return;
   }
   if (selectedAgentId === id) {
-    // Already selected → focus the agent's iTerm2 session
+    // Already selected → focus the agent's terminal session
     send({ cmd: 'focus_agent', id });
   } else {
     // Select this agent → show its terminal drawer
