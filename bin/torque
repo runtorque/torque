@@ -40,6 +40,19 @@ DEFAULT_PORT = 18932
 DESKTOP_DEFAULT_PORT = 18933
 DESKTOP_DEFAULT_PROFILE = "desktop"
 
+
+def _resolve_global_default_port():
+    """Default daemon port for top-level commands.
+
+    The desktop app is the primary surface and listens on
+    ``DESKTOP_DEFAULT_PORT``. Honor an explicit ``TORQUE_PORT`` (e.g. a
+    standalone/browser daemon on ``DEFAULT_PORT``) so a single CLI works
+    against either instance. Mirrors ``_resolve_daemon_port`` precedence so
+    regular and daemon-lifecycle commands resolve the port identically.
+    """
+    env_port = (os.environ.get("TORQUE_PORT", "") or "").strip()
+    return int(env_port or DESKTOP_DEFAULT_PORT)
+
 _yaml_mod = None
 
 def _yaml():
@@ -728,7 +741,8 @@ def api_call(cmd, port=DEFAULT_PORT, **kwargs):
                     f"  ({exc.reason})"
                 )
             die(f"Cannot connect to Torque daemon on localhost:{port}\n"
-                f"  Is it running? Start with: make run (Toolbelt: Scripts menu → torque)\n"
+                f"  Is it running? Start the desktop app with: make run\n"
+                f"  (standalone/browser runs on {DEFAULT_PORT}; pass --port or set TORQUE_PORT to target it)\n"
                 f"  ({exc.reason})")
 
 
@@ -5114,8 +5128,9 @@ def build_parser():
         prog="torque",
         description="Control the Torque daemon from the terminal",
     )
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"Daemon port (default: {DEFAULT_PORT})")
+    parser.add_argument("--port", type=int, default=_resolve_global_default_port(),
+                        help=f"Daemon port (default: {DESKTOP_DEFAULT_PORT}; "
+                             "honors TORQUE_PORT)")
     parser.add_argument("--json", action="store_true",
                         help="Output raw JSON")
     sub = parser.add_subparsers(dest="command")
