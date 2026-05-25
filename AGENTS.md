@@ -1,122 +1,125 @@
 # AGENTS.md
 
-## What This Repo Is
+This file mirrors `CLAUDE.md` for agent providers. Treat `CLAUDE.md` as the maintained source of truth; keep this file aligned with it and avoid introducing stale links or separate policy.
 
-Torque is a local agent-orchestration workspace built around:
+## Project overview
 
-- a long-running Python daemon
-- a PTY-backed terminal runtime
-- a no-build-step HTML/CSS/JS frontend
-- SQLite as the persistent source of truth
+Torque is a local agent-orchestration workspace: a long-running Python daemon, a PTY-backed terminal runtime, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
 
-The product center of gravity is `torque/server.py` plus `torque/state.py`. Most other modules hang off that.
+Primary operator surfaces are standalone/browser and desktop app modes. The old Toolbelt integration is decommissioned; the Makefile no longer installs or updates the old Scripts copy, and old data should be migrated with `scripts/migrate_toolbelt_to_profile.py`.
 
-## Repo Map
+## Key commands
 
-- `torque.py`: installed entrypoint; anchors runtime paths and starts the standalone daemon loop
-- `torque/`: backend package
-- `bin/torque`: CLI; write commands go through HTTP, many read commands go straight to SQLite
-- `webview.html`: frontend shell; script load order matters
-- `static/`: plain JS/CSS frontend, no bundler
-- `actions/`: starter action YAMLs
-- `skills/`: Torque task-specific skills/prompts
-- `tests/`: Python `unittest` suite plus Node-based frontend regression tests
-- `docs/`: current operator/product docs
+```bash
+make deploy          # Primary install/update: ~/.torque/app + CLI refresh
+make run             # Launch the desktop app (standalone daemon, desktop profile)
+make standalone      # Foreground browser-only daemon (then make open)
+make stop            # Free TORQUE_PORT (18932 unless overridden)
+make check           # Python path, dependency, install status
+make open            # Open standalone/browser UI
+make test            # Full regression suite
+```
 
-## Backend Shape
+After `make deploy`, relaunch with `make run` or `make standalone` + `make open`. Migrate old Toolbelt data with `scripts/migrate_toolbelt_to_profile.py`.
 
-- `torque/server.py`: aiohttp server, route registration, command dispatch, integration glue
-- `torque/server_agent.py`, `torque/server_dispatch.py`, `torque/server_worktrees.py`, `torque/server_artifacts.py`, `torque/server_actions.py`: extracted helpers for server-heavy concerns
-- `torque/state.py`: core dataclasses (`AgentCell`, `BoardTask`, `Schedule`, settings) and `MatrixState`
-- `torque/db.py`, `torque/db_schema.py`, `torque/db_board.py`, `torque/db_memory.py`: SQLite schema and persistence helpers
-- `torque/actions.py`: YAML loading plus Jinja2 prompt rendering for actions
-- `torque/templates.py`: agent template discovery and config resolution
-- `torque/worktree.py`, `torque/worktree_boundaries.py`: git worktree lifecycle and merge-boundary logic
-- `torque/mcp.py`, `torque/mcp_engineer.py`, `torque/mcp_engineer_tools/`: MCP tool surfaces for agents and the per-group engineer
-- `torque/engineer.py`: engineer system prompt, digest buffering, idle-gated delivery
-- `torque/adapters/`: provider-specific agent integrations (`claude-code`, `codex`, `gemini-cli`, fallback generic)
-- `torque/memory.py`, `torque/artifacts.py`, `torque/external_tickets.py`: shared memory, task artifacts, and external issue linkage
+## Never deploy/stop mid-session
 
-## Frontend Shape
+If you are a Torque worker or engineer running inside the live daemon, do **not** run `make deploy`, `make stop`, or `make restart` against the daemon that spawned you. Killing that daemon corrupts in-memory dispatch state (PTY subscriptions, pending-prompt queues, session cache) and can make subsequent workers boot DOA.
 
-The frontend is intentionally simple:
+The Makefile refuses `stop` / `deploy` / `restart` when `TORQUE_CELL_ID` is set or when pwd is under `.torque/worktrees/`; HTTP lifecycle commands reject worker-context requests unless `force=true`. Override (`FORCE=1` / `force=true`) only with a specific reason and explicit acceptance of the corruption risk.
 
-- no framework
-- no TypeScript
-- no build step
-- global state patched in place from WebSocket deltas
+Safe alternatives:
 
-Important constraint: script order in [webview.html](webview.html) is part of the architecture. Core files load first, then board/modal submodules, then feature panels.
+- Commit your change and ask the user to deploy/relaunch from their own shell.
+- Test on a different port/profile, e.g. `make standalone-bg TORQUE_PORT=18933 TORQUE_PROFILE=desktop`.
+- Ship code/logging and let it take effect on the next natural restart.
 
-Live-update constraint: most panels are re-rendered from WebSocket-driven state patches. Frontend changes must preserve operator state across routine rerenders unless the view intentionally navigates away. That includes scroll position, viewport anchor when new content is inserted above the user, hover/focus/caret, inline drafts, expanded sections, and selection/highlight state.
+## Architecture map
 
-Primary files:
+See [docs/reference/architecture.md](docs/reference/architecture.md) for the detailed file-by-file reference. High-level map:
 
-- `static/js/ws.js`: socket client, snapshot/delta application
-- `static/js/render.js`: main grid rendering
-- `static/js/board*.js`: board UI and card behavior
-- `static/js/modals*.js`: modal flows
-- `static/js/actions.js`, `templates.js`, `events.js`, `context.js`, `engineer.js`, `diff.js`, `taskhistory.js`: feature panels
-- `static/style.css`: single stylesheet
+- `torque.py`: installed entrypoint; anchors runtime paths and starts the standalone daemon loop.
+- `torque/server.py`: aiohttp routes, command dispatch, agent launch/reuse, action rendering, worker/engineer/architect integration glue.
+- `torque/server_agent.py`, `server_dispatch.py`, `server_worktrees.py`, `server_artifacts.py`, `server_actions.py`: extracted helpers for server-heavy concerns.
+- `torque/state.py`: core dataclasses (`AgentCell`, `BoardTask`, settings) and `MatrixState` mutation/delta logic.
+- `torque/db*.py`: SQLite schema, persistence, board, and shared-memory helpers.
+- `torque/actions.py`: YAML action discovery plus Jinja2 `prompt` rendering; only `prompt` renders, `torque` is reserved, and `transitions` define valid derives.
+- `torque/templates.py`, `roles.py`, `specializations.py`: agent template/config discovery and role/specialization resolution.
+- `torque/worktree.py`, `worktree_boundaries.py`: git worktree lifecycle, checkpointing, merge/boundary safety.
+- `torque/mcp*.py`, `mcp_engineer_tools/`: worker, engineer, architect MCP tool surfaces and scoping.
+- `torque/engineer.py`, `architect.py`: persistent role prompts, journals/digests/decisions, orchestration behavior.
+- `torque/adapters/`: provider integrations (`claude-code`, `codex`, `gemini-cli`, generic).
+- `webview.html` + `static/js/*` + `static/style.css`: plain frontend; script load order is architectural.
+- `bin/torque`: CLI; writes go through HTTP, many reads go directly to SQLite.
 
-## Data Model Rules
+## Persistence and state
 
-- SQLite is the persistent source of truth.
-- The CLI depends on direct SQLite reads for offline/read-only commands.
-- Web clients depend on snapshot + delta messages from `MatrixState`.
-- Some `AgentCell` fields are intentionally ephemeral and are not persisted across restart.
+- SQLite (`torque.db`) is the persistent source of truth and uses WAL mode for daemon writes plus CLI reads.
+- Web clients receive a snapshot on connect/resync and then WebSocket deltas from `MatrixState._emit()` / `broadcast()`.
+- CLI read paths must keep working offline against SQLite when the daemon is stopped.
+- Ephemeral agent fields (activity, current process/path/branch, token counts, needs_attention, live worktree diff, etc.) intentionally live only in memory and clear on restart.
+- Slugs are persisted for agents, terminals, groups, and board tasks; startup fills missing/legacy slugs. CLI identifiers accept slugs, IDs, prefixes, and names where supported.
+- Schema/state-shape changes usually require coordinated updates in dataclasses, SQLite serialization, server command/serialization, CLI read paths, frontend consumers, and tests.
 
-If you change persisted state or object shape, you usually need to update all of:
+### Kinds refactor invariants
 
-1. dataclasses/state normalization in `torque/state.py`
-2. SQLite schema/serialization in `torque/db*.py`
-3. server serialization / command handlers
-4. CLI SQLite read paths in `bin/torque`
-5. frontend consumers in `static/js/*`
-6. tests
+- Agent kinds are explicit and final: `architect`, `engineer`, `worker`, `terminal`.
+- Roles live only under `~/.torque/roles/` and project `.torque/roles/`; legacy `.torque/agents/*.yaml` files are ignored and warned by logs / `torque doctor`.
+- Project `.torque/actions/**`, `.torque/roles/**`, and `.torque/specializations/**` are versioned config and must stay allow-listed while runtime `.torque/*` stays ignored.
+- Keep the seven specialization slugs and matching worker roles in sync with `.torque/roles/*.yaml`, `.torque/specializations/*.yaml`, and [docs/reference/specializations.md](docs/reference/specializations.md).
+- Ownership is explicit: workers use `owner_engineer_id`; tasks use `assigned_engineer_id`; engineers may carry `hired_by_architect_id`; architect-created tasks carry `created_by_architect_id`.
+- Worker dispatch prepends role `preamble` / `priorities` unless an action sets `disable_role_preamble: true`.
+- The Jinja `torque` namespace includes `torque.agent.kind`, `torque.agent.role`, `torque.agent.owner_engineer`, and `torque.agent.hired_by_architect` for architect-hired workers.
+- MCP surfaces are final: worker-side `torque_*`, engineer-side `engineer_*`, and architect-side `architect_*`; legacy aliases are gone.
+- Engineer scoping is strict: engineers see only themselves, owned workers/terminals, and in-group tasks assigned to them. Engineer-created workers/tasks are auto-stamped with ownership ids. Deleting an engineer clears those ids back to the user.
+- Architects are user-created only, never hired. `TORQUE_ARCHITECT_ID` binds architect MCP sessions. Architects can create/reassign only their own architect-created tasks, and only to engineers they hired.
+- Architect decisions are persisted in `decisions`; pending hires are user-approved and approval creates engineers with `hired_by_architect_id`.
+- Architect ↔ engineer messaging is the only architect cross-kind channel. Engineers may message only their hiring architect. Workers report only through `torque_*` status / derive / ask flows.
+- Worker worktrees use `torque/<engineer-slug>/<worker-slug>-<shortid>` or `torque/user/<worker-slug>-<shortid>`; engineer/architect worktrees stay flat; grandfathered flat worker branches remain valid.
+- Review-cycle fixes stay on the implementer's branch. A `feature/review` → `feature/implement` fix is parented to the review's parent so worktree inheritance skips the reviewer. Merge refuses sibling review/implement branches with unmerged commits unless `force=true` is explicit after diffing.
+- `torque doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership/scope invariants.
 
-## Project-Specific Rules
+### Torque context namespace
 
-- Prefer code and tests over prose docs when they disagree. `CLAUDE.md` is useful, but some parts are stale; for example, the repo now has an automated test suite.
-- Action prompts are Jinja2 templates, but only the `prompt` field is rendered. Actions must include `{{ TASK }}` or `{{ torque.task.title }}`.
-- Project-local `.torque/actions/`, `.torque/roles/`, and `.torque/specializations/` override user-global definitions under `~/.torque/`. Legacy `.torque/agents/` role files are ignored.
-- Worktree support is a core feature. Changes in task dispatch, merge flow, or agent reuse often also affect worktree inheritance and boundary tracking.
-- Engineer behavior is not isolated to one file. Changes often span `engineer.py`, `mcp_engineer.py`, server command handling, board/event UI, and tests.
-- Runtime-generated Torque files inside repos/worktrees are intentional. Be careful around `.claude/`, `.codex/`, `.mcp.json`, and `.torque/worktrees/` behavior.
-- When changing a live frontend panel, do not replace an interactive subtree unless you either keep its DOM stable or explicitly capture and restore the operator state it owns before paint.
-- Frontend rerender-stability fixes must ship with Node frontend regression coverage in `tests/frontend_state_regression.test.js` or a nearby targeted frontend test.
+Action templates can reference the injected `torque` dict: `torque.agent.*`, `torque.context.*`, `torque.worktree.*`, `torque.task.*`, and `torque.terminals`. `torque` is a reserved variable name and is rejected on action save. Preview renders use safe `TORQUE_CONTEXT_STUB` defaults.
 
-## Commands
+## Worker dispatch and reporting
 
-- `make deploy`: primary standalone/desktop deploy; stop the primary daemon, install app files under `~/.torque/app`, refresh CLI
-- `make run`: launch the primary desktop app
-- `make stop`: free port `18932`
-- `make standalone`: browser-only UI mode, backed by the PTY supervisor
-- `make open`: open the web UI in a browser
-- `make cli`: install the `torque` CLI symlink
-- `make test`: run the regression suite
+Dispatched workers report through MCP tools only: `torque_progress`, `torque_done`, `torque_blocked`, `torque_error`, `torque_ask`, `torque_derive`, `torque_ready`, `torque_verify`, and related shared-memory/artifact tools. `build_torque_system_prompt()` and `build_dispatch_postscript()` list the current completion paths; `torque_derive` is restricted to the action's declared transitions. The CLI `torque ai *` remains for humans/offline scripts, not worker prompt guidance.
 
-**Never deploy/stop from inside a worker/engineer shell.** The Makefile refuses `stop`/`deploy`/`restart` when `TORQUE_CELL_ID` is set or pwd is under `.torque/worktrees/` — killing the daemon you are talking to corrupts the in-memory dispatch state on the next boot and DOA's every subsequent worker. Override with `FORCE=1` only when you accept the risk. Alternative: commit to main and ask the user to deploy/relaunch from their own shell, or test on a different port (`TORQUE_PORT=18934`). See `CLAUDE.md → "Never deploy/stop mid-session"` for the full failure-mode notes.
+Workers should not ask the user directly. Use `torque_ask` only for blocking human decisions or approvals so Torque can track the request.
 
-Useful runtime paths:
+## Code conventions
 
-- primary desktop log/DB: `~/.torque/profiles/desktop/torque.log`, `~/.torque/profiles/desktop/torque.db`
-- primary standalone log/DB: `~/.torque/profiles/standalone/torque.log`, `~/.torque/profiles/standalone/torque.db`
+- Python: no framework beyond aiohttp and the standard-library PTY/subprocess stack. State mutations should go through `MatrixState` methods, which emit deltas and targeted DB writes. Direct cell mutations from the PTY runtime, events, or server handlers must call `state._emit_agent(cell)` and `state._db_save_agent(cell)` unless only ephemeral fields changed. Catch and log expected runtime errors; never use bare `except: pass`.
+- JS: no framework, no TypeScript, no build step. `webview.html` script order matters (core globals first, then board/modal submodules, then feature panels). State is patched in place from WS deltas.
+- Live frontend panels must preserve operator state across routine rerenders: scroll/viewport anchor, hover/focus/caret, inline drafts, expanded sections, and selection. Prefer shared capture/restore helpers in `static/js/render.js` and add Node frontend regression coverage for rerender-stability fixes.
+- CSS: single stylesheet, CSS custom properties for theming, monospace throughout.
+- Use custom modal/context-menu flows instead of native blocking dialogs so desktop and browser behavior stays consistent.
+
+### Surface-invalidation discipline
+
+For WS delta handling, mark expensive surfaces only when the focused panel actually displays the affected data. The common footgun is unconditional `_markSurface(flags, 'engineer')`, which causes high-frequency full panel rebuilds under normal worker activity.
+
+Rules of thumb:
+
+- Per-cell ops (`event_append`, `mcp_call_append`, `agent_digest_update`) affect engineer panel only when `op.cell_id` is the focused agent.
+- Per-agent ops affect engineer panel only when the changed agent is focused or is owned by the focused engineer/architect.
+- Per-group engineer/digest/journal ops affect engineer panel only when the focused engineer is in that group.
+- Per-architect ops affect engineer panel only when the focused architect id matches the op (resolve cached records for remove/resolve ops when needed).
+- `focus_update` is PTY session/window focus, not agent-panel focus; do not mark engineer from it.
+- Delta-driven callsites should route through `_agentPanelRefreshCurrentTab()` before falling back to full `renderAgentPanel()`.
+- For stubborn flicker/textbox/scroll bugs, use existing `window.__torqueDebugRender` instrumentation before adding speculative gates.
 
 ## Testing
 
-Use `make test`.
+Run `make test`; it self-sanitizes inherited `TORQUE_*` runtime variables. Use targeted tests first when practical, but keep the full suite green before finishing. Manual runtime/deploy recipes live in [docs/operate/manual-testing.md](docs/operate/manual-testing.md) and must be run only from a non-worker shell.
 
-That currently runs:
+## Reference docs
 
-- Python `unittest` coverage across backend/state/worktree/MCP/frontend wrappers
-- Node `--test` regression coverage for frontend state behavior
+Moved reference material lives here to keep boot context small:
 
-When touching specific areas, prefer targeted tests first, but keep the full suite green before finishing.
-
-## High-Value Checks Before You Ship
-
-- If you changed task, action, engineer, or MCP behavior, verify both backend and board/UI expectations.
-- If you changed frontend state shape, verify delta application and the relevant Node regression tests.
-- If you changed persistence, verify daemon writes and CLI offline reads both still work.
-- If you changed worktree behavior, check gitignore/exclude handling, inheritance, merge detection, and cleanup paths.
+- [Detailed architecture reference](docs/reference/architecture.md)
+- [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
+- [Install locations](docs/reference/install-locations.md)
+- [Manual testing](docs/operate/manual-testing.md)
