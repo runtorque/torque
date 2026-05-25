@@ -553,6 +553,81 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
 
+    async def test_engineer_merge_cleanup_removed_agent_still_returns_success(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertTrue(payload.get("close_agent_on_merge"))
+                self.assertTrue(payload.get("remove_worktree_on_merge"))
+                # Simulate post-merge cleanup racing the response path: the
+                # successful merge already happened, then cleanup tombstoned
+                # the agent and removed its worktree metadata.
+                state.remove_agent(worker.id)
+                worker.worktree_path = ""
+                worker.worktree_branch = ""
+                worker.worktree_base_branch = ""
+                worker.worktree_repo_root = ""
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "mode": "pull_request",
+                    "pending": False,
+                    "merged": True,
+                    "sha": "squash789",
+                    "cleanup": {
+                        "close_agent": True,
+                        "remove_worktree": True,
+                        "agent_closed": True,
+                        "worktree_removed": True,
+                        "errors": [],
+                    },
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {
+                "agent": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "ok")
+        self.assertEqual(payload["sha"], "squash789")
+        self.assertEqual(
+            payload["message"],
+            "Squash-merged torque/alice/worker-a into main",
+        )
+        self.assertTrue(payload["cleanup"]["agent_closed"])
+        self.assertTrue(payload["cleanup"]["worktree_removed"])
+        self.assertNotIn("No worktree or base branch", text)
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
     async def test_engineer_merge_passes_pr_title_body_to_worktree_merge(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

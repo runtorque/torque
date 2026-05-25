@@ -1098,6 +1098,11 @@ async def _finalize_successful_worktree_merge(
     board_sync_manager=None,
 ) -> dict:
     """Apply all local side effects after a direct or PR merge succeeds."""
+    merge_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+    merge_base_branch = str(
+        getattr(cell, "worktree_base_branch", "") or ""
+    ).strip()
+    merge_agent_name = str(getattr(cell, "name", "") or "").strip()
     mark_branch_boundaries_merged(cell, merge_sha)
     state.cleanup_stale_boundary_successors()
     preserve_diff_warning = ""
@@ -1256,6 +1261,9 @@ async def _finalize_successful_worktree_merge(
         "id": aid,
         "ok": True,
         "sha": merge_sha,
+        "branch": merge_branch,
+        "base_branch": merge_base_branch,
+        "agent_name": merge_agent_name,
         "cleanup": cleanup,
     }
     _attach_stale_base(result, stale_base)

@@ -3320,7 +3320,53 @@ def _format_worktree_pr_error(result: dict | None,
     return error, False if retryable else None
 
 
-def _worktree_merge_success_payload(result: dict | None, cell) -> dict:
+def _worktree_merge_branch_base(result: dict | None, cell, *,
+                                branch: str = "",
+                                base_branch: str = "") -> tuple[str, str]:
+    result = result or {}
+    merge_branch = str(
+        result.get("branch")
+        or branch
+        or getattr(cell, "worktree_branch", "")
+        or ""
+    ).strip()
+    merge_base_branch = str(
+        result.get("base_branch")
+        or base_branch
+        or getattr(cell, "worktree_base_branch", "")
+        or ""
+    ).strip()
+    return merge_branch, merge_base_branch
+
+
+def _worktree_merge_default_message(result: dict | None, cell, *,
+                                    branch: str = "",
+                                    base_branch: str = "") -> str:
+    result = result or {}
+    mode = str(result.get("mode") or "direct").strip() or "direct"
+    pending = bool(result.get("pending"))
+    merge_branch, merge_base_branch = _worktree_merge_branch_base(
+        result,
+        cell,
+        branch=branch,
+        base_branch=base_branch,
+    )
+    if mode == "pull_request":
+        if pending:
+            return "Pull request is open with auto-merge pending."
+        if merge_branch and merge_base_branch:
+            return (
+                f"Squash-merged {merge_branch} into {merge_base_branch}"
+            )
+        return "Pull request squash merge completed."
+    if merge_branch and merge_base_branch:
+        return f"Merged {merge_branch} into {merge_base_branch}"
+    return "Worktree merge completed."
+
+
+def _worktree_merge_success_payload(result: dict | None, cell, *,
+                                    branch: str = "",
+                                    base_branch: str = "") -> dict:
     result = result or {}
     cleanup = result.get("cleanup", {})
     if not isinstance(cleanup, dict):
@@ -3338,21 +3384,12 @@ def _worktree_merge_success_payload(result: dict | None, cell) -> dict:
         "cleanup": cleanup,
     }
     if not payload["message"]:
-        if mode == "pull_request":
-            if pending:
-                payload["message"] = (
-                    "Pull request is open with auto-merge pending."
-                )
-            else:
-                payload["message"] = (
-                    f"Squash-merged {cell.worktree_branch} into "
-                    f"{cell.worktree_base_branch}"
-                )
-        else:
-            payload["message"] = (
-                f"Merged {cell.worktree_branch} into "
-                f"{cell.worktree_base_branch}"
-            )
+        payload["message"] = _worktree_merge_default_message(
+            result,
+            cell,
+            branch=branch,
+            base_branch=base_branch,
+        )
     if "merged" in result:
         payload["merged"] = bool(result.get("merged"))
     elif mode == "pull_request":
@@ -6178,6 +6215,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         cell = state.agents.get(agent_id)
         if not cell or not cell.worktree_path:
             return "Agent has no worktree", True
+        merge_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+        merge_base_branch = str(
+            getattr(cell, "worktree_base_branch", "") or ""
+        ).strip()
 
         # First check for conflicts / merge boundary eligibility
         force_sibling_divergence = bool(args.get("force"))
@@ -6262,12 +6303,22 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         cleanup_errors = cleanup.get("errors", [])
         if cleanup_errors:
             return (
-                f"Merged {cell.worktree_branch} into "
-                f"{cell.worktree_base_branch}, but cleanup failed:\n"
+                _worktree_merge_default_message(
+                    result,
+                    cell,
+                    branch=merge_branch,
+                    base_branch=merge_base_branch,
+                )
+                + ", but cleanup failed:\n"
                 + "\n".join(f"  - {err}" for err in cleanup_errors)
             ), True
         return json.dumps(
-            _worktree_merge_success_payload(result, cell)
+            _worktree_merge_success_payload(
+                result,
+                cell,
+                branch=merge_branch,
+                base_branch=merge_base_branch,
+            )
         ), False
 
     if tool_name == "rebase":
