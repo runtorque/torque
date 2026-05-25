@@ -1,11 +1,63 @@
 import asyncio
+import importlib
+import sys
 import tempfile
+import types
 import unittest
+from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+try:
+    from helpers import install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import install_aiohttp_stub
+
 from torque.worktree import WorktreeManager
+
+
+def install_iterm2_stub():
+    iterm2 = types.ModuleType("iterm2")
+
+    class Connection:
+        pass
+
+    class Modifier(Enum):
+        COMMAND = "command"
+        OPTION = "option"
+        SHIFT = "shift"
+        CONTROL = "control"
+        FUNCTION = "function"
+
+    class Keycode(Enum):
+        UP_ARROW = "UP_ARROW"
+        DOWN_ARROW = "DOWN_ARROW"
+        LEFT_ARROW = "LEFT_ARROW"
+        RIGHT_ARROW = "RIGHT_ARROW"
+        HOME = "HOME"
+        END = "END"
+        PAGE_UP = "PAGE_UP"
+        PAGE_DOWN = "PAGE_DOWN"
+        FORWARD_DELETE = "FORWARD_DELETE"
+        ANSI_A = "ANSI_A"
+        ANSI_B = "ANSI_B"
+        ANSI_C = "ANSI_C"
+        ANSI_T = "ANSI_T"
+
+    tool = types.SimpleNamespace(async_register_web_view_tool=None)
+    binding = types.ModuleType("iterm2.binding")
+    keyboard = types.ModuleType("iterm2.keyboard")
+    keyboard.Modifier = Modifier
+    keyboard.Keycode = Keycode
+    iterm2.Connection = Connection
+    iterm2.tool = tool
+    iterm2.binding = binding
+    iterm2.keyboard = keyboard
+    sys.modules["iterm2"] = iterm2
+    sys.modules["iterm2.binding"] = binding
+    sys.modules["iterm2.keyboard"] = keyboard
+    return iterm2
 
 
 class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
@@ -421,6 +473,285 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final_gitlink, origin_main)
         self.assertEqual(final_gitlink, worker_sub_sha)
         self.assertIn(final_gitlink, await self._git_out("ls-tree", "main", self.sub_path))
+
+    async def test_pr_merge_path_merges_submodule_base_before_super_branch_push(self):
+        install_aiohttp_stub()
+        install_iterm2_stub()
+        state_mod = importlib.import_module("torque.state")
+        state_mod = importlib.reload(state_mod)
+        server_mod = importlib.import_module("torque.server")
+        server_mod = importlib.reload(server_mod)
+
+        super_origin = self.root / "super-origin.git"
+        await self._git("init", "--bare", str(super_origin), cwd=self.root)
+        await self._git(
+            "remote",
+            "add",
+            "origin",
+            str(super_origin),
+            cwd=self.repo_root,
+        )
+        await self._git("push", "-u", "origin", "main", cwd=self.repo_root)
+
+        cell = state_mod.AgentCell(
+            id="agent-pr",
+            name="PR Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="running",
+        )
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_submodules=[self.sub_path],
+        )
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        sub_wt = wt / self.sub_path
+
+        (sub_wt / "lib.txt").write_text("sub line one\npr merged line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Nested PR merge work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        worker_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        sub_branch = await self._sub_branch(sub_wt)
+        code, _out, _err = await self._git(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "--verify",
+            f"refs/heads/{sub_branch}",
+            cwd=self.root,
+            check=False,
+        )
+        self.assertNotEqual(
+            0,
+            code,
+            "setup should reproduce the PR path's formerly-unpushed sub branch",
+        )
+
+        class FakePrWorktreeManager(WorktreeManager):
+            def __init__(self, case):
+                super().__init__()
+                self.case = case
+                self.pushed_super_gitlinks = []
+                self.branch = ""
+                self.base_branch = ""
+
+            async def github_preflight(self, worktree_path):
+                return {
+                    "ok": True,
+                    "phase": "github_preflight",
+                    "name_with_owner": "acme/super",
+                }
+
+            async def github_select_remote(self, worktree_path):
+                return {
+                    "ok": True,
+                    "phase": "github_remote",
+                    "remote": "origin",
+                }
+
+            async def github_push_branch(self, worktree_path, remote, branch):
+                self.pushed_super_gitlinks.append(
+                    await self.case._gitlink_sha(Path(worktree_path), "HEAD")
+                )
+                return await super().github_push_branch(
+                    worktree_path,
+                    remote,
+                    branch,
+                )
+
+            async def github_create_or_reuse_pr(
+                self,
+                worktree_path,
+                branch,
+                base_branch,
+                title="",
+                body="",
+            ):
+                self.branch = branch
+                self.base_branch = base_branch
+                return {
+                    "ok": True,
+                    "phase": "pr_create",
+                    "url": "https://github.com/acme/super/pull/1",
+                    "number": 1,
+                    "body": body,
+                    "head_sha": await self.rev_parse(worktree_path, branch),
+                    "state": "OPEN",
+                    "merge_state": "CLEAN",
+                    "existing": False,
+                }
+
+            async def github_request_squash_merge(
+                self,
+                worktree_path,
+                pr_number,
+                head_sha,
+                subject="",
+                body="",
+                auto=False,
+                url="",
+            ):
+                branch_sha = await self.rev_parse(worktree_path, self.branch)
+                if head_sha != branch_sha:
+                    return {
+                        "ok": False,
+                        "phase": "pr_merge",
+                        "error": "head SHA did not match pushed branch",
+                        "pending": False,
+                    }
+                base_sha = await self.rev_parse(worktree_path, self.base_branch)
+                code, tree_out, tree_err = await self._git_run(
+                    worktree_path,
+                    "merge-tree",
+                    "--write-tree",
+                    self.base_branch,
+                    self.branch,
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": "pr_merge",
+                        "error": tree_err or tree_out,
+                        "pending": False,
+                    }
+                code, commit_out, commit_err = await self._git_run(
+                    worktree_path,
+                    "commit-tree",
+                    tree_out.splitlines()[0].strip(),
+                    "-p",
+                    base_sha,
+                    "-m",
+                    subject or "Squash merge PR",
+                    "-m",
+                    body or "",
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": "pr_merge",
+                        "error": commit_err,
+                        "pending": False,
+                    }
+                merge_sha = commit_out.splitlines()[0].strip()
+                push = await self._git_run(
+                    worktree_path,
+                    "push",
+                    "origin",
+                    f"{merge_sha}:refs/heads/{self.base_branch}",
+                )
+                if push[0] != 0:
+                    return {
+                        "ok": False,
+                        "phase": "pr_merge",
+                        "error": push[2],
+                        "pending": False,
+                    }
+                return {
+                    "ok": True,
+                    "phase": "pr_merge",
+                    "url": "https://github.com/acme/super/pull/1",
+                    "number": pr_number,
+                    "head_sha": head_sha,
+                    "merge_commit_sha": merge_sha,
+                    "merge_state": "CLEAN",
+                    "pending": False,
+                    "pr_status": {"ok": True, "state": "MERGED"},
+                }
+
+        state = state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings("g", worktree_submodules=[self.sub_path])
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+        fake_mgr = FakePrWorktreeManager(self)
+
+        async def latest_boundary_state(_cell):
+            return {"latest": None, "clean": True, "reason": ""}
+
+        async def cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        async def broadcast_toast(*_args, **_kwargs):
+            return None
+
+        class DummyBridge:
+            async def send_text(self, *_args, **_kwargs):
+                return None
+
+        result = await server_mod._run_pr_worktree_merge(
+            state=state,
+            cell=cell,
+            aid=cell.id,
+            data={
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            },
+            worktree_mgr=fake_mgr,
+            latest_boundary_state_for_cell=latest_boundary_state,
+            boundary_reason_message=lambda reason, latest: reason,
+            mark_branch_boundaries_merged=lambda *_args, **_kwargs: None,
+            cleanup_after_merge=cleanup_after_merge,
+            broadcast_toast=broadcast_toast,
+            bridge=DummyBridge(),
+            handle_command=None,
+            panel_event=None,
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["mode"], "pull_request")
+        self.assertTrue(result["nested_submodules"]["ok"])
+        self.assertEqual(fake_mgr.pushed_super_gitlinks, [worker_sub_sha])
+
+        remote_sub_main = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "main",
+            cwd=self.root,
+        )
+        remote_sub_branch = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            sub_branch,
+            cwd=self.root,
+        )
+        self.assertEqual(remote_sub_main, worker_sub_sha)
+        self.assertEqual(remote_sub_branch, worker_sub_sha)
+
+        remote_super_gitlink_line = await self._git_out(
+            "--git-dir",
+            str(super_origin),
+            "ls-tree",
+            "main",
+            self.sub_path,
+            cwd=self.root,
+        )
+        self.assertIn(remote_sub_main, remote_super_gitlink_line)
+        self.assertEqual(
+            await self._gitlink_sha(self.repo_root, "main"),
+            remote_sub_main,
+        )
 
     async def test_merge_preflight_blocks_dirty_submodule(self):
         cell, wt = await self._create_nested()
