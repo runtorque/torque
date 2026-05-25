@@ -4811,6 +4811,50 @@ async def _replay_buffered_cross_kind_messages(
     return replayed
 
 
+def _make_agent_session_start_handler(
+        state: MatrixState,
+        bridge,
+        send_prompt_getter,
+        *,
+        schedule_task=None):
+    """Build the EventBus session_start hook.
+
+    The hook is intentionally small: mark the terminal input-ready, then
+    asynchronously replay any buffered direct/peer inbox messages for live,
+    non-dismissed agent sessions.
+    """
+    if schedule_task is None:
+        schedule_task = asyncio.create_task
+
+    def _on_agent_session_start(cell):
+        """Signal terminal readiness and recover buffered direct/peer messages."""
+        bridge.signal_input_ready(cell.id)
+        if (
+            str(getattr(cell, "cell_type", "") or "") != "agent"
+            or _agent_dismissed_at(cell)
+        ):
+            return
+
+        async def _recover_buffered_messages():
+            try:
+                await _replay_buffered_cross_kind_messages(
+                    state,
+                    bridge,
+                    cell,
+                    send_prompt=send_prompt_getter(),
+                )
+                await state.broadcast()
+            except Exception:
+                log.exception(
+                    "Failed to recover buffered messages for %s",
+                    getattr(cell, "id", ""),
+                )
+
+        schedule_task(_recover_buffered_messages())
+
+    return _on_agent_session_start
+
+
 def _inherit_assigned_engineer_for_derived_task(parent_task,
                                                 derived_task=None) -> str:
     """Keep derived-task ownership bound to the parent's assigned engineer."""
@@ -9769,32 +9813,6 @@ async def main(connection=None):
     if hasattr(bridge, "on_supervisor_event"):
         bridge.on_supervisor_event = _on_supervisor_event
 
-    def _on_agent_session_start(cell):
-        """Signal terminal readiness and recover buffered direct/peer messages."""
-        bridge.signal_input_ready(cell.id)
-        if (
-            str(getattr(cell, "cell_type", "") or "") != "agent"
-            or _agent_dismissed_at(cell)
-        ):
-            return
-
-        async def _recover_buffered_messages():
-            try:
-                await _replay_buffered_cross_kind_messages(
-                    state,
-                    bridge,
-                    cell,
-                    send_prompt=_send_agent_prompt,
-                )
-                await state.broadcast()
-            except Exception:
-                log.exception(
-                    "Failed to recover buffered messages for %s",
-                    getattr(cell, "id", ""),
-                )
-
-        asyncio.create_task(_recover_buffered_messages())
-
     async def _on_agent_session_end_detected(cell, data=None):
         """Convert bridge-detected turn completion into a normal AgentEvent."""
         if str(getattr(cell, "agent_type", "") or "") != "codex":
@@ -9814,7 +9832,11 @@ async def main(connection=None):
         ))
 
     # Signal bridge when agent TUI is ready (hook-based session_start)
-    event_bus.on_session_start = _on_agent_session_start
+    event_bus.on_session_start = _make_agent_session_start_handler(
+        state,
+        bridge,
+        lambda: _send_agent_prompt,
+    )
     # Handle agent turn completion (hook-based session_end)
     event_bus.on_session_end = _on_agent_session_end
     # Handle codex turn completion detected by the PTY idle-screen backstop.

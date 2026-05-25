@@ -2956,6 +2956,121 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             'replay_failed',
         )
 
+    async def test_session_start_hook_replays_buffered_architect_peer_message(self):
+        state = self._make_state()
+        sender = self.state_mod.AgentCell(
+            id='arch-a', name='Architect A', group='g',
+            cell_type='agent', kind='architect')
+        recipient = self.state_mod.AgentCell(
+            id='arch-b', name='Architect B', group='g',
+            cell_type='agent', kind='architect', session_id='session-b')
+        state.agents[sender.id] = sender
+        state.agents[recipient.id] = recipient
+        state.groups['g'] = [sender.id, recipient.id]
+        state.save_peer_message({
+            'id': 'msg-wake-peer',
+            'thread_id': 'msg-wake-peer',
+            'group_name': 'g',
+            'sender_id': sender.id,
+            'sender_kind': 'architect',
+            'recipient_id': recipient.id,
+            'recipient_kind': 'architect',
+            'message': 'Wake replay regression.',
+            'created_at': 125.0,
+            'delivery_state': 'buffered',
+            'delivery_reason': 'no_session',
+        })
+        broadcasts = []
+
+        async def fake_broadcast():
+            broadcasts.append(True)
+
+        state.broadcast = fake_broadcast
+        scheduled = []
+
+        def schedule(coro):
+            task = asyncio.create_task(coro)
+            scheduled.append(task)
+            return task
+
+        class FakeBridge:
+            def __init__(self):
+                self.ready = []
+                self.primed = []
+                self.sent = []
+
+            def signal_input_ready(self, cell_id):
+                self.ready.append(cell_id)
+
+            def prime_input_ready(self, session_id):
+                self.primed.append(session_id)
+
+            async def send_text(self, session_id, text):
+                self.sent.append((session_id, text))
+
+        bridge = FakeBridge()
+        handler = self.server_mod._make_agent_session_start_handler(
+            state, bridge, lambda: None, schedule_task=schedule)
+
+        handler(recipient)
+        self.assertEqual(bridge.ready, [recipient.id])
+        self.assertEqual(len(scheduled), 1)
+        await scheduled[0]
+
+        self.assertEqual(bridge.primed, ['session-b'])
+        self.assertEqual(bridge.sent[0][0], 'session-b')
+        self.assertIn('Wake replay regression.', bridge.sent[0][1])
+        self.assertEqual(broadcasts, [True])
+        persisted = self.db.load_agent_peer_message('msg-wake-peer')
+        self.assertEqual(persisted['delivery_state'], 'delivered')
+        self.assertEqual(persisted['delivery_reason'], '')
+
+    async def test_session_start_hook_skips_dismissed_architect_replay(self):
+        state = self._make_state()
+        sender = self.state_mod.AgentCell(
+            id='arch-a', name='Architect A', group='g',
+            cell_type='agent', kind='architect')
+        recipient = self.state_mod.AgentCell(
+            id='arch-b', name='Architect B', group='g',
+            cell_type='agent', kind='architect', session_id='session-b',
+            dismissed_at=123)
+        state.agents[sender.id] = sender
+        state.agents[recipient.id] = recipient
+        state.groups['g'] = [sender.id, recipient.id]
+        state.save_peer_message({
+            'id': 'msg-dismissed-wake-peer',
+            'thread_id': 'msg-dismissed-wake-peer',
+            'group_name': 'g',
+            'sender_id': sender.id,
+            'sender_kind': 'architect',
+            'recipient_id': recipient.id,
+            'recipient_kind': 'architect',
+            'message': 'Do not replay while dismissed.',
+            'created_at': 126.0,
+            'delivery_state': 'buffered',
+            'delivery_reason': 'recipient_dismissed',
+        })
+        scheduled = []
+
+        class FakeBridge:
+            def __init__(self):
+                self.ready = []
+
+            def signal_input_ready(self, cell_id):
+                self.ready.append(cell_id)
+
+        bridge = FakeBridge()
+        handler = self.server_mod._make_agent_session_start_handler(
+            state, bridge, lambda: None, schedule_task=scheduled.append)
+
+        handler(recipient)
+
+        self.assertEqual(bridge.ready, [recipient.id])
+        self.assertEqual(scheduled, [])
+        persisted = self.db.load_agent_peer_message('msg-dismissed-wake-peer')
+        self.assertEqual(persisted['delivery_state'], 'buffered')
+        self.assertEqual(persisted['delivery_reason'], 'recipient_dismissed')
+
     def test_handle_engineer_reply_completes_follow_up_only_and_preserves_parent_state(self):
         state = self._make_state()
         parent = state.board_add_task(
