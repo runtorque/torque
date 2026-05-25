@@ -148,6 +148,18 @@ test('error banner does not regress normal connection banners', () => {
   assert.match(s.RemoteRender.bannerHtml('reauth_required', {}), /re-pair/);
 });
 
+test('bannerHtml surfaces config errors as terminal config-error state', () => {
+  const s = buildSandbox();
+  const html = s.RemoteRender.bannerHtml('config_error', {
+    errors: ['daemonId is required'],
+  });
+  assert.match(html, /remote-banner-config-error/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Relay config error/);
+  assert.match(html, /daemonId is required/);
+  assert.doesNotMatch(html, /Disconnected/);
+});
+
 // --- #3 stick-to-bottom on inbound (at-tail gated) ------------------------
 function makeConvEl(initial) {
   let stored = '';
