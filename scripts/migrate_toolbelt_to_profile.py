@@ -401,6 +401,9 @@ def _backfill_agent_history(conn: sqlite3.Connection) -> None:
 def _run_schema_and_normalize(target_db: Path) -> dict[str, int]:
     conn = sqlite3.connect(str(target_db))
     try:
+        has_legacy_agent_backend = _column_exists(
+            conn, "agents", "terminal_backend"
+        )
         legacy_agent_ids = _legacy_toolbelt_agent_ids(conn)
         legacy_group_names = _legacy_toolbelt_group_names(conn)
         legacy_agent_where = (
@@ -412,7 +415,8 @@ def _run_schema_and_normalize(target_db: Path) -> dict[str, int]:
                 "SELECT COUNT(*) FROM agents "
                 f"WHERE {legacy_agent_where} AND status != 'stopped'",
             )
-            if _column_exists(conn, "agents", "status")
+            if has_legacy_agent_backend
+            and _column_exists(conn, "agents", "status")
             else 0
         )
         agent_sessions_cleared = (
@@ -421,7 +425,8 @@ def _run_schema_and_normalize(target_db: Path) -> dict[str, int]:
                 "SELECT COUNT(*) FROM agents "
                 f"WHERE {legacy_agent_where} AND session_id IS NOT NULL",
             )
-            if _column_exists(conn, "agents", "session_id")
+            if has_legacy_agent_backend
+            and _column_exists(conn, "agents", "session_id")
             else 0
         )
         agent_windows_cleared = (
@@ -431,7 +436,8 @@ def _run_schema_and_normalize(target_db: Path) -> dict[str, int]:
                 f"WHERE {legacy_agent_where} "
                 "AND COALESCE(window_id, '') != ''",
             )
-            if _column_exists(conn, "agents", "window_id")
+            if has_legacy_agent_backend
+            and _column_exists(conn, "agents", "window_id")
             else 0
         )
 
