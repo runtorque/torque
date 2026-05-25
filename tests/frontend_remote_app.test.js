@@ -69,6 +69,7 @@ function loadApp(rawConfig, opts = {}) {
   const elements = {
     'torque-remote-config': { textContent: JSON.stringify(rawConfig || {}) },
     'remote-banner': makeElement('remote-banner'),
+    'remote-agent-picker': makeElement('remote-agent-picker'),
     'remote-agent-list': makeElement('remote-agent-list'),
     'remote-conversation': makeElement('remote-conversation'),
     'remote-composer': makeElement('remote-composer'),
@@ -90,19 +91,51 @@ function loadApp(rawConfig, opts = {}) {
     __connectCalls: 0,
     __clientConstructs: 0,
     __sendCalls: [],
+    __setActiveAgentCalls: [],
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
 
   function RemoteStore() {
     this.snapshotApplied = false;
+    this._subscribers = [];
+    const initialConv = opts.activeConversation === undefined ? null : opts.activeConversation;
+    this._conversations = Object.assign({}, opts.conversations || {});
+    if (initialConv && initialConv.agentId && !this._conversations[initialConv.agentId]) {
+      this._conversations[initialConv.agentId] = initialConv;
+    }
+    this._activeAgentId = opts.activeAgentId
+      || (initialConv && initialConv.agentId)
+      || Object.keys(this._conversations)[0]
+      || '';
+    this._agentList = (opts.agentList || Object.keys(this._conversations).map((agentId) => ({
+      agentId,
+      agentName: agentId,
+      lastBody: '',
+      lastActivityMs: 0,
+    }))).map((agent) => Object.assign({}, agent));
   }
-  RemoteStore.prototype.subscribe = function() {};
-  RemoteStore.prototype.agentList = function() { return []; };
-  RemoteStore.prototype.activeConversation = function() {
-    return opts.activeConversation === undefined ? null : opts.activeConversation;
+  RemoteStore.prototype.subscribe = function(fn) {
+    if (typeof fn === 'function') this._subscribers.push(fn);
   };
-  RemoteStore.prototype.setActiveAgent = function() {};
+  RemoteStore.prototype._notify = function() {
+    for (const fn of this._subscribers) fn(this);
+  };
+  RemoteStore.prototype.agentList = function() {
+    return this._agentList.map((agent) => Object.assign({}, agent, {
+      active: agent.agentId === this._activeAgentId,
+    }));
+  };
+  RemoteStore.prototype.activeConversation = function() {
+    return this._activeAgentId ? this._conversations[this._activeAgentId] || null : null;
+  };
+  RemoteStore.prototype.setActiveAgent = function(agentId) {
+    sandbox.__setActiveAgentCalls.push(agentId);
+    if (!this._conversations[agentId]) return false;
+    this._activeAgentId = agentId;
+    this._notify();
+    return true;
+  };
   sandbox.RemoteStore = RemoteStore;
 
   function RemoteRelayClient(opts) {
@@ -166,6 +199,41 @@ test('app boot with valid config still follows the normal connect path', () => {
   assert.ok(s.__torqueRemote.client, 'client exposed for diagnostics');
   assert.equal(s.__torqueRemote.configError, undefined);
   assert.doesNotMatch(s.__elements['remote-banner'].innerHTML, /remote-banner-config-error/);
+});
+
+test('mobile agent picker change switches the active conversation and repaints', () => {
+  const s = loadApp(validConfig(), {
+    activeAgentId: 'agent-a',
+    agentList: [
+      { agentId: 'agent-a', agentName: 'Agent Alpha', lastBody: 'hello from a' },
+      { agentId: 'agent-b', agentName: 'Agent Beta', lastBody: 'hello from b' },
+    ],
+    conversations: {
+      'agent-a': { agentId: 'agent-a', messages: [
+        { id: 'a1', sender: 'agent', body: 'conversation alpha', messageType: 'message' },
+      ] },
+      'agent-b': { agentId: 'agent-b', messages: [
+        { id: 'b1', sender: 'agent', body: 'conversation beta', messageType: 'message' },
+      ] },
+    },
+  });
+  const picker = s.__elements['remote-agent-picker'];
+  assert.match(picker.innerHTML, /data-agent-picker/, 'picker rendered');
+  assert.match(picker.innerHTML, /<option value="agent-a" selected>Agent Alpha<\/option>/);
+  assert.match(s.__elements['remote-conversation'].innerHTML, /conversation alpha/);
+
+  const select = {
+    value: 'agent-b',
+    getAttribute(name) { return name === 'data-agent-picker' ? '' : null; },
+    closest(selector) { return selector === '[data-agent-picker]' ? this : null; },
+  };
+  picker.dispatchEvent(makeEvent('change', { target: select }));
+
+  assert.deepEqual(s.__setActiveAgentCalls, ['agent-b']);
+  assert.match(s.__elements['remote-agent-picker'].innerHTML,
+    /<option value="agent-b" selected>Agent Beta<\/option>/);
+  assert.match(s.__elements['remote-conversation'].innerHTML, /conversation beta/);
+  assert.doesNotMatch(s.__elements['remote-conversation'].innerHTML, /conversation alpha/);
 });
 
 test('composer Enter submits through the existing send path and clears input', () => {
