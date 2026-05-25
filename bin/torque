@@ -1146,8 +1146,8 @@ def _context_from_cell(cell, agents):
 def detect_context(state_data):
     """Auto-detect group and parent from the current Torque session.
 
-    Reads TORQUE_CELL_ID first (standalone/PTY sessions), then falls back
-    to ITERM_SESSION_ID (format: w0t0p0:GUID) for iTerm2/Toolbelt.
+    Reads TORQUE_CELL_ID first (managed PTY sessions), then falls back
+    to legacy ITERM_SESSION_ID (format: w0t0p0:GUID) for older sessions.
     Returns (cell, parent_agent, group) or (None, None, None) if not in
     a Torque-managed session.
     """
@@ -2229,7 +2229,7 @@ def cmd_terminal_add(args):
     elif args.group:
         kwargs["group"] = args.group
     else:
-        # Auto-detect from current iTerm2 session
+        # Auto-detect from the current Torque-managed session.
         state_data = get_state(args.port)
         _cell, parent, group = detect_context(state_data)
         if parent:
@@ -3477,7 +3477,6 @@ description: ""
 agent:
   name_prefix: {args.name}
   # command: claude
-  # tab_color: "#f85149"
 
 # group: ""
 # worktree: true
@@ -5177,16 +5176,16 @@ def build_parser():
     # -- desktop ------------------------------------------------------------
     p = sub.add_parser("desktop", help="Launch Torque in the native desktop shell")
     p.add_argument("--attach", action="store_true",
-                   help="Attach to an existing matching standalone Torque server "
+                   help="Attach to an existing matching Torque server "
                         "instead of spawning a desktop-owned child server")
     p.add_argument("--profile",
-                   help=f"Standalone profile for the desktop app "
+                   help=f"Desktop profile "
                         f"(default: {DESKTOP_DEFAULT_PROFILE})")
     p.add_argument("--port", dest="desktop_port", type=int,
-                   help=f"Standalone port for the desktop app "
+                   help=f"Desktop port "
                         f"(default: {DESKTOP_DEFAULT_PORT})")
     p.add_argument("--data-dir",
-                   help="Standalone data directory for the desktop app")
+                   help="Desktop data directory")
     p.add_argument("--python",
                    help="Python executable to use for the desktop shell")
     p.set_defaults(func=cmd_desktop)
@@ -5259,8 +5258,8 @@ def build_parser():
                    help="Target group (auto-detected if in a Torque session)")
     p.add_argument("-c", "--command", help="Boot command")
     p.add_argument("-d", "--directory", help="Working directory")
-    p.add_argument("--profile", help="iTerm2 profile")
-    p.add_argument("--color", help="Tab color (hex, e.g., #f85149)")
+    p.add_argument("--profile", help="Legacy profile label (PTY runtime uses Default)")
+    p.add_argument("--color", help="Legacy color metadata (hex, e.g., #f85149)")
     p.set_defaults(func=cmd_agent_add)
 
     p = agt_sub.add_parser("remove", aliases=["rm"],
@@ -5268,7 +5267,7 @@ def build_parser():
     p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_agent_remove)
 
-    p = agt_sub.add_parser("focus", help="Focus agent's iTerm2 session")
+    p = agt_sub.add_parser("focus", help="Focus agent's terminal session")
     p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_agent_focus)
 
@@ -5281,10 +5280,10 @@ def build_parser():
     p.add_argument("-g", "--group", required=True, help="Target group")
     p.set_defaults(func=cmd_agent_move)
 
-    p = agt_sub.add_parser("edit", help="Update agent name or color")
+    p = agt_sub.add_parser("edit", help="Update agent name or legacy color metadata")
     p.add_argument("identifier", help="Agent ID, slug, or name")
     p.add_argument("--name", help="New name")
-    p.add_argument("--color", help="New tab color (hex)")
+    p.add_argument("--color", help="Legacy color metadata (hex)")
     p.set_defaults(func=cmd_agent_edit)
 
     # -- engineer -----------------------------------------------------------
@@ -5395,8 +5394,8 @@ def build_parser():
     p.add_argument("-g", "--group", help="Group (if no parent)")
     p.add_argument("-c", "--command", help="Boot command")
     p.add_argument("-d", "--directory", help="Working directory")
-    p.add_argument("--profile", help="iTerm2 profile")
-    p.add_argument("--color", help="Tab color (hex)")
+    p.add_argument("--profile", help="Legacy profile label (PTY runtime uses Default)")
+    p.add_argument("--color", help="Legacy color metadata (hex)")
     p.set_defaults(func=cmd_terminal_add)
 
     p = trm_sub.add_parser("remove", aliases=["rm"],
