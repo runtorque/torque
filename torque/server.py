@@ -4938,6 +4938,12 @@ def _create_engineer_followup_task(state: MatrixState, target, message: str,
         "status": "Awaiting Reply",
         "labels": labels,
         "reply_agent_id": target.id,
+        "board_sync": {
+            "version": 1,
+            "auto_track": False,
+            "auto_sync_excluded": True,
+            "auto_sync_excluded_reason": "engineer_message",
+        },
     }
     task_group = target.group
     if active_task:
@@ -13904,11 +13910,6 @@ async def main(connection=None):
                 state.board_reorder_task(
                     data.get("id", ""),
                     data.get("position", 0))
-                if board_sync_manager:
-                    board_sync_manager.enqueue_task(
-                        data.get("id", ""),
-                        reason="task_reorder",
-                    )
 
             elif cmd == "dispatch_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -15505,7 +15506,13 @@ async def main(connection=None):
                         action_name=sched.action_name,
                         action_vars=dict(sched.action_vars),
                         agent_template=sched.agent_template,
-                        labels=list(sched.labels))
+                        labels=list(sched.labels),
+                        board_sync={
+                            "version": 1,
+                            "auto_track": False,
+                            "auto_sync_excluded": True,
+                            "auto_sync_excluded_reason": "schedule",
+                        })
                     if task:
                         await handle_command({
                             "cmd": "dispatch_task",

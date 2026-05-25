@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Sequence
@@ -301,6 +302,17 @@ def _assignees(task, settings: GitHubSyncSettings) -> list[str]:
 
 
 def _lane_status(task, settings: GitHubSyncSettings) -> str:
+    status = str(getattr(task, "status", "") or "").strip()
+    if status:
+        mapped = settings.lane_status_map.get(status)
+        if mapped is None:
+            folded = {
+                str(key or "").strip().casefold(): value
+                for key, value in settings.lane_status_map.items()
+            }
+            mapped = folded.get(status.casefold())
+        if mapped:
+            return str(mapped or "").strip()
     lane = str(getattr(task, "lane", "") or "").strip()
     return str(settings.lane_status_map.get(lane, lane) or "").strip()
 
@@ -397,6 +409,10 @@ class GitHubBoardSyncProvider:
     def __init__(self, runner: GhRunner | None = None, cwd: str | None = None):
         self.runner = runner or default_gh_runner
         self.cwd = cwd
+        self._label_cache: dict[str, tuple[float, set[str]]] = {}
+        self._project_cache: dict[tuple[str, int, str], tuple[float, dict]] = {}
+        self._label_cache_ttl_seconds = 60.0
+        self._project_cache_ttl_seconds = 300.0
 
     async def _gh(self, phase: str, *args: str, cwd: str | None = None) -> dict:
         result = await self.runner([str(arg) for arg in args], cwd if cwd is not None else self.cwd)
@@ -499,6 +515,15 @@ class GitHubBoardSyncProvider:
         return ""
 
     async def _resolve_project(self, settings: GitHubSyncSettings) -> dict:
+        cache_key = (
+            settings.project_owner,
+            int(settings.project_number or 0),
+            settings.status_field_name,
+        )
+        cached = self._project_cache.get(cache_key)
+        now = time.monotonic()
+        if cached and cached[0] > now:
+            return dict(cached[1])
         project = await self._json_gh(
             "project",
             "project",
@@ -545,7 +570,7 @@ class GitHubBoardSyncProvider:
                 "project_status_field",
                 f"GitHub Project Status field '{settings.status_field_name}' was not found.",
             )
-        return _ok(
+        resolved = _ok(
             "project",
             project_owner=settings.project_owner,
             project_number=settings.project_number,
@@ -557,6 +582,11 @@ class GitHubBoardSyncProvider:
             status_options=self._status_options(field),
             status_options_list=self._status_option_items(field),
         )
+        self._project_cache[cache_key] = (
+            now + self._project_cache_ttl_seconds,
+            dict(resolved),
+        )
+        return resolved
 
     @staticmethod
     def _find_status_field(data: Any, name: str) -> dict:
@@ -672,11 +702,6 @@ class GitHubBoardSyncProvider:
         if not repo:
             return self._sync_error(task, "repo", "GitHub repository is not configured.")
 
-        labels = _user_labels(task)
-        label_check = await self._ensure_labels(repo, labels, settings)
-        if not label_check.get("ok"):
-            return self._sync_error(task, label_check.get("phase", "labels"), label_check.get("error", ""))
-
         outbound_hash = compute_outbound_hash(task, settings)
         github_sync = existing.get("github") if isinstance(existing.get("github"), dict) else {}
         issue_number = int(issue["issue_number"] or github_sync.get("issue_number") or 0)
@@ -685,6 +710,11 @@ class GitHubBoardSyncProvider:
             skipped = dict(existing)
             skipped.update({"sync_state": "idle", "last_error": "", "skipped": True})
             return skipped
+
+        labels = _user_labels(task)
+        label_check = await self._ensure_labels(repo, labels, settings)
+        if not label_check.get("ok"):
+            return self._sync_error(task, label_check.get("phase", "labels"), label_check.get("error", ""))
 
         if issue_number:
             pushed = await self._update_issue(repo, issue_number, task, labels, settings)
@@ -764,23 +794,33 @@ class GitHubBoardSyncProvider:
     ) -> dict:
         if not labels:
             return _ok("labels", labels=[])
-        listed = await self._json_gh(
-            "labels",
-            "label",
-            "list",
-            "--repo",
-            repo,
-            "--json",
-            "name",
-            "--limit",
-            "1000",
-        )
-        if not listed.get("ok"):
-            return listed
-        existing = {
-            _label_key(str(item.get("name") or ""))
-            for item in _as_json_items(listed.get("data"))
-        }
+        repo_key = str(repo or "").strip().lower()
+        now = time.monotonic()
+        cached = self._label_cache.get(repo_key)
+        if cached and cached[0] > now:
+            existing = set(cached[1])
+        else:
+            listed = await self._json_gh(
+                "labels",
+                "label",
+                "list",
+                "--repo",
+                repo,
+                "--json",
+                "name",
+                "--limit",
+                "1000",
+            )
+            if not listed.get("ok"):
+                return listed
+            existing = {
+                _label_key(str(item.get("name") or ""))
+                for item in _as_json_items(listed.get("data"))
+            }
+            self._label_cache[repo_key] = (
+                now + self._label_cache_ttl_seconds,
+                set(existing),
+            )
         missing = []
         seen_missing = set()
         for label in labels:
@@ -811,8 +851,14 @@ class GitHubBoardSyncProvider:
             )
             if not created.get("ok"):
                 if _label_already_exists_error(created.get("error", "")):
+                    existing.add(_label_key(label))
                     continue
                 return created
+            existing.add(_label_key(label))
+        self._label_cache[repo_key] = (
+            time.monotonic() + self._label_cache_ttl_seconds,
+            set(existing),
+        )
         return _ok("labels", labels=labels, missing_created=missing)
 
     async def _create_issue(

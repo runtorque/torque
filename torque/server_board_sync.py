@@ -12,6 +12,7 @@ import asyncio
 import copy
 import inspect
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Iterable
@@ -35,6 +36,7 @@ _SYNC_RELEVANT_FIELDS = {
     "provider",
     "external_id",
     "external_url",
+    "board_sync",
 }
 _PULL_APPLY_FIELDS = {
     "task",
@@ -49,6 +51,11 @@ _PULL_APPLY_FIELDS = {
     "external_url",
 }
 _AUTO_TRACK_VALUES = {"all", "all_tasks", "auto", "create", "created", "new"}
+_LINKED_ONLY_VALUES = {"linked", "existing", "manual", "false", "off", "none"}
+_AUTO_DEBOUNCE_SECONDS = 1.0
+_AUTO_MAX_COALESCE_SECONDS = 5.0
+_AUTO_RETRY_BACKOFF_SECONDS = (30.0, 120.0, 300.0, 900.0)
+_AUTO_RETRY_MAX_ATTEMPTS = 5
 
 
 def _now_iso() -> str:
@@ -196,7 +203,46 @@ def group_auto_tracks_new_tasks(group_settings) -> bool:
         or nested.get("github_sync_default")
         or ""
     ).strip().lower()
-    return sync_default in _AUTO_TRACK_VALUES
+    if sync_default in _AUTO_TRACK_VALUES:
+        return True
+    if sync_default in _LINKED_ONLY_VALUES:
+        return False
+    return provider_name == "github"
+
+
+def task_allows_auto_create_for_board_sync(task: BoardTask | None) -> bool:
+    """Return whether an unlinked task is eligible for automatic issue create.
+
+    The GitHub mirror is the product board, not an orchestration trace.  Auto
+    create therefore defaults to top-level user/architect product tasks only.
+    Derived/review/ask/scheduled internal nodes can still opt in with
+    task-level ``board_sync.enabled = true`` (handled by
+    ``task_is_tracked_for_board_sync``).
+    """
+    if not task:
+        return False
+    sync = getattr(task, "board_sync", {}) or {}
+    if isinstance(sync, dict):
+        if sync.get("auto_track") is False or sync.get("auto_sync_excluded"):
+            return False
+        if _maybe_bool(sync.get("enabled")):
+            return True
+    if str(getattr(task, "parent_task_id", "") or "").strip():
+        return False
+    try:
+        if int(getattr(task, "pipeline_depth", 0) or 0) != 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    labels = {
+        str(label or "").strip().casefold()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    if "torque:derived" in labels:
+        return False
+    if str(getattr(task, "created_by_engineer_id", "") or "").strip():
+        return False
+    return True
 
 
 def task_is_tracked_for_board_sync(task: BoardTask | None) -> bool:
@@ -252,17 +298,62 @@ def _task_match_summary(task: BoardTask | None) -> dict:
 
 
 @dataclass
-class _QueueItem:
+class _DirtyItem:
     task_id: str
     explicit: bool = False
+    force: bool = False
     reasons: set[str] = field(default_factory=set)
+    fields: set[str] = field(default_factory=set)
     enqueued_at: float = field(default_factory=time.time)
+    first_marked_at: float = field(default_factory=time.time)
+    last_marked_at: float = field(default_factory=time.time)
+    due_at: float = 0.0
+    retry_attempt: int = 0
 
-    def merge(self, *, explicit: bool, reason: str) -> None:
+    def merge(
+        self,
+        *,
+        explicit: bool,
+        force: bool,
+        reason: str,
+        fields: Iterable[str] | None = None,
+        debounce_seconds: float = _AUTO_DEBOUNCE_SECONDS,
+        max_coalesce_seconds: float = _AUTO_MAX_COALESCE_SECONDS,
+        due_at: float | None = None,
+    ) -> None:
+        now = time.time()
         self.explicit = self.explicit or bool(explicit)
+        self.force = self.force or bool(force)
         if reason:
             self.reasons.add(reason)
-        self.enqueued_at = time.time()
+        for field_name in fields or []:
+            value = str(field_name or "").strip()
+            if value:
+                self.fields.add(value)
+        self.enqueued_at = now
+        self.last_marked_at = now
+        if self.explicit:
+            self.due_at = now
+            return
+        trailing_due = now + max(0.0, float(debounce_seconds or 0.0))
+        max_due = self.first_marked_at + max(0.0, float(max_coalesce_seconds or 0.0))
+        auto_due = min(trailing_due, max_due)
+        if due_at is not None:
+            auto_due = max(auto_due, due_at)
+        self.due_at = auto_due
+
+
+class _DirtyQueueCompat:
+    """Tiny compatibility facade for older tests that used manager.queue."""
+
+    def __init__(self, manager: "BoardSyncManager"):
+        self.manager = manager
+
+    def qsize(self) -> int:
+        return len(self.manager._dirty_by_task)
+
+    async def join(self) -> None:
+        await self.manager.join()
 
 
 class BoardSyncManager:
@@ -279,17 +370,35 @@ class BoardSyncManager:
         provider_factory: ProviderFactory | None = None,
         panel_event: PanelEventCallback | None = None,
         toast: ToastCallback | None = None,
-        debounce_seconds: float = 0.15,
+        debounce_seconds: float = _AUTO_DEBOUNCE_SECONDS,
+        max_coalesce_seconds: float = _AUTO_MAX_COALESCE_SECONDS,
+        retry_backoff_seconds: Iterable[float] = _AUTO_RETRY_BACKOFF_SECONDS,
+        max_auto_retry_attempts: int = _AUTO_RETRY_MAX_ATTEMPTS,
     ):
         self.state = state
         self.provider_factory = provider_factory or get_provider
         self.panel_event = panel_event
         self.toast = toast
         self.debounce_seconds = max(0.0, float(debounce_seconds or 0.0))
-        self.queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
-        self._pending_by_task: dict[str, _QueueItem] = {}
+        self.max_coalesce_seconds = max(
+            self.debounce_seconds,
+            float(max_coalesce_seconds or 0.0),
+        )
+        backoffs = [max(0.0, float(value or 0.0))
+                    for value in (retry_backoff_seconds or [])]
+        self.retry_backoff_seconds = backoffs or list(_AUTO_RETRY_BACKOFF_SECONDS)
+        self.max_auto_retry_attempts = max(0, int(max_auto_retry_attempts or 0))
+        self.queue = _DirtyQueueCompat(self)
+        self._dirty_by_task: dict[str, _DirtyItem] = {}
+        self._task_fingerprints: dict[str, tuple] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
         self._target_locks: dict[str, asyncio.Lock] = {}
+        self._provider_cache: dict[str, object] = {}
+        self._wake_event: asyncio.Event | None = None
+        self._idle_event: asyncio.Event | None = None
+        self._inflight_count = 0
+        self._observer_unregister: Callable[[], None] | None = None
+        self._suppress_observer_depth = 0
         self._worker: asyncio.Task | None = None
         self._stopping = False
 
@@ -299,10 +408,23 @@ class BoardSyncManager:
         if self._worker and not self._worker.done():
             return
         self._stopping = False
+        self._seed_task_fingerprints()
+        self._wake_event = asyncio.Event()
+        self._idle_event = asyncio.Event()
+        self._idle_event.set()
+        registrar = getattr(self.state, "register_task_upsert_observer", None)
+        if callable(registrar) and self._observer_unregister is None:
+            self._observer_unregister = registrar(self._on_task_upsert)
         self._worker = asyncio.create_task(self._run(), name="board-sync-manager")
 
     async def stop(self) -> None:
         self._stopping = True
+        if self._observer_unregister:
+            try:
+                self._observer_unregister()
+            finally:
+                self._observer_unregister = None
+        self._wake()
         worker = self._worker
         if not worker:
             return
@@ -313,6 +435,8 @@ class BoardSyncManager:
             pass
         finally:
             self._worker = None
+            self._wake_event = None
+            self._idle_event = None
 
     # -- Enqueue / state transitions --------------------------------------
 
@@ -336,6 +460,7 @@ class BoardSyncManager:
             reason=reason,
             explicit=explicit,
             force=force,
+            fields=fields,
         )
 
     def enqueue_task(
@@ -345,6 +470,7 @@ class BoardSyncManager:
         reason: str = "mutation",
         explicit: bool = False,
         force: bool = False,
+        fields: Iterable[str] | None = None,
     ) -> dict:
         tid = self._resolve_task_id(task_id)
         task = self.state.board_tasks.get(tid)
@@ -363,16 +489,32 @@ class BoardSyncManager:
         if isinstance(sync, dict) and sync.get("enabled") is False and not force:
             return {"ok": False, "queued": False, "reason": "task_opted_out"}
         tracked = task_is_tracked_for_board_sync(task)
-        auto_track = group_auto_tracks_new_tasks(settings)
+        auto_track = (
+            group_auto_tracks_new_tasks(settings)
+            and task_allows_auto_create_for_board_sync(task)
+        )
         if not (force or explicit or tracked or auto_track):
             return {"ok": False, "queued": False, "reason": "task_not_tracked"}
 
         sync = self._queued_sync(task, provider_name)
         self._save_task_sync(task, sync)
 
-        item = self._pending_by_task.get(tid)
+        retry_due_at = 0.0
+        if not (explicit or force):
+            retry_due_at = self._cooldown_due_at(sync)
+
+        item = self._dirty_by_task.get(tid)
         if item:
-            item.merge(explicit=explicit, reason=reason)
+            item.merge(
+                explicit=explicit,
+                force=force,
+                reason=reason,
+                fields=fields,
+                debounce_seconds=self.debounce_seconds,
+                max_coalesce_seconds=self.max_coalesce_seconds,
+                due_at=retry_due_at or None,
+            )
+            self._wake()
             return {
                 "ok": True,
                 "queued": True,
@@ -380,9 +522,32 @@ class BoardSyncManager:
                 "task_id": tid,
                 "reason": reason,
             }
-        item = _QueueItem(task_id=tid, explicit=explicit, reasons={reason})
-        self._pending_by_task[tid] = item
-        self.queue.put_nowait(item)
+        now = time.time()
+        item = _DirtyItem(
+            task_id=tid,
+            explicit=bool(explicit),
+            force=bool(force),
+            reasons={reason} if reason else set(),
+            fields={str(field or "").strip() for field in (fields or []) if str(field or "").strip()},
+            enqueued_at=now,
+            first_marked_at=now,
+            last_marked_at=now,
+            due_at=now if (explicit or force) else (
+                max(
+                    now + self.debounce_seconds,
+                    retry_due_at,
+                ) if retry_due_at else now + self.debounce_seconds
+            ),
+        )
+        if not (explicit or force):
+            item.due_at = min(
+                item.due_at,
+                item.first_marked_at + self.max_coalesce_seconds,
+            ) if not retry_due_at else item.due_at
+        self._dirty_by_task[tid] = item
+        if self._idle_event:
+            self._idle_event.clear()
+        self._wake()
         return {
             "ok": True,
             "queued": True,
@@ -690,7 +855,8 @@ class BoardSyncManager:
             "last_error": "",
         })
         update_fields["board_sync"] = sync
-        self.state.board_update_task(task.id, **update_fields)
+        with self.suppress_auto_sync_observer():
+            self.state.board_update_task(task.id, **update_fields)
         refreshed = self.state.board_tasks.get(task.id)
         self._emit_panel(
             "board_pull_applied",
@@ -815,22 +981,71 @@ class BoardSyncManager:
 
     async def _run(self) -> None:
         while not self._stopping:
-            item = await self.queue.get()
-            current = self._pending_by_task.get(item.task_id)
-            if current is item:
-                self._pending_by_task.pop(item.task_id, None)
+            item = await self._next_due_item()
+            if item is None:
+                continue
             try:
-                if self.debounce_seconds:
-                    await asyncio.sleep(self.debounce_seconds)
+                self._inflight_count += 1
                 await self._sync_one(item)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("Board sync worker failed for task %s", item.task_id)
             finally:
-                self.queue.task_done()
+                self._inflight_count = max(0, self._inflight_count - 1)
+                self._set_idle_if_drained()
 
-    async def _sync_one(self, item: _QueueItem) -> None:
+    async def join(self) -> None:
+        """Wait until the current dirty map and in-flight syncs drain."""
+        while self._dirty_by_task or self._inflight_count:
+            event = self._idle_event
+            if event is None:
+                await asyncio.sleep(0.01)
+                continue
+            await event.wait()
+
+    async def _next_due_item(self) -> _DirtyItem | None:
+        while not self._stopping:
+            now = time.time()
+            if self._dirty_by_task:
+                due_items = [
+                    item for item in self._dirty_by_task.values()
+                    if item.due_at <= now
+                ]
+                if due_items:
+                    item = min(
+                        due_items,
+                        key=lambda candidate: (
+                            candidate.due_at,
+                            candidate.first_marked_at,
+                            candidate.task_id,
+                        ),
+                    )
+                    current = self._dirty_by_task.get(item.task_id)
+                    if current is item:
+                        self._dirty_by_task.pop(item.task_id, None)
+                    return item
+                next_due = min(item.due_at for item in self._dirty_by_task.values())
+                timeout = max(0.0, next_due - now)
+            else:
+                self._set_idle_if_drained()
+                timeout = None
+
+            wake = self._wake_event
+            if wake is None:
+                await asyncio.sleep(timeout if timeout is not None else 0.05)
+                continue
+            try:
+                if timeout is None:
+                    await wake.wait()
+                else:
+                    await asyncio.wait_for(wake.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
+            wake.clear()
+        return None
+
+    async def _sync_one(self, item: _DirtyItem) -> None:
         tid = self._resolve_task_id(item.task_id)
         task = self.state.board_tasks.get(tid)
         if not task:
@@ -839,7 +1054,7 @@ class BoardSyncManager:
         provider_name = normalize_provider_name(
             getattr(settings, "board_sync_provider", "")
         )
-        provider = self.provider_factory(provider_name)
+        provider = self._provider(provider_name)
         lock_key = self._lock_key(task, settings, provider_name)
         task_lock = self._task_locks.setdefault(tid, asyncio.Lock())
         target_lock = self._target_locks.setdefault(lock_key, asyncio.Lock())
@@ -860,6 +1075,7 @@ class BoardSyncManager:
                 })
                 self._save_task_sync(task, syncing)
                 await self._maybe_broadcast()
+                task = self.state.board_tasks.get(tid) or task
                 try:
                     provider_sync = await provider.push_task(task, settings)
                 except Exception as exc:
@@ -876,7 +1092,7 @@ class BoardSyncManager:
         task_id: str,
         provider_name: str,
         provider_sync,
-        item: _QueueItem,
+        item: _DirtyItem,
     ) -> None:
         task = self.state.board_tasks.get(task_id)
         if not task:
@@ -897,6 +1113,15 @@ class BoardSyncManager:
         if sync.get("sync_state") != "error":
             sync["sync_state"] = "idle"
             sync["last_error"] = ""
+            for key in (
+                "auto_retry_attempts",
+                "next_retry_at",
+                "next_retry_at_iso",
+                "retry_backoff_seconds",
+            ):
+                sync.pop(key, None)
+        else:
+            self._schedule_retry_if_needed(task_id, provider_name, sync, item)
         self._save_task_sync(task, sync)
         await self._maybe_broadcast()
 
@@ -923,6 +1148,225 @@ class BoardSyncManager:
                 )
 
     # -- Internal helpers ---------------------------------------------------
+
+    @contextmanager
+    def suppress_auto_sync_observer(self):
+        self._suppress_observer_depth += 1
+        try:
+            yield
+        finally:
+            self._suppress_observer_depth = max(
+                0,
+                self._suppress_observer_depth - 1,
+            )
+
+    def _provider(self, provider_name: str):
+        provider_name = normalize_provider_name(provider_name)
+        provider = self._provider_cache.get(provider_name)
+        if provider is None:
+            provider = self.provider_factory(provider_name)
+            self._provider_cache[provider_name] = provider
+        return provider
+
+    def _wake(self) -> None:
+        if self._wake_event is not None:
+            self._wake_event.set()
+
+    def _set_idle_if_drained(self) -> None:
+        if (
+                self._idle_event is not None
+                and not self._dirty_by_task
+                and self._inflight_count <= 0):
+            self._idle_event.set()
+
+    def _seed_task_fingerprints(self) -> None:
+        self._task_fingerprints = {
+            task.id: self._task_sync_fingerprint(task)
+            for task in self.state.board_tasks.values()
+        }
+
+    def _on_task_upsert(self, payload: dict) -> None:
+        task_id = str((payload or {}).get("id", "") or "").strip()
+        if not task_id:
+            return
+        task = self.state.board_tasks.get(task_id)
+        if not task:
+            return
+        new_fingerprint = self._task_sync_fingerprint(task)
+        old_fingerprint = self._task_fingerprints.get(task_id)
+        self._task_fingerprints[task_id] = new_fingerprint
+        if self._suppress_observer_depth:
+            return
+        if old_fingerprint == new_fingerprint:
+            return
+        changed_fields = self._changed_fingerprint_fields(
+            old_fingerprint,
+            new_fingerprint,
+        )
+        if not old_fingerprint:
+            reason = "task_create"
+        else:
+            reason = "task_update"
+        self.enqueue_for_local_change(
+            task_id,
+            reason=reason,
+            fields=changed_fields or _SYNC_RELEVANT_FIELDS,
+        )
+
+    @staticmethod
+    def _task_sync_fingerprint(task: BoardTask | None) -> tuple:
+        if not task:
+            return ()
+        labels = tuple(
+            str(label or "").strip()
+            for label in (getattr(task, "labels", []) or [])
+            if str(label or "").strip()
+        )
+        sync = getattr(task, "board_sync", {}) or {}
+        sync = sync if isinstance(sync, dict) else {}
+        enabled = sync.get("enabled", None)
+        return (
+            ("task", str(getattr(task, "task", "") or "")),
+            ("description", str(getattr(task, "description", "") or "")),
+            ("labels", labels),
+            ("agent_id", str(getattr(task, "agent_id", "") or "")),
+            ("assigned_engineer_id", str(getattr(task, "assigned_engineer_id", "") or "")),
+            ("lane", str(getattr(task, "lane", "") or "")),
+            ("status", str(getattr(task, "status", "") or "")),
+            ("provider", str(getattr(task, "provider", "") or "")),
+            ("external_id", str(getattr(task, "external_id", "") or "")),
+            ("external_url", str(getattr(task, "external_url", "") or "")),
+            ("parent_task_id", str(getattr(task, "parent_task_id", "") or "")),
+            ("pipeline_depth", int(getattr(task, "pipeline_depth", 0) or 0)),
+            ("created_by_architect_id", str(getattr(task, "created_by_architect_id", "") or "")),
+            ("created_by_engineer_id", str(getattr(task, "created_by_engineer_id", "") or "")),
+            ("board_sync_enabled", enabled),
+            ("board_sync_provider", str(sync.get("provider", "") or "")),
+            ("board_sync_auto_track", sync.get("auto_track", None)),
+            ("board_sync_auto_excluded", sync.get("auto_sync_excluded", None)),
+        )
+
+    @staticmethod
+    def _changed_fingerprint_fields(old: tuple | None, new: tuple | None) -> set[str]:
+        if not old or not new:
+            return set(_SYNC_RELEVANT_FIELDS)
+        old_map = dict(old)
+        new_map = dict(new)
+        changed = {
+            key for key in set(old_map) | set(new_map)
+            if old_map.get(key) != new_map.get(key)
+        }
+        fields = {
+            key for key in changed
+            if key in _SYNC_RELEVANT_FIELDS
+        }
+        if changed & {
+            "parent_task_id",
+            "pipeline_depth",
+            "created_by_architect_id",
+            "created_by_engineer_id",
+            "board_sync_auto_track",
+            "board_sync_auto_excluded",
+        }:
+            fields.add("board_sync")
+        if changed & {"board_sync_enabled", "board_sync_provider"}:
+            fields.add("board_sync")
+        return fields
+
+    @staticmethod
+    def _cooldown_due_at(sync: dict) -> float:
+        if not isinstance(sync, dict):
+            return 0.0
+        try:
+            return max(0.0, float(sync.get("next_retry_at", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _schedule_retry_if_needed(
+        self,
+        task_id: str,
+        provider_name: str,
+        sync: dict,
+        item: _DirtyItem,
+    ) -> None:
+        if getattr(item, "explicit", False) or getattr(item, "force", False):
+            return
+        error = str(sync.get("last_error") or sync.get("error") or "").strip()
+        if not self._is_transient_error(error):
+            return
+        prior_attempts = int(sync.get("auto_retry_attempts", 0) or 0)
+        attempt = max(prior_attempts, getattr(item, "retry_attempt", 0)) + 1
+        if attempt > self.max_auto_retry_attempts:
+            return
+        backoff = self.retry_backoff_seconds[
+            min(attempt - 1, len(self.retry_backoff_seconds) - 1)
+        ]
+        due_at = time.time() + backoff
+        sync["auto_retry_attempts"] = attempt
+        sync["retry_backoff_seconds"] = backoff
+        sync["next_retry_at"] = due_at
+        sync["next_retry_at_iso"] = datetime.fromtimestamp(
+            due_at,
+            timezone.utc,
+        ).isoformat()
+        retry_item = self._dirty_by_task.get(task_id)
+        if retry_item:
+            retry_item.retry_attempt = attempt
+            retry_item.merge(
+                explicit=False,
+                force=False,
+                reason="auto_retry",
+                fields=_SYNC_RELEVANT_FIELDS,
+                debounce_seconds=self.debounce_seconds,
+                max_coalesce_seconds=self.max_coalesce_seconds,
+                due_at=due_at,
+            )
+        else:
+            now = time.time()
+            self._dirty_by_task[task_id] = _DirtyItem(
+                task_id=task_id,
+                explicit=False,
+                force=False,
+                reasons={"auto_retry"},
+                fields=set(_SYNC_RELEVANT_FIELDS),
+                enqueued_at=now,
+                first_marked_at=now,
+                last_marked_at=now,
+                due_at=due_at,
+                retry_attempt=attempt,
+            )
+        if self._idle_event:
+            self._idle_event.clear()
+        self._wake()
+
+    @staticmethod
+    def _is_transient_error(error: str) -> bool:
+        lower = str(error or "").casefold()
+        if not lower:
+            return False
+        return any(
+            needle in lower
+            for needle in (
+                "rate limit",
+                "secondary rate limit",
+                "timeout",
+                "timed out",
+                "temporarily",
+                "temporary",
+                "try again",
+                "connection reset",
+                "connection aborted",
+                "connection refused",
+                "network",
+                "econn",
+                "5xx",
+                "500",
+                "502",
+                "503",
+                "504",
+                "abuse detection",
+            )
+        )
 
     def _resolve_task_id(self, task_id: str) -> str:
         resolver = getattr(self.state, "resolve_task_alias", None)
@@ -954,7 +1398,8 @@ class BoardSyncManager:
         return sync
 
     def _save_task_sync(self, task: BoardTask, sync: dict) -> None:
-        self.state.board_update_task(task.id, board_sync=sync)
+        with self.suppress_auto_sync_observer():
+            self.state.board_update_task(task.id, board_sync=sync)
 
     def _task_provider_context(self, task_id: str):
         tid = self._resolve_task_id(task_id)
@@ -1184,5 +1629,6 @@ __all__ = [
     "BoardSyncManager",
     "board_sync_fields_trigger",
     "group_auto_tracks_new_tasks",
+    "task_allows_auto_create_for_board_sync",
     "task_is_tracked_for_board_sync",
 ]
