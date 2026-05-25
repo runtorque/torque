@@ -217,7 +217,7 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertTrue(fake_process.terminated)
         self.assertEqual(fake_process.wait_timeouts, [5])
 
-    def test_existing_toolbelt_instance_is_rejected(self):
+    def test_existing_non_standalone_instance_is_rejected(self):
         launcher = self.desktop_mod.DesktopLauncher(
             settings=self.desktop_mod.DesktopSettings(
                 launch_mode="spawn",
@@ -233,7 +233,7 @@ class DesktopLauncherTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             launcher.ensure_server()
 
-        self.assertIn("iTerm2-hosted Torque instance", str(ctx.exception))
+        self.assertIn("unsupported Torque instance", str(ctx.exception))
         launcher._popen_factory.assert_not_called()
 
     def test_existing_standalone_can_be_attached_when_opted_in(self):

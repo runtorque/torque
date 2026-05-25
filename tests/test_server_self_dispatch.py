@@ -4957,9 +4957,6 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
 class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        install_iterm2_stub()
-        self.bridge_mod = importlib.import_module("torque.bridge")
-        self.bridge_mod = importlib.reload(self.bridge_mod)
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
         self.server_agent_mod = importlib.import_module("torque.server_agent")
@@ -5078,58 +5075,20 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(finished, started)
 
-    async def test_delayed_self_dispatch_primes_ready_before_submit(self):
-        class FakeLineInfo:
-            overflow = 0
-            first_visible_line_number = 0
-            mutable_area_height = 24
-
-        class FakeSession:
-            def __init__(self, session_id):
-                self.session_id = session_id
-                self.sent = []
-                self.screen_reads = 0
-
-            async def async_set_profile_properties(self, change):
-                pass
-
-            async def async_send_text(self, text):
-                self.sent.append(text)
-
-            async def async_get_variable(self, name):
-                return None
-
-            async def async_get_line_info(self):
-                self.screen_reads += 1
-                return FakeLineInfo()
-
-            async def async_get_contents(self, first, count):
-                return []
-
-        class FakeTab:
-            def __init__(self, session):
-                self.current_session = session
-                self.sessions = [session]
-
-        class FakeWindow:
-            def __init__(self, session):
-                self.window_id = "window-1"
-                self.tabs = [FakeTab(session)]
-
-        class FakeApp:
-            def __init__(self, session):
-                window = FakeWindow(session)
-                self.current_window = window
-                self.windows = [window]
-
-        session = FakeSession("session-derive")
-
-        async def fake_get_app(conn):
-            return FakeApp(session)
-
-        self.bridge_mod.iterm2.async_get_app = fake_get_app
         state = self.state_mod.MatrixState()
-        bridge = self.bridge_mod.ITerm2Adapter(None, state)
+
+        class FakeBridge:
+            def __init__(self):
+                self.primed = []
+                self.sent = []
+
+            def prime_input_ready(self, session_id):
+                self.primed.append(session_id)
+
+            async def send_text(self, session_id, payload, **kwargs):
+                self.sent.append((session_id, payload, kwargs))
+
+        bridge = FakeBridge()
 
         class FakeTemplateManager:
             pass
@@ -5172,13 +5131,13 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.server_agent_mod.asyncio.sleep = orig_sleep
 
-        self.assertEqual(delays, [3, 0.3])
-        self.assertIn("session-derive", bridge._input_ready_sessions)
+        self.assertEqual(delays, [3])
+        self.assertEqual(bridge.primed, ["session-derive"])
         self.assertEqual(
-            session.sent,
-            [
-                "Proceed with the derived task you just created.",
-                "\r",
-            ],
+            bridge.sent,
+            [(
+                "session-derive",
+                "Proceed with the derived task you just created.\r",
+                {"settled_submit": True},
+            )],
         )
-        self.assertEqual(session.screen_reads, 0)

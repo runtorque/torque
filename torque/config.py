@@ -29,9 +29,8 @@ DEFAULT_ENGINEER_BOOT_NUDGE = (
 # default instead of receiving a per-agent git worktree.
 ARCHITECT_USES_WORKTREE: bool = False
 
-# Standalone mode: daemon runs outside iTerm2's script environment,
-# no toolbelt webview registration.  Dual mode (toolbelt + browser)
-# works without this flag — just open http://127.0.0.1:<port>/.
+# Standalone mode: daemon runs as a regular local process and serves the
+# browser/desktop UI at http://127.0.0.1:<port>/.
 STANDALONE = os.environ.get("TORQUE_STANDALONE", "").lower() in ("1", "true", "yes")
 BIND_HOST = "0.0.0.0" if os.environ.get("TORQUE_BIND_ALL") else "127.0.0.1"
 

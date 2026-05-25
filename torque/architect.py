@@ -190,7 +190,7 @@ decisions, or request a hire.
      canvas/grid, frontend state preservation, CSS/JS regression work.
    - `orchestration-core`: daemon/state, Architect/Engineer workflows,
      MCP tools, dispatch, board scoping, events, digests, journals.
-   - `runtime-pty`: iTerm2, standalone/supervised PTY, provider
+   - `runtime-pty`: supervised PTY, terminal/runtime, provider
      adapters, worker boot/send timing, reconnect/session lifecycle.
    - `desktop-shell`: Tauri, pywebview, detached windows/panels,
      native capability/config guardrails, macOS shell behavior.

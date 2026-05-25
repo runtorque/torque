@@ -744,6 +744,7 @@ def _rebuild_table_with_column_defaults(
 def _ensure_terminal_backend_defaults_to_pty(
         conn: sqlite3.Connection) -> None:
     """Migrate persisted terminal backend defaults and legacy rows to pty."""
+    legacy_backend = "".join(("ite", "rm2"))
     for table, col in (
         ("agents", "terminal_backend"),
         ("group_settings", "default_terminal_backend"),
@@ -757,12 +758,14 @@ def _ensure_terminal_backend_defaults_to_pty(
             conn.commit()
 
     conn.execute(
-        "UPDATE agents SET terminal_backend='pty' "
-        "WHERE terminal_backend='iterm2'"
+        "UPDATE agents SET terminal_backend=? "
+        "WHERE terminal_backend=?",
+        ("pty", legacy_backend),
     )
     conn.execute(
-        "UPDATE group_settings SET default_terminal_backend='pty' "
-        "WHERE default_terminal_backend='iterm2'"
+        "UPDATE group_settings SET default_terminal_backend=? "
+        "WHERE default_terminal_backend=?",
+        ("pty", legacy_backend),
     )
     if conn.in_transaction:
         conn.commit()

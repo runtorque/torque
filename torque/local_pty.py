@@ -1150,12 +1150,11 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self.state._db_save_agent(cell)
         self._start_codex_idle_monitor(cell)
 
-        # Re-install hooks, MCP config, and skills for awareness agents —
-        # parity with ITerm2Adapter.reconnect_orphans.  A daemon restart
-        # can happen across `uninstall_mcp_config` cleanups or a git
-        # checkout that removes the injected files, so an adopted session
-        # needs them re-written on the filesystem even though the PTY
-        # process itself is still alive.
+        # Re-install hooks, MCP config, and skills for awareness agents. A
+        # daemon restart can happen across `uninstall_mcp_config` cleanups or a
+        # git checkout that removes the injected files, so an adopted session
+        # needs them re-written on the filesystem even though the PTY process
+        # itself is still alive.
         if cell.agent_type and cell.directory:
             adapter = get_adapter(cell.agent_type)
             hook_dir = os.path.expanduser(cell.directory)

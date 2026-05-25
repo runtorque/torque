@@ -228,13 +228,11 @@ _LOG_MAX_LINES = 500
 
 
 def _runtime_payload(*, bridge=None, state=None) -> dict:
-    runtime_mode = "toolbelt"
-    if STANDALONE:
-        runtime_mode = (
-            "desktop"
-            if os.environ.get("TORQUE_DESKTOP_MODE", "").strip()
-            else "standalone"
-        )
+    runtime_mode = (
+        "desktop"
+        if os.environ.get("TORQUE_DESKTOP_MODE", "").strip()
+        else "standalone"
+    )
     capabilities = getattr(bridge, "capabilities", None)
     embedded_terminal = bool(
         getattr(capabilities, "supports_embedded_terminal", False)
@@ -248,7 +246,7 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "standalone": STANDALONE,
         "embedded_terminal": embedded_terminal,
         "layout": "ide" if embedded_terminal else "classic",
-        "terminal_backend": "pty" if STANDALONE else "iterm2",
+        "terminal_backend": "pty",
         "home_directory": str(Path.home()),
         "profile": os.environ.get("TORQUE_PROFILE", "").strip(),
         "data_dir": str(DATA_DIR),
@@ -333,19 +331,6 @@ def _tail_log_entries(
         "inode": inode,
         "path": str(log_path),
     }
-
-
-def _should_install_keybindings() -> bool:
-    """Keybindings/RPCs are only installed in iTerm2-hosted mode."""
-    return not STANDALONE
-
-
-def _get_keybinding_defaults(keybindings_module) -> dict:
-    """Resolve keybinding defaults, empty in standalone mode when the
-    keybindings module was never imported (skipped on boot)."""
-    if keybindings_module is None:
-        return {}
-    return keybindings_module.get_default_bindings()
 
 
 def _resolve_pending_engineer_specializations(
@@ -5449,21 +5434,12 @@ async def _handle_daemon_stop_command(
     daemon_stop_state: _DaemonStopState,
     schedule_daemon_stop,
     state,
-    keybindings_module=None,
-    connection=None,
-    displaced=None,
-    install_keybindings: bool = False,
 ) -> dict:
     already_requested = not daemon_stop_state.request()
     if already_requested:
         log.info("Stop requested while daemon stop already pending")
     else:
         log.info("Stop requested — draining requests and shutting down")
-        if install_keybindings and keybindings_module:
-            try:
-                await keybindings_module.remove(connection, (displaced or [[]])[0])
-            except Exception:
-                log.exception("Keybinding cleanup during daemon stop failed")
         # Persist all agents (status etc.) before stop, mirroring restart.
         # Helper daemons are intentionally left running for PID-file adoption
         # by the next daemon; this matches current restart semantics and is
@@ -9171,38 +9147,33 @@ async def main(connection=None):
     event_ingest_client.on_reconnect = _on_event_ingest_reconnect
 
     supervisor_banner: dict | None = None
-    if STANDALONE:
-        from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter
+    from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter
 
-        if torque_config.PROFILE_SKIP_PTY:
-            bridge = LocalPtyAdapter(state)
-            log.info("Profile mode — PTY supervisor skipped")
-        else:
-            from . import pty_supervisor
-
-            bridge = None
-            try:
-                sock_path = pty_supervisor.ensure_running(DATA_DIR)
-                bridge = SupervisedPtyAdapter(state, sock_path)
-                log.info(
-                    "Standalone mode — using PTY supervisor at %s", sock_path)
-            except Exception as exc:
-                log.exception(
-                    "PTY supervisor unavailable — falling back to in-memory "
-                    "(terminals will not survive daemon restart)")
-                supervisor_banner = {
-                    "kind": "supervisor_unavailable",
-                    "message": (
-                        "PTY supervisor unavailable — terminals will not "
-                        "survive a Torque restart. See torque.log for details."
-                    ),
-                    "detail": str(exc),
-                }
-                bridge = LocalPtyAdapter(state)
+    if torque_config.PROFILE_SKIP_PTY:
+        bridge = LocalPtyAdapter(state)
+        log.info("Profile mode — PTY supervisor skipped")
     else:
-        from .bridge import ITerm2Adapter
+        from . import pty_supervisor
 
-        bridge = ITerm2Adapter(connection, state)
+        bridge = None
+        try:
+            sock_path = pty_supervisor.ensure_running(DATA_DIR)
+            bridge = SupervisedPtyAdapter(state, sock_path)
+            log.info(
+                "Standalone mode — using PTY supervisor at %s", sock_path)
+        except Exception as exc:
+            log.exception(
+                "PTY supervisor unavailable — falling back to in-memory "
+                "(terminals will not survive daemon restart)")
+            supervisor_banner = {
+                "kind": "supervisor_unavailable",
+                "message": (
+                    "PTY supervisor unavailable — terminals will not "
+                    "survive a Torque restart. See torque.log for details."
+                ),
+                "detail": str(exc),
+            }
+            bridge = LocalPtyAdapter(state)
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
     template_mgr = RoleManager()
@@ -9826,9 +9797,6 @@ async def main(connection=None):
     log.info("Startup checkpoint: worktree diff updater scheduled")
     asyncio.create_task(_tombstone_sweeper())
     log.info("Startup checkpoint: tombstone sweeper scheduled")
-
-    keybindings = None
-    _displaced = [[]]
 
     async def _resolve_base_dir(group: str = "") -> str:
         return await agent_launch.resolve_base_dir(group)
@@ -10903,7 +10871,7 @@ async def main(connection=None):
             return {
                 "type": "global_settings",
                 "settings": asdict(state.global_settings),
-                "keybinding_defaults": _get_keybinding_defaults(keybindings),
+                "keybinding_defaults": {},
                 # Resolved relay config + per-field provenance (settings / env /
                 # ee_connector.json) for the Settings "Relay" section.
                 "relay_config": cloud_hooks.resolve_relay_config(
@@ -11509,10 +11477,8 @@ async def main(connection=None):
 
             elif cmd == "update_global_settings":
                 settings = data.get("settings", {})
-                old_kb = state.global_settings.keybindings.copy()
                 old_relay = _relay_settings_fingerprint()
                 state.update_global_settings(**settings)
-                new_kb = state.global_settings.keybindings
                 # Apply-on-change: restart the cloud connector when any relay
                 # field changed so the new config takes effect without a daemon
                 # restart. Defensive / non-fatal.
@@ -11522,10 +11488,6 @@ async def main(connection=None):
                     except Exception:
                         log.exception(
                             "Cloud connector apply-on-change failed")
-                if new_kb != old_kb and _should_install_keybindings() and keybindings:
-                    _displaced[0] = await keybindings.reinstall(
-                        connection, _displaced[0],
-                        overrides=new_kb or None)
                 # Propagate max_event_log to panel log
                 new_max = state.global_settings.max_event_log
                 if panel_log._max_size != new_max:
@@ -11540,16 +11502,6 @@ async def main(connection=None):
                 except Exception:
                     event_ingest_configured[0] = False
                     log.exception("Failed to reconfigure event ingest daemon")
-
-            elif cmd == "suspend_keybindings" and _should_install_keybindings() and keybindings:
-                await keybindings.remove(connection, _displaced[0])
-
-            elif cmd == "resume_keybindings" and _should_install_keybindings() and keybindings:
-                _kb_overrides = (state.global_settings.keybindings
-                                 or None)
-                _displaced[0] = await keybindings.reinstall(
-                    connection, _displaced[0],
-                    overrides=_kb_overrides)
 
             elif cmd == "remove_group":
                 removed = state.remove_group(data["group"])
@@ -11890,7 +11842,7 @@ async def main(connection=None):
 
                 cell = state.add_terminal(
                     name=data["name"], group=group,
-                    terminal_backend="pty" if bridge.capabilities.supports_embedded_terminal else "iterm2",
+                    terminal_backend="pty",
                     profile=profile, command=command,
                     directory=directory, tab_color=tab_color,
                     parent_id=parent_id,
@@ -17190,16 +17142,10 @@ async def main(connection=None):
                     daemon_stop_state=daemon_stop_state,
                     schedule_daemon_stop=_schedule_daemon_stop,
                     state=state,
-                    keybindings_module=keybindings,
-                    connection=connection,
-                    displaced=_displaced,
-                    install_keybindings=_should_install_keybindings(),
                 )
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
-                if _should_install_keybindings() and keybindings:
-                    await keybindings.remove(connection, _displaced[0])
                 # Persist all agents (status etc.) before restart
                 for cell in state.agents.values():
                     state._db_save_agent(cell)
@@ -17259,92 +17205,6 @@ async def main(connection=None):
 
         await state.broadcast()
         return result
-
-    async def _confirm_keybinding_close(cell) -> bool:
-        if not keybindings:
-            return False
-        try:
-            import iterm2
-            message = keybindings.build_close_cell_confirmation_message(
-                state, cell)
-            alert = iterm2.Alert(
-                "Close cell?",
-                message,
-                window_id=cell.window_id or state.current_window_id or None,
-            )
-            alert.add_button("Cancel")
-            alert.add_button("Delete")
-            return await alert.async_run(connection) == 1001
-        except Exception:
-            log.exception("Failed to confirm close-cell keybinding for '%s'",
-                          cell.name)
-            return False
-
-    async def _run_keybinding_command(payload: dict,
-                                      description: str) -> dict | None:
-        result = await handle_command(payload)
-        if result and result.get("type") == "error":
-            log.warning("Keybinding command '%s' failed: %s",
-                        description, result.get("message", "unknown error"))
-        return result
-
-    async def _handle_keybinding_add_agent(*,
-                                           group: str,
-                                           name: str = "",
-                                           target_session_id: str = "",
-                                           target_window_id: str = ""):
-        payload = {"cmd": "add_agent", "group": group}
-        if name:
-            payload["name"] = name
-        if target_session_id:
-            payload["target_session_id"] = target_session_id
-        if target_window_id:
-            payload["target_window_id"] = target_window_id
-        await _run_keybinding_command(payload, "add_agent")
-
-    async def _handle_keybinding_add_terminal(*,
-                                              group: str,
-                                              parent_id: str,
-                                              name: str = ""):
-        payload = {
-            "cmd": "add_terminal",
-            "group": group,
-            "parent_id": parent_id,
-        }
-        if name:
-            payload["name"] = name
-        await _run_keybinding_command(payload, "add_terminal")
-
-    async def _handle_keybinding_close_cell(cell):
-        if await _confirm_keybinding_close(cell):
-            await _run_keybinding_command(
-                {"cmd": "remove_agent", "id": cell.id},
-                "remove_agent",
-            )
-
-    # Register iTerm2 RPCs and global key bindings only when Torque is
-    # running as an iTerm2-hosted script. External standalone mode still
-    # controls sessions through the adapter, but it should not try to
-    # register iTerm2-global shortcuts before the HTTP server binds.
-    if _should_install_keybindings():
-        _kb_overrides = state.global_settings.keybindings or None
-        from . import keybindings
-
-        displaced_bindings = await keybindings.setup(
-            connection,
-            state,
-            bridge,
-            overrides=_kb_overrides,
-            add_agent_handler=_handle_keybinding_add_agent,
-            add_terminal_handler=_handle_keybinding_add_terminal,
-            close_cell_handler=_handle_keybinding_close_cell,
-        )
-        # Mutable container so nested closures can reassign on keybinding change
-        _displaced = [displaced_bindings]
-        log.info("Startup checkpoint: keybindings installed")
-    else:
-        log.info("Standalone mode — iTerm2 keybindings skipped")
-    log.info("Startup checkpoint: post-keybinding setup")
 
     # -- Events endpoint (agent hooks) ----------------------------------------
 
@@ -18139,22 +17999,7 @@ async def main(connection=None):
         log.info("Startup checkpoint: site start complete")
         log.info("HTTP/WS server listening on %s:%d", BIND_HOST, WS_PORT)
 
-        # -- Register toolbelt (skipped in standalone-only mode) ----------------
-
-        if not STANDALONE:
-            registered = await bridge.register_web_view_tool(
-                display_name="Torque",
-                identifier="com.torque.toolbelt",
-                reveal_if_already_registered=True,
-                url=f"http://127.0.0.1:{WS_PORT}/",
-            )
-            if registered:
-                log.info("Toolbelt webview registered — Torque ready")
-            else:
-                log.warning("Toolbelt webview registration unavailable")
-        else:
-            log.info("Standalone mode — toolbelt registration skipped")
-            log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
+        log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
 
         await daemon_stop_event.wait()
     finally:

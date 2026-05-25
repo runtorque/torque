@@ -120,7 +120,7 @@ class _CapturingBridge(_FakeBridge):
 
 
 class _FailingCreateBridge(_FakeBridge):
-    async def create_session(self, cell, **kwargs): raise RuntimeError("iterm session timeout")
+    async def create_session(self, cell, **kwargs): raise RuntimeError("terminal session timeout")
 
 
 class _EmptyWorktreeManager:
@@ -838,7 +838,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         event = state.panel_log.get_recent(1)[0]
         self.assertEqual(event["kind"], "agent_error")
         self.assertEqual(event["cell_id"], cell.id)
-        self.assertIn("iterm session timeout", event["message"])
+        self.assertIn("terminal session timeout", event["message"])
         self.assertIn("bridge.create_session failed for cell=worker group=backend",
                       "\n".join(logs.output))
 
