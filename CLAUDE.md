@@ -36,7 +36,7 @@ Safe alternatives:
 
 See [docs/reference/architecture.md](docs/reference/architecture.md) for the detailed file-by-file reference. High-level map:
 
-- `torque.py`: installed entrypoint; anchors runtime paths and starts iTerm2/standalone loop.
+- `torque.py`: installed entrypoint; anchors runtime paths and starts the standalone daemon loop.
 - `torque/server.py`: aiohttp routes, command dispatch, agent launch/reuse, action rendering, worker/engineer/architect integration glue.
 - `torque/server_agent.py`, `server_dispatch.py`, `server_worktrees.py`, `server_artifacts.py`, `server_actions.py`: extracted helpers for server-heavy concerns.
 - `torque/state.py`: core dataclasses (`AgentCell`, `BoardTask`, settings) and `MatrixState` mutation/delta logic.

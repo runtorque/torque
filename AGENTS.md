@@ -13,7 +13,7 @@ The product center of gravity is `torque/server.py` plus `torque/state.py`. Most
 
 ## Repo Map
 
-- `torque.py`: installed entrypoint; anchors runtime paths and starts the daemon via `iterm2.run_forever(...)`
+- `torque.py`: installed entrypoint; anchors runtime paths and starts the standalone daemon loop
 - `torque/`: backend package
 - `bin/torque`: CLI; write commands go through HTTP, many read commands go straight to SQLite
 - `webview.html`: frontend shell; script load order matters

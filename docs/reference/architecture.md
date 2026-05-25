@@ -2,7 +2,7 @@
 
 This is the file-by-file reference that used to live in `CLAUDE.md`. Keep boot instructions terse; use this page when a task needs module-level detail.
 
-- **Entry point**: `torque.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main, retry=STANDALONE)`. In standalone mode, `retry=True` waits for iTerm2 and reconnects on restart.
+- **Entry point**: `torque.py` — thin wrapper that anchors paths, forces standalone mode, and runs the daemon with `asyncio.run(main(None))`.
 - **Python package** (`torque/`):
   - `config.py` — env vars, paths (`STATE_FILE`, `DB_FILE`, `WEBVIEW_FILE`, `LOG_FILE`), mode flags (`STANDALONE`, `BIND_HOST`), logging setup
   - `db.py` — `TorqueDB` (SQLite persistence layer, WAL mode, schema with 8 tables: `agents`, `groups`, `group_members`, `group_settings`, `board_tasks`, `board_lanes`, `ui_state`, `global_settings`). Targeted write methods (`save_agent`, `save_board_task`, `save_global_settings`, etc.), `load_all`, `migrate_from_json` (one-time state.json→SQLite migration), `save_all` (bulk write, used only by migration)
