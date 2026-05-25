@@ -7,7 +7,6 @@ If you haven't read the pitch yet, [What is Torque?](what-is-torque.md) gives yo
 ## Prerequisites
 
 - macOS
-- iTerm2 with the Python API enabled: **Preferences → General → Magic → Enable Python API**
 - A Claude Code, Codex, or Gemini CLI install on your `PATH`
 
 Torque itself is the orchestrator; it doesn't ship the agents. You'll need at least one agent CLI installed and authenticated.
@@ -15,8 +14,8 @@ Torque itself is the orchestrator; it doesn't ship the agents. You'll need at le
 ## Install
 
 ```bash
-git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
-cd iterm2-agent-orchestration
+git clone git@github.com:runtorque/torque.git
+cd torque
 make deps
 make deploy
 ```
@@ -38,7 +37,7 @@ make run
 The Torque workspace should appear in a native desktop window. If it doesn't,
 check `~/.torque/profiles/desktop/torque.log` for errors.
 
-## Browser mode and legacy Toolbelt migration
+## Browser mode and legacy data migration
 
 For standalone browser mode:
 
@@ -47,11 +46,10 @@ make standalone
 make open
 ```
 
-The iTerm2 Toolbelt is deprecated and the Makefile no longer installs or
-updates the old iTerm2 Scripts copy. Use the desktop app or standalone browser
-mode for new installs. If you have old Toolbelt data, migrate it to a profile
-with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b). For more
-runtime modes, see [Operations](../operate/operations.md).
+Use the desktop app or standalone browser mode for new installs. If you have
+old Toolbelt data from a pre-removal install, migrate it to a profile with
+`scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b). For more runtime
+modes, see [Operations](../operate/operations.md).
 
 ## Your first session
 
@@ -59,7 +57,7 @@ This is the whole loop you're going to be doing for the rest of your life with T
 
 1. **Create a group.** Click **+ Group** in the Torque workspace and give it a name like `playground`. A group is just a container — think of it as one project area, one feature, one chunk of work you want to keep together.
 
-2. **Add a worker.** Inside the group, click **+ New** and choose Worker. A new iTerm2 tab opens running `claude` (or whatever the default boot command is). The worker's cell appears in the grid.
+2. **Add a worker.** Inside the group, click **+ New** and choose Worker. Torque starts a managed PTY session running `claude` (or whatever the default boot command is). The worker's cell appears in the grid.
 
 3. **Click the worker.** The focus pane at the bottom shows you what the worker is doing. The grid cell's status dot tells you whether it's idle, running, or in trouble.
 

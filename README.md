@@ -7,8 +7,7 @@
 > Torque is a local agent-orchestration workspace for terminal-native
 > developers. Manage AI coding agents, run them in isolated git worktrees,
 > dispatch work from a kanban board, and let an embedded engineer coordinate
-> the wave — from a native desktop window, your browser, or the deprecated
-> secondary iTerm2 Toolbelt.
+> the wave — from a native desktop window or your browser.
 
 ![Torque workspace showing the agent grid, engineer workload, task board, and a live terminal session.](docs/images/main-screenshot.jpg)
 
@@ -33,8 +32,8 @@ workspace.
 
 What you get:
 
-- A visual group, agent, and terminal grid in a native desktop window, a
-  browser, or the deprecated secondary iTerm2 Toolbelt sidebar.
+- A visual group, agent, and terminal grid in a native desktop window or a
+  browser.
 - **Automatic git worktrees** per agent, with checkpointing, diff tracking,
   and engineer-driven merges back to your base branch.
 - A built-in **kanban board** with lanes, drag-and-drop, derived subtasks,
@@ -74,8 +73,7 @@ agent is doing without attaching to its terminal.
 ### Native desktop app (recommended)
 
 The desktop app gives you the full Torque workspace in a dedicated native
-window — no Toolbelt sidebar, no browser tab — and it is the easiest way to
-get started.
+window — no browser tab required — and it is the easiest way to get started.
 
 ```bash
 git clone git@github.com:runtorque/torque.git
@@ -89,8 +87,8 @@ make run
 `~/.torque/runtime/venv`. `make deploy` installs the primary
 standalone/desktop app files under `~/.torque/app` and refreshes the CLI
 symlink. `make run` starts a native desktop window on its own profile and port
-(defaults: `desktop` profile, port `18933`), so it does not collide with any
-Toolbelt instance you might also run.
+(defaults: `desktop` profile, port `18933`), so it does not collide with other
+standalone profiles.
 
 ### Standalone browser mode
 
@@ -105,10 +103,10 @@ Standalone mode launches the daemon and opens Torque in your default browser.
 It is useful when you want a wider workspace or are running on a remote /
 shared machine.
 
-### Migrating from old iTerm2 Toolbelt installs
+### Migrating from old Toolbelt installs
 
-The iTerm2 Toolbelt is a deprecated secondary integration and the Makefile no
-longer installs or updates the iTerm2 Scripts copy. Use the primary desktop
+The old Toolbelt integration is decommissioned and the Makefile no
+longer installs or updates the old Scripts copy. Use the primary desktop
 app (`make run`) or standalone browser mode (`make standalone` + `make open`).
 If you still have old Toolbelt data, migrate it to a profile with
 `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
@@ -140,8 +138,8 @@ See [The board](docs/tasks/board.md).
 
 **Actions and one-click dispatch.** An action is a reusable Jinja2 prompt
 template. When you dispatch a task, Torque creates (or reuses) an agent,
-spins up its worktree, opens the iTerm2 tab, installs the MCP config and
-hooks, and sends the rendered prompt — all in one move. The prompt includes
+spins up its worktree, opens the managed PTY session, installs the MCP config
+and hooks, and sends the rendered prompt — all in one move. The prompt includes
 a `torque` context namespace with the agent's identity, worktree state, and
 task metadata, plus a postscript listing the exact MCP tools the agent may
 call for this action's transitions. See [Actions](docs/tasks/actions.md).
@@ -194,12 +192,11 @@ requests use the templates in [`.github/`](.github/).
 
 Torque is single-user, local-first, and currently macOS-focused. The native
 desktop app and the standalone browser mode are the recommended entry points;
-the iTerm2 Toolbelt integration is a deprecated secondary surface whose
-Makefile install/update surface has been removed. Migrate old Toolbelt data
-with `scripts/migrate_toolbelt_to_profile.py`.
+the old Toolbelt integration has been decommissioned and its Makefile
+install/update surface has been removed. Migrate old Toolbelt data with
+`scripts/migrate_toolbelt_to_profile.py`.
 Linux and Windows are follow-up targets: the daemon itself is portable, but
-the terminal-control layer (iTerm2 today, Ghostty next) is the strongest
-platform dependency.
+the desktop shell, packaging, and operator workflows are still macOS-first.
 
 The project is on version `1.1.0`. See [Roadmap](docs/roadmap.md) for what's
 next.

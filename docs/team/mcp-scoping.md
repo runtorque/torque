@@ -86,7 +86,7 @@ There is no debug mode that reveals what's actually there. There's no capability
 
 Three observable surfaces let you audit:
 
-- **Daemon log** logs every MCP call with the calling cell ID prefix. Tail the active profile log (for example `tail -f ~/.torque/profiles/desktop/torque.log`, or the secondary Toolbelt log under `~/Library/Application Support/iTerm2/Scripts/torque/torque/`) and dispatch work — you'll see lines like `mcp_call cell=abc12345 kind=worker tool=torque_done`.
+- **Daemon log** logs every MCP call with the calling cell ID prefix. Tail the active profile log (for example `tail -f ~/.torque/profiles/desktop/torque.log`, or the legacy Toolbelt log under `~/Library/Application Support/iTerm2/Scripts/torque/torque/` when migrating old data) and dispatch work — you'll see lines like `mcp_call cell=abc12345 kind=worker tool=torque_done`.
 - **`engineer_mcp_calls`** and **`architect_mcp_calls`** return recent MCP call history filtered to the caller's scope. An Engineer calling `engineer_mcp_calls` sees Workers in its group; an Architect sees the same plus its Engineers' calls.
 - **`engineer_board_summary` from a different Engineer** is the easiest direct test. Spin up two Engineers in two groups, call `engineer_board_summary` from each, confirm neither sees the other's tasks.
 

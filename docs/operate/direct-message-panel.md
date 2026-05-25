@@ -23,5 +23,5 @@ stays buffered and replays on the next wake.
 Agent→user direct messages can fire a macOS notification when group attention
 notifications are enabled. User→agent replies do not notify. Notification
 failure is non-fatal: the message remains persisted and visible in the panel.
-The panel is fed by WebSocket snapshot/delta state and has no iTerm2 UI
+The panel is fed by WebSocket snapshot/delta state and has no terminal-host UI
 dependency, so it is safe groundwork for future remote-browser access.

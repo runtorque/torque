@@ -112,9 +112,7 @@ agent:
   name_prefix: impl
   command: codex
   directory: /path/to/repo
-  profile: Default
   shell: /bin/zsh
-  tab_color: "#3fb950"
   env_vars:
     FEATURE_FLAG: "1"
 ```
@@ -126,9 +124,9 @@ Inline agent fields:
 | `name_prefix` | string | Prefix used by legacy action-driven naming paths. |
 | `command` | string | Provider boot command override. |
 | `directory` | string | Working directory override. |
-| `profile` | string | iTerm2 profile name. |
+| `profile` | string | Legacy profile field retained for compatibility; the PTY runtime uses `Default`. |
 | `shell` | string | Shell override. |
-| `tab_color` | string | Tab color, usually a quoted hex string. |
+| `tab_color` | string | Legacy color field retained for compatibility; ignored by the PTY runtime. |
 | `env_vars` | object | Environment variables for the launched process in render output. |
 
 ## Terminals

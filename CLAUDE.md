@@ -2,9 +2,9 @@
 
 ## Project overview
 
-Torque is a local agent-orchestration workspace: a long-running Python daemon, an iTerm2/PTY terminal adapter, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
+Torque is a local agent-orchestration workspace: a long-running Python daemon, a PTY-backed terminal runtime, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
 
-Primary operator surfaces are standalone/browser and desktop app modes. The iTerm2 Toolbelt is a deprecated secondary integration; the Makefile no longer installs or updates the old Scripts copy, and old data should be migrated with `scripts/migrate_toolbelt_to_profile.py`.
+Primary operator surfaces are standalone/browser and desktop app modes. The old Toolbelt integration is decommissioned; the Makefile no longer installs or updates the old Scripts copy, and old data should be migrated with `scripts/migrate_toolbelt_to_profile.py`.
 
 ## Key commands
 
@@ -89,11 +89,11 @@ Workers should not ask the user directly. Use `torque_ask` only for blocking hum
 
 ## Code conventions
 
-- Python: no framework beyond aiohttp + iterm2. State mutations should go through `MatrixState` methods, which emit deltas and targeted DB writes. Direct cell mutations from bridge/events/server must call `state._emit_agent(cell)` and `state._db_save_agent(cell)` unless only ephemeral fields changed. Catch and log iTerm2 API errors; never use bare `except: pass`.
+- Python: no framework beyond aiohttp and the standard-library PTY/subprocess stack. State mutations should go through `MatrixState` methods, which emit deltas and targeted DB writes. Direct cell mutations from the PTY runtime, events, or server handlers must call `state._emit_agent(cell)` and `state._db_save_agent(cell)` unless only ephemeral fields changed. Catch and log expected runtime errors; never use bare `except: pass`.
 - JS: no framework, no TypeScript, no build step. `webview.html` script order matters (core globals first, then board/modal submodules, then feature panels). State is patched in place from WS deltas.
 - Live frontend panels must preserve operator state across routine rerenders: scroll/viewport anchor, hover/focus/caret, inline drafts, expanded sections, and selection. Prefer shared capture/restore helpers in `static/js/render.js` and add Node frontend regression coverage for rerender-stability fixes.
 - CSS: single stylesheet, CSS custom properties for theming, monospace throughout.
-- `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView; use custom modal/context-menu flows.
+- Use custom modal/context-menu flows instead of native blocking dialogs so desktop and browser behavior stays consistent.
 
 ### Surface-invalidation discipline
 
@@ -105,7 +105,7 @@ Rules of thumb:
 - Per-agent ops affect engineer panel only when the changed agent is focused or is owned by the focused engineer/architect.
 - Per-group engineer/digest/journal ops affect engineer panel only when the focused engineer is in that group.
 - Per-architect ops affect engineer panel only when the focused architect id matches the op (resolve cached records for remove/resolve ops when needed).
-- `focus_update` is iTerm2 session/window focus, not agent-panel focus; do not mark engineer from it.
+- `focus_update` is PTY session/window focus, not agent-panel focus; do not mark engineer from it.
 - Delta-driven callsites should route through `_agentPanelRefreshCurrentTab()` before falling back to full `renderAgentPanel()`.
 - For stubborn flicker/textbox/scroll bugs, use existing `window.__torqueDebugRender` instrumentation before adding speculative gates.
 
@@ -118,7 +118,6 @@ Run `make test`; it self-sanitizes inherited `TORQUE_*` runtime variables. Use t
 Moved reference material lives here to keep boot context small:
 
 - [Detailed architecture reference](docs/reference/architecture.md)
-- [iTerm2 API gotchas](docs/reference/iterm2-gotchas.md)
 - [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
 - [Install locations](docs/reference/install-locations.md)
 - [Manual testing](docs/operate/manual-testing.md)

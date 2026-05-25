@@ -62,7 +62,7 @@ Before dispatching, decide two separate things:
 This split matters in daily use:
 
 - An **action** can describe an implementation step, review step, fix step, or research step.
-- An **agent role** can choose the provider, model, permissions, tab color, worktree behavior, environment variables, companion terminals, and optional worker preamble.
+- An **agent role** can choose the provider, model, permissions, icon, worktree behavior, environment variables, companion terminals, and optional worker preamble.
 
 Example action + role pairing:
 

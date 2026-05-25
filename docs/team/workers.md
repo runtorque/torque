@@ -21,7 +21,7 @@ When a task is dispatched, Torque does seven things in order:
 1. **Resolves launch settings.** Group defaults → assigned role → action overrides → per-agent overrides.
 2. **Picks a provider and boot command.** Claude Code, Codex, Gemini CLI, or a generic adapter.
 3. **Creates a worktree** if the action or role wants one. The branch is named `torque/<engineer-slug>/<worker-slug>-<shortid>` (or `torque/user/...` for user-spawned workers). → [Worktrees](../tasks/worktrees.md)
-4. **Opens an iTerm2 tab** with the right title, tab color, working directory, and environment.
+4. **Opens a managed PTY session** with the right title, color, working directory, and environment.
 5. **Installs runtime integration.** Hooks, MCP configuration, the persistent system prompt file, any provider-specific glue.
 6. **Launches the provider.**
 7. **Sends the first message** — the rendered action prompt with the task description, the `torque` context namespace, and the dispatch postscript that lists the MCP tools the Worker can call.
@@ -54,7 +54,7 @@ Roles live in `.torque/roles/foo.yaml` (project) or `~/.torque/roles/foo.yaml` (
 - Initial prompt
 - Worktree behavior
 - Environment variables
-- Tab color, icon
+- Icon and other visual metadata
 - Idle timeout
 - Optional `preamble` and `priorities` blocks that get prepended to the dispatch prompt
 

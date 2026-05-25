@@ -6,7 +6,7 @@ The Engineer is the layer that makes parallel Workers actually work. Without one
 
 ## What an Engineer does
 
-One Engineer per group. **Persistent** (survives `/clear`, restarts, long pauses). It runs in its own iTerm2 tab and maintains five things:
+One Engineer per group. **Persistent** (survives `/clear`, restarts, long pauses). It runs in its own managed PTY session and maintains five things:
 
 1. **A continuous read** on the group's board state.
 2. **A buffered event digest** that wakes it up periodically without needing it to poll.

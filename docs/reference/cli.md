@@ -47,15 +47,15 @@ torque desktop --attach --profile desktop --port 18933
 torque desktop --python "/path/to/python3"
 ```
 
-Default desktop values are intentionally separate from the Toolbelt daemon:
+Default desktop values are intentionally profile-scoped:
 
 - profile: `desktop`
 - port: `18933`
 - data dir: `~/.torque/profiles/desktop`
 
 Attach mode only reuses an existing **matching standalone** Torque server. It
-will refuse to attach to the iTerm2-hosted Toolbelt daemon or to a standalone
-server with a different profile or data dir.
+will refuse non-standalone runtimes or standalone servers with a different
+profile or data dir.
 
 `pywebview` must be installed in the Python runtime that launches the desktop
 shell. For the standard Torque install, run:
@@ -66,8 +66,8 @@ make deps
 
 Without `--python`, the CLI prefers `TORQUE_PYTHON_EXECUTABLE`, then the
 legacy `TORQUE_DESKTOP_PYTHON` override, then the Torque-owned runtime at
-`~/.torque/runtime/venv/bin/python`, then the legacy iTerm2 Toolbelt Python,
-and finally the current interpreter.
+`~/.torque/runtime/venv/bin/python`, then any legacy Toolbelt Python kept for
+old installs, and finally the current interpreter.
 
 | Flag | Description |
 |------|-------------|
@@ -131,7 +131,7 @@ Manage agents.
 
 ```bash
 torque agent add my-agent -g backend
-torque agent add my-agent -g backend -c claude -d ~/project --color "#3fb950"
+torque agent add my-agent -g backend -c claude -d ~/project
 ```
 
 | Flag | Description |
@@ -139,8 +139,8 @@ torque agent add my-agent -g backend -c claude -d ~/project --color "#3fb950"
 | `-g, --group` | Target group (auto-detected if in a Torque session) |
 | `-c, --command` | Boot command |
 | `-d, --directory` | Working directory |
-| `--profile` | iTerm2 profile |
-| `--color` | Tab color (hex) |
+| `--profile` | Legacy profile label (PTY runtime uses `Default`) |
+| `--color` | Legacy color metadata (hex) |
 
 ### agent remove
 
@@ -152,7 +152,7 @@ Accepts ID, slug, or name. Alias: `rm`
 
 ### agent focus
 
-Focus the agent's iTerm2 tab.
+Focus the agent's terminal session.
 
 ```bash
 torque agent focus impl-add-auth
@@ -176,10 +176,10 @@ torque agent move impl-add-auth -g frontend
 
 ### agent edit
 
-Update an agent's name or tab color.
+Update an agent's name or legacy color metadata.
 
 ```bash
-torque agent edit impl-add-auth --name review-auth --color "#a371f7"
+torque agent edit impl-add-auth --name review-auth
 ```
 
 Alias: `a`
@@ -204,8 +204,8 @@ torque terminal add tests -p impl-add-auth -c "npm test"    # with boot command
 | `-g, --group` | Group (for standalone terminals) |
 | `-c, --command` | Boot command |
 | `-d, --directory` | Working directory |
-| `--profile` | iTerm2 profile |
-| `--color` | Tab color (hex) |
+| `--profile` | Legacy profile label (PTY runtime uses `Default`) |
+| `--color` | Legacy color metadata (hex) |
 
 ### terminal remove
 

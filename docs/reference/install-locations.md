@@ -7,7 +7,7 @@ Primary standalone/desktop app files are installed to:
 ```
 
 The primary Python runtime is Torque-owned and lives outside the app copy and
-outside iTerm2's Application Support tree:
+outside the legacy Application Support tree:
 
 ```text
 ~/.torque/runtime/venv/bin/python
@@ -15,7 +15,7 @@ outside iTerm2's Application Support tree:
 
 `make deps` (and `make deploy` before it copies app files) creates or repairs
 that clean virtual environment with `python3 -m venv` and installs the primary
-runtime requirements. Existing AppSupport/iTerm2 installs are not reused or
+runtime requirements. Existing legacy AppSupport installs are not reused or
 moved; on the next deploy, Torque rebuilds the primary venv in
 `~/.torque/runtime/venv`.
 
@@ -28,7 +28,7 @@ Primary runtime data is profile-scoped:
 ~/.torque/profiles/standalone/torque.log
 ```
 
-Deprecated secondary iTerm2 Toolbelt files from older releases may still exist
+Deprecated secondary Toolbelt files from older releases may still exist
 at:
 
 ```text
@@ -43,7 +43,7 @@ script directory:
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log   # daemon log
 ```
 
-The iTerm2/AppSupport Python environment is legacy and Toolbelt-only. The
+The AppSupport Python environment is legacy and Toolbelt-only. The
 primary surfaces are the desktop app (`make run`) and standalone browser mode
 (`make standalone`). The Makefile no longer installs, updates, or launches the
 old Toolbelt Scripts copy. Migrate Toolbelt data to a profile with

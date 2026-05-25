@@ -1,6 +1,6 @@
 # Architecture
 
-Torque is a local orchestration system. A long-running Python daemon manages state, agents, and worktrees; a lightweight web UI renders that state in the primary desktop/browser surfaces or, secondarily, inside iTerm2's Toolbelt; SQLite is the source of truth for persistence.
+Torque is a local orchestration system. A long-running Python daemon manages state, agents, PTY sessions, and worktrees; a lightweight web UI renders that state in the desktop and browser surfaces; SQLite is the source of truth for persistence.
 
 This page describes the major components and how they fit together. For the user-facing concepts (groups, agents, tasks, threads, pipelines), start with [What is Torque?](foundations/what-is-torque.md).
 
@@ -15,9 +15,8 @@ The daemon's responsibilities, by module:
 | `server.py` | aiohttp server. HTTP `/api/cmd`, WebSocket `/ws`, hook receiver `/events`, MCP endpoints. Periodic worktree diff updater, dispatch, render-action, save-action. |
 | `state.py` | `MatrixState` (in-memory + SQLite-backed), `AgentCell`, `BoardTask`, `GroupSettings`, `ArchitectSettings`, slug generation, delta accumulator + WebSocket broadcast. |
 | `db.py`, `db_board.py`, `db_memory.py`, `db_schema.py` | SQLite persistence layer with WAL mode. Targeted writes, schema migrations, JSON-encoded fields. |
-| `bridge.py`, `iterm2_bridge_core.py` | iTerm2 adapter — create / focus / close tabs, monitor prompt + variables, manage tab colors and ordering, surface session termination events. |
-| `terminal_adapter.py` | Provider-agnostic terminal interface, designed for future Ghostty support. |
-| `local_pty.py`, `pty_supervisor*.py` | Standalone-mode PTY ownership. Supervisor sidecar persists sessions across daemon restarts. |
+| `terminal_adapter.py` | Terminal interface for session lifecycle, input, resize, focus, and capability flags. |
+| `local_pty.py`, `pty_supervisor*.py` | PTY ownership. Supervisor sidecar persists sessions across daemon restarts. |
 | `actions.py` | Action loading, Jinja2 rendering with `torque` context namespace, transition graph discovery, pipeline detection. |
 | `roles.py` | Worker / engineer / architect role file management. |
 | `worktree.py` | Git worktree lifecycle — create, validate, checkpoint, rollback, diff, merge detection, gitignore management. |
@@ -27,7 +26,6 @@ The daemon's responsibilities, by module:
 | `mcp_tools_shared.py` | Authorization (`authorize_caller`), scoped state views, caller-aware result filtering. |
 | `engineer.py`, `architect.py` | Role-specific system prompts, dispatch postscripts, journal/decision plumbing. |
 | `events.py`, `notifications.py`, `digest_routing.py` | Event bus, throttled broadcast, macOS notifications, digest assembly + idle-gated push. |
-| `keybindings.py` | Global iTerm2 key binding lifecycle. |
 | `cron.py` | Schedules (one-shot and recurring). |
 | `adapters/` | Provider integration: Claude Code, Codex, Gemini CLI, generic fallback. |
 
@@ -35,9 +33,7 @@ The daemon's responsibilities, by module:
 
 Plain HTML, CSS, and JavaScript. No build step. The same frontend runs in:
 
-- The iTerm2 Toolbelt webview
-- A browser window in dual mode
-- A browser window in standalone-only mode
+- A browser window in standalone mode
 - The native desktop shell (`pywebview`)
 
 The frontend consumes a full snapshot on connect and live deltas after that. JS files are loaded in dependency order: `constants → ws → render → commands → modals → board → actions → main`. State is patched in place from delta messages, then re-rendered.
@@ -112,19 +108,16 @@ The same daemon serves several deployment shapes:
 - **Native desktop** — the primary app surface. `make run` launches a native
   shell backed by a standalone-mode daemon on port `18933` with data under
   `~/.torque/profiles/desktop`.
-- **Standalone browser** — `make standalone` runs the daemon without Toolbelt
-  registration and `make open` opens the browser UI. This is the primary
-  browser-only path and supports headless development setups.
-- **Legacy iTerm2 Toolbelt** — the deprecated secondary integration retained
-  for migration/rollback context. The Makefile no longer installs or updates
-  the old iTerm2 Scripts copy; migrate Toolbelt data with
-  `scripts/migrate_toolbelt_to_profile.py`.
-- **Legacy Toolbelt + browser** — when an already-installed Toolbelt daemon is
-  running, `make open` opens a browser window connected to the same daemon.
+- **Standalone browser** — `make standalone` runs the PTY-backed daemon and
+  `make open` opens the browser UI. This is the primary browser-only path and
+  supports headless development setups.
 
 The desktop and standalone paths use profile-scoped data directories under
-`~/.torque/profiles/` so they don't accidentally attach to a live Toolbelt
-instance.
+`~/.torque/profiles/`.
+
+Older releases could leave legacy Toolbelt data under the old Scripts
+tree. That integration is no longer installed or updated; migrate old
+data with `scripts/migrate_toolbelt_to_profile.py`.
 
 → [Operations](operate/operations.md)
 

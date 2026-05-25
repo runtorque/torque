@@ -131,7 +131,6 @@ function createSandbox() {
 
   const sandbox = {
     console,
-    TAB_COLORS: [],
     state: {
       agents: {
         'engineer-1': { id: 'engineer-1', name: 'Engineer', status: 'running' },
@@ -1113,7 +1112,7 @@ test('group settings sub-tab switching preserves scroll focus and inline draft s
   );
 });
 
-test('group settings sub-tab CSS remains reusable in narrow toolbelt layouts', () => {
+test('group settings sub-tab CSS remains reusable in narrow embedded layouts', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 

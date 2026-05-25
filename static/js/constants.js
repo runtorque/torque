@@ -88,14 +88,3 @@ function labelColor(name) {
   }
   return _LABEL_PALETTE[((h < 0 ? -h : h) % _LABEL_PALETTE.length)];
 }
-
-const TAB_COLORS = [
-  { name: 'Red',    hex: '#f85149' },
-  { name: 'Orange', hex: '#d29922' },
-  { name: 'Yellow', hex: '#e3b341' },
-  { name: 'Green',  hex: '#3fb950' },
-  { name: 'Teal',   hex: '#2ea8a1' },
-  { name: 'Blue',   hex: '#58a6ff' },
-  { name: 'Purple', hex: '#a371f7' },
-  { name: 'Pink',   hex: '#f778ba' },
-];

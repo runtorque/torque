@@ -13,9 +13,7 @@ These settings apply to the group as a whole and serve as the base defaults for 
 | Setting | Description |
 |---------|-------------|
 | **Directory** | Default working directory for new sessions. Supports `~` for home directory. |
-| **Profile** | Default iTerm2 profile. |
-| **Shell** | Default shell (`zsh`, `bash`, `fish`). Leave as "Default" to use the profile's shell. |
-| **Tab color** | Default tab color for visual organization. |
+| **Shell** | Default shell (`zsh`, `bash`, `fish`). Leave as "Default" to use the runtime default shell. |
 | **Environment** | Environment variables applied to all sessions. One `KEY=VALUE` per line. |
 | **Auto-create terminals** | Number of child terminals to create automatically alongside each new agent (0--10). |
 | **Max agents** | Maximum number of agents allowed in this group. Set to 0 for unlimited. When the cap is reached, the "+ New" button shows "Full". |
@@ -26,7 +24,7 @@ When enabled, the group starts collapsed each time the Torque workspace webview 
 
 ### Pin to active window
 
-When enabled, the group only appears in iTerm2 windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.
+When enabled, the group only appears in workspace windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.
 
 ### Sync provider
 
@@ -50,13 +48,11 @@ worktrees, notifications). Leave a field empty to inherit from the group tab.
 | Setting | Description |
 |---------|-------------|
 | **Directory** | Working directory for agents. Overrides the group default. |
-| **Profile** | iTerm2 profile for agents. |
 | **Shell** | Shell for agents. |
 | **Provider** | Preferred agent backend (`claude-code`, `codex`, `gemini-cli`, or empty to auto-detect from the boot command). |
 | **Default model** | Optional provider-specific model override for new agents in this group. |
 | **Default reasoning effort** | Optional provider-specific reasoning-effort override for new agents in this group. Unsupported providers ignore it. |
-| **Boot command** | Command Torque runs when the agent tab opens. Leave empty to use the provider default or global default command. |
-| **Tab color** | Tab color for agents. Select the arrow (++up++) to inherit from the group, or ++x++ for no color. |
+| **Boot command** | Command Torque runs when the agent session starts. Leave empty to use the provider default or global default command. |
 | **Additional environment** | Extra environment variables for agents, merged with (and can override) the group environment. |
 | **Environment file** | Optional shell file sourced before the boot command runs. |
 | **Default agent template** | Optional base template applied to new agents in this group before group-specific `agent_*` overrides. |
@@ -110,9 +106,7 @@ They live under **Group → Terminals**.
 | **Arguments** | Arguments appended to the boot command. |
 | **Init script** | Path to a shell script sourced after `cd` but before the boot command. Supports `~`. |
 | **Directory** | Working directory for terminals. Overrides the group default. |
-| **Profile** | iTerm2 profile for terminals. |
 | **Shell** | Shell for terminals. |
-| **Tab color** | Tab color for terminals. Select the arrow (++up++) to inherit from the group, or ++x++ for no color. |
 | **Additional environment** | Extra environment variables for terminals, merged with the group environment. |
 
 ### Always open custom dialog
@@ -150,9 +144,3 @@ When creating an agent, Torque resolves settings in this order:
 For terminals, the old resolution still applies: terminal-specific overrides, then group defaults, then system defaults.
 
 For environment variables, all applicable levels are merged. More specific levels override less specific ones.
-
-For tab color, the agent/terminal tabs have three states:
-
-- **Inherit** (++up++) --- use whatever the group tab has
-- **A specific color** --- override the group
-- **None** (++x++) --- explicitly no color, even if the group has one

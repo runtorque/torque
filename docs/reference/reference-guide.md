@@ -40,8 +40,6 @@ See [Keyboard Shortcuts](../operate/keyboard-shortcuts.md) for the full list. Th
 | ++t++ | Add a terminal for the selected agent |
 | ++g++ | Create a group |
 | ++r++ | Relaunch the focused agent or terminal |
-| ++cmd+option+right++ / ++cmd+option+left++ | Move between agents |
-| ++cmd+option+down++ / ++cmd+option+up++ | Move between all Torque-managed cells |
 
 ## Settings that change behavior
 
@@ -67,7 +65,7 @@ Torque has a few settings surfaces. The details live in the linked pages; this s
 ## File locations and logs
 
 Primary standalone/desktop installs use `~/.torque/app` for app files and
-profile-specific data dirs for runtime state. The iTerm2 Scripts paths only
+profile-specific data dirs for runtime state. The legacy Scripts paths only
 matter for legacy Toolbelt data and one-off migration.
 
 | Item | Path |
@@ -98,7 +96,7 @@ These are operator notes, not implementation details.
 | Attach the native shell to an existing standalone server | `torque desktop --attach` or `make desktop-attach` |
 
 !!! note
-    `make deploy` updates the primary app copy and stops the primary desktop port (`18933` by default), but you still need to relaunch Torque with `make run` or `make standalone` + `make open`. The iTerm2 Toolbelt is deprecated and the Makefile no longer installs or updates the old iTerm2 Scripts copy. Migrate Toolbelt data with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
+    `make deploy` updates the primary app copy and stops the primary desktop port (`18933` by default), but you still need to relaunch Torque with `make run` or `make standalone` + `make open`. The old Toolbelt integration is decommissioned and the Makefile no longer installs or updates the old Scripts copy. Migrate Toolbelt data with `scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
 
 ## User-facing behavior versus implementation notes
 
