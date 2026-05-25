@@ -1806,6 +1806,8 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
+        self.server_agent_mod = importlib.import_module('torque.server_agent')
+        self.server_agent_mod = importlib.reload(self.server_agent_mod)
         from torque.db import TorqueDB
 
         self.tmp = tempfile.TemporaryDirectory()
@@ -1818,6 +1820,18 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState(db=self.db)
         state.groups['g'] = []
         return state
+
+    def _make_agent_launch_service(self, state, bridge):
+        class FakeTemplateManager:
+            pass
+
+        return self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
 
     def _add_engineer_and_worker(self, state, *, current_task_id=''):
         engineer = self.state_mod.AgentCell(
@@ -1952,6 +1966,38 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.group, 'g')
         self.assertEqual(follow_up.labels, ['torque:engineer-message'])
 
+    async def test_send_engineer_message_failure_restores_progress_clocks(self):
+        state = self._make_state()
+        _engineer, worker = self._add_engineer_and_worker(state)
+        worker.status = 'running'
+        worker.last_progress_at = 123.0
+        worker.last_heartbeat_at = 124.0
+        worker.last_activity_at = 124.0
+        worker.last_event_at = 124.0
+
+        class FailingBridge:
+            def prime_input_ready(self, _session_id):
+                pass
+
+            async def send_text(self, _session_id, _text):
+                raise RuntimeError('terminal unavailable')
+
+        result = await self.server_mod._send_engineer_message_to_agent(
+            state,
+            FailingBridge(),
+            worker,
+            'Need a quick status update',
+            lambda *args, **kwargs: None,
+        )
+
+        self.assertEqual(result['type'], 'error')
+        self.assertEqual(worker.status, 'running')
+        self.assertEqual(worker.last_progress_at, 123.0)
+        self.assertEqual(worker.last_heartbeat_at, 124.0)
+        self.assertEqual(worker.last_activity_at, 124.0)
+        self.assertEqual(worker.last_event_at, 124.0)
+        self.assertEqual(state.board_tasks, {})
+
     async def test_send_engineer_message_reply_not_required_appends_inline_thread(self):
         state = self._make_state()
         parent = state.board_add_task(
@@ -2055,7 +2101,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(
             self.server_mod.time,
             'time',
-            side_effect=[10.0, 10.5, 20.0, 20.5],
+            side_effect=[9.0, 10.0, 10.5, 19.0, 20.0, 20.5],
         ):
             await self.server_mod._send_engineer_message_to_agent(
                 state,
@@ -2150,6 +2196,93 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_send_user_message_failure_restores_progress_clocks(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+            status='idle',
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+
+        class FailingBridge:
+            async def send_text(self, _session_id, _text):
+                raise RuntimeError('terminal unavailable')
+
+        with self.assertRaises(RuntimeError):
+            await self.server_mod._handle_send_user_message_command(
+                {
+                    'cmd': 'send_user_message',
+                    'cell_id': worker.id,
+                    'text': 'line one',
+                },
+                state,
+                FailingBridge(),
+            )
+
+        self.assertEqual(worker.status, 'idle')
+        self.assertEqual(worker.last_progress_at, 123.0)
+        self.assertEqual(worker.last_heartbeat_at, 124.0)
+        self.assertEqual(worker.last_activity_at, 124.0)
+        self.assertEqual(worker.last_event_at, 124.0)
+        self.assertEqual(state.agent_message_history_read(worker.id), [])
+
+    async def test_send_text_command_rolls_back_when_background_send_fails(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+            status='idle',
+            last_progress_at=123.0,
+            last_heartbeat_at=124.0,
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        send_started = asyncio.Event()
+        release_delivery = asyncio.Event()
+
+        class FailingBridge:
+            async def send_text(self, _session_id, _text, **_kwargs):
+                send_started.set()
+                await release_delivery.wait()
+                raise RuntimeError('terminal unavailable')
+
+        service = self._make_agent_launch_service(state, FailingBridge())
+        queued = await self.server_mod._handle_send_text_command(
+            {
+                'cmd': 'send_text',
+                'id': worker.id,
+                'text': 'start this',
+            },
+            state,
+            service.send_agent_prompt,
+        )
+
+        self.assertTrue(queued)
+        self.assertEqual(worker.status, 'running')
+        self.assertEqual(len(service._background_prompt_tasks), 1)
+        task = next(iter(service._background_prompt_tasks))
+
+        await asyncio.wait_for(send_started.wait(), timeout=1.0)
+        release_delivery.set()
+        result = await asyncio.gather(task, return_exceptions=True)
+
+        self.assertIsInstance(result[0], RuntimeError)
+        self.assertEqual(worker.status, 'idle')
+        self.assertEqual(worker.last_progress_at, 123.0)
+        self.assertEqual(worker.last_heartbeat_at, 124.0)
+        self.assertEqual(worker.last_activity_at, 124.0)
+        self.assertEqual(worker.last_event_at, 124.0)
+
     async def test_user_agent_message_persists_and_queues_wrapped_prompt(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -2228,6 +2361,52 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             'delivered',
         )
         self.assertEqual(direct_notifications, [])
+
+    async def test_user_agent_message_marks_agent_running_before_delivery_finishes(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        send_entered = asyncio.Event()
+        release_delivery = asyncio.Event()
+
+        class BlockingBridge:
+            async def send_text(self, _session_id, _text, **_kwargs):
+                send_entered.set()
+                await release_delivery.wait()
+
+        service = self._make_agent_launch_service(state, BlockingBridge())
+        command_task = asyncio.create_task(
+            self.server_mod._handle_user_agent_message_command(
+                {
+                    'cmd': 'user_agent_message',
+                    'agent_id': worker.id,
+                    'message': 'Start this now.',
+                    'idempotency_key': 'optimistic-submit',
+                },
+                state,
+                service.send_agent_prompt,
+            )
+        )
+
+        await asyncio.wait_for(send_entered.wait(), timeout=1.0)
+        self.assertFalse(command_task.done())
+        self.assertEqual(worker.status, 'running')
+        self.assertGreater(worker.last_progress_at, 0)
+        self.assertGreaterEqual(state._seq, 1)
+
+        release_delivery.set()
+        result = await command_task
+        self.assertEqual(result['delivery_state'], 'delivered')
+        self.assertEqual(worker.status, 'running')
 
     async def test_user_agent_message_reply_hint_cadence_and_replay(self):
         state = self._make_state()
@@ -2510,13 +2689,16 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             cell_type='agent',
             kind='engineer',
             session_id='session-eng',
+            status='idle',
         )
         state.agents[engineer.id] = engineer
         state.groups['g'] = [engineer.id]
 
-        async def failing_send_prompt(*_args, **_kwargs):
-            raise RuntimeError('terminal unavailable')
+        class FailingBridge:
+            async def send_text(self, _session_id, _text, **_kwargs):
+                raise RuntimeError('terminal unavailable')
 
+        service = self._make_agent_launch_service(state, FailingBridge())
         result = await self.server_mod._handle_user_agent_message_command(
             {
                 'cmd': 'user_agent_message',
@@ -2525,7 +2707,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 'idempotency_key': 'failure-submit',
             },
             state,
-            failing_send_prompt,
+            service.send_agent_prompt,
         )
 
         self.assertEqual(result['delivery_state'], 'buffered')
@@ -2537,6 +2719,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             state.direct_messages_by_agent[engineer.id][0]['delivery_reason'],
             'terminal unavailable',
         )
+        self.assertEqual(engineer.status, 'idle')
 
     async def test_user_agent_message_aliases_prompt_unavailable_and_idempotency_conflict(self):
         state = self._make_state()

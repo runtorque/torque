@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import time
 from typing import Any
 
 from . import config as torque_config
@@ -196,6 +197,7 @@ class AgentLaunchService:
         self.template_mgr = template_mgr
         self._background_prompt_tasks: set[asyncio.Task] = set()
         self._prompt_queue_tails: dict[str, asyncio.Task] = {}
+        self._prompt_queue_optimistic_baselines: dict[str, dict] = {}
 
     def _runtime_terminal_backend(self) -> str:
         return "pty"
@@ -734,7 +736,60 @@ class AgentLaunchService:
         payload = prompt if prompt.endswith("\r") else prompt + "\r"
         target_session_id = cell.session_id or ""
         previous = self._prompt_queue_tails.get(target_session_id)
+        optimistic_baseline = {}
+        if target_session_id:
+            optimistic_baseline = (
+                self._prompt_queue_optimistic_baselines.get(target_session_id)
+                or self.state.snapshot_agent_optimistic_state(cell)
+            )
+            self._prompt_queue_optimistic_baselines.setdefault(
+                target_session_id,
+                optimistic_baseline,
+            )
+        optimistic_at = time.time()
+        optimistic_marked = False
+        if target_session_id:
+            optimistic_marked = self.state.mark_agent_optimistic_running(
+                cell,
+                optimistic_at,
+                emit=True,
+                persist=persist,
+            )
+            if optimistic_marked:
+                await self.state.broadcast()
         task_ref = None
+
+        async def _rollback_optimistic_running():
+            if not optimistic_marked or not optimistic_baseline:
+                return
+            if getattr(cell, "status", "") != "running":
+                return
+            if getattr(cell, "activity", ""):
+                return
+            if target_session_id \
+                    and self._prompt_queue_tails.get(target_session_id) is not task_ref:
+                # A newer prompt is queued for the same session; keep the
+                # optimistic Running status for that pending work.
+                return
+            if float(getattr(cell, "last_progress_at", 0) or 0) > optimistic_at:
+                # A real activity/progress event arrived after the optimistic
+                # mark, so do not roll the cell back underneath it.
+                return
+            baseline = self._prompt_queue_optimistic_baselines.get(
+                target_session_id,
+                optimistic_baseline,
+            )
+            changed = self.state.restore_agent_optimistic_state(
+                cell,
+                baseline,
+                emit=True,
+                persist=persist,
+            )
+            if target_session_id:
+                self._prompt_queue_optimistic_baselines.pop(
+                    target_session_id, None)
+            if changed:
+                await self.state.broadcast()
 
         async def _run():
             try:
@@ -762,6 +817,7 @@ class AgentLaunchService:
                         cell.session_id or "<empty>",
                         len(prompt),
                     )
+                    await _rollback_optimistic_running()
                     return
                 if prime_input_ready \
                         and hasattr(self.bridge, "prime_input_ready"):
@@ -774,16 +830,32 @@ class AgentLaunchService:
                     )
                 else:
                     await self.bridge.send_text(target_session_id, payload)
-                cell.status = "running"
-                self.state.mark_agent_progress(cell, emit=False, persist=persist)
+                self.state.mark_agent_optimistic_running(
+                    cell,
+                    emit=False,
+                    persist=persist,
+                )
+                if target_session_id:
+                    if self._prompt_queue_tails.get(target_session_id) is task_ref:
+                        self._prompt_queue_optimistic_baselines.pop(
+                            target_session_id, None)
+                    else:
+                        self._prompt_queue_optimistic_baselines[
+                            target_session_id
+                        ] = self.state.snapshot_agent_optimistic_state(cell)
                 self.state._emit_agent(cell)
                 if persist:
                     self.state._db_save_agent(cell)
                 await self.state.broadcast()
+            except Exception:
+                await _rollback_optimistic_running()
+                raise
             finally:
                 if target_session_id \
                         and self._prompt_queue_tails.get(target_session_id) is task_ref:
                     self._prompt_queue_tails.pop(target_session_id, None)
+                    self._prompt_queue_optimistic_baselines.pop(
+                        target_session_id, None)
                 if task_ref is not None:
                     self._background_prompt_tasks.discard(task_ref)
 
