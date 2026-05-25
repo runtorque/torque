@@ -59,7 +59,7 @@ class CliDoctorTests(unittest.TestCase):
         api_call.assert_not_called()
 
     def test_cmd_doctor_prints_json_report(self):
-        report = {"schema_version": 2, "result": "pass", "checks": []}
+        report = {"schema_version": 3, "result": "pass", "checks": []}
         with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):

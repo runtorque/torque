@@ -69,6 +69,13 @@ legacy `TORQUE_DESKTOP_PYTHON` override, then the Torque-owned runtime at
 `~/.torque/runtime/venv/bin/python`, then any legacy Toolbelt Python kept for
 old installs, and finally the current interpreter.
 
+Offline SQLite reads and `torque logs` default to the primary desktop profile
+(`~/.torque/profiles/desktop`). Use `TORQUE_PORT=18932` or `torque --port
+18932 ...` for the standalone profile, or set `TORQUE_PROFILE` /
+`TORQUE_DATA_DIR` for a custom profile. Legacy Toolbelt DB/log fallback is
+only used when no primary profile artifact exists and no explicit
+profile/data-dir was requested.
+
 | Flag | Description |
 |------|-------------|
 | `--attach` | Reuse an existing matching standalone Torque server instead of spawning a child server |

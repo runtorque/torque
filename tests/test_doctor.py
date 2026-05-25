@@ -265,7 +265,7 @@ class TorqueDoctorTests(unittest.TestCase):
             report = build_doctor_report_for_db(self.db_path)
             rendered = format_doctor_report(report)
 
-        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["failed_checks"], [])
         self.assertGreaterEqual(
@@ -307,6 +307,11 @@ class TorqueDoctorTests(unittest.TestCase):
             0,
         )
         self.assertEqual(report["warnings"], [])
+        self.assertEqual(report["runtime_locations"]["data_dir_kind"], "custom")
+        self.assertEqual(
+            report["runtime_locations"]["primary_runtime_python"],
+            str(home / ".torque" / "runtime" / "venv" / "bin" / "python"),
+        )
         self.assertEqual(report["roles"]["roles_file_count"], 0)
         self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 0)
         self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
@@ -316,8 +321,66 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("[engineers]", rendered)
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
+        self.assertIn("[runtime_locations]", rendered)
         self.assertIn("[stage_6_cleanup]", rendered)
         self.assertNotIn("default (engineer_* routing)", rendered)
+
+    def test_doctor_warns_when_reading_legacy_toolbelt_data_dir(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "home"
+            db_path = (
+                home
+                / "Library/Application Support/iTerm2/Scripts/torque/torque/torque.db"
+            )
+            db_path.parent.mkdir(parents=True)
+            db = TorqueDB(db_path)
+            db.init()
+            self.addCleanup(db.close)
+            db.save_agent(
+                AgentCell(
+                    id="engineer-legacy",
+                    name="Engineer",
+                    group="torque",
+                    slug="engineer",
+                    cell_type="agent",
+                    kind="engineer",
+                    persistent=True,
+                )
+            )
+
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                report = build_doctor_report_for_db(db_path)
+                rendered = format_doctor_report(report)
+
+        self.assertEqual(
+            report["runtime_locations"]["data_dir_kind"],
+            "legacy_toolbelt",
+        )
+        warning_names = {warning["name"] for warning in report["warnings"]}
+        self.assertIn("legacy_toolbelt_data_dir", warning_names)
+        self.assertIn("legacy Toolbelt data", rendered)
+
+    def test_doctor_warns_on_legacy_appsupport_python_runtime(self):
+        home = self._home_dir()
+        self._save_engineer()
+        legacy_python = (
+            home
+            / "Library/Application Support/iTerm2/Scripts/torque/iterm2env/versions/3.14.0/bin/python3"
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(
+                self.db_path,
+                runtime_python=str(legacy_python),
+            )
+            rendered = format_doctor_report(report)
+
+        runtime = report["runtime_locations"]
+        self.assertEqual(runtime["runtime_python"], str(legacy_python))
+        self.assertEqual(runtime["runtime_python_kind"], "legacy_appsupport")
+        warning_names = {warning["name"] for warning in report["warnings"]}
+        self.assertIn("legacy_appsupport_python_runtime", warning_names)
+        self.assertIn("legacy iTerm2/AppSupport Python", rendered)
 
     def test_build_doctor_report_includes_zero_architect_and_pending_hire_sections(self):
         home = self._home_dir()

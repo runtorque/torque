@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from torque import install_locations
 from torque.doctor import (
     build_doctor_report_for_db,
     format_doctor_report,
@@ -66,23 +67,58 @@ def _yaml():
             die("PyYAML is required for this command.\n"
                 "  Install with: pip3 install pyyaml")
     return _yaml_mod
-ITERM2_RUNTIME_DIR = Path(os.path.expanduser(
-    "~/Library/Application Support/iTerm2/Scripts/torque/torque"))
-TORQUE_RUNTIME_PYTHON = Path(os.path.expanduser(
-    "~/.torque/runtime/venv/bin/python"))
+TORQUE_RUNTIME_PYTHON = install_locations.primary_runtime_python()
 
 
 def _truthy_env(name):
-    return os.environ.get(name, "").lower() in ("1", "true", "yes")
+    return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
 
 
 def _slugify_profile(name):
-    text = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "").strip().lower())
-    text = text.strip(".-_")
-    return text or "default"
+    return install_locations.slugify_profile(name)
 
 
-def _resolve_runtime_dir():
+def _legacy_runtime_dir():
+    return install_locations.legacy_toolbelt_dir()
+
+
+def _runtime_profile_for_port(port=None):
+    try:
+        port_value = int(port) if port is not None else _resolve_global_default_port()
+    except (TypeError, ValueError):
+        port_value = DESKTOP_DEFAULT_PORT
+    if port_value == DEFAULT_PORT:
+        return "standalone"
+    return DESKTOP_DEFAULT_PROFILE
+
+
+def _runtime_port_from_args(args=None):
+    if args is None:
+        return _resolve_global_default_port()
+    for attr in ("daemon_port", "desktop_port", "port"):
+        value = getattr(args, attr, None)
+        if value is not None:
+            return value
+    return _resolve_global_default_port()
+
+
+def _explicit_runtime_dir_requested():
+    return bool(os.environ.get("TORQUE_DATA_DIR", "").strip())
+
+
+def _explicit_runtime_profile_requested():
+    return bool(os.environ.get("TORQUE_PROFILE", "").strip())
+
+
+def _allow_legacy_runtime_fallback():
+    return (
+        not _explicit_runtime_dir_requested()
+        and not _explicit_runtime_profile_requested()
+        and not _truthy_env("TORQUE_STANDALONE")
+    )
+
+
+def _preferred_runtime_dir(port=None):
     explicit = os.environ.get("TORQUE_DATA_DIR", "").strip()
     if explicit:
         return Path(os.path.expanduser(explicit))
@@ -90,9 +126,41 @@ def _resolve_runtime_dir():
     profile = os.environ.get("TORQUE_PROFILE", "").strip()
     if not profile and _truthy_env("TORQUE_STANDALONE"):
         profile = "standalone"
-    if profile:
-        return Path.home() / ".torque" / "profiles" / _slugify_profile(profile)
-    return ITERM2_RUNTIME_DIR
+    if not profile:
+        profile = _runtime_profile_for_port(port)
+    return install_locations.profile_data_dir(profile)
+
+
+def _resolve_runtime_dir(port=None, *, prefer_existing_artifact=""):
+    preferred = _preferred_runtime_dir(port)
+    artifact = str(prefer_existing_artifact or "").strip()
+    if artifact and _allow_legacy_runtime_fallback():
+        legacy = _legacy_runtime_dir()
+        if not (preferred / artifact).exists() and (legacy / artifact).exists():
+            return legacy
+    return preferred
+
+
+def _runtime_artifact_for_args(args=None):
+    command = str(getattr(args, "command", "") or "")
+    if command == "logs":
+        return "torque.log"
+    if command == "doctor" and (
+        getattr(args, "sidecars", False) or getattr(args, "reap_sidecars", False)
+    ):
+        return ""
+    return "torque.db"
+
+
+def _configure_runtime_paths(args=None):
+    global RUNTIME_DIR, TORQUE_LOG, TORQUE_DB
+    RUNTIME_DIR = _resolve_runtime_dir(
+        _runtime_port_from_args(args),
+        prefer_existing_artifact=_runtime_artifact_for_args(args),
+    )
+    TORQUE_LOG = str(RUNTIME_DIR / "torque.log")
+    TORQUE_DB = str(RUNTIME_DIR / "torque.db")
+    return RUNTIME_DIR
 
 
 def _argv_has_flag(flag):
@@ -127,40 +195,13 @@ def _resolve_desktop_entrypoint():
 
 
 def _candidate_iterm2_pythons():
-    project_candidates = {
-        path.resolve()
-        for path in Path.home().glob(
-            "Library/Application Support/iTerm2/Scripts/torque/iterm2env/versions/*/bin/python3"
-        )
-    }
-    fallback_candidates = {
-        path.resolve()
-        for pattern in (
-            "Library/Application Support/iTerm2/iterm2env-*/versions/*/bin/python3",
-            ".config/iterm2/AppSupport/iterm2env-*/versions/*/bin/python3",
-        )
-        for path in Path.home().glob(pattern)
-    }
-
-    candidates = project_candidates or fallback_candidates
-    if candidates:
-        def _sort_key(path):
-            version = path.parents[1].name
-            parts = []
-            for part in version.split("."):
-                try:
-                    parts.append(int(part))
-                except ValueError:
-                    parts.append(part)
-            return tuple(parts)
-
-        return sorted(candidates, key=_sort_key)
-    return []
+    return install_locations.legacy_iterm2_python_candidates()
 
 
 def _candidate_torque_runtime_pythons():
-    if TORQUE_RUNTIME_PYTHON.is_file():
-        return [TORQUE_RUNTIME_PYTHON.resolve()]
+    runtime_python = install_locations.primary_runtime_python()
+    if runtime_python.is_file():
+        return [runtime_python.resolve()]
     return []
 
 
@@ -829,11 +870,16 @@ def _lsof_pid(port):
 
 def _daemon_stop_pid_from_file(port):
     seen = set()
-    directories = [_resolve_runtime_dir()]
+    directories = [
+        _resolve_runtime_dir(port, prefer_existing_artifact="torque.pid"),
+    ]
     if int(port) == DESKTOP_DEFAULT_PORT:
         directories.append(_resolve_desktop_data_dir(_resolve_desktop_profile()))
     if int(port) == DEFAULT_PORT:
+        directories.append(install_locations.profile_data_dir("standalone"))
         directories.append(PROJECT_ROOT)
+    if _allow_legacy_runtime_fallback():
+        directories.append(_legacy_runtime_dir())
     for directory in directories:
         path = Path(directory).expanduser() / "torque.pid"
         if path in seen:
@@ -6042,6 +6088,7 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    _configure_runtime_paths(args)
 
     if not hasattr(args, "func") or args.func is None:
         # Show help for the subcommand (e.g. "torque agent") or top-level

@@ -62,6 +62,9 @@ class MakefileInstallTests(unittest.TestCase):
             "TOOLBELT_PORT",
             "TORQUE_TOOLBELT_REQUIREMENTS",
             "requirements/toolbelt-legacy.txt",
+            "ITERM2_SCRIPTS",
+            "ITERM2_PROJECT",
+            "SCRIPT_DIR     := $(ITERM2_PROJECT)/torque",
         ):
             with self.subTest(snippet=snippet):
                 self.assertNotIn(snippet, text)
@@ -85,6 +88,20 @@ class MakefileInstallTests(unittest.TestCase):
         ):
             with self.subTest(snippet=snippet):
                 self.assertNotIn(snippet, proc.stdout)
+
+    def test_standalone_bg_pid_file_uses_profile_data_dir(self):
+        proc = self._run_make_dry(
+            "standalone-bg",
+            "TORQUE_RUNTIME_PYTHON=/usr/bin/python3",
+            "PRIMARY_APP_DIR=/tmp/torque-primary-test",
+            "TORQUE_DATA_DIR=",
+            "TORQUE_PROFILE=standalone",
+            "TORQUE_PORT=18932",
+        )
+
+        self.assertIn('pid_file="$data_dir/torque.pid"', proc.stdout)
+        self.assertNotIn("Application Support/iTerm2", proc.stdout)
+        self.assertNotIn("SCRIPT_DIR", proc.stdout)
 
     def test_removed_toolbelt_make_targets_not_advertised_in_first_party_docs(self):
         stale_target_re = re.compile(

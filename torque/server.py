@@ -6085,7 +6085,7 @@ def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | No
 
 
 def _handle_doctor_command(db: TorqueDB) -> dict:
-    return build_doctor_report(db._conn, db.db_path)
+    return build_doctor_report(db._conn, db.db_path, runtime_python=sys.executable)
 
 
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"

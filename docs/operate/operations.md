@@ -107,12 +107,18 @@ Legacy Toolbelt data from older releases may still include a log at:
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log
 ```
 
-Tail it from the CLI:
+Tail the active/default profile from the CLI:
 
 ```bash
 torque logs
 torque logs -f
 ```
+
+By default the CLI targets the desktop profile (`~/.torque/profiles/desktop`).
+Use `TORQUE_PORT=18932` / `torque --port 18932 ...`, `TORQUE_PROFILE`, or
+`TORQUE_DATA_DIR` to inspect a standalone or custom profile. If the primary
+profile log is absent and no explicit profile/data-dir was requested, the CLI
+can fall back to an existing legacy Toolbelt log for migration diagnostics.
 
 ## Notifications
 
@@ -142,7 +148,7 @@ Legacy Toolbelt data from older releases may still include a database at:
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db
 ```
 
-Read-only CLI commands can fall back to SQLite directly, which is why commands like `torque task list` and `torque ai context` can still work even when the daemon is stopped.
+Read-only CLI commands can fall back to SQLite directly, which is why commands like `torque task list` and `torque ai context` can still work even when the daemon is stopped. Offline reads use the desktop profile by default, or the selected profile/data-dir when you pass `TORQUE_PORT=18932`, `--port 18932`, `TORQUE_PROFILE`, or `TORQUE_DATA_DIR`. Legacy Toolbelt DB fallback is only for non-explicit migration diagnostics when no primary profile DB exists.
 
 ## Common Problems
 
@@ -157,11 +163,15 @@ make stop TORQUE_PORT=18933
 ### Old Toolbelt data is missing from the primary app
 
 The primary recovery path is to migrate Toolbelt data to a profile and relaunch
-with the desktop app or standalone browser mode:
+with the desktop app or standalone browser mode. Migration is manual and
+non-destructive; `make deploy` does not delete or move old AppSupport files:
 
 ```bash
 scripts/migrate_toolbelt_to_profile.py
 ```
+
+Run `torque doctor` to see the `[runtime_locations]` section and warnings for
+legacy Toolbelt data or legacy AppSupport Python runtimes.
 
 ### CLI cannot talk to the daemon
 
