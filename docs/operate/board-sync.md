@@ -28,7 +28,7 @@ passes.
 | Project Status field name | Single-select field name, usually `Status`. |
 | Lane → status mapping | JSON map from Torque lane names to Project Status option names. |
 | Close linked issues via PR body | Add PR closing refs; enabled by default. |
-| Create missing labels / Assignee map | Optional label creation and Torque agent/engineer ID → GitHub login JSON. |
+| Create missing labels / Assignee map | Auto-create missing GitHub labels by default; assignee map is Torque agent/engineer ID → GitHub login JSON. |
 
 For scripted setup, use `torque group settings ... -s board_sync_provider=github`
 with a JSON `board_sync_github` value. See [CLI reference](../reference/cli.md#board-sync).
@@ -76,6 +76,6 @@ requires `engineer_merge_mode=pr` or `engineer-choice` without
 - Failures surface as structured `type`/`provider`/`phase`/`error` data in UI,
   panel events, CLI JSON, and task `board_sync`.
 - Common failures: missing `gh`, not logged in, missing `project` scope, repo or
-  project not found, missing Status option, missing labels when label creation
-  is disabled, permission errors, and rate limits. Fix, run **Test connection**,
+  project not found, missing Status option, missing labels only when label creation
+  is explicitly disabled, permission errors, and rate limits. Fix, run **Test connection**,
   then retry sync.

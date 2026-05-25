@@ -1470,6 +1470,26 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   });
 });
 
+test('Group Settings defaults GitHub missing-label creation on when unset', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      board_sync_provider: "github",
+      board_sync_enabled: true,
+      board_sync_github: {
+        github_repo: "acme/widgets"
+      }
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(sandbox.document.getElementById('gs-board-sync-github-create-labels').checked, true);
+});
+
 test('Group Settings board sync project dropdown reloads and selection resolves project draft', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
