@@ -1620,6 +1620,10 @@ test('worktree gitignored symlink checkbox renders and loads from settings', () 
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /id="gs-wt-symlink-gitignored"/);
   assert.match(html, /Symlink gitignored paths/);
+  assert.match(
+    html,
+    /Warning: symlinks every gitignored path, including \.env, secrets,[\s\S]*credentials, and node_modules\.[\s\S]*Workers read and modify the real[\s\S]*files because these are symlinks, not copies\./,
+  );
 
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
