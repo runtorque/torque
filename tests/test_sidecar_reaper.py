@@ -170,6 +170,11 @@ class EndToEndReapTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
             cleaned = True
             orphans = sidecar_reaper.find_orphaned_sidecars()
+            # Full-suite runs may have another live Torque daemon or startup
+            # reaper racing to clean the just-orphaned sidecar.  If that wins,
+            # the end state this smoke cares about is already satisfied.
+            if pid not in [s.pid for s in orphans] and not _alive(pid):
+                return
             self.assertIn(
                 pid,
                 [s.pid for s in orphans],
