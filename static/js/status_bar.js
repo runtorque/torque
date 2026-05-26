@@ -7,6 +7,7 @@
  */
 
 var STATUS_BAR_CLAUDE_PROVIDER = 'claude-code';
+var STATUS_BAR_CODEX_PROVIDER = 'codex';
 var STATUS_BAR_DEPLOY_POLL_INTERVAL_MS = 90000;
 var _statusBarDeployState = null;
 var _statusBarDeployRequestKey = '';
@@ -307,28 +308,36 @@ function _statusBarUsageUsedPct(windowInfo) {
   return NaN;
 }
 
-function _statusBarClaudeProviderUsageFromAgent(agent) {
+function _statusBarProviderUsageFromAgent(agent, provider) {
   if (!agent || typeof agent !== 'object') return null;
+  provider = String(provider || '').trim();
   var agentType = String(agent.agent_type || agent.provider || '').trim();
   var payload = agent.provider_usage;
   if (!payload || typeof payload !== 'object') return null;
 
   // Current backend shape (TORQUE:700): provider_usage is stored directly on
-  // Claude Code agents as {five_hour, seven_day}. Keep a compatibility read for
+  // provider agents as {five_hour, seven_day}. Keep a compatibility read for
   // an older provider-keyed draft, but do not consult the retired top-level
   // state.provider_usage scaffold.
-  if (payload[STATUS_BAR_CLAUDE_PROVIDER]
-      && typeof payload[STATUS_BAR_CLAUDE_PROVIDER] === 'object') {
-    return payload[STATUS_BAR_CLAUDE_PROVIDER];
+  if (provider && payload[provider] && typeof payload[provider] === 'object') {
+    return payload[provider];
   }
-  if (agentType && agentType !== STATUS_BAR_CLAUDE_PROVIDER) return null;
+  if (provider && agentType && agentType !== provider) return null;
   return payload;
 }
 
-function _statusBarClaudeUsageHasAvailableWindow(providerUsage) {
+function _statusBarClaudeProviderUsageFromAgent(agent) {
+  return _statusBarProviderUsageFromAgent(agent, STATUS_BAR_CLAUDE_PROVIDER);
+}
+
+function _statusBarUsageHasAvailableWindow(providerUsage) {
   var five = _statusBarUsageWindow(providerUsage, ['five_hour', '5h', 'fiveHour']);
   var seven = _statusBarUsageWindow(providerUsage, ['seven_day', 'weekly', '7d', 'week', 'sevenDay']);
   return _statusBarUsageWindowAvailable(five) || _statusBarUsageWindowAvailable(seven);
+}
+
+function _statusBarClaudeUsageHasAvailableWindow(providerUsage) {
+  return _statusBarUsageHasAvailableWindow(providerUsage);
 }
 
 function _statusBarAgentFreshness(agent) {
@@ -342,17 +351,17 @@ function _statusBarAgentFreshness(agent) {
   return newest;
 }
 
-function _statusBarSelectClaudeUsage() {
+function _statusBarSelectProviderUsage(provider) {
   var agents = (typeof state !== 'undefined' && state && state.agents) ? state.agents : {};
   var selected = null;
   Object.keys(agents || {}).forEach(function(id) {
     var agent = agents[id];
     if (!agent || _statusBarIsTombstonedAgent(agent)) return;
-    var usage = _statusBarClaudeProviderUsageFromAgent(agent);
-    if (!_statusBarClaudeUsageHasAvailableWindow(usage)) return;
+    var usage = _statusBarProviderUsageFromAgent(agent, provider);
+    if (!_statusBarUsageHasAvailableWindow(usage)) return;
 
-    // Claude 5h/7d limits are account-level quotas shared by every Claude Code
-    // agent for the same user account. Each Claude agent reports the same
+    // 5h/7d limits are account-level quotas shared by every provider's
+    // agents for the same user account. Each provider agent reports the same
     // account numbers, so represent the chip with exactly one available agent
     // payload. Never sum or average multiple agents; that would double-count.
     var freshness = _statusBarAgentFreshness(agent);
@@ -367,21 +376,25 @@ function _statusBarSelectClaudeUsage() {
   return selected;
 }
 
-function _statusBarClaudeUsageView(providerUsage) {
+function _statusBarSelectClaudeUsage() {
+  return _statusBarSelectProviderUsage(STATUS_BAR_CLAUDE_PROVIDER);
+}
+
+function _statusBarProviderUsageView(provider, label, unavailableTitle, payloadTitle, providerAgentLabel, providerUsage) {
   var sourceAgent = null;
   var usage = providerUsage;
   if (usage === undefined) {
-    var selected = _statusBarSelectClaudeUsage();
+    var selected = _statusBarSelectProviderUsage(provider);
     usage = selected ? selected.usage : null;
     sourceAgent = selected ? selected.agent : null;
   }
   if (!usage || typeof usage !== 'object' || !Object.keys(usage).length
-      || !_statusBarClaudeUsageHasAvailableWindow(usage)) {
+      || !_statusBarUsageHasAvailableWindow(usage)) {
     return {
       state: 'unknown',
-      label: 'Claude —',
+      label: label + ' —',
       level: 'unknown',
-      title: 'Claude 5h and weekly usage limits are unavailable until a Claude agent reports available provider_usage.',
+      title: unavailableTitle,
       nextResetAt: 0,
     };
   }
@@ -389,11 +402,11 @@ function _statusBarClaudeUsageView(providerUsage) {
   var five = _statusBarUsageWindow(usage, ['five_hour', '5h', 'fiveHour']);
   var seven = _statusBarUsageWindow(usage, ['seven_day', 'weekly', '7d', 'week', 'sevenDay']);
   var parts = [];
-  var titleLines = ['Claude account usage limits'];
+  var titleLines = [payloadTitle];
   if (sourceAgent) {
-    titleLines.push('Source agent: ' + String(sourceAgent.name || sourceAgent.id || 'Claude agent'));
+    titleLines.push('Source agent: ' + String(sourceAgent.name || sourceAgent.id || providerAgentLabel));
   }
-  titleLines.push('Account-wide quota shared by all Claude Code agents; one agent is selected, not summed.');
+  titleLines.push('Account-wide quota shared by all ' + providerAgentLabel + ' agents; one agent is selected, not summed.');
   var maxUsed = 0;
   var nextResetAt = 0;
 
@@ -420,9 +433,9 @@ function _statusBarClaudeUsageView(providerUsage) {
   if (!parts.length) {
     return {
       state: 'unknown',
-      label: 'Claude —',
+      label: label + ' —',
       level: 'unknown',
-      title: 'Claude usage payload is present but does not include 5h / weekly windows yet.',
+      title: label + ' usage payload is present but does not include 5h / weekly windows yet.',
       nextResetAt: 0,
     };
   }
@@ -430,11 +443,33 @@ function _statusBarClaudeUsageView(providerUsage) {
   var level = maxUsed >= 90 ? 'danger' : (maxUsed >= 70 ? 'warn' : 'normal');
   return {
     state: 'known',
-    label: 'Claude ' + parts.join(' · '),
+    label: label + ' ' + parts.join(' · '),
     level: level,
     title: titleLines.join('\n'),
     nextResetAt: nextResetAt,
   };
+}
+
+function _statusBarClaudeUsageView(providerUsage) {
+  return _statusBarProviderUsageView(
+    STATUS_BAR_CLAUDE_PROVIDER,
+    'Claude',
+    'Claude 5h and weekly usage limits are unavailable until a Claude agent reports available provider_usage.',
+    'Claude account usage limits',
+    'Claude Code',
+    providerUsage
+  );
+}
+
+function _statusBarCodexUsageView(providerUsage) {
+  return _statusBarProviderUsageView(
+    STATUS_BAR_CODEX_PROVIDER,
+    'Codex',
+    'Codex 5h and weekly usage limits are unavailable until a Codex agent reports available provider_usage.',
+    'Codex account usage limits',
+    'Codex',
+    providerUsage
+  );
 }
 
 function _statusBarNormalizeLevel(level) {
@@ -477,16 +512,30 @@ function _statusBarScheduleRefresh(view) {
   }, delay);
 }
 
+function _statusBarNextResetView(views) {
+  var selected = null;
+  (views || []).forEach(function(view) {
+    var resetAt = view && Number(view.nextResetAt || 0);
+    if (!resetAt) return;
+    if (!selected || resetAt < Number(selected.nextResetAt || 0)) {
+      selected = view;
+    }
+  });
+  return selected;
+}
+
 function refreshStatusBar(opts) {
   opts = opts || {};
   var group = String(opts.group === undefined ? _statusBarActiveGroup() : opts.group || '').trim();
   var claudeView = _statusBarClaudeUsageView();
+  var codexView = _statusBarCodexUsageView();
   var deployView = _statusBarDeployView(_statusBarDeployState);
   var agentsView = _statusBarAgentCounts(group);
   var tasksView = _statusBarActiveTaskCount(group);
   var attentionView = _statusBarAttentionCount(group);
 
   _statusBarSetChip(_statusBarElement('statusbar-claude-usage'), claudeView);
+  _statusBarSetChip(_statusBarElement('statusbar-codex-usage'), codexView);
   _statusBarSetChip(_statusBarElement('statusbar-deploy'), deployView);
   _statusBarSetChip(_statusBarElement('statusbar-workload'), {
     visible: true,
@@ -506,7 +555,7 @@ function refreshStatusBar(opts) {
     label: attentionView.label,
     title: attentionView.title,
   });
-  _statusBarScheduleRefresh(claudeView);
+  _statusBarScheduleRefresh(_statusBarNextResetView([claudeView, codexView]));
 }
 
 function statusBarReceiveDeployState(payload) {

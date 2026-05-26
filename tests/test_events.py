@@ -438,6 +438,37 @@ asyncio.run(main())
         self.assertEqual(seen, ["agent-1"])
         self.assertEqual(event_log.get(cell.id)[0].event_type, "session_start")
 
+    async def test_non_session_start_event_can_persist_provider_session_id(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+        )
+        state.agents[cell.id] = cell
+
+        event_log = self.events_mod.EventLog()
+        bus = self.events_mod.EventBus(state, event_log)
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=125.0,
+                event_type="context_update",
+                data={"session_id": "agent-session-from-live-hook"},
+            )
+        )
+
+        self.assertEqual(cell.agent_session_id, "agent-session-from-live-hook")
+        upserts = [op for op in state._delta_ops if op["op"] == "agent_upsert"]
+        self.assertEqual(len(upserts), 1)
+        self.assertEqual(
+            upserts[0]["agent_session_id"],
+            "agent-session-from-live-hook",
+        )
+
     async def test_context_window_updates_do_not_mutate_session_tokens(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

@@ -928,15 +928,22 @@ class CodexAdapter(AgentAdapter):
             raw, now
         )
 
+        def _attach_live_usage(data: dict) -> dict:
+            session_id = raw.get("session_id", "") or raw.get("sessionId", "")
+            if session_id:
+                data["session_id"] = session_id
+            if context_window:
+                data["context_window"] = context_window
+            if provider_usage is not None:
+                data["provider_usage"] = provider_usage
+            return data
+
         if hook_event == "SessionStart":
             data = {
                 "model": raw.get("model", ""),
                 "session_id": raw.get("session_id", ""),
             }
-            if context_window:
-                data["context_window"] = context_window
-            if provider_usage is not None:
-                data["provider_usage"] = provider_usage
+            _attach_live_usage(data)
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_start",
@@ -949,10 +956,7 @@ class CodexAdapter(AgentAdapter):
                 or raw.get("stopReason", "completed"),
                 "summary": raw.get("last_assistant_message") or "",
             }
-            if context_window:
-                data["context_window"] = context_window
-            if provider_usage is not None:
-                data["provider_usage"] = provider_usage
+            _attach_live_usage(data)
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_end",
@@ -971,7 +975,11 @@ class CodexAdapter(AgentAdapter):
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="tool_start",
-                data={"tool": tool, "input": inp, "detail": detail},
+                data=_attach_live_usage({
+                    "tool": tool,
+                    "input": inp,
+                    "detail": detail,
+                }),
             )
 
         if hook_event == "PostToolUse":

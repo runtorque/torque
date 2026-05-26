@@ -116,6 +116,20 @@ def _apply_provider_usage(cell, data: dict | None) -> bool:
     return True
 
 
+def _apply_agent_session_id(cell, data: dict | None) -> bool:
+    if not isinstance(data, dict):
+        return False
+    agent_sid = str(
+        data.get("session_id", "")
+        or data.get("sessionId", "")
+        or ""
+    ).strip()
+    if not agent_sid or agent_sid == getattr(cell, "agent_session_id", ""):
+        return False
+    cell.agent_session_id = agent_sid
+    return True
+
+
 def _effective_owner_engineer_id(cell) -> str:
     owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
     if owner_id:
@@ -903,17 +917,13 @@ class EventBus:
             clear_on_empty=et == "session_start",
         )
         provider_usage_changed = _apply_provider_usage(cell, d)
+        session_id_changed = _apply_agent_session_id(cell, d)
 
         if et == "session_start":
             cell.activity = ""
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
-            # Persist the agent's own session ID for resume support
-            agent_sid = d.get("session_id", "")
-            if agent_sid and agent_sid != cell.agent_session_id:
-                cell.agent_session_id = agent_sid
-                self._state._db_save_agent(cell)
             # Signal the bridge that this agent's TUI is ready for input
             if self.on_session_start:
                 self.on_session_start(cell)
@@ -1003,7 +1013,11 @@ class EventBus:
             # Context-window meter already refreshed above. Deliberately no
             # last_event_text here: surfacing it spammed the agent card status
             # line on every high-frequency context_update.
-            if not context_changed and not provider_usage_changed:
+            if (
+                not context_changed
+                and not provider_usage_changed
+                and not session_id_changed
+            ):
                 return
 
         elif et == "heartbeat":

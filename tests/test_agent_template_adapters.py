@@ -1460,6 +1460,62 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         self.assertIn("context_window", event.data)
         self.assertNotIn("provider_usage", event.data)
 
+    def test_codex_pre_tool_use_attaches_live_session_and_provider_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "rollout.jsonl"
+            transcript.write_text(
+                json.dumps({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {"total_tokens": 1000},
+                            "last_token_usage": {
+                                "input_tokens": 40,
+                                "cached_input_tokens": 10,
+                                "output_tokens": 5,
+                                "reasoning_output_tokens": 1,
+                                "total_tokens": 45,
+                            },
+                            "model_context_window": 1000,
+                        },
+                        "rate_limits": {
+                            "primary": {
+                                "used_percent": 63.8,
+                                "window_minutes": 300,
+                                "resets_at": 1779771600,
+                            },
+                            "secondary": {
+                                "used_percent": 12.2,
+                                "window_minutes": 10080,
+                                "resets_at": 1779787800,
+                            },
+                        },
+                    },
+                }) + "\n"
+            )
+
+            event = CodexAdapter().parse_event(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "session_id": "codex-live-session",
+                    "model": "gpt-5.4",
+                    "transcript_path": str(transcript),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "echo hello"},
+                },
+                SimpleNamespace(id="agent-1"),
+            )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "tool_start")
+        self.assertEqual(event.data["session_id"], "codex-live-session")
+        self.assertEqual(event.data["context_window"]["session_id"], "codex-live-session")
+        self.assertEqual(
+            event.data["provider_usage"]["five_hour"]["used_percentage"],
+            64,
+        )
+
     def test_codex_rate_limits_with_null_window_marks_that_window_unavailable(self):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "rollout.jsonl"
