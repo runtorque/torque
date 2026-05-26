@@ -89,6 +89,42 @@ test('§602: sendUserMessage mints an idempotency_key and records it on the opti
   assert.notEqual(env2.payload.idempotency_key, key, 'each message gets a distinct key');
 });
 
+test('restart command_request queues until ready and dispatches command_result callback', () => {
+  const s = loadBundle();
+  const sockets = [];
+  const results = [];
+  const { client } = makeClient(s, sockets);
+  client._onCommandResult = (env) => results.push(env);
+  client.connect();
+  const env = client.requestRestartAgent('w', {
+    confirm: false,
+    commandId: '123e4567-e89b-42d3-a456-426614174000',
+    nonce: 'nonce-1',
+    issuedAt: '2026-05-26T12:00:00.000Z',
+  });
+  assert.equal(sockets[0].sent.filter((e) => e.kind === 'command_request').length, 0,
+    'not sent while connecting');
+  sockets[0].onmessage({ data: JSON.stringify(ready('d')) });
+  const sent = sockets[0].sent.filter((e) => e.kind === 'command_request');
+  assert.equal(sent.length, 1, 'flushed on ready');
+  assert.equal(sent[0].payload.command_id, env.payload.command_id);
+  sockets[0].onmessage({ data: JSON.stringify({
+    v: 1, id: 'cmd-result-1', daemon_id: 'd',
+    source: { kind: 'daemon', id: 'd' },
+    target: { kind: 'remote-client', id: 'c', user_id: 'user' },
+    kind: 'command_result', created_at: new Date().toISOString(),
+    payload: {
+      ref_command_id: env.payload.command_id,
+      ok: false,
+      status: 'confirmation_required',
+      error_code: 'confirmation_required',
+      message: 'confirm',
+    },
+  }) });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].payload.status, 'confirmation_required');
+});
+
 test('snapshot_request is sent on ready (recent-history-on-connect)', () => {
   const s = loadBundle();
   const sockets = [];

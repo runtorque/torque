@@ -35,7 +35,10 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
-from .remote_ingress import ingest_remote_user_agent_message
+from .remote_ingress import (
+    ingest_remote_command_request,
+    ingest_remote_user_agent_message,
+)
 from .direct_message_mirrors import (
     ask_recipient_is_user,
     ask_task_labels_for_owner_recipient,
@@ -10841,6 +10844,47 @@ async def main(connection=None):
             handler=_handle_user_agent_message_command,
         )
 
+    async def _ingest_remote_command(payload: dict) -> dict:
+        async def _dispatch_remote_command(command: dict) -> dict | None:
+            if command.get("cmd") != "restart_agent":
+                return {
+                    "type": "error",
+                    "code": "unsupported_command",
+                    "message": "unsupported remote command",
+                }
+            return await _handle_restart_agent_command(
+                command,
+                state,
+                bridge=bridge,
+                worktree_mgr=worktree_mgr,
+                resolve_base_dir=_resolve_base_dir,
+                resolve_agent_launch_config=_resolve_agent_launch_config,
+                resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                resolve_architect_launch_config=_resolve_architect_launch_config,
+                resolve_worker_launch_config=_resolve_worker_launch_config,
+                apply_persistent_prompt=_apply_persistent_prompt,
+                build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                persistent_prompt_filename=_persistent_prompt_filename,
+                is_designated_engineer=_is_designated_engineer,
+                send_agent_prompt=_send_agent_prompt,
+            )
+
+        result = await ingest_remote_command_request(
+            payload,
+            state=state,
+            handler=_dispatch_remote_command,
+        )
+        log.info(
+            "Relay remote command audit: command_id=%s cmd=%s args=%s status=%s ok=%s error=%s",
+            payload.get("command_id", ""),
+            payload.get("cmd", ""),
+            payload.get("args", {}),
+            result.get("status", ""),
+            result.get("ok", False),
+            result.get("error_code", ""),
+        )
+        return result
+
     def _recent_user_direct_messages(limit: int) -> list[dict]:
         """Bounded recent user↔agent rows for the remote snapshot-on-open.
 
@@ -10876,6 +10920,7 @@ async def main(connection=None):
         return cloud_hooks.CloudConnectorContext(
             state=state,
             remote_user_agent_message=_ingest_remote_user_agent_message,
+            remote_command=_ingest_remote_command,
             recent_direct_messages=_recent_user_direct_messages,
             agent_roster=lambda: _relay_agent_roster(state),
             agent_state_snapshot=lambda: _relay_agent_state_snapshot(state),

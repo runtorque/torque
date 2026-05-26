@@ -73,6 +73,7 @@ function loadApp(rawConfig, opts = {}) {
     'remote-agent-picker': makeElement('remote-agent-picker'),
     'remote-agent-list': makeElement('remote-agent-list'),
     'remote-conversation': makeElement('remote-conversation'),
+    'remote-command-panel': makeElement('remote-command-panel'),
     'remote-composer': makeElement('remote-composer'),
     'remote-composer-input': makeElement('remote-composer-input'),
     'remote-history-notice': makeElement('remote-history-notice'),
@@ -92,6 +93,7 @@ function loadApp(rawConfig, opts = {}) {
     __connectCalls: 0,
     __clientConstructs: 0,
     __sendCalls: [],
+    __restartCalls: [],
     __setActiveAgentCalls: [],
   };
   sandbox.global = sandbox;
@@ -152,6 +154,9 @@ function loadApp(rawConfig, opts = {}) {
   };
   RemoteRelayClient.prototype.sendUserMessage = function(agentId, text, options) {
     sandbox.__sendCalls.push({ agentId, text, options });
+  };
+  RemoteRelayClient.prototype.requestRestartAgent = function(agentId, options) {
+    sandbox.__restartCalls.push({ agentId, options });
   };
   sandbox.RemoteRelayClient = RemoteRelayClient;
 
@@ -266,6 +271,48 @@ test('composer Shift+Enter keeps the default textarea newline and does not send'
   assert.equal(ev.defaultPrevented, false, 'Shift+Enter is left to the textarea');
   assert.deepEqual(s.__sendCalls, []);
   assert.equal(input.value, 'line one\n');
+});
+
+test('restart control sends an unconfirmed command then confirmed command after command_result gate', () => {
+  const s = loadApp(validConfig(), {
+    activeAgentId: 'agent-1',
+    agentList: [{ agentId: 'agent-1', agentName: 'Agent One', lastBody: '' }],
+    conversations: { 'agent-1': { agentId: 'agent-1', agentName: 'Agent One', messages: [] } },
+  });
+  const list = s.__elements['remote-agent-list'];
+  const restartTarget = {
+    getAttribute(name) {
+      if (name === 'data-agent-command') return 'restart_agent';
+      if (name === 'data-agent-id') return 'agent-1';
+      return null;
+    },
+    closest(selector) { return selector === '[data-agent-command]' ? this : null; },
+  };
+  list.dispatchEvent(makeEvent('click', { target: restartTarget }));
+  assert.equal(s.__restartCalls.length, 1);
+  assert.equal(s.__restartCalls[0].agentId, 'agent-1');
+  assert.equal(s.__restartCalls[0].options.confirm, false);
+
+  s.__torqueRemote.client.opts.onCommandResult({
+    payload: {
+      ref_command_id: '123e4567-e89b-42d3-a456-426614174000',
+      ok: false,
+      status: 'confirmation_required',
+      message: 'confirm restart',
+    },
+  });
+  assert.match(s.__elements['remote-command-panel'].innerHTML, /Confirm restart/);
+
+  const confirmTarget = {
+    getAttribute(name) {
+      return name === 'data-command-panel-action' ? 'confirm-restart' : null;
+    },
+    closest(selector) { return selector === '[data-command-panel-action]' ? this : null; },
+  };
+  s.__elements['remote-command-panel'].dispatchEvent(makeEvent('click', { target: confirmTarget }));
+  assert.equal(s.__restartCalls.length, 2);
+  assert.equal(s.__restartCalls[1].agentId, 'agent-1');
+  assert.equal(s.__restartCalls[1].options.confirm, true);
 });
 
 test('composer Enter on whitespace input follows the submit guard and does not send', () => {
