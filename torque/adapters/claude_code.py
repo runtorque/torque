@@ -194,6 +194,97 @@ def _torque_statusline_command(working_dir: str) -> str:
     return "python3 " + shlex.quote(str(_statusline_proxy_file(working_dir)))
 
 
+def _read_statusline_setting(settings_file: Path) -> tuple[bool, object]:
+    try:
+        text = settings_file.read_text().strip()
+        if not text:
+            return False, None
+        settings = json.loads(text)
+    except Exception:
+        return False, None
+    if not isinstance(settings, dict) or "statusLine" not in settings:
+        return False, None
+    return True, settings.get("statusLine")
+
+
+def _effective_global_statusline() -> tuple[bool, object]:
+    """Return Claude's effective user-global statusLine setting.
+
+    Claude applies ~/.claude/settings.json first and
+    ~/.claude/settings.local.json after it.  A statusLine entry in the latter
+    therefore overrides the former; absence in the latter leaves the former in
+    effect.
+    """
+    claude_home = Path.home() / ".claude"
+    present = False
+    value = None
+    for settings_file in (
+        claude_home / "settings.json",
+        claude_home / "settings.local.json",
+    ):
+        has_value, candidate = _read_statusline_setting(settings_file)
+        if has_value:
+            present = True
+            value = candidate
+    return present, value
+
+
+def _capture_statusline_original(settings: dict) -> dict:
+    if "statusLine" in settings:
+        return {
+            "present": True,
+            "value": settings.get("statusLine"),
+            "source": "project",
+        }
+
+    global_present, global_value = _effective_global_statusline()
+    if global_present:
+        return {
+            "present": True,
+            "value": global_value,
+            "source": "global",
+        }
+
+    return {
+        "present": False,
+        "value": None,
+        "source": "none",
+    }
+
+
+def _capture_non_project_statusline_original(settings: dict) -> dict:
+    without_statusline = dict(settings or {})
+    without_statusline.pop("statusLine", None)
+    return _capture_statusline_original(without_statusline)
+
+
+def _should_refresh_torque_statusline_original(original_file: Path) -> bool:
+    """Return true when an existing Torque proxy should recapture globals.
+
+    Pre-source markers from older Torque installs recorded
+    {"present": false, "value": null} when there was no project-local
+    statusLine.  Those markers must be upgraded on reinstall so already
+    touched directories can start chaining to the effective global statusLine.
+    Legacy present=true markers are kept because older Torque only captured
+    project-local originals, and overwriting them would lose the user's local
+    command.
+    """
+    if not original_file.exists():
+        return True
+    try:
+        data = json.loads(original_file.read_text() or "{}")
+    except Exception:
+        return True
+    if not isinstance(data, dict):
+        return True
+    source = data.get("source")
+    if source in {"global", "none"}:
+        return True
+    if source == "project":
+        return False
+    return not data.get("present")
+
+
 def _statusline_proxy_source(original_file: Path, event_url: str) -> str:
     """Return the Torque-managed Claude statusLine proxy script."""
     original_path = json.dumps(str(original_file))
@@ -279,18 +370,64 @@ def _statusline_proxy_source(original_file: Path, event_url: str) -> str:
 
 
         def _neutral_status(payload):
+            parts = []
+            model = payload.get("model")
+            if isinstance(model, dict):
+                model_name = str(
+                    model.get("display_name")
+                    or model.get("displayName")
+                    or model.get("name")
+                    or model.get("id")
+                    or ""
+                ).strip()
+            else:
+                model_name = str(model or "").strip()
+            if model_name:
+                parts.append(model_name)
+
+            workspace = payload.get("workspace")
+            if not isinstance(workspace, dict):
+                workspace = {{}}
+            cwd = str(
+                workspace.get("current_dir")
+                or workspace.get("currentDir")
+                or payload.get("cwd")
+                or ""
+            ).strip()
+            if cwd:
+                parts.append(cwd)
+
+            branch = str(
+                payload.get("gitBranch")
+                or payload.get("git_branch")
+                or workspace.get("git_branch")
+                or workspace.get("gitBranch")
+                or ""
+            ).strip()
+            if branch:
+                parts.append(branch)
+
             context = payload.get("context_window")
             if not isinstance(context, dict):
                 context = {{}}
-            pct = context.get("used_percentage")
+            pct = (
+                context.get("used_percentage")
+                if context.get("used_percentage") is not None
+                else context.get("usedPercentage")
+            )
+            if pct is None:
+                pct = context.get("used_pct")
+            if pct is None:
+                pct = context.get("usedPct")
             try:
                 pct = float(pct)
             except Exception:
                 pct = None
             if pct is None:
-                sys.stdout.write("ctx --\\n")
+                parts.append("ctx --")
             else:
-                sys.stdout.write(f"ctx {{pct:.0f}}%\\n")
+                parts.append(f"ctx {{pct:.0f}}%")
+            sys.stdout.write(" · ".join(parts) + "\\n")
 
 
         def main():
@@ -315,13 +452,13 @@ def _install_statusline_proxy(working_dir: str, settings: dict) -> None:
     if not _is_torque_statusline_entry(existing):
         original_file.parent.mkdir(parents=True, exist_ok=True)
         original_file.write_text(
-            json.dumps(
-                {
-                    "present": "statusLine" in settings,
-                    "value": existing,
-                },
-                indent=2,
-            )
+            json.dumps(_capture_statusline_original(settings), indent=2)
+            + "\n"
+        )
+    elif _should_refresh_torque_statusline_original(original_file):
+        original_file.parent.mkdir(parents=True, exist_ok=True)
+        original_file.write_text(
+            json.dumps(_capture_non_project_statusline_original(settings), indent=2)
             + "\n"
         )
 
@@ -346,7 +483,9 @@ def _restore_statusline_setting(working_dir: str, settings: dict | None) -> None
             and original_file.exists()
         ):
             data = json.loads(original_file.read_text() or "{}")
-            if data.get("present"):
+            if data.get("source") == "global":
+                settings.pop("statusLine", None)
+            elif data.get("present"):
                 settings["statusLine"] = data.get("value")
             else:
                 settings.pop("statusLine", None)

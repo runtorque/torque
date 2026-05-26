@@ -30,6 +30,36 @@ def _claude_mcp_config_worker(args):
     return True
 
 
+def _start_statusline_event_server(received: queue.Queue, *, marker_file: Path | None = None, requests: int = 1):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            received.put({
+                "path": self.path,
+                "cell_id": self.headers.get("X-Torque-Cell-Id", ""),
+                "body": json.loads(body.decode("utf-8")),
+            })
+            if marker_file is not None:
+                marker_file.write_text("posted")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, fmt, *args):
+            pass
+
+    server = http.server.HTTPServer(("localhost", 0), Handler)
+
+    def serve():
+        for _ in range(requests):
+            server.handle_request()
+
+    thread = threading.Thread(target=serve)
+    thread.daemon = True
+    thread.start()
+    return server, thread
+
+
 class AgentTemplateAdapterTests(unittest.TestCase):
     def test_claude_inject_system_prompt_writes_instructions_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -330,6 +360,11 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertTrue(
                 (Path(tmp) / ".torque" / "claude-statusline-original.json").exists()
             )
+            original_capture = json.loads(
+                (Path(tmp) / ".torque" / "claude-statusline-original.json").read_text()
+            )
+            self.assertEqual(original_capture["source"], "project")
+            self.assertEqual(original_capture["value"], original_statusline)
 
             payload = {
                 "session_id": "claude-session-1",
@@ -360,18 +395,76 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 (Path(tmp) / ".torque" / "claude-statusline-original.json").exists()
             )
 
-    def test_claude_statusline_proxy_takes_over_without_project_local_statusline(self):
-        with tempfile.TemporaryDirectory() as tmp:
+    def test_claude_statusline_proxy_chains_effective_global_statusline_and_posts(self):
+        received = queue.Queue()
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
+            marker_file = Path(tmp) / "post-before-chain"
+            server, thread = _start_statusline_event_server(
+                received,
+                marker_file=marker_file,
+            )
+            self.addCleanup(server.server_close)
+            self.addCleanup(thread.join, 5)
+
             adapter = ClaudeCodeAdapter()
             settings_file = Path(tmp) / ".claude" / "settings.local.json"
             settings_file.parent.mkdir(parents=True, exist_ok=True)
             settings_file.write_text(json.dumps({"theme": "dark"}))
+            global_dir = Path(home) / ".claude"
+            global_dir.mkdir(parents=True, exist_ok=True)
+            base_script = Path(tmp) / "base_global_statusline.py"
+            base_script.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "sys.stdout.write('BASE-GLOBAL')\n"
+            )
+            base_script.chmod(0o755)
+            local_script = Path(tmp) / "local_global_statusline.py"
+            local_script.write_text(
+                "\n".join([
+                    "#!/usr/bin/env python3",
+                    "import json, os, sys",
+                    "payload = json.load(sys.stdin)",
+                    f"marker = {json.dumps(str(marker_file))}",
+                    "sys.stdout.write("
+                    "'GLOBAL-LINE:'"
+                    " + payload.get('session_id', '')"
+                    " + ':'"
+                    " + str(os.path.exists(marker))"
+                    ")",
+                    "",
+                ])
+            )
+            local_script.chmod(0o755)
+            base_statusline = {
+                "type": "command",
+                "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(base_script))}",
+            }
+            effective_statusline = {
+                "type": "command",
+                "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(local_script))}",
+            }
+            (global_dir / "settings.json").write_text(
+                json.dumps({"statusLine": base_statusline})
+            )
+            (global_dir / "settings.local.json").write_text(
+                json.dumps({"statusLine": effective_statusline})
+            )
 
-            with mock.patch.dict(os.environ, {"TORQUE_PORT": "1"}, clear=False):
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": home, "TORQUE_PORT": str(server.server_port)},
+                clear=False,
+            ):
                 self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(settings_file.read_text())
             proxy = installed["statusLine"]
+            original_capture = json.loads(
+                (Path(tmp) / ".torque" / "claude-statusline-original.json").read_text()
+            )
+            self.assertEqual(original_capture["source"], "global")
+            self.assertEqual(original_capture["value"], effective_statusline)
             payload = {
                 "session_id": "claude-session-1",
                 "context_window": {
@@ -391,7 +484,253 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout.decode("utf-8"), "ctx 25%\n")
+            self.assertEqual(
+                result.stdout.decode("utf-8"),
+                "GLOBAL-LINE:claude-session-1:True",
+            )
+            posted = received.get(timeout=5)
+            self.assertEqual(posted["path"], "/events")
+            self.assertEqual(posted["cell_id"], "agent-1")
+            self.assertEqual(posted["body"]["hook_event_name"], "StatusLine")
+            self.assertEqual(posted["body"]["session_id"], "claude-session-1")
+
+            adapter.uninstall_hooks(tmp)
+
+            cleaned = json.loads(settings_file.read_text())
+            self.assertNotIn("statusLine", cleaned)
+            self.assertEqual(cleaned["theme"], "dark")
+            self.assertFalse(
+                (Path(tmp) / ".torque" / "claude-statusline-original.json").exists()
+            )
+            self.assertFalse(
+                (Path(tmp) / ".torque" / "claude-statusline-proxy.py").exists()
+            )
+
+        server.server_close()
+        thread.join(timeout=5)
+
+    def test_claude_statusline_proxy_recaptures_legacy_missing_marker_on_reinstall(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
+            adapter = ClaudeCodeAdapter()
+            root = Path(tmp)
+            settings_file = root / ".claude" / "settings.local.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            settings_file.write_text(
+                json.dumps(
+                    {
+                        "theme": "dark",
+                        "statusLine": {
+                            "type": "command",
+                            "command": (
+                                "python3 "
+                                + shlex.quote(
+                                    str(root / ".torque" / "claude-statusline-proxy.py")
+                                )
+                            ),
+                        },
+                    }
+                )
+            )
+            original_file = root / ".torque" / "claude-statusline-original.json"
+            original_file.parent.mkdir(parents=True, exist_ok=True)
+            original_file.write_text(
+                json.dumps({"present": False, "value": None}) + "\n"
+            )
+
+            global_dir = Path(home) / ".claude"
+            global_dir.mkdir(parents=True, exist_ok=True)
+            global_script = root / "global_statusline.py"
+            global_script.write_text(
+                "\n".join([
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "payload = json.load(sys.stdin)",
+                    "sys.stdout.write('GLOBAL-LINE:' + payload.get('session_id', ''))",
+                    "",
+                ])
+            )
+            global_script.chmod(0o755)
+            global_statusline = {
+                "type": "command",
+                "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(global_script))}",
+            }
+            (global_dir / "settings.json").write_text(
+                json.dumps({"statusLine": global_statusline})
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": home, "TORQUE_PORT": "1"},
+                clear=False,
+            ):
+                self.assertTrue(adapter.install_hooks(str(root)))
+
+            installed = json.loads(settings_file.read_text())
+            proxy = installed["statusLine"]
+            recaptured = json.loads(original_file.read_text())
+            self.assertEqual(recaptured["source"], "global")
+            self.assertEqual(recaptured["value"], global_statusline)
+
+            result = subprocess.run(
+                proxy["command"],
+                shell=True,
+                input=json.dumps(
+                    {
+                        "session_id": "legacy-session",
+                        "context_window": {"used_percentage": 9},
+                    }
+                ).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={**os.environ, "TORQUE_CELL_ID": "agent-1", "TORQUE_PORT": "1"},
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.decode("utf-8"), "GLOBAL-LINE:legacy-session")
+
+            adapter.uninstall_hooks(str(root))
+
+            cleaned = json.loads(settings_file.read_text())
+            self.assertEqual(cleaned, {"theme": "dark"})
+            self.assertFalse(original_file.exists())
+
+    def test_claude_statusline_proxy_preserves_legacy_project_marker_on_reinstall(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
+            adapter = ClaudeCodeAdapter()
+            root = Path(tmp)
+            settings_file = root / ".claude" / "settings.local.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            settings_file.write_text(
+                json.dumps(
+                    {
+                        "theme": "dark",
+                        "statusLine": {
+                            "type": "command",
+                            "command": (
+                                "python3 "
+                                + shlex.quote(
+                                    str(root / ".torque" / "claude-statusline-proxy.py")
+                                )
+                            ),
+                        },
+                    }
+                )
+            )
+
+            project_script = root / "project_statusline.py"
+            project_script.write_text(
+                "\n".join([
+                    "#!/usr/bin/env python3",
+                    "import json, sys",
+                    "payload = json.load(sys.stdin)",
+                    "sys.stdout.write('PROJECT-LINE:' + payload.get('session_id', ''))",
+                    "",
+                ])
+            )
+            project_script.chmod(0o755)
+            project_statusline = {
+                "type": "command",
+                "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(project_script))}",
+            }
+            original_file = root / ".torque" / "claude-statusline-original.json"
+            original_file.parent.mkdir(parents=True, exist_ok=True)
+            original_file.write_text(
+                json.dumps({"present": True, "value": project_statusline}) + "\n"
+            )
+
+            global_dir = Path(home) / ".claude"
+            global_dir.mkdir(parents=True, exist_ok=True)
+            (global_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "statusLine": {
+                            "type": "command",
+                            "command": "printf global-line",
+                        }
+                    }
+                )
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": home, "TORQUE_PORT": "1"},
+                clear=False,
+            ):
+                self.assertTrue(adapter.install_hooks(str(root)))
+
+            installed = json.loads(settings_file.read_text())
+            proxy = installed["statusLine"]
+            preserved = json.loads(original_file.read_text())
+            self.assertNotIn("source", preserved)
+            self.assertEqual(preserved["value"], project_statusline)
+
+            result = subprocess.run(
+                proxy["command"],
+                shell=True,
+                input=json.dumps({"session_id": "project-session"}).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={**os.environ, "TORQUE_CELL_ID": "agent-1", "TORQUE_PORT": "1"},
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.decode("utf-8"), "PROJECT-LINE:project-session")
+
+            adapter.uninstall_hooks(str(root))
+
+            cleaned = json.loads(settings_file.read_text())
+            self.assertEqual(cleaned["theme"], "dark")
+            self.assertEqual(cleaned["statusLine"], project_statusline)
+
+    def test_claude_statusline_proxy_takes_over_without_project_local_statusline(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
+            adapter = ClaudeCodeAdapter()
+            settings_file = Path(tmp) / ".claude" / "settings.local.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            settings_file.write_text(json.dumps({"theme": "dark"}))
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": home, "TORQUE_PORT": "1"},
+                clear=False,
+            ):
+                self.assertTrue(adapter.install_hooks(tmp))
+
+            installed = json.loads(settings_file.read_text())
+            proxy = installed["statusLine"]
+            original_capture = json.loads(
+                (Path(tmp) / ".torque" / "claude-statusline-original.json").read_text()
+            )
+            self.assertEqual(original_capture["source"], "none")
+            self.assertFalse(original_capture["present"])
+            payload = {
+                "session_id": "claude-session-1",
+                "model": {"display_name": "Claude Sonnet"},
+                "workspace": {"current_dir": "/tmp/project"},
+                "gitBranch": "feature/statusline",
+                "context_window": {
+                    "context_window_size": 200000,
+                    "used_percentage": 25,
+                    "total_tokens": 50000,
+                },
+            }
+            result = subprocess.run(
+                proxy["command"],
+                shell=True,
+                input=json.dumps(payload).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={**os.environ, "TORQUE_CELL_ID": "agent-1", "TORQUE_PORT": "1"},
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(
+                result.stdout.decode("utf-8"),
+                "Claude Sonnet · /tmp/project · feature/statusline · ctx 25%\n",
+            )
 
             adapter.uninstall_hooks(tmp)
 
@@ -399,37 +738,65 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn("statusLine", cleaned)
             self.assertEqual(cleaned["theme"], "dark")
 
+    def test_claude_statusline_global_capture_uninstall_leaves_no_shadow_in_roots(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
+            global_dir = Path(home) / ".claude"
+            global_dir.mkdir(parents=True, exist_ok=True)
+            global_statusline = {
+                "type": "command",
+                "command": "printf global-statusline",
+            }
+            (global_dir / "settings.json").write_text(
+                json.dumps({"statusLine": global_statusline})
+            )
+            adapter = ClaudeCodeAdapter()
+
+            for root_name in ("repo-root", "worktree"):
+                with self.subTest(root_name=root_name):
+                    root = Path(tmp) / root_name
+                    settings_file = root / ".claude" / "settings.local.json"
+                    settings_file.parent.mkdir(parents=True, exist_ok=True)
+                    settings_file.write_text(json.dumps({"theme": root_name}))
+
+                    with mock.patch.dict(
+                        os.environ,
+                        {"HOME": home, "TORQUE_PORT": "1"},
+                        clear=False,
+                    ):
+                        self.assertTrue(adapter.install_hooks(str(root)))
+
+                    installed = json.loads(settings_file.read_text())
+                    self.assertIn("claude-statusline-proxy.py", installed["statusLine"]["command"])
+                    original_file = root / ".torque" / "claude-statusline-original.json"
+                    original_capture = json.loads(original_file.read_text())
+                    self.assertEqual(original_capture["source"], "global")
+                    self.assertEqual(original_capture["value"], global_statusline)
+
+                    adapter.uninstall_hooks(str(root))
+
+                    cleaned = json.loads(settings_file.read_text())
+                    self.assertEqual(cleaned, {"theme": root_name})
+                    self.assertFalse(original_file.exists())
+                    self.assertFalse(
+                        (root / ".torque" / "claude-statusline-proxy.py").exists()
+                    )
+
     def test_claude_statusline_proxy_bakes_install_time_port(self):
         received = queue.Queue()
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_POST(self):
-                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                received.put({
-                    "path": self.path,
-                    "cell_id": self.headers.get("X-Torque-Cell-Id", ""),
-                    "body": json.loads(body.decode("utf-8")),
-                })
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"{}")
-
-            def log_message(self, fmt, *args):
-                pass
-
-        server = http.server.HTTPServer(("localhost", 0), Handler)
-        thread = threading.Thread(target=server.handle_request)
-        thread.daemon = True
-        thread.start()
+        server, thread = _start_statusline_event_server(received)
         try:
             port = str(server.server_port)
-            with tempfile.TemporaryDirectory() as tmp:
+            with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
                 adapter = ClaudeCodeAdapter()
                 settings_file = Path(tmp) / ".claude" / "settings.local.json"
                 settings_file.parent.mkdir(parents=True, exist_ok=True)
                 settings_file.write_text(json.dumps({"theme": "dark"}))
 
-                with mock.patch.dict(os.environ, {"TORQUE_PORT": port}, clear=False):
+                with mock.patch.dict(
+                    os.environ,
+                    {"HOME": home, "TORQUE_PORT": port},
+                    clear=False,
+                ):
                     self.assertTrue(adapter.install_hooks(tmp))
 
                 installed = json.loads(settings_file.read_text())
@@ -437,9 +804,16 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 proxy_source = (Path(tmp) / ".torque" / "claude-statusline-proxy.py").read_text()
                 self.assertIn(f"http://localhost:{port}/events", proxy_source)
                 self.assertNotIn('os.environ.get("TORQUE_PORT")', proxy_source)
+                self.assertLess(
+                    proxy_source.index("payload = _post_event(raw)"),
+                    proxy_source.index("if not _forward_original(raw):"),
+                )
 
                 payload = {
                     "session_id": "claude-session-1",
+                    "model": {"display_name": "Claude Sonnet"},
+                    "workspace": {"current_dir": "/tmp/project"},
+                    "gitBranch": "feature/statusline",
                     "context_window": {
                         "context_window_size": 200000,
                         "used_percentage": 25,
@@ -460,7 +834,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
 
                 self.assertEqual(result.returncode, 0)
-                self.assertEqual(result.stdout.decode("utf-8"), "ctx 25%\n")
+                self.assertEqual(
+                    result.stdout.decode("utf-8"),
+                    "Claude Sonnet · /tmp/project · feature/statusline · ctx 25%\n",
+                )
                 posted = received.get(timeout=5)
                 self.assertEqual(posted["path"], "/events")
                 self.assertEqual(posted["cell_id"], "agent-1")
