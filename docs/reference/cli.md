@@ -476,6 +476,10 @@ commands (`board import/link/open/push/comment`) remain available; `board sync`
 uses the configured board-sync provider for the group. See the
 [operator guide](../operate/board-sync.md) for setup and recovery.
 
+GitHub-enabled groups auto-push top-level product task creates and meaningful
+local board mutations. `board sync push` is still useful as an explicit
+force/retry/recovery command.
+
 ```bash
 torque group settings backend -s \
   board_sync_provider=github \
@@ -491,8 +495,8 @@ torque board sync pull --preview --group backend
 | Command | Description |
 |---|---|
 | `board sync test -g GROUP` | Run provider preflight checks for a group. |
-| `board sync push TASK` | Queue one task for provider sync. |
-| `board sync push --group GROUP` | Queue every task in a group for provider sync. |
+| `board sync push TASK` | Force-queue one task for provider sync. |
+| `board sync push --group GROUP` | Queue every task in a group for provider sync as an explicit recovery push. |
 | `board sync pull --preview TASK` | Preview remote changes for one task. |
 | `board sync pull --preview --group GROUP` | Preview remote changes for each task in a group. |
 

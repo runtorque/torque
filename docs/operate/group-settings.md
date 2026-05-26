@@ -36,8 +36,11 @@ and the lane → Status JSON map. The **Test connection** button runs the same
 preflight as `torque board sync test -g GROUP` and surfaces `gh` auth, missing
 `project` scope, repo, project, and Status-field failures.
 
-See [Board sync operator guide](board-sync.md) for setup, PR closing refs,
-manual pull preview/apply, limitations, and recovery.
+Enabled groups auto-push top-level product task creates and meaningful board
+mutations through a debounced background sync. Manual Sync now remains the
+force/retry path, and pull preview/apply remains operator-gated. See
+[Board sync operator guide](board-sync.md) for setup, auto-sync behavior, PR
+closing refs, manual pull preview/apply, limitations, and recovery.
 
 ## Group → Worker defaults and Workers tab
 

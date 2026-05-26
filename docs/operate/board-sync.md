@@ -38,15 +38,32 @@ configured. Missing project scope errors include `gh auth refresh -s project`.
 
 ## Status mapping
 
-Torque maps **lane → Project Status option**. If a lane is not in
-`github_lane_status_map`, the lane name itself is used. Option names must match
-the configured Status field exactly, so create GitHub options such as `Todo`,
-`In Progress`, and `Done` before enabling writes.
+Torque maps **lane → Project Status option**. If a task has a non-empty
+pipeline `status` and `github_lane_status_map` contains an explicit key for
+that status, the status mapping wins; otherwise the lane mapping/fallback is
+used. Option names must match the configured Status field exactly, so create
+GitHub options such as `Todo`, `In Progress`, `Review`, and `Done` before
+enabling writes.
 
 ## Push, pull, and apply
 
-Use a card context menu or the task modal to create/push the GitHub issue, sync
-now, pull-preview, or toggle **Track this task for GitHub sync**.
+When GitHub sync is enabled for a group, Torque automatically pushes local
+top-level product tasks after meaningful board mutations: create, title/body,
+labels, lane/status, assignee, and external-link changes. Automatic pushes are
+debounced and coalesced (roughly a 1s trailing delay with a 5s max window), so a
+burst of card edits produces one latest-state GitHub update instead of one API
+call per keystroke or drag.
+
+Auto-create is intentionally limited to top-level user/architect product tasks.
+Derived pipeline children, review/fix/ask tasks, schedule-created internal
+tasks, and other orchestration nodes are not mirrored by default. Use the task
+modal's **Track this task for GitHub sync** / explicit task-level sync opt-in if
+an excluded task should be mirrored.
+
+Manual **Sync now** remains available from the card context menu, task modal,
+and CLI as a force/retry/recovery path. Pull preview and apply remain
+operator-gated; there are no automatic inbound webhooks or background polling in
+this scope.
 
 ```bash
 torque board sync test -g backend
@@ -73,6 +90,10 @@ requires `engineer_merge_mode=pr` or `engineer-choice` without
 - GitHub Issues + Projects v2 only; Projects classic is not supported.
 - No webhooks or background polling in V1. Remote changes require manual pull
   preview; new external issues are not auto-imported without an operator gate.
+- Automatic pushes use an idempotent outbound hash and short-lived GitHub
+  metadata caches to reduce no-op API calls. Transient failures such as rate
+  limits or network timeouts are retried with bounded backoff; configuration
+  errors wait for a new mutation or manual Sync now.
 - Failures surface as structured `type`/`provider`/`phase`/`error` data in UI,
   panel events, CLI JSON, and task `board_sync`.
 - Common failures: missing `gh`, not logged in, missing `project` scope, repo or

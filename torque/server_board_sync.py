@@ -492,6 +492,7 @@ class BoardSyncManager:
         auto_track = (
             group_auto_tracks_new_tasks(settings)
             and task_allows_auto_create_for_board_sync(task)
+            and not self._task_is_schedule_created(task)
         )
         if not (force or explicit or tracked or auto_track):
             return {"ok": False, "queued": False, "reason": "task_not_tracked"}
@@ -1167,6 +1168,17 @@ class BoardSyncManager:
             provider = self.provider_factory(provider_name)
             self._provider_cache[provider_name] = provider
         return provider
+
+    def _task_is_schedule_created(self, task: BoardTask | None) -> bool:
+        if not task:
+            return False
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if not task_id:
+            return False
+        for schedule in getattr(self.state, "schedules", {}).values():
+            if str(getattr(schedule, "last_task_id", "") or "").strip() == task_id:
+                return True
+        return False
 
     def _wake(self) -> None:
         if self._wake_event is not None:
