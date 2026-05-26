@@ -7,10 +7,13 @@
  */
 
 var STATUS_BAR_CLAUDE_PROVIDER = 'claude-code';
+var STATUS_BAR_DEPLOY_POLL_INTERVAL_MS = 90000;
 var _statusBarDeployState = null;
 var _statusBarDeployRequestKey = '';
 var _statusBarDeployRequestedAt = 0;
 var _statusBarRefreshTimer = 0;
+var _statusBarDeployPollTimer = 0;
+var _statusBarVisibilityListenerInstalled = false;
 
 function _statusBarNowMs() {
   return Date.now();
@@ -19,6 +22,14 @@ function _statusBarNowMs() {
 function _statusBarElement(id) {
   if (typeof document === 'undefined' || !document.getElementById) return null;
   return document.getElementById(id);
+}
+
+function _statusBarDocumentHidden() {
+  return !!(
+    typeof document !== 'undefined'
+    && document
+    && document.hidden
+  );
 }
 
 function _statusBarActiveGroup() {
@@ -524,6 +535,68 @@ function statusBarRequestDeployState(opts) {
   return true;
 }
 
+function _statusBarClearDeployPollTimer() {
+  if (_statusBarDeployPollTimer && typeof clearTimeout === 'function') {
+    clearTimeout(_statusBarDeployPollTimer);
+  }
+  _statusBarDeployPollTimer = 0;
+}
+
+function _statusBarScheduleDeployPoll() {
+  if (_statusBarDocumentHidden()) {
+    _statusBarClearDeployPollTimer();
+    return false;
+  }
+  if (_statusBarDeployPollTimer || typeof setTimeout !== 'function') {
+    return false;
+  }
+  _statusBarDeployPollTimer = setTimeout(function() {
+    _statusBarDeployPollTimer = 0;
+    if (_statusBarDocumentHidden()) return;
+    statusBarRequestDeployState({ interval: true });
+    _statusBarScheduleDeployPoll();
+  }, STATUS_BAR_DEPLOY_POLL_INTERVAL_MS);
+  return true;
+}
+
+function _statusBarHandleVisibilityChange() {
+  if (_statusBarDocumentHidden()) {
+    _statusBarClearDeployPollTimer();
+    return;
+  }
+  statusBarRequestDeployState({ force: true, visibility: true });
+  _statusBarScheduleDeployPoll();
+}
+
+function _statusBarInstallVisibilityListener() {
+  if (_statusBarVisibilityListenerInstalled) return;
+  if (typeof document === 'undefined'
+      || !document
+      || typeof document.addEventListener !== 'function') {
+    return;
+  }
+  document.addEventListener('visibilitychange', _statusBarHandleVisibilityChange);
+  _statusBarVisibilityListenerInstalled = true;
+}
+
+function statusBarStartDeployPolling(opts) {
+  opts = opts || {};
+  _statusBarInstallVisibilityListener();
+  if (opts.reset) _statusBarClearDeployPollTimer();
+  if (_statusBarDocumentHidden()) {
+    _statusBarClearDeployPollTimer();
+    return false;
+  }
+  if (opts.immediate) {
+    statusBarRequestDeployState({ force: true, start: true });
+  }
+  return _statusBarScheduleDeployPoll();
+}
+
+function statusBarStopDeployPolling() {
+  _statusBarClearDeployPollTimer();
+}
+
 function statusBarOpenDeploy() {
   statusBarRequestDeployState({ force: true });
   if (_statusBarDeployState
@@ -532,4 +605,12 @@ function statusBarOpenDeploy() {
       && typeof togglePanel === 'function') {
     togglePanel('board');
   }
+}
+
+statusBarStartDeployPolling();
+
+if (typeof window !== 'undefined'
+    && window
+    && typeof window.addEventListener === 'function') {
+  window.addEventListener('beforeunload', statusBarStopDeployPolling);
 }

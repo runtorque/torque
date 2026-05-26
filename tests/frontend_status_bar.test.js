@@ -52,6 +52,8 @@ class FakeDocument {
     this.elements = new Map();
     this.activeElement = null;
     this.body = this.register('body');
+    this.hidden = false;
+    this._listeners = new Map();
   }
   register(id) {
     const el = new FakeElement(id, this);
@@ -63,6 +65,22 @@ class FakeDocument {
     return this.elements.get(id);
   }
   getElementById(id) { return this.elements.get(id) || null; }
+  addEventListener(type, fn) {
+    if (!this._listeners.has(type)) this._listeners.set(type, []);
+    this._listeners.get(type).push(fn);
+  }
+  removeEventListener(type, fn) {
+    const listeners = this._listeners.get(type) || [];
+    this._listeners.set(type, listeners.filter((listener) => listener !== fn));
+  }
+  dispatchEvent(event) {
+    const type = typeof event === 'string' ? event : event.type;
+    const listeners = (this._listeners.get(type) || []).slice();
+    listeners.forEach((listener) => listener.call(this, event));
+  }
+  listenerCount(type) {
+    return (this._listeners.get(type) || []).length;
+  }
 }
 
 function loadStatusBar(context) {
@@ -101,10 +119,14 @@ function createSandbox() {
     Date,
     setTimeout(fn, delay) {
       const id = timers.length + 1;
-      timers.push({ id, fn, delay });
+      timers.push({ id, fn, delay, active: true });
       return id;
     },
-    clearTimeout(id) { timers.push({ cleared: id }); },
+    clearTimeout(id) {
+      const timer = timers.find((entry) => entry.id === id);
+      if (timer) timer.active = false;
+      timers.push({ cleared: id });
+    },
     send(message) { sendCalls.push(message); },
   };
   sandbox.global = sandbox;
@@ -114,6 +136,15 @@ function createSandbox() {
 
 function jsonValue(context, expression) {
   return JSON.parse(vm.runInContext(`JSON.stringify(${expression})`, context));
+}
+
+function liveTimers(timers, delay) {
+  return timers.filter((timer) => timer.active && timer.delay === delay);
+}
+
+function runTimer(timer) {
+  timer.active = false;
+  timer.fn();
 }
 
 test('Claude usage view is unknown when no Claude agent has available provider_usage', () => {
@@ -303,4 +334,71 @@ test('statusBarRequestDeployState polls explicit get_deploy_state per active gro
   const sent = vm.runInContext('statusBarRequestDeployState({ force: true })', context);
   assert.equal(sent, true);
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[0])), { cmd: 'get_deploy_state', group: 'Torque' });
+});
+
+test('deploy-state interval polls while visible via statusBarRequestDeployState', () => {
+  const { sandbox, sendCalls, timers } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+
+  let deployTimers = liveTimers(timers, 90000);
+  assert.equal(deployTimers.length, 1);
+  assert.equal(jsonValue(context, '_statusBarDeployPollTimer > 0'), true);
+
+  runTimer(deployTimers[0]);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[0])), { cmd: 'get_deploy_state', group: 'Torque' });
+  deployTimers = liveTimers(timers, 90000);
+  assert.equal(deployTimers.length, 1);
+});
+
+test('deploy-state interval pauses while document is hidden', () => {
+  const { sandbox, document, sendCalls, timers } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+  const initialTimer = liveTimers(timers, 90000)[0];
+
+  document.hidden = true;
+  document.dispatchEvent({ type: 'visibilitychange' });
+
+  assert.equal(liveTimers(timers, 90000).length, 0);
+  assert.equal(jsonValue(context, '_statusBarDeployPollTimer'), 0);
+
+  runTimer(initialTimer);
+  assert.equal(sendCalls.length, 0);
+  assert.equal(liveTimers(timers, 90000).length, 0);
+});
+
+test('deploy-state interval resumes with immediate refresh when document becomes visible', () => {
+  const { sandbox, document, sendCalls, timers } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+
+  document.hidden = true;
+  document.dispatchEvent({ type: 'visibilitychange' });
+  assert.equal(liveTimers(timers, 90000).length, 0);
+
+  document.hidden = false;
+  document.dispatchEvent({ type: 'visibilitychange' });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[0])), { cmd: 'get_deploy_state', group: 'Torque' });
+  assert.equal(liveTimers(timers, 90000).length, 1);
+});
+
+test('deploy-state polling start is idempotent and teardown clears the one timer', () => {
+  const { sandbox, document, timers } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+
+  assert.equal(liveTimers(timers, 90000).length, 1);
+  assert.equal(document.listenerCount('visibilitychange'), 1);
+
+  vm.runInContext('statusBarStartDeployPolling(); statusBarStartDeployPolling();', context);
+
+  assert.equal(liveTimers(timers, 90000).length, 1);
+  assert.equal(document.listenerCount('visibilitychange'), 1);
+
+  vm.runInContext('statusBarStopDeployPolling();', context);
+
+  assert.equal(liveTimers(timers, 90000).length, 0);
 });
