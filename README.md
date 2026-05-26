@@ -22,7 +22,12 @@ worktrees, three half-remembered prompts, and a lot of "where was I?" friction.
 
 Torque is a harness on top of **Claude Code** and **Codex**: it drives the
 CLIs you already run, so every agent uses your existing subscription plans — no
-extra API keys or per-token billing.
+extra API keys or per-token billing. I built it because the AI companies would
+rather lock me into *their* harnesses and *their* idea of how I should work.
+Torque is how I found to get the full value out of the subscriptions I already
+pay for, on my own terms, without conforming to a vendor's prescribed workflow.
+
+## How it works
 
 Torque is a hierarchy of agents, each minding its own role. **Workers** write
 the code. **Engineers** sit above them: they orchestrate tasks across their
@@ -46,7 +51,8 @@ to do next on your own time, without ever stalling the agent or polluting its
 working context. Meanwhile the **kanban board** shows
 what every agent is doing at all times — every task, who owns it, and where it
 sits in the pipeline.
-What you get:
+
+## What you get:
 
 - A **chat-first workspace** where you talk to an **architect** that plans the
   work and runs the engineers and workers for you — backed by Claude Code and
@@ -66,7 +72,9 @@ What you get:
   transitions.
 - A `torque` CLI for scripting from the command line.
 
-## Torque builds Torque
+## Core Ideas
+
+### Torque builds Torque
 
 Torque is built with Torque. Nearly all of its code is written by agents
 dispatched from the board and merged through the engineer — the same loop the
@@ -77,19 +85,24 @@ and merge gates are themselves run by agents. It is an honest, sometimes
 uncomfortable, demonstration of what the harness can do — and a live stress
 test of the guardrails it ships with.
 
-## How agents stay in their lane
+### Agents only see what they're allowed to
 
-Two pieces of plumbing make multi-agent orchestration safe:
+An agent can only perform the actions its role allows — and it can only *see*
+those actions in the first place. There is no hidden menu of capabilities an
+agent could reach for and be denied; anything outside its scope simply never
+appears, and a call to a tool it isn't scoped for is refused at the server, not
+merely hidden in the UI. Two pieces of plumbing enforce and observe that:
 
 **Scoped MCP tools via env-var injection.** When Torque spawns an agent it
 writes a per-agent `.mcp.json` (or `.codex/config.toml`) with the
 `TORQUE_CELL_ID` env var baked in. Every MCP request the agent makes carries
 that cell id as an `X-Torque-Cell-Id` header, and the daemon uses it to
-**filter the tool list before it leaves the server**. A worker only sees the
-`torque_*` reporting tools. An engineer additionally sees `engineer_*` tools
-scoped to its own group — it physically cannot enumerate another group's
-journal. An architect gets `architect_*` tools further scoped per actor.
-There is no override flag; scope is the contract. → [MCP scoping](docs/team/mcp-scoping.md)
+**filter the tool list before it leaves the server** — and to scope which of
+those tools the agent may actually call. A worker only sees the `torque_*`
+reporting tools. An engineer additionally sees `engineer_*` tools scoped to its
+own group — it physically cannot enumerate another group's journal. An architect
+gets `architect_*` tools further scoped per actor. There is no override flag;
+scope is the contract. → [MCP scoping](docs/team/mcp-scoping.md)
 
 **Hooks for live work tracking.** For Claude Code and Codex workers, Torque
 installs `SessionStart`, `PreToolUse`, `PostToolUse`, and `Stop` hooks that
@@ -99,7 +112,7 @@ drives the activity badges on agent cells, the engineer's event digest, the
 worklog, and the auto-checkpoint triggers on the worktree. You see what each
 agent is doing without attaching to its terminal.
 
-## Actions, transitions, and pipelines
+### Actions, transitions, and pipelines
 
 You don't have to micromanage how a task flows — you predefine it. Each task is
 dispatched with an **action**, and an action declares the **transitions** it is
@@ -117,7 +130,11 @@ action produces a different prompt depending on the agent's role, its worktree
 state, and the task at hand. Define the graph once; Torque drives tasks through
 it. → [Actions](docs/tasks/actions.md), [Pipelines](docs/tasks/pipelines.md)
 
-## The board and where tasks come from
+| The transition graph | The action's prompt template |
+|:---:|:---:|
+| ![A DAG view: research → implement → review, with review bouncing back to implement for fixes.](docs/images/actions-dag.png) | ![The action editor with a Jinja prompt template rendered against the torque context.](docs/images/actions-editor.png) |
+
+### The board is an objective view of the work
 
 The kanban board is where work lives, and it can sync with external task
 providers — today that means **GitHub**, with others like **Linear** planned.
@@ -127,7 +144,9 @@ the board, but a raw card is just a title and a note — hand it to the architec
 so it can fill in the details, attach the right action, assign an engineer, and
 dispatch the work. → [The board](docs/tasks/board.md)
 
-## Events, context, and communication
+![The Torque board: a Backlog of active and queued cards, In Progress work in flight, and a Done lane of completed tasks.](docs/images/board-full.png)
+
+### Events, context, and communication
 
 Agents don't work in isolation — they talk to each other. Workers report to
 their engineer, engineers message the architect, architects can message other
@@ -144,6 +163,10 @@ building a durable trail of what was done and why. They also carry a shared
 have learned — so a discovery made by one agent doesn't have to be rediscovered
 by the next, and long-running engineers and architects retain their bearings
 across many tasks.
+
+| Agent messages & digests | Every MCP tool call | The work journal |
+|:---:|:---:|:---:|
+| ![The events inbox showing messages and queued digests between agents.](docs/images/events-inbox.png) | ![A separate panel listing each MCP tool call an agent makes.](docs/images/events-mcp.png) | ![An agent's journal: a durable, timestamped trail of what it did and why.](docs/images/journal.png) |
 
 The payoff is that Torque tends to run smoother the longer you use it. As
 journals fill in and context accumulates, the agents get better at managing
