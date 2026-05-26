@@ -252,6 +252,39 @@ def _capture_statusline_original(settings: dict) -> dict:
     }
 
 
+def _capture_non_project_statusline_original(settings: dict) -> dict:
+    without_statusline = dict(settings or {})
+    without_statusline.pop("statusLine", None)
+    return _capture_statusline_original(without_statusline)
+
+
+def _should_refresh_torque_statusline_original(original_file: Path) -> bool:
+    """Return true when an existing Torque proxy should recapture globals.
+
+    Pre-source markers from older Torque installs recorded
+    {"present": false, "value": null} when there was no project-local
+    statusLine.  Those markers must be upgraded on reinstall so already
+    touched directories can start chaining to the effective global statusLine.
+    Legacy present=true markers are kept because older Torque only captured
+    project-local originals, and overwriting them would lose the user's local
+    command.
+    """
+    if not original_file.exists():
+        return True
+    try:
+        data = json.loads(original_file.read_text() or "{}")
+    except Exception:
+        return True
+    if not isinstance(data, dict):
+        return True
+    source = data.get("source")
+    if source in {"global", "none"}:
+        return True
+    if source == "project":
+        return False
+    return not data.get("present")
+
+
 def _statusline_proxy_source(original_file: Path, event_url: str) -> str:
     """Return the Torque-managed Claude statusLine proxy script."""
     original_path = json.dumps(str(original_file))
@@ -420,6 +453,12 @@ def _install_statusline_proxy(working_dir: str, settings: dict) -> None:
         original_file.parent.mkdir(parents=True, exist_ok=True)
         original_file.write_text(
             json.dumps(_capture_statusline_original(settings), indent=2)
+            + "\n"
+        )
+    elif _should_refresh_torque_statusline_original(original_file):
+        original_file.parent.mkdir(parents=True, exist_ok=True)
+        original_file.write_text(
+            json.dumps(_capture_non_project_statusline_original(settings), indent=2)
             + "\n"
         )
 
