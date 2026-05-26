@@ -15102,7 +15102,7 @@ async def main(connection=None):
                                         if AUTO_CLOSE_SPAWNED_LABEL not in labels:
                                             labels.append(AUTO_CLOSE_SPAWNED_LABEL)
                                             task.labels = labels
-                                            _save_task(task)
+                                            state._db_save_task(task)
                                 # Worktree inheritance (pipeline) is applied
                                 # before session creation. Re-copy here in
                                 # case the source changed while the agent

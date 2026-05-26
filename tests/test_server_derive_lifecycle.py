@@ -289,7 +289,8 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def _extract_handle_command(self, state, dispatch_handler,
-                                worktree_mgr=None):
+                                worktree_mgr=None, action_mgr=None,
+                                closure_overrides=None):
         main_code = self.server_mod.main.__code__
         handle_code = next(
             const
@@ -321,7 +322,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             "_panel_event": lambda *args, **kwargs: None,
             "_resolve_base_dir": resolve_base_dir,
             "_runtime_payload": lambda: {},
-            "action_mgr": self._ActionManager(),
+            "action_mgr": action_mgr or self._ActionManager(),
             "bridge": DummyBridge(),
             "handle_command": dispatch_handler,
             "state": state,
@@ -331,6 +332,8 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             ),
             "worktree_mgr": worktree_mgr,
         })
+        if closure_overrides:
+            closure_values.update(closure_overrides)
         closure = tuple(
             self._make_cell(closure_values[name])
             for name in handle_code.co_freevars
@@ -372,6 +375,33 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             }
 
         return calls, dispatch
+
+    class _AutoCloseActionManager:
+        def get_transitions(self, action_name, _base_dir):
+            if action_name == "feature/implement":
+                return [{"action": "feature/review"}]
+            return []
+
+        def load_action(self, _action_name, _base_dir):
+            return {}
+
+        def get_deliverable(self, _action_name, _base_dir):
+            return None
+
+        def has_required_transition(self, _action_name, _base_dir):
+            return False
+
+        def get_auto_close_on_done(self, action_name, *, base_dir=""):
+            return action_name == "feature/review"
+
+        def render_action(self, action_name, _vars, *, base_dir="",
+                          torque_context=None):
+            if action_name == "feature/review":
+                return {"prompt": "Review the implementation."}
+            return {"prompt": "Proceed."}
+
+        def is_implementation_depth(self, _action_name, _base_dir):
+            return False
 
     class _StaleWorktreeManager:
         async def stale_base_info(self, _cell):
@@ -584,6 +614,101 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["shape"], "serial")
         self.assertFalse(event["hintable"])
         self.assertEqual(event["metadata"]["parent_task_id"], "task-root")
+
+    async def test_derive_auto_dispatch_persists_auto_close_spawn_label(self):
+        state = self._make_state()
+        implementer = self._make_agent(
+            "impl-1",
+            status="running",
+            current_task_id="task-root",
+        )
+        state.agents[implementer.id] = implementer
+        state.groups["g"].append(implementer.id)
+        state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+        )
+
+        persisted_labels = {}
+
+        def record_saved_task(task):
+            persisted_labels[task.id] = list(task.labels or [])
+
+        state._db_save_task = record_saved_task
+
+        async def create_agent(group, name, launch_cfg, **_kwargs):
+            agent = self._make_agent(
+                "created-reviewer",
+                status="idle",
+                session_id="created-reviewer-session",
+            )
+            agent.name = name
+            state.agents[agent.id] = agent
+            state.groups[group].append(agent.id)
+            return agent
+
+        sent_prompts = []
+
+        async def send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        def record_task_dispatch(cell, task, lane):
+            state.board_update_task(task.id, agent_id=cell.id, lane=lane)
+            cell.current_task_id = task.id
+            state.mark_agent_progress(cell, emit=False)
+
+        holder = {}
+
+        async def recursive_dispatch(payload):
+            return await holder["handle_command"](payload)
+
+        handle_command = self._extract_handle_command(
+            state,
+            recursive_dispatch,
+            action_mgr=self._AutoCloseActionManager(),
+            closure_overrides={
+                "_build_postscript": lambda *args, **kwargs: "",
+                "_create_agent_with_config": create_agent,
+                "_record_task_dispatch": record_task_dispatch,
+                "_resolve_worker_launch_config": (
+                    lambda *args, **kwargs: {"worktree": False}
+                ),
+                "_send_agent_prompt": send_agent_prompt,
+            },
+        )
+        holder["handle_command"] = handle_command
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review implementation",
+        })
+
+        self.assertEqual(result["type"], "ok")
+        derived = [
+            task for task in state.board_tasks.values()
+            if task.action_name == "feature/review"
+        ]
+        self.assertEqual(len(derived), 1)
+        derived_task = derived[0]
+        self.assertIn(
+            self.server_mod.AUTO_CLOSE_SPAWNED_LABEL,
+            derived_task.labels,
+        )
+        self.assertIn(
+            self.server_mod.AUTO_CLOSE_SPAWNED_LABEL,
+            persisted_labels.get(derived_task.id, []),
+        )
+        self.assertEqual(derived_task.agent_id, "created-reviewer")
+        self.assertEqual(result["agent_id"], "created-reviewer")
+        self.assertEqual([call[0] for call in sent_prompts],
+                         ["created-reviewer"])
 
     async def test_reuse_self_derive_records_warm_cluster_shape(self):
         state = self._make_state()
