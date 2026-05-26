@@ -35,13 +35,16 @@ RELAY_SOURCE_ENV = "env"
 RELAY_SOURCE_UNSET = ""
 
 DirectMessageObserver = Callable[[dict[str, Any]], Any]
+StateDeltaObserver = Callable[[list[dict[str, Any]]], Any]
 RemoteUserAgentIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 RecentDirectMessages = Callable[[int], list[dict[str, Any]]]
 AgentRoster = Callable[[], list[dict[str, Any]]]
+AgentStateSnapshot = Callable[[], list[dict[str, Any]]]
 ReportConnectionState = Callable[[dict[str, Any]], None]
 Unregister = Callable[[], None]
 
 _DIRECT_MESSAGE_OBSERVERS: list[DirectMessageObserver] = []
+_STATE_DELTA_OBSERVERS: list[StateDeltaObserver] = []
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,9 @@ class CloudConnectorContext:
     state: Any
     remote_user_agent_message: RemoteUserAgentIngress
     register_direct_message_observer: Callable[[DirectMessageObserver], Unregister]
+    register_state_delta_observer: (
+        Callable[[StateDeltaObserver], Unregister] | None
+    ) = None
     profile: str = ""
     data_dir: str = ""
     config: dict[str, Any] = field(default_factory=dict)
@@ -62,6 +68,10 @@ class CloudConnectorContext:
     # ``None`` in community/legacy builds; the connector then omits the additive
     # snapshot ``agents`` key for old payload compatibility.
     agent_roster: AgentRoster | None = None
+    # Optional: group-scoped current ephemeral agent-state snapshot for remote
+    # relay clients.  ``None`` in community/legacy builds; the connector then
+    # omits agent_state from snapshots and ignores state-delta observer events.
+    agent_state_snapshot: AgentStateSnapshot | None = None
     # Optional: report the connector's relay connection-state transitions to the
     # daemon as the ephemeral ``relay_connection`` signal.  ``None`` in
     # community/legacy builds.  The connector wraps every invocation in
@@ -102,6 +112,27 @@ def register_direct_message_observer(observer: DirectMessageObserver) -> Unregis
     return unregister
 
 
+def register_state_delta_observer(observer: StateDeltaObserver) -> Unregister:
+    """Register a best-effort observer for coalesced MatrixState delta batches.
+
+    Observers receive a shallow-copied list of delta ops from the same path used
+    for local WebSocket broadcasts.  Community builds register nothing, so this
+    seam is a no-op by default.
+    """
+
+    if not callable(observer):
+        raise TypeError("state-delta observer must be callable")
+    _STATE_DELTA_OBSERVERS.append(observer)
+
+    def unregister() -> None:
+        try:
+            _STATE_DELTA_OBSERVERS.remove(observer)
+        except ValueError:
+            pass
+
+    return unregister
+
+
 def _direct_message_agent_ids(row: dict[str, Any]) -> list[str]:
     ids: list[str] = []
     for field in ("sender", "recipient"):
@@ -118,6 +149,72 @@ async def _await_observer_result(result: Awaitable[Any], event_type: str) -> Non
         await result
     except Exception:
         log.exception("Cloud direct-message observer failed for %s", event_type)
+
+
+async def _await_state_delta_observer_result(result: Awaitable[Any]) -> None:
+    try:
+        await result
+    except Exception:
+        log.exception("Cloud state-delta observer failed")
+
+
+def _invoke_state_delta_observer(
+    observer: StateDeltaObserver,
+    ops: list[dict[str, Any]],
+) -> None:
+    try:
+        # Give each observer its own shallow copy so connector-side coalescing
+        # cannot mutate the batch seen by later observers.
+        result = observer([dict(op) for op in ops])
+        if inspect.isawaitable(result):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                log.warning(
+                    "Async cloud state-delta observer returned without "
+                    "a running event loop"
+                )
+                if inspect.iscoroutine(result):
+                    result.close()
+            else:
+                loop.create_task(_await_state_delta_observer_result(result))
+    except Exception:
+        log.exception("Cloud state-delta observer failed")
+
+
+def notify_state_delta_observers(
+    ops: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    *,
+    state: Any = None,
+) -> int:
+    """Notify optional connector observers after local WS deltas are drained.
+
+    The ``state`` keyword is intentionally accepted for symmetry with direct
+    message notifications and future observers, but the current hot-path relay
+    observer gets only the already-coalesced op list.  Invocation is scheduled
+    with ``call_soon`` when an event loop is running so MatrixState.broadcast()
+    does not wait on connector projection/network work.  Exceptions are logged
+    and swallowed.
+    """
+
+    del state  # Reserved for future observer seams; do not leak mutable state.
+    if not _STATE_DELTA_OBSERVERS or not ops:
+        return 0
+    copied_ops = [dict(op) for op in ops if isinstance(op, dict)]
+    if not copied_ops:
+        return 0
+    invoked = 0
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    for observer in list(_STATE_DELTA_OBSERVERS):
+        invoked += 1
+        if loop is None:
+            _invoke_state_delta_observer(observer, copied_ops)
+        else:
+            loop.call_soon(_invoke_state_delta_observer, observer, copied_ops)
+    return invoked
 
 
 def notify_direct_message_observers(
@@ -1291,8 +1388,9 @@ async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnecto
     Disabled by default.  When enabled, the module named by
     ``TORQUE_CLOUD_CONNECTOR_MODULE`` (default ``torque_ee_connector``) may expose
     ``create_connector(context)`` returning an object with optional ``start()``,
-    ``stop()``, and ``on_direct_message(event)`` methods.  A module-level
-    ``start(context)``/``stop()`` shape is also accepted for thin adapters.
+    ``stop()``, ``on_direct_message(event)``, and ``on_state_delta(ops)``
+    methods.  A module-level ``start(context)``/``stop()`` shape is also
+    accepted for thin adapters.
     """
 
     module_name = str(
@@ -1362,6 +1460,12 @@ async def start_cloud_connector(context: CloudConnectorContext) -> CloudConnecto
             runtime.unregister_callbacks.append(
                 register_direct_message_observer(observer)
             )
+        state_observer = getattr(connector, "on_state_delta", None)
+        if callable(state_observer):
+            registrar = getattr(context, "register_state_delta_observer", None)
+            if not callable(registrar):
+                registrar = register_state_delta_observer
+            runtime.unregister_callbacks.append(registrar(state_observer))
         if connector is module:
             starter = getattr(module, "start", None)
             if callable(starter):

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import ssl
 import sys
 import unittest
@@ -28,11 +29,15 @@ if _EE_TESTS_ENABLED:
         SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
         ConnectorConfig,
         EnterpriseConnector,
+        _agent_state_fingerprint,
         _agent_id_for_direct_message,
         _build_relay_ssl_context,
         _direct_message_payload,
+        _humanize_activity_detail,
         _is_persistent_connection_error,
+        _is_agent_state_channel_event,
         _is_tls_verify_error,
+        _project_agent_state,
         _relay_host_only,
         _wire_kind_for_direct_message_row,
         build_daemon_ws_url,
@@ -44,6 +49,31 @@ if _EE_TESTS_ENABLED:
     )
 
 _AGENT_ROSTER_UNSET = object()
+_SANITIZED_ENV_KEYS = (
+    "TORQUE_EE_DAEMON_CREDENTIAL_ID",
+    "TORQUE_EE_DAEMON_PRIVATE_KEY_PEM",
+    "TORQUE_EE_RELAY_URL",
+    "TORQUE_EE_DAEMON_ID",
+    "TORQUE_CLOUD_RELAY_URL",
+    "TORQUE_CLOUD_DAEMON_ID",
+)
+_SANITIZED_ENV_ORIGINALS = {}
+
+
+def setUpModule():
+    # Worker shells can inherit live relay credentials. Unit tests construct
+    # explicit loopback contexts and should not silently flip into signed remote
+    # mode because of the surrounding daemon environment.
+    for key in _SANITIZED_ENV_KEYS:
+        _SANITIZED_ENV_ORIGINALS[key] = os.environ.pop(key, None)
+
+
+def tearDownModule():
+    for key, value in _SANITIZED_ENV_ORIGINALS.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
 
 
 class FakeWs:
@@ -430,6 +460,250 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
+class AgentStateForwardingTests(unittest.IsolatedAsyncioTestCase):
+    def _connector(self, *, rows=None, config=None):
+        cfg = {"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"}
+        if config:
+            cfg.update(config)
+        provider_rows = rows
+
+        def agent_state_snapshot():
+            return [dict(row) for row in provider_rows] if provider_rows is not None else []
+
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config=cfg,
+            remote_user_agent_message=lambda _payload: {"type": "ok"},
+            agent_state_snapshot=agent_state_snapshot,
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        connector.started = True
+        connector._ws = FakeWs()
+        connector._connected_event.set()
+        return connector
+
+    def _row(self, **overrides):
+        row = {
+            "id": "worker-1",
+            "kind": "worker",
+            "status": "running",
+            "activity_detail": "mcp__torque__torque_context",
+            "needs_attention": False,
+            "context_window": {
+                "used_pct": 56.6,
+                "used_tokens": 12345,
+                "limit_tokens": 20000,
+                "model": "claude-sonnet",
+            },
+            "provider_usage": {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 41.6,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                    "remaining": 58,
+                },
+                "seven_day": {
+                    "available": False,
+                    "used_percentage": 10,
+                    "resets_at": "ignored",
+                },
+            },
+            "last_event_at": 123.0,
+        }
+        row.update(overrides)
+        return row
+
+    def test_projection_uses_wire_used_percentage_and_humanized_activity(self):
+        projected = _project_agent_state(self._row())
+
+        self.assertEqual(projected["agent_id"], "worker-1")
+        self.assertEqual(projected["kind"], "worker")
+        self.assertEqual(projected["status"], "running")
+        self.assertEqual(projected["activity_detail"], "Checking context")
+        self.assertEqual(projected["context_window"], {"used_percentage": 57})
+        self.assertNotIn("used_pct", projected["context_window"])
+        self.assertEqual(projected["provider_usage"], {
+            "five_hour": {
+                "available": True,
+                "used_percentage": 42,
+                "resets_at": "2026-05-26T05:00:00Z",
+            },
+            "seven_day": {
+                "available": False,
+                "used_percentage": None,
+                "resets_at": None,
+            },
+        })
+        # Percent-only relay state: no tokens/model/session or quota fields leak.
+        self.assertNotIn("used_tokens", json.dumps(projected))
+        self.assertNotIn("remaining", json.dumps(projected))
+
+    def test_projection_nulls_unknown_context_and_provider_usage(self):
+        projected = _project_agent_state(self._row(
+            context_window={},
+            provider_usage=None,
+        ))
+        self.assertIsNone(projected["context_window"])
+        self.assertIsNone(projected["provider_usage"])
+
+    def test_activity_humanization_matches_representative_640_labels(self):
+        self.assertEqual(
+            _humanize_activity_detail("mcp__torque__torque_progress"),
+            "Reporting progress",
+        )
+        self.assertEqual(
+            _humanize_activity_detail("Using torque_done"),
+            "Completing task",
+        )
+        self.assertEqual(
+            _humanize_activity_detail("engineer_task_dispatch failed"),
+            "Dispatching failed",
+        )
+        self.assertEqual(
+            _humanize_activity_detail("Reading file.py"),
+            "Reading file.py",
+        )
+        long = _project_agent_state(self._row(activity_detail="x" * 300))
+        self.assertLessEqual(len(long["activity_detail"]), 160)
+
+    def test_fingerprint_ignores_heartbeat_tokens_and_same_integer_percentages(self):
+        first = _project_agent_state(self._row(
+            context_window={"used_pct": 56.1, "used_tokens": 1},
+            provider_usage={
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 41.2,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                }
+            },
+            last_event_at=1,
+        ))
+        second = _project_agent_state(self._row(
+            context_window={"used_pct": 56.4, "used_tokens": 999999},
+            provider_usage={
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 41.4,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                }
+            },
+            last_event_at=999,
+        ))
+        changed = _project_agent_state(self._row(
+            context_window={"used_pct": 57.0, "used_tokens": 999999},
+            provider_usage={
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 42,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                }
+            },
+        ))
+
+        self.assertEqual(_agent_state_fingerprint(first), _agent_state_fingerprint(second))
+        self.assertNotEqual(_agent_state_fingerprint(first), _agent_state_fingerprint(changed))
+
+    async def test_on_state_delta_filters_to_snapshot_scope_and_emits_channel_event(self):
+        connector = self._connector(rows=[self._row()])
+
+        await connector.on_state_delta([
+            {"op": "focus_update", "id": "worker-1"},
+            {"op": "agent_upsert", "id": "worker-2"},  # not in snapshot scope
+            {"op": "agent_upsert", "id": "worker-1", "last_event_at": 100},
+        ])
+
+        envelope = await asyncio.wait_for(connector._outbound_queue.get(), timeout=1.0)
+        self.assertEqual(envelope["kind"], "channel_event")
+        self.assertEqual(envelope["payload"]["type"], "agent_state")
+        self.assertEqual(envelope["payload"]["schema"], 1)
+        self.assertEqual(envelope["payload"]["lane"], "agent-state")
+        self.assertEqual(envelope["payload"]["agent"]["agent_id"], "worker-1")
+        self.assertEqual(
+            envelope["payload"]["agent"]["context_window"],
+            {"used_percentage": 57},
+        )
+        self.assertTrue(connector._outbound_queue.empty())
+
+    async def test_agent_state_is_meaningful_change_deduped(self):
+        connector = self._connector(rows=[self._row()])
+
+        await connector.on_state_delta([{"op": "agent_upsert", "id": "worker-1"}])
+        await asyncio.wait_for(connector._outbound_queue.get(), timeout=1.0)
+        await connector.on_state_delta([{"op": "agent_upsert", "id": "worker-1"}])
+
+        self.assertTrue(connector._outbound_queue.empty())
+
+    async def test_agent_state_rate_cap_sends_latest_trailing_edge(self):
+        connector = self._connector(rows=[])
+        first = _project_agent_state(self._row(activity_detail="torque_context"))
+        second = _project_agent_state(self._row(activity_detail="torque_progress"))
+        third = _project_agent_state(self._row(activity_detail="torque_done"))
+
+        with mock.patch("torque_ee_connector.connector.AGENT_STATE_MIN_INTERVAL_SECONDS", 0.05):
+            connector._schedule_agent_state(first)
+            first_envelope = await asyncio.wait_for(
+                connector._outbound_queue.get(), timeout=1.0)
+            self.assertEqual(
+                first_envelope["payload"]["agent"]["activity_detail"],
+                "Checking context",
+            )
+
+            connector._schedule_agent_state(second)
+            connector._schedule_agent_state(third)
+            self.assertTrue(connector._outbound_queue.empty())
+            trailing = await asyncio.wait_for(
+                connector._outbound_queue.get(), timeout=1.0)
+
+        self.assertEqual(
+            trailing["payload"]["agent"]["activity_detail"],
+            "Completing task",
+        )
+        self.assertTrue(connector._outbound_queue.empty())
+
+    async def test_transient_agent_state_send_failure_is_not_requeued(self):
+        class FailingWs:
+            async def send_str(self, _text):
+                raise RuntimeError("boom")
+
+        connector = self._connector(rows=[])
+        agent = _project_agent_state(self._row())
+        envelope = connector._agent_state_envelope(agent)
+        self.assertTrue(_is_agent_state_channel_event(envelope))
+        connector._outbound_queue.put_nowait(envelope)
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            await connector._send_loop(FailingWs())
+
+        self.assertTrue(connector._outbound_queue.empty())
+
+    async def test_ready_emits_transient_agent_state_snapshot_batch(self):
+        connector = self._connector(rows=[self._row()])
+        ready = make_relay_envelope(
+            id="ready-agent-state",
+            daemon_id="daemon-1",
+            source={"kind": "relay", "id": "relay"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="ready",
+            created_at="2026-05-26T00:00:00.000Z",
+            payload={"epoch": 7},
+        )
+
+        await connector._handle_envelope(ready)
+
+        self.assertEqual(connector._epoch, 7)
+        self.assertEqual(len(connector._ws.sent), 1)
+        envelope = connector._ws.sent[0]
+        self.assertEqual(envelope["kind"], "channel_event")
+        self.assertEqual(envelope["payload"]["type"], "agent_state_snapshot")
+        self.assertEqual(envelope["payload"]["schema"], 1)
+        self.assertEqual(envelope["payload"]["lane"], "agent-state")
+        self.assertEqual(envelope["payload"]["agents"][0]["agent_id"], "worker-1")
+        self.assertIn("worker-1", connector._agent_state_last_sent_fingerprint)
+
+
+@unittest.skipUnless(_EE_TESTS_ENABLED, _EE_SKIP_REASON)
 class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
     """snapshot_request → bounded user↔agent snapshot, gated like live egress."""
 
@@ -439,6 +713,7 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         rows=None,
         recent_provider=None,
         agent_roster_provider=_AGENT_ROSTER_UNSET,
+        agent_state_provider=None,
         config=None,
     ):
         cfg = {"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"}
@@ -456,6 +731,8 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         }
         if agent_roster_provider is not _AGENT_ROSTER_UNSET:
             context_kwargs["agent_roster"] = agent_roster_provider
+        if agent_state_provider is not None:
+            context_kwargs["agent_state_snapshot"] = agent_state_provider
         context = SimpleNamespace(**context_kwargs)
         connector = EnterpriseConnector(context=context)
         connector.config = config_from_context(context)
@@ -575,6 +852,60 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["payload"]["limit"], SNAPSHOT_DEFAULT_MESSAGE_LIMIT)
         self.assertEqual(payload["payload"]["truncated"], False)
         self.assertEqual(payload["payload"]["ref_id"], "snap-req-1")
+
+    async def test_snapshot_additively_includes_agent_state_when_provider_available(self):
+        rows = [{
+            "id": "w1",
+            "kind": "worker",
+            "status": "running",
+            "activity_detail": "torque_context",
+            "needs_attention": True,
+            "context_window": {"used_pct": 72.2, "used_tokens": 12345},
+            "provider_usage": {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 12.4,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                },
+                "seven_day": {
+                    "available": True,
+                    "used_percentage": 90,
+                    "resets_at": "2026-05-31T00:00:00Z",
+                },
+            },
+        }]
+        connector = self._connector(
+            rows=self._lane_rows(),
+            agent_state_provider=lambda: [dict(row) for row in rows],
+        )
+        payload = await self._snapshot_payload(connector, self._request())
+
+        agent_state = payload["payload"]["agent_state"]
+        self.assertEqual(agent_state["schema"], 1)
+        self.assertEqual(agent_state["agents"], [{
+            "agent_id": "w1",
+            "kind": "worker",
+            "status": "running",
+            "activity_detail": "Checking context",
+            "needs_attention": True,
+            "context_window": {"used_percentage": 72},
+            "provider_usage": {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 12,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                },
+                "seven_day": {
+                    "available": True,
+                    "used_percentage": 90,
+                    "resets_at": "2026-05-31T00:00:00Z",
+                },
+            },
+        }])
+        # Existing snapshot payload remains backward-compatible and additive.
+        self.assertEqual(payload["payload"]["lane"], "user-agent")
+        self.assertEqual(payload["payload"]["count"], 4)
+        self.assertNotIn("used_pct", json.dumps(agent_state))
 
     async def test_snapshot_is_bounded_by_default_cap(self):
         many = [

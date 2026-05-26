@@ -437,8 +437,8 @@ def _resolve_agent_id(state, identifier: str) -> str:
     return ""
 
 
-def _relay_agent_roster(state: MatrixState) -> list[dict]:
-    """Return the group-scoped, non-tombstoned agent roster for relay snapshots."""
+def _relay_snapshot_group(state: MatrixState) -> str:
+    """Return the group used for relay snapshots, matching roster semantics."""
     group = str(getattr(state, "active_group", "") or "").strip()
     if not group:
         groups = [
@@ -448,6 +448,12 @@ def _relay_agent_roster(state: MatrixState) -> list[dict]:
         ]
         if len(groups) == 1:
             group = groups[0]
+    return group
+
+
+def _relay_agent_roster(state: MatrixState) -> list[dict]:
+    """Return the group-scoped, non-tombstoned agent roster for relay snapshots."""
+    group = _relay_snapshot_group(state)
     if not group:
         return []
     roster: list[dict] = []
@@ -462,6 +468,36 @@ def _relay_agent_roster(state: MatrixState) -> list[dict]:
             "kind": getattr(cell, "kind", ""),
         })
     return roster
+
+
+def _relay_agent_state_snapshot(state: MatrixState) -> list[dict]:
+    """Return group-scoped current ephemeral agent state for relay snapshots."""
+    group = _relay_snapshot_group(state)
+    if not group:
+        return []
+    rows: list[dict] = []
+    for cell in getattr(state, "agents", {}).values():
+        if state.agent_is_tombstoned(cell):
+            continue
+        if str(getattr(cell, "group", "") or "") != group:
+            continue
+        context_window = getattr(cell, "context_window", None)
+        provider_usage = getattr(cell, "provider_usage", None)
+        rows.append({
+            "id": getattr(cell, "id", ""),
+            "name": getattr(cell, "name", ""),
+            "kind": getattr(cell, "kind", ""),
+            "status": getattr(cell, "status", ""),
+            "activity_detail": getattr(cell, "activity_detail", ""),
+            "needs_attention": bool(getattr(cell, "needs_attention", False)),
+            "context_window": (
+                dict(context_window) if isinstance(context_window, dict) else None
+            ),
+            "provider_usage": (
+                dict(provider_usage) if isinstance(provider_usage, dict) else None
+            ),
+        })
+    return rows
 
 
 def _worktree_merge_preserve_diff_enabled(
@@ -10128,8 +10164,12 @@ async def main(connection=None):
             remote_user_agent_message=_ingest_remote_user_agent_message,
             recent_direct_messages=_recent_user_direct_messages,
             agent_roster=lambda: _relay_agent_roster(state),
+            agent_state_snapshot=lambda: _relay_agent_state_snapshot(state),
             register_direct_message_observer=(
                 cloud_hooks.register_direct_message_observer
+            ),
+            register_state_delta_observer=(
+                cloud_hooks.register_state_delta_observer
             ),
             report_connection_state=(
                 lambda payload: state.set_relay_connection(payload)
