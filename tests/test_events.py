@@ -533,6 +533,108 @@ asyncio.run(main())
             "Context usage updated", [evt["message"] for evt in stream]
         )
 
+    async def test_provider_usage_context_updates_dedupe_and_coalesce(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="claude-code",
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=200.0,
+                event_type="context_update",
+                data={
+                    "provider_usage": {
+                        "five_hour": {
+                            "available": True,
+                            "used_percentage": 12.2,
+                            "resets_at": "2026-05-26T05:00:00Z",
+                        },
+                        "seven_day": {
+                            "available": False,
+                            "used_percentage": None,
+                            "resets_at": None,
+                        },
+                    },
+                },
+            )
+        )
+
+        self.assertEqual(cell.provider_usage["five_hour"]["used_percentage"], 12)
+        upserts = [op for op in state._delta_ops if op["op"] == "agent_upsert"]
+        self.assertEqual(len(upserts), 1)
+        self.assertEqual(
+            upserts[0]["provider_usage"]["five_hour"]["used_percentage"],
+            12,
+        )
+
+        # Same integer percentage + same reset time is not a meaningful update,
+        # so no second delta is queued despite heartbeat clock churn.
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=201.0,
+                event_type="context_update",
+                data={
+                    "provider_usage": {
+                        "five_hour": {
+                            "available": True,
+                            "used_percentage": 12.4,
+                            "resets_at": "2026-05-26T05:00:00Z",
+                        },
+                        "seven_day": {
+                            "available": False,
+                            "used_percentage": None,
+                            "resets_at": None,
+                        },
+                    },
+                },
+            )
+        )
+        upserts = [op for op in state._delta_ops if op["op"] == "agent_upsert"]
+        self.assertEqual(len(upserts), 1)
+        self.assertEqual(cell.provider_usage["five_hour"]["used_percentage"], 12)
+
+        # A meaningful integer-percent change replaces the pending telemetry
+        # upsert instead of appending another one before the throttled broadcast.
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=202.0,
+                event_type="context_update",
+                data={
+                    "provider_usage": {
+                        "five_hour": {
+                            "available": True,
+                            "used_percentage": 12.6,
+                            "resets_at": "2026-05-26T05:00:00Z",
+                        },
+                        "seven_day": {
+                            "available": False,
+                            "used_percentage": None,
+                            "resets_at": None,
+                        },
+                    },
+                },
+            )
+        )
+
+        upserts = [op for op in state._delta_ops if op["op"] == "agent_upsert"]
+        self.assertEqual(len(upserts), 1)
+        self.assertEqual(
+            upserts[0]["provider_usage"]["five_hour"]["used_percentage"],
+            13,
+        )
+        self.assertEqual(cell.provider_usage["five_hour"]["used_percentage"], 13)
+
     async def test_session_start_without_context_clears_stale_context_window(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

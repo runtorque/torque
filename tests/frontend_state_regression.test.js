@@ -18464,6 +18464,64 @@ test('context_update delta updates only the affected grid card context meter', (
   assert.equal(main._torqueLastHtml, null);
 });
 
+test('context_update delta patches provider_usage without broad rerender', () => {
+  const { context, sandbox } = createWsRenderHarness();
+
+  runInContext(context, `
+    state.agents = {
+      'agent-a': {
+        id: 'agent-a',
+        name: 'Agent A',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        context_window: { used_pct: 57, used_tokens: 57, limit_tokens: 100 },
+        provider_usage: null
+      }
+    };
+    _expectedSeq = 1;
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'context_update',
+      cell_id: 'agent-a',
+      group: 'alpha',
+      provider_usage: {
+        five_hour: {
+          available: true,
+          used_percentage: 42,
+          resets_at: '2026-05-26T05:00:00Z',
+        },
+        seven_day: {
+          available: false,
+          used_percentage: null,
+          resets_at: null,
+        },
+      },
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+  });
+  assert.equal(
+    jsonValue(context, 'state.agents["agent-a"].provider_usage.five_hour.used_percentage'),
+    42,
+  );
+  assert.equal(
+    jsonValue(context, 'state.agents["agent-a"].context_window.used_pct'),
+    57,
+  );
+});
+
 test('agent_upsert carrying only context_window skips full grid rebuild and patches meter', () => {
   const { context, document, sandbox } = createWsRenderHarness();
   const card = new FakeElement('agent-a-card');
@@ -18521,6 +18579,65 @@ test('agent_upsert carrying only context_window skips full grid rebuild and patc
   assert.equal(jsonValue(context, 'renderCalls.engineer'), 0);
   assert.equal(meter.textContent, 'ctx 91%');
   assert.match(meter.getAttribute('class'), /agent-context-meter--danger/);
+});
+
+test('agent_upsert carrying only provider_usage skips full grid rebuild', () => {
+  const { context } = createWsRenderHarness();
+
+  runInContext(context, `
+    state.agents = {
+      'agent-a': {
+        id: 'agent-a',
+        name: 'Agent A',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        last_heartbeat_at: 10,
+        last_activity_at: 10,
+        last_event_at: 10,
+        last_event_text: '',
+        context_window: { used_pct: 57, used_tokens: 57, limit_tokens: 100 },
+        provider_usage: null
+      }
+    };
+    _expectedSeq = 1;
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-a',
+      name: 'Agent A',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      last_heartbeat_at: 11,
+      last_activity_at: 11,
+      last_event_at: 11,
+      last_event_text: 'Context usage updated',
+      context_window: { used_pct: 57, used_tokens: 57, limit_tokens: 100 },
+      provider_usage: {
+        five_hour: {
+          available: true,
+          used_percentage: 64,
+          resets_at: '2026-05-26T09:30:00Z',
+        },
+        seven_day: {
+          available: false,
+          used_percentage: null,
+          resets_at: null,
+        },
+      },
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'renderCalls.main'), 0);
+  assert.equal(jsonValue(context, 'renderCalls.engineer'), 0);
+  assert.equal(
+    jsonValue(context, 'state.agents["agent-a"].provider_usage.five_hour.used_percentage'),
+    64,
+  );
 });
 
 test('engineer sent-event deltas rerender only the active agent panel surface', () => {
