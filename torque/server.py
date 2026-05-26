@@ -231,6 +231,9 @@ from .server_prompts import (
     deliverable_word,
 )
 from .engineer_session_map import build_engineer_session_map
+from .codex_usage_backfill import (
+    backfill_codex_provider_usage_for_dormant_agents,
+)
 
 
 def _read_torque_version() -> str:
@@ -258,6 +261,7 @@ _LOG_LINE_RE = re.compile(
 )
 _LOG_TAIL_BYTES = 256 * 1024
 _LOG_MAX_LINES = 500
+_CODEX_PROVIDER_USAGE_BACKFILL_INTERVAL_SECONDS = 300
 
 
 def _runtime_payload(*, bridge=None, state=None) -> dict:
@@ -10255,6 +10259,23 @@ async def main(connection=None):
             except Exception:
                 log.exception("Agent tombstone sweeper failed")
 
+    async def _codex_provider_usage_backfill_refresher():
+        """Periodically refresh dormant Codex account-usage telemetry."""
+        while True:
+            await asyncio.sleep(_CODEX_PROVIDER_USAGE_BACKFILL_INTERVAL_SECONDS)
+            try:
+                changed = backfill_codex_provider_usage_for_dormant_agents(
+                    state,
+                )
+                if changed:
+                    await state.broadcast()
+                    log.info(
+                        "Backfilled Codex provider_usage for %d dormant agent(s)",
+                        changed,
+                    )
+            except Exception:
+                log.exception("Codex provider_usage backfill refresh failed")
+
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
         summary = cell.last_summary.strip()
@@ -10476,6 +10497,15 @@ async def main(connection=None):
     await bridge.start()
     log.info("Startup checkpoint: bridge started")
     await bridge.reconnect_orphans()
+    try:
+        changed = backfill_codex_provider_usage_for_dormant_agents(state)
+        if changed:
+            log.info(
+                "Backfilled Codex provider_usage for %d dormant agent(s)",
+                changed,
+            )
+    except Exception:
+        log.exception("Codex provider_usage backfill on startup failed")
     state.sync_ui_selection_to_session(
         state.active_session_id or "",
         emit=False,
@@ -10485,6 +10515,8 @@ async def main(connection=None):
     log.info("Startup checkpoint: worktree diff updater scheduled")
     asyncio.create_task(_tombstone_sweeper())
     log.info("Startup checkpoint: tombstone sweeper scheduled")
+    asyncio.create_task(_codex_provider_usage_backfill_refresher())
+    log.info("Startup checkpoint: Codex provider_usage backfill scheduled")
 
     async def _resolve_base_dir(group: str = "") -> str:
         return await agent_launch.resolve_base_dir(group)
