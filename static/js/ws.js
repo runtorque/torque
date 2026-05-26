@@ -533,6 +533,9 @@ function connect() {
       if (typeof renderGsEngineerSpecializations === 'function') {
         renderGsEngineerSpecializations();
       }
+      if (typeof renderEditEngineerSpecializations === 'function') {
+        renderEditEngineerSpecializations();
+      }
       if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
           || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
           && typeof specializationLibraryReceiveList === 'function') {
@@ -550,6 +553,9 @@ function connect() {
       const cell = agents[msg.engineer_id];
       if (cell) {
         cell.engineer_specializations = msg.specializations || [];
+      }
+      if (typeof renderEditEngineerSpecializations === 'function') {
+        renderEditEngineerSpecializations();
       }
     } else if (msg.type === 'template_rendered') {
       if (typeof _handleRenderedTemplate === 'function') {

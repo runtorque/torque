@@ -368,9 +368,17 @@
     <label>Name</label>
     <input id="edit-name-input" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitEdit();if(event.key==='Escape')closeModals();">
-    <div id="edit-icon-row">
-      <label>Icon</label>
-      <div class="icon-picker" id="edit-icon-picker"></div>
+    <div id="edit-specializations-row" class="hidden">
+      <label>Specializations
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs. The first one is the primary focus; each adds a preamble block to the engineer's boot prompt.">?</span>
+      </label>
+      <div id="edit-specializations-picker" class="specializations-picker">
+        <ul id="edit-specializations-selected" class="specializations-selected"></ul>
+        <div class="specializations-controls">
+          <select id="edit-specializations-available"></select>
+          <button type="button" class="btn-secondary" onclick="editEngineerAddSpecialization()">+ Add</button>
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>

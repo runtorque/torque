@@ -241,6 +241,31 @@ class MatrixStateCleanupTests(unittest.TestCase):
                     "relay_credential_id", "relay_private_key_path"):
             self.assertIn(key, d)
 
+    def test_update_agent_persists_ordered_engineer_specializations(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        engineer = state.add_agent(name="Engineer", group="g")
+        engineer.kind = "engineer"
+        worker = state.add_agent(name="Worker", group="g")
+        worker.kind = "worker"
+
+        state.update_agent(
+            engineer.id,
+            engineer_specializations=[
+                "ui-ux",
+                "",
+                "runtime-pty",
+                "ui-ux",
+            ],
+        )
+        state.update_agent(worker.id, engineer_specializations=["ui-ux"])
+
+        self.assertEqual(
+            engineer.engineer_specializations,
+            ["ui-ux", "runtime-pty"],
+        )
+        self.assertEqual(worker.engineer_specializations, [])
+
     def test_set_relay_config_dedupes_and_emits(self):
         state = self.state_mod.MatrixState()
         payload = {
