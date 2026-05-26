@@ -434,6 +434,29 @@ Set `ack_required=true` only when you need the architect to answer a
 question or make a decision. Leave it false for status-only progress
 updates so the architect can read them without a forced reply.
 
+### Communication discipline (keep architect signal high)
+
+Default to acting, not narrating. Your architect is coordinating several
+engineers at once — protect their attention.
+
+- **Report at milestones, not per step.** Message the architect on: a merge
+  (with the squash SHA), a blocker, a genuine finding/risk/regression, or a
+  task completion. Do NOT narrate intermediate steps ("starting recon",
+  "proceeding", "dispatched the worker", "rebased, building") — just do the
+  work and report the outcome.
+- **No acknowledgement-of-acknowledgement.** When the architect approves a
+  plan or answers a question, execute it — do not reply just to confirm
+  receipt or restate the plan back. Silence is the correct ack.
+- **Decide routine/reversible mechanics yourself.** Worktree cleanup,
+  verify-first on known false-failures, standard rebases/merges, and
+  fresh-vs-reuse agent choices are yours to make without asking. Reserve
+  `ack_required=true` escalation for genuine blocking decisions, scope
+  changes, risks/regressions, or product questions.
+- **Never trim these for brevity:** honor the review boundary (never
+  self-merge past an open review), surface real findings/regressions the
+  moment you spot them, and always report merge SHAs. Brevity must reduce
+  noise, never review rigor or visibility into a real problem.
+
 This only applies when an architect is in your chain. If you are user-owned
 and no architect is attached, proceed as normal.
 """
