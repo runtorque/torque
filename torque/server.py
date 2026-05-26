@@ -399,6 +399,43 @@ def _resolve_pending_engineer_specializations(
     ]
 
 
+def _known_specialization_names(specialization_mgr, base_dir: str = "") -> set:
+    """Return valid specialization slugs for a group/project base dir."""
+    names = set()
+    for item in specialization_mgr.list_specializations(base_dir=base_dir):
+        name = str((item or {}).get("name", "") or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _normalize_engineer_specialization_selection(
+        raw, valid_names: set | None = None) -> list:
+    """Validate, dedupe, and preserve engineer specialization order."""
+    if not isinstance(raw, list):
+        raise ValueError("specializations must be a list")
+    names = []
+    seen = set()
+    unknown = []
+    for item in raw:
+        token = str(item or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        if valid_names is not None and token not in valid_names:
+            unknown.append(token)
+            continue
+        names.append(token)
+    if unknown:
+        raise ValueError(
+            "Unknown specialization"
+            + ("s" if len(unknown) != 1 else "")
+            + ": "
+            + ", ".join(unknown)
+        )
+    return names
+
+
 def _resolve_task_id(state, identifier: str) -> str:
     """Resolve a task by canonical ID, legacy alias, or ID prefix.
 
@@ -12249,19 +12286,18 @@ async def main(connection=None):
                     "message": f"Engineer \"{engineer_ident}\" not found",
                 }
             raw = data.get("specializations", [])
-            if not isinstance(raw, list):
+            try:
+                base_dir = await _resolve_base_dir(cell.group)
+                names = _normalize_engineer_specialization_selection(
+                    raw,
+                    valid_names=_known_specialization_names(
+                        specialization_mgr, base_dir),
+                )
+            except ValueError as exc:
                 return {
                     "type": "error",
-                    "message": "specializations must be a list",
+                    "message": str(exc),
                 }
-            names = []
-            seen = set()
-            for item in raw:
-                token = str(item or "").strip()
-                if not token or token in seen:
-                    continue
-                names.append(token)
-                seen.add(token)
             cell.engineer_specializations = names
             state._emit_agent(cell)
             state._db_save_agent(cell)
@@ -12844,15 +12880,45 @@ async def main(connection=None):
                     old_name = cell.name
                     new_name = data.get("name", cell.name)
                     new_color = data.get("tab_color", cell.tab_color)
-                    new_icon = data.get("icon", cell.icon)
-                    state.update_agent(data["id"], name=new_name,
-                                       tab_color=new_color,
-                                       icon=new_icon)
-                    if new_name != old_name and cell.cell_type == "agent":
-                        state.history_update_agent(
-                            cell, name=new_name, slug=cell.slug)
-                    if cell.session_id:
-                        await bridge.update_session(cell, old_name)
+                    update_fields = {
+                        "name": new_name,
+                        "tab_color": new_color,
+                    }
+                    if "icon" in data:
+                        update_fields["icon"] = data.get("icon", cell.icon)
+                    if "engineer_specializations" in data:
+                        if cell.kind != "engineer":
+                            result = {
+                                "type": "error",
+                                "message": (
+                                    "engineer_specializations can only be "
+                                    "updated for engineers"
+                                ),
+                            }
+                        else:
+                            try:
+                                base_dir = await _resolve_base_dir(cell.group)
+                                update_fields["engineer_specializations"] = (
+                                    _normalize_engineer_specialization_selection(
+                                        data.get("engineer_specializations"),
+                                        valid_names=_known_specialization_names(
+                                            specialization_mgr, base_dir),
+                                    )
+                                )
+                            except ValueError as exc:
+                                result = {
+                                    "type": "error",
+                                    "message": str(exc),
+                                }
+                    if not result:
+                        # Edit popup save path: name + engineer specializations
+                        # are persisted in one update_agent round-trip.
+                        state.update_agent(data["id"], **update_fields)
+                        if new_name != old_name and cell.cell_type == "agent":
+                            state.history_update_agent(
+                                cell, name=new_name, slug=cell.slug)
+                        if cell.session_id:
+                            await bridge.update_session(cell, old_name)
 
             elif cmd == "focus_agent":
                 cell = state.agents.get(data["id"])

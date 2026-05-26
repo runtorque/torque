@@ -7521,6 +7521,17 @@ class MatrixState:
         for key in ("name", "tab_color", "icon"):
             if key in fields:
                 setattr(cell, key, fields[key])
+        if "engineer_specializations" in fields and cell.kind == "engineer":
+            raw_specs = fields.get("engineer_specializations") or []
+            specs = []
+            seen_specs = set()
+            for item in (raw_specs if isinstance(raw_specs, list) else []):
+                token = str(item or "").strip()
+                if not token or token in seen_specs:
+                    continue
+                specs.append(token)
+                seen_specs.add(token)
+            cell.engineer_specializations = specs
         if "name" in fields:
             if cell.cell_type == "terminal":
                 cell.slug = self._unique_terminal_slug(

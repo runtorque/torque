@@ -80,6 +80,22 @@ class ServerModuleExtractionTests(unittest.TestCase):
         state.add_group("g")
         return state
 
+    def test_normalize_engineer_specialization_selection_validates_and_dedupes(self):
+        normalize = self.server_mod._normalize_engineer_specialization_selection
+
+        self.assertEqual(
+            normalize(
+                ["ui-ux", "runtime-pty", "ui-ux", "", "prompts-config"],
+                valid_names={"ui-ux", "runtime-pty", "prompts-config"},
+            ),
+            ["ui-ux", "runtime-pty", "prompts-config"],
+        )
+        with self.assertRaises(ValueError):
+            normalize(["ui-ux", "security-focus"],
+                      valid_names={"ui-ux"})
+        with self.assertRaises(ValueError):
+            normalize("ui-ux", valid_names={"ui-ux"})
+
     def test_pr_task_ref_rewrite_uses_same_repo_short_ref(self):
         state = self._rewrite_state()
         self._task_with_github_sync(

@@ -527,11 +527,15 @@ function connect() {
       state.specializations = Array.isArray(msg.specializations)
         ? msg.specializations
         : [];
+      state.specializations_group = msg.group || '';
       if (typeof renderEngineerLaunchSpecializations === 'function') {
         renderEngineerLaunchSpecializations();
       }
       if (typeof renderGsEngineerSpecializations === 'function') {
         renderGsEngineerSpecializations();
+      }
+      if (typeof renderEditEngineerSpecializations === 'function') {
+        renderEditEngineerSpecializations();
       }
       if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
           || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
@@ -550,6 +554,9 @@ function connect() {
       const cell = agents[msg.engineer_id];
       if (cell) {
         cell.engineer_specializations = msg.specializations || [];
+      }
+      if (typeof renderEditEngineerSpecializations === 'function') {
+        renderEditEngineerSpecializations();
       }
     } else if (msg.type === 'template_rendered') {
       if (typeof _handleRenderedTemplate === 'function') {
