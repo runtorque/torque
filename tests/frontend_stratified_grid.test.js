@@ -111,6 +111,7 @@ function createHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/constants.js');
   loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
   vm.runInContext(
     'renderAgentCell = function(a) {'
     + ' var kind = String(a.kind || "");'

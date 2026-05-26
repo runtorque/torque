@@ -109,6 +109,7 @@ function buildSandbox(activeElement, lookup) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   loadScript(sandbox, 'static/js/render.js');
+  loadScript(sandbox, 'static/js/grid/group-tabs.js');
   return sandbox;
 }
 
@@ -197,6 +198,7 @@ function buildFocusSplitSandbox(options) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   loadScript(sandbox, 'static/js/render.js');
+  loadScript(sandbox, 'static/js/grid/group-tabs.js');
   return {
     sandbox,
     store,

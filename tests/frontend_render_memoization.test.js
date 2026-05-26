@@ -92,6 +92,7 @@ function createGridHarness() {
   sandbox.window = sandbox;
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
   return { context, sandbox, main };
 }
 
