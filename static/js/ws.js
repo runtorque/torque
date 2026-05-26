@@ -1097,6 +1097,18 @@ function _contextWindowPayloadFromOp(op) {
   return undefined;
 }
 
+function _providerUsagePayloadFromOp(op) {
+  if (!op || typeof op !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(op, 'provider_usage')) {
+    return op.provider_usage;
+  }
+  const data = op.data && typeof op.data === 'object' ? op.data : null;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'provider_usage')) {
+    return data.provider_usage;
+  }
+  return undefined;
+}
+
 function _applyContextMeterDeltaUpdates(agentIds) {
   if (!Array.isArray(agentIds) || !agentIds.length) return;
   if (typeof updateAgentContextMeter !== 'function') return;
@@ -1118,14 +1130,15 @@ function _collectContextMeterDeltaAgentIds(ops, hints) {
   for (let i = 0; i < (ops || []).length; i++) {
     const op = ops[i] || {};
     if (op.op === 'context_update') {
-      add(_contextDeltaAgentId(op));
+      if (_contextWindowPayloadFromOp(op) !== undefined) add(_contextDeltaAgentId(op));
       continue;
     }
     if (op.op !== 'agent_upsert') continue;
     const hint = hints && hints[i] ? hints[i] : {};
     const previous = hint && hint.agent ? hint.agent : null;
     const next = _agentNextFromDelta(op, previous);
-    if (_agentDeltaIsContextWindowOnly(previous, next, op)) add(op.id);
+    if (_contextWindowPayloadFromOp(op) !== undefined
+        && _agentDeltaIsContextWindowOnly(previous, next, op)) add(op.id);
   }
   return ids;
 }
@@ -1482,10 +1495,12 @@ function _agentDeltaChangedFields(previous, next, op) {
 function _agentDeltaIsContextWindowOnly(previous, next, op) {
   if (!op || op.op !== 'agent_upsert') return false;
   if (!previous || !next) return false;
-  if (!Object.prototype.hasOwnProperty.call(op, 'context_window')) return false;
+  if (!Object.prototype.hasOwnProperty.call(op, 'context_window')
+      && !Object.prototype.hasOwnProperty.call(op, 'provider_usage')) return false;
   const changed = _agentDeltaChangedFields(previous, next, op);
   const allowed = {
     context_window: true,
+    provider_usage: true,
     last_heartbeat_at: true,
     last_activity_at: true,
     last_event_at: true,
@@ -2315,10 +2330,18 @@ function _applyDelta(ops) {
         const id = _contextDeltaAgentId(op);
         if (!id || !state.agents || !state.agents[id]) break;
         const payload = _contextWindowPayloadFromOp(op);
-        if (payload === undefined) break;
-        state.agents[id].context_window = (payload && typeof payload === 'object')
-          ? Object.assign({}, payload)
-          : {};
+        const providerUsage = _providerUsagePayloadFromOp(op);
+        if (payload === undefined && providerUsage === undefined) break;
+        if (payload !== undefined) {
+          state.agents[id].context_window = (payload && typeof payload === 'object')
+            ? Object.assign({}, payload)
+            : {};
+        }
+        if (providerUsage !== undefined) {
+          state.agents[id].provider_usage = (providerUsage && typeof providerUsage === 'object')
+            ? Object.assign({}, providerUsage)
+            : providerUsage;
+        }
         break;
       }
       case 'agent_remove':

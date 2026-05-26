@@ -200,6 +200,15 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     "cache_creation_input_tokens": 250,
                     "session_total_tokens": 123456,
                 },
+                "rate_limits": {
+                    "five_hour": {
+                        "used_percentage": 42.4,
+                        "resets_at": "2026-05-26T05:00:00Z",
+                    },
+                    "seven_day": {
+                        "available": False,
+                    },
+                },
             },
             SimpleNamespace(id="agent-1"),
         )
@@ -218,6 +227,21 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         self.assertEqual(context_window["cached_input_tokens"], 1250)
         self.assertEqual(context_window["reasoning_output_tokens"], 50)
         self.assertEqual(context_window["session_total_tokens"], 123456)
+        self.assertEqual(
+            event.data["provider_usage"],
+            {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 42,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                },
+                "seven_day": {
+                    "available": False,
+                    "used_percentage": None,
+                    "resets_at": None,
+                },
+            },
+        )
 
         self.assertIsNone(
             adapter.parse_event(
@@ -230,6 +254,41 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 },
                 SimpleNamespace(id="agent-1"),
             )
+        )
+
+    def test_claude_parse_statusline_rate_limits_without_context(self):
+        adapter = ClaudeCodeAdapter()
+
+        event = adapter.parse_event(
+            {
+                "hook_event_name": "StatusLine",
+                "rate_limits": {
+                    "five_hour": {
+                        "used_percentage": "63.8",
+                        "resets_at": "2026-05-26T09:30:00Z",
+                    },
+                },
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "context_update")
+        self.assertNotIn("context_window", event.data)
+        self.assertEqual(
+            event.data["provider_usage"],
+            {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 64,
+                    "resets_at": "2026-05-26T09:30:00Z",
+                },
+                "seven_day": {
+                    "available": False,
+                    "used_percentage": None,
+                    "resets_at": None,
+                },
+            },
         )
 
     def test_claude_statusline_proxy_preserves_project_local_output(self):

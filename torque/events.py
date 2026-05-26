@@ -11,6 +11,10 @@ from .adapters import get_adapter
 from .adapters.base import AgentEvent, EVENT_TYPES
 from .config import log
 from .context_window import normalize_context_window_usage
+from .provider_usage import (
+    normalize_provider_usage,
+    provider_usage_fingerprint,
+)
 from .task_health import HEALTH_SEVERITY
 from . import profiling
 
@@ -96,6 +100,20 @@ def _apply_context_window(cell, data: dict | None, timestamp: float | None,
         return True
     else:
         return False
+
+
+def _apply_provider_usage(cell, data: dict | None) -> bool:
+    if not isinstance(data, dict) or "provider_usage" not in data:
+        return False
+    provider_usage = normalize_provider_usage(data.get("provider_usage"))
+    if provider_usage is None:
+        return False
+    previous = getattr(cell, "provider_usage", None)
+    if provider_usage_fingerprint(previous) == provider_usage_fingerprint(
+            provider_usage):
+        return False
+    cell.provider_usage = provider_usage
+    return True
 
 
 def _effective_owner_engineer_id(cell) -> str:
@@ -878,12 +896,13 @@ class EventBus:
         # grid context meter keeps updating. We intentionally do NOT surface a
         # human-facing status line for context_update — it is high-frequency
         # telemetry and would spam the agent card's activity line.
-        _apply_context_window(
+        context_changed = _apply_context_window(
             cell,
             d,
             event.timestamp,
             clear_on_empty=et == "session_start",
         )
+        provider_usage_changed = _apply_provider_usage(cell, d)
 
         if et == "session_start":
             cell.activity = ""
@@ -984,7 +1003,8 @@ class EventBus:
             # Context-window meter already refreshed above. Deliberately no
             # last_event_text here: surfacing it spammed the agent card status
             # line on every high-frequency context_update.
-            pass
+            if not context_changed and not provider_usage_changed:
+                return
 
         elif et == "heartbeat":
             detail = d.get("detail", "")
@@ -1047,7 +1067,7 @@ class EventBus:
             self._state._emit("event_append", **pe)
 
         # Emit delta for all event types
-        self._state._emit_agent(cell)
+        self._state._emit_agent(cell, coalesce_ephemeral=et == "context_update")
 
     def _maybe_unlink_post_derive(self, cell):
         """Unlink an idle agent once its task has truly handed work off.

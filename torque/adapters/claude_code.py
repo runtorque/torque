@@ -12,6 +12,7 @@ import shlex
 from textwrap import dedent
 
 from ..context_window import normalize_context_window_usage
+from ..provider_usage import normalize_provider_usage_rate_limits
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 from .mcp_launch import build_stdio_launch_spec
 
@@ -495,6 +496,12 @@ def _claude_statusline_context_window(raw: dict, timestamp: float) -> dict:
     return normalize_context_window_usage(data, now=timestamp)
 
 
+def _claude_statusline_provider_usage(raw: dict) -> dict | None:
+    return normalize_provider_usage_rate_limits(
+        _dict_value(raw, "rate_limits", "rateLimits")
+    )
+
+
 # Tool name → human-readable activity detail
 _TOOL_ACTIVITIES = {
     "Bash": lambda inp: f"Running: {_truncate(inp.get('command', ''), 40)}",
@@ -962,12 +969,18 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         if hook_event == "StatusLine":
             context_window = _claude_statusline_context_window(raw, now)
-            if not context_window:
+            provider_usage = _claude_statusline_provider_usage(raw)
+            if not context_window and provider_usage is None:
                 return None
+            data = {}
+            if context_window:
+                data["context_window"] = context_window
+            if provider_usage is not None:
+                data["provider_usage"] = provider_usage
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="context_update",
-                data={"context_window": context_window},
+                data=data,
             )
 
         if hook_event == "SessionStart":

@@ -918,6 +918,7 @@ class AgentCell:
     session_tokens_in: int = 0  # cumulative input tokens this session
     session_tokens_out: int = 0  # cumulative output tokens this session
     context_window: dict = field(default_factory=dict)  # current context usage
+    provider_usage: dict | None = None  # provider rate-limit usage telemetry
     error_message: str = ""  # last error, cleared on next successful event
     needs_attention: bool = False  # agent waiting for input or stuck
     last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
@@ -1042,6 +1043,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "last_event_text",
                      "session_tokens_in", "session_tokens_out",
                      "context_window",
+                     "provider_usage",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
                      "worktree_dirty", "worktree_diff",
@@ -2760,9 +2762,36 @@ class MatrixState:
             except Exception:
                 log.exception("Task-upsert observer failed")
 
-    def _emit_agent(self, cell: AgentCell):
+    def _emit_agent(self, cell: AgentCell, *, coalesce_ephemeral: bool = False):
         """Emit an agent_upsert delta with the full agent dict."""
-        self._emit("agent_upsert", **asdict(cell))
+        payload = asdict(cell)
+        if coalesce_ephemeral and self._coalesce_pending_agent_upsert(payload):
+            return
+        self._emit("agent_upsert", **payload)
+
+    def _coalesce_pending_agent_upsert(self, payload: dict) -> bool:
+        """Replace the latest pending upsert for this agent with ``payload``.
+
+        Agent telemetry such as context-window and provider rate-limit usage is
+        high-frequency and already broadcast on a trailing-edge timer.  Keep at
+        most one pending ``agent_upsert`` per agent for those telemetry events
+        so a burst of statusLine updates becomes one latest-value delta.
+        """
+        agent_id = str((payload or {}).get("id", "") or "")
+        if not agent_id:
+            return False
+        for index in range(len(self._delta_ops) - 1, -1, -1):
+            op = self._delta_ops[index] or {}
+            op_name = str(op.get("op", "") or "")
+            op_id = str(op.get("id", "") or "")
+            if op_id != agent_id:
+                continue
+            if op_name == "agent_remove":
+                return False
+            if op_name == "agent_upsert":
+                self._delta_ops[index] = {"op": "agent_upsert", **payload}
+                return True
+        return False
 
     def _clear_engineer_queue_empty_emitted(self, engineer_id: str) -> bool:
         """Clear the one-shot queue-empty gate when an engineer picks up work."""
