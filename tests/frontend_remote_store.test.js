@@ -262,6 +262,7 @@ test('agent_state ingests separately from conversations and merges by agent_id',
   const store = loadStore();
   assert.equal(store.ingestAgentState({
     agent_id: 'w',
+    agent_type: 'claude-code',
     kind: 'worker',
     status: 'running',
     activity_detail: 'Editing store.js',
@@ -276,6 +277,7 @@ test('agent_state ingests separately from conversations and merges by agent_id',
 
   assert.deepEqual(agentListIds(store), [], 'state heartbeats do not create conversations');
   assert.equal(store.agentState.w.status, 'running');
+  assert.equal(store.agentState.w.agent_type, 'claude-code');
   assert.equal(store.agentState.w.context_window.used_percentage, 42);
   assert.equal(store.agentState.w.provider_usage.five_hour.used_percentage, 64);
 
