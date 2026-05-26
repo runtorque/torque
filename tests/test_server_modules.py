@@ -51,6 +51,255 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(files[0]['insertions'], 2)
         self.assertEqual(files[0]['deletions'], 0)
 
+    def _task_with_github_sync(self, state, task_id, *,
+                               repo="acme/repo", number=166):
+        task = state.board_add_task(
+            f"Task {task_id}",
+            "g",
+            lane="Backlog",
+            id=task_id,
+            board_sync={
+                "provider": "github",
+                "github": {
+                    "issue_repo": repo,
+                    "issue_number": number,
+                    "issue_url": f"https://github.com/{repo}/issues/{number}",
+                },
+            },
+        )
+        self.assertIsNotNone(task)
+        # Auto-synced tasks populate board_sync.github.* even when top-level
+        # provider/external fields are blank.
+        task.provider = ""
+        task.external_id = ""
+        task.external_url = ""
+        return task
+
+    def _rewrite_state(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        return state
+
+    def test_pr_task_ref_rewrite_uses_same_repo_short_ref(self):
+        state = self._rewrite_state()
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="acme/repo",
+            number=166,
+        )
+
+        text, diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Implements TORQUE:680.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(text, "Implements #166.")
+        self.assertEqual(diagnostics["replaced"][0]["ref"], "#166")
+
+    def test_pr_task_ref_rewrite_uses_cross_repo_ref(self):
+        state = self._rewrite_state()
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="runtorque/torque",
+            number=166,
+        )
+
+        text, _diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Implements TORQUE:680.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(text, "Implements runtorque/torque#166.")
+
+    def test_pr_task_ref_rewrite_parses_url_only_sync_mapping(self):
+        state = self._rewrite_state()
+        task = state.board_add_task(
+            "Task with URL-only GitHub sync",
+            "g",
+            lane="Backlog",
+            id="TORQUE:680",
+            board_sync={
+                "provider": "github",
+                "github": {
+                    "issue_url": "https://github.com/acme/repo/issues/166",
+                },
+            },
+        )
+        task.provider = ""
+        task.external_id = ""
+        task.external_url = ""
+
+        text, _diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Implements TORQUE:680.",
+                state=state,
+                base_repo="",
+            )
+        )
+
+        self.assertEqual(text, "Implements acme/repo#166.")
+
+    def test_pr_task_ref_formatter_falls_back_to_issue_url(self):
+        ref = self.server_worktrees._github_issue_ref_for_pr_text({
+            "issue_url": "https://github.com/acme/repo/issues/166",
+        }, base_repo="acme/repo")
+
+        self.assertEqual(ref, "https://github.com/acme/repo/issues/166")
+
+    def test_pr_task_ref_rewrite_leaves_unknown_and_unmapped_refs(self):
+        state = self._rewrite_state()
+        state.board_add_task(
+            "Unmapped task",
+            "g",
+            lane="Backlog",
+            id="TORQUE:680",
+        )
+
+        text, diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Refs TORQUE:680 and TORQUE:999.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(text, "Refs TORQUE:680 and TORQUE:999.")
+        self.assertEqual(
+            sorted({item["task_id"] for item in diagnostics["unresolved"]}),
+            ["TORQUE:680", "TORQUE:999"],
+        )
+
+    def test_pr_task_ref_rewrite_handles_multiple_refs_and_derived_ids(self):
+        state = self._rewrite_state()
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="acme/repo",
+            number=166,
+        )
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680:1",
+            repo="acme/repo",
+            number=167,
+        )
+
+        text, diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Refs TORQUE:680, TORQUE:680:1, and TORQUE:680 again.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(text, "Refs #166, #167, and #166 again.")
+        self.assertEqual(
+            [item["ref"] for item in diagnostics["replaced"]],
+            ["#166", "#167", "#166"],
+        )
+
+    def test_pr_task_ref_rewrite_skips_fenced_and_inline_code(self):
+        state = self._rewrite_state()
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="acme/repo",
+            number=166,
+        )
+        body = (
+            "Outside TORQUE:680.\n"
+            "`inline TORQUE:680`\n"
+            "```sh\n"
+            "echo TORQUE:680\n"
+            "```\n"
+            "Outside again TORQUE:680."
+        )
+
+        text, diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                body,
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(
+            text,
+            (
+                "Outside #166.\n"
+                "`inline TORQUE:680`\n"
+                "```sh\n"
+                "echo TORQUE:680\n"
+                "```\n"
+                "Outside again #166."
+            ),
+        )
+        self.assertEqual(diagnostics["skipped_inline_refs"], 1)
+        self.assertEqual(diagnostics["skipped_fenced_refs"], 1)
+
+    def test_pr_task_ref_rewrite_preserves_close_keywords_without_injecting(self):
+        state = self._rewrite_state()
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="acme/repo",
+            number=166,
+        )
+
+        plain, _plain_diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Plain TORQUE:680.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+        closing, _closing_diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Closes TORQUE:680.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(plain, "Plain #166.")
+        self.assertNotIn("closes", plain.lower())
+        self.assertEqual(closing, "Closes #166.")
+
+    def test_pr_task_ref_rewrite_is_idempotent(self):
+        state = self._rewrite_state()
+        self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="acme/repo",
+            number=166,
+        )
+
+        first, _first_diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                "Refs TORQUE:680.",
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+        second, second_diagnostics = (
+            self.server_worktrees._rewrite_pr_torque_task_refs(
+                first,
+                state=state,
+                base_repo="acme/repo",
+            )
+        )
+
+        self.assertEqual(second, "Refs #166.")
+        self.assertEqual(second_diagnostics["replaced"], [])
+
     def test_relay_agent_roster_is_group_scoped_and_excludes_tombstones(self):
         state = self.state_mod.MatrixState()
         state.add_group('g1')

@@ -2298,6 +2298,65 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 return self.merge_result(auto)
             return dict(self.merge_result)
 
+    class _FakeCreatePrWorktreeManager:
+        def __init__(self):
+            self.calls = []
+
+        async def reconcile_worktree_branch(self, _cell):
+            return False
+
+        async def create_pr(self, cell, title="", body=""):
+            self.calls.append(("create_pr", cell.id, title, body))
+            return {
+                "url": "https://github.com/acme/repo/pull/8",
+                "existing": False,
+            }
+
+    async def test_worktree_create_pr_rewrites_title_body_and_leaves_unmapped(self):
+        state, worker, task = self._make_pr_merge_state()
+        state.update_group_settings(
+            "g",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+            board_sync_github={"github_repo": "acme/repo"},
+        )
+        task.board_sync = {
+            "provider": "github",
+            "github": {
+                "issue_repo": "acme/repo",
+                "issue_number": 123,
+                "issue_url": "https://github.com/acme/repo/issues/123",
+            },
+        }
+        task.provider = ""
+        task.external_id = ""
+        task.external_url = ""
+        state.board_add_task(
+            "Unmapped follow-up",
+            "g",
+            lane="Backlog",
+            id="TORQUE:491",
+        )
+        worktree_mgr = self._FakeCreatePrWorktreeManager()
+        handle_command = self._extract_handle_command(
+            state,
+            worktree_mgr=worktree_mgr,
+        )
+
+        result = await handle_command({
+            "cmd": "worktree_create_pr",
+            "id": worker.id,
+            "title": "Ship TORQUE:490",
+            "body": "Refs TORQUE:490 and TORQUE:491.",
+        })
+
+        self.assertEqual(result["type"], "worktree_pr")
+        self.assertEqual(result["url"], "https://github.com/acme/repo/pull/8")
+        self.assertEqual(
+            worktree_mgr.calls[-1],
+            ("create_pr", worker.id, "Ship #123", "Refs #123 and TORQUE:491."),
+        )
+
     async def test_worktree_merge_mode_pr_rejects_force_direct(self):
         state, worker, _task = self._make_pr_merge_state()
         state.update_group_settings("g", engineer_merge_mode="pr")
@@ -2552,6 +2611,133 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "PR: https://github.com/acme/repo/pull/7"
             ),
         )
+
+    async def test_worktree_merge_pr_rewrites_plain_task_ref_without_close_keyword(self):
+        state, worker, task = self._make_pr_merge_state()
+        state.update_group_settings(
+            "g",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+            board_sync_github={"github_repo": "acme/repo"},
+        )
+        task.board_sync = {
+            "provider": "github",
+            "github": {
+                "issue_repo": "acme/repo",
+                "issue_number": 123,
+                "issue_url": "https://github.com/acme/repo/issues/123",
+            },
+        }
+        # Keep top-level provider fields blank: auto-synced tasks rely on the
+        # nested board_sync.github mapping.
+        task.provider = ""
+        task.external_id = ""
+        task.external_url = ""
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "pr_title": "Refs TORQUE:490",
+                "pr_body": "Plain TORQUE:490 reference.",
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        create_call = [
+            call for call in worktree_mgr.calls if call[0] == "create_pr"
+        ][-1]
+        merge_call = [
+            call for call in worktree_mgr.calls if call[0] == "merge_pr"
+        ][-1]
+        self.assertEqual(create_call[4], "Refs #123")
+        self.assertEqual(create_call[5], "Plain #123 reference.")
+        self.assertNotIn("close", create_call[5].lower())
+        self.assertNotIn("closes", merge_call[6].lower())
+        self.assertNotIn("TORQUE:490", merge_call[6])
+
+    async def test_worktree_merge_pr_preserves_author_close_keyword_on_rewrite(self):
+        state, worker, task = self._make_pr_merge_state()
+        state.update_group_settings(
+            "g",
+            board_sync_provider="github",
+            board_sync_enabled=True,
+            board_sync_github={"github_repo": "acme/repo"},
+        )
+        task.board_sync = {
+            "provider": "github",
+            "github": {
+                "issue_repo": "acme/repo",
+                "issue_number": 123,
+                "issue_url": "https://github.com/acme/repo/issues/123",
+            },
+        }
+        task.provider = ""
+        task.external_id = ""
+        task.external_url = ""
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "pr_title": "Close TORQUE:490",
+                "pr_body": "Closes TORQUE:490.",
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        create_call = [
+            call for call in worktree_mgr.calls if call[0] == "create_pr"
+        ][-1]
+        merge_call = [
+            call for call in worktree_mgr.calls if call[0] == "merge_pr"
+        ][-1]
+        self.assertEqual(create_call[4], "Close #123")
+        self.assertEqual(create_call[5], "Closes #123.")
+        self.assertEqual(merge_call[6].count("Closes #123"), 1)
+        self.assertNotIn("TORQUE:490", merge_call[6])
 
     async def test_worktree_merge_pr_falls_back_to_generated_title_body(self):
         state, worker, _task = self._make_pr_merge_state()

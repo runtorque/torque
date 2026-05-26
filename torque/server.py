@@ -185,6 +185,7 @@ from .server_worktrees import (
     _pr_merge_failure_allows_auto,
     _pr_result_metadata,
     _record_pr_metadata_on_latest_boundary,
+    _rewrite_pr_torque_task_refs_metadata,
     _split_merge_message_for_pr,
     _worktree_diff_updater,
     _worktree_full_diff,
@@ -813,6 +814,40 @@ async def _append_github_closing_refs_to_pr_body(
         linked_issues,
         group_settings,
     )
+
+
+def _log_pr_task_ref_rewrite(context: str, diagnostics: dict | None) -> None:
+    """Log PR task-ref rewrite diagnostics without leaking PR body text."""
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    replaced = diagnostics.get("replaced", []) or []
+    unresolved = diagnostics.get("unresolved", []) or []
+    replaced_refs = sorted({
+        (
+            f"{str(item.get('raw_task_id') or item.get('task_id') or '').strip()}"
+            f"->{str(item.get('ref') or '').strip()}"
+        )
+        for item in replaced
+        if isinstance(item, dict)
+        and str(item.get("raw_task_id") or item.get("task_id") or "").strip()
+        and str(item.get("ref") or "").strip()
+    })
+    unresolved_ids = sorted({
+        str(item.get("task_id") or "").strip()
+        for item in unresolved
+        if isinstance(item, dict) and str(item.get("task_id") or "").strip()
+    })
+    if replaced_refs:
+        log.info(
+            "Rewrote Torque task refs in %s PR metadata: %s",
+            context,
+            ", ".join(replaced_refs),
+        )
+    if unresolved_ids:
+        log.info(
+            "Left unresolved Torque task refs unchanged in %s PR metadata: %s",
+            context,
+            ", ".join(unresolved_ids),
+        )
 
 
 async def _preflight_worktree_merge_gates(
@@ -1543,20 +1578,30 @@ async def _run_pr_worktree_merge(
     body = pr_body or derived_body
 
     group_settings = state.get_group_settings(getattr(cell, "group", "") or "")
+    github_group_settings = getattr(
+        group_settings,
+        "board_sync_github",
+        {},
+    ) or {}
+    if not isinstance(github_group_settings, dict):
+        github_group_settings = {}
+    base_repo = (
+        str(preflight.get("name_with_owner") or "").strip()
+        or str(github_group_settings.get("github_repo", "")).strip()
+    )
+    rewrite = _rewrite_pr_torque_task_refs_metadata(
+        title,
+        body,
+        state=state,
+        base_repo=base_repo,
+    )
+    title = rewrite["title"]
+    body = rewrite["body"]
+    _log_pr_task_ref_rewrite("worktree_merge", rewrite)
+
     close_issues_via_pr = _github_pr_closing_refs_enabled(group_settings)
     linked_issues: list[dict] = []
     if close_issues_via_pr:
-        github_group_settings = getattr(
-            group_settings,
-            "board_sync_github",
-            {},
-        ) or {}
-        if not isinstance(github_group_settings, dict):
-            github_group_settings = {}
-        base_repo = (
-            str(preflight.get("name_with_owner") or "").strip()
-            or str(github_group_settings.get("github_repo", "")).strip()
-        )
         linked_issues = _linked_github_issues_for_pr(
             state,
             cell,
@@ -13046,6 +13091,28 @@ async def main(connection=None):
                     if not title:
                         title = cell.name
                     body = data.get("body", "")
+                    group_settings = state.get_group_settings(
+                        getattr(cell, "group", "") or ""
+                    )
+                    github_group_settings = getattr(
+                        group_settings,
+                        "board_sync_github",
+                        {},
+                    ) or {}
+                    if not isinstance(github_group_settings, dict):
+                        github_group_settings = {}
+                    rewrite = _rewrite_pr_torque_task_refs_metadata(
+                        title,
+                        body,
+                        state=state,
+                        base_repo=str(
+                            github_group_settings.get("github_repo", "")
+                            or ""
+                        ).strip(),
+                    )
+                    title = rewrite["title"]
+                    body = rewrite["body"]
+                    _log_pr_task_ref_rewrite("worktree_create_pr", rewrite)
                     pr_result = await worktree_mgr.create_pr(
                         cell, title=title, body=body)
                     if "error" in pr_result:
