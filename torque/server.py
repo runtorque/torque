@@ -488,6 +488,7 @@ def _relay_agent_state_snapshot(state: MatrixState) -> list[dict]:
             "id": getattr(cell, "id", ""),
             "name": getattr(cell, "name", ""),
             "kind": getattr(cell, "kind", ""),
+            "agent_type": getattr(cell, "agent_type", ""),
             "status": getattr(cell, "status", ""),
             "activity_detail": getattr(cell, "activity_detail", ""),
             "needs_attention": bool(getattr(cell, "needs_attention", False)),

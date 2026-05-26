@@ -488,6 +488,7 @@ class AgentStateForwardingTests(unittest.IsolatedAsyncioTestCase):
         row = {
             "id": "worker-1",
             "kind": "worker",
+            "agent_type": "codex",
             "status": "running",
             "activity_detail": "mcp__torque__torque_context",
             "needs_attention": False,
@@ -520,6 +521,7 @@ class AgentStateForwardingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(projected["agent_id"], "worker-1")
         self.assertEqual(projected["kind"], "worker")
+        self.assertEqual(projected["agent_type"], "codex")
         self.assertEqual(projected["status"], "running")
         self.assertEqual(projected["activity_detail"], "Checking context")
         self.assertEqual(projected["context_window"], {"used_percentage": 57})
@@ -620,6 +622,7 @@ class AgentStateForwardingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(envelope["payload"]["schema"], 1)
         self.assertEqual(envelope["payload"]["lane"], "agent-state")
         self.assertEqual(envelope["payload"]["agent"]["agent_id"], "worker-1")
+        self.assertEqual(envelope["payload"]["agent"]["agent_type"], "codex")
         self.assertEqual(
             envelope["payload"]["agent"]["context_window"],
             {"used_percentage": 57},
@@ -700,6 +703,7 @@ class AgentStateForwardingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(envelope["payload"]["schema"], 1)
         self.assertEqual(envelope["payload"]["lane"], "agent-state")
         self.assertEqual(envelope["payload"]["agents"][0]["agent_id"], "worker-1")
+        self.assertEqual(envelope["payload"]["agents"][0]["agent_type"], "codex")
         self.assertIn("worker-1", connector._agent_state_last_sent_fingerprint)
 
 
@@ -857,6 +861,7 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         rows = [{
             "id": "w1",
             "kind": "worker",
+            "agent_type": "claude-code",
             "status": "running",
             "activity_detail": "torque_context",
             "needs_attention": True,
@@ -885,6 +890,7 @@ class SnapshotRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent_state["agents"], [{
             "agent_id": "w1",
             "kind": "worker",
+            "agent_type": "claude-code",
             "status": "running",
             "activity_detail": "Checking context",
             "needs_attention": True,
