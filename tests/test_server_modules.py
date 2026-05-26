@@ -338,6 +338,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         worker = state.add_agent(name='Worker', group='g1')
         worker.kind = 'worker'
+        worker.agent_type = 'codex'
         worker.status = 'running'
         worker.activity_detail = 'torque_context'
         worker.needs_attention = True
@@ -365,6 +366,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(snapshot[0]['id'], worker.id)
         self.assertEqual(snapshot[0]['name'], 'Worker')
         self.assertEqual(snapshot[0]['kind'], 'worker')
+        self.assertEqual(snapshot[0]['agent_type'], 'codex')
         self.assertEqual(snapshot[0]['status'], 'running')
         self.assertEqual(snapshot[0]['activity_detail'], 'torque_context')
         self.assertTrue(snapshot[0]['needs_attention'])
