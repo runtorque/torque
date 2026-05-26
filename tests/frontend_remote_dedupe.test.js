@@ -51,6 +51,16 @@ function agentMessage(id, daemonId) {
   };
 }
 
+function channelEvent(id, daemonId, payload) {
+  return {
+    v: 1, id, daemon_id: daemonId,
+    source: { kind: 'daemon', id: daemonId },
+    target: { kind: 'remote-client', id: 'user', user_id: 'user' },
+    kind: 'channel_event', created_at: new Date().toISOString(),
+    payload,
+  };
+}
+
 test('duplicate DATA envelope is ingested once but RE-ACKED (stops replay)', () => {
   const s = loadBundle();
   const cfg = s.RemoteConfig.parseConfig({ relayBaseUrl: 'http://127.0.0.1:8787', daemonId: 'd', clientId: 'c' });
@@ -71,6 +81,52 @@ test('duplicate DATA envelope is ingested once but RE-ACKED (stops replay)', () 
   const acks = socket.sent.filter((e) => e.kind === 'ack' && e.payload.ack_id === 'msg-7');
   assert.equal(acks.length, 2,
     're-acked on the duplicate so the relay stops re-replaying (P6.1 #1)');
+});
+
+test('agent_state channel_event is transient: ingested but not acked', () => {
+  const s = loadBundle();
+  const cfg = s.RemoteConfig.parseConfig({ relayBaseUrl: 'http://127.0.0.1:8787', daemonId: 'd', clientId: 'c' });
+  const store = new s.RemoteStore({});
+  const socket = memorySocket();
+  const client = new s.RemoteRelayClient({
+    config: cfg, store, socketFactory: () => socket,
+    setTimeout: () => 0, clearTimeout: () => {},
+  });
+  client.connect();
+  socket.onmessage({ data: JSON.stringify(readyEnvelope('d')) });
+
+  socket.onmessage({ data: JSON.stringify(channelEvent('state-1', 'd', {
+    type: 'agent_state', schema: 1, lane: 'agent-state',
+    agent: { agent_id: 'w', status: 'running', activity_detail: 'Working', lastStateMs: 1000 },
+  })) });
+
+  assert.equal(store.agentState.w.status, 'running');
+  assert.equal(socket.sent.filter((e) => e.kind === 'ack' && e.payload.ack_id === 'state-1').length, 0,
+    'transient channel_event must not be acked');
+});
+
+test('agent_state_snapshot channel_event batches through the same transient path', () => {
+  const s = loadBundle();
+  const cfg = s.RemoteConfig.parseConfig({ relayBaseUrl: 'http://h', daemonId: 'd', clientId: 'c' });
+  const store = new s.RemoteStore({});
+  const socket = memorySocket();
+  const client = new s.RemoteRelayClient({ config: cfg, store, socketFactory: () => socket,
+    setTimeout: () => 0, clearTimeout: () => {} });
+  client.connect();
+  socket.onmessage({ data: JSON.stringify(readyEnvelope('d')) });
+
+  socket.onmessage({ data: JSON.stringify(channelEvent('state-snap-1', 'd', {
+    type: 'agent_state_snapshot', schema: 1, lane: 'agent-state',
+    agents: [
+      { agent_id: 'w1', status: 'running', lastStateMs: 1000 },
+      { agent_id: 'w2', status: 'idle', lastStateMs: 1000 },
+    ],
+  })) });
+
+  assert.equal(store.agentState.w1.status, 'running');
+  assert.equal(store.agentState.w2.status, 'idle');
+  assert.equal(socket.sent.filter((e) => e.kind === 'ack' && e.payload.ack_id === 'state-snap-1').length, 0,
+    'transient state snapshot must not be acked');
 });
 
 test('duplicate control envelope (ping) is dropped, not re-acked', () => {

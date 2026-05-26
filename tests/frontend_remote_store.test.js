@@ -258,6 +258,92 @@ test('snapshot ask + its ask_reply both present render resolved (not pending)', 
   assert.equal(store.conversations['w'].messages.length, 2);
 });
 
+test('agent_state ingests separately from conversations and merges by agent_id', () => {
+  const store = loadStore();
+  assert.equal(store.ingestAgentState({
+    agent_id: 'w',
+    kind: 'worker',
+    status: 'running',
+    activity_detail: 'Editing store.js',
+    needs_attention: false,
+    context_window: { used_percentage: 42 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 64, resets_at: '2026-05-26T09:30:00Z' },
+      seven_day: { available: false, used_percentage: null, resets_at: null },
+    },
+    lastStateMs: 1000,
+  }), true);
+
+  assert.deepEqual(agentListIds(store), [], 'state heartbeats do not create conversations');
+  assert.equal(store.agentState.w.status, 'running');
+  assert.equal(store.agentState.w.context_window.used_percentage, 42);
+  assert.equal(store.agentState.w.provider_usage.five_hour.used_percentage, 64);
+
+  store.ingestInbound(agentMessage('m1', 'w', 'hello'));
+  const row = store.agentList()[0];
+  assert.equal(row.agentId, 'w');
+  assert.equal(row.kind, 'worker', 'state can supply the displayed kind badge');
+  assert.equal(row.sortKind, '', 'state kind does not become a conversation ordering key');
+  assert.equal(row.activityDetail, 'Editing store.js');
+});
+
+test('agent_state stale-guard ignores older lastStateMs rows', () => {
+  const store = loadStore();
+  store.ingestAgentState({ agent_id: 'w', status: 'running',
+    activity_detail: 'newer', lastStateMs: 2000 });
+  const applied = store.ingestAgentState({ agent_id: 'w', status: 'idle',
+    activity_detail: 'older', lastStateMs: 1000 });
+
+  assert.equal(applied, false);
+  assert.equal(store.agentState.w.status, 'running');
+  assert.equal(store.agentState.w.activity_detail, 'newer');
+});
+
+test('agent_state null context_window/provider_usage clears stale chips', () => {
+  const store = loadStore();
+  store.ingestAgentState({
+    agent_id: 'w',
+    context_window: { used_percentage: 77 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 10, resets_at: '2026-05-26T09:30:00Z' },
+      seven_day: { available: true, used_percentage: 20, resets_at: '2026-05-27T09:30:00Z' },
+    },
+    lastStateMs: 1000,
+  });
+  store.ingestAgentState({
+    agent_id: 'w',
+    context_window: null,
+    provider_usage: null,
+    lastStateMs: 2000,
+  });
+
+  assert.equal(store.agentState.w.context_window, null);
+  assert.equal(store.agentState.w.provider_usage, null);
+});
+
+test('snapshot additive agent_state and reconnect agent_state_snapshot share ingest path', () => {
+  const store = loadStore();
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: {
+      agent_state: { schema: 1, agents: [
+        { agent_id: 'w', status: 'running', activity_detail: 'snapshot state', lastStateMs: 1000 },
+      ] },
+      messages: [ { kind: 'agent_message', agent_id: 'w', message_id: 'm1',
+        message: 'hello', sender_kind: 'worker', created_at: new Date().toISOString() } ],
+    },
+  });
+  assert.equal(store.agentState.w.activity_detail, 'snapshot state');
+
+  const applied = store.ingestAgentStateSnapshot([
+    { agent_id: 'w', status: 'idle', activity_detail: 'reconnect state', lastStateMs: 2000 },
+  ]);
+  assert.equal(applied, 1);
+  assert.equal(store.agentState.w.status, 'idle');
+  assert.equal(store.agentState.w.activity_detail, 'reconnect state');
+  assert.deepEqual(agentListIds(store), ['w'], 'state snapshot does not add/reorder conversations');
+});
+
 test('§2c: echoed user ask_reply collapses onto its optimistic answer (one bubble)', () => {
   const store = loadStore();
   // 1) Agent raises a blocking ask.

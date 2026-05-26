@@ -156,6 +156,95 @@ test('agentListHtml remains the desktop list render path', () => {
       + '<span class="remote-agent-preview">hello</span></button>');
 });
 
+test('agentListHtml: renders live status/activity/context/provider chips in the sidebar only', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestInbound(agentMsg('m1', 'worker-a', 'hello'));
+  store.ingestAgentState({
+    agent_id: 'worker-a',
+    kind: 'worker',
+    status: 'running',
+    activity_detail: 'Editing render_remote.js',
+    needs_attention: true,
+    context_window: { used_percentage: 72 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 64,
+        resets_at: new Date(Date.now() + 90 * 60 * 1000).toISOString() },
+      seven_day: { available: false, used_percentage: null, resets_at: null },
+    },
+    lastStateMs: 1000,
+  });
+
+  const list = s.RemoteRender.agentListHtml(store);
+  assert.match(list, /remote-agent-status-attention/);
+  assert.match(list, /needs attention/);
+  assert.match(list, /Editing render_remote\.js/);
+  assert.match(list, /ctx 72%/);
+  assert.match(list, /5h 36% left/);
+  assert.match(list, /7d unknown/);
+  assert.match(list, /remote-agent-attention/);
+
+  const conv = s.RemoteRender.conversationHtml(store.activeConversation(), { askEnabled: true });
+  assert.doesNotMatch(conv, /ctx 72%/, 'state chips stay out of the conversation pane');
+  assert.doesNotMatch(conv, /5h 36% left/, 'provider chips stay out of the conversation pane');
+});
+
+test('agentListHtml: state clears remove context/provider chips and heartbeats do not reorder', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  const base = Date.parse('2026-05-24T12:00:00.000Z');
+  store.ingestInbound(agentMsg('old', 'worker-old', 'older'));
+  store.conversations['worker-old'].lastActivityMs = base;
+  store.ingestInbound(agentMsg('new', 'worker-new', 'newer'));
+  store.conversations['worker-new'].lastActivityMs = base + 1000;
+  const before = store.agentList().map((a) => a.agentId);
+
+  store.ingestAgentState({
+    agent_id: 'worker-old',
+    status: 'running',
+    activity_detail: 'heartbeat',
+    context_window: { used_percentage: 91 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 25,
+        resets_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+      seven_day: { available: false, used_percentage: null, resets_at: null },
+    },
+    lastStateMs: 1000,
+  });
+  assert.deepEqual(store.agentList().map((a) => a.agentId), before,
+    'state-only heartbeat preserves list order');
+  assert.match(s.RemoteRender.agentListHtml(store), /ctx 91%/);
+  assert.match(s.RemoteRender.agentListHtml(store), /5h 75% left/);
+
+  store.ingestAgentState({
+    agent_id: 'worker-old',
+    context_window: null,
+    provider_usage: null,
+    lastStateMs: 2000,
+  });
+  const afterClear = s.RemoteRender.agentListHtml(store);
+  assert.doesNotMatch(afterClear, /ctx 91%/);
+  assert.doesNotMatch(afterClear, /5h 75% left/);
+});
+
+test('agentListHtml: provider windows render unknown when unavailable', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestInbound(agentMsg('m1', 'worker-a', 'hello'));
+  store.ingestAgentState({
+    agent_id: 'worker-a',
+    provider_usage: {
+      five_hour: { available: false, used_percentage: null, resets_at: null },
+      seven_day: { available: false, used_percentage: null, resets_at: null },
+    },
+    lastStateMs: 1000,
+  });
+
+  const html = s.RemoteRender.agentListHtml(store);
+  assert.match(html, /5h unknown/);
+  assert.match(html, /7d unknown/);
+});
+
 test('ask cards are gated behind cfg.askEnabled (no client-side recipient filtering)', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
