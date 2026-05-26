@@ -7,11 +7,13 @@ import os
 import re
 import shlex
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 from .mcp_launch import build_stdio_launch_spec
 from ..context_window import normalize_context_window_usage
+from ..provider_usage import normalize_provider_usage_rate_limits
 
 _TORQUE_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
@@ -455,24 +457,69 @@ def _codex_context_window_from_token_count(
     )
 
 
-def _latest_codex_context_window_from_transcript(
+def _codex_reset_epoch_to_iso(value) -> str | None:
+    try:
+        timestamp = float(value)
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _codex_window_minutes(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _codex_provider_usage_from_rate_limits(rate_limits) -> dict | None:
+    if not isinstance(rate_limits, dict):
+        return None
+
+    assembled: dict[str, dict] = {}
+    fallback_windows = {
+        "primary": "five_hour",
+        "secondary": "seven_day",
+    }
+    for source_name, fallback_window in fallback_windows.items():
+        raw_window = rate_limits.get(source_name)
+        if not isinstance(raw_window, dict):
+            continue
+        window_minutes = _codex_window_minutes(raw_window.get("window_minutes"))
+        if window_minutes == 300:
+            canonical = "five_hour"
+        elif window_minutes == 10080:
+            canonical = "seven_day"
+        else:
+            canonical = fallback_window
+        assembled[canonical] = {
+            "used_percentage": raw_window.get("used_percent"),
+            "resets_at": _codex_reset_epoch_to_iso(raw_window.get("resets_at")),
+        }
+
+    return normalize_provider_usage_rate_limits(assembled)
+
+
+def _latest_codex_context_and_provider_usage_from_transcript(
     transcript_path: str,
     *,
     model: str = "",
     session_id: str = "",
     timestamp: float | None = None,
     max_bytes: int = 1_000_000,
-) -> dict:
-    """Extract the latest Codex token_count event from a bounded JSONL tail."""
+) -> tuple[dict, dict | None]:
+    """Extract latest Codex token_count usage from a bounded JSONL tail."""
     if not transcript_path:
-        return {}
+        return ({}, None)
     try:
         path = Path(str(transcript_path)).expanduser()
         if not path.is_file():
-            return {}
+            return ({}, None)
         text = _read_text_tail(path, max_bytes)
     except Exception:
-        return {}
+        return ({}, None)
 
     for line in reversed(text.splitlines()):
         line = line.strip()
@@ -493,18 +540,50 @@ def _latest_codex_context_window_from_transcript(
             session_id=session_id,
             timestamp=timestamp,
         )
-        if context_window:
-            return context_window
-    return {}
+        provider_usage = _codex_provider_usage_from_rate_limits(
+            payload.get("rate_limits")
+        )
+        if context_window or provider_usage is not None:
+            return (context_window, provider_usage)
+    return ({}, None)
+
+
+def _latest_codex_context_window_from_transcript(
+    transcript_path: str,
+    *,
+    model: str = "",
+    session_id: str = "",
+    timestamp: float | None = None,
+    max_bytes: int = 1_000_000,
+) -> dict:
+    context_window, _provider_usage = (
+        _latest_codex_context_and_provider_usage_from_transcript(
+            transcript_path,
+            model=model,
+            session_id=session_id,
+            timestamp=timestamp,
+            max_bytes=max_bytes,
+        )
+    )
+    return context_window
 
 
 def _codex_context_window_from_raw(raw: dict, timestamp: float) -> dict:
+    context_window, _provider_usage = _codex_context_and_provider_usage_from_raw(
+        raw, timestamp
+    )
+    return context_window
+
+
+def _codex_context_and_provider_usage_from_raw(
+    raw: dict, timestamp: float
+) -> tuple[dict, dict | None]:
     if not isinstance(raw, dict):
-        return {}
+        return ({}, None)
     transcript_path = raw.get("transcript_path") or raw.get("transcriptPath") or ""
     model = str(raw.get("model", "") or "")
     session_id = str(raw.get("session_id", "") or raw.get("sessionId", "") or "")
-    return _latest_codex_context_window_from_transcript(
+    return _latest_codex_context_and_provider_usage_from_transcript(
         transcript_path,
         model=model,
         session_id=session_id,
@@ -845,7 +924,9 @@ class CodexAdapter(AgentAdapter):
         # Codex hooks include a "type" or "hook_event_name" field
         hook_event = raw.get("hook_event_name", "") or raw.get("type", "")
         now = time.time()
-        context_window = _codex_context_window_from_raw(raw, now)
+        context_window, provider_usage = _codex_context_and_provider_usage_from_raw(
+            raw, now
+        )
 
         if hook_event == "SessionStart":
             data = {
@@ -854,6 +935,8 @@ class CodexAdapter(AgentAdapter):
             }
             if context_window:
                 data["context_window"] = context_window
+            if provider_usage is not None:
+                data["provider_usage"] = provider_usage
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_start",
@@ -868,6 +951,8 @@ class CodexAdapter(AgentAdapter):
             }
             if context_window:
                 data["context_window"] = context_window
+            if provider_usage is not None:
+                data["provider_usage"] = provider_usage
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_end",
