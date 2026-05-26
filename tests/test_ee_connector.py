@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import ssl
 import sys
 import unittest
@@ -48,6 +49,31 @@ if _EE_TESTS_ENABLED:
     )
 
 _AGENT_ROSTER_UNSET = object()
+_SANITIZED_ENV_KEYS = (
+    "TORQUE_EE_DAEMON_CREDENTIAL_ID",
+    "TORQUE_EE_DAEMON_PRIVATE_KEY_PEM",
+    "TORQUE_EE_RELAY_URL",
+    "TORQUE_EE_DAEMON_ID",
+    "TORQUE_CLOUD_RELAY_URL",
+    "TORQUE_CLOUD_DAEMON_ID",
+)
+_SANITIZED_ENV_ORIGINALS = {}
+
+
+def setUpModule():
+    # Worker shells can inherit live relay credentials. Unit tests construct
+    # explicit loopback contexts and should not silently flip into signed remote
+    # mode because of the surrounding daemon environment.
+    for key in _SANITIZED_ENV_KEYS:
+        _SANITIZED_ENV_ORIGINALS[key] = os.environ.pop(key, None)
+
+
+def tearDownModule():
+    for key, value in _SANITIZED_ENV_ORIGINALS.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
 
 
 class FakeWs:
