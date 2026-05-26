@@ -143,6 +143,74 @@ test('agentPickerHtml: prefixes options with known kind labels only', () => {
   assert.match(html, /<option value="agent-blank">Blank Kind<\/option>/);
 });
 
+test('agentPickerHtml: appends per-agent context only, not provider usage, for mobile parity', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+    ] },
+  });
+  store.ingestAgentState({
+    agent_id: 'worker-a',
+    context_window: { used_percentage: 72 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 64,
+        resets_at: new Date(Date.now() + 90 * 60 * 1000).toISOString() },
+      seven_day: { available: true, used_percentage: 41,
+        resets_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
+    },
+    lastStateMs: 1000,
+  });
+
+  const html = s.RemoteRender.agentPickerHtml(store);
+
+  assert.match(html, /<option value="worker-a" selected>Worker · Worker Alpha · ctx 72%<\/option>/);
+  assert.doesNotMatch(html, /5h/);
+  assert.doesNotMatch(html, /7d/);
+});
+
+test('paintAgentPicker: context rerenders patch option labels without replacing the open select', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+      { id: 'worker-b', name: 'Worker Beta', kind: 'worker' },
+    ] },
+  });
+  store.setActiveAgent('worker-b');
+  const initialHtml = s.RemoteRender.agentPickerHtml(store);
+  let writes = 0;
+  const select = {
+    value: 'worker-b',
+    options: [
+      { value: 'worker-a', textContent: 'Worker · Worker Alpha', label: 'Worker · Worker Alpha', selected: false },
+      { value: 'worker-b', textContent: 'Worker · Worker Beta', label: 'Worker · Worker Beta', selected: true },
+    ],
+  };
+  const el = {
+    _remoteLastHtml: initialHtml,
+    get innerHTML() { return initialHtml; },
+    set innerHTML(_v) { writes += 1; },
+    querySelector(selector) { return selector === '[data-agent-picker]' ? select : null; },
+  };
+
+  store.ingestAgentState({
+    agent_id: 'worker-b',
+    context_window: { used_percentage: 88 },
+    lastStateMs: 1000,
+  });
+  const changed = s.RemoteRender.paintAgentPicker(el, store);
+
+  assert.equal(changed, true, 'context label changed');
+  assert.equal(writes, 0, 'stable agent roster patches options without innerHTML replacement');
+  assert.equal(select.value, 'worker-b', 'selected value survives the context rerender');
+  assert.equal(select.options[1].textContent, 'Worker · Worker Beta · ctx 88%');
+});
+
 test('agentListHtml remains the desktop list render path', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
