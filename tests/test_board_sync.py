@@ -141,6 +141,7 @@ def field_list():
                 "name": "Status",
                 "options": [
                     {"id": "opt-doing", "name": "Doing"},
+                    {"id": "opt-review", "name": "Review"},
                     {"id": "opt-done", "name": "Done"},
                 ],
             }
@@ -548,6 +549,144 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(sync["skipped"])
         self.assertEqual(runner.calls, [])
+
+    async def test_project_status_uses_explicit_task_status_map_then_lane_fallback(self):
+        settings = github_settings(board_sync_github={
+            "github_lane_status_map": {
+                "In Progress": "Doing",
+                "On Review": "Review",
+            },
+        })
+        mapped_task = BoardTask(
+            id="T:mapped-status",
+            task="Mapped status",
+            lane="In Progress",
+            status="On Review",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {
+                    "issue_repo": "owner/repo",
+                    "issue_number": 123,
+                },
+            },
+        )
+        runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(number=123, title="Mapped status", body=render_issue_body(mapped_task))),
+            gh_ok(project_view()),
+            gh_ok(field_list()),
+            gh_ok({"id": "PVTI_kw"}),
+            gh_ok(""),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(mapped_task, settings)
+
+        self.assertEqual(sync["github"]["status_option_id"], "opt-review")
+        self.assertEqual(runner.calls[-1][0][-1], "opt-review")
+
+        fallback_settings = github_settings(board_sync_github={
+            "github_lane_status_map": {"In Progress": "Doing"},
+        })
+        fallback_task = BoardTask(
+            id="T:unmapped-status",
+            task="Unmapped status",
+            lane="In Progress",
+            status="On Review",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {
+                    "issue_repo": "owner/repo",
+                    "issue_number": 124,
+                },
+            },
+        )
+        fallback_runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(number=124, title="Unmapped status", body=render_issue_body(fallback_task))),
+            gh_ok(project_view()),
+            gh_ok(field_list()),
+            gh_ok({"id": "PVTI_kw2"}),
+            gh_ok(""),
+        ])
+        fallback_provider = GitHubBoardSyncProvider(fallback_runner)
+
+        fallback_sync = await fallback_provider.push_task(
+            fallback_task,
+            fallback_settings,
+        )
+
+        self.assertEqual(fallback_sync["github"]["status_option_id"], "opt-doing")
+        self.assertEqual(fallback_runner.calls[-1][0][-1], "opt-doing")
+
+    async def test_provider_reuses_project_and_label_caches_across_batch_instance(self):
+        settings = github_settings(board_sync_github={
+            "github_project_owner": "owner",
+            "github_project_number": 5,
+        })
+        first = BoardTask(
+            id="T:cache-1",
+            task="Cache one",
+            lane="In Progress",
+            labels=["bug"],
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {
+                    "issue_repo": "owner/repo",
+                    "issue_number": 201,
+                    "project_item_id": "PVTI_201",
+                },
+            },
+        )
+        second = BoardTask(
+            id="T:cache-2",
+            task="Cache two",
+            lane="In Progress",
+            labels=["bug"],
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {
+                    "issue_repo": "owner/repo",
+                    "issue_number": 202,
+                    "project_item_id": "PVTI_202",
+                },
+            },
+        )
+        runner = FakeGhRunner([
+            gh_ok({"items": [{"name": "bug"}]}),
+            gh_ok(""),
+            gh_ok(issue_view(number=201, title="Cache one", body=render_issue_body(first))),
+            gh_ok(project_view()),
+            gh_ok(field_list()),
+            gh_ok(""),
+            gh_ok(""),
+            gh_ok(issue_view(number=202, title="Cache two", body=render_issue_body(second))),
+            gh_ok(""),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        first_sync = await provider.push_task(first, settings)
+        second_sync = await provider.push_task(second, settings)
+
+        self.assertEqual(first_sync["sync_state"], "idle")
+        self.assertEqual(second_sync["sync_state"], "idle")
+        commands = [call[0] for call in runner.calls]
+        self.assertEqual(
+            sum(1 for cmd in commands if cmd[:2] == ["label", "list"]),
+            1,
+        )
+        self.assertEqual(
+            sum(1 for cmd in commands if cmd[:2] == ["project", "field-list"]),
+            1,
+        )
 
 
 class GitHubPullTests(unittest.IsolatedAsyncioTestCase):

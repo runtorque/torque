@@ -698,6 +698,12 @@ async def _scheduler_loop(state: MatrixState, handle_command, panel_event):
                     action_vars=dict(sched.action_vars),
                     agent_template=sched.agent_template,
                     labels=list(sched.labels),
+                    board_sync={
+                        "version": 1,
+                        "auto_track": False,
+                        "auto_sync_excluded": True,
+                        "auto_sync_excluded_reason": "schedule",
+                    },
                 )
                 if not task:
                     log.warning("Schedule '%s': failed to create task", sched.name)

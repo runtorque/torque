@@ -5080,3 +5080,34 @@ class RelayConnectionSignalTests(unittest.TestCase):
         self.assertEqual(rc["retry_count"], 0)
         self.assertEqual(rc["relay_host"], "")
         self.assertIn("enabled", rc)
+
+
+class TaskUpsertObserverTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_register_unregister_and_exception_isolated(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        seen = []
+
+        def observer(payload):
+            seen.append(payload["id"])
+
+        def exploding(_payload):
+            raise RuntimeError("observer boom")
+
+        unregister = state.register_task_upsert_observer(observer)
+        state.register_task_upsert_observer(exploding)
+
+        task = state.board_add_task("Observed", "g", id="task-observed")
+
+        self.assertIn(task.id, seen)
+        count_before_unregister = len(seen)
+        self.assertEqual(state._delta_ops[-1]["op"], "task_upsert")
+        unregister()
+        state.board_update_task(task.id, task="Renamed")
+
+        self.assertEqual(len(seen), count_before_unregister)

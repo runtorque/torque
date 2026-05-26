@@ -1723,6 +1723,7 @@ class TorqueDBTests(unittest.TestCase):
             loaded["board_tasks"]["task-1"]["reply_agent_id"],
             "agent-2",
         )
+
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["assigned_engineer_id"],
             "engineer-1",
@@ -1810,6 +1811,35 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["auto_dispatch_queues"]["g"][0]["provider"],
             "codex",
+        )
+
+    def test_matrix_state_load_normalizes_legacy_github_label_creation_false(self):
+        self.db.save_groups({"g": []}, {"g": "g"})
+        self.db.save_group_members("g", [])
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(
+                board_sync_provider="github",
+                board_sync_enabled=True,
+                board_sync_github={
+                    "github_repo": "owner/repo",
+                    "github_create_missing_labels": False,
+                },
+            ),
+        )
+
+        state = MatrixState(self.db)
+        state.load()
+
+        self.assertTrue(
+            state.group_settings["g"].board_sync_github[
+                "github_create_missing_labels"
+            ]
+        )
+        self.assertTrue(
+            self.db.load_all()["group_settings"]["g"]["board_sync_github"][
+                "github_create_missing_labels"
+            ]
         )
 
     def test_save_all_ignores_unknown_group_settings_fields(self):

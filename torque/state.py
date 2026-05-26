@@ -12,7 +12,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from aiohttp import web
 
@@ -1979,6 +1979,7 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
+        self._task_upsert_observers: list[Callable[[dict], None]] = []
         # Secondary task indexes. Maintained incrementally by
         # `_index_task` / `_unindex_task`; hot-path consumers should not
         # have to scan the full board when they already know the relevant
@@ -2725,6 +2726,39 @@ class MatrixState:
         self._maybe_clear_engineer_queue_empty_from_delta(op, kwargs)
         delta = {"op": op, **kwargs}
         self._delta_ops.append(delta)
+        if op == "task_upsert":
+            self._notify_task_upsert_observers(kwargs)
+
+    def register_task_upsert_observer(
+            self,
+            observer: Callable[[dict], None],
+    ) -> Callable[[], None]:
+        """Register a provider-agnostic task-upsert observer.
+
+        Observers are intentionally best-effort sidecars: they run after the
+        delta is appended, and exceptions are logged without interrupting the
+        state mutation that produced the task update.
+        """
+        if observer not in self._task_upsert_observers:
+            self._task_upsert_observers.append(observer)
+
+        def unregister() -> None:
+            try:
+                self._task_upsert_observers.remove(observer)
+            except ValueError:
+                pass
+
+        return unregister
+
+    def _notify_task_upsert_observers(self, payload: dict) -> None:
+        if not self._task_upsert_observers:
+            return
+        snapshot = dict(payload or {})
+        for observer in list(self._task_upsert_observers):
+            try:
+                observer(snapshot)
+            except Exception:
+                log.exception("Task-upsert observer failed")
 
     def _emit_agent(self, cell: AgentCell):
         """Emit an agent_upsert delta with the full agent dict."""
@@ -5237,6 +5271,12 @@ class MatrixState:
                         strict=False,
                     )
                     self.group_settings[gname] = GroupSettings(**filtered)
+                    if self._normalize_loaded_github_label_defaults(gname):
+                        log.info(
+                            "Normalized GitHub board-sync label creation "
+                            "default for group '%s'",
+                            gname,
+                        )
             # Promote orphaned children whose parent was deleted
             for aid, cell in self.agents.items():
                 if cell.parent_id and cell.parent_id not in self.agents:
@@ -5561,6 +5601,29 @@ class MatrixState:
     def get_group_settings(self, name: str) -> GroupSettings:
         """Return group settings, creating defaults if group has none."""
         return self.group_settings.get(name, GroupSettings())
+
+    def _normalize_loaded_github_label_defaults(self, group: str) -> bool:
+        """One-time :696 compatibility: legacy false label defaults become true.
+
+        Older modal payloads could persist ``github_create_missing_labels:
+        false`` even though the product default is on.  Normalize loaded
+        GitHub-sync groups so the effective persisted value matches the modal
+        default without requiring a schema migration.
+        """
+        gs = self.group_settings.get(group)
+        if not gs:
+            return False
+        provider = _normalize_board_sync_provider(gs.board_sync_provider)
+        if provider != "github" or not bool(gs.board_sync_enabled):
+            return False
+        nested = gs.board_sync_github if isinstance(gs.board_sync_github, dict) else {}
+        if nested.get("github_create_missing_labels") is not False:
+            return False
+        nested = dict(nested)
+        nested["github_create_missing_labels"] = True
+        gs.board_sync_github = nested
+        self._db_save_group_settings(group)
+        return True
 
     def should_show_guidance_hint(self, hint_type: str, cell) -> bool:
         """Return whether a recurring soft guidance hint should be shown.

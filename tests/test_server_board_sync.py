@@ -14,7 +14,7 @@ from torque.server_board_sync import (
     board_sync_fields_trigger,
     task_is_tracked_for_board_sync,
 )
-from torque.state import MatrixState
+from torque.state import MatrixState, Schedule
 
 
 class FakeBoardSyncProvider:
@@ -22,6 +22,7 @@ class FakeBoardSyncProvider:
 
     def __init__(self):
         self.push_calls = []
+        self.push_titles = []
         self.preflight_result = {"ok": True, "phase": "preflight"}
         self.preview = {
             "ok": True,
@@ -51,6 +52,7 @@ class FakeBoardSyncProvider:
 
     async def push_task(self, task, _settings):
         self.push_calls.append(task.id)
+        self.push_titles.append(task.task)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         self.started.set()
@@ -308,6 +310,134 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.queue.qsize(), 1)
         self.assertEqual(state.board_tasks[task.id].board_sync["sync_state"], "queued")
         self.assertEqual(provider.push_calls, [])
+
+    async def test_task_upsert_observer_coalesces_create_and_update_to_latest(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            debounce_seconds=0.03,
+            max_coalesce_seconds=0.2,
+        )
+        self.manager = manager
+        manager.start()
+
+        task = state.board_add_task("Draft title", "g", id="task-auto-create")
+        state.board_update_task(task.id, task="Final title")
+        await asyncio.wait_for(manager.join(), timeout=1)
+
+        self.assertEqual(provider.push_calls, [task.id])
+        self.assertEqual(provider.push_titles, ["Final title"])
+        self.assertEqual(
+            state.board_tasks[task.id].board_sync["sync_state"],
+            "idle",
+        )
+
+    async def test_observer_excludes_derived_internal_tasks_unless_opted_in(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        parent = state.board_add_task("Product root", "g", id="task-root")
+        manager = self.make_manager(state, provider)
+        manager.start()
+
+        derived = state.board_add_task(
+            "Review child",
+            "g",
+            id="task-derived",
+            labels=["torque:derived"],
+            parent_task_id=parent.id,
+            pipeline_depth=1,
+            pipeline_root_id=parent.id,
+        )
+        await asyncio.sleep(0.02)
+        self.assertIsNotNone(derived)
+        self.assertEqual(provider.push_calls, [])
+        self.assertEqual(manager.queue.qsize(), 0)
+
+        opted_in = state.board_add_task(
+            "Opted in child",
+            "g",
+            id="task-derived-opt-in",
+            labels=["torque:derived"],
+            parent_task_id=parent.id,
+            pipeline_depth=1,
+            pipeline_root_id=parent.id,
+            board_sync={"version": 1, "enabled": True},
+        )
+        await asyncio.wait_for(manager.join(), timeout=1)
+
+        self.assertEqual(provider.push_calls, [opted_in.id])
+
+    async def test_auto_create_excludes_schedule_created_last_task(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        scheduled = state.board_add_task("Scheduled internal", "g", id="task-sched")
+        state.schedules["sched-1"] = Schedule(
+            id="sched-1",
+            name="Nightly",
+            group="g",
+            last_task_id=scheduled.id,
+        )
+        manager = self.make_manager(state, provider)
+
+        result = manager.enqueue_task(scheduled.id, reason="task_update")
+
+        self.assertFalse(result["queued"])
+        self.assertEqual(result["reason"], "task_not_tracked")
+
+        state.board_update_task(scheduled.id, board_sync={"version": 1, "enabled": True})
+        result = manager.enqueue_task(scheduled.id, reason="task_update")
+
+        self.assertTrue(result["queued"])
+
+    async def test_position_and_sync_metadata_only_upserts_do_not_auto_enqueue(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        first = state.board_add_task("First", "g", id="task-pos-1")
+        state.board_add_task("Second", "g", id="task-pos-2")
+        manager = self.make_manager(state, provider)
+        manager.start()
+
+        state.board_reorder_task(first.id, 1)
+        state.board_update_task(first.id, board_sync={"version": 1, "sync_state": "idle"})
+        await asyncio.sleep(0.02)
+
+        self.assertEqual(provider.push_calls, [])
+        self.assertEqual(manager.queue.qsize(), 0)
+
+    async def test_automatic_transient_failure_gets_bounded_retry(self):
+        class RateLimitProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                return {
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "error",
+                    "last_error": "secondary rate limit",
+                }
+
+        provider = RateLimitProvider()
+        state = make_state()
+        manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            debounce_seconds=0,
+            retry_backoff_seconds=[0.01],
+            max_auto_retry_attempts=1,
+        )
+        self.manager = manager
+        manager.start()
+
+        task = state.board_add_task("Retry me", "g", id="task-retry")
+        await asyncio.wait_for(manager.join(), timeout=1)
+
+        self.assertEqual(provider.push_calls, [task.id, task.id])
+        sync = state.board_tasks[task.id].board_sync
+        self.assertEqual(sync["sync_state"], "error")
+        self.assertEqual(sync["auto_retry_attempts"], 1)
+        self.assertIn("next_retry_at", sync)
 
     async def test_preflight_error_emits_panel_event_and_toast(self):
         provider = FakeBoardSyncProvider()
