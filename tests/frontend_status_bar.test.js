@@ -97,7 +97,6 @@ function createSandbox() {
       groups: { Torque: [], Other: [] },
       agents: {},
       board_tasks: {},
-      provider_usage: {},
     },
     Date,
     setTimeout(fn, delay) {
@@ -117,20 +116,33 @@ function jsonValue(context, expression) {
   return JSON.parse(vm.runInContext(`JSON.stringify(${expression})`, context));
 }
 
-test('Claude usage view is unknown when provider_usage is absent or empty', () => {
+test('Claude usage view is unknown when no Claude agent has available provider_usage', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadStatusBar(context);
 
-  assert.deepEqual(jsonValue(context, `_statusBarClaudeUsageView({})`), {
+  assert.deepEqual(jsonValue(context, `_statusBarClaudeUsageView()`), {
     state: 'unknown',
     label: 'Claude —',
     level: 'unknown',
-    title: 'Claude 5h and weekly usage limits are unavailable until provider_usage arrives.',
+    title: 'Claude 5h and weekly usage limits are unavailable until a Claude agent reports available provider_usage.',
     nextResetAt: 0,
   });
 
-  vm.runInContext('state.provider_usage = {}; refreshStatusBar();', context);
+  sandbox.state.agents = {
+    claude1: {
+      id: 'claude1',
+      name: 'Claude unavailable',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'claude-code',
+      provider_usage: {
+        five_hour: { available: false, used_percentage: null, resets_at: null },
+        seven_day: { available: false, used_percentage: null, resets_at: null },
+      },
+    },
+  };
+  vm.runInContext('refreshStatusBar();', context);
   assert.equal(sandbox.document.getElementById('statusbar-claude-usage').textContent, 'Claude —');
   assert.equal(
     sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-chip--unknown'),
@@ -138,30 +150,80 @@ test('Claude usage view is unknown when provider_usage is absent or empty', () =
   );
 });
 
-test('Claude usage view reads a stubbed provisional 5h and weekly payload', () => {
+test('Claude usage view reads per-agent provider_usage in the shipped TORQUE:700 shape', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadStatusBar(context);
-  const resetsAt = Math.floor((Date.now() + 90 * 60 * 1000) / 1000);
-  sandbox.stubUsage = {
-    windows: {
-      five_hour: { used_pct: 72.4, remaining_pct: 27.6, resets_at: resetsAt },
-      seven_day: { used_pct: 41.2, remaining_pct: 58.8, resets_at: resetsAt + 86400 },
+  const resetsAt = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+  sandbox.state.agents = {
+    claude1: {
+      id: 'claude1',
+      name: 'Claude Worker',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'claude-code',
+      last_heartbeat_at: 10,
+      provider_usage: {
+        five_hour: { available: true, used_percentage: 72, resets_at: resetsAt },
+        seven_day: { available: true, used_percentage: 41, resets_at: new Date(Date.now() + 86400 * 1000).toISOString() },
+      },
     },
   };
 
-  const view = jsonValue(context, `_statusBarClaudeUsageView(stubUsage)`);
+  const view = jsonValue(context, `_statusBarClaudeUsageView()`);
   assert.equal(view.label, 'Claude 5h 72% · 7d 41%');
   assert.equal(view.level, 'warn');
   assert.match(view.title, /5h: used 72%/);
+  assert.match(view.title, /remaining 28%/);
   assert.match(view.title, /7d: used 41%/);
+  assert.match(view.title, /Source agent: Claude Worker/);
 
-  vm.runInContext(`state.provider_usage['claude-code'] = stubUsage; refreshStatusBar();`, context);
+  vm.runInContext(`refreshStatusBar();`, context);
   assert.equal(sandbox.document.getElementById('statusbar-claude-usage').textContent, 'Claude 5h 72% · 7d 41%');
   assert.equal(
     sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-chip--warn'),
     true,
   );
+});
+
+test('Claude usage view chooses one available Claude agent and does not sum account quotas', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+  const resetsAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  sandbox.state.agents = {
+    claude1: {
+      id: 'claude1',
+      name: 'Claude first',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'claude-code',
+      last_heartbeat_at: 10,
+      provider_usage: {
+        five_hour: { available: true, used_percentage: 40, resets_at: resetsAt },
+        seven_day: { available: true, used_percentage: 30, resets_at: resetsAt },
+      },
+    },
+    claude2: {
+      id: 'claude2',
+      name: 'Claude freshest',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'claude-code',
+      last_heartbeat_at: 20,
+      provider_usage: {
+        five_hour: { available: true, used_percentage: 40, resets_at: resetsAt },
+        seven_day: { available: true, used_percentage: 30, resets_at: resetsAt },
+      },
+    },
+  };
+
+  const view = jsonValue(context, `_statusBarClaudeUsageView()`);
+  assert.equal(view.label, 'Claude 5h 40% · 7d 30%');
+  assert.doesNotMatch(view.label, /80%/);
+  assert.doesNotMatch(view.label, /60%/);
+  assert.match(view.title, /Source agent: Claude freshest/);
+  assert.match(view.title, /not summed/);
 });
 
 test('status bar count helpers scope agents, active tasks, and attention to the active group', () => {

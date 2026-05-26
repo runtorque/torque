@@ -7,7 +7,6 @@
  */
 
 var STATUS_BAR_CLAUDE_PROVIDER = 'claude-code';
-var STATUS_BAR_PROVIDER_USAGE_FIELD = 'provider_usage';
 var _statusBarDeployState = null;
 var _statusBarDeployRequestKey = '';
 var _statusBarDeployRequestedAt = 0;
@@ -276,8 +275,20 @@ function _statusBarUsageWindow(providerUsage, keys) {
   return null;
 }
 
+function _statusBarUsageWindowAvailable(windowInfo) {
+  return !!(
+    windowInfo
+    && typeof windowInfo === 'object'
+    && windowInfo.available === true
+  );
+}
+
 function _statusBarUsageUsedPct(windowInfo) {
   if (!windowInfo || typeof windowInfo !== 'object') return NaN;
+  var usedPercentage = Number(windowInfo.used_percentage);
+  if (Number.isFinite(usedPercentage)) return usedPercentage;
+  var usedPercentageCamel = Number(windowInfo.usedPercentage);
+  if (Number.isFinite(usedPercentageCamel)) return usedPercentageCamel;
   var used = Number(windowInfo.used_pct);
   if (Number.isFinite(used)) return used;
   var remaining = Number(windowInfo.remaining_pct);
@@ -285,37 +296,98 @@ function _statusBarUsageUsedPct(windowInfo) {
   return NaN;
 }
 
+function _statusBarClaudeProviderUsageFromAgent(agent) {
+  if (!agent || typeof agent !== 'object') return null;
+  var agentType = String(agent.agent_type || agent.provider || '').trim();
+  var payload = agent.provider_usage;
+  if (!payload || typeof payload !== 'object') return null;
+
+  // Current backend shape (TORQUE:700): provider_usage is stored directly on
+  // Claude Code agents as {five_hour, seven_day}. Keep a compatibility read for
+  // an older provider-keyed draft, but do not consult the retired top-level
+  // state.provider_usage scaffold.
+  if (payload[STATUS_BAR_CLAUDE_PROVIDER]
+      && typeof payload[STATUS_BAR_CLAUDE_PROVIDER] === 'object') {
+    return payload[STATUS_BAR_CLAUDE_PROVIDER];
+  }
+  if (agentType && agentType !== STATUS_BAR_CLAUDE_PROVIDER) return null;
+  return payload;
+}
+
+function _statusBarClaudeUsageHasAvailableWindow(providerUsage) {
+  var five = _statusBarUsageWindow(providerUsage, ['five_hour', '5h', 'fiveHour']);
+  var seven = _statusBarUsageWindow(providerUsage, ['seven_day', 'weekly', '7d', 'week', 'sevenDay']);
+  return _statusBarUsageWindowAvailable(five) || _statusBarUsageWindowAvailable(seven);
+}
+
+function _statusBarAgentFreshness(agent) {
+  if (!agent || typeof agent !== 'object') return 0;
+  var keys = ['last_heartbeat_at', 'last_activity_at', 'last_event_at', 'last_progress_at'];
+  var newest = 0;
+  for (var i = 0; i < keys.length; i++) {
+    var value = Number(agent[keys[i]]);
+    if (Number.isFinite(value) && value > newest) newest = value;
+  }
+  return newest;
+}
+
+function _statusBarSelectClaudeUsage() {
+  var agents = (typeof state !== 'undefined' && state && state.agents) ? state.agents : {};
+  var selected = null;
+  Object.keys(agents || {}).forEach(function(id) {
+    var agent = agents[id];
+    if (!agent || _statusBarIsTombstonedAgent(agent)) return;
+    var usage = _statusBarClaudeProviderUsageFromAgent(agent);
+    if (!_statusBarClaudeUsageHasAvailableWindow(usage)) return;
+
+    // Claude 5h/7d limits are account-level quotas shared by every Claude Code
+    // agent for the same user account. Each Claude agent reports the same
+    // account numbers, so represent the chip with exactly one available agent
+    // payload. Never sum or average multiple agents; that would double-count.
+    var freshness = _statusBarAgentFreshness(agent);
+    if (!selected || freshness >= selected.freshness) {
+      selected = {
+        agent: agent,
+        usage: usage,
+        freshness: freshness,
+      };
+    }
+  });
+  return selected;
+}
+
 function _statusBarClaudeUsageView(providerUsage) {
+  var sourceAgent = null;
   var usage = providerUsage;
   if (usage === undefined) {
-    // Keep the frontend-provider contract read isolated here. Courier S2 owns
-    // producing state.provider_usage; this scaffold only consumes it.
-    usage = (typeof state !== 'undefined'
-        && state
-        && state[STATUS_BAR_PROVIDER_USAGE_FIELD]
-        && state[STATUS_BAR_PROVIDER_USAGE_FIELD][STATUS_BAR_CLAUDE_PROVIDER])
-      ? state[STATUS_BAR_PROVIDER_USAGE_FIELD][STATUS_BAR_CLAUDE_PROVIDER]
-      : null;
+    var selected = _statusBarSelectClaudeUsage();
+    usage = selected ? selected.usage : null;
+    sourceAgent = selected ? selected.agent : null;
   }
-  if (!usage || typeof usage !== 'object' || !Object.keys(usage).length) {
+  if (!usage || typeof usage !== 'object' || !Object.keys(usage).length
+      || !_statusBarClaudeUsageHasAvailableWindow(usage)) {
     return {
       state: 'unknown',
       label: 'Claude —',
       level: 'unknown',
-      title: 'Claude 5h and weekly usage limits are unavailable until provider_usage arrives.',
+      title: 'Claude 5h and weekly usage limits are unavailable until a Claude agent reports available provider_usage.',
       nextResetAt: 0,
     };
   }
 
   var five = _statusBarUsageWindow(usage, ['five_hour', '5h', 'fiveHour']);
-  var seven = _statusBarUsageWindow(usage, ['seven_day', 'weekly', '7d', 'week']);
+  var seven = _statusBarUsageWindow(usage, ['seven_day', 'weekly', '7d', 'week', 'sevenDay']);
   var parts = [];
-  var titleLines = ['Claude usage limits (provisional provider_usage contract)'];
+  var titleLines = ['Claude account usage limits'];
+  if (sourceAgent) {
+    titleLines.push('Source agent: ' + String(sourceAgent.name || sourceAgent.id || 'Claude agent'));
+  }
+  titleLines.push('Account-wide quota shared by all Claude Code agents; one agent is selected, not summed.');
   var maxUsed = 0;
   var nextResetAt = 0;
 
   function addWindow(label, windowInfo) {
-    if (!windowInfo) return;
+    if (!_statusBarUsageWindowAvailable(windowInfo)) return;
     var usedPct = _statusBarUsageUsedPct(windowInfo);
     if (!Number.isFinite(usedPct)) return;
     if (usedPct < 0) usedPct = 0;
@@ -325,12 +397,10 @@ function _statusBarClaudeUsageView(providerUsage) {
     var resetValue = windowInfo.resets_at || windowInfo.reset_at || windowInfo.resetsAt;
     var resetMs = _statusBarTimestampMs(resetValue);
     if (resetMs && (!nextResetAt || resetMs < nextResetAt)) nextResetAt = resetMs;
-    var remainingPct = Number(windowInfo.remaining_pct);
-    var remainingText = Number.isFinite(remainingPct)
-      ? (' · remaining ' + _statusBarFormatPercent(remainingPct))
-      : '';
+    var remainingPct = 100 - usedPct;
     titleLines.push(label + ': used ' + _statusBarFormatPercent(usedPct)
-      + remainingText + ' · ' + _statusBarFormatReset(resetValue));
+      + ' · remaining ' + _statusBarFormatPercent(remainingPct)
+      + ' · ' + _statusBarFormatReset(resetValue));
   }
 
   addWindow('5h', five);
