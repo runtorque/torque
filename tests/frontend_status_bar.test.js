@@ -94,6 +94,7 @@ function createSandbox() {
     'statusbar-info',
     'statusbar-panel-buttons',
     'statusbar-claude-usage',
+    'statusbar-codex-usage',
     'statusbar-deploy',
     'statusbar-workload',
     'statusbar-tasks',
@@ -215,6 +216,41 @@ test('Claude usage view reads per-agent provider_usage in the shipped TORQUE:700
     sandbox.document.getElementById('statusbar-claude-usage').classList.contains('statusbar-chip--warn'),
     true,
   );
+});
+
+test('Codex usage view reads codex provider_usage and paints its own chip', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+  const resetsAt = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+  sandbox.state.agents = {
+    codex1: {
+      id: 'codex1',
+      name: 'Codex Worker',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'codex',
+      last_heartbeat_at: 10,
+      provider_usage: {
+        five_hour: { available: true, used_percentage: 64, resets_at: resetsAt },
+        seven_day: { available: true, used_percentage: 34, resets_at: new Date(Date.now() + 86400 * 1000).toISOString() },
+      },
+    },
+  };
+
+  const view = jsonValue(context, `_statusBarCodexUsageView()`);
+  assert.equal(view.label, 'Codex 5h 64% · 7d 34%');
+  assert.equal(view.level, 'normal');
+  assert.match(view.title, /Codex account usage limits/);
+  assert.match(view.title, /Source agent: Codex Worker/);
+
+  vm.runInContext(`refreshStatusBar();`, context);
+  assert.equal(sandbox.document.getElementById('statusbar-codex-usage').textContent, 'Codex 5h 64% · 7d 34%');
+  assert.equal(
+    sandbox.document.getElementById('statusbar-codex-usage').classList.contains('statusbar-chip--normal'),
+    true,
+  );
+  assert.equal(sandbox.document.getElementById('statusbar-claude-usage').textContent, 'Claude —');
 });
 
 test('Claude usage view chooses one available Claude agent and does not sum account quotas', () => {

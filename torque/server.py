@@ -232,7 +232,7 @@ from .server_prompts import (
 )
 from .engineer_session_map import build_engineer_session_map
 from .codex_usage_backfill import (
-    backfill_codex_provider_usage_for_dormant_agents,
+    refresh_codex_provider_usage_for_agents,
 )
 
 
@@ -10393,19 +10393,16 @@ async def main(connection=None):
                 log.exception("Agent tombstone sweeper failed")
 
     async def _codex_provider_usage_backfill_refresher():
-        """Periodically refresh dormant Codex account-usage telemetry."""
+        """Periodically refresh Codex account-usage telemetry."""
         while True:
             await asyncio.sleep(_CODEX_PROVIDER_USAGE_BACKFILL_INTERVAL_SECONDS)
             try:
-                changed = backfill_codex_provider_usage_for_dormant_agents(
+                report = refresh_codex_provider_usage_for_agents(
                     state,
                 )
-                if changed:
+                if report.changed:
                     await state.broadcast()
-                    log.info(
-                        "Backfilled Codex provider_usage for %d dormant agent(s)",
-                        changed,
-                    )
+                log.info(report.summary())
             except Exception:
                 log.exception("Codex provider_usage backfill refresh failed")
 
@@ -10631,12 +10628,10 @@ async def main(connection=None):
     log.info("Startup checkpoint: bridge started")
     await bridge.reconnect_orphans()
     try:
-        changed = backfill_codex_provider_usage_for_dormant_agents(state)
-        if changed:
-            log.info(
-                "Backfilled Codex provider_usage for %d dormant agent(s)",
-                changed,
-            )
+        report = refresh_codex_provider_usage_for_agents(state)
+        if report.changed:
+            await state.broadcast()
+        log.info(report.summary())
     except Exception:
         log.exception("Codex provider_usage backfill on startup failed")
     state.sync_ui_selection_to_session(
