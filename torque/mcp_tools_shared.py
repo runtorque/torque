@@ -55,6 +55,7 @@ from .task_health import HEALTH_SEVERITY
 from .engineer_hints import compute_engineer_hints
 from .engineer_session_map import build_engineer_session_map
 from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
+from .worktree_boundaries import latest_boundary_task, task_boundary
 
 _STREAM_STATES = (
     "implementing",
@@ -105,6 +106,9 @@ _TASK_DISPATCH_LAUNCH_OVERRIDE_ARGS = (
     "command",
     "model",
     "reasoning_effort",
+    "adopt_worktree_path",
+    "adopt_branch",
+    "adopt_base_branch",
 )
 
 # ---------------------------------------------------------------------------
@@ -2773,6 +2777,72 @@ def _resolve_visible_agent(state, caller_kind: str, caller_id: str,
     return agent_id, ""
 
 
+def _worktree_path_args(args: dict) -> tuple[str, str]:
+    path = str(args.get("worktree_path", "") or "").strip()
+    branch = str(args.get("branch", "") or args.get("worktree_branch", "") or "").strip()
+    return path, branch
+
+
+def _has_path_target_args(args: dict) -> bool:
+    path, branch = _worktree_path_args(args)
+    return bool(path or branch)
+
+
+def _validate_exactly_one_worktree_target(args: dict) -> tuple[bool, str]:
+    has_agent = bool(str(args.get("agent", "") or "").strip())
+    has_path = _has_path_target_args(args)
+    if has_agent == has_path:
+        return False, "Specify exactly one target mode: agent OR worktree_path+branch."
+    if has_path:
+        path, branch = _worktree_path_args(args)
+        if not path or not branch:
+            return False, "worktree_path and branch are both required for driverless mode."
+    return True, ""
+
+
+def _engineer_can_access_worktree_branch(real_state, caller_id: str, *,
+                                         repo_root: str = "",
+                                         branch: str = "") -> tuple[bool, str]:
+    caller_id = str(caller_id or "").strip()
+    repo_root = str(repo_root or "").strip()
+    branch = str(branch or "").strip()
+    if not caller_id or not branch:
+        return False, "missing caller or branch"
+    if repo_root:
+        latest = latest_boundary_task(
+            real_state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=branch,
+            statuses={"open", "merged", "superseded"},
+        )
+        if latest:
+            assigned = _effective_assigned_engineer_id(latest)
+            if not assigned or assigned == caller_id:
+                return True, "boundary"
+            return False, "branch boundary is outside engineer scope"
+    caller = real_state.agents.get(caller_id)
+    slug = str(getattr(caller, "slug", "") or "").strip()
+    if slug and branch.startswith(f"torque/{slug}/"):
+        return True, "branch_prefix"
+    if branch.startswith("torque/user/"):
+        return True, "branch_prefix_user"
+    return False, "no visible boundary or owned branch prefix"
+
+
+def _driverless_payload_from_args(args: dict, *, caller_id: str, group: str) -> dict:
+    path, branch = _worktree_path_args(args)
+    payload = {
+        "worktree_path": path,
+        "branch": branch,
+        "repo_root": str(args.get("repo_root", "") or "").strip(),
+        "base_branch": str(args.get("base_branch", "") or "").strip(),
+        "group": group,
+        "caller_id": str(caller_id or "").strip(),
+        "caller_kind": "engineer",
+    }
+    return {key: value for key, value in payload.items() if value not in ("", None)}
+
+
 def authorize_caller(state, *, caller_kind: str, caller_id: str):
     caller_id = str(caller_id or "").strip()
     label = {
@@ -5037,6 +5107,17 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             reasoning_effort = args.get("reasoning_effort", "")
             if reasoning_effort:
                 payload["reasoning_effort"] = reasoning_effort
+            adopt_path = str(args.get("adopt_worktree_path", "") or "").strip()
+            if adopt_path:
+                payload["adopt_worktree_path"] = adopt_path
+                for source_key, payload_key in (
+                    ("adopt_branch", "adopt_branch"),
+                    ("adopt_base_branch", "adopt_base_branch"),
+                    ("adopt_repo_root", "adopt_repo_root"),
+                ):
+                    value = str(args.get(source_key, "") or "").strip()
+                    if value:
+                        payload[payload_key] = value
         agent_name = args.get("name", "")
         if agent_name:
             payload["name"] = agent_name
@@ -6224,36 +6305,78 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     # -- Worktree tools -----------------------------------------------------
 
     if tool_name == "merge":
-        agent_ident = args.get("agent", "")
-        agent_id, agent_error = _resolve_visible_agent(
-            real_state, caller_kind, caller_id, agent_ident
-        )
-        if not agent_id:
-            return agent_error, True
-        cell = state.agents.get(agent_id)
-        if not cell or not cell.worktree_path:
-            return "Agent has no worktree", True
-        merge_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
-        merge_base_branch = str(
-            getattr(cell, "worktree_base_branch", "") or ""
-        ).strip()
+        valid_target, target_error = _validate_exactly_one_worktree_target(args)
+        if not valid_target:
+            return target_error, True
+        driverless = _has_path_target_args(args)
+        cell = None
+        agent_id = ""
+        if driverless:
+            path_payload = _driverless_payload_from_args(
+                args,
+                caller_id=caller_id,
+                group=_engineer_group,
+            )
+            scoped, scope_reason = _engineer_can_access_worktree_branch(
+                real_state,
+                caller_id,
+                repo_root=path_payload.get("repo_root", ""),
+                branch=path_payload.get("branch", ""),
+            )
+            if not scoped and path_payload.get("repo_root"):
+                return scope_reason, True
+            agent_id = ""
+            merge_branch = path_payload.get("branch", "")
+            merge_base_branch = path_payload.get("base_branch", "")
+        else:
+            agent_ident = args.get("agent", "")
+            agent_id, agent_error = _resolve_visible_agent(
+                real_state, caller_kind, caller_id, agent_ident
+            )
+            if not agent_id:
+                return agent_error, True
+            cell = state.agents.get(agent_id)
+            if not cell or not cell.worktree_path:
+                return "Agent has no worktree", True
+            merge_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+            merge_base_branch = str(
+                getattr(cell, "worktree_base_branch", "") or ""
+            ).strip()
 
         # First check for conflicts / merge boundary eligibility
         force_sibling_divergence = bool(args.get("force"))
         force_stale_base = bool(
             args.get("force_stale_base") or args.get("force")
         )
-        result, error_text, blocked = await _run_worktree_merge_check_with_options(
-            handle_command,
-            agent_id,
-            allow_stale_base=force_stale_base,
-        )
+        if driverless:
+            check_payload = {
+                "cmd": "worktree_check_merge",
+                **path_payload,
+                "allow_stale_base": force_stale_base,
+            }
+            if force_sibling_divergence:
+                check_payload["force"] = True
+            result = await handle_command(check_payload)
+            error_text = (result or {}).get("error", "")
+            blocked = bool(result and result.get("type") == "error")
+        else:
+            result, error_text, blocked = await _run_worktree_merge_check_with_options(
+                handle_command,
+                agent_id,
+                allow_stale_base=force_stale_base,
+            )
         if blocked:
             return error_text, True
         if result and not result.get("clean", True):
             conflict_list = _format_worktree_conflicts(
                 result.get("conflicts", [])
             )
+            if driverless:
+                return (
+                    f"Merge has conflicts:\n{conflict_list}\n\n"
+                    "Resolve/rebase the driverless worktree manually, then retry "
+                    f"{tool_name_with_prefix(tool_prefix, 'merge')}."
+                ), True
             return (
                 f"Merge has conflicts:\n{conflict_list}\n\n"
                 f"Run {tool_name_with_prefix(tool_prefix, 'rebase')} on "
@@ -6264,7 +6387,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             ), True
 
         # Proceed with merge
-        payload = {"cmd": "worktree_merge", "id": agent_id}
+        payload = (
+            {"cmd": "worktree_merge", **path_payload}
+            if driverless else {"cmd": "worktree_merge", "id": agent_id}
+        )
         msg = args.get("message", "")
         if msg:
             payload["message"] = msg
@@ -6296,9 +6422,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("ok") is False:
             error, cacheable = _format_worktree_pr_error(result, "Merge failed")
             if "conflict" in error.lower():
-                fresh_check, _, _ = await _run_worktree_merge_check(
-                    handle_command, agent_id
-                )
+                fresh_check = None
+                if not driverless:
+                    fresh_check, _, _ = await _run_worktree_merge_check(
+                        handle_command, agent_id
+                    )
                 conflict_text = ""
                 if fresh_check and not fresh_check.get("clean", True):
                     conflict_text = (
@@ -6307,6 +6435,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                             fresh_check.get("conflicts", [])
                         )
                     )
+                if driverless:
+                    return (
+                        f"Merge failed: {error}{conflict_text}\n\n"
+                        "Resolve/rebase the driverless worktree manually, then retry "
+                        f"{tool_name_with_prefix(tool_prefix, 'merge')}."
+                    ), True
                 return (
                     f"Merge failed: {error}{conflict_text}\n\n"
                     f"Run {tool_name_with_prefix(tool_prefix, 'rebase')} on "
@@ -6400,17 +6534,31 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         }), False
 
     if tool_name == "create_pr":
-        agent_ident = args.get("agent", "")
-        agent_id, agent_error = _resolve_visible_agent(
-            real_state, caller_kind, caller_id, agent_ident
-        )
-        if not agent_id:
-            return agent_error, True
-        cell = state.agents.get(agent_id)
-        if not cell or not cell.worktree_path:
-            return "Agent has no worktree", True
-
-        payload = {"cmd": "worktree_create_pr", "id": agent_id}
+        valid_target, target_error = _validate_exactly_one_worktree_target(args)
+        if not valid_target:
+            return target_error, True
+        driverless = _has_path_target_args(args)
+        if driverless:
+            payload = {
+                "cmd": "worktree_create_pr",
+                **_driverless_payload_from_args(
+                    args,
+                    caller_id=caller_id,
+                    group=_engineer_group,
+                ),
+            }
+            cell = None
+        else:
+            agent_ident = args.get("agent", "")
+            agent_id, agent_error = _resolve_visible_agent(
+                real_state, caller_kind, caller_id, agent_ident
+            )
+            if not agent_id:
+                return agent_error, True
+            cell = state.agents.get(agent_id)
+            if not cell or not cell.worktree_path:
+                return "Agent has no worktree", True
+            payload = {"cmd": "worktree_create_pr", "id": agent_id}
         title = args.get("title", "")
         if title:
             payload["title"] = title
@@ -6433,6 +6581,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "pr_url": pr_url,
             "message": (result or {}).get("message", "PR created"),
         }
+        if driverless:
+            payload["driverless"] = True
         phase = _worktree_result_phase(result)
         if phase:
             payload["phase"] = phase
@@ -6472,19 +6622,35 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return result.get("diff", "No changes"), False
 
     if tool_name == "worktree_remove":
-        agent_ident = args.get("agent", "")
-        agent_id, agent_error = _resolve_visible_agent(
-            real_state, caller_kind, caller_id, agent_ident
-        )
-        if not agent_id:
-            return agent_error, True
-        cell = state.agents.get(agent_id)
-        if not cell or not cell.worktree_path:
-            return "Agent has no worktree", True
-        result = await handle_command({
-            "cmd": "worktree_remove",
-            "id": agent_id,
-        })
+        valid_target, target_error = _validate_exactly_one_worktree_target(args)
+        if not valid_target:
+            return target_error, True
+        if _has_path_target_args(args):
+            payload = {
+                "cmd": "worktree_remove",
+                **_driverless_payload_from_args(
+                    args,
+                    caller_id=caller_id,
+                    group=_engineer_group,
+                ),
+                "delete_branch": bool(args.get("delete_branch", True)),
+            }
+            cell = None
+        else:
+            agent_ident = args.get("agent", "")
+            agent_id, agent_error = _resolve_visible_agent(
+                real_state, caller_kind, caller_id, agent_ident
+            )
+            if not agent_id:
+                return agent_error, True
+            cell = state.agents.get(agent_id)
+            if not cell or not cell.worktree_path:
+                return "Agent has no worktree", True
+            payload = {
+                "cmd": "worktree_remove",
+                "id": agent_id,
+            }
+        result = await handle_command(payload)
         if result and result.get("type") == "error" \
                 and isinstance(result.get("worktree_remove"), dict):
             payload = {
@@ -6522,6 +6688,67 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if isinstance(result, dict):
             payload["worktree_remove"] = result
         return json.dumps(payload), False
+
+    if tool_name == "worktree_adopt":
+        agent_ident = args.get("agent", "")
+        agent_id, agent_error = _resolve_visible_agent(
+            real_state, caller_kind, caller_id, agent_ident
+        )
+        if not agent_id:
+            return agent_error, True
+        payload = {
+            "cmd": "worktree_adopt",
+            "id": agent_id,
+            **_driverless_payload_from_args(
+                args,
+                caller_id=caller_id,
+                group=_engineer_group,
+            ),
+            "relaunch": bool(args.get("relaunch", False)),
+        }
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result or {"type": "ok"}), False
+
+    if tool_name == "worktree_advance_boundary":
+        valid_target, target_error = _validate_exactly_one_worktree_target(args)
+        if not valid_target:
+            return target_error, True
+        if not str(args.get("verification_note", "") or "").strip():
+            return "verification_note is required", True
+        if not str(args.get("expected_previous_head", "") or "").strip():
+            return "expected_previous_head is required", True
+        if _has_path_target_args(args):
+            payload = {
+                "cmd": "worktree_advance_boundary",
+                **_driverless_payload_from_args(
+                    args,
+                    caller_id=caller_id,
+                    group=_engineer_group,
+                ),
+            }
+        else:
+            agent_ident = args.get("agent", "")
+            agent_id, agent_error = _resolve_visible_agent(
+                real_state, caller_kind, caller_id, agent_ident
+            )
+            if not agent_id:
+                return agent_error, True
+            payload = {"cmd": "worktree_advance_boundary", "id": agent_id, "group": _engineer_group}
+        for key in (
+            "expected_previous_head",
+            "expected_new_head",
+            "verification_note",
+            "reason",
+        ):
+            if key in args:
+                payload[key] = args[key]
+        payload["actor_agent_id"] = str(caller_id or "").strip()
+        result = await handle_command(payload)
+        if result and not result.get("ok"):
+            return json.dumps(result), True
+        return json.dumps(result or {"type": "ok"}), False
 
     if tool_name == "worktree_checkpoint":
         agent_ident = args.get("agent", "")

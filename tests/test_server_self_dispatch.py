@@ -2312,6 +2312,193 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "existing": False,
             }
 
+    class _FakeWorktreeCreateManager:
+        def __init__(self):
+            self.calls = []
+
+        async def get_repo_root(self, directory):
+            self.calls.append(("get_repo_root", directory))
+            return "/repo"
+
+        async def create(self, cell, repo_root, **kwargs):
+            self.calls.append(("create", cell.id, repo_root, kwargs))
+            cell.worktree_path = "/repo/.torque/worktrees/worker"
+            cell.worktree_branch = "torque/worker"
+            cell.worktree_repo_root = repo_root
+            return cell.worktree_path
+
+    class _FakeBoundaryAdvanceWorktreeManager:
+        def __init__(self):
+            self.calls = []
+
+        async def reconcile_worktree_branch(self, _cell):
+            return False
+
+        async def current_head(self, _target):
+            self.calls.append(("current_head",))
+            return "new"
+
+        async def verify_mechanical_gitlink_commit(
+            self,
+            target,
+            *,
+            previous_head,
+            new_head,
+            worktree_submodules=None,
+        ):
+            self.calls.append(
+                (
+                    "verify",
+                    target.id,
+                    previous_head,
+                    new_head,
+                    tuple(worktree_submodules or ()),
+                )
+            )
+            return {
+                "ok": True,
+                "mechanical_commit": new_head,
+                "paths": ["ee"],
+                "submodules": [{"path": "ee", "commit_sha": "new-ee"}],
+            }
+
+    async def test_worktree_create_regression_does_not_touch_boundary_error_result(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-create",
+            name="Worker Create",
+            group="g",
+            cell_type="agent",
+            directory="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        worktree_mgr = self._FakeWorktreeCreateManager()
+        handle_command = self._extract_handle_command(
+            state,
+            worktree_mgr=worktree_mgr,
+        )
+
+        result = await handle_command({
+            "cmd": "worktree_create",
+            "id": worker.id,
+        })
+
+        self.assertIsNone(result)
+        self.assertEqual(worker.directory, "/repo/.torque/worktrees/worker")
+        self.assertEqual(worker.worktree_path, "/repo/.torque/worktrees/worker")
+        self.assertEqual(
+            [call[0] for call in worktree_mgr.calls],
+            ["get_repo_root", "create"],
+        )
+
+    async def test_worktree_advance_boundary_is_reachable_via_command(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings("g", worktree_submodules=["ee"])
+        worker = self.state_mod.AgentCell(
+            id="worker-boundary",
+            name="Worker Boundary",
+            group="g",
+            cell_type="agent",
+            worktree_path="/repo/.torque/worktrees/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        task = state.board_add_task(
+            "Reviewed implementation",
+            "g",
+            lane="In Progress",
+            id="TORQUE:ADV",
+            agent_id=worker.id,
+        )
+        task.worktree_boundary = {
+            "version": "1",
+            "branch": worker.worktree_branch,
+            "repo_root": worker.worktree_repo_root,
+            "base_branch": worker.worktree_base_branch,
+            "commit_sha": "old",
+            "status": "open",
+            "recorded_at": "2026-05-26T12:00:00+00:00",
+            "recorded_by_agent_id": worker.id,
+            "submodules": [{"path": "ee", "commit_sha": "old-ee"}],
+        }
+        saved_task_ids = []
+        worktree_mgr = self._FakeBoundaryAdvanceWorktreeManager()
+        handle_command = self._extract_handle_command(
+            state,
+            _save_task_record=lambda saved_task: saved_task_ids.append(
+                saved_task.id
+            ),
+            worktree_mgr=worktree_mgr,
+        )
+
+        result = await handle_command({
+            "cmd": "worktree_advance_boundary",
+            "id": worker.id,
+            "expected_previous_head": "old",
+            "expected_new_head": "new",
+            "verification_note": "audit metadata only",
+            "actor_agent_id": "engineer-1",
+        })
+
+        self.assertEqual(result["type"], "worktree_advance_boundary")
+        self.assertTrue(result["ok"])
+        self.assertEqual(task.worktree_boundary["commit_sha"], "new")
+        self.assertEqual(
+            task.worktree_boundary["submodules"][0]["commit_sha"],
+            "new-ee",
+        )
+        self.assertEqual(saved_task_ids, [task.id])
+        self.assertEqual(
+            worktree_mgr.calls,
+            [("verify", worker.id, "old", "new", ("ee",))],
+        )
+
+    async def test_worktree_check_merge_unknown_live_agent_id_fails_closed(self):
+        state = self.state_mod.MatrixState()
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "worktree_check_merge",
+            "id": "missing-agent",
+        })
+
+        self.assertEqual(result["type"], "worktree_check_merge")
+        self.assertEqual(result["id"], "missing-agent")
+        self.assertIn("not found", result["error"])
+
+    async def test_worktree_check_merge_tombstoned_live_agent_id_fails_closed(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="gone-worker",
+            name="Gone Worker",
+            group="g",
+            cell_type="agent",
+            deleted_at=123.0,
+            worktree_path="/repo/.torque/worktrees/gone",
+            worktree_branch="torque/gone",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "worktree_check_merge",
+            "id": worker.id,
+        })
+
+        self.assertEqual(result["type"], "worktree_check_merge")
+        self.assertEqual(result["id"], worker.id)
+        self.assertIn("tombstoned", result["error"])
+
     async def test_worktree_create_pr_rewrites_title_body_and_leaves_unmapped(self):
         state, worker, task = self._make_pr_merge_state()
         state.update_group_settings(
@@ -3391,6 +3578,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=1,
             agent_id=reviewer_one.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         fix = state.board_add_task(
             "Fix issues",
@@ -3413,6 +3601,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=3,
             agent_id=reviewer_two.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
 
         with tempfile.TemporaryDirectory() as tempdir:
@@ -3440,6 +3629,51 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, [reviewer_one.id, reviewer_two.id])
         self.assertEqual(closed, [reviewer_one.id, reviewer_two.id])
+
+    async def test_auto_close_on_done_fails_closed_without_spawn_label(self):
+        state = self._make_state()
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            status="idle",
+        )
+        state.agents = {reviewer.id: reviewer}
+        root = state.board_add_task(
+            "Review root",
+            "g",
+            lane="Done",
+            id="task-root",
+            action_name="feature/review",
+            agent_id=reviewer.id,
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._write_action(
+                tempdir,
+                "feature/review",
+                auto_close_on_done=True,
+            )
+            closed = []
+
+            async def resolve_base_dir(_group):
+                return tempdir
+
+            async def close_agent(cell):
+                closed.append(cell.id)
+
+            result = await self.server_mod._maybe_auto_close_root_done_agents(
+                state,
+                root,
+                action_mgr=self.server_mod.ActionManager(),
+                resolve_base_dir=resolve_base_dir,
+                close_agent=close_agent,
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(closed, [])
 
     async def test_auto_close_on_done_waits_for_root_resolution(self):
         state = self._make_state()
@@ -3476,6 +3710,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=1,
             agent_id=reviewer.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         state.board_add_task(
             "Fix issues",
@@ -3533,6 +3768,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             id="task-root",
             action_name="feature/review",
             agent_id=reviewer.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         queued = state.board_add_task(
             "Queued follow-up",
@@ -3600,6 +3836,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             id="task-root",
             action_name="feature/review",
             agent_id=reviewer.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         state.board_add_task(
             "Queued follow-up",

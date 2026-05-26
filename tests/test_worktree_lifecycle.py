@@ -1284,6 +1284,99 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             "",
         )
 
+    async def test_validate_existing_worktree_requires_listed_branch_head(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+
+        target = await self.mgr.validate_existing_worktree(
+            wt_path,
+            repo_root=str(self.repo_root),
+            branch=cell.worktree_branch,
+            base_branch="main",
+        )
+
+        self.assertEqual(target.worktree_path, str(Path(wt_path).resolve()))
+        self.assertEqual(target.repo_root, str(self.repo_root.resolve()))
+        self.assertEqual(target.branch, cell.worktree_branch)
+        self.assertFalse(target.is_dirty)
+
+        with self.assertRaises(ValueError):
+            await self.mgr.validate_existing_worktree(
+                wt_path,
+                repo_root=str(self.repo_root),
+                branch="not-the-checked-out-branch",
+                base_branch="main",
+            )
+
+        self.assertTrue(await self.mgr.remove(cell))
+
+    async def test_safe_remove_existing_worktree_refuses_dirty_or_unmerged(self):
+        dirty_cell = self._make_cell(agent_id="dirty")
+        dirty_wt = await self.mgr.create(dirty_cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(dirty_wt)
+        (Path(dirty_wt) / "dirty.txt").write_text("dirty\n")
+        dirty_target = await self.mgr.validate_existing_worktree(
+            dirty_wt,
+            repo_root=str(self.repo_root),
+            branch=dirty_cell.worktree_branch,
+            base_branch="main",
+        )
+
+        dirty_result = await self.mgr.safe_remove_existing_worktree(dirty_target)
+
+        self.assertFalse(dirty_result["ok"])
+        self.assertIn("dirty_worktree", dirty_result["mismatches"])
+        self.assertTrue(Path(dirty_wt).exists())
+        await self._git("reset", "--hard", cwd=dirty_wt)
+        await self._git("clean", "-fd", cwd=dirty_wt)
+        self.assertTrue(await self.mgr.remove(dirty_cell))
+
+        unmerged_cell = self._make_cell(agent_id="unmerged")
+        unmerged_wt = await self.mgr.create(unmerged_cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(unmerged_wt)
+        (Path(unmerged_wt) / "work.txt").write_text("work\n")
+        self.assertTrue(await self.mgr.checkpoint(unmerged_cell, "Unmerged work"))
+        unmerged_target = await self.mgr.validate_existing_worktree(
+            unmerged_wt,
+            repo_root=str(self.repo_root),
+            branch=unmerged_cell.worktree_branch,
+            base_branch="main",
+        )
+
+        unmerged_result = await self.mgr.safe_remove_existing_worktree(unmerged_target)
+
+        self.assertFalse(unmerged_result["ok"])
+        self.assertIn("branch_not_merged", unmerged_result["mismatches"])
+        self.assertTrue(Path(unmerged_wt).exists())
+        self.assertTrue(await self.mgr.remove(unmerged_cell))
+
+    async def test_safe_remove_existing_worktree_removes_clean_merged_orphan(self):
+        cell = self._make_cell(agent_id="merged")
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+        branch = cell.worktree_branch
+        target = await self.mgr.validate_existing_worktree(
+            wt_path,
+            repo_root=str(self.repo_root),
+            branch=branch,
+            base_branch="main",
+        )
+
+        result = await self.mgr.safe_remove_existing_worktree(target)
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["worktree_removed"], result)
+        self.assertTrue(result["branch_deleted"], result)
+        self.assertFalse(Path(wt_path).exists())
+        code, _out, _err = await self._git_code(
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        )
+        self.assertNotEqual(code, 0)
+
 
 class ScopeDomainClassifierTests(unittest.TestCase):
     """Unit coverage for the out-of-scope diff classifier (TORQUE:604 A2)."""

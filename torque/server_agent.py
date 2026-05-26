@@ -638,6 +638,17 @@ class AgentLaunchService:
         inherited_worktree = _copy_worktree_context(
             cell, inherited_worktree_from
         )
+        adopted_worktree = launch_cfg.get("adopted_worktree") or {}
+        if adopted_worktree and not inherited_worktree:
+            cell.worktree_path = str(adopted_worktree.get("worktree_path", "") or "")
+            cell.worktree_branch = str(adopted_worktree.get("branch", "") or "")
+            cell.worktree_repo_root = str(adopted_worktree.get("repo_root", "") or "")
+            cell.git_root = cell.worktree_repo_root
+            cell.worktree_base_branch = str(adopted_worktree.get("base_branch", "") or "")
+            if cell.worktree_path:
+                cell.directory = cell.worktree_path
+                launch_cfg["directory"] = cell.worktree_path
+            launch_cfg["worktree"] = False
         if (cell.kind == "architect"
                 and not torque_config.ARCHITECT_USES_WORKTREE
                 and not inherited_worktree):
