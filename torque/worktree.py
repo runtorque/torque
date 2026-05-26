@@ -7279,19 +7279,11 @@ class WorktreeManager:
             if existing_state == "OPEN":
                 existing.update({"phase": phase, "existing": True})
                 return existing
-            if existing_state == "MERGED" \
-                    or existing.get("merged_at") \
-                    or existing.get("merge_commit_sha"):
-                existing.update({
-                    "phase": phase,
-                    "existing": True,
-                    "already_merged": True,
-                    "warning": (
-                        f"Branch {branch} already has a merged pull request; "
-                        "treating PR creation as already landed."
-                    ),
-                })
-                return existing
+            # Reused Torque worker branches can have older merged PRs while
+            # also carrying fresh follow-up commits.  Do not treat a stale
+            # non-open PR lookup as proof the current branch is already
+            # landed; only the explicit create-time "No commits between"
+            # response below is safe to convert into already_merged.
 
         create = await self._run_gh(
             worktree_path,

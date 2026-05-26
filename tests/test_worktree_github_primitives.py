@@ -594,6 +594,58 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["head_sha"], "def456")
         self.assertEqual(remaining, [])
 
+    async def test_create_or_reuse_pr_ignores_stale_merged_pr_for_branch(self):
+        stale = {
+            "url": "https://github.com/acme/repo/pull/8",
+            "number": 8,
+            "headRefOid": "oldsha",
+            "state": "MERGED",
+            "mergedAt": "2026-05-20T12:00:00Z",
+            "mergeCommit": {"oid": "mergesha"},
+        }
+        created = {
+            "url": "https://github.com/acme/repo/pull/10",
+            "number": 10,
+            "body": "Body",
+            "headRefOid": "newsha",
+            "state": "OPEN",
+        }
+        fake, _calls, remaining = self._fake_exec([
+            (
+                self._gh_pr_view_matcher("feature"),
+                FakeProcess(stdout=json.dumps(stale)),
+            ),
+            (
+                [
+                    "gh", "pr", "create",
+                    "--base", "main",
+                    "--head", "feature",
+                    "--title", "Feature",
+                    "--body", "Body",
+                ],
+                FakeProcess(stdout="https://github.com/acme/repo/pull/10\n"),
+            ),
+            (
+                self._gh_pr_view_matcher("feature"),
+                FakeProcess(stdout=json.dumps(created)),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_create_or_reuse_pr(
+                "/wt", "feature", "main", title="Feature", body="Body"
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["phase"], "pr_create")
+        self.assertFalse(result["existing"])
+        self.assertNotIn("already_merged", result)
+        self.assertEqual(result["url"], created["url"])
+        self.assertEqual(result["number"], 10)
+        self.assertEqual(result["head_sha"], "newsha")
+        self.assertEqual(remaining, [])
+
     async def test_create_or_reuse_pr_no_commits_between_is_already_merged(self):
         err = "GraphQL: No commits between main and feature (createPullRequest)"
         fake, _calls, remaining = self._fake_exec([
