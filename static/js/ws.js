@@ -381,6 +381,10 @@ function connect() {
       _clearDaemonStoppedBanner();
     }
     if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+    if (typeof refreshStatusBar === 'function') refreshStatusBar({ connected: true });
+    if (typeof statusBarRequestDeployState === 'function') {
+      statusBarRequestDeployState({ force: true });
+    }
   };
   ws.onclose = () => {
     _resyncPending = false;
@@ -390,6 +394,7 @@ function connect() {
     }
     _setConnDotState(false);
     if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+    if (typeof refreshStatusBar === 'function') refreshStatusBar({ connected: false });
     if (typeof _daemonStopRequestedByUser !== 'undefined'
         && _daemonStopRequestedByUser
         && typeof _showDaemonStoppedBanner === 'function') {
@@ -417,6 +422,9 @@ function connect() {
       if (msg.runtime && typeof refreshDaemonStatusIndicator === 'function') {
         refreshDaemonStatusIndicator();
       }
+      if (msg.runtime && typeof refreshStatusBar === 'function') {
+        refreshStatusBar({ runtime: true });
+      }
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
@@ -428,6 +436,9 @@ function connect() {
       if (msg.runtime && typeof loadDaemonStatus === 'function') loadDaemonStatus();
       if (msg.runtime && typeof refreshDaemonStatusIndicator === 'function') {
         refreshDaemonStatusIndicator();
+      }
+      if (msg.runtime && typeof refreshStatusBar === 'function') {
+        refreshStatusBar({ runtime: true });
       }
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
@@ -443,6 +454,10 @@ function connect() {
     } else if (msg.type === 'system_health_metrics') {
       if (typeof healthReceiveMetrics === 'function') {
         healthReceiveMetrics(msg);
+      }
+    } else if (msg.type === 'deploy_state') {
+      if (typeof statusBarReceiveDeployState === 'function') {
+        statusBarReceiveDeployState(msg);
       }
     } else if (msg.type === 'daemon_stop') {
       if (typeof _daemonStopRequestedByUser !== 'undefined'
@@ -851,6 +866,10 @@ function _handleFullState(msg) {
   // `state` via the `state = msg` assignment above; refresh the indicator from
   // it (renders nothing when the field is absent — pre-producer / community).
   if (typeof refreshRelayStatusIndicator === 'function') refreshRelayStatusIndicator();
+  if (typeof refreshStatusBar === 'function') refreshStatusBar({ fullState: true });
+  if (typeof statusBarRequestDeployState === 'function') {
+    statusBarRequestDeployState({ force: true });
+  }
   // Relay config + provenance (TORQUE:603 #1): top-level `state.relay_config` is
   // captured by the `state = msg` assignment above; refresh the Settings Relay
   // config sub-block from it (no-op when the section/field elements aren't
@@ -922,6 +941,10 @@ function _handleDelta(msg) {
   _applyContextMeterDeltaUpdates(
     _collectContextMeterDeltaAgentIds(msg.ops, opGroupHints)
   );
+  if (typeof refreshStatusBar === 'function'
+      && _statusBarDeltaNeedsRefresh(msg.ops, opGroupHints)) {
+    refreshStatusBar({ delta: true });
+  }
   const selectedAgentGroupSynced = _selectedAgentGroupSyncedDuringDelta;
   _selectedAgentGroupSyncedDuringDelta = false;
   const taskDeltaChanges = _collectBoardTaskDeltaChanges(msg.ops, opGroupHints);
@@ -970,6 +993,27 @@ function _handleDelta(msg) {
   if (!dragInProgress) {
     _queueDeltaSurfaceRender(invalidations);
   }
+}
+
+function _statusBarDeltaNeedsRefresh(ops, hints) {
+  for (let i = 0; i < (ops || []).length; i++) {
+    const op = ops[i] || {};
+    switch (op.op) {
+      case 'agent_upsert':
+      case 'agent_remove':
+      case 'task_upsert':
+      case 'task_remove':
+        return true;
+      case 'ui_update':
+        if (op.key === 'active_group'
+            || op.key === 'events_dismissed_attention'
+            || op.key === 'selected_agent_id') {
+          return true;
+        }
+        break;
+    }
+  }
+  return false;
 }
 
 function _standaloneDeltaOptimizationsEnabled() {
@@ -1255,6 +1299,10 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'runtime':
         // Runtime metadata refreshes daemon status with a targeted DOM update
         // in _applyDelta; never invalidate panel/grid surfaces for it.
+        break;
+      case 'provider_usage':
+        // Provider usage is consumed by the bottom status bar via a targeted
+        // chip update only. Never invalidate broad surfaces for it.
         break;
       case 'group_update':
       case 'group_remove':
@@ -2959,6 +3007,41 @@ function _applyDelta(ops) {
         if (state.pending_hires) delete state.pending_hires[op.id];
         break;
 
+      case 'provider_usage': {
+        if (!state.provider_usage || typeof state.provider_usage !== 'object') {
+          state.provider_usage = {};
+        }
+        var provider = String(
+          op.provider || op.provider_id || op.adapter || op.name || ''
+        ).trim();
+        if (!provider && op.provider_usage && typeof op.provider_usage === 'object') {
+          state.provider_usage = Object.assign({}, op.provider_usage);
+        } else if (provider) {
+          if (op.delete || op.remove || op.value === null) {
+            delete state.provider_usage[provider];
+          } else {
+            var usagePayload = op.usage || op.value || op.payload || op.data || null;
+            if (!usagePayload || typeof usagePayload !== 'object') {
+              usagePayload = Object.assign({}, op);
+              delete usagePayload.op;
+              delete usagePayload.provider;
+              delete usagePayload.provider_id;
+              delete usagePayload.adapter;
+              delete usagePayload.name;
+            }
+            state.provider_usage[provider] = usagePayload;
+          }
+        } else {
+          var usageMap = Object.assign({}, op);
+          delete usageMap.op;
+          Object.assign(state.provider_usage, usageMap);
+        }
+        if (typeof refreshStatusBar === 'function') {
+          refreshStatusBar({ providerUsage: true });
+        }
+        break;
+      }
+
       case 'runtime': {
         // Daemon-global runtime metadata (version/port/started_at/etc.). Patch
         // in place and refresh only the small daemon status surfaces; no panel
@@ -2979,6 +3062,9 @@ function _applyDelta(ops) {
         if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
         if (typeof refreshDaemonStatusIndicator === 'function') {
           refreshDaemonStatusIndicator();
+        }
+        if (typeof refreshStatusBar === 'function') {
+          refreshStatusBar({ runtime: true });
         }
         break;
       }
@@ -3005,6 +3091,9 @@ function _applyDelta(ops) {
         }
         if (typeof refreshRelayStatusIndicator === 'function') {
           refreshRelayStatusIndicator();
+        }
+        if (typeof refreshStatusBar === 'function') {
+          refreshStatusBar({ relay: true });
         }
         break;
       }

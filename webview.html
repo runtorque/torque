@@ -1569,42 +1569,64 @@
   <div id="panel-health" class="panel-hidden"></div>
 </div>
 
-<!-- Taskbar (dock for panel apps) -->
+<!-- Taskbar (status + dock for panel apps) -->
 <div id="taskbar">
-  <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
-  <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
-  <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
-  <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
-  <button class="taskbar-app" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
-  <button class="taskbar-app" data-app="context" onclick="togglePanel('context')">
-    <span class="taskbar-app-icon" aria-hidden="true">
-      <svg viewBox="0 0 16 16">
-        <path d="M2.5 3.5c0-.83.67-1.5 1.5-1.5h3.25c1.03 0 2.03.33 2.85.94L10.5 3.5v9.5l-.4-.29A4.82 4.82 0 0 0 7.25 12H4a1.5 1.5 0 0 1-1.5-1.5z"/>
-        <path d="M13.5 3.5c0-.83-.67-1.5-1.5-1.5H8.75c-1.03 0-2.03.33-2.85.94L5.5 3.5v9.5l.4-.29A4.82 4.82 0 0 1 8.75 12H12a1.5 1.5 0 0 0 1.5-1.5z"/>
-      </svg>
-    </span>
-    <span>Context</span>
-  </button>
-  <button class="taskbar-app" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
-  <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
-  <button class="taskbar-app" data-app="supervisor" onclick="togglePanel('supervisor')">&#9635; Supervisor</button>
-  <button class="taskbar-app" data-app="health" onclick="togglePanel('health')">&#9829; Health</button>
+  <div id="statusbar-info" class="statusbar-info" aria-label="Workspace status">
+    <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
+         title="Daemon: disconnected">
+      <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
+      <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
+    </div>
+    <span id="statusbar-claude-usage"
+          class="statusbar-chip statusbar-chip--unknown"
+          title="Claude usage limits unavailable until provider usage data arrives.">Claude —</span>
+    <button id="statusbar-deploy"
+            class="statusbar-chip statusbar-chip-button statusbar-chip--muted statusbar-chip-deploy"
+            type="button"
+            hidden
+            onclick="statusBarOpenDeploy()"
+            title="No deploy-pending tasks">Deploy 0</button>
+    <span id="statusbar-workload"
+          class="statusbar-chip statusbar-chip-agents"
+          title="Agent status counts">Agents —</span>
+    <span id="statusbar-tasks"
+          class="statusbar-chip statusbar-chip-tasks"
+          title="Active worker tasks">Tasks —</span>
+    <span id="statusbar-attention"
+          class="statusbar-chip statusbar-chip-attention"
+          title="Attention items">Attention —</span>
+  </div>
   <div class="taskbar-spacer"></div>
-  <button id="taskbar-restore-layout" class="taskbar-aux-btn"
-          onclick="restoreStandaloneLayoutDefaults()"
-          title="Restore the default standalone workspace layout"
-          aria-label="Restore layout">
-    <span class="taskbar-aux-icon" aria-hidden="true">
-      <svg viewBox="0 0 16 16" focusable="false">
-        <path d="M12.5 5.5A5 5 0 1 1 10 3.1"/>
-        <path d="M10 1.75V5.5h3.75"/>
-      </svg>
-    </span>
-  </button>
-  <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
-       title="Daemon: disconnected">
-    <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
-    <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
+  <div id="statusbar-panel-buttons" class="statusbar-panel-buttons" aria-label="Panels">
+    <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
+    <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
+    <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
+    <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
+    <button class="taskbar-app" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
+    <button class="taskbar-app" data-app="context" onclick="togglePanel('context')">
+      <span class="taskbar-app-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16">
+          <path d="M2.5 3.5c0-.83.67-1.5 1.5-1.5h3.25c1.03 0 2.03.33 2.85.94L10.5 3.5v9.5l-.4-.29A4.82 4.82 0 0 0 7.25 12H4a1.5 1.5 0 0 1-1.5-1.5z"/>
+          <path d="M13.5 3.5c0-.83-.67-1.5-1.5-1.5H8.75c-1.03 0-2.03.33-2.85.94L5.5 3.5v9.5l.4-.29A4.82 4.82 0 0 1 8.75 12H12a1.5 1.5 0 0 0 1.5-1.5z"/>
+        </svg>
+      </span>
+      <span>Context</span>
+    </button>
+    <button class="taskbar-app" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
+    <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
+    <button class="taskbar-app" data-app="supervisor" onclick="togglePanel('supervisor')">&#9635; Supervisor</button>
+    <button class="taskbar-app" data-app="health" onclick="togglePanel('health')">&#9829; Health</button>
+    <button id="taskbar-restore-layout" class="taskbar-aux-btn"
+            onclick="restoreStandaloneLayoutDefaults()"
+            title="Restore the default standalone workspace layout"
+            aria-label="Restore layout">
+      <span class="taskbar-aux-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" focusable="false">
+          <path d="M12.5 5.5A5 5 0 1 1 10 3.1"/>
+          <path d="M10 1.75V5.5h3.75"/>
+        </svg>
+      </span>
+    </button>
   </div>
 </div>
 
@@ -1742,6 +1764,7 @@
 <script src="/static/js/templates.js"></script>
 <script src="/static/js/history.js"></script>
 <script src="/static/js/events.js"></script>
+<script src="/static/js/status_bar.js"></script>
 <script src="/static/js/context.js"></script>
 <script src="/static/js/agent_panel.js"></script>
 <script src="/static/js/chat.js"></script>

@@ -34,7 +34,7 @@ from .config import (
     log,
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
-from .deploy_state import capture_deploy_boot_state
+from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
 from .remote_ingress import ingest_remote_user_agent_message
 from .direct_message_mirrors import (
     ask_recipient_is_user,
@@ -11259,6 +11259,22 @@ async def main(connection=None):
                 )
             except ValueError as exc:
                 return {"type": "error", "message": str(exc)}
+
+        if cmd == "get_deploy_state":
+            group = str(data.get("group", "") or "")
+            payload = architect_deploy_state_payload(state, group)
+            payload["type"] = "deploy_state"
+            payload["group"] = group
+            payload.setdefault("error", "")
+            pending = payload.get("pending_deploy")
+            if not isinstance(pending, dict):
+                payload["pending_deploy"] = {"count": 0, "torque_task_ids": []}
+            else:
+                pending.setdefault("count", 0)
+                pending.setdefault("torque_task_ids", [])
+            if "daemon_uptime_seconds" not in payload:
+                payload["daemon_uptime_seconds"] = None
+            return payload
 
         if cmd == "supervisor_sessions_list":
             return await build_supervisor_sessions_payload(
