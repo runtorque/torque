@@ -4,12 +4,14 @@
 [![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](VERSION)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](docs/index.md)
 
-> Torque is a local agent-orchestration workspace for terminal-native
-> developers. Manage AI coding agents, run them in isolated git worktrees,
-> dispatch work from a kanban board, and let an embedded engineer coordinate
-> the wave — from a native desktop window or your browser.
+Torque is a local agent-orchestration workspace built on top of **Claude
+Code** and **Codex**. Chat with an orchestrator agent, run coding agents in
+isolated git worktrees, dispatch work from a kanban board, and watch tasks
+ship — from a native desktop window or your browser. Because Torque is a
+harness over the CLIs you already use, all the work runs through your
+existing Claude and Codex subscription plans.
 
-![Torque workspace showing the agent grid, engineer workload, task board, and a live terminal session.](docs/images/main-screenshot.jpg)
+![Torque workspace showing the agent grid, the chat with the orchestrator, the task board, and a live agent session.](docs/images/overview.png)
 
 ## Why Torque
 
@@ -18,22 +20,40 @@ session, its own branch, its own context window, and its own terminal history.
 Spinning up three at once can quickly turn into three terminals, three
 worktrees, three half-remembered prompts, and a lot of "where was I?" friction.
 
-Torque puts a thin orchestration layer in front of that workflow. You define
-**groups**, drop **agents** and **terminals** into them, dispatch work through
-reusable **actions**, and watch tasks move across a built-in kanban board.
-Every agent runs in its own isolated git worktree by default, so branch
-boundaries are enforced instead of merely hoped for.
+Torque is a harness on top of **Claude Code** and **Codex**: it drives the
+CLIs you already run, so every agent uses your existing subscription plans — no
+extra API keys or per-token billing.
 
-One step further: each group can have an **engineer**. The engineer is Torque's
-orchestrator agent — it reads the board, dispatches workers, watches digests,
-merges finished branches, and coordinates the next wave. It is the same idea
-as a designated build engineer on a small team, but for a single-user OSS
-workspace.
+Torque is a hierarchy of agents, each minding its own role. **Workers** write
+the code. **Engineers** sit above them: they orchestrate tasks across their
+workers and merge the results, serializing changes so conflicts never happen in
+the first place. That orchestration keeps engineers busy and their context
+precious — too busy to also plan at a high level. So that job falls to the
+**architect**, which does the high-level planning and is usually the role you
+want to talk to. It interfaces with the engineers and shields their context
+from human interruption; because it is typically less loaded than the
+engineers, it is the natural entrypoint to the whole system — though you can
+still drop down and talk to an engineer directly when you need to.
 
+You drive everything from the **chat** with the architect. This matters because
+the underlying Claude Code or Codex session is busy almost constantly —
+fielding messages from other agents and digests from the system — so a message
+typed straight at it would just get buried in its context. Instead, the chat
+works both ways: your messages go in through the harness — the normal Claude
+Code or Codex input channel — while the architect replies back through an MCP
+tool call, and it keeps working in between. You read its replies and decide what
+to do next on your own time, without ever stalling the agent or polluting its
+working context. Meanwhile the **kanban board** shows
+what every agent is doing at all times — every task, who owns it, and where it
+sits in the pipeline.
 What you get:
 
-- A visual group, agent, and terminal grid in a native desktop window or a
-  browser.
+- A **chat-first workspace** where you talk to an **architect** that plans the
+  work and runs the engineers and workers for you — backed by Claude Code and
+  Codex on your own subscription plans.
+- **Groups** that act like separate projects — each one fully isolated from the
+  others — so you can run Torque across all your projects from a single native
+  desktop window or browser tab.
 - **Automatic git worktrees** per agent, with checkpointing, diff tracking,
   and engineer-driven merges back to your base branch.
 - A built-in **kanban board** with lanes, drag-and-drop, derived subtasks,
@@ -45,6 +65,17 @@ What you get:
 - Reusable action templates with Jinja-rendered prompts and pipeline
   transitions.
 - A `torque` CLI for scripting from the command line.
+
+## Torque builds Torque
+
+Torque is built with Torque. Nearly all of its code is written by agents
+dispatched from the board and merged through the engineer — the same loop the
+product exposes to you. The agents produce code so fast that, as a deliberate
+experiment in trusting the orchestration loop, **none of the code Torque has
+written for itself has been manually inspected line-by-line.** Review, testing,
+and merge gates are themselves run by agents. It is an honest, sometimes
+uncomfortable, demonstration of what the harness can do — and a live stress
+test of the guardrails it ships with.
 
 ## How agents stay in their lane
 
@@ -68,6 +99,58 @@ drives the activity badges on agent cells, the engineer's event digest, the
 worklog, and the auto-checkpoint triggers on the worktree. You see what each
 agent is doing without attaching to its terminal.
 
+## Actions, transitions, and pipelines
+
+You don't have to micromanage how a task flows — you predefine it. Each task is
+dispatched with an **action**, and an action declares the **transitions** it is
+allowed to take. Together those transitions form a directed acyclic graph: a
+task can go out for implementation, move to review, bounce back to
+implementation for fixes, or branch off to a fix step — all on its own. Because
+the action already encodes the legal moves, a worker can derive the next step
+autonomously, without the engineer stepping in to route it.
+
+Transitions also decide *who* does the next step: some hand the work to a fresh
+agent (a clean reviewer that didn't write the code), while others keep it on the
+same agent that already has the context. And every action's prompt is a
+**template** — it renders against the `torque` context namespace, so the same
+action produces a different prompt depending on the agent's role, its worktree
+state, and the task at hand. Define the graph once; Torque drives tasks through
+it. → [Actions](docs/tasks/actions.md), [Pipelines](docs/tasks/pipelines.md)
+
+## The board and where tasks come from
+
+The kanban board is where work lives, and it can sync with external task
+providers — today that means **GitHub**, with others like **Linear** planned.
+Most tasks are meant to be created by talking to the architect, which fleshes
+them out before assigning and dispatching. You can also add a card directly on
+the board, but a raw card is just a title and a note — hand it to the architect
+so it can fill in the details, attach the right action, assign an engineer, and
+dispatch the work. → [The board](docs/tasks/board.md)
+
+## Events, context, and communication
+
+Agents don't work in isolation — they talk to each other. Workers report to
+their engineer, engineers message the architect, architects can message other
+architects, and the architect messages you. All of that crosstalk is visible: a
+dedicated panel renders the live conversation between agents, so you can watch
+the orchestration happen instead of guessing at it. A separate panel surfaces
+every **MCP tool call** an agent makes, so you can see exactly what each agent
+is doing — which tool, with which arguments — as it happens.
+
+Underneath the chatter, agents keep a written record. Workers, engineers, and
+especially the engineers and the architect **journal** their work as they go,
+building a durable trail of what was done and why. They also carry a shared
+**context** they use to pass findings to one another and to remember what they
+have learned — so a discovery made by one agent doesn't have to be rediscovered
+by the next, and long-running engineers and architects retain their bearings
+across many tasks.
+
+The payoff is that Torque tends to run smoother the longer you use it. As
+journals fill in and context accumulates, the agents get better at managing
+their own workflows, at coordinating with one another, and at solving problems
+they have seen before. The system isn't static — it compounds, turning each
+solved problem into a head start on the next one.
+
 ## Quickstart
 
 ### Native desktop app (recommended)
@@ -79,16 +162,13 @@ window — no browser tab required — and it is the easiest way to get started.
 git clone git@github.com:runtorque/torque.git
 cd torque
 make deps
-make deploy
-make run
+make tauri-dev
 ```
 
 `make deps` creates or repairs Torque's owned runtime venv at
-`~/.torque/runtime/venv`. `make deploy` installs the primary
-standalone/desktop app files under `~/.torque/app` and refreshes the CLI
-symlink. `make run` starts a native desktop window on its own profile and port
-(defaults: `desktop` profile, port `18933`), so it does not collide with other
-standalone profiles.
+`~/.torque/runtime/venv`. `make tauri-dev` builds and launches the native
+desktop window on its own profile and port (defaults: `desktop` profile, port
+`18933`), so it does not collide with other standalone profiles.
 
 ### Standalone browser mode
 
@@ -103,63 +183,9 @@ Standalone mode launches the daemon and opens Torque in your default browser.
 It is useful when you want a wider workspace or are running on a remote /
 shared machine.
 
-### Migrating from old Toolbelt installs
-
-The old Toolbelt integration is decommissioned and the Makefile no
-longer installs or updates the old Scripts copy. Use the primary desktop
-app (`make run`) or standalone browser mode (`make standalone` + `make open`).
-If you still have old Toolbelt data, migrate it to a profile with
-`scripts/migrate_toolbelt_to_profile.py` (TORQUE:645 P1b).
-
 For more install variants and runtime modes, see
 [Getting Started](docs/foundations/getting-started.md) and
 [Operations](docs/operate/operations.md).
-
-## Key concepts
-
-**Groups, agents, and terminals.** A group is a workspace for one project or
-one focus area. It contains agents — long-running coding sessions in their own
-worktrees — and terminals, which are regular shells for ad-hoc commands and
-inspection. See [Core concepts](docs/foundations/core-concepts.md).
-
-**Automatic worktrees.** When you enable worktrees on a group, every agent
-dispatched into it gets its own branch (`torque/<engineer>/<worker>-<id>`) and
-checkout under `.torque/worktrees/`. The agent's terminal opens directly in
-the worktree, parallel agents never trample each other's index, and the cell
-shows a live branch + diff stats badge. Torque auto-checkpoints on stop and
-on progress, so in-flight work survives crashes. See
-[Worktrees](docs/tasks/worktrees.md).
-
-**The kanban board.** Tasks live on a board with `Backlog`, `To Do`, `In
-Progress`, `Done`, and `Archived` lanes (custom lanes welcome). Drag cards
-between lanes, add tasks inline, attach an action and variables, set
-dependencies, schedule for later — or do all of it from the `torque` CLI.
-See [The board](docs/tasks/board.md).
-
-**Actions and one-click dispatch.** An action is a reusable Jinja2 prompt
-template. When you dispatch a task, Torque creates (or reuses) an agent,
-spins up its worktree, opens the managed PTY session, installs the MCP config
-and hooks, and sends the rendered prompt — all in one move. The prompt includes
-a `torque` context namespace with the agent's identity, worktree state, and
-task metadata, plus a postscript listing the exact MCP tools the agent may
-call for this action's transitions. See [Actions](docs/tasks/actions.md).
-
-**Merges and pipelines.** Actions can declare `transitions` (e.g.
-`feature/implement` → `feature/review` → `feature/merge`), which become the
-allowed `torque_derive` targets a worker may call. When a worktree is ready
-to ship, the engineer (or you, via right-click → Merge Worktree) runs
-`engineer_merge`, which handles squash vs regular merges, detects merge
-boundaries on shared sequential branches, and refuses to silently lose work
-on conflict. See [Pipelines](docs/tasks/pipelines.md) and
-[Worktrees → Merging](docs/tasks/worktrees.md#merging).
-
-**The engineer.** Each group can have an embedded engineer agent that watches
-the board, plans the next wave, dispatches workers, batches them in parallel,
-monitors event digests pushed from worker hooks, reviews diffs, merges
-finished branches, and asks you for input when it hits a decision boundary.
-The engineer is opt-in; Torque works fine without one, but it is the layer
-that turns "six workers in flight" from chaotic into routine. See
-[Engineers](docs/team/engineers.md).
 
 ## Documentation
 
@@ -191,15 +217,18 @@ requests use the templates in [`.github/`](.github/).
 ## Status
 
 Torque is single-user, local-first, and currently macOS-focused. The native
-desktop app and the standalone browser mode are the recommended entry points;
-the old Toolbelt integration has been decommissioned and its Makefile
-install/update surface has been removed. Migrate old Toolbelt data with
-`scripts/migrate_toolbelt_to_profile.py`.
+desktop app and the standalone browser mode are the recommended entry points.
 Linux and Windows are follow-up targets: the daemon itself is portable, but
 the desktop shell, packaging, and operator workflows are still macOS-first.
 
 The project is on version `1.1.0`. See [Roadmap](docs/roadmap.md) for what's
 next.
+
+## Disclaimer
+
+Torque is under active development and has not been tested outside its author's
+own development environment. Expect rough edges and bugs. Treat it as
+experimental and keep backups of anything you point it at.
 
 ## License
 
