@@ -1338,6 +1338,20 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                                 },
                                 "model_context_window": 258400,
                             },
+                            "rate_limits": {
+                                "plan_type": "pro",
+                                "limit_id": "codex",
+                                "primary": {
+                                    "used_percent": 42.4,
+                                    "window_minutes": 300,
+                                    "resets_at": 1779771600,
+                                },
+                                "secondary": {
+                                    "used_percent": 12.2,
+                                    "window_minutes": 10080,
+                                    "resets_at": 1779787800,
+                                },
+                            },
                         },
                     }),
                 ]) + "\n"
@@ -1368,6 +1382,141 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         self.assertEqual(context_window["reasoning_output_tokens"], 16)
         self.assertEqual(context_window["session_total_tokens"], 1799981)
         self.assertAlmostEqual(context_window["used_pct"], 57.17, places=2)
+        self.assertEqual(
+            event.data["provider_usage"],
+            {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 42,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                },
+                "seven_day": {
+                    "available": True,
+                    "used_percentage": 12,
+                    "resets_at": "2026-05-26T09:30:00Z",
+                },
+            },
+        )
+        claude_event = ClaudeCodeAdapter().parse_event(
+            {
+                "hook_event_name": "StatusLine",
+                "rate_limits": {
+                    "five_hour": {
+                        "used_percentage": 42.4,
+                        "resets_at": "2026-05-26T05:00:00Z",
+                    },
+                    "seven_day": {
+                        "used_percentage": 12.2,
+                        "resets_at": "2026-05-26T09:30:00Z",
+                    },
+                },
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+        self.assertIsNotNone(claude_event)
+        self.assertEqual(
+            event.data["provider_usage"]["five_hour"]["resets_at"],
+            claude_event.data["provider_usage"]["five_hour"]["resets_at"],
+        )
+        self.assertEqual(
+            event.data["provider_usage"]["seven_day"]["resets_at"],
+            claude_event.data["provider_usage"]["seven_day"]["resets_at"],
+        )
+
+    def test_codex_token_count_without_rate_limits_leaves_provider_usage_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "rollout.jsonl"
+            transcript.write_text(
+                json.dumps({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {"total_tokens": 100},
+                            "last_token_usage": {
+                                "input_tokens": 40,
+                                "cached_input_tokens": 10,
+                                "output_tokens": 5,
+                                "reasoning_output_tokens": 1,
+                                "total_tokens": 45,
+                            },
+                            "model_context_window": 1000,
+                        },
+                    },
+                }) + "\n"
+            )
+
+            event = CodexAdapter().parse_event(
+                {
+                    "hook_event_name": "Stop",
+                    "session_id": "codex-session-1",
+                    "model": "gpt-5.4",
+                    "transcript_path": str(transcript),
+                },
+                SimpleNamespace(id="agent-1"),
+            )
+
+        self.assertIsNotNone(event)
+        self.assertIn("context_window", event.data)
+        self.assertNotIn("provider_usage", event.data)
+
+    def test_codex_rate_limits_with_null_window_marks_that_window_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "rollout.jsonl"
+            transcript.write_text(
+                json.dumps({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {"total_tokens": 100},
+                            "last_token_usage": {
+                                "input_tokens": 40,
+                                "cached_input_tokens": 10,
+                                "output_tokens": 5,
+                                "reasoning_output_tokens": 1,
+                                "total_tokens": 45,
+                            },
+                            "model_context_window": 1000,
+                        },
+                        "rate_limits": {
+                            "primary": {
+                                "used_percent": 63.8,
+                                "window_minutes": 300,
+                                "resets_at": 1779771600,
+                            },
+                            "secondary": None,
+                        },
+                    },
+                }) + "\n"
+            )
+
+            event = CodexAdapter().parse_event(
+                {
+                    "hook_event_name": "Stop",
+                    "session_id": "codex-session-1",
+                    "model": "gpt-5.4",
+                    "transcript_path": str(transcript),
+                },
+                SimpleNamespace(id="agent-1"),
+            )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(
+            event.data["provider_usage"],
+            {
+                "five_hour": {
+                    "available": True,
+                    "used_percentage": 64,
+                    "resets_at": "2026-05-26T05:00:00Z",
+                },
+                "seven_day": {
+                    "available": False,
+                    "used_percentage": None,
+                    "resets_at": None,
+                },
+            },
+        )
 
     def test_codex_context_window_transcript_parse_is_defensive(self):
         event = CodexAdapter().parse_event(
