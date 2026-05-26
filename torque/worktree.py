@@ -4670,18 +4670,25 @@ class WorktreeManager:
                 result["message"] = "base_branch is required to delete branch safely"
                 result["mismatches"].append("missing_base_branch")
                 return result
-            merged = (
-                await self.is_merged(
-                    probe,
-                    worktree_submodules=submodule_paths,
+            if submodule_paths:
+                merged = bool(
+                    await self.is_branch_merged(
+                        repo_root,
+                        branch=branch,
+                        base_branch=base_branch,
+                    )
+                    and await self._nested_submodule_branches_merged(
+                        probe,
+                        repo_root,
+                        submodule_paths,
+                    )
                 )
-                if submodule_paths
-                else await self.is_branch_merged(
+            else:
+                merged = await self.is_branch_merged(
                     repo_root,
                     branch=branch,
                     base_branch=base_branch,
                 )
-            )
             if not merged:
                 result["message"] = (
                     f"Refusing to delete unmerged branch {branch!r} "

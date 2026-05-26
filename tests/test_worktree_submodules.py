@@ -490,14 +490,13 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
 
         result = await self.mgr.safe_remove_existing_worktree(
             target,
-            delete_branch=False,
             worktree_submodules=[self.sub_path],
         )
 
         self.assertTrue(result["ok"], result)
         self.assertTrue(result["worktree_removed"], result)
-        self.assertFalse(result["branch_deleted"], result)
-        self.assertTrue(result["branch_preserved"], result)
+        self.assertTrue(result["branch_deleted"], result)
+        self.assertFalse(result["branch_preserved"], result)
         self.assertNotIn("dirty_worktree", result["mismatches"])
         self.assertFalse(wt.exists())
         module_worktrees = await self._git_out(
