@@ -310,7 +310,7 @@ def refresh_codex_provider_usage_for_agents(
             else:
                 report.skip(result)
         except Exception:
-            report.skip("exception")
+            report.skip("exception-caught")
             log.exception(
                 "Codex provider_usage backfill failed for cell %s",
                 getattr(cell, "id", ""),
@@ -422,7 +422,7 @@ def _refresh_codex_provider_usage_for_cell(
     if not cell_changed:
         if normalized_usage is None:
             return "no_rate_limits"
-        return "fingerprint_unchanged"
+        return "fingerprint-unchanged"
 
     state._emit_agent(cell, coalesce_ephemeral=True)
     state._db_save_agent(cell)
