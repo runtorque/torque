@@ -1226,7 +1226,10 @@ class WorktreeManager:
             cell,
             worktree_submodules=worktree_submodules,
         )
-        dirty, uncommitted_files, untracked_files = await self._status_v2(cell)
+        dirty, uncommitted_files, untracked_files = await self._status_v2(
+            cell,
+            worktree_submodules=worktree_submodules,
+        )
         diff_stats, committed_files = await self._diff_numstat(
             cell,
             worktree_submodules=worktree_submodules,
@@ -1349,7 +1352,8 @@ class WorktreeManager:
                 )
         return (ahead, behind)
 
-    async def _status_v2(self, cell) -> tuple[bool, list[str], list[str]]:
+    async def _status_v2(self, cell,
+                         worktree_submodules=None) -> tuple[bool, list[str], list[str]]:
         """One git call: returns (dirty, uncommitted_paths, untracked_paths)."""
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1364,6 +1368,10 @@ class WorktreeManager:
             uncommitted: list[str] = []
             untracked: list[str] = []
             dirty = False
+            ignored_submodule_drift: list[str] = []
+            submodule_paths = set(_normalize_worktree_submodules(
+                worktree_submodules
+            ))
             for raw in stdout.decode().splitlines():
                 if not raw:
                     continue
@@ -1373,7 +1381,18 @@ class WorktreeManager:
                     # ordinary changed entry: "1 XY ... <path>"
                     parts = raw.split(" ", 8)
                     if len(parts) >= 9:
-                        uncommitted.append(parts[8])
+                        path = parts[8]
+                        if (
+                                submodule_paths
+                                and await self._is_clean_submodule_gitlink_drift(
+                                    cell,
+                                    path,
+                                    submodule_paths,
+                                    status_xy=parts[1] if len(parts) > 1 else "",
+                                )):
+                            ignored_submodule_drift.append(path)
+                        else:
+                            uncommitted.append(path)
                 elif tag == "2":
                     # rename/copy: "2 XY ... <path>\t<orig>"
                     parts = raw.split(" ", 9)
@@ -1383,6 +1402,9 @@ class WorktreeManager:
                 elif tag == "?":
                     # untracked: "? <path>"
                     untracked.append(raw[2:])
+            if dirty and not uncommitted and not untracked \
+                    and ignored_submodule_drift:
+                dirty = False
             return (dirty, uncommitted, untracked)
         except Exception:
             log.debug("status_v2 failed for '%s'", cell.name)
@@ -2662,6 +2684,9 @@ class WorktreeManager:
             head = await self.rev_parse(sub_wt, "HEAD") or ""
             old_gitlink = await self._nested_submodule_base_gitlink(cell, path)
             new_gitlink = info.get("gitlink_sha", "")
+            zero_gitlink_delta = bool(
+                old_gitlink and old_gitlink == new_gitlink == head
+            )
             entry = {
                 "path": path,
                 "worktree_path": sub_wt,
@@ -2673,6 +2698,7 @@ class WorktreeManager:
                 "old_gitlink_sha": old_gitlink,
                 "new_gitlink_sha": new_gitlink,
                 "head_sha": head,
+                "zero_gitlink_delta": zero_gitlink_delta,
                 "remote": "",
                 "remote_refs_containing_gitlink": [],
             }
@@ -2741,6 +2767,21 @@ class WorktreeManager:
                 entry["base_branch"],
             )
             if entry["branch"] and remote_branch_sha != head:
+                if zero_gitlink_delta:
+                    pushed = await self._push_nested_submodule_ref(
+                        sub_wt,
+                        remote,
+                        head,
+                        entry["branch"],
+                    )
+                    if pushed.get("ok"):
+                        entry["remote_branch_sha"] = head
+                        entry["zero_delta_branch_published"] = True
+                        checked.append(entry)
+                        continue
+                    entry["zero_delta_branch_publish_error"] = (
+                        pushed.get("error", "")
+                    )
                 return self._nested_preflight_error(
                     entry,
                     "UNPUSHED",
@@ -3035,6 +3076,9 @@ class WorktreeManager:
             head = await self.rev_parse(sub_wt, "HEAD") or ""
             old_gitlink = await self._nested_submodule_base_gitlink(cell, path)
             new_gitlink = info.get("gitlink_sha", "")
+            zero_gitlink_delta = bool(
+                old_gitlink and old_gitlink == new_gitlink == head
+            )
             entry = {
                 "path": path,
                 "worktree_path": sub_wt,
@@ -3046,6 +3090,7 @@ class WorktreeManager:
                 "old_gitlink_sha": old_gitlink,
                 "new_gitlink_sha": new_gitlink,
                 "head_sha": head,
+                "zero_gitlink_delta": zero_gitlink_delta,
                 "remote": "",
             }
 
@@ -3091,7 +3136,7 @@ class WorktreeManager:
                     "submodule": entry,
                 }
             if not entry["branch"]:
-                if old_gitlink and old_gitlink == new_gitlink == head:
+                if zero_gitlink_delta:
                     published.append({
                         **entry,
                         "skipped": True,
@@ -3427,6 +3472,21 @@ class WorktreeManager:
             }
 
         stale = fork_point != base_head
+        merged_into_base = False
+        if stale:
+            try:
+                merged_into_base = await self.is_merged(
+                    cell,
+                    worktree_submodules=worktree_submodules,
+                )
+            except Exception:
+                log.debug(
+                    "stale-base merged-state check failed for '%s'",
+                    getattr(cell, "name", ""),
+                    exc_info=True,
+                )
+            if merged_into_base:
+                stale = False
         info = {
             "stale": stale,
             "branch": branch,
@@ -3446,6 +3506,9 @@ class WorktreeManager:
                 or str(getattr(cell, "name", "") or "").strip()
             ),
         }
+        if merged_into_base:
+            info["merged"] = True
+            info["stale_base_suppressed"] = "branch_changes_already_in_base"
         if stale:
             await self._populate_stale_base_counts(info, repo_root)
             info["warning"] = format_stale_base_warning(info)
@@ -4607,18 +4670,25 @@ class WorktreeManager:
                 result["message"] = "base_branch is required to delete branch safely"
                 result["mismatches"].append("missing_base_branch")
                 return result
-            merged = (
-                await self.is_merged(
-                    probe,
-                    worktree_submodules=submodule_paths,
+            if submodule_paths:
+                merged = bool(
+                    await self.is_branch_merged(
+                        repo_root,
+                        branch=branch,
+                        base_branch=base_branch,
+                    )
+                    and await self._nested_submodule_branches_merged(
+                        probe,
+                        repo_root,
+                        submodule_paths,
+                    )
                 )
-                if submodule_paths
-                else await self.is_branch_merged(
+            else:
+                merged = await self.is_branch_merged(
                     repo_root,
                     branch=branch,
                     base_branch=base_branch,
                 )
-            )
             if not merged:
                 result["message"] = (
                     f"Refusing to delete unmerged branch {branch!r} "
@@ -4637,15 +4707,6 @@ class WorktreeManager:
                 require_worktree=False,
                 strict=False,
             )
-            deinit = await self._safe_deinit_submodules_for_remove(
-                worktree_path,
-                submodule_paths,
-            )
-            result["deinit"] = deinit
-            if not deinit.get("ok"):
-                result["message"] = "Submodule deinit refused; worktree preserved"
-                result["mismatches"].append("submodule_deinit_failed")
-                return result
 
         remove_result = await self.remove_path_result(
             repo_root,
@@ -4796,6 +4857,7 @@ class WorktreeManager:
             "branch_delete_stderr": "",
             "pre_state": {},
             "post_state": {},
+            "deinit": {},
             "nested_submodules": [],
             "mismatches": [],
             "message": "",
@@ -4831,6 +4893,29 @@ class WorktreeManager:
                     "superproject worktree was preserved"
                 )
                 return result
+            deinit_paths = [
+                str(item.get("path", "") or "").strip()
+                for item in result["nested_submodules"]
+                if item.get("worktree_removed") and item.get("path")
+            ]
+            if deinit_paths:
+                deinit = await self._safe_deinit_submodules_for_remove(
+                    worktree_path,
+                    deinit_paths,
+                )
+                result["deinit"] = deinit
+                if not deinit.get("ok"):
+                    result["post_state"] = await self.removal_state(
+                        repo_root,
+                        worktree_path,
+                        branch=branch,
+                    )
+                    result["mismatches"].append("submodule_deinit_failed")
+                    result["message"] = (
+                        "Submodule deinit failed after nested worktree "
+                        "cleanup; superproject worktree was preserved"
+                    )
+                    return result
         try:
             cmd = ["git", "-C", repo_root,
                    "worktree", "remove", worktree_path]
@@ -5036,6 +5121,140 @@ class WorktreeManager:
         )
         return bool(result.get("worktree_removed"))
 
+    @staticmethod
+    def _porcelain_v1_path(raw: str) -> str:
+        if not raw:
+            return ""
+        if raw.startswith(("?? ", "!! ")):
+            return _normalize_repo_rel_path(raw[3:])
+        if len(raw) < 4:
+            return ""
+        path = raw[3:]
+        if "\t" in path:
+            path = path.split("\t", 1)[0]
+        if " -> " in path:
+            path = path.rsplit(" -> ", 1)[-1]
+        return _normalize_repo_rel_path(path)
+
+    async def _is_clean_submodule_gitlink_drift(
+            self,
+            cell,
+            path: str,
+            allowed_paths: set[str],
+            *,
+            status_xy: str = "",
+    ) -> bool:
+        """True when a status entry is only clean submodule HEAD drift.
+
+        Linked nested submodule worktrees can transiently move their HEAD while
+        the superproject index remains unchanged. Git reports that as a dirty
+        submodule path even when the submodule worktree itself is clean and the
+        two submodule commits have identical file content. That structural
+        gitlink-only drift should not block safe worktree removal.
+        """
+        wt_path = str(getattr(cell, "worktree_path", "") or "").strip()
+        norm_path = _normalize_repo_rel_path(path)
+        if not wt_path or not norm_path or norm_path not in allowed_paths:
+            return False
+
+        if status_xy:
+            # Only ignore unstaged/worktree-side submodule drift. A staged
+            # gitlink update is real superproject content and must stay dirty.
+            x_status = status_xy[0] if len(status_xy) >= 1 else ""
+            if x_status not in {" ", "."}:
+                return False
+
+        sub_wt = self._join_repo_rel(wt_path, norm_path)
+        if not os.path.isdir(sub_wt):
+            return False
+
+        cached_code, _cached_out, _cached_err = await self._git_run(
+            wt_path,
+            "diff",
+            "--cached",
+            "--quiet",
+            "--",
+            norm_path,
+        )
+        if cached_code != 0:
+            return False
+
+        raw_code, raw_out = await self._git_stdout(
+            wt_path,
+            "diff",
+            "--raw",
+            "--no-renames",
+            "--",
+            norm_path,
+        )
+        if raw_code != 0 or not raw_out.strip():
+            return False
+        for line in raw_out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                meta, raw_path = line.split("\t", 1)
+            except ValueError:
+                return False
+            parts = meta.split()
+            if len(parts) < 5:
+                return False
+            old_mode = parts[0].lstrip(":")
+            new_mode = parts[1]
+            status = parts[4]
+            if (
+                    old_mode != "160000"
+                    or new_mode != "160000"
+                    or not status.startswith("M")
+                    or _normalize_repo_rel_path(raw_path) != norm_path):
+                return False
+
+        diff_code, diff_out = await self._git_stdout(
+            wt_path,
+            "diff",
+            "--submodule=diff",
+            "--",
+            norm_path,
+        )
+        if diff_code != 0:
+            return False
+        # A content-free submodule commit range prints only the summary header
+        # ("Submodule path old..new:") on some Git versions and nothing on
+        # others. Any actual file delta emits normal diff hunks and is dirty.
+        for line in diff_out.splitlines():
+            if line.strip() and not line.startswith("Submodule "):
+                return False
+
+        status_code, sub_status = await self._git_stdout(
+            sub_wt,
+            "status",
+            "--porcelain",
+        )
+        return status_code == 0 and not sub_status.strip()
+
+    async def _status_lines_are_only_clean_submodule_gitlink_drift(
+            self,
+            cell,
+            lines: list[str],
+            allowed_paths: set[str],
+    ) -> bool:
+        if not lines or not allowed_paths:
+            return False
+        for raw in lines:
+            if raw.startswith(("?? ", "!! ")):
+                return False
+            path = self._porcelain_v1_path(raw)
+            status_xy = raw[:2] if len(raw) >= 2 else ""
+            if not await self._is_clean_submodule_gitlink_drift(
+                    cell,
+                    path,
+                    allowed_paths,
+                    status_xy=status_xy,
+            ):
+                return False
+        return True
+
     async def validate(self, cell) -> bool:
         """Check that a cell's worktree_path exists and is a valid worktree."""
         if not cell.worktree_path:
@@ -5067,11 +5286,20 @@ class WorktreeManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await proc.communicate()
-            if bool(stdout.decode().strip()):
-                return True
             submodule_paths = _normalize_worktree_submodules(
                 worktree_submodules
             )
+            status_lines = [
+                line for line in stdout.decode().splitlines()
+                if line.strip()
+            ]
+            if status_lines:
+                if not await self._status_lines_are_only_clean_submodule_gitlink_drift(
+                        cell,
+                        status_lines,
+                        set(submodule_paths),
+                ):
+                    return True
             if not submodule_paths:
                 return False
             infos = await self._nested_submodule_infos_for_cell(
