@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shlex
 
 from dataclasses import asdict
 from datetime import datetime, timezone
 
 from .config import log
-from .board_sync.github import parse_github_issue_ref
+from .board_sync.github import issue_ref_for_closing, parse_github_issue_ref
 from .state import task_counts_as_done
 from .worktree_boundaries import (
     attach_pr_metadata_to_latest_open_boundary,
     branch_boundary_tasks,
 )
+
+
+_TORQUE_TASK_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_:/-])"
+    r"(?P<task_id>[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?)"
+    r"(?![A-Za-z0-9_:/-])"
+)
+_MARKDOWN_FENCE_RE = re.compile(r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})")
+_INLINE_CODE_TICKS_RE = re.compile(r"`+")
 
 
 def _parse_diff_git_paths(line: str) -> tuple[str, str]:
@@ -313,6 +323,280 @@ def _append_pr_url_to_squash_body(body: str, pr_url: str) -> str:
     if body:
         return f"{body}\n\n{suffix}"
     return suffix
+
+
+def _resolve_board_task_for_pr_ref(state, raw_task_id: str):
+    """Resolve an exact canonical task token to a live board task."""
+    raw_task_id = str(raw_task_id or "").strip()
+    if not state or not raw_task_id:
+        return None
+    resolver = getattr(state, "resolve_board_task_id", None)
+    if callable(resolver):
+        try:
+            resolved_id = resolver(raw_task_id, allow_prefix=False)
+        except TypeError:
+            resolved_id = resolver(raw_task_id)
+    else:
+        resolve_alias = getattr(state, "resolve_task_alias", None)
+        resolved_id = (
+            resolve_alias(raw_task_id)
+            if callable(resolve_alias)
+            else raw_task_id
+        )
+        if resolved_id != raw_task_id:
+            if resolved_id not in getattr(state, "board_tasks", {}):
+                resolved_id = ""
+        elif raw_task_id not in getattr(state, "board_tasks", {}):
+            resolved_id = ""
+    if not resolved_id:
+        return None
+    return getattr(state, "board_tasks", {}).get(resolved_id)
+
+
+def _resolve_task_ref_to_github_issue(state, raw_task_id: str) -> dict | None:
+    """Resolve a Torque task token to its synced GitHub issue metadata."""
+    task = _resolve_board_task_for_pr_ref(state, raw_task_id)
+    if not task:
+        return None
+
+    external_id = str(getattr(task, "external_id", "") or "").strip()
+    external_url = str(getattr(task, "external_url", "") or "").strip()
+    board_sync = getattr(task, "board_sync", {}) or {}
+    if not isinstance(board_sync, dict):
+        board_sync = {}
+    parsed = parse_github_issue_ref(
+        external_id=external_id,
+        external_url=external_url,
+        board_sync=board_sync,
+    )
+
+    # ``parse_github_issue_ref`` prioritizes board_sync.github.issue_repo and
+    # issue_number.  If a future/partial sync stores only issue_url there, use
+    # the same parser against that URL before giving up.
+    github_sync = (
+        board_sync.get("github")
+        if isinstance(board_sync.get("github"), dict)
+        else {}
+    )
+    if (
+            (not parsed.get("issue_repo") or not parsed.get("issue_number"))
+            and str(github_sync.get("issue_url", "") or "").strip()):
+        parsed = parse_github_issue_ref(
+            external_url=str(github_sync.get("issue_url", "") or "").strip()
+        )
+
+    repo = str(parsed.get("issue_repo", "") or "").strip()
+    number = parsed.get("issue_number")
+    try:
+        number = int(number or 0)
+    except (TypeError, ValueError):
+        number = 0
+    issue_url = str(parsed.get("issue_url", "") or "").strip()
+    if not ((repo and number) or issue_url):
+        return None
+
+    return {
+        "provider": "github",
+        "task_id": str(getattr(task, "id", "") or "").strip(),
+        "task_title": str(getattr(task, "task", "") or "").strip(),
+        "external_id": external_id,
+        "external_url": external_url,
+        "board_sync": board_sync,
+        "issue_repo": repo,
+        "issue_number": number,
+        "issue_url": issue_url,
+    }
+
+
+def _github_issue_ref_for_pr_text(issue: dict, *, base_repo: str = "") -> str:
+    """Render the concise GitHub issue ref used inside PR title/body text."""
+    issue = dict(issue or {})
+    issue["base_repo"] = str(base_repo or "").strip()
+    ref = issue_ref_for_closing(issue, default_repo=base_repo)
+    if ref:
+        return ref
+    return str(issue.get("issue_url", "") or "").strip()
+
+
+def _replace_task_refs_in_plain_markdown_text(
+    text: str,
+    replace_fn,
+) -> tuple[str, int]:
+    """Rewrite task refs in text that is known not to contain markdown code."""
+    skipped_inline_refs = 0
+    result: list[str] = []
+    pos = 0
+    for match in _INLINE_CODE_TICKS_RE.finditer(text):
+        if match.start() < pos:
+            continue
+        ticks = match.group(0)
+        result.append(_TORQUE_TASK_REF_RE.sub(replace_fn, text[pos:match.start()]))
+        close = text.find(ticks, match.end())
+        if close < 0:
+            code_span = text[match.start():]
+            skipped_inline_refs += len(_TORQUE_TASK_REF_RE.findall(code_span))
+            result.append(code_span)
+            pos = len(text)
+            break
+        code_span = text[match.start():close + len(ticks)]
+        skipped_inline_refs += len(_TORQUE_TASK_REF_RE.findall(code_span))
+        result.append(code_span)
+        pos = close + len(ticks)
+    if pos < len(text):
+        result.append(_TORQUE_TASK_REF_RE.sub(replace_fn, text[pos:]))
+    return "".join(result), skipped_inline_refs
+
+
+def _rewrite_markdown_task_refs_outside_code(
+    text: str,
+    replace_fn,
+) -> tuple[str, dict]:
+    """Apply ``replace_fn`` to task refs outside fenced and inline code."""
+    text = str(text or "")
+    diagnostics = {"skipped_fenced_refs": 0, "skipped_inline_refs": 0}
+    output: list[str] = []
+    pending_plain: list[str] = []
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+
+    def flush_plain() -> None:
+        nonlocal pending_plain
+        if not pending_plain:
+            return
+        rewritten, skipped_inline = _replace_task_refs_in_plain_markdown_text(
+            "".join(pending_plain),
+            replace_fn,
+        )
+        diagnostics["skipped_inline_refs"] += skipped_inline
+        output.append(rewritten)
+        pending_plain = []
+
+    for line in text.splitlines(keepends=True):
+        fence_match = _MARKDOWN_FENCE_RE.match(line)
+        if in_fence:
+            diagnostics["skipped_fenced_refs"] += len(
+                _TORQUE_TASK_REF_RE.findall(line)
+            )
+            output.append(line)
+            if fence_match:
+                fence = fence_match.group("fence")
+                if fence.startswith(fence_char) and len(fence) >= fence_len:
+                    in_fence = False
+                    fence_char = ""
+                    fence_len = 0
+            continue
+
+        if fence_match:
+            flush_plain()
+            fence = fence_match.group("fence")
+            in_fence = True
+            fence_char = fence[0]
+            fence_len = len(fence)
+            diagnostics["skipped_fenced_refs"] += len(
+                _TORQUE_TASK_REF_RE.findall(line)
+            )
+            output.append(line)
+            continue
+
+        pending_plain.append(line)
+
+    flush_plain()
+    return "".join(output), diagnostics
+
+
+def _rewrite_pr_torque_task_refs(
+    text: str,
+    *,
+    state,
+    base_repo: str = "",
+) -> tuple[str, dict]:
+    """Rewrite Torque task refs in PR text to synced GitHub issue refs."""
+    diagnostics = {
+        "replaced": [],
+        "unresolved": [],
+        "skipped_fenced_refs": 0,
+        "skipped_inline_refs": 0,
+    }
+    resolved_cache: dict[str, tuple[str, dict | None]] = {}
+
+    def replacement(match: re.Match) -> str:
+        raw_task_id = match.group("task_id")
+        if raw_task_id not in resolved_cache:
+            issue = _resolve_task_ref_to_github_issue(state, raw_task_id)
+            ref = (
+                _github_issue_ref_for_pr_text(issue, base_repo=base_repo)
+                if issue
+                else ""
+            )
+            resolved_cache[raw_task_id] = (ref, issue)
+        ref, issue = resolved_cache[raw_task_id]
+        if not ref or not issue:
+            diagnostics["unresolved"].append({"task_id": raw_task_id})
+            return match.group(0)
+        diagnostics["replaced"].append({
+            "task_id": str(issue.get("task_id") or raw_task_id),
+            "raw_task_id": raw_task_id,
+            "ref": ref,
+            "issue_repo": str(issue.get("issue_repo", "") or "").strip(),
+            "issue_number": int(issue.get("issue_number") or 0),
+            "issue_url": str(issue.get("issue_url", "") or "").strip(),
+        })
+        return ref
+
+    rewritten, markdown_diagnostics = _rewrite_markdown_task_refs_outside_code(
+        str(text or ""),
+        replacement,
+    )
+    diagnostics["skipped_fenced_refs"] += int(
+        markdown_diagnostics.get("skipped_fenced_refs", 0) or 0
+    )
+    diagnostics["skipped_inline_refs"] += int(
+        markdown_diagnostics.get("skipped_inline_refs", 0) or 0
+    )
+    return rewritten, diagnostics
+
+
+def _rewrite_pr_torque_task_refs_metadata(
+    title: str,
+    body: str,
+    *,
+    state,
+    base_repo: str = "",
+) -> dict:
+    """Rewrite Torque task refs in PR title/body metadata."""
+    rewritten_title, title_diagnostics = _rewrite_pr_torque_task_refs(
+        title,
+        state=state,
+        base_repo=base_repo,
+    )
+    rewritten_body, body_diagnostics = _rewrite_pr_torque_task_refs(
+        body,
+        state=state,
+        base_repo=base_repo,
+    )
+    return {
+        "title": rewritten_title,
+        "body": rewritten_body,
+        "replaced": (
+            title_diagnostics.get("replaced", [])
+            + body_diagnostics.get("replaced", [])
+        ),
+        "unresolved": (
+            title_diagnostics.get("unresolved", [])
+            + body_diagnostics.get("unresolved", [])
+        ),
+        "skipped_fenced_refs": (
+            int(title_diagnostics.get("skipped_fenced_refs", 0) or 0)
+            + int(body_diagnostics.get("skipped_fenced_refs", 0) or 0)
+        ),
+        "skipped_inline_refs": (
+            int(title_diagnostics.get("skipped_inline_refs", 0) or 0)
+            + int(body_diagnostics.get("skipped_inline_refs", 0) or 0)
+        ),
+        "title_diagnostics": title_diagnostics,
+        "body_diagnostics": body_diagnostics,
+    }
 
 
 def _github_issue_from_linked_task(task, *, base_repo: str = "") -> dict | None:
