@@ -490,11 +490,14 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
 
         result = await self.mgr.safe_remove_existing_worktree(
             target,
+            delete_branch=False,
             worktree_submodules=[self.sub_path],
         )
 
         self.assertTrue(result["ok"], result)
         self.assertTrue(result["worktree_removed"], result)
+        self.assertFalse(result["branch_deleted"], result)
+        self.assertTrue(result["branch_preserved"], result)
         self.assertNotIn("dirty_worktree", result["mismatches"])
         self.assertFalse(wt.exists())
         module_worktrees = await self._git_out(
@@ -1382,8 +1385,55 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HEAD_MISMATCH", check["error"])
         self.assertIn(self.sub_path, check["error"])
 
-    async def test_merge_preflight_blocks_unpushed_submodule_branch(self):
+    async def test_merge_preflight_auto_publishes_zero_delta_submodule_branch(self):
         cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        sub_branch = await self._sub_branch(sub_wt)
+        head = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        code, _out, _err = await self._git(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "--verify",
+            f"refs/heads/{sub_branch}",
+            cwd=self.root,
+            check=False,
+        )
+        self.assertNotEqual(0, code)
+
+        check = await self.mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(check["clean"], check)
+        remote_branch = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            sub_branch,
+            cwd=self.root,
+        )
+        self.assertEqual(remote_branch, head)
+
+    async def test_merge_preflight_blocks_unpushed_nonzero_submodule_branch(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nreachable elsewhere\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Reachable but unpushed branch",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        head = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        await self._git(
+            "push",
+            "origin",
+            f"{head}:refs/heads/not-the-worker-branch",
+            cwd=sub_wt,
+        )
 
         check = await self.mgr.check_merge_conflicts(
             cell,

@@ -2767,6 +2767,21 @@ class WorktreeManager:
                 entry["base_branch"],
             )
             if entry["branch"] and remote_branch_sha != head:
+                if zero_gitlink_delta:
+                    pushed = await self._push_nested_submodule_ref(
+                        sub_wt,
+                        remote,
+                        head,
+                        entry["branch"],
+                    )
+                    if pushed.get("ok"):
+                        entry["remote_branch_sha"] = head
+                        entry["zero_delta_branch_published"] = True
+                        checked.append(entry)
+                        continue
+                    entry["zero_delta_branch_publish_error"] = (
+                        pushed.get("error", "")
+                    )
                 return self._nested_preflight_error(
                     entry,
                     "UNPUSHED",
