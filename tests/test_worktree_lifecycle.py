@@ -521,6 +521,35 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(info["stale"])
         self.assertEqual(info["fork_point"], info["base_head"])
 
+    async def test_stale_base_info_ignores_landed_squash_merge(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+        self.assertIsNotNone(wt_path)
+        (Path(wt_path) / "worker.txt").write_text("worker change\n")
+        self.assertTrue(await self.mgr.checkpoint(cell, "Worker change"))
+
+        merge = await self.mgr.server_merge(
+            cell,
+            "Squash worker change",
+            squash=True,
+        )
+        self.assertTrue(merge["ok"], merge)
+
+        info = await self.mgr.stale_base_info(cell)
+
+        self.assertFalse(info["stale"], info)
+        self.assertTrue(info["merged"], info)
+        self.assertEqual(info["base_head"], merge["sha"])
+        self.assertNotEqual(info["fork_point"], info["base_head"])
+        self.assertEqual(
+            info["stale_base_suppressed"],
+            "branch_changes_already_in_base",
+        )
+
     async def test_blank_custom_worktree_name_preserves_default_naming(self):
         cell = self._make_cell()
 
