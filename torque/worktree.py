@@ -4472,7 +4472,7 @@ class WorktreeManager:
             allowed_paths,
         )
         sub_by_path = {item.get("path", ""): item for item in submodule_states}
-        for path in changed_paths:
+        for path in allowed_paths:
             state = sub_by_path.get(path)
             if not state:
                 return {"ok": False, "reason": "missing_submodule_state", "path": path}
