@@ -460,11 +460,11 @@ def _codex_context_window_from_token_count(
 def _codex_reset_epoch_to_iso(value) -> str | None:
     try:
         timestamp = float(value)
-    except (TypeError, ValueError, OverflowError):
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
 
 
 def _codex_window_minutes(value) -> int | None:
