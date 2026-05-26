@@ -163,6 +163,7 @@ function createMainHarness() {
     openAddArchitectModal() { calls.push('architect'); },
     quickAddTerminal(group, agent) { calls.push(['terminal', group, agent]); },
     openAddTask(lane) { calls.push(['task', lane]); },
+    _terminalComposeInputId(cellId) { return `terminal-compose-input-${cellId}`; },
     connect() {},
     setupDrag() {},
     send() {},
@@ -186,6 +187,18 @@ test('main keydown preserves modal and input focus guards before registry dispat
   assert.deepEqual(calls, []);
   assert.equal(inputEvent.defaultPrevented, false);
 
+  document.activeElement = { tagName: 'SELECT' };
+  const selectEvent = keyEvent('t');
+  document._keydown(selectEvent);
+  assert.deepEqual(calls, []);
+  assert.equal(selectEvent.defaultPrevented, false);
+
+  document.activeElement = { tagName: 'TEXTAREA' };
+  const textareaEvent = keyEvent('t');
+  document._keydown(textareaEvent);
+  assert.deepEqual(calls, []);
+  assert.equal(textareaEvent.defaultPrevented, false);
+
   document.activeElement = { tagName: 'DIV' };
   document._modalOpen = true;
   const modalEvent = keyEvent('t');
@@ -202,6 +215,29 @@ test('main keydown preserves modal and input focus guards before registry dispat
   document._keydown(normalEvent);
   assert.deepEqual(calls.slice(-1)[0], ['terminal', 'alpha', 'agent-1']);
   assert.equal(normalEvent.defaultPrevented, true);
+});
+
+test('main keydown composer.focus moves focus from non-input state and respects input guard', () => {
+  const { document, calls } = createMainHarness();
+
+  document.activeElement = { tagName: 'DIV' };
+  const focusEvent = keyEvent('c');
+  document._keydown(focusEvent);
+  assert.deepEqual(calls, [['focus', 'terminal-compose-input-agent-1']]);
+  assert.equal(focusEvent.defaultPrevented, true);
+
+  [
+    { tagName: 'INPUT', type: 'text' },
+    { tagName: 'SELECT' },
+    { tagName: 'TEXTAREA' },
+  ].forEach((activeElement) => {
+    calls.length = 0;
+    document.activeElement = activeElement;
+    const inputFocusEvent = keyEvent('c');
+    document._keydown(inputFocusEvent);
+    assert.deepEqual(calls, []);
+    assert.equal(inputFocusEvent.defaultPrevented, false);
+  });
 });
 
 function createModalHarness() {
