@@ -215,6 +215,65 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.status, "stopped")
         self.assertEqual(adapter._sessions, {})
 
+    async def test_finalize_session_marks_process_exit_stopped_and_persists(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_agent(
+            name="Worker",
+            group="Torque",
+            terminal_backend="pty",
+            command="codex",
+            directory="/tmp",
+        )
+        cell.status = "running"
+        cell.session_id = "session-exited"
+        cell.current_process = "codex"
+        cell.current_path = "/tmp"
+        cell.current_branch = "feature/test"
+        cell.git_root = "/tmp"
+        cell.activity = "thinking"
+        cell.activity_detail = "Running tests"
+        state.active_session_id = cell.session_id
+
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = self.pty_mod._PtySession(
+            session_id=cell.session_id,
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+        )
+
+        emitted = []
+        saved = []
+        broadcasts = []
+        state._emit_agent = lambda agent: emitted.append(
+            (agent.id, agent.status, agent.session_id))
+        state._db_save_agent = lambda agent: saved.append(
+            (agent.id, agent.status, agent.session_id))
+        state._emit = lambda op, **payload: emitted.append(
+            (op, payload.get("active_session_id")))
+
+        async def broadcast():
+            broadcasts.append(True)
+
+        state.broadcast = broadcast
+
+        await adapter._finalize_session("session-exited")
+
+        self.assertNotIn("session-exited", adapter._sessions)
+        self.assertEqual(cell.status, "stopped")
+        self.assertIsNone(cell.session_id)
+        self.assertEqual(cell.current_process, "")
+        self.assertEqual(cell.current_path, "")
+        self.assertEqual(cell.current_branch, "")
+        self.assertEqual(cell.git_root, "")
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(cell.activity_detail, "")
+        self.assertIn((cell.id, "stopped", None), emitted)
+        self.assertEqual(saved, [(cell.id, "stopped", None)])
+        self.assertEqual(broadcasts, [True])
+        self.assertIsNone(state.active_session_id)
+
     async def test_send_text_waits_for_input_ready_signal_for_hook_based_agent(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

@@ -700,6 +700,125 @@ prompt: |
         self.assertEqual(terminal_clients, {})
         self.assertEqual(ui_ws_clients, set())
 
+    def test_shutdown_daemon_runtime_marks_active_agents_stopped_before_ws_close(self):
+        events = []
+
+        class FakeWs:
+            def __init__(self, name):
+                self.name = name
+
+            async def close(self):
+                events.append(f"{self.name}.close")
+
+        class AsyncMethod:
+            def __init__(self, name):
+                self.name = name
+
+            async def __call__(self):
+                events.append(self.name)
+
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        running = state.add_agent(
+            name="Running Worker",
+            group="g",
+            terminal_backend="pty",
+            command="codex",
+        )
+        idle = state.add_agent(
+            name="Idle Worker",
+            group="g",
+            terminal_backend="pty",
+            command="codex",
+        )
+        stopped = state.add_agent(
+            name="Stopped Worker",
+            group="g",
+            terminal_backend="pty",
+            command="codex",
+        )
+        running.status = "running"
+        running.session_id = "sid-running"
+        running.current_process = "codex"
+        running.activity = "thinking"
+        idle.status = "idle"
+        idle.session_id = "sid-idle"
+        idle.current_process = "codex"
+        stopped.status = "stopped"
+        stopped.session_id = None
+        state.active_session_id = "sid-running"
+
+        saved = []
+        state._emit_agent = lambda cell: events.append(
+            f"emit:{cell.id}:{cell.status}:{cell.session_id}")
+        state._db_save_agent = lambda cell: (
+            saved.append((cell.id, cell.status, cell.session_id)),
+            events.append(f"save:{cell.id}:{cell.status}:{cell.session_id}"),
+        )
+        state._emit = lambda op, **payload: events.append(
+            f"emit_op:{op}:{payload.get('active_session_id')}")
+
+        async def broadcast():
+            events.append("state.broadcast")
+
+        state.broadcast = broadcast
+
+        terminal_clients = {"cell-1": {FakeWs("terminal_ws")}}
+        ui_ws_clients = {FakeWs("ui_ws")}
+        panel_log = types.SimpleNamespace(aclose=AsyncMethod("panel_log.aclose"))
+        drainer = types.SimpleNamespace(stop=AsyncMethod("event_drainer.stop"))
+        ingest_client = types.SimpleNamespace(aclose=AsyncMethod("event_client.aclose"))
+        bridge = types.SimpleNamespace(shutdown=AsyncMethod("bridge.shutdown"))
+        runner = types.SimpleNamespace(cleanup=AsyncMethod("runner.cleanup"))
+
+        class FakeDb:
+            close_async_writes = AsyncMethod("db.close_async_writes")
+
+            def close(self):
+                events.append("db.close")
+
+        state.flush_db_writes = AsyncMethod("state.flush_db_writes")
+
+        asyncio.run(self.server_mod._shutdown_daemon_runtime(
+            terminal_clients=terminal_clients,
+            ui_ws_clients=ui_ws_clients,
+            panel_log=panel_log,
+            event_ingest_drainer=drainer,
+            event_ingest_client=ingest_client,
+            bridge=bridge,
+            runner=runner,
+            state=state,
+            db=FakeDb(),
+        ))
+
+        self.assertEqual(running.status, "stopped")
+        self.assertIsNone(running.session_id)
+        self.assertEqual(running.current_process, "")
+        self.assertEqual(running.activity, "")
+        self.assertEqual(idle.status, "stopped")
+        self.assertIsNone(idle.session_id)
+        self.assertEqual(stopped.status, "stopped")
+        self.assertEqual(
+            saved,
+            [
+                (running.id, "stopped", None),
+                (idle.id, "stopped", None),
+            ],
+        )
+        self.assertIsNone(state.active_session_id)
+        self.assertLess(
+            events.index(f"save:{running.id}:stopped:None"),
+            events.index("terminal_ws.close"),
+        )
+        self.assertLess(
+            events.index("state.broadcast"),
+            events.index("terminal_ws.close"),
+        )
+        self.assertLess(
+            events.index("terminal_ws.close"),
+            events.index("bridge.shutdown"),
+        )
+
     def test_task_detail_command_returns_full_task_shape(self):
         state = self.state_mod.MatrixState()
         state.groups['g'] = []

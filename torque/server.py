@@ -5656,6 +5656,75 @@ async def _handle_daemon_stop_command(
     return _daemon_stop_result(already_requested=already_requested)
 
 
+def _mark_shutdown_runtime_agents_stopped(state) -> int:
+    """Mark live runtime cells stopped before daemon teardown.
+
+    PTY shutdown can happen after websocket clients are gone (or, in
+    supervisor mode, without terminating sessions at all). Persist the
+    stopped status from the server shutdown path itself so the UI and SQLite
+    do not retain a stale "running" status after the daemon exits.
+    """
+    iter_cells = getattr(state, "iter_active_agents", None)
+    if callable(iter_cells):
+        cells = list(iter_cells())
+    else:
+        cells = list(getattr(state, "agents", {}).values())
+
+    stopped = 0
+    for cell in cells:
+        try:
+            status = str(getattr(cell, "status", "") or "")
+            session_id = getattr(cell, "session_id", None)
+            if status not in {"running", "idle"} and not session_id:
+                continue
+            if status == "stopped" and not session_id:
+                continue
+
+            previous_session_id = session_id
+            cell.status = "stopped"
+            cell.session_id = None
+            cell.current_process = ""
+            cell.current_path = ""
+            cell.current_branch = ""
+            cell.git_root = ""
+            cell.activity = ""
+            cell.activity_detail = ""
+            cell.error_message = ""
+            cell.needs_attention = False
+
+            mark_heartbeat = getattr(state, "mark_agent_heartbeat", None)
+            if callable(mark_heartbeat):
+                mark_heartbeat(cell, emit=False)
+            emit_agent = getattr(state, "_emit_agent", None)
+            if callable(emit_agent):
+                emit_agent(cell)
+            save_agent = getattr(state, "_db_save_agent", None)
+            if callable(save_agent):
+                save_agent(cell)
+
+            if (previous_session_id
+                    and getattr(state, "active_session_id", None)
+                    == previous_session_id):
+                state.active_session_id = None
+                emit = getattr(state, "_emit", None)
+                if callable(emit):
+                    emit(
+                        "focus_update",
+                        active_session_id=None,
+                        current_window_id=(
+                            getattr(state, "current_window_id", "")
+                            or "standalone"
+                        ),
+                    )
+            stopped += 1
+        except Exception:
+            log.exception(
+                "Failed to mark agent '%s' stopped during daemon shutdown",
+                getattr(cell, "id", ""),
+            )
+    return stopped
+
+
 async def _shutdown_daemon_runtime(
     *,
     terminal_clients,
@@ -5670,6 +5739,12 @@ async def _shutdown_daemon_runtime(
     db,
 ) -> None:
     """Run the daemon shutdown drain sequence in one shared place."""
+    stopped_count = _mark_shutdown_runtime_agents_stopped(state)
+    if stopped_count:
+        try:
+            await state.broadcast()
+        except Exception:
+            log.exception("Shutdown stopped-status broadcast failed")
     for ws_clients in terminal_clients.values():
         for ws_client in list(ws_clients):
             try:
