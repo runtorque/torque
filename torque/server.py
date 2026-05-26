@@ -708,8 +708,11 @@ async def _reconcile_worktree_branch(state: MatrixState, worktree_mgr,
     """
     if not cell or not getattr(cell, "worktree_path", ""):
         return False
+    reconcile = getattr(worktree_mgr, "reconcile_worktree_branch", None)
+    if not callable(reconcile):
+        return False
     try:
-        changed = await worktree_mgr.reconcile_worktree_branch(cell)
+        changed = await reconcile(cell)
     except Exception:
         log.exception(
             "Failed to reconcile worktree branch for '%s'",
@@ -720,6 +723,174 @@ async def _reconcile_worktree_branch(state: MatrixState, worktree_mgr,
         state._emit_agent(cell)
         state._db_save_agent(cell)
     return changed
+
+
+def _active_agent_owning_worktree_target_for_state(
+        state: MatrixState,
+        repo_root: str,
+        path: str,
+        branch: str = ""):
+    repo_root = str(repo_root or "").strip()
+    path = str(path or "").strip()
+    branch = str(branch or "").strip()
+    if not state:
+        return None
+    for agent in state.iter_active_agents():
+        if state.agent_is_tombstoned(agent):
+            continue
+        status = str(getattr(agent, "status", "") or "").strip().lower()
+        active = status not in {"", "stopped", "error"} or bool(
+            getattr(agent, "session_id", None) and status != "stopped"
+        )
+        if not active:
+            continue
+        if _worktree_entry_matches_agent(repo_root, path, agent):
+            return agent
+        if branch and branch == str(getattr(agent, "worktree_branch", "") or "").strip():
+            return agent
+    return None
+
+
+async def _resolve_worktree_command_target_value(
+        *,
+        state: MatrixState,
+        worktree_mgr: WorktreeManager,
+        data: dict,
+        require_base: bool = False,
+        reject_active_owner: bool = False,
+        group: str = ""):
+    """Return (target, cell, error_result) for live-agent or path+branch mode."""
+    data = data or {}
+    aid = str(data.get("id", "") or "").strip()
+    has_path_target = _target_has_driverless_payload(data)
+    if aid and has_path_target:
+        return None, None, {
+            "type": "error",
+            "message": "Specify either id or worktree_path+branch, not both.",
+        }
+    if aid:
+        cell = state.agents.get(aid)
+        await _reconcile_worktree_branch(state, worktree_mgr, cell)
+        target = _target_from_cell(cell)
+        return target, cell, None
+    if not has_path_target:
+        return None, None, {
+            "type": "error",
+            "message": "Agent id or worktree_path+branch is required.",
+        }
+    worktree_path = str(data.get("worktree_path", "") or "").strip()
+    branch = _target_branch_from_payload(data)
+    if not worktree_path or not branch:
+        return None, None, {
+            "type": "error",
+            "message": "worktree_path and branch are required.",
+        }
+    repo_root = str(data.get("repo_root", "") or "").strip()
+    base_branch = str(data.get("base_branch", "") or "").strip()
+    if not base_branch and repo_root:
+        base_branch = latest_boundary_base_branch(
+            state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=branch,
+            statuses={"open", "merged", "superseded"},
+        )
+    if not base_branch:
+        # Validate once to resolve repo root, then consult boundary/group defaults.
+        try:
+            provisional = await worktree_mgr.validate_existing_worktree(
+                worktree_path,
+                repo_root=repo_root,
+                branch=branch,
+            )
+            repo_root = provisional.repo_root
+        except ValueError as exc:
+            return None, None, {"type": "error", "message": str(exc)}
+        base_branch = latest_boundary_base_branch(
+            state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=branch,
+            statuses={"open", "merged", "superseded"},
+        )
+    if not base_branch:
+        if group:
+            base_branch = str(
+                getattr(state.get_group_settings(group), "worktree_base_branch", "")
+                or ""
+            ).strip()
+        if not base_branch:
+            base_branch = "main"
+    if require_base and not base_branch:
+        return None, None, {"type": "error", "message": "base_branch is required."}
+    try:
+        existing = await worktree_mgr.validate_existing_worktree(
+            worktree_path,
+            repo_root=repo_root,
+            branch=branch,
+            base_branch=base_branch,
+            worktree_submodules=(
+                list(getattr(state.get_group_settings(group), "worktree_submodules", []) or [])
+                if group else None
+            ),
+        )
+    except ValueError as exc:
+        return None, None, {"type": "error", "message": str(exc)}
+    caller_kind = str(data.get("caller_kind", "") or "").strip()
+    caller_id = str(data.get("caller_id", "") or "").strip()
+    if caller_kind == "engineer" and caller_id:
+        base_dir = ".torque/worktrees"
+        try:
+            base_dir = str(
+                getattr(state.get_group_settings(group), "worktree_base_dir", "")
+                or ".torque/worktrees"
+            ).strip() or ".torque/worktrees"
+        except Exception:
+            base_dir = ".torque/worktrees"
+        allowed_root = base_dir if os.path.isabs(base_dir) else os.path.join(
+            existing.repo_root,
+            base_dir,
+        )
+        if not _worktree_path_contains(allowed_root, existing.worktree_path):
+            return None, None, {
+                "type": "error",
+                "message": "driverless worktree path is outside the configured Torque worktree directory",
+            }
+        latest = latest_boundary_task(
+            state.board_tasks.values(),
+            repo_root=existing.repo_root,
+            branch=existing.branch,
+            statuses={"open", "merged", "superseded"},
+        )
+        if latest:
+            assigned = str(getattr(latest, "assigned_engineer_id", "") or "").strip()
+            if assigned and assigned != caller_id:
+                return None, None, {
+                    "type": "error",
+                    "message": "branch boundary is outside engineer scope",
+                }
+        else:
+            caller = state.agents.get(caller_id)
+            slug = str(getattr(caller, "slug", "") or "").strip()
+            if not (
+                    (slug and existing.branch.startswith(f"torque/{slug}/"))
+                    or existing.branch.startswith("torque/user/")
+            ):
+                return None, None, {
+                    "type": "error",
+                    "message": "no visible boundary or owned branch prefix for driverless target",
+                }
+    owner = _active_agent_owning_worktree_target_for_state(
+        state,
+        existing.repo_root,
+        existing.worktree_path,
+        existing.branch,
+    )
+    if reject_active_owner and owner:
+        return None, None, {
+            "type": "error",
+            "message": f"Worktree is already owned by active agent {owner.name or owner.id}.",
+            "owner_agent_id": owner.id,
+        }
+    return _target_from_existing_worktree(existing, group=group), None, None
 
 
 def _engineer_merge_mode_for_cell(state: MatrixState, cell) -> str:
@@ -10862,6 +11033,23 @@ async def main(connection=None):
         caller_kind = str(data.get("caller_kind", "") or "").strip()
         caller_id = str(data.get("caller_id", "") or "").strip()
         if caller_kind == "engineer" and caller_id:
+            base_dir = ".torque/worktrees"
+            try:
+                base_dir = str(
+                    getattr(state.get_group_settings(group), "worktree_base_dir", "")
+                    or ".torque/worktrees"
+                ).strip() or ".torque/worktrees"
+            except Exception:
+                base_dir = ".torque/worktrees"
+            allowed_root = base_dir if os.path.isabs(base_dir) else os.path.join(
+                existing.repo_root,
+                base_dir,
+            )
+            if not _worktree_path_contains(allowed_root, existing.worktree_path):
+                return None, None, {
+                    "type": "error",
+                    "message": "driverless worktree path is outside the configured Torque worktree directory",
+                }
             latest = latest_boundary_task(
                 state.board_tasks.values(),
                 repo_root=existing.repo_root,
@@ -12838,12 +13026,14 @@ async def main(connection=None):
                                     target_window_id=data.get(
                                         "target_window_id", ""))
 
-            elif cmd == "worktree_advance_boundary":
-                target, live_cell, error_result = await _resolve_worktree_command_target(
-                    data,
-                    require_base=True,
-                    group=str(data.get("group", "") or ""),
-                )
+                elif cmd == "worktree_advance_boundary":
+                    target, live_cell, error_result = await _resolve_worktree_command_target_value(
+                        state=state,
+                        worktree_mgr=worktree_mgr,
+                        data=data,
+                        require_base=True,
+                        group=str(data.get("group", "") or ""),
+                    )
                 if error_result:
                     result = {
                         "type": "worktree_advance_boundary",
@@ -12904,8 +13094,10 @@ async def main(connection=None):
                             "message": f"Agent is not adoptable while status={cell.status}",
                         }
                     else:
-                        target, _live, error_result = await _resolve_worktree_command_target(
-                            data,
+                        target, _live, error_result = await _resolve_worktree_command_target_value(
+                            state=state,
+                            worktree_mgr=worktree_mgr,
+                            data=data,
                             require_base=True,
                             reject_active_owner=True,
                             group=str(data.get("group", "") or cell.group or ""),
@@ -12956,8 +13148,10 @@ async def main(connection=None):
 
             elif cmd == "worktree_remove":
                 if _target_has_driverless_payload(data):
-                    target, _cell, error_result = await _resolve_worktree_command_target(
-                        data,
+                    target, _cell, error_result = await _resolve_worktree_command_target_value(
+                        state=state,
+                        worktree_mgr=worktree_mgr,
+                        data=data,
                         require_base=True,
                         reject_active_owner=True,
                         group=str(data.get("group", "") or ""),
@@ -13232,8 +13426,10 @@ async def main(connection=None):
                 return result
 
             elif cmd == "worktree_check_merge":
-                target, live_cell, error_result = await _resolve_worktree_command_target(
-                    data,
+                target, live_cell, error_result = await _resolve_worktree_command_target_value(
+                    state=state,
+                    worktree_mgr=worktree_mgr,
+                    data=data,
                     require_base=True,
                     reject_active_owner=_target_has_driverless_payload(data),
                     group=str(data.get("group", "") or ""),
@@ -13686,8 +13882,10 @@ async def main(connection=None):
                         }
 
             elif cmd == "worktree_create_pr":
-                target, live_cell, error_result = await _resolve_worktree_command_target(
-                    data,
+                target, live_cell, error_result = await _resolve_worktree_command_target_value(
+                    state=state,
+                    worktree_mgr=worktree_mgr,
+                    data=data,
                     require_base=True,
                     reject_active_owner=_target_has_driverless_payload(data),
                     group=str(data.get("group", "") or ""),
@@ -13735,9 +13933,20 @@ async def main(connection=None):
                         state,
                         cell,
                     )
-                    pr_result = await worktree_mgr.create_pr(
-                        cell, title=title, body=body,
-                        worktree_submodules=submodules)
+                    pr_result = (
+                        await worktree_mgr.create_pr(
+                            cell,
+                            title=title,
+                            body=body,
+                            worktree_submodules=submodules,
+                        )
+                        if submodules
+                        else await worktree_mgr.create_pr(
+                            cell,
+                            title=title,
+                            body=body,
+                        )
+                    )
                     if "error" in pr_result:
                         result = {"type": "worktree_pr",
                                   "error": pr_result["error"]}
@@ -13752,8 +13961,10 @@ async def main(connection=None):
                             result["driverless"] = True
 
             elif cmd == "worktree_merge":
-                target, live_cell, error_result = await _resolve_worktree_command_target(
-                    data,
+                target, live_cell, error_result = await _resolve_worktree_command_target_value(
+                    state=state,
+                    worktree_mgr=worktree_mgr,
+                    data=data,
                     require_base=True,
                     reject_active_owner=_target_has_driverless_payload(data),
                     group=str(data.get("group", "") or ""),
@@ -14906,8 +15117,10 @@ async def main(connection=None):
                                     "group": group,
                                 }
                                 adopt_target, _adopt_cell, adopt_error = (
-                                    await _resolve_worktree_command_target(
-                                        adopt_payload,
+                                    await _resolve_worktree_command_target_value(
+                                        state=state,
+                                        worktree_mgr=worktree_mgr,
+                                        data=adopt_payload,
                                         require_base=True,
                                         reject_active_owner=True,
                                         group=group,

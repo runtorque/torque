@@ -1540,3 +1540,214 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result["ok"], result)
         self.assertEqual(result["reason"], "non_gitlink_diff")
+
+    async def test_560_chain_mechanical_boundary_advance_driverless_merge_succeeds(self):
+        install_aiohttp_stub()
+        install_iterm2_stub()
+        state_mod = importlib.import_module("torque.state")
+        state_mod = importlib.reload(state_mod)
+        server_mod = importlib.import_module("torque.server")
+        server_mod = importlib.reload(server_mod)
+        boundaries_mod = importlib.import_module("torque.worktree_boundaries")
+
+        cell = state_mod.AgentCell(
+            id="agent-560",
+            name="560 Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="stopped",
+        )
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_submodules=[self.sub_path],
+        )
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        sub_wt = wt / self.sub_path
+
+        (wt / "README.md").write_text("super line one\nreviewed work\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Reviewed worker change",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        reviewed_head = await self._git_out("rev-parse", "HEAD", cwd=wt)
+        reviewed_submodules = await self.mgr.nested_submodule_head_states(
+            cell,
+            [self.sub_path],
+        )
+
+        state = state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings("g", worktree_submodules=[self.sub_path])
+        boundary_task = state_mod.BoardTask(
+            id="TORQUE:560-review",
+            task=":560 reviewed implementation",
+            group="g",
+            lane="Done",
+            agent_id=cell.id,
+            assigned_engineer_id="eng-1",
+        )
+        boundary_task.worktree_boundary = {
+            "version": "1",
+            "repo_root": str(self.repo_root),
+            "branch": cell.worktree_branch,
+            "base_branch": "main",
+            "commit_sha": reviewed_head,
+            "kind": "marker",
+            "status": "open",
+            "recorded_at": "2026-05-26T00:00:00+00:00",
+            "recorded_by_agent_id": cell.id,
+            "submodules": reviewed_submodules,
+        }
+        state.board_tasks[boundary_task.id] = boundary_task
+
+        (sub_wt / "lib.txt").write_text(
+            "sub line one\nmechanical post-review line\n"
+        )
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Mechanical gitlink bump",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        advanced_head = await self._git_out("rev-parse", "HEAD", cwd=wt)
+        sub_branch = await self._sub_branch(sub_wt)
+        mechanical_sub_sha = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        missing_code, _out, _err = await self._git(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "--verify",
+            f"refs/heads/{sub_branch}",
+            cwd=self.root,
+            check=False,
+        )
+        self.assertNotEqual(0, missing_code)
+
+        machine = await self.mgr.verify_mechanical_gitlink_commit(
+            cell,
+            previous_head=reviewed_head,
+            new_head=advanced_head,
+            worktree_submodules=[self.sub_path],
+        )
+        self.assertTrue(machine["ok"], machine)
+        updated, advance = boundaries_mod.advance_latest_boundary_after_mechanical_commit(
+            state.board_tasks.values(),
+            repo_root=str(self.repo_root),
+            branch=cell.worktree_branch,
+            expected_previous_head=reviewed_head,
+            new_head=advanced_head,
+            machine_verification=machine,
+            actor_agent_id="eng-1",
+            verification_note="machine verified one gitlink-only post-review bump",
+            now="2026-05-26T01:00:00+00:00",
+        )
+        self.assertIs(updated, boundary_task)
+        self.assertTrue(advance["ok"], advance)
+        self.assertEqual(boundary_task.worktree_boundary["commit_sha"], advanced_head)
+        self.assertEqual(
+            boundary_task.worktree_boundary["mechanical_advances"][0]["paths"],
+            [self.sub_path],
+        )
+
+        target = server_mod.WorktreeCommandTarget(
+            id=f"driverless:{cell.worktree_branch}",
+            name=f"driverless:{cell.worktree_branch}",
+            group="g",
+            worktree_path=cell.worktree_path,
+            worktree_branch=cell.worktree_branch,
+            worktree_repo_root=cell.worktree_repo_root,
+            worktree_base_branch=cell.worktree_base_branch,
+            git_root=cell.git_root,
+            worktree_merge_squash=True,
+            driverless=True,
+        )
+
+        async def latest_boundary_state(target_cell):
+            latest = boundaries_mod.latest_boundary_task(
+                state.board_tasks.values(),
+                repo_root=target_cell.worktree_repo_root,
+                branch=target_cell.worktree_branch,
+                statuses={"open"},
+            )
+            if not latest:
+                return {"latest": None, "clean": None, "reason": ""}
+            boundary = dict(boundaries_mod.task_boundary(latest))
+            summary = {
+                "task_id": latest.id,
+                "commit_sha": boundary.get("commit_sha", ""),
+                "branch": boundary.get("branch", ""),
+                "repo_root": boundary.get("repo_root", ""),
+            }
+            head_sha = await self.mgr.current_head(target_cell)
+            summary["head_sha"] = head_sha or ""
+            if head_sha == boundary.get("commit_sha", ""):
+                summary["clean_mergeable"] = True
+                return {"latest": summary, "clean": summary, "reason": ""}
+            return {
+                "latest": summary,
+                "clean": None,
+                "reason": "branch_tip_moved",
+            }
+
+        def mark_boundaries(target_cell, merge_sha):
+            boundaries_mod.mark_branch_boundaries_merged(
+                state.board_tasks.values(),
+                repo_root=target_cell.worktree_repo_root,
+                branch=target_cell.worktree_branch,
+                merge_sha=merge_sha,
+                merged_at="2026-05-26T02:00:00+00:00",
+            )
+
+        async def cleanup_after_merge(*_args, **_kwargs):
+            self.fail("driverless merge must not run live-agent cleanup")
+
+        async def broadcast_toast(*_args, **_kwargs):
+            return None
+
+        class DummyBridge:
+            async def send_text(self, *_args, **_kwargs):
+                return None
+
+        result = await server_mod._run_direct_worktree_merge(
+            state=state,
+            cell=target,
+            aid=target.id,
+            data={},
+            worktree_mgr=self.mgr,
+            latest_boundary_state_for_cell=latest_boundary_state,
+            boundary_reason_message=lambda reason, latest: reason,
+            mark_branch_boundaries_merged=mark_boundaries,
+            cleanup_after_merge=cleanup_after_merge,
+            broadcast_toast=broadcast_toast,
+            bridge=DummyBridge(),
+            handle_command=None,
+            panel_event=None,
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertTrue(result["driverless"])
+        self.assertEqual(boundary_task.worktree_boundary["status"], "merged")
+        self.assertEqual(
+            boundary_task.worktree_boundary["merge_commit_sha"],
+            result["sha"],
+        )
+        remote_sub_branch = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            sub_branch,
+            cwd=self.root,
+        )
+        self.assertEqual(remote_sub_branch, mechanical_sub_sha)
+        self.assertEqual(
+            await self._gitlink_sha(self.repo_root, "main"),
+            mechanical_sub_sha,
+        )
