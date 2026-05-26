@@ -103,6 +103,8 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
             "channel_event",
             "mint_client_establish_code",
             "mint_client_establish_code_result",
+            "command_request",
+            "command_result",
         ))
 
     def test_build_daemon_ws_url_accepts_base_or_full_local_url(self):
@@ -237,6 +239,94 @@ class EnterpriseConnectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error["payload"]["message"], "agent worker-404 not found")
         self.assertEqual(error["payload"]["ref_id"], "msg-remote-error")
         self.assertIs(error["payload"]["retryable"], False)
+
+    async def test_command_request_uses_separate_ingress_confirm_gate_and_idempotency(self):
+        calls = []
+
+        async def remote_command(payload):
+            calls.append(dict(payload))
+            return {
+                "ref_command_id": payload["command_id"],
+                "ok": True,
+                "status": "ok",
+                "result": {"restarted": True},
+                "message": "done",
+            }
+
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+            remote_user_agent_message=lambda _payload: {"type": "ok"},
+            remote_command=remote_command,
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        fake_ws = FakeWs()
+        connector._ws = fake_ws
+        command_id = "123e4567-e89b-42d3-a456-426614174000"
+        envelope = make_relay_envelope(
+            id="cmd-env-1",
+            daemon_id="daemon-1",
+            source={"kind": "remote-client", "id": "browser-1", "user_id": "user"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="command_request",
+            payload={
+                "command_id": command_id,
+                "cmd": "restart_agent",
+                "args": {"agent_id": "worker-1"},
+                "confirm": True,
+                "issued_at": "2026-05-22T00:00:00.000Z",
+                "nonce": "nonce-1",
+            },
+        )
+
+        await connector._handle_envelope(envelope)
+        await connector._handle_envelope(envelope)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(fake_ws.sent), 2)
+        for result in fake_ws.sent:
+            self.assertEqual(result["kind"], "command_result")
+            self.assertEqual(result["target"], {"kind": "remote-client", "id": "browser-1", "user_id": "user"})
+            self.assertEqual(result["payload"]["ref_command_id"], command_id)
+            self.assertEqual(result["payload"]["ok"], True)
+            self.assertEqual(result["payload"]["status"], "ok")
+
+    async def test_command_request_unavailable_returns_command_result_not_user_message(self):
+        context = SimpleNamespace(
+            profile="desktop",
+            data_dir="/tmp/torque-desktop",
+            config={"relay_url": "http://127.0.0.1:8787", "daemon_id": "daemon-1"},
+            remote_user_agent_message=lambda _payload: {"type": "ok"},
+        )
+        connector = EnterpriseConnector(context=context)
+        connector.config = config_from_context(context)
+        fake_ws = FakeWs()
+        connector._ws = fake_ws
+        envelope = make_relay_envelope(
+            id="cmd-env-no-ingress",
+            daemon_id="daemon-1",
+            source={"kind": "remote-client", "id": "browser-1", "user_id": "user"},
+            target={"kind": "daemon", "id": "daemon-1"},
+            kind="command_request",
+            payload={
+                "command_id": "123e4567-e89b-42d3-a456-426614174111",
+                "cmd": "restart_agent",
+                "args": {"agent_id": "worker-1"},
+                "confirm": True,
+                "issued_at": "2026-05-22T00:00:00.000Z",
+                "nonce": "nonce-1",
+            },
+        )
+
+        await connector._handle_envelope(envelope)
+
+        self.assertEqual(len(fake_ws.sent), 1)
+        result = fake_ws.sent[0]
+        self.assertEqual(result["kind"], "command_result")
+        self.assertEqual(result["payload"]["ok"], False)
+        self.assertEqual(result["payload"]["error_code"], "remote_command_unavailable")
 
     async def test_agent_messages_and_ask_mirrors_are_queued_outbound(self):
         context = SimpleNamespace(

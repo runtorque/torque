@@ -220,6 +220,10 @@ test('agentListHtml remains the desktop list render path', () => {
     '<button type="button" class="remote-agent-item is-active" data-agent-id="worker-a">'
       + '<span class="remote-agent-heading">'
       + '<span class="remote-agent-name">worker-a</span>'
+      + '<span class="remote-agent-spacer"></span>'
+      + '<span role="button" tabindex="0" class="remote-agent-restart"'
+      + ' data-agent-command="restart_agent" data-agent-id="worker-a"'
+      + ' title="Restart this agent">restart</span>'
       + '</span>'
       + '<span class="remote-agent-preview">hello</span></button>');
 });

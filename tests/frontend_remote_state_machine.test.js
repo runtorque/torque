@@ -89,6 +89,88 @@ test('§602: sendUserMessage mints an idempotency_key and records it on the opti
   assert.notEqual(env2.payload.idempotency_key, key, 'each message gets a distinct key');
 });
 
+test('restart command_request queues until ready and dispatches command_result callback', () => {
+  const s = loadBundle();
+  const sockets = [];
+  const results = [];
+  const { client, statuses } = makeClient(s, sockets);
+  client._onCommandResult = (env) => results.push(env);
+  client.connect();
+  const env = client.requestRestartAgent('w', {
+    confirm: false,
+    commandId: '123e4567-e89b-42d3-a456-426614174000',
+    nonce: 'nonce-1',
+    issuedAt: '2026-05-26T12:00:00.000Z',
+  });
+  assert.equal(sockets[0].sent.filter((e) => e.kind === 'command_request').length, 0,
+    'not sent while connecting');
+  sockets[0].onmessage({ data: JSON.stringify(ready('d')) });
+  const sent = sockets[0].sent.filter((e) => e.kind === 'command_request');
+  assert.equal(sent.length, 1, 'flushed on ready');
+  assert.equal(sent[0].payload.command_id, env.payload.command_id);
+  const resultEnvelope = {
+    v: 1, id: 'cmd-result-1', daemon_id: 'd',
+    source: { kind: 'daemon', id: 'd' },
+    target: { kind: 'remote-client', id: 'c', user_id: 'user' },
+    kind: 'command_result', created_at: new Date().toISOString(),
+    payload: {
+      ref_command_id: env.payload.command_id,
+      ok: false,
+      status: 'confirmation_required',
+      error_code: 'confirmation_required',
+      message: 'confirm',
+    },
+  };
+  sockets[0].onmessage({ data: JSON.stringify(resultEnvelope) });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].payload.status, 'confirmation_required');
+  const acks = sockets[0].sent.filter((e) => e.kind === 'ack' && e.payload.ack_id === 'cmd-result-1');
+  assert.equal(acks.length, 1, 'command_result is acked so the relay stops replaying it');
+  assert.equal(acks[0].payload.ack_kind, 'command_result');
+  assert.equal(statuses.includes('error'), false,
+    'expected confirmation_required command_result does not trip the global error banner');
+
+  sockets[0].onmessage({ data: JSON.stringify(resultEnvelope) });
+  assert.equal(results.length, 1, 'duplicate command_result is not dispatched again');
+  assert.equal(
+    sockets[0].sent.filter((e) => e.kind === 'ack' && e.payload.ack_id === 'cmd-result-1').length,
+    2,
+    'duplicate command_result is re-acked to heal lost acks',
+  );
+});
+
+test('stale command_result without a pending command is acked but not surfaced', () => {
+  const s = loadBundle();
+  const sockets = [];
+  const results = [];
+  const { client, statuses } = makeClient(s, sockets);
+  client._onCommandResult = (env) => results.push(env);
+  client.connect();
+  sockets[0].onmessage({ data: JSON.stringify(ready('d')) });
+
+  sockets[0].onmessage({ data: JSON.stringify({
+    v: 1, id: 'cmd-result-stale', daemon_id: 'd',
+    source: { kind: 'daemon', id: 'd' },
+    target: { kind: 'remote-client', id: 'c', user_id: 'user' },
+    kind: 'command_result', created_at: new Date().toISOString(),
+    payload: {
+      ref_command_id: '123e4567-e89b-42d3-a456-426614174000',
+      ok: false,
+      status: 'error',
+      error_code: 'stale_result',
+      message: 'old command result',
+    },
+  }) });
+
+  assert.equal(results.length, 0, 'stale replay is not shown as a live command result');
+  assert.equal(statuses.includes('error'), false, 'stale replay does not trip the global error banner');
+  assert.equal(
+    sockets[0].sent.filter((e) => e.kind === 'ack' && e.payload.ack_id === 'cmd-result-stale').length,
+    1,
+    'stale replay is still acked so relay persistence can converge',
+  );
+});
+
 test('snapshot_request is sent on ready (recent-history-on-connect)', () => {
   const s = loadBundle();
   const sockets = [];

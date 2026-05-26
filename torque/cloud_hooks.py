@@ -37,6 +37,7 @@ RELAY_SOURCE_UNSET = ""
 DirectMessageObserver = Callable[[dict[str, Any]], Any]
 StateDeltaObserver = Callable[[list[dict[str, Any]]], Any]
 RemoteUserAgentIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+RemoteCommandIngress = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 RecentDirectMessages = Callable[[int], list[dict[str, Any]]]
 AgentRoster = Callable[[], list[dict[str, Any]]]
 AgentStateSnapshot = Callable[[], list[dict[str, Any]]]
@@ -54,6 +55,7 @@ class CloudConnectorContext:
     state: Any
     remote_user_agent_message: RemoteUserAgentIngress
     register_direct_message_observer: Callable[[DirectMessageObserver], Unregister]
+    remote_command: RemoteCommandIngress | None = None
     register_state_delta_observer: (
         Callable[[StateDeltaObserver], Unregister] | None
     ) = None

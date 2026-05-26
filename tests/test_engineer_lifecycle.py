@@ -1408,6 +1408,49 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.get("type"), "error")
 
+    async def test_restart_agent_refuses_shared_worktree_while_owner_active(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        owner = self._add_worker_cell(state, engineer, "Owner")
+        target = self._add_worker_cell(state, engineer, "Target")
+        owner.worktree_path = target.worktree_path = "/tmp/project/.torque/worktrees/shared"
+        owner.worktree_branch = target.worktree_branch = "torque/shared"
+        owner.current_task_id = "TORQUE:active"
+        state.board_tasks["TORQUE:active"] = self.state_mod.BoardTask(
+            id="TORQUE:active",
+            task="Active task",
+            group="torque",
+            lane="In Progress",
+            agent_id=owner.id,
+        )
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return "/tmp/project"
+
+        async def noop(*a, **k):
+            pass
+
+        bridge = _CapturingBridge()
+        result = await self.server_mod._handle_restart_agent_command(
+            {"id": target.id},
+            state,
+            bridge=bridge,
+            worktree_mgr=_FakeWorktreeManager(),
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_agent_launch_config=lambda *a, **k: {},
+            resolve_engineer_launch_config=lambda *a, **k: {},
+            apply_persistent_prompt=lambda *a, **k: None,
+            build_cell_persistent_prompt=lambda *a, **k: "",
+            persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+            is_designated_engineer=lambda cell: False,
+            send_agent_prompt=noop,
+        )
+
+        self.assertEqual(result.get("type"), "error")
+        self.assertIn("Cannot restart", result.get("message", ""))
+        self.assertEqual(bridge.create_session_calls, [])
+
     async def test_relaunch_preserves_cell_agent_type_when_launch_cfg_empty(self):
         state = self._make_state()
         engineer = self._add_engineer_cell(state, "eng-alice", "Alice")

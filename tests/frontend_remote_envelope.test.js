@@ -58,6 +58,22 @@ test('buildAck carries ack_id + delivery_state', () => {
   assert.equal(ack.payload.delivery_state, 'acked');
 });
 
+test('buildCommandRequest produces a valid privileged command envelope', () => {
+  const E = loadRemote();
+  const env = E.buildCommandRequest({
+    daemonId: 'daemon-1', clientId: 'client-9', cmd: 'restart_agent',
+    args: { agent_id: 'worker-7' }, confirm: false,
+    commandId: '123e4567-e89b-42d3-a456-426614174000',
+    issuedAt: '2026-05-26T12:00:00.000Z',
+    nonce: 'nonce-1',
+  });
+  assert.equal(env.kind, 'command_request');
+  assert.equal(env.payload.cmd, 'restart_agent');
+  assert.equal(env.payload.args.agent_id, 'worker-7');
+  assert.equal(env.payload.confirm, false);
+  assert.equal(env.target.kind, 'daemon');
+});
+
 test('makeEnvelope rejects target daemon id mismatch (relay semantic rule)', () => {
   const E = loadRemote();
   assert.throws(() => E.makeEnvelope({
