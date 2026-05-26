@@ -592,6 +592,22 @@ ENGINEER_TOOLS = [
                         "command is not fully overridden."
                     ),
                 },
+                "adopt_worktree_path": {
+                    "type": "string",
+                    "description": "Create the new worker attached to this existing orphaned worktree path instead of creating a branch.",
+                },
+                "adopt_branch": {
+                    "type": "string",
+                    "description": "Existing branch to adopt with adopt_worktree_path.",
+                },
+                "adopt_base_branch": {
+                    "type": "string",
+                    "description": "Base branch for the adopted worktree.",
+                },
+                "adopt_repo_root": {
+                    "type": "string",
+                    "description": "Optional main repo root for the adopted worktree.",
+                },
             },
             "required": ["task"],
         },
@@ -1123,7 +1139,23 @@ ENGINEER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent ID/name with worktree.",
+                    "description": "Agent ID/name with worktree. Omit when using worktree_path+branch driverless mode.",
+                },
+                "worktree_path": {
+                    "type": "string",
+                    "description": "Existing git worktree path for driverless mode (requires branch).",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Existing local branch for driverless mode (requires worktree_path).",
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": "Optional main repository root for driverless mode.",
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "Optional base branch for driverless merge/PR/remove.",
                 },
                 "message": {
                     "type": "string",
@@ -1211,7 +1243,6 @@ ENGINEER_TOOLS = [
                     ),
                 },
             },
-            "required": ["agent"],
         },
     },
     {
@@ -1249,7 +1280,23 @@ ENGINEER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent ID or name with a worktree.",
+                    "description": "Agent ID or name with a worktree. Omit when using worktree_path+branch driverless mode.",
+                },
+                "worktree_path": {
+                    "type": "string",
+                    "description": "Existing git worktree path for driverless mode (requires branch).",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Existing local branch for driverless mode (requires worktree_path).",
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": "Optional main repository root for driverless mode.",
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "Optional base branch for driverless mode.",
                 },
                 "title": {
                     "type": "string",
@@ -1263,7 +1310,6 @@ ENGINEER_TOOLS = [
                     "description": "PR description body (markdown).",
                 },
             },
-            "required": ["agent"],
         },
     },
     {
@@ -1316,10 +1362,64 @@ ENGINEER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent ID or name with a worktree.",
+                    "description": "Agent ID or name with a worktree. Omit when using worktree_path+branch orphan mode.",
+                },
+                "worktree_path": {
+                    "type": "string",
+                    "description": "Existing orphaned git worktree path to remove safely (requires branch).",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Existing local branch for orphan removal (requires worktree_path).",
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": "Optional main repository root for orphan removal.",
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "Base branch used to verify branch is merged before deletion.",
+                },
+                "delete_branch": {
+                    "type": "boolean",
+                    "description": "Delete the local branch with git branch -d after safe removal. Defaults true; false preserves it.",
                 },
             },
-            "required": ["agent"],
+        },
+    },
+    {
+        "name": "engineer_worktree_adopt",
+        "description": "Attach a stopped/idle visible agent to an existing orphaned worktree+branch without creating or moving branches.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {"type": "string", "description": "Stopped/idle agent to attach."},
+                "worktree_path": {"type": "string", "description": "Existing git worktree path."},
+                "branch": {"type": "string", "description": "Existing local branch checked out in the worktree."},
+                "repo_root": {"type": "string", "description": "Optional main repository root."},
+                "base_branch": {"type": "string", "description": "Optional base branch for the adopted worktree."},
+                "relaunch": {"type": "boolean", "description": "Relaunch the agent after attaching. Default false."},
+            },
+            "required": ["agent", "worktree_path", "branch"],
+        },
+    },
+    {
+        "name": "engineer_worktree_advance_boundary",
+        "description": "Advance the latest open worktree boundary to a new tip only after Torque machine-verifies exactly one configured nested-submodule gitlink-only commit. verification_note is audit metadata, not authorization.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {"type": "string", "description": "Agent with worktree. Omit when using worktree_path+branch."},
+                "worktree_path": {"type": "string", "description": "Existing git worktree path for driverless mode."},
+                "branch": {"type": "string", "description": "Existing local branch for driverless mode."},
+                "repo_root": {"type": "string", "description": "Optional main repository root."},
+                "base_branch": {"type": "string", "description": "Optional base branch."},
+                "expected_previous_head": {"type": "string", "description": "Boundary commit SHA currently recorded."},
+                "expected_new_head": {"type": "string", "description": "Expected current branch HEAD; defaults to HEAD if omitted."},
+                "verification_note": {"type": "string", "description": "Required audit explanation of the external/mechanical verification."},
+                "reason": {"type": "string", "description": "Audit reason. Defaults to verified_mechanical_gitlink."},
+            },
+            "required": ["expected_previous_head", "verification_note"],
         },
     },
     {

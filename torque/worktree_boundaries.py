@@ -587,6 +587,101 @@ def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
     return latest
 
 
+
+def advance_latest_boundary_after_mechanical_commit(
+    tasks: Iterable,
+    *,
+    repo_root: str,
+    branch: str,
+    expected_previous_head: str,
+    new_head: str,
+    machine_verification: dict,
+    actor_agent_id: str = "",
+    reason: str = "verified_mechanical_gitlink",
+    verification_note: str = "",
+    now: str | None = None,
+):
+    """Advance the latest open boundary after a machine-verified gitlink commit.
+
+    The human note is audit metadata only. Authorization comes exclusively
+    from ``machine_verification['ok']`` plus boundary/successor checks here.
+    """
+    repo_root = _clean_text(repo_root)
+    branch = _clean_text(branch)
+    expected_previous_head = _clean_text(expected_previous_head)
+    new_head = _clean_text(new_head)
+    verification_note = _clean_text(verification_note)
+    reason = _clean_text(reason) or "verified_mechanical_gitlink"
+    now = _clean_text(now) or datetime.now(timezone.utc).isoformat()
+    if not repo_root or not branch:
+        return None, {"ok": False, "reason": "missing_target"}
+    if not expected_previous_head or not new_head:
+        return None, {"ok": False, "reason": "missing_head"}
+    if not verification_note:
+        return None, {"ok": False, "reason": "verification_note_required"}
+    if not isinstance(machine_verification, dict) or not machine_verification.get("ok"):
+        return None, {
+            "ok": False,
+            "reason": "machine_verification_failed",
+            "machine_verification": machine_verification or {},
+        }
+
+    latest = latest_boundary_task(
+        tasks,
+        repo_root=repo_root,
+        branch=branch,
+        statuses={"open"},
+    )
+    if not latest:
+        return None, {"ok": False, "reason": "no_latest_open_boundary"}
+    boundary = dict(task_boundary(latest))
+    if boundary.get("commit_sha", "") != expected_previous_head:
+        return None, {
+            "ok": False,
+            "reason": "boundary_head_mismatch",
+            "boundary_head": boundary.get("commit_sha", ""),
+            "expected_previous_head": expected_previous_head,
+        }
+    started = started_successor_tasks(tasks, getattr(latest, "id", ""))
+    if started:
+        return None, {
+            "ok": False,
+            "reason": "started_successor",
+            "started_successors": [getattr(task, "id", "") for task in started],
+        }
+
+    paths = list(machine_verification.get("paths", []) or [])
+    updated_submodules = machine_verification.get("submodules", []) or []
+    boundary["commit_sha"] = new_head
+    boundary.pop("reason", None)
+    if updated_submodules:
+        boundary["submodules"] = updated_submodules
+    advances = list(boundary.get("mechanical_advances", []) or [])
+    advances.append({
+        "advanced_at": now,
+        "actor_agent_id": _clean_text(actor_agent_id),
+        "reason": reason,
+        "verification_note": verification_note,
+        "previous_head": expected_previous_head,
+        "new_head": new_head,
+        "mechanical_commit": _clean_text(
+            machine_verification.get("mechanical_commit", "")
+        ),
+        "paths": paths,
+    })
+    boundary["mechanical_advances"] = advances
+    latest.worktree_boundary = boundary
+    return latest, {
+        "ok": True,
+        "task_id": getattr(latest, "id", ""),
+        "previous_head": expected_previous_head,
+        "new_head": new_head,
+        "mechanical_commit": _clean_text(
+            machine_verification.get("mechanical_commit", "")
+        ),
+        "paths": paths,
+    }
+
 def mark_branch_boundaries_merged(tasks: Iterable, *,
                                   repo_root: str,
                                   branch: str,

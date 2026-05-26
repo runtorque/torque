@@ -44,7 +44,7 @@ from .direct_message_mirrors import (
     save_direct_ask_reply_mirror,
 )
 from .doctor import build_doctor_report
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from .state import (
     ARCHIVED_LANE,
     ArchitectSettings,
@@ -75,11 +75,13 @@ from .adapters import get_adapter, get_providers
 from .adapters.base import AgentEvent
 from .notifications import NotificationManager
 from .worktree import (
+    ExistingWorktreeTarget,
     WorktreeManager,
     classify_task_scope_domain,
     format_stale_base_warning,
 )
 from .worktree_boundaries import (
+    advance_latest_boundary_after_mechanical_commit,
     boundary_submodule_branches,
     boundary_summary,
     branch_boundary_tasks,
@@ -146,6 +148,36 @@ from .identity import (
     agent_kind_for_identity,
     prepend_agent_identity_anchor,
 )
+
+
+AUTO_CLOSE_SPAWNED_LABEL = "torque:auto-close-spawned-agent"
+
+
+@dataclass
+class WorktreeCommandTarget:
+    """Value object for live-agent or driverless worktree operations."""
+
+    id: str
+    name: str
+    group: str
+    worktree_path: str
+    worktree_branch: str
+    worktree_repo_root: str
+    worktree_base_branch: str
+    git_root: str = ""
+    slug: str = ""
+    worktree_merge_squash: bool = True
+    worktree_checkpoints: int = 0
+    worktree_dirty: bool = False
+    worktree_diff: dict | None = None
+    worktree_changed_files: list | None = None
+    worktree_ahead: int = 0
+    worktree_behind: int = 0
+    worktree_merged: bool = False
+    current_task_id: str = ""
+    source_agent_id: str = ""
+    driverless: bool = False
+    cell: object | None = None
 
 GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
 GUIDANCE_HINT_IDENTITY_DISPATCH = "agent_identity_anchor.dispatch"
@@ -600,6 +632,69 @@ def _worktree_merge_error(aid: str, message: str, **extra) -> dict:
     }
     result.update(extra)
     return result
+
+
+def _target_from_cell(cell) -> WorktreeCommandTarget | None:
+    if not cell:
+        return None
+    return WorktreeCommandTarget(
+        id=str(getattr(cell, "id", "") or ""),
+        name=str(getattr(cell, "name", "") or getattr(cell, "id", "") or ""),
+        group=str(getattr(cell, "group", "") or ""),
+        worktree_path=str(getattr(cell, "worktree_path", "") or ""),
+        worktree_branch=str(getattr(cell, "worktree_branch", "") or ""),
+        worktree_repo_root=str(
+            getattr(cell, "worktree_repo_root", "")
+            or getattr(cell, "git_root", "")
+            or ""
+        ),
+        worktree_base_branch=str(getattr(cell, "worktree_base_branch", "") or ""),
+        git_root=str(getattr(cell, "git_root", "") or getattr(cell, "worktree_repo_root", "") or ""),
+        slug=str(getattr(cell, "slug", "") or ""),
+        worktree_merge_squash=bool(getattr(cell, "worktree_merge_squash", True)),
+        worktree_checkpoints=int(getattr(cell, "worktree_checkpoints", 0) or 0),
+        worktree_dirty=bool(getattr(cell, "worktree_dirty", False)),
+        worktree_diff=dict(getattr(cell, "worktree_diff", {}) or {}),
+        worktree_changed_files=list(getattr(cell, "worktree_changed_files", []) or []),
+        worktree_ahead=int(getattr(cell, "worktree_ahead", 0) or 0),
+        worktree_behind=int(getattr(cell, "worktree_behind", 0) or 0),
+        worktree_merged=bool(getattr(cell, "worktree_merged", False)),
+        current_task_id=str(getattr(cell, "current_task_id", "") or ""),
+        source_agent_id=str(getattr(cell, "id", "") or ""),
+        driverless=False,
+        cell=cell,
+    )
+
+
+def _target_from_existing_worktree(
+        target: ExistingWorktreeTarget, *, group: str = "") -> WorktreeCommandTarget:
+    return WorktreeCommandTarget(
+        id=f"driverless:{target.branch}",
+        name=f"driverless:{target.branch}",
+        group=group,
+        worktree_path=target.worktree_path,
+        worktree_branch=target.branch,
+        worktree_repo_root=target.repo_root,
+        worktree_base_branch=target.base_branch,
+        git_root=target.git_root or target.repo_root,
+        slug=f"driverless-{target.branch.replace('/', '-')}",
+        worktree_merge_squash=True,
+        worktree_dirty=target.is_dirty,
+        worktree_diff={},
+        worktree_changed_files=[],
+        source_agent_id="",
+        driverless=True,
+        cell=None,
+    )
+
+
+def _target_has_driverless_payload(data: dict) -> bool:
+    return bool(str(data.get("worktree_path", "") or "").strip()) \
+        or bool(str(data.get("branch", "") or data.get("worktree_branch", "") or "").strip())
+
+
+def _target_branch_from_payload(data: dict) -> str:
+    return str(data.get("branch", "") or data.get("worktree_branch", "") or "").strip()
 
 
 async def _reconcile_worktree_branch(state: MatrixState, worktree_mgr,
@@ -1375,6 +1470,93 @@ async def _finalize_successful_worktree_merge(
     return result
 
 
+async def _finalize_successful_driverless_worktree_merge(
+    *,
+    state: MatrixState,
+    target: WorktreeCommandTarget,
+    aid: str,
+    data: dict,
+    merge_sha: str,
+    stale_base: dict | None,
+    preserve_merge_diff: bool,
+    boundary_task_for_diff,
+    merge_diff_snapshot: dict | None,
+    mark_branch_boundaries_merged,
+    worktree_mgr: WorktreeManager,
+) -> dict:
+    """Apply branch/boundary side effects after a driverless merge succeeds."""
+    mark_branch_boundaries_merged(target, merge_sha)
+    state.cleanup_stale_boundary_successors()
+    preserve_diff_warning = ""
+    if preserve_merge_diff:
+        preserve_diff_warning = _persist_preserved_merge_diff_warning_only(
+            state,
+            target,
+            boundary_task_for_diff,
+            merge_diff_snapshot,
+            merge_commit_sha=merge_sha,
+        )
+    cleanup = {
+        "close_agent": False,
+        "remove_worktree": False,
+        "agent_closed": False,
+        "worktree_removed": False,
+        "errors": [],
+        "driverless": True,
+    }
+    requested_cleanup = _worktree_merge_requested_cleanup(
+        state,
+        target,
+        data,
+        preserve_merge_diff=preserve_merge_diff,
+    )
+    if requested_cleanup.get("close_agent_on_merge"):
+        cleanup["errors"].append(
+            "close_agent_on_merge is not supported for driverless merges"
+        )
+    if requested_cleanup.get("remove_worktree_on_merge"):
+        submodules = _configured_worktree_submodules_for_cell(state, target)
+        existing = ExistingWorktreeTarget(
+            repo_root=target.worktree_repo_root,
+            worktree_path=target.worktree_path,
+            branch=target.worktree_branch,
+            head_sha=await worktree_mgr.rev_parse(target.worktree_path, "HEAD") or "",
+            base_branch=target.worktree_base_branch,
+            git_root=target.git_root or target.worktree_repo_root,
+            is_dirty=False,
+            listed_worktree_entry={},
+        )
+        remove_result = await worktree_mgr.safe_remove_existing_worktree(
+            existing,
+            delete_branch=True,
+            worktree_submodules=submodules,
+        )
+        cleanup["remove_worktree"] = True
+        cleanup["worktree_removed"] = bool(remove_result.get("worktree_removed"))
+        cleanup["worktree_remove"] = remove_result
+        if not remove_result.get("ok"):
+            cleanup["errors"].append(
+                remove_result.get("message") or "Safe worktree removal failed"
+            )
+    result = {
+        "type": "worktree_merge",
+        "id": aid,
+        "ok": not bool(cleanup.get("errors")),
+        "sha": merge_sha,
+        "branch": target.worktree_branch,
+        "base_branch": target.worktree_base_branch,
+        "agent_name": target.name,
+        "driverless": True,
+        "cleanup": cleanup,
+    }
+    if preserve_diff_warning:
+        result["warning"] = preserve_diff_warning
+    _attach_stale_base(result, stale_base)
+    if cleanup.get("errors"):
+        result["error"] = "; ".join(cleanup["errors"])
+    return result
+
+
 async def _run_direct_worktree_merge(
     *,
     state: MatrixState,
@@ -1401,6 +1583,7 @@ async def _run_direct_worktree_merge(
         latest_boundary_state_for_cell=latest_boundary_state_for_cell,
         boundary_reason_message=boundary_reason_message,
         panel_event=panel_event,
+        publish_nested_submodule_branches=True,
     )
     if not gates.get("ok"):
         result = gates.get("result") or _worktree_merge_error(
@@ -1447,26 +1630,41 @@ async def _run_direct_worktree_merge(
         else await worktree_mgr.server_merge(cell, msg, squash=squash)
     )
     if merge_result.get("ok"):
-        result = await _finalize_successful_worktree_merge(
-            state=state,
-            cell=cell,
-            aid=aid,
-            data=data,
-            merge_sha=merge_result["sha"],
-            stale_base=gates.get("stale_base"),
-            preserve_merge_diff=preserve_merge_diff,
-            boundary_task_for_diff=boundary_task_for_diff,
-            merge_diff_snapshot=merge_diff_snapshot,
-            merge_resume_targets=merge_resume_targets,
-            mark_branch_boundaries_merged=mark_branch_boundaries_merged,
-            cleanup_after_merge=cleanup_after_merge,
-            broadcast_toast=broadcast_toast,
-            bridge=bridge,
-            worktree_mgr=worktree_mgr,
-            handle_command=handle_command,
-            panel_event=panel_event,
-            board_sync_manager=board_sync_manager,
-        )
+        if getattr(cell, "driverless", False):
+            result = await _finalize_successful_driverless_worktree_merge(
+                state=state,
+                target=cell,
+                aid=aid,
+                data=data,
+                merge_sha=merge_result["sha"],
+                stale_base=gates.get("stale_base"),
+                preserve_merge_diff=preserve_merge_diff,
+                boundary_task_for_diff=boundary_task_for_diff,
+                merge_diff_snapshot=merge_diff_snapshot,
+                mark_branch_boundaries_merged=mark_branch_boundaries_merged,
+                worktree_mgr=worktree_mgr,
+            )
+        else:
+            result = await _finalize_successful_worktree_merge(
+                state=state,
+                cell=getattr(cell, "cell", None) or cell,
+                aid=aid,
+                data=data,
+                merge_sha=merge_result["sha"],
+                stale_base=gates.get("stale_base"),
+                preserve_merge_diff=preserve_merge_diff,
+                boundary_task_for_diff=boundary_task_for_diff,
+                merge_diff_snapshot=merge_diff_snapshot,
+                merge_resume_targets=merge_resume_targets,
+                mark_branch_boundaries_merged=mark_branch_boundaries_merged,
+                cleanup_after_merge=cleanup_after_merge,
+                broadcast_toast=broadcast_toast,
+                bridge=bridge,
+                worktree_mgr=worktree_mgr,
+                handle_command=handle_command,
+                panel_event=panel_event,
+                board_sync_manager=board_sync_manager,
+            )
     else:
         result = _worktree_merge_error(
             aid,
@@ -1971,26 +2169,41 @@ async def _run_pr_worktree_merge(
             result["workflow_breach"] = gates["workflow_breach"]
         return result
 
-    result = await _finalize_successful_worktree_merge(
-        state=state,
-        cell=cell,
-        aid=aid,
-        data=data,
-        merge_sha=merge_sha,
-        stale_base=gates.get("stale_base"),
-        preserve_merge_diff=preserve_merge_diff,
-        boundary_task_for_diff=boundary_task_for_diff,
-        merge_diff_snapshot=merge_diff_snapshot,
-        merge_resume_targets=merge_resume_targets,
-        mark_branch_boundaries_merged=mark_branch_boundaries_merged,
-        cleanup_after_merge=cleanup_after_merge,
-        broadcast_toast=broadcast_toast,
-        bridge=bridge,
-        worktree_mgr=worktree_mgr,
-        handle_command=handle_command,
-        panel_event=panel_event,
-        board_sync_manager=board_sync_manager,
-    )
+    if getattr(cell, "driverless", False):
+        result = await _finalize_successful_driverless_worktree_merge(
+            state=state,
+            target=cell,
+            aid=aid,
+            data=data,
+            merge_sha=merge_sha,
+            stale_base=gates.get("stale_base"),
+            preserve_merge_diff=preserve_merge_diff,
+            boundary_task_for_diff=boundary_task_for_diff,
+            merge_diff_snapshot=merge_diff_snapshot,
+            mark_branch_boundaries_merged=mark_branch_boundaries_merged,
+            worktree_mgr=worktree_mgr,
+        )
+    else:
+        result = await _finalize_successful_worktree_merge(
+            state=state,
+            cell=getattr(cell, "cell", None) or cell,
+            aid=aid,
+            data=data,
+            merge_sha=merge_sha,
+            stale_base=gates.get("stale_base"),
+            preserve_merge_diff=preserve_merge_diff,
+            boundary_task_for_diff=boundary_task_for_diff,
+            merge_diff_snapshot=merge_diff_snapshot,
+            merge_resume_targets=merge_resume_targets,
+            mark_branch_boundaries_merged=mark_branch_boundaries_merged,
+            cleanup_after_merge=cleanup_after_merge,
+            broadcast_toast=broadcast_toast,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            handle_command=handle_command,
+            panel_event=panel_event,
+            board_sync_manager=board_sync_manager,
+        )
     result.update({
         "mode": "pull_request",
         "pending": False,
@@ -4315,6 +4528,8 @@ async def _maybe_auto_close_root_done_agents(
                 base_dir=base_dir,
             )
         if not auto_close_cache[cache_key]:
+            continue
+        if AUTO_CLOSE_SPAWNED_LABEL not in (getattr(chain_task, "labels", []) or []):
             continue
         if _agent_has_open_assigned_tasks(state, agent_id):
             continue
@@ -10558,6 +10773,132 @@ async def main(connection=None):
                 return agent
         return None
 
+    def _active_agent_owning_worktree_target(repo_root: str, path: str, branch: str = ""):
+        repo_root = str(repo_root or "").strip()
+        path = str(path or "").strip()
+        branch = str(branch or "").strip()
+        for agent in state.iter_active_agents():
+            if state.agent_is_tombstoned(agent):
+                continue
+            status = str(getattr(agent, "status", "") or "").strip().lower()
+            active = status not in {"", "stopped", "error"} or bool(
+                getattr(agent, "session_id", None) and status != "stopped"
+            )
+            if not active:
+                continue
+            if _worktree_entry_matches_agent(repo_root, path, agent):
+                return agent
+            if branch and branch == str(getattr(agent, "worktree_branch", "") or "").strip():
+                return agent
+        return None
+
+    def _boundary_base_branch_for_target(repo_root: str, branch: str) -> str:
+        return latest_boundary_base_branch(
+            state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=branch,
+            statuses={"open", "merged", "superseded"},
+        )
+
+    async def _resolve_worktree_command_target(data: dict, *, require_base: bool = False,
+                                               reject_active_owner: bool = False,
+                                               group: str = ""):
+        """Return (target, cell, error_result) for live-agent or path+branch mode."""
+        data = data or {}
+        aid = str(data.get("id", "") or "").strip()
+        has_path_target = _target_has_driverless_payload(data)
+        if aid and has_path_target:
+            return None, None, {"type": "error", "message": "Specify either id or worktree_path+branch, not both."}
+        if aid:
+            cell = state.agents.get(aid)
+            await _reconcile_worktree_branch(state, worktree_mgr, cell)
+            target = _target_from_cell(cell)
+            return target, cell, None
+        if not has_path_target:
+            return None, None, {"type": "error", "message": "Agent id or worktree_path+branch is required."}
+        worktree_path = str(data.get("worktree_path", "") or "").strip()
+        branch = _target_branch_from_payload(data)
+        if not worktree_path or not branch:
+            return None, None, {"type": "error", "message": "worktree_path and branch are required."}
+        repo_root = str(data.get("repo_root", "") or "").strip()
+        base_branch = str(data.get("base_branch", "") or "").strip()
+        if not base_branch and repo_root:
+            base_branch = _boundary_base_branch_for_target(repo_root, branch)
+        if not base_branch:
+            # Validate once to resolve repo root, then consult boundary/group defaults.
+            try:
+                provisional = await worktree_mgr.validate_existing_worktree(
+                    worktree_path,
+                    repo_root=repo_root,
+                    branch=branch,
+                )
+                repo_root = provisional.repo_root
+            except ValueError as exc:
+                return None, None, {"type": "error", "message": str(exc)}
+            base_branch = _boundary_base_branch_for_target(repo_root, branch)
+        if not base_branch:
+            if group:
+                base_branch = str(
+                    getattr(state.get_group_settings(group), "worktree_base_branch", "")
+                    or ""
+                ).strip()
+            if not base_branch:
+                base_branch = "main"
+        if require_base and not base_branch:
+            return None, None, {"type": "error", "message": "base_branch is required."}
+        try:
+            existing = await worktree_mgr.validate_existing_worktree(
+                worktree_path,
+                repo_root=repo_root,
+                branch=branch,
+                base_branch=base_branch,
+                worktree_submodules=(
+                    list(getattr(state.get_group_settings(group), "worktree_submodules", []) or [])
+                    if group else None
+                ),
+            )
+        except ValueError as exc:
+            return None, None, {"type": "error", "message": str(exc)}
+        caller_kind = str(data.get("caller_kind", "") or "").strip()
+        caller_id = str(data.get("caller_id", "") or "").strip()
+        if caller_kind == "engineer" and caller_id:
+            latest = latest_boundary_task(
+                state.board_tasks.values(),
+                repo_root=existing.repo_root,
+                branch=existing.branch,
+                statuses={"open", "merged", "superseded"},
+            )
+            if latest:
+                assigned = str(getattr(latest, "assigned_engineer_id", "") or "").strip()
+                if assigned and assigned != caller_id:
+                    return None, None, {
+                        "type": "error",
+                        "message": "branch boundary is outside engineer scope",
+                    }
+            else:
+                caller = state.agents.get(caller_id)
+                slug = str(getattr(caller, "slug", "") or "").strip()
+                if not (
+                        (slug and existing.branch.startswith(f"torque/{slug}/"))
+                        or existing.branch.startswith("torque/user/")
+                ):
+                    return None, None, {
+                        "type": "error",
+                        "message": "no visible boundary or owned branch prefix for driverless target",
+                    }
+        owner = _active_agent_owning_worktree_target(
+            existing.repo_root,
+            existing.worktree_path,
+            existing.branch,
+        )
+        if reject_active_owner and owner:
+            return None, None, {
+                "type": "error",
+                "message": f"Worktree is already owned by active agent {owner.name or owner.id}.",
+                "owner_agent_id": owner.id,
+            }
+        return _target_from_existing_worktree(existing, group=group), None, None
+
     async def _classify_repo_worktrees(repo_root: str) -> list[dict]:
         repo_root = str(repo_root or "").strip()
         if not repo_root:
@@ -12497,57 +12838,221 @@ async def main(connection=None):
                                     target_window_id=data.get(
                                         "target_window_id", ""))
 
-            elif cmd == "worktree_remove":
-                cell = state.agents.get(data["id"])
-                if cell and cell.worktree_path:
-                    # Restore directory to original repo root
-                    repo_root = cell.worktree_repo_root
-                    remove_result = await _safe_remove_worktree_result(cell)
-                    if repo_root and remove_result.get("worktree_removed"):
-                        cell.directory = repo_root
-                    # Relaunch if requested by the UI
-                    if (
-                            remove_result.get("worktree_removed")
-                            and data.get("relaunch")
-                            and cell.cell_type == "agent"):
-                        await _relaunch_agent_after_worktree_removal(
-                            cell,
-                            bridge=bridge,
-                            state=state,
-                            resolve_base_dir=_resolve_base_dir,
-                            resolve_agent_launch_config=_resolve_agent_launch_config,
-                            resolve_engineer_launch_config=_resolve_engineer_launch_config,
-                            resolve_architect_launch_config=_resolve_architect_launch_config,
-                            resolve_worker_launch_config=_resolve_worker_launch_config,
-                            is_designated_engineer=_is_designated_engineer,
-                            apply_persistent_prompt=_apply_persistent_prompt,
-                            build_cell_persistent_prompt=_build_cell_persistent_prompt,
-                            send_agent_prompt=_send_agent_prompt,
-                        )
-                    else:
-                        state._emit_agent(cell)
-                        state._db_save_agent(cell)
+            elif cmd == "worktree_advance_boundary":
+                target, live_cell, error_result = await _resolve_worktree_command_target(
+                    data,
+                    require_base=True,
+                    group=str(data.get("group", "") or ""),
+                )
+                if error_result:
                     result = {
-                        "type": "worktree_remove",
-                        "id": cell.id,
-                        **remove_result,
+                        "type": "worktree_advance_boundary",
+                        "ok": False,
+                        "error": error_result.get("message", "Target resolution failed"),
                     }
-                    if not remove_result.get("worktree_removed"):
+                else:
+                    previous_head = str(data.get("expected_previous_head", "") or "").strip()
+                    expected_new = str(data.get("expected_new_head", "") or "").strip()
+                    if not expected_new:
+                        expected_new = await worktree_mgr.current_head(target) or ""
+                    note = str(data.get("verification_note", "") or "").strip()
+                    submodules = _configured_worktree_submodules_for_cell(state, target)
+                    machine = await worktree_mgr.verify_mechanical_gitlink_commit(
+                        target,
+                        previous_head=previous_head,
+                        new_head=expected_new,
+                        worktree_submodules=submodules,
+                    )
+                    updated_task, advance_result = advance_latest_boundary_after_mechanical_commit(
+                        state.board_tasks.values(),
+                        repo_root=target.worktree_repo_root,
+                        branch=target.worktree_branch,
+                        expected_previous_head=previous_head,
+                        new_head=expected_new,
+                        machine_verification=machine,
+                        actor_agent_id=str(data.get("actor_agent_id", "") or target.source_agent_id or ""),
+                        reason=str(data.get("reason", "") or "verified_mechanical_gitlink"),
+                        verification_note=note,
+                    )
+                    if updated_task:
+                        updated_task.messages.append({
+                            "timestamp": time.time(),
+                            "action": "worktree_boundary_advanced",
+                            "message": "Advanced boundary to branch tip after verified mechanical gitlink-only commit.",
+                            "agent_name": "torque",
+                        })
+                        _save_task_record(updated_task)
+                    result = {
+                        "type": "worktree_advance_boundary",
+                        **advance_result,
+                        "machine_verification": machine,
+                    }
+                    if not advance_result.get("ok"):
+                        result["error"] = advance_result.get("reason", "advance_refused")
+
+            elif cmd == "worktree_adopt":
+                cell = state.agents.get(str(data.get("id", "") or "").strip())
+                if not cell:
+                    result = {"type": "error", "message": "Agent not found"}
+                elif state.agent_is_tombstoned(cell):
+                    result = {"type": "error", "message": "Agent is tombstoned"}
+                else:
+                    status = str(getattr(cell, "status", "") or "").strip().lower()
+                    if status not in {"", "stopped", "idle", "error"}:
                         result = {
                             "type": "error",
-                            "message": (
-                                remove_result.get("message")
-                                or "Worktree removal failed"
-                            ),
-                            "id": cell.id,
-                            "worktree_remove": remove_result,
+                            "message": f"Agent is not adoptable while status={cell.status}",
                         }
-                elif cell:
-                    result = {
-                        "type": "error",
-                        "message": "Agent has no worktree",
-                        "id": cell.id,
-                    }
+                    else:
+                        target, _live, error_result = await _resolve_worktree_command_target(
+                            data,
+                            require_base=True,
+                            reject_active_owner=True,
+                            group=str(data.get("group", "") or cell.group or ""),
+                        )
+                        if error_result:
+                            result = error_result
+                        else:
+                            cell.worktree_path = target.worktree_path
+                            cell.worktree_branch = target.worktree_branch
+                            cell.worktree_repo_root = target.worktree_repo_root
+                            cell.git_root = target.worktree_repo_root
+                            cell.worktree_base_branch = target.worktree_base_branch
+                            cell.directory = target.worktree_path
+                            cell.worktree_dirty = bool(target.worktree_dirty)
+                            cell.worktree_diff = {}
+                            cell.worktree_changed_files = []
+                            cell.worktree_checkpoints = await worktree_mgr.count_commits(cell)
+                            state._emit_agent(cell)
+                            state._db_save_agent(cell)
+                            state.history_update_agent(
+                                cell,
+                                worktree_branch=cell.worktree_branch,
+                            )
+                            result = {
+                                "type": "worktree_adopt",
+                                "ok": True,
+                                "id": cell.id,
+                                "agent_id": cell.id,
+                                "worktree_path": cell.worktree_path,
+                                "branch": cell.worktree_branch,
+                                "base_branch": cell.worktree_base_branch,
+                            }
+                            if data.get("relaunch") and cell.cell_type == "agent":
+                                await _relaunch_agent_after_worktree_removal(
+                                    cell,
+                                    bridge=bridge,
+                                    state=state,
+                                    resolve_base_dir=_resolve_base_dir,
+                                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                                    resolve_architect_launch_config=_resolve_architect_launch_config,
+                                    resolve_worker_launch_config=_resolve_worker_launch_config,
+                                    is_designated_engineer=_is_designated_engineer,
+                                    apply_persistent_prompt=_apply_persistent_prompt,
+                                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                                    send_agent_prompt=_send_agent_prompt,
+                                )
+
+            elif cmd == "worktree_remove":
+                if _target_has_driverless_payload(data):
+                    target, _cell, error_result = await _resolve_worktree_command_target(
+                        data,
+                        require_base=True,
+                        reject_active_owner=True,
+                        group=str(data.get("group", "") or ""),
+                    )
+                    if error_result:
+                        result = error_result
+                    else:
+                        submodules = _configured_worktree_submodules_for_cell(
+                            state,
+                            target,
+                        )
+                        existing = ExistingWorktreeTarget(
+                            repo_root=target.worktree_repo_root,
+                            worktree_path=target.worktree_path,
+                            branch=target.worktree_branch,
+                            head_sha=await worktree_mgr.rev_parse(
+                                target.worktree_path, "HEAD"
+                            ) or "",
+                            base_branch=target.worktree_base_branch,
+                            git_root=target.git_root or target.worktree_repo_root,
+                            is_dirty=False,
+                            listed_worktree_entry={},
+                        )
+                        remove_result = await worktree_mgr.safe_remove_existing_worktree(
+                            existing,
+                            delete_branch=bool(data.get("delete_branch", True)),
+                            worktree_submodules=submodules,
+                        )
+                        result = {
+                            "type": "worktree_remove",
+                            "id": target.id,
+                            "driverless": True,
+                            **remove_result,
+                        }
+                        if not remove_result.get("worktree_removed"):
+                            result = {
+                                "type": "error",
+                                "message": (
+                                    remove_result.get("message")
+                                    or "Worktree removal failed"
+                                ),
+                                "id": target.id,
+                                "worktree_remove": remove_result,
+                            }
+                else:
+                    cell = state.agents.get(data.get("id", ""))
+                    if cell and cell.worktree_path:
+                        # Restore directory to original repo root
+                        repo_root = cell.worktree_repo_root
+                        remove_result = await _safe_remove_worktree_result(cell)
+                        if repo_root and remove_result.get("worktree_removed"):
+                            cell.directory = repo_root
+                        # Relaunch if requested by the UI
+                        if (
+                                remove_result.get("worktree_removed")
+                                and data.get("relaunch")
+                                and cell.cell_type == "agent"):
+                            await _relaunch_agent_after_worktree_removal(
+                                cell,
+                                bridge=bridge,
+                                state=state,
+                                resolve_base_dir=_resolve_base_dir,
+                                resolve_agent_launch_config=_resolve_agent_launch_config,
+                                resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                                resolve_architect_launch_config=_resolve_architect_launch_config,
+                                resolve_worker_launch_config=_resolve_worker_launch_config,
+                                is_designated_engineer=_is_designated_engineer,
+                                apply_persistent_prompt=_apply_persistent_prompt,
+                                build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                                send_agent_prompt=_send_agent_prompt,
+                            )
+                        else:
+                            state._emit_agent(cell)
+                            state._db_save_agent(cell)
+                        result = {
+                            "type": "worktree_remove",
+                            "id": cell.id,
+                            **remove_result,
+                        }
+                        if not remove_result.get("worktree_removed"):
+                            result = {
+                                "type": "error",
+                                "message": (
+                                    remove_result.get("message")
+                                    or "Worktree removal failed"
+                                ),
+                                "id": cell.id,
+                                "worktree_remove": remove_result,
+                            }
+                    elif cell:
+                        result = {
+                            "type": "error",
+                            "message": "Agent has no worktree",
+                            "id": cell.id,
+                        }
 
             elif cmd == "worktree_list":
                 requested_root = str(data.get("repo_root", "") or "").strip()
@@ -12727,9 +13232,21 @@ async def main(connection=None):
                 return result
 
             elif cmd == "worktree_check_merge":
-                cell = state.agents.get(data.get("id", ""))
-                aid = data.get("id", "")
-                await _reconcile_worktree_branch(state, worktree_mgr, cell)
+                target, live_cell, error_result = await _resolve_worktree_command_target(
+                    data,
+                    require_base=True,
+                    reject_active_owner=_target_has_driverless_payload(data),
+                    group=str(data.get("group", "") or ""),
+                )
+                if error_result:
+                    result = {
+                        "type": "worktree_check_merge",
+                        "id": data.get("id", "") or _target_branch_from_payload(data),
+                        "error": error_result.get("message", "No worktree"),
+                    }
+                    return result
+                cell = target
+                aid = target.id
                 if cell and cell.worktree_path \
                         and cell.worktree_branch:
                     boundary_state = await _latest_boundary_state_for_cell(
@@ -12854,6 +13371,8 @@ async def main(connection=None):
                                 await _generate_merge_message(
                                     cell, worktree_mgr, squash,
                                     state=state)
+                            if getattr(cell, "driverless", False):
+                                check["driverless"] = True
                         result = check
                 else:
                     result = {
@@ -13167,11 +13686,18 @@ async def main(connection=None):
                         }
 
             elif cmd == "worktree_create_pr":
-                cell = state.agents.get(data.get("id", ""))
-                await _reconcile_worktree_branch(state, worktree_mgr, cell)
-                if not cell or not cell.worktree_path:
-                    result = {"type": "worktree_pr",
-                              "error": "Agent has no worktree."}
+                target, live_cell, error_result = await _resolve_worktree_command_target(
+                    data,
+                    require_base=True,
+                    reject_active_owner=_target_has_driverless_payload(data),
+                    group=str(data.get("group", "") or ""),
+                )
+                cell = target
+                if error_result or not cell or not cell.worktree_path:
+                    result = {
+                        "type": "worktree_pr",
+                        "error": (error_result or {}).get("message", "Agent has no worktree."),
+                    }
                 else:
                     # Build PR title from linked task or agent name
                     title = data.get("title", "")
@@ -13205,8 +13731,13 @@ async def main(connection=None):
                     title = rewrite["title"]
                     body = rewrite["body"]
                     _log_pr_task_ref_rewrite("worktree_create_pr", rewrite)
+                    submodules = _configured_worktree_submodules_for_cell(
+                        state,
+                        cell,
+                    )
                     pr_result = await worktree_mgr.create_pr(
-                        cell, title=title, body=body)
+                        cell, title=title, body=body,
+                        worktree_submodules=submodules)
                     if "error" in pr_result:
                         result = {"type": "worktree_pr",
                                   "error": pr_result["error"]}
@@ -13217,11 +13748,18 @@ async def main(connection=None):
                         result = {"type": "worktree_pr",
                                   "url": pr_result["url"],
                                   "message": msg}
+                        if getattr(cell, "driverless", False):
+                            result["driverless"] = True
 
             elif cmd == "worktree_merge":
-                cell = state.agents.get(data.get("id", ""))
-                aid = data.get("id", "")
-                await _reconcile_worktree_branch(state, worktree_mgr, cell)
+                target, live_cell, error_result = await _resolve_worktree_command_target(
+                    data,
+                    require_base=True,
+                    reject_active_owner=_target_has_driverless_payload(data),
+                    group=str(data.get("group", "") or ""),
+                )
+                cell = target
+                aid = getattr(target, "id", "") if target else data.get("id", "")
                 requested_force_direct = bool(data.get("force_direct"))
                 merge_mode = _engineer_merge_mode_for_cell(state, cell)
                 direct_merge_breach_event = None
@@ -13233,7 +13771,25 @@ async def main(connection=None):
                     "Group setting engineer_merge_mode='direct' forced a "
                     "direct local worktree merge; the PR workflow was bypassed."
                 )
-                if merge_mode == "pr" and requested_force_direct:
+                if error_result:
+                    result = _worktree_merge_error(
+                        aid,
+                        error_result.get("message", "No worktree"),
+                        phase="target_resolution",
+                    )
+                elif getattr(cell, "driverless", False) and _worktree_merge_requested_cleanup(
+                        state,
+                        cell,
+                        data,
+                        preserve_merge_diff=False,
+                ).get("close_agent_on_merge"):
+                    result = _worktree_merge_error(
+                        aid,
+                        "close_agent_on_merge/close_remove cleanup is not supported in driverless mode",
+                        phase="driverless_cleanup",
+                        driverless=True,
+                    )
+                elif merge_mode == "pr" and requested_force_direct:
                     message = (
                         "Group setting engineer_merge_mode='pr' forbids "
                         "force_direct=true. Adjust setting or omit force_direct."
@@ -14340,6 +14896,35 @@ async def main(connection=None):
                                 explicit_template=explicit_template,
                                 overrides=launch_overrides,
                             )
+                            adopt_path = str(data.get("adopt_worktree_path", "") or "").strip()
+                            if adopt_path:
+                                adopt_payload = {
+                                    "worktree_path": adopt_path,
+                                    "branch": str(data.get("adopt_branch", "") or "").strip(),
+                                    "repo_root": str(data.get("adopt_repo_root", "") or "").strip(),
+                                    "base_branch": str(data.get("adopt_base_branch", "") or "").strip(),
+                                    "group": group,
+                                }
+                                adopt_target, _adopt_cell, adopt_error = (
+                                    await _resolve_worktree_command_target(
+                                        adopt_payload,
+                                        require_base=True,
+                                        reject_active_owner=True,
+                                        group=group,
+                                    )
+                                )
+                                if adopt_error:
+                                    result = adopt_error
+                                    cell = None
+                                else:
+                                    launch_cfg["adopted_worktree"] = {
+                                        "worktree_path": adopt_target.worktree_path,
+                                        "branch": adopt_target.worktree_branch,
+                                        "repo_root": adopt_target.worktree_repo_root,
+                                        "base_branch": adopt_target.worktree_base_branch,
+                                    }
+                                    launch_cfg["worktree"] = False
+                                    launch_cfg["directory"] = adopt_target.worktree_path
                             inherit_from = data.get(
                                 "inherit_worktree_from", "")
                             inherited_worktree_source = (
@@ -14369,23 +14954,43 @@ async def main(connection=None):
                                     persistent_prompt_text=
                                     persistent_prompt_text,
                                 )
-                            cell = await _create_agent_with_config(
-                                group, agent_name, launch_cfg,
-                                explicit_template=explicit_template,
-                                target_session_id=data.get(
-                                    "target_session_id", ""),
-                                target_window_id=data.get(
-                                    "target_window_id", ""),
-                                persistent_prompt_text=persistent_prompt_text,
-                                created_by_engineer_id=data.get(
-                                    "_created_by_engineer_id", ""),
-                                owner_engineer_id=data.get(
-                                    "owner_engineer_id", ""),
-                                kind="worker",
-                                inherited_worktree_from=inherited_worktree_source,
-                                restore_focus_to_prev_tab=True,
-                            )
+                            if result:
+                                cell = None
+                            else:
+                                cell = await _create_agent_with_config(
+                                    group, agent_name, launch_cfg,
+                                    explicit_template=explicit_template,
+                                    target_session_id=data.get(
+                                        "target_session_id", ""),
+                                    target_window_id=data.get(
+                                        "target_window_id", ""),
+                                    persistent_prompt_text=persistent_prompt_text,
+                                    created_by_engineer_id=data.get(
+                                        "_created_by_engineer_id", ""),
+                                    owner_engineer_id=data.get(
+                                        "owner_engineer_id", ""),
+                                    kind="worker",
+                                    inherited_worktree_from=inherited_worktree_source,
+                                    restore_focus_to_prev_tab=True,
+                                )
                             if cell:
+                                if (
+                                        data.get("create_agent")
+                                        and not launch_cfg.get("adopted_worktree")
+                                        and task.action_name):
+                                    try:
+                                        auto_close_spawn = action_mgr.get_auto_close_on_done(
+                                            task.action_name,
+                                            base_dir=base_dir,
+                                        )
+                                    except Exception:
+                                        auto_close_spawn = False
+                                    if auto_close_spawn:
+                                        labels = list(task.labels or [])
+                                        if AUTO_CLOSE_SPAWNED_LABEL not in labels:
+                                            labels.append(AUTO_CLOSE_SPAWNED_LABEL)
+                                            task.labels = labels
+                                            _save_task(task)
                                 # Worktree inheritance (pipeline) is applied
                                 # before session creation. Re-copy here in
                                 # case the source changed while the agent

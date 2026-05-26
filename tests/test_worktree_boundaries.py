@@ -17,6 +17,7 @@ from torque.worktree_boundaries import (
     retarget_queued_successor_tasks,
     started_successor_tasks,
     task_branch_keys,
+    advance_latest_boundary_after_mechanical_commit,
 )
 
 
@@ -653,3 +654,70 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(pr["updated_at"], "2026-04-07T11:00:00+00:00")
         self.assertEqual(pr["head_sha"], "reviewed-head")
         self.assertEqual(pr["requested_cleanup"]["close_agent_on_merge"], True)
+
+    def test_advance_boundary_requires_machine_verified_gitlink(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "old",
+            },
+        )
+
+        updated, result = advance_latest_boundary_after_mechanical_commit(
+            [boundary_task],
+            repo_root="/repo",
+            branch="torque/worker",
+            expected_previous_head="old",
+            new_head="new",
+            machine_verification={"ok": False, "reason": "non_gitlink_diff"},
+            verification_note="human says this was mechanical",
+        )
+
+        self.assertIsNone(updated)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "machine_verification_failed")
+        self.assertEqual(boundary_task.worktree_boundary["commit_sha"], "old")
+
+    def test_advance_boundary_records_audit_after_machine_verified_gitlink(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "old",
+                "submodules": [{"path": "ee", "commit_sha": "old-ee"}],
+            },
+        )
+
+        updated, result = advance_latest_boundary_after_mechanical_commit(
+            [boundary_task],
+            repo_root="/repo",
+            branch="torque/worker",
+            expected_previous_head="old",
+            new_head="new",
+            machine_verification={
+                "ok": True,
+                "mechanical_commit": "new",
+                "paths": ["ee"],
+                "submodules": [{"path": "ee", "commit_sha": "new-ee"}],
+            },
+            actor_agent_id="eng-1",
+            verification_note="verified gitlink-only ee bump",
+            now="2026-04-07T12:00:00+00:00",
+        )
+
+        self.assertIs(updated, boundary_task)
+        self.assertTrue(result["ok"])
+        boundary = boundary_task.worktree_boundary
+        self.assertEqual(boundary["commit_sha"], "new")
+        self.assertEqual(boundary["submodules"][0]["commit_sha"], "new-ee")
+        audit = boundary["mechanical_advances"][0]
+        self.assertEqual(audit["previous_head"], "old")
+        self.assertEqual(audit["new_head"], "new")
+        self.assertEqual(audit["paths"], ["ee"])

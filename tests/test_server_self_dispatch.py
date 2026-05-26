@@ -3391,6 +3391,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=1,
             agent_id=reviewer_one.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         fix = state.board_add_task(
             "Fix issues",
@@ -3413,6 +3414,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=3,
             agent_id=reviewer_two.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
 
         with tempfile.TemporaryDirectory() as tempdir:
@@ -3440,6 +3442,51 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, [reviewer_one.id, reviewer_two.id])
         self.assertEqual(closed, [reviewer_one.id, reviewer_two.id])
+
+    async def test_auto_close_on_done_fails_closed_without_spawn_label(self):
+        state = self._make_state()
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            status="idle",
+        )
+        state.agents = {reviewer.id: reviewer}
+        root = state.board_add_task(
+            "Review root",
+            "g",
+            lane="Done",
+            id="task-root",
+            action_name="feature/review",
+            agent_id=reviewer.id,
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._write_action(
+                tempdir,
+                "feature/review",
+                auto_close_on_done=True,
+            )
+            closed = []
+
+            async def resolve_base_dir(_group):
+                return tempdir
+
+            async def close_agent(cell):
+                closed.append(cell.id)
+
+            result = await self.server_mod._maybe_auto_close_root_done_agents(
+                state,
+                root,
+                action_mgr=self.server_mod.ActionManager(),
+                resolve_base_dir=resolve_base_dir,
+                close_agent=close_agent,
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(closed, [])
 
     async def test_auto_close_on_done_waits_for_root_resolution(self):
         state = self._make_state()
@@ -3476,6 +3523,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=root.id,
             pipeline_depth=1,
             agent_id=reviewer.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         state.board_add_task(
             "Fix issues",
@@ -3533,6 +3581,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             id="task-root",
             action_name="feature/review",
             agent_id=reviewer.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         queued = state.board_add_task(
             "Queued follow-up",
@@ -3600,6 +3649,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             id="task-root",
             action_name="feature/review",
             agent_id=reviewer.id,
+            labels=[self.server_mod.AUTO_CLOSE_SPAWNED_LABEL],
         )
         state.board_add_task(
             "Queued follow-up",

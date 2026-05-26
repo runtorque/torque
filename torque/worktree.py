@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import asdict, dataclass
 from typing import Optional
 
 from .config import log
@@ -23,6 +24,23 @@ TORQUE_EXCLUDE_ENTRIES = [
     ".torque/claude-auto-memory-original.json",
     ".torque/torque-system-prompt-*.md",
 ]
+
+@dataclass
+class ExistingWorktreeTarget:
+    """Validated, non-mutating view of an existing git worktree."""
+
+    repo_root: str
+    worktree_path: str
+    branch: str
+    head_sha: str
+    base_branch: str = ""
+    git_root: str = ""
+    is_dirty: bool = False
+    listed_worktree_entry: dict | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
 
 _CLAUDE_CODE_SETTINGS_DIR = ".claude"
 _CLAUDE_CODE_SETTINGS_FILE = "settings.local.json"
@@ -4225,6 +4243,443 @@ class WorktreeManager:
         except Exception:
             log.exception("Failed to update worktree exclude file")
 
+    async def validate_existing_worktree(
+            self,
+            worktree_path: str,
+            *,
+            repo_root: str = "",
+            branch: str = "",
+            base_branch: str = "",
+            worktree_submodules=None,
+    ) -> ExistingWorktreeTarget:
+        """Validate an already-existing linked worktree without mutating refs.
+
+        This is the shared path/branch target primitive for driverless
+        merge/PR/remove/adopt flows. It intentionally performs only reads:
+        no checkout, branch creation, reset, or worktree creation.
+        """
+        wt_path = os.path.realpath(os.path.expanduser(
+            str(worktree_path or "").strip()
+        ))
+        if not wt_path or not os.path.isdir(wt_path):
+            raise ValueError("worktree_path must be an existing directory")
+
+        resolved_repo = str(repo_root or "").strip()
+        if resolved_repo:
+            resolved_repo = os.path.realpath(os.path.expanduser(resolved_repo))
+        else:
+            resolved_repo = await self.get_repo_root(wt_path) or ""
+            if resolved_repo:
+                resolved_repo = os.path.realpath(os.path.expanduser(resolved_repo))
+        if not resolved_repo or not os.path.isdir(resolved_repo):
+            raise ValueError("repo_root could not be resolved for worktree_path")
+
+        entries = await self.list_worktrees(resolved_repo)
+        entry = None
+        for candidate in entries:
+            cand_path = str(candidate.get("path", "") or "").strip()
+            if cand_path and self._same_worktree_path(cand_path, wt_path):
+                entry = dict(candidate)
+                break
+        if not entry:
+            raise ValueError("worktree_path is not listed by git worktree list")
+        if entry.get("bare"):
+            raise ValueError("bare worktrees cannot be targeted")
+        if entry.get("detached"):
+            raise ValueError("worktree is detached; a branch target is required")
+
+        actual_branch = (await self.get_current_branch(wt_path) or "").strip()
+        if not actual_branch or actual_branch == "HEAD":
+            raise ValueError("worktree is detached; a branch target is required")
+        requested_branch = str(branch or "").strip() or actual_branch
+        if requested_branch != actual_branch:
+            raise ValueError(
+                f"requested branch {requested_branch!r} does not match "
+                f"worktree branch {actual_branch!r}"
+            )
+        entry_branch = str(entry.get("branch", "") or "").strip()
+        if entry_branch and entry_branch != requested_branch:
+            raise ValueError(
+                f"git worktree list reports branch {entry_branch!r}, not "
+                f"{requested_branch!r}"
+            )
+        if not await self._branch_exists(resolved_repo, requested_branch):
+            raise ValueError(f"local branch does not exist: {requested_branch}")
+
+        head_sha = await self.rev_parse(wt_path, "HEAD") or ""
+        branch_sha = await self.rev_parse(resolved_repo, requested_branch) or ""
+        if not head_sha:
+            raise ValueError("could not resolve worktree HEAD")
+        if not branch_sha:
+            raise ValueError(f"could not resolve branch: {requested_branch}")
+        if head_sha != branch_sha:
+            raise ValueError(
+                "worktree HEAD does not match requested branch tip "
+                f"({head_sha[:12]} != {branch_sha[:12]})"
+            )
+
+        probe = type("ExistingWorktreeProbe", (), {
+            "id": f"driverless:{requested_branch}",
+            "name": requested_branch,
+            "worktree_path": wt_path,
+            "worktree_repo_root": resolved_repo,
+            "git_root": resolved_repo,
+            "worktree_branch": requested_branch,
+            "worktree_base_branch": str(base_branch or "").strip(),
+        })()
+        is_dirty = await self.has_uncommitted_changes(
+            probe,
+            worktree_submodules=worktree_submodules,
+        )
+        return ExistingWorktreeTarget(
+            repo_root=resolved_repo,
+            worktree_path=wt_path,
+            branch=requested_branch,
+            head_sha=head_sha,
+            base_branch=str(base_branch or "").strip(),
+            git_root=resolved_repo,
+            is_dirty=bool(is_dirty),
+            listed_worktree_entry=entry,
+        )
+
+    async def verify_mechanical_gitlink_commit(
+            self,
+            cell,
+            *,
+            previous_head: str,
+            new_head: str,
+            worktree_submodules,
+    ) -> dict:
+        """Machine-verify a boundary advance as exactly one gitlink-only commit."""
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        wt_path = str(getattr(cell, "worktree_path", "") or "").strip()
+        previous_head = str(previous_head or "").strip()
+        new_head = str(new_head or "").strip()
+        allowed_paths = _normalize_worktree_submodules(worktree_submodules)
+        if not repo_root or not wt_path:
+            return {"ok": False, "reason": "missing_worktree"}
+        if not previous_head or not new_head:
+            return {"ok": False, "reason": "missing_head"}
+        if not allowed_paths:
+            return {"ok": False, "reason": "no_configured_submodules"}
+
+        current_head = await self.rev_parse(wt_path, "HEAD") or ""
+        if current_head != new_head:
+            return {
+                "ok": False,
+                "reason": "new_head_mismatch",
+                "current_head": current_head,
+                "new_head": new_head,
+            }
+        code, _out, _err = await self._git_run(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            previous_head,
+            new_head,
+        )
+        if code != 0:
+            return {"ok": False, "reason": "previous_not_ancestor"}
+        code, count_out, err = await self._git_run(
+            repo_root,
+            "rev-list",
+            "--count",
+            f"{previous_head}..{new_head}",
+        )
+        if code != 0:
+            return {"ok": False, "reason": "rev_list_failed", "error": err}
+        try:
+            commit_count = int((count_out or "0").strip())
+        except ValueError:
+            commit_count = -1
+        if commit_count != 1:
+            return {
+                "ok": False,
+                "reason": "expected_exactly_one_commit",
+                "commit_count": commit_count,
+            }
+        code, commit_out, err = await self._git_run(
+            repo_root,
+            "rev-list",
+            "--max-count=1",
+            f"{previous_head}..{new_head}",
+        )
+        if code != 0 or not commit_out.strip():
+            return {"ok": False, "reason": "mechanical_commit_missing", "error": err}
+        mechanical_commit = commit_out.strip().splitlines()[0]
+
+        code, raw_out, err = await self._git_run(
+            repo_root,
+            "diff",
+            "--raw",
+            "--no-renames",
+            previous_head,
+            new_head,
+        )
+        if code != 0:
+            return {"ok": False, "reason": "diff_failed", "error": err}
+        changed_paths: list[str] = []
+        raw_entries: list[dict] = []
+        for line in (raw_out or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                meta, path = line.split("\t", 1)
+            except ValueError:
+                return {"ok": False, "reason": "diff_parse_failed", "raw": raw_out}
+            parts = meta.split()
+            if len(parts) < 5:
+                return {"ok": False, "reason": "diff_parse_failed", "raw": raw_out}
+            old_mode = parts[0].lstrip(":")
+            new_mode = parts[1]
+            status = parts[4]
+            norm_path = _normalize_repo_rel_path(path)
+            raw_entries.append({
+                "path": norm_path,
+                "old_mode": old_mode,
+                "new_mode": new_mode,
+                "status": status,
+            })
+            if old_mode != "160000" or new_mode != "160000":
+                return {
+                    "ok": False,
+                    "reason": "non_gitlink_diff",
+                    "path": norm_path,
+                    "old_mode": old_mode,
+                    "new_mode": new_mode,
+                }
+            if norm_path not in allowed_paths:
+                return {
+                    "ok": False,
+                    "reason": "path_not_configured_submodule",
+                    "path": norm_path,
+                    "allowed_paths": allowed_paths,
+                }
+            changed_paths.append(norm_path)
+        if not changed_paths:
+            return {"ok": False, "reason": "empty_diff"}
+
+        dirty = await self.has_uncommitted_changes(
+            cell,
+            worktree_submodules=allowed_paths,
+        )
+        if dirty:
+            return {"ok": False, "reason": "dirty_worktree"}
+
+        submodule_states = await self.nested_submodule_head_states(
+            cell,
+            allowed_paths,
+        )
+        sub_by_path = {item.get("path", ""): item for item in submodule_states}
+        for path in changed_paths:
+            state = sub_by_path.get(path)
+            if not state:
+                return {"ok": False, "reason": "missing_submodule_state", "path": path}
+            if state.get("commit_sha", "") != state.get("gitlink_sha", ""):
+                return {
+                    "ok": False,
+                    "reason": "submodule_head_gitlink_mismatch",
+                    "path": path,
+                    "commit_sha": state.get("commit_sha", ""),
+                    "gitlink_sha": state.get("gitlink_sha", ""),
+                }
+
+        return {
+            "ok": True,
+            "mechanical_commit": mechanical_commit,
+            "paths": sorted(set(changed_paths)),
+            "raw_entries": raw_entries,
+            "submodules": submodule_states,
+        }
+
+    async def _safe_deinit_submodules_for_remove(
+            self,
+            worktree_path: str,
+            submodule_paths: list[str],
+    ) -> dict:
+        result = {"ok": True, "deinitialized": [], "errors": []}
+        for path in submodule_paths:
+            code, out, err = await self._git_run(
+                worktree_path,
+                "submodule",
+                "deinit",
+                "--",
+                path,
+            )
+            entry = {
+                "path": path,
+                "returncode": code,
+                "stdout": out,
+                "stderr": err,
+            }
+            if code != 0:
+                result["ok"] = False
+                result["errors"].append(entry)
+            else:
+                result["deinitialized"].append(entry)
+        return result
+
+    async def safe_remove_existing_worktree(
+            self,
+            target: ExistingWorktreeTarget | dict,
+            *,
+            delete_branch: bool = True,
+            worktree_submodules=None,
+    ) -> dict:
+        """Safely remove a validated existing worktree without force defaults."""
+        if isinstance(target, ExistingWorktreeTarget):
+            target_dict = target.to_dict()
+        else:
+            target_dict = dict(target or {})
+        repo_root = str(target_dict.get("repo_root", "") or "").strip()
+        worktree_path = str(target_dict.get("worktree_path", "") or "").strip()
+        branch = str(target_dict.get("branch", "") or "").strip()
+        base_branch = str(target_dict.get("base_branch", "") or "").strip()
+        result = {
+            "ok": False,
+            "worktree_removed": False,
+            "branch_deleted": not bool(delete_branch and branch),
+            "branch_preserved": bool(not delete_branch and branch),
+            "path": worktree_path,
+            "branch": branch,
+            "base_branch": base_branch,
+            "delete_branch": bool(delete_branch),
+            "safe": True,
+            "forced": False,
+            "deinit": {},
+            "nested_submodules": [],
+            "pruned": [],
+            "mismatches": [],
+            "message": "",
+        }
+        try:
+            validated = await self.validate_existing_worktree(
+                worktree_path,
+                repo_root=repo_root,
+                branch=branch,
+                base_branch=base_branch,
+                worktree_submodules=worktree_submodules,
+            )
+        except ValueError as exc:
+            result["message"] = str(exc)
+            result["mismatches"].append("target_validation_failed")
+            return result
+        if validated.is_dirty:
+            result["message"] = "Refusing to remove dirty worktree"
+            result["mismatches"].append("dirty_worktree")
+            return result
+        branch = validated.branch
+        repo_root = validated.repo_root
+        worktree_path = validated.worktree_path
+        base_branch = validated.base_branch or base_branch
+        submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+        probe = type("SafeRemoveProbe", (), {
+            "id": f"driverless:{branch}",
+            "name": branch,
+            "worktree_path": worktree_path,
+            "worktree_repo_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": base_branch,
+        })()
+        if delete_branch:
+            if not base_branch:
+                result["message"] = "base_branch is required to delete branch safely"
+                result["mismatches"].append("missing_base_branch")
+                return result
+            merged = (
+                await self.is_merged(
+                    probe,
+                    worktree_submodules=submodule_paths,
+                )
+                if submodule_paths
+                else await self.is_branch_merged(
+                    repo_root,
+                    branch=branch,
+                    base_branch=base_branch,
+                )
+            )
+            if not merged:
+                result["message"] = (
+                    f"Refusing to delete unmerged branch {branch!r} "
+                    f"relative to {base_branch!r}"
+                )
+                result["mismatches"].append("branch_not_merged")
+                return result
+
+        infos = []
+        if submodule_paths:
+            infos = await self._nested_submodule_infos(
+                repo_root,
+                worktree_path,
+                submodule_paths,
+                ref="HEAD",
+                require_worktree=False,
+                strict=False,
+            )
+            deinit = await self._safe_deinit_submodules_for_remove(
+                worktree_path,
+                submodule_paths,
+            )
+            result["deinit"] = deinit
+            if not deinit.get("ok"):
+                result["message"] = "Submodule deinit refused; worktree preserved"
+                result["mismatches"].append("submodule_deinit_failed")
+                return result
+
+        remove_result = await self.remove_path_result(
+            repo_root,
+            worktree_path,
+            branch=branch if delete_branch else "",
+            name=branch or worktree_path,
+            force=False,
+            worktree_submodules=submodule_paths,
+        )
+        result.update({
+            key: value
+            for key, value in remove_result.items()
+            if key not in {"ok", "message"}
+        })
+        result["branch"] = branch
+        result["base_branch"] = base_branch
+        result["nested_submodules"] = remove_result.get("nested_submodules", [])
+        result["mismatches"] = list(remove_result.get("mismatches", []) or [])
+        result["worktree_removed"] = bool(remove_result.get("worktree_removed"))
+        result["branch_deleted"] = (
+            bool(remove_result.get("branch_deleted")) if delete_branch
+            else False
+        )
+        result["branch_preserved"] = bool(not delete_branch and branch)
+        await self.prune_admin(repo_root)
+        result["pruned"].append({"repo_root": repo_root})
+        for info in infos:
+            module_dir = str(info.get("module_dir", "") or "").strip()
+            if module_dir:
+                await self.prune_admin(module_dir)
+                result["pruned"].append({"repo_root": module_dir})
+                if info.get("repo_root"):
+                    result.setdefault("module_core_worktree", []).append(
+                        await self._ensure_submodule_module_core_worktree_for_info(info)
+                    )
+        result["ok"] = bool(
+            result["worktree_removed"]
+            and (
+                (delete_branch and result["branch_deleted"])
+                or (not delete_branch)
+            )
+        )
+        if result["ok"]:
+            result["message"] = (
+                "Worktree removed; branch preserved"
+                if not delete_branch else "Worktree removed"
+            )
+        else:
+            result["message"] = remove_result.get(
+                "message",
+                "Safe worktree removal failed",
+            )
+        return result
+
     async def remove_path(self, repo_root: str, worktree_path: str, *,
                           branch: str = "",
                           name: str = "",
@@ -6988,7 +7443,8 @@ class WorktreeManager:
         )
 
     async def create_pr(self, cell, title: str = "",
-                        body: str = "") -> dict:
+                        body: str = "",
+                        worktree_submodules=None) -> dict:
         """Push the worktree branch and create a GitHub PR.
 
         Returns structured GitHub PR metadata on success or an ``error`` on
@@ -7021,6 +7477,21 @@ class WorktreeManager:
                 "create_pr",
                 f"Branch {branch} has no commits ahead of {base}.",
             )
+
+        submodule_paths = _normalize_worktree_submodules(worktree_submodules)
+        if submodule_paths:
+            published = await self.publish_nested_submodule_branches_for_merge(
+                cell,
+                submodule_paths,
+            )
+            if not published.get("ok"):
+                return published
+            nested_preflight = await self.nested_submodule_merge_preflight(
+                cell,
+                submodule_paths,
+            )
+            if not nested_preflight.get("ok"):
+                return nested_preflight
 
         pushed = await self.github_push_branch(
             wt, remote_info.get("remote", "origin"), branch

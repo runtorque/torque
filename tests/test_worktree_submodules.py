@@ -1497,3 +1497,46 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             "",
             await self._git_out("status", "--porcelain", cwd=sub_wt),
         )
+
+    async def test_verify_mechanical_gitlink_commit_accepts_single_configured_gitlink(self):
+        cell, wt = await self._create_nested()
+        previous = await self._git_out("rev-parse", "HEAD", cwd=wt)
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nmechanical line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Mechanical gitlink bump",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        new_head = await self._git_out("rev-parse", "HEAD", cwd=wt)
+
+        result = await self.mgr.verify_mechanical_gitlink_commit(
+            cell,
+            previous_head=previous,
+            new_head=new_head,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["paths"], [self.sub_path])
+        self.assertEqual(result["mechanical_commit"], new_head)
+
+    async def test_verify_mechanical_gitlink_commit_refuses_non_gitlink_commit(self):
+        cell, wt = await self._create_nested()
+        previous = await self._git_out("rev-parse", "HEAD", cwd=wt)
+        (wt / "README.md").write_text("super line one\nnot mechanical\n")
+        await self._git("add", "README.md", cwd=wt)
+        await self._git("commit", "-m", "Non gitlink change", cwd=wt)
+        new_head = await self._git_out("rev-parse", "HEAD", cwd=wt)
+
+        result = await self.mgr.verify_mechanical_gitlink_commit(
+            cell,
+            previous_head=previous,
+            new_head=new_head,
+            worktree_submodules=[self.sub_path],
+        )
+
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["reason"], "non_gitlink_diff")
