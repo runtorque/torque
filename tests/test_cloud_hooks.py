@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import json
 import os
@@ -64,6 +65,37 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["agent_ids"], ["a1"])
         self.assertEqual(
             self.cloud_hooks.notify_direct_message_observers("direct_message_saved", row),
+            0,
+        )
+
+    async def test_state_delta_observer_registry_schedules_and_unregisters(self):
+        ops = [{"op": "agent_upsert", "id": "agent-1", "last_event_at": 123}]
+        self.assertEqual(
+            self.cloud_hooks.notify_state_delta_observers(ops, state=object()),
+            0,
+        )
+
+        events = []
+
+        async def observer(batch):
+            events.append(batch)
+
+        unregister = self.cloud_hooks.register_state_delta_observer(observer)
+        try:
+            self.assertEqual(
+                self.cloud_hooks.notify_state_delta_observers(ops, state=object()),
+                1,
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+        finally:
+            unregister()
+
+        self.assertEqual(events, [ops])
+        ops[0]["id"] = "mutated"
+        self.assertEqual(events[0][0]["id"], "agent-1")
+        self.assertEqual(
+            self.cloud_hooks.notify_state_delta_observers(ops, state=object()),
             0,
         )
 
@@ -166,7 +198,7 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reports[0]["daemon_id"], "daemon-1")
         self.assertIn("cryptography is unavailable", reports[0]["last_error"])
 
-    async def test_enabled_connector_imports_factory_and_unregisters_observer_on_stop(self):
+    async def test_enabled_connector_imports_factory_and_unregisters_observers_on_stop(self):
         module_name = "fake_torque_ee_connector_for_test"
         module = types.ModuleType(module_name)
 
@@ -176,6 +208,7 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
                 self.started = False
                 self.stopped = False
                 self.events = []
+                self.delta_batches = []
 
             async def start(self):
                 self.started = True
@@ -185,6 +218,9 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
 
             def on_direct_message(self, event):
                 self.events.append(event)
+
+            async def on_state_delta(self, ops):
+                self.delta_batches.append(ops)
 
         module.create_connector = lambda context: FakeConnector(context)
         sys.modules[module_name] = module
@@ -196,6 +232,7 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
                 state=object(),
                 remote_user_agent_message=_remote_user_agent_message,
                 register_direct_message_observer=self.cloud_hooks.register_direct_message_observer,
+                register_state_delta_observer=self.cloud_hooks.register_state_delta_observer,
             )
             with self.assertLogs(self.cloud_hooks.log, level="INFO") as captured:
                 runtime = await self.cloud_hooks.start_cloud_connector(context)
@@ -213,12 +250,26 @@ class CloudHooksTests(unittest.IsolatedAsyncioTestCase):
         row = {"id": "msg-2", "sender_kind": "agent", "sender_id": "a2", "recipient_kind": "user"}
         self.cloud_hooks.notify_direct_message_observers("direct_message_saved", row)
         self.assertEqual(runtime.connector.events[0]["row"]["id"], "msg-2")
+        self.cloud_hooks.notify_state_delta_observers(
+            [{"op": "agent_upsert", "id": "a2"}],
+            state=object(),
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertEqual(runtime.connector.delta_batches[0][0]["id"], "a2")
 
         await self.cloud_hooks.stop_cloud_connector(runtime)
         self.assertTrue(runtime.connector.stopped)
         self.assertFalse(runtime.started)
         self.assertEqual(
             self.cloud_hooks.notify_direct_message_observers("direct_message_saved", row),
+            0,
+        )
+        self.assertEqual(
+            self.cloud_hooks.notify_state_delta_observers(
+                [{"op": "agent_upsert", "id": "a2"}],
+                state=object(),
+            ),
             0,
         )
 

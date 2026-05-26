@@ -81,6 +81,50 @@ class ServerModuleExtractionTests(unittest.TestCase):
             {'id': terminal.id, 'name': 'Terminal', 'kind': 'terminal'},
         ])
 
+    def test_relay_agent_state_snapshot_is_group_scoped_and_ephemeral_only(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g1')
+        state.add_group('g2')
+        state.active_group = 'g1'
+
+        worker = state.add_agent(name='Worker', group='g1')
+        worker.kind = 'worker'
+        worker.status = 'running'
+        worker.activity_detail = 'torque_context'
+        worker.needs_attention = True
+        worker.context_window = {
+            'used_pct': 42.2,
+            'used_tokens': 12345,
+            'model': 'claude',
+        }
+        worker.provider_usage = {
+            'five_hour': {
+                'available': True,
+                'used_percentage': 12,
+                'resets_at': '2026-05-26T05:00:00Z',
+            },
+        }
+        tombstoned = state.add_agent(name='Deleted Worker', group='g1')
+        tombstoned.kind = 'worker'
+        tombstoned.deleted_at = 123.0
+        other = state.add_agent(name='Other Worker', group='g2')
+        other.kind = 'worker'
+
+        snapshot = self.server_mod._relay_agent_state_snapshot(state)
+
+        self.assertEqual(len(snapshot), 1)
+        self.assertEqual(snapshot[0]['id'], worker.id)
+        self.assertEqual(snapshot[0]['name'], 'Worker')
+        self.assertEqual(snapshot[0]['kind'], 'worker')
+        self.assertEqual(snapshot[0]['status'], 'running')
+        self.assertEqual(snapshot[0]['activity_detail'], 'torque_context')
+        self.assertTrue(snapshot[0]['needs_attention'])
+        self.assertEqual(snapshot[0]['context_window']['used_pct'], 42.2)
+        self.assertEqual(
+            snapshot[0]['provider_usage']['five_hour']['used_percentage'],
+            12,
+        )
+
     def test_action_to_yaml_keeps_prompt_as_block_scalar(self):
         yaml_text = self.server_actions._action_to_yaml('review/code', {
             'description': 'Review code',

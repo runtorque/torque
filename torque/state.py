@@ -9143,6 +9143,11 @@ class MatrixState:
                 *(ws.send_str(msg) for ws in clients),
                 return_exceptions=True,
             )
+        # Optional cloud connectors observe the SAME already-coalesced delta
+        # batch that local WS clients received.  Notification is best-effort and
+        # scheduled by cloud_hooks so connector projection/network work can never
+        # block local WS delivery.
+        cloud_hooks.notify_state_delta_observers(ops, state=self)
         dead: set[web.WebSocketResponse] = {
             ws for ws, result in zip(clients, results)
             if isinstance(result, BaseException)
