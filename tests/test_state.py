@@ -2784,6 +2784,72 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
 
+class MatrixStateDurableSettingsTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    async def test_durable_global_settings_failure_preserves_memory(self):
+        attempted = []
+
+        class BadDB:
+            async def save_global_settings_durable(self, gs):
+                attempted.append({
+                    "relay_credential_id": gs.relay_credential_id,
+                    "relay_private_key_path": gs.relay_private_key_path,
+                })
+                raise OSError("settings database is read-only")
+
+        state = self.state_mod.MatrixState(db=BadDB())
+        state.global_settings = self.state_mod.GlobalSettings(
+            relay_credential_id="cred-old",
+            relay_private_key_path="/keys/old.pem",
+        )
+
+        with self.assertRaises(OSError):
+            await state.update_global_settings_durable(
+                relay_credential_id=" cred-new ",
+                relay_private_key_path=" /keys/new.pem ",
+            )
+
+        self.assertEqual(attempted, [{
+            "relay_credential_id": "cred-new",
+            "relay_private_key_path": "/keys/new.pem",
+        }])
+        self.assertEqual(state.global_settings.relay_credential_id, "cred-old")
+        self.assertEqual(
+            state.global_settings.relay_private_key_path,
+            "/keys/old.pem",
+        )
+
+    async def test_durable_global_settings_success_applies_after_save(self):
+        saved = []
+
+        class GoodDB:
+            async def save_global_settings_durable(self, gs):
+                saved.append({
+                    "relay_credential_id": gs.relay_credential_id,
+                    "relay_private_key_path": gs.relay_private_key_path,
+                })
+
+        state = self.state_mod.MatrixState(db=GoodDB())
+        await state.update_global_settings_durable(
+            relay_credential_id="cred-new",
+            relay_private_key_path="/keys/new.pem",
+        )
+
+        self.assertEqual(saved, [{
+            "relay_credential_id": "cred-new",
+            "relay_private_key_path": "/keys/new.pem",
+        }])
+        self.assertEqual(state.global_settings.relay_credential_id, "cred-new")
+        self.assertEqual(
+            state.global_settings.relay_private_key_path,
+            "/keys/new.pem",
+        )
+
+
 class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
