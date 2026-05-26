@@ -594,6 +594,44 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["head_sha"], "def456")
         self.assertEqual(remaining, [])
 
+    async def test_create_or_reuse_pr_no_commits_between_is_already_merged(self):
+        err = "GraphQL: No commits between main and feature (createPullRequest)"
+        fake, _calls, remaining = self._fake_exec([
+            (
+                self._gh_pr_view_matcher("feature"),
+                FakeProcess(returncode=1, stderr="no pull requests found"),
+            ),
+            (
+                [
+                    "gh", "pr", "create",
+                    "--base", "main",
+                    "--head", "feature",
+                    "--title", "Feature",
+                    "--body", "Body",
+                ],
+                FakeProcess(returncode=1, stderr=err),
+            ),
+            (
+                self._gh_pr_view_matcher("feature"),
+                FakeProcess(returncode=1, stderr="no pull requests found"),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_create_or_reuse_pr(
+                "/wt", "feature", "main", title="Feature", body="Body"
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["phase"], "pr_create")
+        self.assertTrue(result["already_merged"])
+        self.assertTrue(result["no_commits_between"])
+        self.assertNotIn("error", result)
+        self.assertIn("no commits", result["warning"].lower())
+        self.assertEqual(result["url"], "")
+        self.assertEqual(remaining, [])
+
     async def test_github_pr_edit_body_updates_existing_pr_body(self):
         updated = {
             "url": "https://github.com/acme/repo/pull/7",
@@ -766,7 +804,7 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         fake, _calls, remaining = self._fake_exec([
             (
                 [
-                    "git", "-C", "/wt",
+                    "git", "-C", "/repo",
                     "fetch", "--prune", "origin",
                     "+refs/heads/main:refs/remotes/origin/main",
                 ],
@@ -813,7 +851,7 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         fake, _calls, remaining = self._fake_exec([
             (
                 [
-                    "git", "-C", "/wt",
+                    "git", "-C", "/repo",
                     "fetch", "--prune", "origin",
                     "+refs/heads/main:refs/remotes/origin/main",
                 ],

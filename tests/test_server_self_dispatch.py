@@ -2132,7 +2132,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     class _FakePrWorktreeManager:
         def __init__(self, merge_result, direct_result=None,
-                     push_result=None, force_retry_result=None):
+                     push_result=None, force_retry_result=None,
+                     sync_results=None, create_result=None,
+                     base_sha="base789"):
             self.merge_result = merge_result
             self.direct_result = direct_result or {"ok": True, "sha": "direct123"}
             self.push_result = push_result or {
@@ -2140,6 +2142,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "phase": "push_branch",
             }
             self.force_retry_result = force_retry_result
+            self.sync_results = list(sync_results or [])
+            self.create_result = create_result
+            self.base_sha = base_sha
             self.calls = []
             self.sync_calls = 0
 
@@ -2167,10 +2172,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 ("sync_base", self.sync_calls, worktree_path, repo_root,
                  remote, base_branch)
             )
+            if self.sync_results:
+                return dict(self.sync_results.pop(0))
             return {
                 "ok": True,
                 "phase": "remote_base_sync",
                 "synced": self.sync_calls > 1,
+                "base_sha": self.base_sha,
             }
 
         async def has_uncommitted_changes(self, _cell):
@@ -2261,6 +2269,8 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.calls.append(
                 ("create_pr", worktree_path, branch, base_branch, title, body)
             )
+            if self.create_result is not None:
+                return dict(self.create_result)
             return {
                 "ok": True,
                 "phase": "pr_create",
@@ -2271,6 +2281,10 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "merge_state": "CLEAN",
                 "existing": False,
             }
+
+        async def rev_parse(self, directory, ref):
+            self.calls.append(("rev_parse", directory, ref))
+            return self.base_sha if ref == "main" else ""
 
         async def github_request_squash_merge(
             self,
@@ -3161,6 +3175,185 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.lane, "Done")
         self.assertEqual(task.agent_id, "")
         self.assertEqual(worktree_mgr.sync_calls, 2)
+
+    async def test_worktree_merge_pr_post_merge_sync_failure_is_warning(self):
+        state, worker, task = self._make_pr_merge_state()
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            sync_results=[
+                {"ok": True, "phase": "remote_base_sync", "synced": False},
+                {
+                    "ok": False,
+                    "phase": "remote_base_sync",
+                    "error": "Unable to read current working directory",
+                },
+            ],
+        )
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            cleanup_calls.append((close_agent, remove_worktree))
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertTrue(result["merged"])
+        self.assertEqual(result["sha"], "squash789")
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(cleanup_calls, [(True, True)])
+        self.assertEqual(worktree_mgr.sync_calls, 2)
+        self.assertEqual(result["remote_base_sync"]["phase"], "remote_base_sync")
+        self.assertIn("post-merge local base sync failed", result["warning"])
+        self.assertEqual(
+            result["post_success_warnings"][-1]["phase"],
+            "remote_base_sync",
+        )
+
+    async def test_worktree_merge_pr_post_cleanup_error_is_warning(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": True,
+                "errors": [
+                    "REMOTE_UNAVAILABLE: Unable to read current working directory",
+                ],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertTrue(result["merged"])
+        self.assertEqual(task.lane, "Done")
+        self.assertIn("post-merge cleanup", result["warning"])
+        self.assertEqual(
+            result["post_success_warnings"][0]["phase"],
+            "post_merge_cleanup",
+        )
+        self.assertEqual(
+            result["cleanup"]["errors"],
+            ["REMOTE_UNAVAILABLE: Unable to read current working directory"],
+        )
+
+    async def test_worktree_merge_pr_already_merged_create_result_finalizes(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager(
+            {"ok": False, "phase": "pr_merge", "error": "must not merge"},
+            create_result={
+                "ok": True,
+                "phase": "pr_create",
+                "url": "",
+                "number": None,
+                "head_sha": "",
+                "state": "MERGED",
+                "merge_state": "",
+                "existing": False,
+                "already_merged": True,
+                "no_commits_between": True,
+                "warning": (
+                    "GitHub reported no commits between main and "
+                    "torque/worker; treating PR creation as already landed."
+                ),
+            },
+            base_sha="base-landed-sha",
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertTrue(result["merged"])
+        self.assertTrue(result["already_merged"])
+        self.assertEqual(result["sha"], "base-landed-sha")
+        self.assertEqual(task.lane, "Done")
+        self.assertNotIn("merge_pr", [call[0] for call in worktree_mgr.calls])
+        self.assertIn("no commits", result["warning"].lower())
+        self.assertEqual(result["pr"]["status"], "merged")
 
     async def test_worktree_merge_pr_success_snapshots_metadata_before_cleanup(self):
         state, worker, _task = self._make_pr_merge_state()

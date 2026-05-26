@@ -1440,6 +1440,84 @@ def _attach_auto_force_push_metadata(result: dict,
     return result
 
 
+def _append_post_success_warning(result: dict, message: str, *,
+                                 phase: str = "",
+                                 detail: dict | None = None) -> dict:
+    """Attach a non-fatal warning for work done after merge success."""
+    if not isinstance(result, dict):
+        return result
+    message = str(message or "").strip()
+    if not message:
+        return result
+    existing = str(result.get("warning") or "").strip()
+    result["warning"] = f"{existing}\n{message}" if existing else message
+    entry = {"message": message}
+    if phase:
+        entry["phase"] = phase
+    if isinstance(detail, dict):
+        entry["detail"] = detail
+    result.setdefault("post_success_warnings", []).append(entry)
+    return result
+
+
+def _post_success_result_error(result: dict | None, fallback: str) -> str:
+    result = result or {}
+    return str(
+        result.get("error")
+        or result.get("message")
+        or result.get("stderr")
+        or result.get("stdout")
+        or fallback
+    ).strip()
+
+
+def _post_success_cleanup_warning(cleanup: dict | None) -> str:
+    cleanup = cleanup or {}
+    errors = [
+        str(item or "").strip()
+        for item in (cleanup.get("errors") or [])
+        if str(item or "").strip()
+    ]
+    if not errors:
+        return ""
+    return (
+        "Merge landed, but post-merge cleanup reported warnings: "
+        + "; ".join(errors)
+    )
+
+
+async def _resolve_already_merged_sha(
+    *,
+    worktree_mgr: WorktreeManager,
+    cell,
+    repo_root: str,
+    worktree_path: str,
+    base_branch: str,
+    pr_result: dict | None = None,
+) -> str:
+    """Best-effort landed SHA for an already-merged/no-op PR result."""
+    pr_result = pr_result or {}
+    for key in ("merge_commit_sha", "base_sha"):
+        sha = str(pr_result.get(key) or "").strip()
+        if sha:
+            return sha
+    rev_parse = getattr(worktree_mgr, "rev_parse", None)
+    if callable(rev_parse):
+        for directory in (repo_root, worktree_path):
+            directory = str(directory or "").strip()
+            if not directory:
+                continue
+            sha = await rev_parse(directory, base_branch)
+            if sha:
+                return str(sha).strip()
+    current_head = getattr(worktree_mgr, "current_head", None)
+    if callable(current_head):
+        sha = await current_head(cell)
+        if sha:
+            return str(sha).strip()
+    return str(pr_result.get("head_sha") or "").strip()
+
+
 async def _finalize_successful_worktree_merge(
     *,
     state: MatrixState,
@@ -1631,6 +1709,15 @@ async def _finalize_successful_worktree_merge(
         "cleanup": cleanup,
     }
     _attach_stale_base(result, stale_base)
+    cleanup_warning = _post_success_cleanup_warning(cleanup)
+    if cleanup_warning:
+        log.warning(cleanup_warning)
+        _append_post_success_warning(
+            result,
+            cleanup_warning,
+            phase="post_merge_cleanup",
+            detail=cleanup,
+        )
     if queued_followups and reset_failed_with_followups:
         log.warning(
             "Skipping post-merge follow-up dispatch for '%s': worktree reset "
@@ -1726,7 +1813,7 @@ async def _finalize_successful_driverless_worktree_merge(
     result = {
         "type": "worktree_merge",
         "id": aid,
-        "ok": not bool(cleanup.get("errors")),
+        "ok": True,
         "sha": merge_sha,
         "branch": target.worktree_branch,
         "base_branch": target.worktree_base_branch,
@@ -1737,8 +1824,15 @@ async def _finalize_successful_driverless_worktree_merge(
     if preserve_diff_warning:
         result["warning"] = preserve_diff_warning
     _attach_stale_base(result, stale_base)
-    if cleanup.get("errors"):
-        result["error"] = "; ".join(cleanup["errors"])
+    cleanup_warning = _post_success_cleanup_warning(cleanup)
+    if cleanup_warning:
+        log.warning(cleanup_warning)
+        _append_post_success_warning(
+            result,
+            cleanup_warning,
+            phase="post_merge_cleanup",
+            detail=cleanup,
+        )
     return result
 
 
@@ -2165,7 +2259,12 @@ async def _run_pr_worktree_merge(
             result["workflow_breach"] = gates["workflow_breach"]
         return result
 
-    if close_issues_via_pr and linked_issues and pr_result.get("existing"):
+    already_merged_pr = bool(pr_result.get("already_merged"))
+    if (
+            close_issues_via_pr
+            and linked_issues
+            and pr_result.get("existing")
+            and not already_merged_pr):
         existing_body = str(pr_result.get("body") or "")
         updated_existing_body = await _append_github_closing_refs_to_pr_body(
             body=existing_body,
@@ -2212,7 +2311,7 @@ async def _run_pr_worktree_merge(
         remote=remote,
         base_branch=base_branch,
         branch=branch,
-        status="created",
+        status="merged" if already_merged_pr else "created",
     )
     _record_pr_metadata_on_latest_boundary(
         state,
@@ -2220,37 +2319,60 @@ async def _run_pr_worktree_merge(
         pr_metadata,
         requested_cleanup=requested_cleanup,
     )
-    squash_body = _append_pr_url_to_squash_body(
-        body,
-        str(pr_result.get("url") or pr_metadata.get("url") or ""),
-    )
 
-    head_sha = str(pr_result.get("head_sha") or "").strip()
-    if not head_sha:
-        current_head = getattr(worktree_mgr, "current_head", None)
-        if callable(current_head):
-            head_sha = await current_head(cell) or ""
-    merge_result = await worktree_mgr.github_request_squash_merge(
-        wt,
-        pr_result.get("number") or pr_result.get("url", ""),
-        head_sha,
-        subject=title,
-        body=squash_body,
-    )
-    if (
-        not merge_result.get("ok")
-        and not bool(data.get("disable_auto_merge"))
-        and _pr_merge_failure_allows_auto(merge_result)
-    ):
+    if already_merged_pr:
+        merge_sha = await _resolve_already_merged_sha(
+            worktree_mgr=worktree_mgr,
+            cell=cell,
+            repo_root=repo_root or wt,
+            worktree_path=wt,
+            base_branch=base_branch,
+            pr_result=pr_result,
+        )
+        merge_result = {
+            "ok": True,
+            "phase": "pr_merge",
+            "url": pr_result.get("url", ""),
+            "number": pr_result.get("number"),
+            "head_sha": pr_result.get("head_sha", ""),
+            "merge_commit_sha": merge_sha,
+            "merge_state": pr_result.get("merge_state", ""),
+            "pending": False,
+            "already_merged": True,
+            "pr_status": pr_result,
+        }
+    else:
+        squash_body = _append_pr_url_to_squash_body(
+            body,
+            str(pr_result.get("url") or pr_metadata.get("url") or ""),
+        )
+
+        head_sha = str(pr_result.get("head_sha") or "").strip()
+        if not head_sha:
+            current_head = getattr(worktree_mgr, "current_head", None)
+            if callable(current_head):
+                head_sha = await current_head(cell) or ""
         merge_result = await worktree_mgr.github_request_squash_merge(
             wt,
             pr_result.get("number") or pr_result.get("url", ""),
             head_sha,
             subject=title,
             body=squash_body,
-            auto=True,
-            url=pr_result.get("url", ""),
         )
+        if (
+            not merge_result.get("ok")
+            and not bool(data.get("disable_auto_merge"))
+            and _pr_merge_failure_allows_auto(merge_result)
+        ):
+            merge_result = await worktree_mgr.github_request_squash_merge(
+                wt,
+                pr_result.get("number") or pr_result.get("url", ""),
+                head_sha,
+                subject=title,
+                body=squash_body,
+                auto=True,
+                url=pr_result.get("url", ""),
+            )
 
     pending = bool(merge_result.get("pending"))
     pr_metadata = _pr_result_metadata(
@@ -2313,6 +2435,8 @@ async def _run_pr_worktree_merge(
     merge_sha = str(merge_result.get("merge_commit_sha") or "").strip()
     if not merge_sha:
         merge_sha = str(pr_metadata.get("merge_commit_sha") or "").strip()
+    if not merge_sha and merge_result.get("already_merged"):
+        merge_sha = str(pr_result.get("head_sha") or "already-merged").strip()
     if not merge_sha:
         result = _worktree_merge_error(
             aid,
@@ -2334,25 +2458,16 @@ async def _run_pr_worktree_merge(
         remote,
         base_branch,
     )
+    post_merge_sync_warning = ""
     if not post_merge_sync.get("ok"):
-        result = _worktree_merge_error(
-            aid,
-            post_merge_sync.get(
-                "error",
-                "Pull request merged but local base sync failed.",
-            ),
-            mode="pull_request",
-            phase=post_merge_sync.get("phase", "remote_base_sync"),
-            url=pr_metadata.get("url", ""),
-            pr_url=pr_metadata.get("url", ""),
-            pr=pr_metadata,
-            sha=merge_sha,
-            remote_base_sync=post_merge_sync,
+        post_merge_sync_warning = (
+            "Pull request is merged, but post-merge local base sync failed: "
+            + _post_success_result_error(
+                post_merge_sync,
+                "local base sync failed",
+            )
         )
-        _attach_auto_force_push_metadata(result, push_metadata_result)
-        if gates.get("workflow_breach"):
-            result["workflow_breach"] = gates["workflow_breach"]
-        return result
+        log.warning(post_merge_sync_warning)
 
     if getattr(cell, "driverless", False):
         result = await _finalize_successful_driverless_worktree_merge(
@@ -2399,6 +2514,24 @@ async def _run_pr_worktree_merge(
     })
     if nested_merge_result:
         result["nested_submodules"] = nested_merge_result
+    if already_merged_pr:
+        result["already_merged"] = True
+        pr_warning = str(pr_result.get("warning") or "").strip()
+        if pr_warning:
+            _append_post_success_warning(
+                result,
+                pr_warning,
+                phase=pr_result.get("phase", "pr_create"),
+                detail=pr_result,
+            )
+    if post_merge_sync_warning:
+        result["remote_base_sync"] = post_merge_sync
+        _append_post_success_warning(
+            result,
+            post_merge_sync_warning,
+            phase=post_merge_sync.get("phase", "remote_base_sync"),
+            detail=post_merge_sync,
+        )
     _attach_auto_force_push_metadata(result, push_metadata_result)
     if gates.get("workflow_breach"):
         result["workflow_breach"] = gates["workflow_breach"]

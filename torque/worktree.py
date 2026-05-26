@@ -358,6 +358,25 @@ def _is_non_fast_forward_push_error(text: str) -> bool:
     )
 
 
+def _is_no_commits_between_pr_create_error(
+        text: str,
+        base_branch: str = "",
+        branch: str = "",
+) -> bool:
+    """Return true for GitHub's already-landed/no-op PR error."""
+    lower = str(text or "").lower()
+    if "no commits between" not in lower:
+        return False
+    base = str(base_branch or "").strip().lower()
+    head = str(branch or "").strip().lower()
+    if base and base not in lower:
+        return False
+    # Branch names may be truncated/escaped by GitHub, so don't require the
+    # head branch to be present.  If it is present, this is still the same
+    # already-merged/no-op race we want to tolerate.
+    return True
+
+
 def _extract_pr_number_from_url(url: str) -> int | None:
     match = _PR_NUMBER_RE.search(str(url or "").strip())
     if not match:
@@ -2060,8 +2079,9 @@ class WorktreeManager:
         )
 
         try:
+            remove_cwd = module_dir or sub_wt_path
             cmd = [
-                "git", "-C", sub_wt_path,
+                "git", "-C", remove_cwd,
                 "worktree", "remove", sub_wt_path,
             ]
             if force:
@@ -6798,16 +6818,16 @@ class WorktreeManager:
         repo_root = str(repo_root or "").strip() or worktree_path
         remote = str(remote or "").strip()
         base_branch = str(base_branch or "").strip()
-        if not worktree_path or not repo_root or not remote or not base_branch:
+        if not repo_root or not remote or not base_branch:
             return _worktree_error(
                 phase,
-                "Worktree path, repo root, remote, and base branch are required.",
+                "Repo root, remote, and base branch are required.",
             )
 
         remote_ref = f"refs/remotes/{remote}/{base_branch}"
         fetch_refspec = f"+refs/heads/{base_branch}:{remote_ref}"
         fetch = await self._run_capture(
-            "git", "-C", worktree_path,
+            "git", "-C", repo_root,
             "fetch", "--prune", remote, fetch_refspec,
         )
         if fetch.get("returncode") != 0:
@@ -7254,10 +7274,24 @@ class WorktreeManager:
         base_branch = base_branch or "main"
 
         existing = await self.github_pr_view(worktree_path, branch)
-        if existing.get("ok") \
-                and str(existing.get("state") or "").upper() == "OPEN":
-            existing.update({"phase": phase, "existing": True})
-            return existing
+        if existing.get("ok"):
+            existing_state = str(existing.get("state") or "").upper()
+            if existing_state == "OPEN":
+                existing.update({"phase": phase, "existing": True})
+                return existing
+            if existing_state == "MERGED" \
+                    or existing.get("merged_at") \
+                    or existing.get("merge_commit_sha"):
+                existing.update({
+                    "phase": phase,
+                    "existing": True,
+                    "already_merged": True,
+                    "warning": (
+                        f"Branch {branch} already has a merged pull request; "
+                        "treating PR creation as already landed."
+                    ),
+                })
+                return existing
 
         create = await self._run_gh(
             worktree_path,
@@ -7275,11 +7309,48 @@ class WorktreeManager:
         if create.get("returncode") != 0:
             err = create.get("stderr") or create.get("stdout") \
                 or "gh pr create failed"
-            if "already exists" in err.lower():
+            lowered = err.lower()
+            if "already exists" in lowered:
                 reused = await self.github_pr_view(worktree_path, branch)
                 if reused.get("ok"):
                     reused.update({"phase": phase, "existing": True})
                     return reused
+            if _is_no_commits_between_pr_create_error(
+                    err,
+                    base_branch=base_branch,
+                    branch=branch,
+            ):
+                reused = await self.github_pr_view(worktree_path, branch)
+                warning = (
+                    f"GitHub reported no commits between {base_branch} "
+                    f"and {branch}; treating PR creation as already landed."
+                )
+                if reused.get("ok"):
+                    reused.update({
+                        "phase": phase,
+                        "existing": True,
+                        "already_merged": True,
+                        "no_commits_between": True,
+                        "warning": warning,
+                        "pr_create_error": err,
+                    })
+                    return reused
+                return _worktree_ok(
+                    phase,
+                    url="",
+                    number=None,
+                    head_sha="",
+                    state="MERGED",
+                    merge_state="",
+                    merge_commit_sha="",
+                    existing=False,
+                    already_merged=True,
+                    no_commits_between=True,
+                    warning=warning,
+                    pr_create_error=err,
+                    base_branch=base_branch,
+                    branch=branch,
+                )
             return _worktree_error(phase, f"Failed to create PR: {err}")
 
         url = (create.get("stdout") or "").splitlines()[-1].strip()
