@@ -1813,7 +1813,7 @@ class TorqueDBTests(unittest.TestCase):
             "codex",
         )
 
-    def test_matrix_state_load_normalizes_legacy_github_label_creation_false(self):
+    def test_matrix_state_load_preserves_explicit_github_label_creation_false(self):
         self.db.save_groups({"g": []}, {"g": "g"})
         self.db.save_group_members("g", [])
         self.db.save_group_settings(
@@ -1831,15 +1831,39 @@ class TorqueDBTests(unittest.TestCase):
         state = MatrixState(self.db)
         state.load()
 
-        self.assertTrue(
+        self.assertFalse(
             state.group_settings["g"].board_sync_github[
                 "github_create_missing_labels"
             ]
         )
-        self.assertTrue(
+        self.assertFalse(
             self.db.load_all()["group_settings"]["g"]["board_sync_github"][
                 "github_create_missing_labels"
             ]
+        )
+
+    def test_matrix_state_load_keeps_unset_github_label_creation_sparse(self):
+        self.db.save_groups({"g": []}, {"g": "g"})
+        self.db.save_group_members("g", [])
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(
+                board_sync_provider="github",
+                board_sync_enabled=True,
+                board_sync_github={"github_repo": "owner/repo"},
+            ),
+        )
+
+        state = MatrixState(self.db)
+        state.load()
+
+        self.assertNotIn(
+            "github_create_missing_labels",
+            state.group_settings["g"].board_sync_github,
+        )
+        self.assertNotIn(
+            "github_create_missing_labels",
+            self.db.load_all()["group_settings"]["g"]["board_sync_github"],
         )
 
     def test_save_all_ignores_unknown_group_settings_fields(self):

@@ -5300,12 +5300,6 @@ class MatrixState:
                         strict=False,
                     )
                     self.group_settings[gname] = GroupSettings(**filtered)
-                    if self._normalize_loaded_github_label_defaults(gname):
-                        log.info(
-                            "Normalized GitHub board-sync label creation "
-                            "default for group '%s'",
-                            gname,
-                        )
             # Promote orphaned children whose parent was deleted
             for aid, cell in self.agents.items():
                 if cell.parent_id and cell.parent_id not in self.agents:
@@ -5630,29 +5624,6 @@ class MatrixState:
     def get_group_settings(self, name: str) -> GroupSettings:
         """Return group settings, creating defaults if group has none."""
         return self.group_settings.get(name, GroupSettings())
-
-    def _normalize_loaded_github_label_defaults(self, group: str) -> bool:
-        """One-time :696 compatibility: legacy false label defaults become true.
-
-        Older modal payloads could persist ``github_create_missing_labels:
-        false`` even though the product default is on.  Normalize loaded
-        GitHub-sync groups so the effective persisted value matches the modal
-        default without requiring a schema migration.
-        """
-        gs = self.group_settings.get(group)
-        if not gs:
-            return False
-        provider = _normalize_board_sync_provider(gs.board_sync_provider)
-        if provider != "github" or not bool(gs.board_sync_enabled):
-            return False
-        nested = gs.board_sync_github if isinstance(gs.board_sync_github, dict) else {}
-        if nested.get("github_create_missing_labels") is not False:
-            return False
-        nested = dict(nested)
-        nested["github_create_missing_labels"] = True
-        gs.board_sync_github = nested
-        self._db_save_group_settings(group)
-        return True
 
     def should_show_guidance_hint(self, hint_type: str, cell) -> bool:
         """Return whether a recurring soft guidance hint should be shown.

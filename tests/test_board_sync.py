@@ -178,6 +178,22 @@ class BoardSyncProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["phase"], "provider_lookup")
 
+    async def test_github_settings_defaults_missing_label_creation_to_true_when_unset(self):
+        settings = extract_github_settings(GroupSettings(
+            board_sync_provider="github",
+            board_sync_enabled=True,
+            board_sync_github={},
+        ))
+
+        self.assertTrue(settings.create_missing_labels)
+
+        explicit_false = extract_github_settings(GroupSettings(
+            board_sync_provider="github",
+            board_sync_enabled=True,
+            board_sync_github={"github_create_missing_labels": False},
+        ))
+        self.assertFalse(explicit_false.create_missing_labels)
+
     async def test_register_provider_accepts_custom_provider(self):
         register_provider("fake", lambda: FakeBoardSyncProvider())
         self.assertEqual(get_provider("fake").name, "fake")

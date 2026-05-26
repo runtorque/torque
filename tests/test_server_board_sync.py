@@ -802,3 +802,31 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
             {"external_id", "external_url", "torque_marker"},
         )
         self.assertEqual(len(state.board_tasks), 3)
+
+    async def test_import_preview_keeps_valid_items_when_provider_reports_item_error(self):
+        provider = FakeBoardSyncProvider()
+        provider.external_items = [
+            {
+                "ok": False,
+                "provider": "github",
+                "phase": "issue_view",
+                "error": 'Unknown JSON field: "repository"',
+                "issue_number": 1,
+            },
+            {
+                "provider": "github",
+                "external_id": "owner/repo#2",
+                "external_url": "https://github.com/owner/repo/issues/2",
+                "title": "Import me",
+            },
+        ]
+        state = make_state()
+        manager = self.make_manager(state, provider)
+
+        result = await manager.import_preview("g")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["unlinked_count"], 1)
+        self.assertEqual(result["items"][0]["external_id"], "owner/repo#2")
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn("repository", result["errors"][0]["error"])
