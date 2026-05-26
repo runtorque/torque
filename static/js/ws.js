@@ -527,6 +527,7 @@ function connect() {
       state.specializations = Array.isArray(msg.specializations)
         ? msg.specializations
         : [];
+      state.specializations_group = msg.group || '';
       if (typeof renderEngineerLaunchSpecializations === 'function') {
         renderEngineerLaunchSpecializations();
       }

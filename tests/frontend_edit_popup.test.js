@@ -110,6 +110,7 @@ function createSandbox() {
         { name: 'runtime-pty', preamble: 'PTY.', priorities: [] },
         { name: 'prompts-config', preamble: 'Prompts.', priorities: [] },
       ],
+      specializations_group: 'alpha',
     },
     sendCalls: [],
     document: {
@@ -193,6 +194,64 @@ test('edit popup shows ordered specialization picker for engineers and saves one
     engineer_specializations: ['prompts-config', 'ui-ux', 'runtime-pty'],
   });
   assert.equal(Object.hasOwn(updateCall, 'icon'), false, 'edit save must not send icon');
+});
+
+
+test('edit popup preserves engineer selections while stale group specializations are loaded', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'a-only', preamble: 'Group A.', priorities: [] },
+  ];
+  sandbox.state.specializations_group = 'group-a';
+  sandbox.state.agents['engineer-b'] = {
+    id: 'engineer-b',
+    name: 'Group B Engineer',
+    group: 'group-b',
+    cell_type: 'agent',
+    kind: 'engineer',
+    engineer_specializations: ['b-only', 'b-only'],
+  };
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext("openEditCell('engineer-b')", context);
+
+  assert.deepEqual(
+    labelsFor(ensure('edit-specializations-selected')),
+    ['b-only (primary)'],
+    'stale specialization list for another group must not drop selected specs',
+  );
+  assert.deepEqual(
+    optionsFor(ensure('edit-specializations-available')),
+    [''],
+    'stale options from another group should not be offered',
+  );
+
+  sandbox.state.specializations = [
+    { name: 'b-only', preamble: 'Group B.', priorities: [] },
+    { name: 'b-extra', preamble: 'Extra.', priorities: [] },
+  ];
+  sandbox.state.specializations_group = 'group-b';
+  vm.runInContext('renderEditEngineerSpecializations()', context);
+
+  assert.deepEqual(
+    labelsFor(ensure('edit-specializations-selected')),
+    ['b-only (primary)'],
+  );
+  assert.deepEqual(
+    optionsFor(ensure('edit-specializations-available')),
+    ['', 'b-extra'],
+  );
+  ensure('edit-name-input').value = 'Group B Prime';
+  vm.runInContext('submitEdit()', context);
+
+  const updateCall = sandbox.sendCalls.find((msg) => msg.cmd === 'update_agent');
+  assert.deepEqual(JSON.parse(JSON.stringify(updateCall)), {
+    cmd: 'update_agent',
+    id: 'engineer-b',
+    name: 'Group B Prime',
+    engineer_specializations: ['b-only'],
+  });
 });
 
 test('edit popup hides specialization picker for non-engineer agents', () => {

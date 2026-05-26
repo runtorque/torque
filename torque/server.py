@@ -12884,6 +12884,8 @@ async def main(connection=None):
                         "name": new_name,
                         "tab_color": new_color,
                     }
+                    if "icon" in data:
+                        update_fields["icon"] = data.get("icon", cell.icon)
                     if "engineer_specializations" in data:
                         if cell.kind != "engineer":
                             result = {

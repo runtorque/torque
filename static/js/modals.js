@@ -784,21 +784,30 @@ function submitArchitectDecision() {
 /* -- Edit Agent / Terminal --------------------------------------------- */
 let _editCellId = null;
 let _editEngineerSpecs = [];
+let _editSpecializationsGroup = '';
+
+function _editSpecializationsListMatchesGroup() {
+  if (!_editSpecializationsGroup) return true;
+  return String((state && state.specializations_group) || '') === _editSpecializationsGroup;
+}
 
 function _editAvailableSpecs() {
+  if (!_editSpecializationsListMatchesGroup()) return [];
   return (state.specializations || [])
     .map(function (s) { return s && s.name; })
     .filter(Boolean);
 }
 
-function _editNormalizeEngineerSpecs(raw) {
-  const available = new Set(_editAvailableSpecs());
+function _editNormalizeEngineerSpecs(raw, opts) {
+  opts = opts || {};
+  const shouldFilter = !!opts.filterKnown && _editSpecializationsListMatchesGroup();
+  const available = shouldFilter ? new Set(_editAvailableSpecs()) : null;
   const out = [];
   const seen = new Set();
   (Array.isArray(raw) ? raw : []).forEach(function (item) {
     const name = String(item || '').trim();
     if (!name || seen.has(name)) return;
-    if (available.size && !available.has(name)) return;
+    if (available && available.size && !available.has(name)) return;
     seen.add(name);
     out.push(name);
   });
@@ -809,7 +818,7 @@ function renderEditEngineerSpecializations() {
   const selectedEl = document.getElementById('edit-specializations-selected');
   const availableEl = document.getElementById('edit-specializations-available');
   if (!selectedEl || !availableEl) return;
-  _editEngineerSpecs = _editNormalizeEngineerSpecs(_editEngineerSpecs);
+  _editEngineerSpecs = _editNormalizeEngineerSpecs(_editEngineerSpecs, { filterKnown: true });
   const selected = _editEngineerSpecs;
   selectedEl.innerHTML = '';
   selected.forEach(function (name, idx) {
@@ -888,6 +897,7 @@ function openEditCell(id) {
   if (!cell) return;
   _editCellId = id;
   _editEngineerSpecs = [];
+  _editSpecializationsGroup = '';
 
   document.getElementById('edit-title').textContent =
     cell.cell_type === 'terminal' ? 'Edit Terminal' :
@@ -896,11 +906,16 @@ function openEditCell(id) {
 
   const specsRow = document.getElementById('edit-specializations-row');
   if (cell.kind === 'engineer') {
-    _editEngineerSpecs = _editNormalizeEngineerSpecs(cell.engineer_specializations || []);
+    _editSpecializationsGroup = String(cell.group || '');
+    _editEngineerSpecs = _editNormalizeEngineerSpecs(
+      cell.engineer_specializations || [],
+      { filterKnown: true }
+    );
     if (specsRow) specsRow.classList.remove('hidden');
     send({ cmd: 'list_specializations', group: cell.group || '' });
     renderEditEngineerSpecializations();
   } else {
+    _editSpecializationsGroup = '';
     if (specsRow) specsRow.classList.add('hidden');
   }
 
@@ -916,11 +931,15 @@ function submitEdit() {
   if (!name) return;
   const payload = { cmd: 'update_agent', id: _editCellId, name };
   if (cell && cell.kind === 'engineer') {
-    payload.engineer_specializations = _editNormalizeEngineerSpecs(_editEngineerSpecs);
+    payload.engineer_specializations = _editNormalizeEngineerSpecs(
+      _editEngineerSpecs,
+      { filterKnown: true }
+    );
   }
   send(payload);
   _editCellId = null;
   _editEngineerSpecs = [];
+  _editSpecializationsGroup = '';
   closeModals();
 }
 
