@@ -770,6 +770,16 @@ async def _resolve_worktree_command_target_value(
         }
     if aid:
         cell = state.agents.get(aid)
+        if not cell:
+            return None, None, {
+                "type": "error",
+                "message": f"Agent/worktree not found: {aid}",
+            }
+        if state.agent_is_tombstoned(cell):
+            return None, None, {
+                "type": "error",
+                "message": f"Agent/worktree is tombstoned: {aid}",
+            }
         await _reconcile_worktree_branch(state, worktree_mgr, cell)
         target = _target_from_cell(cell)
         return target, cell, None
@@ -12883,14 +12893,14 @@ async def main(connection=None):
                                     target_window_id=data.get(
                                         "target_window_id", ""))
 
-                elif cmd == "worktree_advance_boundary":
-                    target, live_cell, error_result = await _resolve_worktree_command_target_value(
-                        state=state,
-                        worktree_mgr=worktree_mgr,
-                        data=data,
-                        require_base=True,
-                        group=str(data.get("group", "") or ""),
-                    )
+            elif cmd == "worktree_advance_boundary":
+                target, live_cell, error_result = await _resolve_worktree_command_target_value(
+                    state=state,
+                    worktree_mgr=worktree_mgr,
+                    data=data,
+                    require_base=True,
+                    group=str(data.get("group", "") or ""),
+                )
                 if error_result:
                     result = {
                         "type": "worktree_advance_boundary",
