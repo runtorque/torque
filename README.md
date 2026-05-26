@@ -127,6 +127,8 @@ the board, but a raw card is just a title and a note — hand it to the architec
 so it can fill in the details, attach the right action, assign an engineer, and
 dispatch the work. → [The board](docs/tasks/board.md)
 
+![The Torque board: a Backlog of active and queued cards, In Progress work in flight, and a Done lane of completed tasks.](docs/images/board-full.png)
+
 ## Events, context, and communication
 
 Agents don't work in isolation — they talk to each other. Workers report to
@@ -144,6 +146,10 @@ building a durable trail of what was done and why. They also carry a shared
 have learned — so a discovery made by one agent doesn't have to be rediscovered
 by the next, and long-running engineers and architects retain their bearings
 across many tasks.
+
+| Agent messages & digests | Every MCP tool call | The work journal |
+|:---:|:---:|:---:|
+| ![The events inbox showing messages and queued digests between agents.](docs/images/events-inbox.png) | ![A separate panel listing each MCP tool call an agent makes.](docs/images/events-mcp.png) | ![An agent's journal: a durable, timestamped trail of what it did and why.](docs/images/journal.png) |
 
 The payoff is that Torque tends to run smoother the longer you use it. As
 journals fill in and context accumulates, the agents get better at managing
