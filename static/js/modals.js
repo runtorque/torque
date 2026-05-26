@@ -784,10 +784,10 @@ function submitArchitectDecision() {
 /* -- Edit Agent / Terminal --------------------------------------------- */
 let _editCellId = null;
 let _editEngineerSpecs = [];
-let _editSpecializationsGroup = '';
+let _editSpecializationsGroup = null;
 
 function _editSpecializationsListMatchesGroup() {
-  if (!_editSpecializationsGroup) return true;
+  if (_editSpecializationsGroup === null) return true;
   return String((state && state.specializations_group) || '') === _editSpecializationsGroup;
 }
 
@@ -897,7 +897,7 @@ function openEditCell(id) {
   if (!cell) return;
   _editCellId = id;
   _editEngineerSpecs = [];
-  _editSpecializationsGroup = '';
+  _editSpecializationsGroup = null;
 
   document.getElementById('edit-title').textContent =
     cell.cell_type === 'terminal' ? 'Edit Terminal' :
@@ -915,7 +915,7 @@ function openEditCell(id) {
     send({ cmd: 'list_specializations', group: cell.group || '' });
     renderEditEngineerSpecializations();
   } else {
-    _editSpecializationsGroup = '';
+    _editSpecializationsGroup = null;
     if (specsRow) specsRow.classList.add('hidden');
   }
 
@@ -939,7 +939,7 @@ function submitEdit() {
   send(payload);
   _editCellId = null;
   _editEngineerSpecs = [];
-  _editSpecializationsGroup = '';
+  _editSpecializationsGroup = null;
   closeModals();
 }
 

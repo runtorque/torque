@@ -254,6 +254,52 @@ test('edit popup preserves engineer selections while stale group specializations
   });
 });
 
+test('edit popup treats empty engineer group as a real specialization scope', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'other-only', preamble: 'Other group.', priorities: [] },
+  ];
+  sandbox.state.specializations_group = 'other-group';
+  sandbox.state.agents['engineer-default'] = {
+    id: 'engineer-default',
+    name: 'Default Group Engineer',
+    group: '',
+    cell_type: 'agent',
+    kind: 'engineer',
+    engineer_specializations: ['default-only'],
+  };
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext("openEditCell('engineer-default')", context);
+
+  assert.deepEqual(
+    labelsFor(ensure('edit-specializations-selected')),
+    ['default-only (primary)'],
+  );
+  assert.deepEqual(
+    optionsFor(ensure('edit-specializations-available')),
+    [''],
+    'stale non-default-group options should not be offered for default group',
+  );
+
+  sandbox.state.specializations = [
+    { name: 'default-only', preamble: 'Default.', priorities: [] },
+    { name: 'default-extra', preamble: 'Extra.', priorities: [] },
+  ];
+  sandbox.state.specializations_group = '';
+  vm.runInContext('renderEditEngineerSpecializations()', context);
+
+  assert.deepEqual(
+    labelsFor(ensure('edit-specializations-selected')),
+    ['default-only (primary)'],
+  );
+  assert.deepEqual(
+    optionsFor(ensure('edit-specializations-available')),
+    ['', 'default-extra'],
+  );
+});
+
 test('edit popup hides specialization picker for non-engineer agents', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
