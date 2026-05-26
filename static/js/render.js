@@ -601,6 +601,13 @@ function _activeGroupTransition(prevGroup, nextGroup, opts) {
     _reloadVisibleGroupScopedPanelApps();
   }
 
+  if (typeof refreshStatusBar === 'function') {
+    refreshStatusBar({ groupChanged: true });
+  }
+  if (typeof statusBarRequestDeployState === 'function') {
+    statusBarRequestDeployState({ force: true });
+  }
+
   const result = { changed: true, saved };
   if (opts.render === false) return result;
 

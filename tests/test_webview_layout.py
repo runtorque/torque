@@ -171,5 +171,85 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
         )
 
 
+def _taskbar_html(html: str) -> str:
+    start = html.index('<div id="taskbar">')
+    end = html.index("<!-- Context menu", start)
+    return html[start:end]
+
+
+class WebviewStatusBarLayoutTests(unittest.TestCase):
+    """Bottom status bar keeps stable taskbar IDs/buttons while moving apps right."""
+
+    PANEL_APPS = [
+        "board",
+        "chat",
+        "actions",
+        "templates",
+        "history",
+        "context",
+        "engineer",
+        "events",
+        "supervisor",
+        "health",
+    ]
+
+    def test_taskbar_status_clusters_and_daemon_anchor_are_preserved(self):
+        taskbar = _taskbar_html(_read(WEBVIEW))
+
+        self.assertIn('id="statusbar-info"', taskbar)
+        self.assertIn('id="statusbar-panel-buttons"', taskbar)
+        self.assertLess(
+            taskbar.index('id="statusbar-info"'),
+            taskbar.index('id="statusbar-panel-buttons"'),
+            "status info cluster must stay left of panel buttons",
+        )
+        self.assertRegex(
+            taskbar,
+            r'id="statusbar-info"[\s\S]*id="daemon-status-indicator"[\s\S]*id="taskbar-conn-dot"',
+            "daemon wrapper and #taskbar-conn-dot anchor must stay inside statusbar-info",
+        )
+        self.assertRegex(
+            taskbar,
+            r'id="statusbar-claude-usage"[\s\S]*Claude —',
+            "Claude usage chip must render as an unknown placeholder",
+        )
+
+    def test_panel_buttons_keep_ids_data_app_labels_and_toggle_handlers(self):
+        taskbar = _taskbar_html(_read(WEBVIEW))
+        panel_start = taskbar.index('id="statusbar-panel-buttons"')
+        panel_html = taskbar[panel_start:]
+
+        for app in self.PANEL_APPS:
+            self.assertRegex(
+                panel_html,
+                r'<button[^>]*class="[^"]*\btaskbar-app\b[^"]*"[^>]*data-app="'
+                + re.escape(app)
+                + r'"[^>]*onclick="togglePanel\('
+                + re.escape(repr(app))
+                + r'\)"',
+                f"{app} panel button must remain a .taskbar-app with its toggle handler",
+            )
+
+        self.assertIn('id="taskbar-restore-layout"', panel_html)
+        self.assertGreater(
+            panel_html.index('id="taskbar-restore-layout"'),
+            panel_html.rindex('class="taskbar-app"'),
+            "Restore layout button follows the panel app buttons in the right cluster",
+        )
+
+    def test_status_bar_script_loads_after_events_before_panel_manager(self):
+        html = _read(WEBVIEW)
+        self.assertLess(
+            html.index('/static/js/events.js'),
+            html.index('/static/js/status_bar.js'),
+            "status_bar.js may use events helpers, so it must load after events.js",
+        )
+        self.assertLess(
+            html.index('/static/js/status_bar.js'),
+            html.index('/static/js/panel_manager.js'),
+            "status_bar.js must be ready before panel_manager/main drive panel state",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

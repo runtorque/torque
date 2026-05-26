@@ -989,8 +989,10 @@ function createRelayStatusHarness() {
   header.appendChild(connDot);
   document.body.appendChild(header);
   const taskbar = document.register('taskbar');
+  const statusInfo = document.register('statusbar-info');
   const taskbarConnDot = document.register('taskbar-conn-dot');
-  taskbar.appendChild(taskbarConnDot);
+  statusInfo.appendChild(taskbarConnDot);
+  taskbar.appendChild(statusInfo);
   document.body.appendChild(taskbar);
   // Modal "Relay" detail row elements (connection sub-block, TORQUE:560).
   [
@@ -5344,14 +5346,18 @@ function createDaemonStatusHarness(overrides = {}) {
   header.appendChild(headerDot);
   document.body.appendChild(header);
   const taskbar = document.register('taskbar');
+  const info = document.register('statusbar-info');
+  const panelButtons = document.register('statusbar-panel-buttons');
   const restore = document.register('taskbar-restore-layout');
   const daemon = document.register('daemon-status-indicator');
   const taskbarDot = document.register('taskbar-conn-dot');
   const label = document.register('taskbar-daemon-label');
   daemon.appendChild(taskbarDot);
   daemon.appendChild(label);
-  taskbar.appendChild(restore);
-  taskbar.appendChild(daemon);
+  info.appendChild(daemon);
+  panelButtons.appendChild(restore);
+  taskbar.appendChild(info);
+  taskbar.appendChild(panelButtons);
   document.body.appendChild(taskbar);
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
@@ -5365,12 +5371,18 @@ test('taskbar contains Restore layout and labelled daemon status members', () =>
   const taskbarEnd = html.indexOf('<!-- Context menu', taskbarStart);
   assert.ok(taskbarStart >= 0 && taskbarEnd > taskbarStart, '#taskbar markup exists');
   const taskbarHtml = html.slice(taskbarStart, taskbarEnd);
+  assert.match(taskbarHtml, /id="statusbar-info"/);
+  assert.match(taskbarHtml, /id="statusbar-panel-buttons"/);
   assert.match(taskbarHtml, /id="taskbar-restore-layout"/);
   assert.match(taskbarHtml, /id="daemon-status-indicator"/);
   assert.match(taskbarHtml, /id="taskbar-conn-dot"/);
   assert.ok(
-    taskbarHtml.indexOf('id="taskbar-restore-layout"') < taskbarHtml.indexOf('id="daemon-status-indicator"'),
-    'Restore layout and daemon status both live inside the taskbar',
+    taskbarHtml.indexOf('id="daemon-status-indicator"') < taskbarHtml.indexOf('id="statusbar-panel-buttons"'),
+    'daemon status lives in the left status cluster before panel buttons',
+  );
+  assert.ok(
+    taskbarHtml.indexOf('id="taskbar-restore-layout"') > taskbarHtml.indexOf('id="statusbar-panel-buttons"'),
+    'Restore layout remains in the right panel-button cluster',
   );
 });
 
@@ -5451,12 +5463,14 @@ test('relay indicator mounts after the labelled daemon status wrapper', () => {
   header.appendChild(connDot);
   document.body.appendChild(header);
   const taskbar = document.register('taskbar');
+  const statusInfo = document.register('statusbar-info');
   const daemon = document.register('daemon-status-indicator');
   const taskbarConnDot = document.register('taskbar-conn-dot');
   const daemonLabel = document.register('taskbar-daemon-label');
   daemon.appendChild(taskbarConnDot);
   daemon.appendChild(daemonLabel);
-  taskbar.appendChild(daemon);
+  statusInfo.appendChild(daemon);
+  taskbar.appendChild(statusInfo);
   document.body.appendChild(taskbar);
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/relay_status.js');
@@ -5467,7 +5481,7 @@ test('relay indicator mounts after the labelled daemon status wrapper', () => {
     };
     refreshRelayStatusIndicator();
   `);
-  assert.deepEqual(taskbar.children.map((child) => child.id), [
+  assert.deepEqual(statusInfo.children.map((child) => child.id), [
     'daemon-status-indicator',
     'relay-status-indicator',
   ]);
@@ -5602,11 +5616,11 @@ test('relay_connection snapshot read populates state and renders the indicator',
     true,
   );
   assert.equal(jsonValue(context, '_relayStatusEls.label.textContent'), 'Relay');
-  // Default mount = taskbar: mounted as a sibling of #taskbar-conn-dot (same
-  // parent #taskbar), as a distinct labelled element (not a second bare dot).
-  const taskbar = document.getElementById('taskbar');
-  assert.ok(taskbar.children.some((c) => c.id === 'relay-status-indicator'));
-  assert.ok(taskbar.children.some((c) => c.id === 'taskbar-conn-dot'));
+  // Default mount = taskbar: relay_status.js anchors on #taskbar-conn-dot and
+  // mounts the labelled Relay chip as a sibling in the left status cluster.
+  const statusInfo = document.getElementById('statusbar-info');
+  assert.ok(statusInfo.children.some((c) => c.id === 'relay-status-indicator'));
+  assert.ok(statusInfo.children.some((c) => c.id === 'taskbar-conn-dot'));
 });
 
 test('relay_connection indicator mounts beside #taskbar-conn-dot (confirmed placement)', () => {
@@ -5620,11 +5634,11 @@ test('relay_connection indicator mounts beside #taskbar-conn-dot (confirmed plac
     };
     refreshRelayStatusIndicator();
   `);
-  const taskbar = document.getElementById('taskbar');
+  const statusInfo = document.getElementById('statusbar-info');
   const header = document.getElementById('header-host');
   assert.ok(
-    taskbar.children.some((c) => c.id === 'relay-status-indicator'),
-    'indicator mounts inside #taskbar',
+    statusInfo.children.some((c) => c.id === 'relay-status-indicator'),
+    'indicator mounts inside the taskbar status cluster',
   );
   assert.ok(
     !header.children.some((c) => c.id === 'relay-status-indicator'),
