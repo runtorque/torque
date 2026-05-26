@@ -652,6 +652,12 @@ function _relayDaemonCredentialClearResult() {
   if (el) { el.hidden = true; el.innerHTML = ''; }
 }
 
+function _relayDaemonCredentialClearRecovery() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-daemon-credential-recovery');
+  if (el) { el.hidden = true; el.innerHTML = ''; }
+}
+
 function _relayDaemonCredentialSetInFlight(on) {
   _relayDaemonCredentialInFlight = !!on;
   if (typeof document === 'undefined' || !document.getElementById) return;
@@ -733,6 +739,20 @@ function _relayDaemonCredentialComputeView(msg) {
         ? msg.provenance : {},
     };
   }
+  var recoveryCredentialId = String(msg.credential_id || '');
+  var recoveryPrivateKeyPath = String(msg.private_key_path || '');
+  if (msg.error === 'settings_write_failed'
+      && recoveryCredentialId && recoveryPrivateKeyPath) {
+    return {
+      kind: 'recovery',
+      message: String(msg.message || (
+        "Relay accepted the credential, but Torque couldn't save it to Settings."
+      )),
+      credentialId: recoveryCredentialId,
+      privateKeyPath: recoveryPrivateKeyPath,
+      detail: String(msg.detail || ''),
+    };
+  }
   return {
     kind: 'error',
     error: String(msg.error || ''),
@@ -770,6 +790,29 @@ function _relayDaemonCredentialRenderSuccess(view) {
   el.innerHTML = html;
 }
 
+function _relayDaemonCredentialRenderRecovery(view) {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var el = document.getElementById('gls-relay-daemon-credential-recovery');
+  if (!el) return;
+  var html = '<div class="gls-relay-daemon-credential-recovery-line">'
+    + '<span class="gls-relay-daemon-credential-badge gls-relay-daemon-credential-badge--warning">'
+    + 'Recovery</span>'
+    + '<span>' + _relayProbeEsc(view.message) + '</span>'
+    + '</div>';
+  html += '<div class="gls-relay-daemon-credential-field">'
+    + '<span>Credential ID</span><code>'
+    + _relayProbeEsc(view.credentialId) + '</code></div>';
+  html += '<div class="gls-relay-daemon-credential-field">'
+    + '<span>Private key path</span><code>'
+    + _relayProbeEsc(view.privateKeyPath) + '</code></div>';
+  if (view.detail) {
+    html += '<div class="gls-relay-daemon-credential-recovery-detail">'
+      + _relayProbeEsc(view.detail) + '</div>';
+  }
+  el.hidden = false;
+  el.innerHTML = html;
+}
+
 function _relayDaemonCredentialApplyRelayConfig(msg) {
   if (!msg || !msg.relay_config || typeof msg.relay_config !== 'object') return;
   if (typeof state !== 'undefined' && state) {
@@ -791,6 +834,7 @@ function _relayDaemonCredentialReset() {
   }
   _relayDaemonCredentialClearError();
   _relayDaemonCredentialClearResult();
+  _relayDaemonCredentialClearRecovery();
   relayDaemonCredentialRefreshButtonState();
 }
 
@@ -801,6 +845,7 @@ function _relayDaemonCredentialSubmit(skipExistingCredentialGuard) {
   var token = _relayDaemonCredentialTokenValue();
   _relayDaemonCredentialClearError();
   _relayDaemonCredentialClearResult();
+  _relayDaemonCredentialClearRecovery();
   if (!gate.canGenerate) {
     _relayDaemonCredentialRenderError({ message: gate.reason, detail: '' });
     return;
@@ -846,6 +891,7 @@ function handleRelayDaemonCredential(msg) {
   var view = _relayDaemonCredentialComputeView(msg);
   if (view.kind === 'success') {
     _relayDaemonCredentialClearError();
+    _relayDaemonCredentialClearRecovery();
     _relayDaemonCredentialApplyRelayConfig(msg);
     if (typeof document !== 'undefined' && document.getElementById) {
       var token = document.getElementById('gls-relay-daemon-credential-token');
@@ -853,7 +899,15 @@ function handleRelayDaemonCredential(msg) {
     }
     _relayDaemonCredentialRenderSuccess(view);
     relayDaemonCredentialRefreshButtonState();
+  } else if (view.kind === 'recovery') {
+    _relayDaemonCredentialClearError();
+    _relayDaemonCredentialClearResult();
+    // Keep the pasted one-time token in place after this recoverable local
+    // Settings write failure so the operator can retry after saving/revoking.
+    _relayDaemonCredentialRenderRecovery(view);
+    relayDaemonCredentialRefreshButtonState();
   } else if (view.kind === 'error') {
+    _relayDaemonCredentialClearRecovery();
     _relayDaemonCredentialClearResult();
     _relayDaemonCredentialRenderError(view);
   }
