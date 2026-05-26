@@ -387,21 +387,38 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((wt / "local-only").is_symlink())
         self.assertFalse((wt / "local-only" / "config.json").is_symlink())
 
-    def test_gitignored_symlink_filter_skips_dot_git_and_torque_runtime(self):
+    def test_gitignored_symlink_filter_only_skips_structural_excludes(self):
         filtered = self.mgr._filter_gitignored_symlink_candidates(
             str(self.repo_root),
-            ".torque/worktrees",
+            "worker-worktrees",
             [
                 ".git",
                 ".git/config",
+                ".torque",
                 ".torque/torque.db",
                 ".torque/logs/",
-                ".torque/worktrees/",
+                "worker-worktrees/",
+                "worker-worktrees/agent-123/tmp",
+                "../outside",
+                "/tmp/outside",
+                ".env",
+                ".env.local",
+                "secrets/api.key",
+                "credentials/token.json",
                 "node_modules/",
             ],
         )
 
-        self.assertEqual(filtered, ["node_modules"])
+        self.assertEqual(
+            filtered,
+            [
+                ".env",
+                ".env.local",
+                "secrets/api.key",
+                "credentials/token.json",
+                "node_modules",
+            ],
+        )
 
     async def test_get_repo_root_returns_common_root_for_linked_worktree(self):
         cell = self._make_cell()

@@ -662,6 +662,11 @@
             <input id="gs-wt-symlink-gitignored" type="checkbox"> Symlink gitignored paths
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Use Git ignore rules to symlink ignored files and directories into each new worktree. Torque skips its own .torque runtime directory and never replaces paths that already exist in the worktree.">?</span>
           </label>
+          <div class="label-hint">
+            Warning: symlinks every gitignored path, including .env, secrets,
+            credentials, and node_modules. Workers read and modify the real
+            files because these are symlinks, not copies.
+          </div>
           <div id="gs-wt-symlinks-list" class="wt-symlinks-chips"></div>
           <div style="display:flex;gap:4px;align-items:center">
             <input id="gs-wt-symlink-input" placeholder="e.g. etl/**/node_modules" autocomplete="off" style="flex:1"
