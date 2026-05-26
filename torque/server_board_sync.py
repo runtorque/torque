@@ -955,7 +955,13 @@ class BoardSyncManager:
                 item.setdefault("matched", False)
                 unlinked.append(item)
 
-        ok = not errors
+        ok = not errors or bool(unlinked or matched)
+        if errors and ok:
+            log.warning(
+                "Board import preview skipped %d provider item(s) for group %s",
+                len(errors),
+                group,
+            )
         result = {
             "ok": ok,
             "type": "board_import_preview",

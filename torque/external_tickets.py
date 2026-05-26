@@ -70,6 +70,20 @@ def build_external_url(provider: str, external_id: str,
     return ""
 
 
+def _github_repo_from_url(url: str) -> str:
+    gh = re.match(
+        r"^https?://github\.com/([^/]+)/([^/]+)/issues/\d+(?:[/?#].*)?$",
+        (url or "").strip(),
+        re.IGNORECASE,
+    )
+    return f"{gh.group(1)}/{gh.group(2)}" if gh else ""
+
+
+def _github_repo_from_external_id(external_id: str) -> str:
+    gh = re.match(r"^([^/\s]+/[^/\s#]+)#\d+$", (external_id or "").strip())
+    return gh.group(1) if gh else ""
+
+
 def normalize_link(provider: str = "", external_id: str = "",
                    external_url: str = "", ref: str = "") -> dict:
     ref_provider, ref_id, ref_url = parse_ref(ref, provider)
@@ -209,11 +223,13 @@ class GitHubExternalTicketAdapter(ExternalTicketAdapter):
         )
         raw = self._run_gh([
             "issue", "view", issue_ref,
-            "--json", "number,title,body,url,repository",
+            "--json", "number,title,body,url",
         ])
         data = json.loads(raw or "{}")
-        repo = ((data.get("repository") or {}).get("nameWithOwner", "")
-                or link["external_id"].split("#", 1)[0])
+        repo = (
+            _github_repo_from_url(data.get("url") or "")
+            or _github_repo_from_external_id(link["external_id"])
+        )
         number = data.get("number")
         gh_id = link["external_id"]
         if repo and number:

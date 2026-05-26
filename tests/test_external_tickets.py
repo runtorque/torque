@@ -1,5 +1,7 @@
+import json
 import types
 import unittest
+from unittest import mock
 
 from torque import external_tickets as ext
 
@@ -70,3 +72,32 @@ class ExternalTicketTests(unittest.TestCase):
         )
         self.assertIn("Torque completed: Fix flaky tests", comment)
         self.assertIn("Summary:", comment)
+
+    def test_github_import_uses_supported_issue_view_json_fields(self):
+        calls = []
+
+        def fake_run(cmd, check, capture_output, text):
+            calls.append(cmd)
+            self.assertEqual(cmd[:3], ["gh", "issue", "view"])
+            fields = cmd[cmd.index("--json") + 1]
+            self.assertNotIn("repository", fields.split(","))
+            return types.SimpleNamespace(
+                stdout=json.dumps({
+                    "number": 42,
+                    "title": "Imported",
+                    "body": "Body",
+                    "url": "https://github.com/openai/example/issues/42",
+                }),
+                stderr="",
+            )
+
+        with mock.patch.object(ext.subprocess, "run", side_effect=fake_run):
+            imported = ext.GitHubExternalTicketAdapter().import_ticket(
+                "https://github.com/openai/example/issues/42"
+            )
+
+        self.assertEqual(imported.provider, "github")
+        self.assertEqual(imported.external_id, "openai/example#42")
+        self.assertEqual(imported.external_url, "https://github.com/openai/example/issues/42")
+        self.assertEqual(imported.title, "Imported")
+        self.assertEqual(len(calls), 1)
