@@ -117,6 +117,10 @@ action produces a different prompt depending on the agent's role, its worktree
 state, and the task at hand. Define the graph once; Torque drives tasks through
 it. → [Actions](docs/tasks/actions.md), [Pipelines](docs/tasks/pipelines.md)
 
+| The transition graph | The action's prompt template |
+|:---:|:---:|
+| ![A DAG view: research → implement → review, with review bouncing back to implement for fixes.](docs/images/actions-dag.png) | ![The action editor with a Jinja prompt template rendered against the torque context.](docs/images/actions-editor.png) |
+
 ## The board and where tasks come from
 
 The kanban board is where work lives, and it can sync with external task
