@@ -1904,7 +1904,7 @@ class GlobalSettings:
     xterm_scrollback: int = XTERM_SCROLLBACK_DEFAULT  # embedded xterm.js history lines
     # General > Board
     default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))
-    # Keybindings — action name → {modifiers, keycode, character} overrides
+    # Keybindings — action name → {key, ctrl, meta, alt, shift} overrides
     keybindings: dict[str, dict] = field(default_factory=dict)
     # Pipeline
     max_pipeline_depth: int = 10  # 0 = unlimited

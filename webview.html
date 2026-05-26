@@ -1732,7 +1732,7 @@
   </div>
 </div>
 
-<!-- JS (order matters: constants → compact → ws → render → commands/native/markdown → modals → board core/modules → main) -->
+<!-- JS (order matters: constants → compact → ws → keybindings → render → commands/native/markdown → modals → board core/modules → main) -->
 <!-- Enterprise frontend injection seam. Community builds keep this manifest
      empty, so remote/EE panels fail closed unless enterprise assets replace or
      extend it before panel_manager.js runs. -->
@@ -1740,6 +1740,7 @@
 <script src="/static/js/constants.js"></script>
 <script src="/static/js/compact.js"></script>
 <script src="/static/js/ws.js"></script>
+<script src="/static/js/keybindings.js"></script>
 <!-- Vendored MIT QR encoder (provenance header in-file); MUST load before
      relay_status.js, which uses the `qrcode` global for the device-link QR. -->
 <script src="/static/js/vendor/qrcode-generator.js"></script>

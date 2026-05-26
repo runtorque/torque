@@ -2660,6 +2660,12 @@ function _applyDelta(ops) {
         const gs = Object.assign({}, op);
         delete gs.op;
         state.global_settings = gs;
+        if (typeof invalidateEffectiveKeybindings === 'function') {
+          invalidateEffectiveKeybindings();
+        }
+        if (typeof _syncKeybindingSettingsFromGlobal === 'function') {
+          _syncKeybindingSettingsFromGlobal(gs);
+        }
         if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
           _applyEmbeddedTerminalScrollbackFromSettings();
         }
