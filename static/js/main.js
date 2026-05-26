@@ -909,13 +909,27 @@ function moveFocusCreationControl(delta) {
 }
 
 function switchGroup(delta) {
-  const groups = window._navGroupOrder || [];
+  let groups = window._navGroupOrder || [];
+  if (typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()
+      && state && state.groups) {
+    groups = typeof _groupNamesSorted === 'function'
+      ? _groupNamesSorted()
+      : Object.keys(state.groups).sort();
+  }
   if (groups.length === 0) return;
 
-  const currentGroup = _focusedGroup();
+  const singleGroup = typeof _singleGroupModeEnabled === 'function'
+    && _singleGroupModeEnabled();
+  const currentGroup = (typeof _activeGroup === 'function' && singleGroup)
+    ? _activeGroup()
+    : _focusedGroup();
   let idx = currentGroup ? groups.indexOf(currentGroup) : -1;
-  const nextIdx = idx < 0 ? 0 : Math.max(0, Math.min(groups.length - 1, idx + delta));
+  const nextIdx = idx < 0 ? 0 : (idx + delta + groups.length) % groups.length;
   const targetGroup = groups[nextIdx];
+  if (typeof setActiveGroup === 'function' && singleGroup) {
+    setActiveGroup(targetGroup, { render: false });
+  }
 
   const groupItems = (window._navByGroup || {})[targetGroup] || [];
   if (groupItems.length > 0) {
@@ -972,6 +986,85 @@ function openAddTerminalForFocused() {
     const cell = state.agents[selectedAgentId];
     if (cell) quickAddTerminal(cell.group, selectedAgentId);
   }
+}
+
+function openAddTaskForFocused() {
+  if (typeof openAddTask !== 'function') return false;
+  var lane = '';
+  if (typeof _boardSelectedLane !== 'undefined' && _boardSelectedLane) {
+    lane = _boardSelectedLane;
+  }
+  openAddTask(lane);
+  return true;
+}
+
+function _composerFocusTargetCell() {
+  if (!state || !state.agents) return null;
+  var candidates = [];
+  if (focusedItemId) candidates.push(focusedItemId);
+  if (typeof selectedTerminalId !== 'undefined' && selectedTerminalId) candidates.push(selectedTerminalId);
+  if (selectedAgentId) candidates.push(selectedAgentId);
+  for (var i = 0; i < candidates.length; i++) {
+    var id = candidates[i];
+    var meta = typeof _navMeta === 'function' ? _navMeta(id) : null;
+    if (meta && meta.type === 'control') continue;
+    if (state.agents[id]) return state.agents[id];
+  }
+  return null;
+}
+
+function _focusComposerInputForCell(cellId) {
+  var id = String(cellId || '');
+  var findInput = function() {
+    var input = null;
+    if (id && typeof _terminalComposeInputId === 'function' && document.getElementById) {
+      input = document.getElementById(_terminalComposeInputId(id));
+    }
+    if (!input) {
+      var root = document.getElementById ? document.getElementById('terminal-workspace') : null;
+      if (root && root.querySelector) input = root.querySelector('.terminal-compose-input');
+    }
+    return input;
+  };
+  var focusInput = function() {
+    var input = findInput();
+    if (!input || typeof input.focus !== 'function') return false;
+    input.focus();
+    if (typeof input.value === 'string' && typeof input.setSelectionRange === 'function') {
+      var end = input.value.length;
+      try { input.setSelectionRange(end, end); } catch (_err) {}
+    }
+    return true;
+  };
+  if (focusInput()) return true;
+  var schedule = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : function(fn) { return setTimeout(fn, 0); };
+  schedule(focusInput);
+  return true;
+}
+
+function focusComposerForFocusedAgent() {
+  var cell = _composerFocusTargetCell();
+  if (!cell) return false;
+  var prevSelectedId = selectedAgentId;
+  if (cell.group && typeof setActiveGroup === 'function') setActiveGroup(cell.group);
+  focusedItemId = cell.id;
+  if (typeof _updateSelectedAgentContext === 'function') {
+    _updateSelectedAgentContext(cell.id);
+  } else if (cell.cell_type === 'terminal' && cell.parent_id && state.agents[cell.parent_id]) {
+    selectedAgentId = cell.parent_id;
+  } else {
+    selectedAgentId = cell.id;
+  }
+  if (typeof selectedTerminalId !== 'undefined') selectedTerminalId = cell.id;
+  if (typeof _syncPanelsAfterSelectionChange === 'function') {
+    _syncPanelsAfterSelectionChange(prevSelectedId);
+  }
+  if (typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace({ suppressTerminalFocus: true });
+  }
+  return _focusComposerInputForCell(cell.id);
 }
 
 function relaunchFocused() {
@@ -1069,7 +1162,7 @@ function _handleTextEditingShortcut(e) {
 
 /* -- Main keyboard handler ----------------------------------------------- */
 
-document.addEventListener('keydown', (e) => {
+function _handleTorqueGlobalKeydown(e) {
   if (_handleTextEditingShortcut(e)) return;
 
   // If a modal is open, only handle Escape/Enter
@@ -1124,73 +1217,24 @@ document.addEventListener('keydown', (e) => {
     if (boardKeydown(e)) { e.preventDefault(); return; }
   }
 
-  switch (e.key) {
-    case 'ArrowUp':
-      e.preventDefault();
-      moveFocusUp();
-      break;
-    case 'ArrowDown':
-      e.preventDefault();
-      moveFocusDown();
-      break;
-    case 'ArrowLeft':
-      e.preventDefault();
-      moveFocusHorizontal(-1);
-      break;
-    case 'ArrowRight':
-      e.preventDefault();
-      moveFocusHorizontal(1);
-      break;
-    case 'Enter':
-      e.preventDefault();
-      activateFocused();
-      break;
-    case 'Backspace':
-    case 'Delete':
-      e.preventDefault();
-      removeFocused();
-      break;
-    case 'n':
-    case 'N':
-      e.preventDefault();
-      openAddAgentForFocused();
-      break;
-    case 'g':
-    case 'G':
-      e.preventDefault();
-      openAddGroup();
-      break;
-    case 't':
-    case 'T':
-      e.preventDefault();
-      openAddTerminalForFocused();
-      break;
-    case 'r':
-    case 'R':
-      e.preventDefault();
-      relaunchFocused();
-      break;
-    case 'k':
-    case 'K':
-      e.preventDefault();
-      togglePanel('board');
-      break;
-    case 'Tab':
-      e.preventDefault();
-      moveFocusCreationControl(e.shiftKey ? -1 : 1);
-      break;
-    case 'Escape':
-      if (typeof _boardSelectedCount === 'function' && _boardSelectedCount() > 0) {
-        boardClearSelection();
-        break;
-      }
-      closeModals();
-      closeMenus();
-      closeContextMenu();
-      if (_activePanelApp) togglePanel(_activePanelApp);
-      break;
+  if (typeof dispatchKeybindingEvent === 'function'
+      && dispatchKeybindingEvent(e)) {
+    return;
   }
-});
+
+  if (e.key === 'Escape') {
+    if (typeof _boardSelectedCount === 'function' && _boardSelectedCount() > 0) {
+      boardClearSelection();
+      return;
+    }
+    closeModals();
+    closeMenus();
+    closeContextMenu();
+    if (_activePanelApp) togglePanel(_activePanelApp);
+  }
+}
+
+document.addEventListener('keydown', _handleTorqueGlobalKeydown);
 
 document.addEventListener('click', () => { closeMenus(); closeContextMenu(); });
 document.querySelectorAll('.overlay').forEach(o => {

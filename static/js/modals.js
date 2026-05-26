@@ -2503,6 +2503,7 @@ function copyPromptPreview() {
 var _glsKeybindings = {};     // current keybinding overrides being edited
 var _glsDefaults = {};        // default keybinding specs from server
 var _glsCapturing = null;     // action name currently capturing a keypress
+var _glsPendingConflict = null; // pending custom in-modal reassign confirmation
 
 function _glsXtermScrollbackDefault() {
   return (typeof XTERM_SCROLLBACK_DEFAULT === 'number')
@@ -2701,8 +2702,13 @@ function _showGlobalSettingsModal(data) {
     ? document.querySelector('#modal-global-settings .gs-tab.active')
     : null;
   var activeTabName = activeTab && activeTab.dataset ? activeTab.dataset.tab : '';
-  _glsDefaults = data.keybinding_defaults || {};
-  _glsKeybindings = Object.assign({}, s.keybindings || {});
+  _glsDefaults = typeof keybindingDefaults === 'function'
+    ? keybindingDefaults()
+    : (data.keybinding_defaults || {});
+  _glsKeybindings = typeof sanitizeKeybindingOverrides === 'function'
+    ? sanitizeKeybindingOverrides(s.keybindings || {})
+    : Object.assign({}, s.keybindings || {});
+  _glsPendingConflict = null;
 
   // General > Server
   document.getElementById('gls-default-cmd').value = s.default_command || '';
@@ -2760,37 +2766,179 @@ function _showGlobalSettingsModal(data) {
   if (!modalWasVisible) document.getElementById('gls-default-cmd').focus();
 }
 
+function _kbDefaultBinding(action) {
+  var def = _glsDefaults[action] || {};
+  if (typeof normalizeKeybindingDescriptor === 'function') {
+    return normalizeKeybindingDescriptor(def.defaultBinding);
+  }
+  return def.defaultBinding || null;
+}
+
+function _kbOverrideBinding(action) {
+  if (!_glsKeybindings || !_glsKeybindings[action]) return null;
+  if (typeof normalizeKeybindingDescriptor === 'function') {
+    return normalizeKeybindingDescriptor(_glsKeybindings[action]);
+  }
+  return _glsKeybindings[action] || null;
+}
+
+function _kbEffectiveBindingForSettings(action) {
+  return _kbOverrideBinding(action) || _kbDefaultBinding(action);
+}
+
 function _kbDisplayName(action, binding) {
-  var b = binding || _glsDefaults[action] || {};
-  var mods = (b.modifiers || []).map(function(m) {
-    if (m === 'command') return '\u2318';
-    if (m === 'option') return '\u2325';
-    if (m === 'shift') return '\u21E7';
-    if (m === 'control') return '\u2303';
-    return m;
+  var b = binding || _kbEffectiveBindingForSettings(action);
+  if (typeof kbBindingDisplayName === 'function') return kbBindingDisplayName(b);
+  return b && b.key ? b.key : 'Unassigned';
+}
+
+function _kbBindingSame(a, b) {
+  if (typeof _kbSameBinding === 'function') return _kbSameBinding(a, b);
+  if (!a || !b) return false;
+  return String(a.key || '').toLowerCase() === String(b.key || '').toLowerCase()
+    && !!a.ctrl === !!b.ctrl
+    && !!a.meta === !!b.meta
+    && !!a.alt === !!b.alt
+    && !!a.shift === !!b.shift;
+}
+
+function _kbBindingFingerprintLocal(binding) {
+  if (typeof _kbBindingFingerprint === 'function') return _kbBindingFingerprint(binding);
+  if (!binding) return '';
+  return [String(binding.key || '').toLowerCase(), binding.ctrl ? 1 : 0,
+    binding.meta ? 1 : 0, binding.alt ? 1 : 0, binding.shift ? 1 : 0].join('|');
+}
+
+function _kbActionLabel(action) {
+  var def = _glsDefaults[action] || {};
+  return def.label || action;
+}
+
+function _kbActionOrder() {
+  return Object.keys(_glsDefaults || {}).sort(function(a, b) {
+    var ao = typeof _glsDefaults[a].order === 'number' ? _glsDefaults[a].order : 1000;
+    var bo = typeof _glsDefaults[b].order === 'number' ? _glsDefaults[b].order : 1000;
+    if (ao !== bo) return ao - bo;
+    return a < b ? -1 : (a > b ? 1 : 0);
   });
-  var key = (b.keycode || '').replace('ANSI_', '').replace('_ARROW', '');
-  var arrowMap = { 'UP': '\u2191', 'DOWN': '\u2193', 'LEFT': '\u2190', 'RIGHT': '\u2192' };
-  key = arrowMap[key] || key;
-  return mods.join('') + key;
+}
+
+function _kbFindConflict(action, binding) {
+  var fp = _kbBindingFingerprintLocal(binding);
+  if (!fp) return null;
+  var actions = _kbActionOrder();
+  for (var i = 0; i < actions.length; i++) {
+    var other = actions[i];
+    if (other === action) continue;
+    var def = _glsDefaults[other] || {};
+    if (Array.isArray(def.defaultBindings) && def.defaultBindings.length) {
+      for (var j = 0; j < def.defaultBindings.length; j++) {
+        var fixedBinding = def.defaultBindings[j];
+        if (_kbBindingFingerprintLocal(fixedBinding) === fp) {
+          return { action: other, binding: fixedBinding, fixed: true };
+        }
+      }
+      continue;
+    }
+    var otherBinding = _kbEffectiveBindingForSettings(other);
+    if (_kbBindingFingerprintLocal(otherBinding) === fp) {
+      return { action: other, binding: otherBinding, fixed: !!def.fixed };
+    }
+  }
+  return null;
+}
+
+function _kbSetOverride(action, binding) {
+  if (!_glsKeybindings) _glsKeybindings = {};
+  var normalized = typeof normalizeKeybindingDescriptor === 'function'
+    ? normalizeKeybindingDescriptor(binding)
+    : binding;
+  if (!normalized) return;
+  var defBinding = _kbDefaultBinding(action);
+  if (defBinding && _kbBindingSame(normalized, defBinding)) delete _glsKeybindings[action];
+  else _glsKeybindings[action] = normalized;
+}
+
+function _kbApplyBindingWithConflictCheck(action, binding, reset) {
+  var normalized = typeof normalizeKeybindingDescriptor === 'function'
+    ? normalizeKeybindingDescriptor(binding)
+    : binding;
+  if (!normalized) return;
+  var conflict = _kbFindConflict(action, normalized);
+  if (conflict) {
+    _glsPendingConflict = {
+      action: action,
+      binding: normalized,
+      reset: !!reset,
+      conflictAction: conflict.action,
+      conflictBinding: conflict.binding,
+      fixed: !!conflict.fixed,
+      previousBinding: _kbEffectiveBindingForSettings(action),
+    };
+    _renderKeybindingList();
+    return;
+  }
+  if (reset) delete _glsKeybindings[action];
+  else _kbSetOverride(action, normalized);
+  _glsPendingConflict = null;
+  _renderKeybindingList();
+}
+
+function _kbConflictWarningHtml() {
+  if (!_glsPendingConflict) return '';
+  var pending = _glsPendingConflict;
+  var actionLabel = _kbActionLabel(pending.action);
+  var conflictLabel = _kbActionLabel(pending.conflictAction);
+  var combo = _kbDisplayName(pending.action, pending.binding);
+  var html = '<div class="kb-conflict-warning" role="alert">';
+  html += '<div><strong>' + esc(combo) + '</strong> is already assigned to '
+    + '<strong>' + esc(conflictLabel) + '</strong>.</div>';
+  if (pending.fixed) {
+    html += '<div class="kb-conflict-copy">That shortcut is part of a fixed key cluster. Choose another shortcut for '
+      + esc(actionLabel) + '.</div>';
+    html += '<div class="kb-conflict-actions">'
+      + '<button type="button" class="kb-btn" onclick="_cancelKeybindingConflict()">OK</button>'
+      + '</div>';
+  } else {
+    var previous = _kbDisplayName(pending.conflictAction, pending.previousBinding);
+    html += '<div class="kb-conflict-copy">Reassign it to ' + esc(actionLabel)
+      + ' and move ' + esc(conflictLabel) + ' to '
+      + '<strong>' + esc(previous) + '</strong>?</div>';
+    html += '<div class="kb-conflict-actions">'
+      + '<button type="button" class="kb-btn kb-btn-primary" onclick="_confirmKeybindingReassign()">Reassign</button>'
+      + '<button type="button" class="kb-btn" onclick="_cancelKeybindingConflict()">Cancel</button>'
+      + '</div>';
+  }
+  html += '</div>';
+  return html;
 }
 
 function _renderKeybindingList() {
   var container = document.getElementById('gls-keybinding-list');
+  if (!container) return;
+  var scrollTop = container.scrollTop || 0;
   var html = '';
-  for (var action in _glsDefaults) {
+  html += _kbConflictWarningHtml();
+  var actions = _kbActionOrder();
+  for (var ai = 0; ai < actions.length; ai++) {
+    var action = actions[ai];
     var def = _glsDefaults[action];
-    var current = _glsKeybindings[action] || null;
+    var current = _kbOverrideBinding(action);
     var display = _kbDisplayName(action, current);
     var label = def.label || action;
     var isCapturing = _glsCapturing === action;
-    html += '<div class="kb-row">';
-    html += '  <span class="kb-label">' + esc(label) + '</span>';
+    html += '<div class="kb-row" data-keybinding-action="' + esc(action) + '">';
+    html += '  <span class="kb-label">' + esc(label);
+    if (def.description) html += '<span class="kb-description">' + esc(def.description) + '</span>';
+    html += '</span>';
     if (isCapturing) {
       html += '  <span class="kb-combo kb-capturing">Press keys\u2026</span>';
       html += '  <button class="kb-btn" onclick="_cancelCapture()">Cancel</button>';
+    } else if (def.fixed) {
+      html += '  <span class="kb-combo">' + esc(def.display || display) + '</span>';
+      html += '  <span class="kb-fixed">Fixed</span>';
     } else {
-      html += '  <span class="kb-combo">' + display + '</span>';
+      html += '  <span class="kb-combo">' + esc(display) + '</span>';
       html += '  <button class="kb-btn" onclick="_startCapture(\'' + action + '\')">Rebind</button>';
       if (current) {
         html += '  <button class="kb-btn" onclick="_resetKeybinding(\'' + action + '\')">Reset</button>';
@@ -2799,19 +2947,37 @@ function _renderKeybindingList() {
     html += '</div>';
   }
   container.innerHTML = html;
+  container.scrollTop = scrollTop;
 }
 
 function _startCapture(action) {
   _glsCapturing = action;
+  _glsPendingConflict = null;
   _renderKeybindingList();
-  send({ cmd: 'suspend_keybindings' });
   document.addEventListener('keydown', _captureKeydown, true);
 }
 
 function _cancelCapture() {
   _glsCapturing = null;
   document.removeEventListener('keydown', _captureKeydown, true);
-  send({ cmd: 'resume_keybindings' });
+  _renderKeybindingList();
+}
+
+function _cancelKeybindingConflict() {
+  _glsPendingConflict = null;
+  _renderKeybindingList();
+}
+
+function _confirmKeybindingReassign() {
+  var pending = _glsPendingConflict;
+  if (!pending || pending.fixed) {
+    _cancelKeybindingConflict();
+    return;
+  }
+  if (pending.reset) delete _glsKeybindings[pending.action];
+  else _kbSetOverride(pending.action, pending.binding);
+  if (pending.previousBinding) _kbSetOverride(pending.conflictAction, pending.previousBinding);
+  _glsPendingConflict = null;
   _renderKeybindingList();
 }
 
@@ -2821,68 +2987,33 @@ function _captureKeydown(e) {
   // Ignore bare modifier presses
   if (['Meta', 'Alt', 'Shift', 'Control'].includes(e.key)) return;
 
-  var modifiers = [];
-  if (e.metaKey) modifiers.push('command');
-  if (e.altKey) modifiers.push('option');
-  if (e.shiftKey) modifiers.push('shift');
-  if (e.ctrlKey) modifiers.push('control');
-
-  var keycode = _jsCodeToKeycode(e.code);
-  var character = _jsCodeToCharacter(e.code, e.key);
-
-  if (_glsCapturing && keycode) {
-    _glsKeybindings[_glsCapturing] = {
-      modifiers: modifiers,
-      keycode: keycode,
-      character: character,
-    };
-  }
-  _cancelCapture();
-}
-
-function _jsCodeToKeycode(code) {
-  var map = {
-    'ArrowUp': 'UP_ARROW', 'ArrowDown': 'DOWN_ARROW',
-    'ArrowLeft': 'LEFT_ARROW', 'ArrowRight': 'RIGHT_ARROW',
-    'Enter': 'RETURN', 'Tab': 'TAB', 'Space': 'SPACE',
-    'Backspace': 'DELETE', 'Escape': 'ESCAPE',
-    'Delete': 'FORWARD_DELETE',
-    'Home': 'HOME', 'End': 'END',
-    'PageUp': 'PAGE_UP', 'PageDown': 'PAGE_DOWN',
-  };
-  if (map[code]) return map[code];
-  var m = code.match(/^Key([A-Z])$/);
-  if (m) return 'ANSI_' + m[1];
-  var d = code.match(/^Digit(\d)$/);
-  if (d) return 'ANSI_' + d[1];
-  var f = code.match(/^F(\d+)$/);
-  if (f) return 'F' + f[1];
-  var punct = {
-    'Minus': 'ANSI_MINUS', 'Equal': 'ANSI_EQUAL',
-    'BracketLeft': 'ANSI_LEFT_BRACKET', 'BracketRight': 'ANSI_RIGHT_BRACKET',
-    'Backslash': 'ANSI_BACKSLASH', 'Semicolon': 'ANSI_SEMICOLON',
-    'Quote': 'ANSI_QUOTE', 'Comma': 'ANSI_COMMA',
-    'Period': 'ANSI_PERIOD', 'Slash': 'ANSI_SLASH',
-    'Backquote': 'ANSI_GRAVE',
-  };
-  return punct[code] || null;
-}
-
-function _jsCodeToCharacter(code, key) {
-  var arrowChars = {
-    'ArrowUp': 0xF700, 'ArrowDown': 0xF701,
-    'ArrowLeft': 0xF702, 'ArrowRight': 0xF703,
-  };
-  if (arrowChars[code]) return arrowChars[code];
-  if (key.length === 1) return key.toUpperCase().charCodeAt(0);
-  var special = {
-    'Enter': 13, 'Tab': 9, 'Space': 32, 'Backspace': 127, 'Escape': 27,
-  };
-  return special[key] || 0;
+  var action = _glsCapturing;
+  var binding = typeof keybindingDescriptorFromEvent === 'function'
+    ? keybindingDescriptorFromEvent(e)
+    : null;
+  _glsCapturing = null;
+  document.removeEventListener('keydown', _captureKeydown, true);
+  if (action && binding) _kbApplyBindingWithConflictCheck(action, binding, false);
+  else _renderKeybindingList();
 }
 
 function _resetKeybinding(action) {
-  delete _glsKeybindings[action];
+  var defBinding = _kbDefaultBinding(action);
+  if (!defBinding) {
+    delete _glsKeybindings[action];
+    _renderKeybindingList();
+    return;
+  }
+  _kbApplyBindingWithConflictCheck(action, defBinding, true);
+}
+
+function _syncKeybindingSettingsFromGlobal(settings) {
+  var s = settings || (state && state.global_settings) || {};
+  if (!_glsCapturing) {
+    _glsKeybindings = typeof sanitizeKeybindingOverrides === 'function'
+      ? sanitizeKeybindingOverrides(s.keybindings || {})
+      : Object.assign({}, s.keybindings || {});
+  }
   _renderKeybindingList();
 }
 
@@ -2896,7 +3027,9 @@ function submitGlobalSettings() {
     focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
     focus_on_click: document.getElementById('gls-focus-on-click').checked,
     xterm_scrollback: xtermScrollback,
-    keybindings: _glsKeybindings,
+    keybindings: typeof sanitizeKeybindingOverrides === 'function'
+      ? sanitizeKeybindingOverrides(_glsKeybindings)
+      : _glsKeybindings,
     max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
     max_event_log: parseInt(document.getElementById('gls-max-event-log').value) || 500,
   };

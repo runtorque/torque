@@ -7918,6 +7918,12 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .kb-label {
   flex: 1; font-size: 11px; color: var(--text);
 }
+.kb-description {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
 .kb-combo {
   font-size: 11px; font-family: monospace;
   color: var(--text-dim);
@@ -7945,6 +7951,36 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .kb-btn:hover {
   color: var(--text);
   border-color: var(--text-dim);
+}
+.kb-btn-primary {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.kb-fixed {
+  min-width: 50px;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: right;
+}
+.kb-conflict-warning {
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--warning, #b58900);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning, #b58900) 12%, transparent);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.kb-conflict-copy {
+  margin-top: 4px;
+  color: var(--text-dim);
+}
+.kb-conflict-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
 }
 
 /* ------------------------------------------------------------------ */
