@@ -69,6 +69,7 @@ function loadApp(rawConfig, opts = {}) {
   const elements = {
     'torque-remote-config': { textContent: JSON.stringify(rawConfig || {}) },
     'remote-banner': makeElement('remote-banner'),
+    'remote-provider-usage': makeElement('remote-provider-usage'),
     'remote-agent-picker': makeElement('remote-agent-picker'),
     'remote-agent-list': makeElement('remote-agent-list'),
     'remote-conversation': makeElement('remote-conversation'),

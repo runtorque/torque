@@ -143,6 +143,74 @@ test('agentPickerHtml: prefixes options with known kind labels only', () => {
   assert.match(html, /<option value="agent-blank">Blank Kind<\/option>/);
 });
 
+test('agentPickerHtml: appends per-agent context only, not provider usage, for mobile parity', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+    ] },
+  });
+  store.ingestAgentState({
+    agent_id: 'worker-a',
+    context_window: { used_percentage: 72 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 64,
+        resets_at: new Date(Date.now() + 90 * 60 * 1000).toISOString() },
+      seven_day: { available: true, used_percentage: 41,
+        resets_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
+    },
+    lastStateMs: 1000,
+  });
+
+  const html = s.RemoteRender.agentPickerHtml(store);
+
+  assert.match(html, /<option value="worker-a" selected>Worker · Worker Alpha · ctx 72%<\/option>/);
+  assert.doesNotMatch(html, /5h/);
+  assert.doesNotMatch(html, /7d/);
+});
+
+test('paintAgentPicker: context rerenders patch option labels without replacing the open select', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestSnapshot({
+    kind: 'snapshot', created_at: new Date().toISOString(),
+    payload: { agents: [
+      { id: 'worker-a', name: 'Worker Alpha', kind: 'worker' },
+      { id: 'worker-b', name: 'Worker Beta', kind: 'worker' },
+    ] },
+  });
+  store.setActiveAgent('worker-b');
+  const initialHtml = s.RemoteRender.agentPickerHtml(store);
+  let writes = 0;
+  const select = {
+    value: 'worker-b',
+    options: [
+      { value: 'worker-a', textContent: 'Worker · Worker Alpha', label: 'Worker · Worker Alpha', selected: false },
+      { value: 'worker-b', textContent: 'Worker · Worker Beta', label: 'Worker · Worker Beta', selected: true },
+    ],
+  };
+  const el = {
+    _remoteLastHtml: initialHtml,
+    get innerHTML() { return initialHtml; },
+    set innerHTML(_v) { writes += 1; },
+    querySelector(selector) { return selector === '[data-agent-picker]' ? select : null; },
+  };
+
+  store.ingestAgentState({
+    agent_id: 'worker-b',
+    context_window: { used_percentage: 88 },
+    lastStateMs: 1000,
+  });
+  const changed = s.RemoteRender.paintAgentPicker(el, store);
+
+  assert.equal(changed, true, 'context label changed');
+  assert.equal(writes, 0, 'stable agent roster patches options without innerHTML replacement');
+  assert.equal(select.value, 'worker-b', 'selected value survives the context rerender');
+  assert.equal(select.options[1].textContent, 'Worker · Worker Beta · ctx 88%');
+});
+
 test('agentListHtml remains the desktop list render path', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
@@ -156,12 +224,13 @@ test('agentListHtml remains the desktop list render path', () => {
       + '<span class="remote-agent-preview">hello</span></button>');
 });
 
-test('agentListHtml: renders live status/activity/context/provider chips in the sidebar only', () => {
+test('agentListHtml: renders live status/activity/context chips in the sidebar only', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
   store.ingestInbound(agentMsg('m1', 'worker-a', 'hello'));
   store.ingestAgentState({
     agent_id: 'worker-a',
+    agent_type: 'claude-code',
     kind: 'worker',
     status: 'running',
     activity_detail: 'Editing render_remote.js',
@@ -180,16 +249,23 @@ test('agentListHtml: renders live status/activity/context/provider chips in the 
   assert.match(list, /needs attention/);
   assert.match(list, /Editing render_remote\.js/);
   assert.match(list, /ctx 72%/);
-  assert.match(list, /5h 36% left/);
-  assert.match(list, /7d unknown/);
+  assert.doesNotMatch(list, /5h 36% left/, 'provider usage moved out of per-agent rows');
+  assert.doesNotMatch(list, /7d/, 'provider usage moved out of per-agent rows');
   assert.match(list, /remote-agent-attention/);
+
+  const usage = s.RemoteRender.providerUsageSummaryHtml(store);
+  assert.match(usage, /Provider usage/);
+  assert.match(usage, /data-provider="claude-code"/);
+  assert.match(usage, /Claude Code/);
+  assert.match(usage, /5h 36% left/);
+  assert.match(usage, /7d —/);
 
   const conv = s.RemoteRender.conversationHtml(store.activeConversation(), { askEnabled: true });
   assert.doesNotMatch(conv, /ctx 72%/, 'state chips stay out of the conversation pane');
-  assert.doesNotMatch(conv, /5h 36% left/, 'provider chips stay out of the conversation pane');
+  assert.doesNotMatch(conv, /5h 36% left/, 'provider usage stays out of the conversation pane');
 });
 
-test('agentListHtml: state clears remove context/provider chips and heartbeats do not reorder', () => {
+test('agentListHtml: state clears remove context chips and heartbeats do not reorder', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
   const base = Date.parse('2026-05-24T12:00:00.000Z');
@@ -201,6 +277,7 @@ test('agentListHtml: state clears remove context/provider chips and heartbeats d
 
   store.ingestAgentState({
     agent_id: 'worker-old',
+    agent_type: 'claude-code',
     status: 'running',
     activity_detail: 'heartbeat',
     context_window: { used_percentage: 91 },
@@ -214,7 +291,8 @@ test('agentListHtml: state clears remove context/provider chips and heartbeats d
   assert.deepEqual(store.agentList().map((a) => a.agentId), before,
     'state-only heartbeat preserves list order');
   assert.match(s.RemoteRender.agentListHtml(store), /ctx 91%/);
-  assert.match(s.RemoteRender.agentListHtml(store), /5h 75% left/);
+  assert.doesNotMatch(s.RemoteRender.agentListHtml(store), /5h 75% left/);
+  assert.match(s.RemoteRender.providerUsageSummaryHtml(store), /5h 75% left/);
 
   store.ingestAgentState({
     agent_id: 'worker-old',
@@ -225,14 +303,17 @@ test('agentListHtml: state clears remove context/provider chips and heartbeats d
   const afterClear = s.RemoteRender.agentListHtml(store);
   assert.doesNotMatch(afterClear, /ctx 91%/);
   assert.doesNotMatch(afterClear, /5h 75% left/);
+  assert.match(s.RemoteRender.providerUsageSummaryHtml(store), /Claude Code/);
+  assert.match(s.RemoteRender.providerUsageSummaryHtml(store), /remote-provider-usage-row--unknown/);
 });
 
-test('agentListHtml: provider windows render unknown when unavailable', () => {
+test('providerUsageSummaryHtml: provider windows render no-data when unavailable', () => {
   const s = buildSandbox();
   const store = new s.RemoteStore({});
   store.ingestInbound(agentMsg('m1', 'worker-a', 'hello'));
   store.ingestAgentState({
     agent_id: 'worker-a',
+    agent_type: 'codex',
     provider_usage: {
       five_hour: { available: false, used_percentage: null, resets_at: null },
       seven_day: { available: false, used_percentage: null, resets_at: null },
@@ -240,9 +321,95 @@ test('agentListHtml: provider windows render unknown when unavailable', () => {
     lastStateMs: 1000,
   });
 
-  const html = s.RemoteRender.agentListHtml(store);
-  assert.match(html, /5h unknown/);
-  assert.match(html, /7d unknown/);
+  const list = s.RemoteRender.agentListHtml(store);
+  assert.doesNotMatch(list, /5h/);
+  assert.doesNotMatch(list, /7d/);
+  const html = s.RemoteRender.providerUsageSummaryHtml(store);
+  assert.match(html, /data-provider="codex"/);
+  assert.match(html, /Codex/);
+  assert.match(html, /remote-provider-usage-value">—<\/span>/);
+});
+
+test('providerUsageSummaryHtml: groups by agent_type and selects one available freshest payload', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  const reset = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  store.ingestAgentState({
+    agent_id: 'claude-stale',
+    agent_type: 'claude-code',
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 90, resets_at: reset },
+      seven_day: { available: true, used_percentage: 10, resets_at: reset },
+    },
+    lastStateMs: 1000,
+  });
+  store.ingestAgentState({
+    agent_id: 'claude-fresh',
+    agent_type: 'claude-code',
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 20, resets_at: reset },
+      seven_day: { available: true, used_percentage: 30, resets_at: reset },
+    },
+    lastStateMs: 2000,
+  });
+
+  const html = s.RemoteRender.providerUsageSummaryHtml(store);
+  assert.equal((html.match(/data-provider="claude-code"/g) || []).length, 1,
+    'Claude Code renders once globally, not once per agent');
+  assert.match(html, /5h 80% left/);
+  assert.match(html, /7d 70% left/);
+  assert.doesNotMatch(html, /5h 10% left/, 'older payload is not rendered');
+});
+
+test('providerUsageSummaryHtml: omits rows without agent_type until S2 projection lands', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestAgentState({
+    agent_id: 'missing-provider',
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 10,
+        resets_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+      seven_day: { available: true, used_percentage: 20,
+        resets_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+    },
+    lastStateMs: 1000,
+  });
+
+  assert.equal(s.RemoteRender.providerUsageSummaryHtml(store), '');
+});
+
+test('agentListHtml: provider_usage-only changes do not dirty the per-agent list HTML', () => {
+  const s = buildSandbox();
+  const store = new s.RemoteStore({});
+  store.ingestInbound(agentMsg('m1', 'worker-a', 'hello'));
+  store.ingestAgentState({
+    agent_id: 'worker-a',
+    agent_type: 'claude-code',
+    context_window: { used_percentage: 44 },
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 10,
+        resets_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+      seven_day: { available: true, used_percentage: 20,
+        resets_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+    },
+    lastStateMs: 1000,
+  });
+  const before = s.RemoteRender.agentListHtml(store);
+  store.ingestAgentState({
+    agent_id: 'worker-a',
+    agent_type: 'claude-code',
+    provider_usage: {
+      five_hour: { available: true, used_percentage: 70,
+        resets_at: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString() },
+      seven_day: { available: true, used_percentage: 80,
+        resets_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() },
+    },
+    lastStateMs: 2000,
+  });
+  const after = s.RemoteRender.agentListHtml(store);
+
+  assert.equal(after, before, 'global usage changes avoid per-agent list rewrites');
+  assert.match(s.RemoteRender.providerUsageSummaryHtml(store), /5h 30% left/);
 });
 
 test('ask cards are gated behind cfg.askEnabled (no client-side recipient filtering)', () => {
