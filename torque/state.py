@@ -9407,15 +9407,18 @@ class MatrixState:
                 self._delta_ops = ops + self._delta_ops
                 raise
             clients = list(self._ws_clients)
-        payload_bytes = len(msg.encode("utf-8"))
         meter = self.metrics_collector
+        profiling_enabled = profiling.is_enabled()
+        payload_bytes = 0
+        if meter.enabled or profiling_enabled:
+            payload_bytes = len(msg.encode("utf-8"))
         if meter.enabled:
             meter.record_ws_delta(
                 op_count=op_count,
                 payload_bytes=payload_bytes,
                 subscribers=len(clients),
             )
-        if profiling.is_enabled():
+        if profiling_enabled:
             profiling.recorder().observe("ws_delta_payload_bytes", payload_bytes)
             profiling.recorder().observe("ws_delta_ops_count", op_count)
             profiling.recorder().observe("ws_clients_per_broadcast", len(clients))

@@ -529,6 +529,33 @@ class SystemHealthServerCommandTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+    async def test_broadcast_metrics_disabled_skips_payload_byte_count(self):
+        state = self.state_mod.MatrixState()
+        state.global_settings.metrics_enabled = False
+        state.metrics_collector.set_enabled(False)
+        encode_calls = {"count": 0}
+
+        class CountingStr(str):
+            def encode(self, *args, **kwargs):
+                encode_calls["count"] += 1
+                return super().encode(*args, **kwargs)
+
+        async def fake_dumps(*_args, **_kwargs):
+            return CountingStr('{"type":"delta","ops":[]}')
+
+        original_dumps = self.state_mod.hot_json_dumps_async
+        original_profiling_enabled = self.state_mod.profiling.is_enabled
+        self.state_mod.hot_json_dumps_async = fake_dumps
+        self.state_mod.profiling.is_enabled = lambda: False
+        try:
+            state._emit("ui_update", key="metrics_disabled_guard", value=True)
+            await state.broadcast()
+        finally:
+            self.state_mod.hot_json_dumps_async = original_dumps
+            self.state_mod.profiling.is_enabled = original_profiling_enabled
+
+        self.assertEqual(encode_calls["count"], 0)
+
     async def test_server_command_returns_metrics_and_validates_window(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
