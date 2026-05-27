@@ -846,6 +846,7 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   min-width: 0;
 }
 .terminal-compose-input-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
 }
@@ -922,6 +923,29 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
 }
 .terminal-compose-error:not(:empty) {
   display: block;
+}
+.terminal-compose-task-dropdown {
+  bottom: calc(100% + 4px);
+  margin-top: 0;
+  z-index: 45;
+}
+.terminal-compose-task-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.terminal-compose-task-ref-id {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 700;
+}
+.terminal-compose-task-ref-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .terminal-compose-history-wrap {
   position: relative;

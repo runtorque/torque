@@ -7262,6 +7262,30 @@ test('boardAddTaskInput mirrors the current inline editor text into draft state'
   assert.equal(runInContext(context, '_boardAddingTaskDraft'), 'Follow up with design review');
 });
 
+test('board inline label operator still filters and inserts labels', () => {
+  const { context, document } = createBoardHarness();
+  const input = document.register('board-add-task-input');
+  const dropdown = document.register('board-add-label-dropdown');
+  runInContext(context, `
+    _getAllLabels = function() { return ['release', 'bug']; };
+  `);
+  input.value = 'Ship %rel';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+
+  context.boardAddTaskInput(input);
+
+  assert.equal(dropdown.style.display, '');
+  assert.match(dropdown.innerHTML, /release/);
+  assert.doesNotMatch(dropdown.innerHTML, /bug/);
+
+  context.boardPickInlineLabel('release');
+
+  assert.equal(input.value, 'Ship %release ');
+  assert.equal(input.focused, true);
+  assert.equal(dropdown.style.display, 'none');
+});
+
 test('boardAddTaskKeydown moves Home and End to the current line boundaries', () => {
   const { context, document } = createBoardHarness();
   const input = document.register('board-add-task-input');
@@ -12745,6 +12769,140 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
   assert.equal(sandbox.sendCalls[0].text, 'prefix-' + secondPath + ' suffix');
   assert.equal(input.value, '');
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+});
+
+test('terminal compose ticket typeahead filters tasks and inserts selected reference', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.board_tasks = {
+    'TORQUE:735': {
+      id: 'TORQUE:735',
+      task: 'DM image drag token display',
+      lane: 'In Progress',
+      group: 'Torque',
+    },
+    'TORQUE:736': {
+      id: 'TORQUE:736',
+      task: 'DM composer colon ticket typeahead',
+      lane: 'To Do',
+      group: 'Torque',
+    },
+    'TORQUE:900': {
+      id: 'TORQUE:900',
+      task: 'Archived match should stay hidden',
+      lane: 'Archived',
+      group: 'Torque',
+    },
+  };
+
+  const form = new FakeElement('compose-form');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  const dropdown = document.register('terminal-compose-task-dropdown-agent-1');
+  dropdown.classList.add('deps-dropdown');
+  dropdown.classList.add('terminal-compose-task-dropdown');
+  dropdown.style.display = 'none';
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(dropdown);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  input.value = 'Please check :image';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+
+  assert.equal(dropdown.style.display, '');
+  assert.match(dropdown.innerHTML, /TORQUE:735/);
+  assert.match(dropdown.innerHTML, /DM image drag token display/);
+  assert.doesNotMatch(dropdown.innerHTML, /TORQUE:736/);
+  assert.doesNotMatch(dropdown.innerHTML, /TORQUE:900/);
+
+  input.value = 'Please check :736';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.match(dropdown.innerHTML, /TORQUE:736/);
+  assert.doesNotMatch(dropdown.innerHTML, /TORQUE:735/);
+
+  input.value = 'Please check :dm';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  const optionOne = new FakeElement('ticket-opt-1');
+  const optionTwo = new FakeElement('ticket-opt-2');
+  optionOne.classList.add('deps-option');
+  optionTwo.classList.add('deps-option');
+  dropdown.setQuerySelectorAll('.deps-option', [optionOne, optionTwo]);
+
+  function keyEvent(key) {
+    return {
+      key,
+      target: input,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefaultCalled: false,
+      stopPropagationCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+      stopPropagation() { this.stopPropagationCalled = true; },
+    };
+  }
+
+  const arrowDownOne = keyEvent('ArrowDown');
+  context.__arrowDownOne = arrowDownOne;
+  runInContext(context, `terminalComposeKeydown(__arrowDownOne, 'agent-1');`);
+  assert.equal(arrowDownOne.preventDefaultCalled, true);
+  assert.equal(optionOne.classList.contains('active'), true);
+  assert.equal(optionTwo.classList.contains('active'), false);
+
+  const arrowDownTwo = keyEvent('ArrowDown');
+  context.__arrowDownTwo = arrowDownTwo;
+  runInContext(context, `terminalComposeKeydown(__arrowDownTwo, 'agent-1');`);
+  assert.equal(optionOne.classList.contains('active'), false);
+  assert.equal(optionTwo.classList.contains('active'), true);
+
+  const enterEvent = keyEvent('Enter');
+  context.__enterEvent = enterEvent;
+  runInContext(context, `terminalComposeKeydown(__enterEvent, 'agent-1');`);
+  assert.equal(enterEvent.preventDefaultCalled, true);
+  assert.equal(enterEvent.stopPropagationCalled, true);
+  assert.equal(input.value, 'Please check TORQUE:736 ');
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(input.focused, true);
+  assert.equal(dropdown.style.display, 'none');
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), input.value);
+
+  input.focused = false;
+  input.value = 'Dismiss :image';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(dropdown.style.display, '');
+  const escapeEvent = keyEvent('Escape');
+  context.__escapeEvent = escapeEvent;
+  runInContext(context, `terminalComposeKeydown(__escapeEvent, 'agent-1');`);
+  assert.equal(escapeEvent.preventDefaultCalled, true);
+  assert.equal(escapeEvent.stopPropagationCalled, true);
+  assert.equal(dropdown.style.display, 'none');
+  assert.equal(input.value, 'Dismiss :image');
+
+  input.value = 'Visit http:';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(dropdown.style.display, 'none');
+
+  input.value = 'Meet at 10:';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(dropdown.style.display, 'none');
 });
 
 test('terminal compose oversized image drop is rejected without upload or draft changes', async () => {
