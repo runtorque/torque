@@ -2692,6 +2692,24 @@ function _boardSelectedSingleGroup() {
   return group;
 }
 
+function _boardTaskHasExternalLink(task) {
+  if (!task) return false;
+  var gh = typeof _boardTaskGithubSync === 'function'
+    ? _boardTaskGithubSync(task)
+    : {};
+  return !!(task.provider || task.external_id || task.external_url
+    || (gh && (gh.issue_number || gh.issue_url)));
+}
+
+function _boardSelectedExternalLinkTasks() {
+  var tasks = _boardSelectedTaskItems();
+  var out = [];
+  for (var i = 0; i < tasks.length; i++) {
+    if (_boardTaskHasExternalLink(tasks[i])) out.push(tasks[i]);
+  }
+  return out;
+}
+
 function _boardBatchEditAgents() {
   var group = _boardSelectedSingleGroup();
   if (!group || !state || !state.agents) return [];
@@ -2931,6 +2949,12 @@ function _renderBoardSelectionBar() {
   if (allBacklog) {
     html += '<button class="board-selection-btn" onclick="boardBulkDispatch()">Dispatch</button>';
   }
+  var externalLinkTasks = _boardSelectedExternalLinkTasks();
+  if (externalLinkTasks.length) {
+    var externalSuffix = externalLinkTasks.length === count ? '' : ' (' + externalLinkTasks.length + ')';
+    html += '<button class="board-selection-btn" onclick="boardBulkSyncGithub()">Sync' + externalSuffix + '</button>';
+    html += '<button class="board-selection-btn" onclick="boardBulkUnlinkGithub()">Unlink' + externalSuffix + '</button>';
+  }
   if (archiveIds.length) {
     html += '<button class="board-selection-btn" onclick="boardBulkArchiveSelected()">Archive completed'
       + (archiveIds.length === count ? '' : ' (' + archiveIds.length + ')')
@@ -3004,6 +3028,30 @@ function boardBulkAddLabel(label) {
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
   _boardResetBatchEdit();
+}
+
+function boardBulkSyncGithub() {
+  var tasks = _boardSelectedExternalLinkTasks();
+  if (!tasks.length) return;
+  for (var i = 0; i < tasks.length; i++) {
+    boardSyncTaskNow(tasks[i].id, { keepMenu: true, quiet: true });
+  }
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
+  renderBoard();
+}
+
+function boardBulkUnlinkGithub() {
+  var tasks = _boardSelectedExternalLinkTasks();
+  if (!tasks.length) return;
+  for (var i = 0; i < tasks.length; i++) {
+    boardClearExternal(tasks[i].id);
+  }
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
+  renderBoard();
 }
 
 function boardBulkDelete() {
