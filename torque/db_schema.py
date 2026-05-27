@@ -253,6 +253,22 @@ CREATE TABLE IF NOT EXISTS panel_events (
 );
 CREATE INDEX IF NOT EXISTS idx_panel_events_ts ON panel_events (timestamp);
 
+CREATE TABLE IF NOT EXISTS metrics_perf_rollups (
+    bucket_start                 INTEGER NOT NULL,
+    bucket_seconds               INTEGER NOT NULL,
+    sample_count                 INTEGER NOT NULL DEFAULT 0,
+    event_loop_lag_p95_ms        REAL NOT NULL DEFAULT 0,
+    ws_deltas_per_s              REAL NOT NULL DEFAULT 0,
+    db_write_latency_p95_ms      REAL NOT NULL DEFAULT 0,
+    rss_mb                       REAL NOT NULL DEFAULT 0,
+    cpu_pct                      REAL NOT NULL DEFAULT 0,
+    created_at                   REAL NOT NULL DEFAULT 0,
+    updated_at                   REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (bucket_start, bucket_seconds)
+);
+CREATE INDEX IF NOT EXISTS idx_metrics_perf_rollups_start
+    ON metrics_perf_rollups(bucket_start);
+
 CREATE TABLE IF NOT EXISTS agent_history (
     id                TEXT PRIMARY KEY,
     name              TEXT NOT NULL,

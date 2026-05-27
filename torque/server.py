@@ -74,6 +74,7 @@ from .events import (
     health_check,
 )
 from .event_ingest_db import event_call_row_from_record, redact_event_for_mcp_call_log
+from .metrics import MetricsDaemon
 from .adapters import get_adapter, get_providers
 from .adapters.base import AgentEvent
 from .notifications import NotificationManager
@@ -10622,6 +10623,39 @@ async def main(connection=None):
     daemon_stop_event = asyncio.Event()
     daemon_stop_task: asyncio.Task | None = None
 
+    async def _broadcast_metrics_tick(payload: dict) -> None:
+        msg = await hot_json_dumps_async(payload, offload=False)
+        async with state._ws_clients_lock:
+            clients = list(state._ws_clients)
+        if not clients:
+            return
+        results = await asyncio.gather(
+            *(ws.send_str(msg) for ws in clients),
+            return_exceptions=True,
+        )
+        dead: set[web.WebSocketResponse] = {
+            ws for ws, result in zip(clients, results)
+            if isinstance(result, BaseException)
+        }
+        if dead:
+            async with state._ws_clients_lock:
+                state._ws_clients -= dead
+
+    def _metrics_live_sampler() -> dict:
+        active = list(state.iter_active_agents())
+        prompt_tails = getattr(agent_launch, "_prompt_queue_tails", {}) or {}
+        return {
+            "agents": sum(
+                1 for cell in active
+                if getattr(cell, "cell_type", "") == "agent"
+            ),
+            "ptys": sum(
+                1 for cell in active
+                if getattr(cell, "session_id", None)
+            ),
+            "prompt_queue_depth": len(prompt_tails),
+        }
+
     def _schedule_daemon_stop() -> None:
         nonlocal daemon_stop_task
         if daemon_stop_event.is_set():
@@ -10685,6 +10719,14 @@ async def main(connection=None):
     log.info("Startup checkpoint: tombstone sweeper scheduled")
     asyncio.create_task(_codex_provider_usage_backfill_refresher())
     log.info("Startup checkpoint: Codex provider_usage backfill scheduled")
+    metrics_daemon = MetricsDaemon(
+        state=state,
+        db=db,
+        send_tick=_broadcast_metrics_tick,
+        live_sampler=_metrics_live_sampler,
+    )
+    metrics_daemon.start()
+    log.info("Startup checkpoint: metrics daemon scheduled")
 
     async def _resolve_base_dir(group: str = "") -> str:
         return await agent_launch.resolve_base_dir(group)
@@ -11961,6 +12003,24 @@ async def main(connection=None):
 
         if cmd == "doctor":
             return _handle_doctor_command(db)
+
+        if cmd == "get_metrics_history":
+            try:
+                await state.flush_db_writes()
+                if panel_log and hasattr(panel_log, "flush"):
+                    await panel_log.flush()
+                return state.metrics_history(
+                    window=data.get("window", "24h"),
+                    group=data.get("group", ""),
+                )
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
+
+        if cmd == "report_frontend_render":
+            meter = getattr(state, "metrics_collector", None)
+            if meter is not None and meter.enabled:
+                meter.record_frontend_render(data)
+            return {"type": "ok", "schema_version": 1}
 
         if cmd == "get_system_health_metrics":
             try:
@@ -19422,6 +19482,10 @@ async def main(connection=None):
 
         await daemon_stop_event.wait()
     finally:
+        try:
+            await metrics_daemon.stop()
+        except Exception:
+            log.exception("Metrics daemon shutdown failed")
         await board_sync_manager.stop()
         await _shutdown_daemon_runtime(
             terminal_clients=terminal_clients,
