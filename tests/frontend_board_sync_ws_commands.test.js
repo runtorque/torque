@@ -34,22 +34,111 @@ class FakeElement {
     this.dataset = {};
     this.children = [];
     this.classList = new FakeClassList();
+    this.attributes = {};
+    this.parentNode = null;
+    this.onclick = null;
+    this._listeners = {};
     this._innerHTML = '';
     this.focused = false;
   }
   get innerHTML() { return this._innerHTML; }
-  set innerHTML(value) { this._innerHTML = String(value); this.children = []; }
+  set innerHTML(value) {
+    this._innerHTML = String(value);
+    this.children = parseButtonChildren(this._innerHTML, this);
+  }
   appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
   remove() { this.removed = true; }
   focus() { this.focused = true; }
   getBoundingClientRect() {
     return { left: 0, top: 0, right: 160, bottom: 200, width: 160, height: 200 };
   }
-  addEventListener() {}
-  removeEventListener() {}
+  addEventListener(type, fn) {
+    if (!this._listeners[type]) this._listeners[type] = [];
+    this._listeners[type].push(fn);
+  }
+  removeEventListener(type, fn) {
+    if (!this._listeners[type]) return;
+    this._listeners[type] = this._listeners[type].filter((item) => item !== fn);
+  }
+  dispatchEvent(event) {
+    event.target = event.target || this;
+    event.currentTarget = this;
+    event.preventDefault = event.preventDefault || function() { event.defaultPrevented = true; };
+    event.stopPropagation = event.stopPropagation || function() { event._stopped = true; };
+    if (typeof this.onclick === 'function' && event.type === 'click') this.onclick(event);
+    for (const fn of this._listeners[event.type] || []) fn(event);
+    if (!event._stopped && this.parentNode && this.parentNode.dispatchEvent) {
+      this.parentNode.dispatchEvent(event);
+    }
+    return !event.defaultPrevented;
+  }
+  click() { this.dispatchEvent({ type: 'click', target: this }); }
   querySelector() { return null; }
   querySelectorAll() { return []; }
-  closest() { return this; }
+  getAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, name)
+      ? this.attributes[name]
+      : null;
+  }
+  setAttribute(name, value) {
+    const stringValue = String(value);
+    this.attributes[name] = stringValue;
+    if (name === 'class') this.className = stringValue;
+    if (name === 'disabled') this.disabled = true;
+    if (name.indexOf('data-') === 0) {
+      this.dataset[dataKey(name)] = stringValue;
+    }
+  }
+  hasAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, name);
+  }
+  closest(selector) {
+    if (selector && selector[0] === '[' && selector[selector.length - 1] === ']') {
+      const attr = selector.slice(1, -1);
+      let el = this;
+      while (el) {
+        if (el.hasAttribute && el.hasAttribute(attr)) return el;
+        el = el.parentNode;
+      }
+      return null;
+    }
+    return this;
+  }
+}
+
+function dataKey(attrName) {
+  return attrName
+    .slice(5)
+    .replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+function decodeHtml(value) {
+  return String(value)
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+function parseButtonChildren(html, parent) {
+  const children = [];
+  const buttonRe = /<button\b([^>]*)>([\s\S]*?)<\/button>/gi;
+  let match;
+  while ((match = buttonRe.exec(html)) !== null) {
+    const button = new FakeElement('button');
+    button.tagName = 'BUTTON';
+    button.parentNode = parent;
+    button.textContent = decodeHtml(match[2].replace(/<[^>]*>/g, '')).trim();
+    const attrs = match[1] || '';
+    const attrRe = /([a-zA-Z0-9_-]+)(?:="([^"]*)")?/g;
+    let attr;
+    while ((attr = attrRe.exec(attrs)) !== null) {
+      button.setAttribute(attr[1], decodeHtml(attr[2] || ''));
+    }
+    children.push(button);
+  }
+  return children;
 }
 
 function createSandbox() {
@@ -153,6 +242,11 @@ function lastCall(sandbox) {
   return sandbox.sendCalls[sandbox.sendCalls.length - 1];
 }
 
+function menuButton(sandbox, label) {
+  const menu = sandbox.document.getElementById('ctx-menu');
+  return menu.children.find((child) => child.textContent === label);
+}
+
 test('Group Settings Test connection sends board_sync_preflight envelope and surfaces scope guidance', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -229,29 +323,43 @@ test('task modal Sync now and Pull preview send board_sync_task and board_pull_p
   });
 });
 
-test('card GitHub context menu exposes sync actions that send expected envelopes', () => {
+test('card GitHub context menu exposes only Open, Sync, and Unlink actions that work on click', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadBoardSyncScripts(context);
 
   vm.runInContext('_boardRenderCardMenu("task-1")', context);
   const menuHtml = sandbox.document.getElementById('ctx-menu').innerHTML;
-  assert.match(menuHtml, /Open GitHub issue/);
-  assert.match(menuHtml, /Push to GitHub/);
-  assert.match(menuHtml, /Sync GitHub now/);
-  assert.match(menuHtml, /Pull preview/);
-  assert.match(menuHtml, /Unlink external issue/);
+  assert.match(menuHtml, />Open in GitHub<\/button>/);
+  assert.match(menuHtml, />Sync<\/button>/);
+  assert.match(menuHtml, />Unlink<\/button>/);
+  assert.doesNotMatch(menuHtml, /Open GitHub issue/);
+  assert.doesNotMatch(menuHtml, /Push to GitHub/);
+  assert.doesNotMatch(menuHtml, /Sync GitHub now/);
+  assert.doesNotMatch(menuHtml, /Pull preview/);
+  assert.doesNotMatch(menuHtml, /Edit external link/);
+  assert.doesNotMatch(menuHtml, /Unlink external issue/);
 
-  vm.runInContext('boardSyncTaskNow("task-1", { quiet: true }); boardPullPreview("task-1", { quiet: true });', context);
+  menuButton(sandbox, 'Open in GitHub').click();
+  assert.deepEqual(sandbox.openedUrls, ['https://github.com/acme/widgets/issues/123']);
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  menuButton(sandbox, 'Sync').click();
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[0])), {
     cmd: 'board_sync_task',
     args: { task: 'task-1' },
     task: 'task-1',
   });
+
+  menuButton(sandbox, 'Unlink').click();
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1])), {
-    cmd: 'board_pull_preview',
-    args: { task: 'task-1' },
-    task: 'task-1',
+    cmd: 'external_link_task',
+    id: 'task-1',
+    provider: '',
+    external_id: '',
+    external_url: '',
+    ref: '',
+    board_sync: { version: 1, enabled: false },
   });
 });
 
@@ -305,10 +413,14 @@ test('board sync-only GitHub links can be unlinked and opt out of tracking', () 
   const context = vm.createContext(sandbox);
   loadBoardSyncScripts(context);
 
-  vm.runInContext('_boardRenderCardMenu("sync-only"); boardClearExternal("sync-only");', context);
+  vm.runInContext('_boardRenderCardMenu("sync-only");', context);
   const menuHtml = sandbox.document.getElementById('ctx-menu').innerHTML;
-  assert.match(menuHtml, /Open GitHub issue/);
-  assert.match(menuHtml, /Unlink external issue/);
+  assert.match(menuHtml, /Open in GitHub/);
+  assert.match(menuHtml, />Sync<\/button>/);
+  assert.match(menuHtml, />Unlink<\/button>/);
+  assert.doesNotMatch(menuHtml, /Open GitHub issue/);
+  assert.doesNotMatch(menuHtml, /Unlink external issue/);
+  menuButton(sandbox, 'Unlink').click();
   assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox))), {
     cmd: 'external_link_task',
     id: 'sync-only',
