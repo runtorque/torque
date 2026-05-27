@@ -39,6 +39,38 @@
   </div>
   <div id="workspace-resize-handle" title="Resize sidebar"></div>
   <section id="terminal-workspace"></section>
+  <!-- Status bar (right rail). Keep the stable chip ids/nodes intact; the
+       bottom panel launcher bar lives below the workspace. -->
+  <div id="taskbar">
+    <div id="statusbar-info" class="statusbar-info" aria-label="Workspace status">
+      <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
+           title="Daemon: disconnected">
+        <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
+        <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
+      </div>
+      <span id="statusbar-claude-usage"
+            class="statusbar-chip statusbar-chip--unknown"
+            title="Claude usage limits unavailable until provider usage data arrives.">Claude —</span>
+      <span id="statusbar-codex-usage"
+            class="statusbar-chip statusbar-chip--unknown"
+            title="Codex usage limits unavailable until provider usage data arrives.">Codex —</span>
+      <button id="statusbar-deploy"
+              class="statusbar-chip statusbar-chip-button statusbar-chip--muted statusbar-chip-deploy"
+              type="button"
+              hidden
+              onclick="statusBarOpenDeploy()"
+              title="No deploy-pending tasks">Deploy 0</button>
+      <span id="statusbar-workload"
+            class="statusbar-chip statusbar-chip-agents"
+            title="Agent status counts">Agents —</span>
+      <span id="statusbar-tasks"
+            class="statusbar-chip statusbar-chip-tasks"
+            title="Active worker tasks">Tasks —</span>
+      <span id="statusbar-attention"
+            class="statusbar-chip statusbar-chip-attention"
+            title="Attention items">Attention —</span>
+    </div>
+  </div>
 </div>
 <div id="standalone-float-layer"></div>
 <div id="diff-view-root"></div>
@@ -1582,37 +1614,8 @@
   <div id="panel-health" class="panel-hidden"></div>
 </div>
 
-<!-- Taskbar (status + dock for panel apps) -->
-<div id="taskbar">
-  <div id="statusbar-info" class="statusbar-info" aria-label="Workspace status">
-    <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
-         title="Daemon: disconnected">
-      <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
-      <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
-    </div>
-    <span id="statusbar-claude-usage"
-          class="statusbar-chip statusbar-chip--unknown"
-          title="Claude usage limits unavailable until provider usage data arrives.">Claude —</span>
-    <span id="statusbar-codex-usage"
-          class="statusbar-chip statusbar-chip--unknown"
-          title="Codex usage limits unavailable until provider usage data arrives.">Codex —</span>
-    <button id="statusbar-deploy"
-            class="statusbar-chip statusbar-chip-button statusbar-chip--muted statusbar-chip-deploy"
-            type="button"
-            hidden
-            onclick="statusBarOpenDeploy()"
-            title="No deploy-pending tasks">Deploy 0</button>
-    <span id="statusbar-workload"
-          class="statusbar-chip statusbar-chip-agents"
-          title="Agent status counts">Agents —</span>
-    <span id="statusbar-tasks"
-          class="statusbar-chip statusbar-chip-tasks"
-          title="Active worker tasks">Tasks —</span>
-    <span id="statusbar-attention"
-          class="statusbar-chip statusbar-chip-attention"
-          title="Attention items">Attention —</span>
-  </div>
-  <div class="taskbar-spacer"></div>
+<!-- Panel bar (bottom dock for panel apps) -->
+<div id="panelbar">
   <div id="statusbar-panel-buttons" class="statusbar-panel-buttons" aria-label="Panels">
     <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
     <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>

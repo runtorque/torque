@@ -100,9 +100,23 @@ function createSandbox() {
     'statusbar-tasks',
     'statusbar-attention',
   ].forEach((id) => document.ensure(id));
+  const taskbar = document.register('taskbar');
+  const statusInfo = document.getElementById('statusbar-info');
+  [
+    'statusbar-claude-usage',
+    'statusbar-codex-usage',
+    'statusbar-deploy',
+    'statusbar-workload',
+    'statusbar-tasks',
+    'statusbar-attention',
+  ].forEach((id) => statusInfo.appendChild(document.getElementById(id)));
+  taskbar.appendChild(statusInfo);
+  document.body.appendChild(taskbar);
+  const panelbar = document.register('panelbar');
   const panelButtons = document.getElementById('statusbar-panel-buttons');
   const board = document.register('panel-board-button');
   const chat = document.register('panel-chat-button');
+  panelbar.appendChild(panelButtons);
   panelButtons.appendChild(board);
   panelButtons.appendChild(chat);
 
@@ -132,7 +146,7 @@ function createSandbox() {
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
-  return { sandbox, document, sendCalls, timers, panelButtons, board, chat };
+  return { sandbox, document, sendCalls, timers, taskbar, statusInfo, panelbar, panelButtons, board, chat };
 }
 
 function jsonValue(context, expression) {
@@ -340,7 +354,7 @@ test('deploy view hides zero-pending state and highlights pending deploys', () =
 });
 
 test('refreshStatusBar updates static nodes without wiping panel-button nodes or focus', () => {
-  const { sandbox, document, panelButtons, board, chat } = createSandbox();
+  const { sandbox, document, taskbar, statusInfo, panelbar, panelButtons, board, chat } = createSandbox();
   const context = vm.createContext(sandbox);
   loadStatusBar(context);
   board.focus();
@@ -349,14 +363,27 @@ test('refreshStatusBar updates static nodes without wiping panel-button nodes or
   };
 
   vm.runInContext('refreshStatusBar();', context);
+  const beforeStatusChildren = statusInfo.children.slice();
   const beforeChildren = panelButtons.children.slice();
   assert.equal(document.activeElement, board);
+  assert.deepEqual(beforeStatusChildren.map((child) => child.id), [
+    'statusbar-claude-usage',
+    'statusbar-codex-usage',
+    'statusbar-deploy',
+    'statusbar-workload',
+    'statusbar-tasks',
+    'statusbar-attention',
+  ]);
   assert.deepEqual(beforeChildren, [board, chat]);
 
   sandbox.state.agents.a2 = { id: 'a2', group: 'Torque', cell_type: 'agent', status: 'idle' };
   vm.runInContext('refreshStatusBar();', context);
 
+  assert.equal(document.getElementById('statusbar-info'), statusInfo);
+  assert.equal(statusInfo.parentNode, taskbar);
+  assert.deepEqual(statusInfo.children, beforeStatusChildren);
   assert.equal(document.getElementById('statusbar-panel-buttons'), panelButtons);
+  assert.equal(panelButtons.parentNode, panelbar);
   assert.deepEqual(panelButtons.children, beforeChildren);
   assert.equal(document.activeElement, board);
   assert.match(document.getElementById('statusbar-workload').textContent, /Agents 1 run \/ 1 idle/);

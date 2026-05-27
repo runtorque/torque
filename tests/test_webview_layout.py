@@ -173,12 +173,18 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
 
 def _taskbar_html(html: str) -> str:
     start = html.index('<div id="taskbar">')
+    end = html.index('<div id="standalone-float-layer"', start)
+    return html[start:end]
+
+
+def _panelbar_html(html: str) -> str:
+    start = html.index('<div id="panelbar">')
     end = html.index("<!-- Context menu", start)
     return html[start:end]
 
 
 class WebviewStatusBarLayoutTests(unittest.TestCase):
-    """Bottom status bar keeps stable taskbar IDs/buttons while moving apps right."""
+    """Right status rail + bottom panelbar keep stable ids/buttons."""
 
     PANEL_APPS = [
         "board",
@@ -194,14 +200,22 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
     ]
 
     def test_taskbar_status_clusters_and_daemon_anchor_are_preserved(self):
-        taskbar = _taskbar_html(_read(WEBVIEW))
+        html = _read(WEBVIEW)
+        taskbar = _taskbar_html(html)
+        panelbar = _panelbar_html(html)
 
         self.assertIn('id="statusbar-info"', taskbar)
-        self.assertIn('id="statusbar-panel-buttons"', taskbar)
+        self.assertNotIn('id="statusbar-panel-buttons"', taskbar)
+        self.assertIn('id="statusbar-panel-buttons"', panelbar)
         self.assertLess(
-            taskbar.index('id="statusbar-info"'),
-            taskbar.index('id="statusbar-panel-buttons"'),
-            "status info cluster must stay left of panel buttons",
+            html.index('<div id="workspace-shell">'),
+            html.index('<div id="taskbar">'),
+            "status rail must live inside the workspace shell after workspace content",
+        )
+        self.assertLess(
+            html.index('<div id="bottom-panel"'),
+            html.index('<div id="panelbar">'),
+            "panel launcher bar must stay at the bottom where the status bar used to be",
         )
         self.assertRegex(
             taskbar,
@@ -215,9 +229,7 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
         )
 
     def test_panel_buttons_keep_ids_data_app_labels_and_toggle_handlers(self):
-        taskbar = _taskbar_html(_read(WEBVIEW))
-        panel_start = taskbar.index('id="statusbar-panel-buttons"')
-        panel_html = taskbar[panel_start:]
+        panel_html = _panelbar_html(_read(WEBVIEW))
 
         for app in self.PANEL_APPS:
             self.assertRegex(
@@ -234,7 +246,7 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
         self.assertGreater(
             panel_html.index('id="taskbar-restore-layout"'),
             panel_html.rindex('class="taskbar-app"'),
-            "Restore layout button follows the panel app buttons in the right cluster",
+            "Restore layout button follows the panel app buttons in the bottom cluster",
         )
 
     def test_status_bar_script_loads_after_events_before_panel_manager(self):
