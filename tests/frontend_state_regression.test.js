@@ -12635,7 +12635,7 @@ test('terminal compose validates dropped attachments before upload', () => {
   ]);
 });
 
-test('terminal compose image drop uploads files and inserts returned paths at the cursor', async () => {
+test('terminal compose image drop displays tokens and sends returned paths', async () => {
   const uploads = [];
   class FakeFormData {
     constructor() {
@@ -12647,7 +12647,7 @@ test('terminal compose image drop uploads files and inserts returned paths at th
     }
   }
 
-  const { context, document } = createEmbeddedTerminalHarness({
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
     FormData: FakeFormData,
     fetch(url, options) {
       uploads.push({ url, entries: options.body.entries });
@@ -12705,15 +12705,46 @@ test('terminal compose image drop uploads files and inserts returned paths at th
     ['file', imageOne],
     ['file', imageTwo],
   ]);
-  const inserted = '/home/testuser/.torque/attachments/agent-1-first.png'
-    + '\n/home/testuser/.torque/attachments/agent-1-second.jpg';
-  assert.equal(input.value, 'prefix-' + inserted + ' suffix');
-  assert.equal(input.selectionStart, 'prefix-'.length + inserted.length);
+  const firstPath = '/home/testuser/.torque/attachments/agent-1-first.png';
+  const secondPath = '/home/testuser/.torque/attachments/agent-1-second.jpg';
+  const displayInserted = '[ Image #1 ]\n[ Image #2 ]';
+  const payloadInserted = firstPath + '\n' + secondPath;
+  assert.equal(input.value, 'prefix-' + displayInserted + ' suffix');
+  assert.equal(input.selectionStart, 'prefix-'.length + displayInserted.length);
   assert.equal(input.selectionEnd, input.selectionStart);
   assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), input.value);
+  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
+    { token: '[ Image #1 ]', path: firstPath },
+    { token: '[ Image #2 ]', path: secondPath },
+  ]);
+  assert.equal(
+    runInContext(context, `_terminalComposePayloadText('agent-1', ${JSON.stringify(input.value)})`),
+    'prefix-' + payloadInserted + ' suffix',
+  );
   assert.equal(error.textContent, '');
   assert.equal(button.disabled, false);
   assert.equal(input.focused, true);
+
+  input.value = 'prefix-[ Image #2 ] suffix';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
+    { token: '[ Image #2 ]', path: secondPath },
+  ]);
+
+  context.__submitEvt = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeSubmit(__submitEvt, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'send_user_message');
+  assert.equal(sandbox.sendCalls[0].cell_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[0].text, 'prefix-' + secondPath + ' suffix');
+  assert.equal(input.value, '');
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
 });
 
 test('terminal compose oversized image drop is rejected without upload or draft changes', async () => {

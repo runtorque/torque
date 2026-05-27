@@ -11,6 +11,7 @@ let _embeddedTerminalDropSurface = null;
 let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
+let _terminalComposeAttachments = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
 let _terminalComposeHistoryOpenCellId = '';
@@ -1451,6 +1452,7 @@ function _terminalComposeSetValue(input, cellId, value) {
   if (!input) return;
   const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
   input.value = String(value || '');
+  if (id) _terminalComposePruneAttachments(id, input.value);
   if (id) _terminalComposeDrafts[id] = input.value;
   const end = input.value.length;
   if (typeof input.setSelectionRange === 'function') {
@@ -1592,11 +1594,92 @@ function terminalComposeValidateDroppedFiles(files) {
   return { accepted: accepted, errors: errors };
 }
 
+function _terminalComposeAttachmentToken(number) {
+  return '[ Image #' + number + ' ]';
+}
+
+function _terminalComposeAttachmentState(cellId) {
+  var id = String(cellId || '');
+  if (!id) return null;
+  if (!_terminalComposeAttachments[id]) {
+    _terminalComposeAttachments[id] = { next: 1, entries: [] };
+  }
+  var stateForCell = _terminalComposeAttachments[id];
+  if (!Array.isArray(stateForCell.entries)) stateForCell.entries = [];
+  var next = Number(stateForCell.next || 1);
+  stateForCell.next = Number.isFinite(next) && next > 0 ? Math.floor(next) : 1;
+  return stateForCell;
+}
+
+function _terminalComposeHighestAttachmentTokenNumber(text) {
+  var highest = 0;
+  var re = /\[ Image #(\d+) \]/g;
+  var match = null;
+  text = String(text || '');
+  while ((match = re.exec(text))) {
+    highest = Math.max(highest, Number(match[1]) || 0);
+  }
+  return highest;
+}
+
+function _terminalComposeRegisterAttachmentPaths(cellId, paths, displayText) {
+  var stateForCell = _terminalComposeAttachmentState(cellId);
+  if (!stateForCell) {
+    return (paths || []).map(function(path) { return String(path || ''); })
+      .filter(Boolean);
+  }
+  stateForCell.next = Math.max(
+    stateForCell.next || 1,
+    _terminalComposeHighestAttachmentTokenNumber(displayText) + 1
+  );
+  var tokens = [];
+  for (var i = 0; i < (paths || []).length; i++) {
+    var path = String(paths[i] || '');
+    if (!path) continue;
+    var token = _terminalComposeAttachmentToken(stateForCell.next);
+    stateForCell.next += 1;
+    stateForCell.entries.push({ token: token, path: path });
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function _terminalComposePruneAttachments(cellId, displayText) {
+  var id = String(cellId || '');
+  var stateForCell = id ? _terminalComposeAttachments[id] : null;
+  if (!stateForCell || !Array.isArray(stateForCell.entries)) return;
+  var text = String(displayText || '');
+  stateForCell.entries = stateForCell.entries.filter(function(entry) {
+    return !!(entry && entry.token && text.indexOf(entry.token) !== -1);
+  });
+  if (!stateForCell.entries.length) delete _terminalComposeAttachments[id];
+}
+
+function _terminalComposePayloadText(cellId, displayText) {
+  var id = String(cellId || '');
+  var text = String(displayText || '');
+  if (!id || !_terminalComposeAttachments[id]) return text;
+  _terminalComposePruneAttachments(id, text);
+  var stateForCell = _terminalComposeAttachments[id];
+  var entries = stateForCell && Array.isArray(stateForCell.entries)
+    ? stateForCell.entries
+    : [];
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    if (!entry || !entry.token) continue;
+    text = text.split(entry.token).join(String(entry.path || ''));
+  }
+  return text;
+}
+
 function _terminalComposeInsertPaths(input, paths) {
   if (!input || !paths || !paths.length) return;
-  var insertText = paths.map(function(path) { return String(path || ''); })
-    .filter(Boolean)
-    .join('\n');
+  var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  var insertText = _terminalComposeRegisterAttachmentPaths(
+    cellId,
+    paths,
+    input.value
+  ).join('\n');
   if (!insertText) return;
   var value = String(input.value || '');
   var start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
@@ -1789,6 +1872,7 @@ function terminalComposeInput(el) {
   if (!el) return;
   const cellId = el.dataset ? (el.dataset.cellId || '') : '';
   if (cellId) _terminalComposeResetRecall(cellId);
+  if (cellId) _terminalComposePruneAttachments(cellId, el.value);
   if (cellId) _terminalComposeDrafts[cellId] = String(el.value || '');
   if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
@@ -1803,6 +1887,7 @@ function terminalComposeClear(cellId) {
   _terminalComposeHistoryClose(id);
   input.value = '';
   if (id) _terminalComposeDrafts[id] = '';
+  if (id) delete _terminalComposeAttachments[id];
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
 }
@@ -1904,11 +1989,12 @@ function terminalComposeSubmit(evt, cellId) {
     input = document.getElementById(_terminalComposeInputId(id));
   }
   if (!input) return false;
-  const text = String(input.value || '');
-  if (!text.trim()) {
+  const displayText = String(input.value || '');
+  if (!displayText.trim()) {
     terminalComposeClear(id);
     return false;
   }
+  const text = _terminalComposePayloadText(id, displayText);
   const directAgent = _terminalComposeDirectAgentForCellId(id);
   if (directAgent && directAgent.id) {
     const directAgentId = String(directAgent.id || '');
