@@ -10783,6 +10783,36 @@ test('embedded terminal output auto-follows when xterm viewport is pinned to tai
   assert.equal(term.scrollToBottomCount, 1);
 });
 
+test('embedded terminal output keeps tail-follow after a terminal workspace rerender', () => {
+  const { context, dom, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  const socket = sockets[0];
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.scrollToBottomCount = 0;
+
+  // The main grid path ends by calling renderTerminalWorkspace(); this routine
+  // same-session rerender must not replace the active xterm entry or lose the
+  // pinned-to-tail state that lets live Claude/Codex output keep following.
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals.length, 1);
+  assert.equal(sockets.length, 1);
+  assert.equal(terminals[0], term);
+  assert.equal(sockets[0], socket);
+  assert.equal(dom.stage.querySelector('.terminal-surface'), dom.surface);
+
+  term.writeBaseGrowth = 7;
+  socket.onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'after rerender\r\n' }),
+  });
+
+  assert.deepEqual(term.writes, ['after rerender\r\n']);
+  assert.equal(term.buffer.active.baseY, 49);
+  assert.equal(term.buffer.active.viewportY, 49);
+  assert.equal(term.scrollToBottomCount, 1);
+});
+
 test('embedded terminal output preserves viewport when user has scrolled up', () => {
   const { sockets, terminals } = setupEmbeddedTerminalOutputHarness();
   const term = terminals[0];
