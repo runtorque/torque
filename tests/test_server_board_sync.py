@@ -436,8 +436,61 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.push_calls, [task.id, task.id])
         sync = state.board_tasks[task.id].board_sync
         self.assertEqual(sync["sync_state"], "error")
-        self.assertEqual(sync["auto_retry_attempts"], 1)
-        self.assertIn("next_retry_at", sync)
+        self.assertEqual(sync["last_error"], "secondary rate limit")
+        for key in (
+            "auto_retry_attempts",
+            "next_retry_at",
+            "next_retry_at_iso",
+            "retry_backoff_seconds",
+        ):
+            self.assertNotIn(key, sync)
+
+    async def test_later_non_transient_error_clears_retry_metadata(self):
+        class TransientThenTerminalProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                if len(self.push_calls) == 1:
+                    return {
+                        "version": 1,
+                        "provider": self.name,
+                        "enabled": True,
+                        "sync_state": "error",
+                        "last_error": "temporary network timeout",
+                    }
+                return {
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "error",
+                    "last_error": "validation failed",
+                }
+
+        provider = TransientThenTerminalProvider()
+        state = make_state()
+        manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            debounce_seconds=0,
+            retry_backoff_seconds=[0.01],
+            max_auto_retry_attempts=3,
+        )
+        self.manager = manager
+        manager.start()
+
+        task = state.board_add_task("Retry then stop", "g", id="task-retry-terminal")
+        await asyncio.wait_for(manager.join(), timeout=1)
+
+        self.assertEqual(provider.push_calls, [task.id, task.id])
+        sync = state.board_tasks[task.id].board_sync
+        self.assertEqual(sync["sync_state"], "error")
+        self.assertEqual(sync["last_error"], "validation failed")
+        for key in (
+            "auto_retry_attempts",
+            "next_retry_at",
+            "next_retry_at_iso",
+            "retry_backoff_seconds",
+        ):
+            self.assertNotIn(key, sync)
 
     async def test_preflight_error_emits_panel_event_and_toast(self):
         provider = FakeBoardSyncProvider()
