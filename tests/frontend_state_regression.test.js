@@ -12771,6 +12771,129 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
 });
 
+test('terminal compose preserves image token payload through history recall restore', async () => {
+  async function runRecallRestoreFlow(restoreKey) {
+    const uploads = [];
+    class FakeFormData {
+      constructor() {
+        this.entries = [];
+      }
+
+      append(name, value) {
+        this.entries.push([name, value]);
+      }
+    }
+
+    const fullPath = '/home/testuser/.torque/attachments/agent-1-history.png';
+    const { context, document, sandbox } = createEmbeddedTerminalHarness({
+      FormData: FakeFormData,
+      fetch(url, options) {
+        uploads.push({ url, entries: options.body.entries });
+        return Promise.resolve({
+          json() {
+            return Promise.resolve({
+              ok: true,
+              data: [{ path: fullPath }],
+            });
+          },
+        });
+      },
+    });
+    sandbox.state.agent_message_history = {
+      'agent-1': [
+        { id: 7, agent_id: 'agent-1', message: 'previous history entry', sent_at: 7 },
+      ],
+    };
+
+    const form = new FakeElement('compose-form');
+    form.classList.add('terminal-compose');
+    const input = document.register('terminal-compose-input-agent-1');
+    input.classList.add('terminal-compose-input');
+    input.dataset.cellId = 'agent-1';
+    input.selectionStart = 0;
+    input.selectionEnd = 0;
+    const error = new FakeElement('compose-error');
+    error.classList.add('terminal-compose-error');
+    const button = document.register('terminal-compose-submit-agent-1');
+    button.classList.add('terminal-compose-submit');
+    form.appendChild(input);
+    form.appendChild(error);
+    form.appendChild(button);
+    form.setQuerySelector('.terminal-compose-input', input);
+    form.setQuerySelector('.terminal-compose-error', error);
+    form.setQuerySelector('.terminal-compose-submit', button);
+
+    const image = { type: 'image/png', name: 'history.png', size: 1200 };
+    const dropEvent = {
+      currentTarget: input,
+      dataTransfer: { types: ['Files'], files: [image] },
+      preventDefaultCalled: false,
+      stopPropagationCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+      stopPropagation() { this.stopPropagationCalled = true; },
+    };
+
+    await context.terminalComposeDrop(dropEvent, 'agent-1');
+    assert.equal(dropEvent.preventDefaultCalled, true);
+    assert.equal(dropEvent.stopPropagationCalled, true);
+    assert.equal(uploads.length, 1);
+    assert.equal(input.value, '[ Image #1 ]');
+    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
+      { token: '[ Image #1 ]', path: fullPath },
+    ]);
+
+    function keyEvent(key) {
+      return {
+        key,
+        target: input,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        preventDefaultCalled: false,
+        stopPropagationCalled: false,
+        preventDefault() { this.preventDefaultCalled = true; },
+        stopPropagation() { this.stopPropagationCalled = true; },
+      };
+    }
+
+    const up = keyEvent('ArrowUp');
+    context.__historyUp = up;
+    runInContext(context, `terminalComposeKeydown(__historyUp, 'agent-1');`);
+    assert.equal(up.preventDefaultCalled, true);
+    assert.equal(up.stopPropagationCalled, true);
+    assert.equal(input.value, 'previous history entry');
+    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
+      { token: '[ Image #1 ]', path: fullPath },
+    ]);
+
+    const restore = keyEvent(restoreKey);
+    context.__historyRestore = restore;
+    runInContext(context, `terminalComposeKeydown(__historyRestore, 'agent-1');`);
+    assert.equal(restore.preventDefaultCalled, true);
+    assert.equal(restore.stopPropagationCalled, true);
+    assert.equal(input.value, '[ Image #1 ]');
+    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
+      { token: '[ Image #1 ]', path: fullPath },
+    ]);
+
+    context.__submitHistoryRestore = {
+      currentTarget: form,
+      preventDefault() {},
+      stopPropagation() {},
+    };
+    runInContext(context, `terminalComposeSubmit(__submitHistoryRestore, 'agent-1');`);
+    assert.equal(sandbox.sendCalls.length, 1);
+    assert.equal(sandbox.sendCalls[0].cmd, 'send_user_message');
+    assert.equal(sandbox.sendCalls[0].cell_id, 'agent-1');
+    assert.equal(sandbox.sendCalls[0].text, fullPath);
+    assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+  }
+
+  await runRecallRestoreFlow('ArrowDown');
+  await runRecallRestoreFlow('Escape');
+});
+
 test('terminal compose ticket typeahead filters tasks and inserts selected reference', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
   sandbox.state.board_tasks = {

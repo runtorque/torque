@@ -1435,7 +1435,7 @@ function terminalComposeHistoryPick(evt, cellId, index) {
     const recall = _terminalComposeRecallState(id);
     recall.draft = String(input.value || '');
     recall.index = idx;
-    _terminalComposeSetValue(input, id, entry.message);
+    _terminalComposeSetValue(input, id, entry.message, { preserveAttachments: true });
     if (typeof input.focus === 'function') input.focus();
   }
   _terminalComposeHistoryClose(id);
@@ -1650,11 +1650,12 @@ function _terminalComposeResetRecall(cellId) {
   if (id) delete _terminalComposeRecall[id];
 }
 
-function _terminalComposeSetValue(input, cellId, value) {
+function _terminalComposeSetValue(input, cellId, value, options) {
   if (!input) return;
   const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
   input.value = String(value || '');
-  if (id) _terminalComposePruneAttachments(id, input.value);
+  const preserveAttachments = !!(options && options.preserveAttachments);
+  if (id && !preserveAttachments) _terminalComposePruneAttachments(id, input.value);
   if (id) _terminalComposeTaskDropdownHide(id);
   if (id) _terminalComposeDrafts[id] = input.value;
   const end = input.value.length;
@@ -1699,11 +1700,11 @@ function _terminalComposeHistoryNavigate(input, cellId, direction) {
   if (recall.index < 0) {
     const draft = recall.draft || '';
     _terminalComposeResetRecall(id);
-    _terminalComposeSetValue(input, id, draft);
+    _terminalComposeSetValue(input, id, draft, { preserveAttachments: true });
     return true;
   }
 
-  _terminalComposeSetValue(input, id, entries[recall.index].message);
+  _terminalComposeSetValue(input, id, entries[recall.index].message, { preserveAttachments: true });
   return true;
 }
 
@@ -1713,7 +1714,7 @@ function _terminalComposeRestoreRecallDraft(input, cellId) {
   if (!recall || recall.index < 0) return false;
   const draft = recall.draft || '';
   _terminalComposeResetRecall(id);
-  _terminalComposeSetValue(input, id, draft);
+  _terminalComposeSetValue(input, id, draft, { preserveAttachments: true });
   return true;
 }
 
