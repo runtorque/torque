@@ -262,8 +262,28 @@ function boardCardMenu(evt, taskId) {
   _boardRenderCardMenu(taskId);
 }
 
+function _boardCopyTextToClipboard(text, onDone) {
+  var clipboard = (typeof navigator !== 'undefined' && navigator) ? navigator.clipboard : null;
+  if (!clipboard || typeof clipboard.writeText !== 'function') return;
+  var result = null;
+  try {
+    result = clipboard.writeText(text);
+  } catch (e) {
+    return;
+  }
+  if (result && typeof result.then === 'function') {
+    result.then(function() { if (onDone) onDone(); });
+  } else if (onDone) {
+    onDone();
+  }
+}
+
 function boardCopyTaskId(taskId) {
-  navigator.clipboard.writeText(taskId).then(function() { _closeCtxMenu(); });
+  _boardCopyTextToClipboard(taskId, function() { _closeCtxMenu(); });
+}
+
+function boardCopyTaskIdFromCard(taskId) {
+  _boardCopyTextToClipboard(taskId);
 }
 
 function boardShowDependencyPicker(taskId) {
