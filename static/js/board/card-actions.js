@@ -81,6 +81,43 @@ function _boardCtxTaskJumpButton(label, task) {
     + esc(label) + '</button>';
 }
 
+function _boardCardMenuActionButton(label, action, taskId) {
+  return '<button type="button"'
+    + ' data-board-card-menu-action="' + esc(action) + '"'
+    + ' data-board-task-id="' + esc(taskId) + '">'
+    + esc(label) + '</button>';
+}
+
+function _boardCardMenuActionTarget(target) {
+  while (target && target !== document) {
+    if (target.getAttribute
+        && target.getAttribute('data-board-card-menu-action')) {
+      return target;
+    }
+    target = target.parentNode;
+  }
+  return null;
+}
+
+function _boardHandleCardMenuClick(evt) {
+  var target = _boardCardMenuActionTarget(evt && evt.target);
+  if (!target) return;
+  if (evt && evt.preventDefault) evt.preventDefault();
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+
+  var action = target.getAttribute('data-board-card-menu-action') || '';
+  var taskId = target.getAttribute('data-board-task-id') || '';
+  if (!taskId) return;
+
+  if (action === 'open-github') {
+    boardOpenGithubIssue(taskId);
+  } else if (action === 'sync-github') {
+    boardSyncTaskNow(taskId);
+  } else if (action === 'unlink-external') {
+    boardClearExternal(taskId);
+  }
+}
+
 function _boardTaskCountsAsDone(task) {
   if (!task) return false;
   if (task.lane === 'Done') return true;
@@ -140,8 +177,6 @@ function _boardRenderCardMenu(taskId) {
     html += '<button onclick="event.stopPropagation();boardMarkTaskVerified(\'' + taskId + '\')">Mark verified</button>';
   }
 
-  // Preview prompt
-  html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
   html += '<button onclick="openTaskArtifactBrowser(\'' + taskId + '\')">Artifacts...</button>';
 
   if (dependencies.length || dependents.length) {
@@ -172,16 +207,11 @@ function _boardRenderCardMenu(taskId) {
     var gh = typeof _boardTaskGithubSync === 'function' ? _boardTaskGithubSync(task) : {};
     var hasGithubIssue = !!(task.external_url || task.external_id || gh.issue_number || gh.issue_url);
     if (hasGithubIssue) {
-      html += '<button onclick="event.stopPropagation();boardOpenGithubIssue(\'' + taskId + '\')">Open GitHub issue</button>';
-    } else {
-      html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Create GitHub issue</button>';
+      html += _boardCardMenuActionButton('Open in GitHub', 'open-github', taskId);
     }
-    html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Push to GitHub</button>';
-    html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Sync GitHub now</button>';
-    html += '<button onclick="event.stopPropagation();boardPullPreview(\'' + taskId + '\')">Pull preview</button>';
-    html += '<button onclick="event.stopPropagation();boardLinkExternal(\'' + taskId + '\')">Edit external link...</button>';
+    html += _boardCardMenuActionButton('Sync', 'sync-github', taskId);
     if (hasGithubIssue || task.provider || task.external_id || task.external_url) {
-      html += '<button onclick="event.stopPropagation();boardClearExternal(\'' + taskId + '\')">Unlink external issue</button>';
+      html += _boardCardMenuActionButton('Unlink', 'unlink-external', taskId);
     }
   } else if (task.provider || task.external_id || task.external_url) {
     html += '<button onclick="event.stopPropagation();boardOpenExternal(\'' + taskId + '\')">Open external issue</button>';
@@ -218,6 +248,7 @@ function _boardRenderCardMenu(taskId) {
   html += '<button class="danger" onclick="boardDeleteTask(\'' + taskId + '\')">Delete</button>';
 
   menu.innerHTML = html;
+  menu.onclick = _boardHandleCardMenuClick;
   menu.classList.add('open');
   _adjustCtxMenuOverflow();
 }
