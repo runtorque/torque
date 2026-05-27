@@ -22,7 +22,6 @@
   --standalone-sidebar-width: 340px;
   --standalone-main-stack-min-width: 360px;
   --standalone-right-rail-min-width: 320px;
-  --statusbar-rail-width: 220px;
   --statusbar-bg: color-mix(in srgb, var(--bg) 88%, #000 12%);
   --statusbar-bg-strong: color-mix(in srgb, var(--bg) 72%, #000 28%);
   --statusbar-fg: var(--text);
@@ -150,7 +149,7 @@ body.tauri-mode #taskbar-conn-dot {
   display: inline-block;
   margin-left: 0;
 }
-#taskbar .daemon-connection-status {
+.statusbar-info .daemon-connection-status {
   display: inline-flex;
 }
 /* Relay-connection indicator (TORQUE:560). Daemon<->relay-cloud connection —
@@ -179,9 +178,9 @@ body.tauri-mode #taskbar-conn-dot {
 .relay-status-dot--amber { background: var(--amber); }
 .relay-status-dot--red { background: var(--red); }
 .relay-status-dot--grey { background: var(--text-dim); }
-/* When mounted in the taskbar, keep the indicator visible in browser and
+/* When mounted in the bottom status cluster, keep the indicator visible in browser and
    desktop profiles, matching the labelled daemon status. */
-#taskbar .relay-status { display: inline-flex; }
+.statusbar-info .relay-status { display: inline-flex; }
 .hdr-spacer { flex: 1; min-width: 0; }
 .hdr-btn {
   font-size: 10px; padding: 3px 8px;
@@ -234,8 +233,7 @@ body.runtime-embedded #workspace-shell {
   grid-template-columns:
     max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))))
     8px
-    minmax(0, 1fr)
-    var(--statusbar-rail-width);
+    minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
@@ -336,13 +334,9 @@ body.runtime-embedded #terminal-workspace {
     linear-gradient(180deg, rgba(255,255,255,.015), transparent 28%),
     var(--bg);
 }
-body.runtime-embedded #taskbar {
-  grid-column: 4;
-  grid-row: 1;
-}
 body.runtime-embedded #standalone-float-layer {
   position: fixed;
-  inset: 44px var(--statusbar-rail-width) 36px 0;
+  inset: 44px 0 30px 0;
   pointer-events: none;
   z-index: 20;
 }
@@ -4272,52 +4266,25 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 
 /* ------------------------------------------------------------------ */
-/* Status rail + panel bar                                             */
+/* Status + panel bar                                                 */
 /* ------------------------------------------------------------------ */
-#taskbar {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  background: var(--statusbar-bg);
-  border-left: 1px solid var(--statusbar-divider);
-  padding: 0;
-  flex-shrink: 0;
-  flex-basis: var(--statusbar-rail-width);
-  width: var(--statusbar-rail-width);
-  min-width: var(--statusbar-rail-width);
-  min-height: 0;
-  overflow: hidden;
-}
-body.runtime-embedded #taskbar {
-  gap: 0;
-  width: var(--statusbar-rail-width);
-  min-width: var(--statusbar-rail-width);
-  height: auto;
-  padding: 0;
-  background:
-    linear-gradient(90deg, rgba(255,255,255,.035), transparent 68px),
-    var(--statusbar-bg);
-  box-shadow:
-    inset 1px 0 0 rgba(255,255,255,.035),
-    inset 3px 0 0 var(--statusbar-bg-strong);
-}
 #panelbar {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0;
   background: var(--statusbar-bg);
   border-top: 1px solid var(--statusbar-divider);
   padding: 0 4px;
-  flex: 0 0 auto;
-  height: 26px;
+  flex: 0 0 24px;
+  height: 24px;
   min-width: 0;
   overflow: hidden;
 }
 body.runtime-embedded #panelbar {
   gap: 0;
-  height: 36px;
-  padding: 0 10px;
+  flex-basis: 30px;
+  height: 30px;
+  padding: 0 8px;
   background:
     linear-gradient(180deg, rgba(255,255,255,.035), transparent 90%),
     var(--statusbar-bg);
@@ -4338,9 +4305,9 @@ body.runtime-embedded #panelbar {
 }
 body.runtime-embedded .taskbar-app {
   gap: 6px;
-  min-height: 36px;
-  font-size: 11px;
-  padding: 0 10px;
+  min-height: 30px;
+  font-size: 10px;
+  padding: 0 8px;
   border-radius: 0;
 }
 .taskbar-app-icon {
@@ -4367,8 +4334,8 @@ body.runtime-embedded .taskbar-app.active {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 .taskbar-spacer {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 8px;
 }
 .statusbar-info,
 .statusbar-panel-buttons {
@@ -4378,16 +4345,17 @@ body.runtime-embedded .taskbar-app.active {
   min-width: 0;
 }
 .statusbar-info {
-  flex: 1 1 auto;
-  flex-direction: column;
-  align-items: stretch;
+  flex: 0 1 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
   gap: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .statusbar-panel-buttons {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   gap: 0;
   justify-content: flex-start;
   overflow-x: auto;
@@ -4396,31 +4364,35 @@ body.runtime-embedded .taskbar-app.active {
 }
 .statusbar-panel-buttons::-webkit-scrollbar { display: none; }
 .statusbar-info > .daemon-connection-status:first-child,
-#taskbar .relay-status {
-  width: 100%;
+.statusbar-info .relay-status {
+  height: 100%;
   min-height: 24px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--statusbar-divider);
-  border-left: 0;
+  padding: 0 8px;
+  border-left: 1px solid var(--statusbar-divider);
   background: transparent;
   color: var(--statusbar-muted);
   font-size: 10px;
   line-height: 1;
 }
-#taskbar .relay-status {
+.statusbar-info .relay-status {
   display: inline-flex;
   justify-content: flex-start;
 }
-body.runtime-embedded #taskbar .relay-status {
-  min-height: 26px;
-  font-size: 11px;
+.statusbar-info .relay-status[hidden],
+.statusbar-info .relay-status--hidden {
+  display: none;
 }
-#taskbar #taskbar-conn-dot,
-#taskbar .relay-status-dot {
+body.runtime-embedded .statusbar-info > .daemon-connection-status:first-child,
+body.runtime-embedded .statusbar-info .relay-status {
+  min-height: 30px;
+  font-size: 10px;
+}
+.statusbar-info #taskbar-conn-dot,
+.statusbar-info .relay-status-dot {
   width: 7px;
   height: 7px;
 }
-#taskbar .relay-status-label {
+.statusbar-info .relay-status-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4430,14 +4402,15 @@ body.runtime-embedded #taskbar .relay-status {
   align-items: center;
   justify-content: flex-start;
   gap: 4px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  width: 100%;
-  max-width: none;
-  height: 24px;
-  padding: 0 10px;
+  width: auto;
+  max-width: 150px;
+  height: 100%;
+  min-height: 24px;
+  padding: 0 8px;
   border: 0;
-  border-bottom: 1px solid var(--statusbar-divider);
+  border-left: 1px solid var(--statusbar-divider);
   border-radius: 0;
   background: transparent;
   color: var(--statusbar-muted);
@@ -4450,9 +4423,9 @@ body.runtime-embedded #taskbar .relay-status {
   box-shadow: inset 2px 0 0 transparent;
 }
 body.runtime-embedded .statusbar-chip {
-  height: 26px;
-  padding: 0 10px;
-  font-size: 11px;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 10px;
 }
 .statusbar-chip[hidden] { display: none !important; }
 .statusbar-chip-button {
@@ -4506,7 +4479,7 @@ body.runtime-embedded .statusbar-chip {
 }
 body.runtime-embedded .taskbar-aux-btn {
   display: inline-flex;
-  font-size: 11px;
+  font-size: 10px;
 }
 .taskbar-aux-icon,
 .taskbar-aux-icon svg {
@@ -4554,16 +4527,6 @@ body.runtime-embedded .taskbar-aux-btn {
   .statusbar-chip-attention { display: none; }
   .statusbar-chip { max-width: 120px; padding-inline: 6px; }
 }
-#taskbar .statusbar-chip-deploy,
-#taskbar .statusbar-chip-agents,
-#taskbar .statusbar-chip-tasks,
-#taskbar .statusbar-chip-attention {
-  display: inline-flex;
-}
-#taskbar .statusbar-chip {
-  max-width: none;
-}
-
 /* ------------------------------------------------------------------ */
 /* Standalone dock workspace                                          */
 /* ------------------------------------------------------------------ */
@@ -8205,7 +8168,6 @@ body.diff-view-open #standalone-bottom-dock,
 body.diff-view-open #standalone-right-rail,
 body.diff-view-open #standalone-float-layer,
 body.diff-view-open #bottom-panel,
-body.diff-view-open #taskbar,
 body.diff-view-open #panelbar,
 body.diff-view-open #ctx-menu {
   display: none !important;
@@ -10991,7 +10953,6 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 /* ------------------------------------------------------------------ */
 body.detached-window #workspace-shell,
 body.detached-window #standalone-float-layer,
-body.detached-window #taskbar,
 body.detached-window #panelbar,
 body.detached-window #workspace-resize-handle,
 body.detached-window header,

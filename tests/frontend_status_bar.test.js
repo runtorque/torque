@@ -101,7 +101,7 @@ function createSandbox() {
     'statusbar-tasks',
     'statusbar-attention',
   ].forEach((id) => document.ensure(id));
-  const taskbar = document.register('taskbar');
+  const panelbar = document.register('panelbar');
   const statusInfo = document.getElementById('statusbar-info');
   [
     'statusbar-claude-usage',
@@ -112,15 +112,16 @@ function createSandbox() {
     'statusbar-tasks',
     'statusbar-attention',
   ].forEach((id) => statusInfo.appendChild(document.getElementById(id)));
-  taskbar.appendChild(statusInfo);
-  document.body.appendChild(taskbar);
-  const panelbar = document.register('panelbar');
   const panelButtons = document.getElementById('statusbar-panel-buttons');
   const board = document.register('panel-board-button');
   const chat = document.register('panel-chat-button');
   panelbar.appendChild(panelButtons);
   panelButtons.appendChild(board);
   panelButtons.appendChild(chat);
+  const spacer = document.register('taskbar-spacer');
+  panelbar.appendChild(spacer);
+  panelbar.appendChild(statusInfo);
+  document.body.appendChild(panelbar);
 
   const sendCalls = [];
   const timers = [];
@@ -148,7 +149,7 @@ function createSandbox() {
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
-  return { sandbox, document, sendCalls, timers, taskbar, statusInfo, panelbar, panelButtons, board, chat };
+  return { sandbox, document, sendCalls, timers, statusInfo, panelbar, panelButtons, spacer, board, chat };
 }
 
 function jsonValue(context, expression) {
@@ -163,6 +164,36 @@ function runTimer(timer) {
   timer.active = false;
   timer.fn();
 }
+
+test('status chips live right-aligned inside the bottom panelbar without a right rail', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const panelbarStart = html.indexOf('<div id="panelbar">');
+  const panelbarEnd = html.indexOf('<!-- Context menu', panelbarStart);
+  assert.ok(panelbarStart >= 0 && panelbarEnd > panelbarStart, '#panelbar markup exists');
+  const panelbarHtml = html.slice(panelbarStart, panelbarEnd);
+
+  assert.equal(html.includes('<div id="taskbar">'), false);
+  assert.ok(
+    panelbarHtml.indexOf('id="statusbar-panel-buttons"') < panelbarHtml.indexOf('class="taskbar-spacer"'),
+    'panel buttons stay on the left of the bottom bar',
+  );
+  assert.ok(
+    panelbarHtml.indexOf('class="taskbar-spacer"') < panelbarHtml.indexOf('id="statusbar-info"'),
+    'spacer pushes status chips to the right edge',
+  );
+  assert.match(panelbarHtml, /id="statusbar-info"[\s\S]*id="statusbar-claude-usage"[\s\S]*id="statusbar-attention"/);
+
+  assert.doesNotMatch(css, /--statusbar-rail-width/);
+  assert.match(
+    css,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
+  );
+  assert.match(css, /#panelbar\s*\{[^}]*flex:\s*0 0 24px;[^}]*height:\s*24px;/s);
+  assert.match(css, /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*30px;[^}]*height:\s*30px;/s);
+  assert.match(css, /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*auto;/s);
+  assert.match(css, /\.taskbar-spacer\s*\{[^}]*flex:\s*1 1 auto;/s);
+});
 
 test('Claude usage view is unknown when no Claude agent has available provider_usage', () => {
   const { sandbox } = createSandbox();
@@ -356,7 +387,7 @@ test('deploy view hides zero-pending state and highlights pending deploys', () =
 });
 
 test('refreshStatusBar updates static nodes without wiping panel-button nodes or focus', () => {
-  const { sandbox, document, taskbar, statusInfo, panelbar, panelButtons, board, chat } = createSandbox();
+  const { sandbox, document, statusInfo, panelbar, panelButtons, board, chat } = createSandbox();
   const context = vm.createContext(sandbox);
   loadStatusBar(context);
   board.focus();
@@ -383,7 +414,7 @@ test('refreshStatusBar updates static nodes without wiping panel-button nodes or
   vm.runInContext('refreshStatusBar();', context);
 
   assert.equal(document.getElementById('statusbar-info'), statusInfo);
-  assert.equal(statusInfo.parentNode, taskbar);
+  assert.equal(statusInfo.parentNode, panelbar);
   assert.deepEqual(statusInfo.children, beforeStatusChildren);
   assert.equal(document.getElementById('statusbar-panel-buttons'), panelButtons);
   assert.equal(panelButtons.parentNode, panelbar);
