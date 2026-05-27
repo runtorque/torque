@@ -19479,6 +19479,30 @@ test('chat panel renders message markdown with escaped raw HTML and safe links',
   assert.doesNotMatch(html, /href="(?:javascript|data):/i);
 });
 
+test('markdown code blocks reserve horizontal scrollbar space for message bodies', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const blockRule = css.match(/\.torque-markdown \.torque-md-code-block\s*\{[^}]*\}/s);
+  assert.ok(blockRule, 'markdown code block CSS rule exists');
+  assert.match(blockRule[0], /overflow-x:\s*auto;/);
+  assert.match(
+    blockRule[0],
+    /padding:\s*0\.6em 0\.7em calc\(0\.6em \+ var\(--torque-md-code-scrollbar-space\)\);/,
+    'bottom padding reserves room for overlay horizontal scrollbars',
+  );
+  assert.match(blockRule[0], /scrollbar-gutter:\s*stable;/);
+  assert.match(blockRule[0], /scrollbar-width:\s*thin;/);
+  assert.match(blockRule[0], /scrollbar-color:\s*color-mix\(in srgb, var\(--text-dim\) 58%, transparent\) transparent;/);
+
+  const webkitRule = css.match(/\.torque-markdown \.torque-md-code-block::-webkit-scrollbar\s*\{[^}]*\}/s);
+  assert.ok(webkitRule, 'WebKit scrollbar rule exists for browser and desktop webviews');
+  assert.match(webkitRule[0], /height:\s*var\(--torque-md-code-scrollbar-space\);/);
+
+  const thumbRule = css.match(/\.torque-markdown \.torque-md-code-block::-webkit-scrollbar-thumb\s*\{[^}]*\}/s);
+  assert.ok(thumbRule, 'WebKit scrollbar thumb rule exists');
+  assert.match(thumbRule[0], /background:\s*color-mix\(in srgb, var\(--text-dim\) 58%, transparent\);/);
+  assert.match(thumbRule[0], /border:\s*2px solid transparent;/);
+});
+
 test('chat message context menu copies raw source text rather than rendered markdown', () => {
   const { context, document } = createChatHarness();
   const menu = document.register('ctx-menu');
