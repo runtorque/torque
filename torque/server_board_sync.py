@@ -56,6 +56,12 @@ _AUTO_DEBOUNCE_SECONDS = 1.0
 _AUTO_MAX_COALESCE_SECONDS = 5.0
 _AUTO_RETRY_BACKOFF_SECONDS = (30.0, 120.0, 300.0, 900.0)
 _AUTO_RETRY_MAX_ATTEMPTS = 5
+_AUTO_RETRY_METADATA_KEYS = (
+    "auto_retry_attempts",
+    "next_retry_at",
+    "next_retry_at_iso",
+    "retry_backoff_seconds",
+)
 
 
 def _now_iso() -> str:
@@ -1120,15 +1126,15 @@ class BoardSyncManager:
         if sync.get("sync_state") != "error":
             sync["sync_state"] = "idle"
             sync["last_error"] = ""
-            for key in (
-                "auto_retry_attempts",
-                "next_retry_at",
-                "next_retry_at_iso",
-                "retry_backoff_seconds",
-            ):
-                sync.pop(key, None)
+            self._clear_retry_metadata(sync)
         else:
-            self._schedule_retry_if_needed(task_id, provider_name, sync, item)
+            if not self._schedule_retry_if_needed(
+                task_id,
+                provider_name,
+                sync,
+                item,
+            ):
+                self._clear_retry_metadata(sync)
         self._save_task_sync(task, sync)
         await self._maybe_broadcast()
 
@@ -1300,22 +1306,27 @@ class BoardSyncManager:
         except (TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _clear_retry_metadata(sync: dict) -> None:
+        for key in _AUTO_RETRY_METADATA_KEYS:
+            sync.pop(key, None)
+
     def _schedule_retry_if_needed(
         self,
         task_id: str,
         provider_name: str,
         sync: dict,
         item: _DirtyItem,
-    ) -> None:
+    ) -> bool:
         if getattr(item, "explicit", False) or getattr(item, "force", False):
-            return
+            return False
         error = str(sync.get("last_error") or sync.get("error") or "").strip()
         if not self._is_transient_error(error):
-            return
+            return False
         prior_attempts = int(sync.get("auto_retry_attempts", 0) or 0)
         attempt = max(prior_attempts, getattr(item, "retry_attempt", 0)) + 1
         if attempt > self.max_auto_retry_attempts:
-            return
+            return False
         backoff = self.retry_backoff_seconds[
             min(attempt - 1, len(self.retry_backoff_seconds) - 1)
         ]
@@ -1356,6 +1367,7 @@ class BoardSyncManager:
         if self._idle_event:
             self._idle_event.clear()
         self._wake()
+        return True
 
     @staticmethod
     def _is_transient_error(error: str) -> bool:
