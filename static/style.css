@@ -11835,13 +11835,29 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   padding: 0 0.25em;
 }
 .torque-markdown .torque-md-code-block {
+  --torque-md-code-scrollbar-space: 10px;
   background: rgba(0,0,0,.24);
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 6px;
   color: var(--text);
   overflow-x: auto;
-  padding: 0.6em 0.7em;
+  padding: 0.6em 0.7em calc(0.6em + var(--torque-md-code-scrollbar-space));
+  scrollbar-color: color-mix(in srgb, var(--text-dim) 58%, transparent) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   white-space: pre;
+}
+.torque-markdown .torque-md-code-block::-webkit-scrollbar {
+  height: var(--torque-md-code-scrollbar-space);
+}
+.torque-markdown .torque-md-code-block::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-dim) 58%, transparent);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+.torque-markdown .torque-md-code-block::-webkit-scrollbar-track {
+  background: transparent;
 }
 .torque-markdown .torque-md-code-block code {
   white-space: pre;
