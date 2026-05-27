@@ -5390,24 +5390,29 @@ function createDaemonStatusHarness(overrides = {}) {
   return { context, document, sandbox, taskbar, restore, daemon, taskbarDot, label };
 }
 
-test('taskbar contains Restore layout and labelled daemon status members', () => {
+test('status rail and panelbar keep Restore layout and labelled daemon status members stable', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const taskbarStart = html.indexOf('<div id="taskbar">');
-  const taskbarEnd = html.indexOf('<!-- Context menu', taskbarStart);
+  const taskbarEnd = html.indexOf('<div id="standalone-float-layer"', taskbarStart);
   assert.ok(taskbarStart >= 0 && taskbarEnd > taskbarStart, '#taskbar markup exists');
   const taskbarHtml = html.slice(taskbarStart, taskbarEnd);
+  const panelbarStart = html.indexOf('<div id="panelbar">');
+  const panelbarEnd = html.indexOf('<!-- Context menu', panelbarStart);
+  assert.ok(panelbarStart >= 0 && panelbarEnd > panelbarStart, '#panelbar markup exists');
+  const panelbarHtml = html.slice(panelbarStart, panelbarEnd);
   assert.match(taskbarHtml, /id="statusbar-info"/);
-  assert.match(taskbarHtml, /id="statusbar-panel-buttons"/);
-  assert.match(taskbarHtml, /id="taskbar-restore-layout"/);
+  assert.doesNotMatch(taskbarHtml, /id="statusbar-panel-buttons"/);
+  assert.match(panelbarHtml, /id="statusbar-panel-buttons"/);
+  assert.match(panelbarHtml, /id="taskbar-restore-layout"/);
   assert.match(taskbarHtml, /id="daemon-status-indicator"/);
   assert.match(taskbarHtml, /id="taskbar-conn-dot"/);
   assert.ok(
-    taskbarHtml.indexOf('id="daemon-status-indicator"') < taskbarHtml.indexOf('id="statusbar-panel-buttons"'),
-    'daemon status lives in the left status cluster before panel buttons',
+    taskbarHtml.indexOf('id="daemon-status-indicator"') > taskbarHtml.indexOf('id="statusbar-info"'),
+    'daemon status lives in the right status rail cluster',
   );
   assert.ok(
-    taskbarHtml.indexOf('id="taskbar-restore-layout"') > taskbarHtml.indexOf('id="statusbar-panel-buttons"'),
-    'Restore layout remains in the right panel-button cluster',
+    panelbarHtml.indexOf('id="taskbar-restore-layout"') > panelbarHtml.indexOf('id="statusbar-panel-buttons"'),
+    'Restore layout remains in the bottom panel-button cluster',
   );
 });
 
@@ -21785,7 +21790,7 @@ test('diff review surfaces stale-base warning before merge controls', () => {
 test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #panelbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
 });
 
 test('read-only diff modal tracks task modal breakpoints at twenty percent wider', () => {
@@ -26040,11 +26045,33 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 
   assert.match(
     css,
-    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\)\s+var\(--statusbar-rail-width\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s,
   );
   assert.match(
     html,
-    /<div id="workspace-shell">\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+    /<div id="workspace-shell">\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<!-- Status bar \(right rail\)\.[\s\S]*?<div id="taskbar">[\s\S]*?<div id="statusbar-info"/s,
+  );
+  assert.match(
+    html,
+    /<div id="taskbar">[\s\S]*?<div id="statusbar-info"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>\s*<div id="standalone-float-layer"/s,
+    'status chips should live in the right-rail taskbar inside #workspace-shell',
+  );
+  assert.match(
+    html,
+    /<div id="bottom-panel"[\s\S]*?<\/div>\s*<!-- Panel bar \(bottom dock for panel apps\) -->\s*<div id="panelbar">\s*<div id="statusbar-panel-buttons"/s,
+    'panel launcher buttons should occupy the bottom bar below the workspace',
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded #taskbar\s*\{[^}]*grid-column:\s*4;[^}]*grid-row:\s*1;/s,
+  );
+  assert.match(
+    css,
+    /#taskbar\s*\{[^}]*flex-direction:\s*column;[^}]*width:\s*var\(--statusbar-rail-width\);/s,
+  );
+  assert.match(
+    css,
+    /#panelbar\s*\{[^}]*height:\s*26px;[^}]*overflow:\s*hidden;/s,
   );
   assert.doesNotMatch(
     html,

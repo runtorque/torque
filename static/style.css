@@ -22,6 +22,7 @@
   --standalone-sidebar-width: 340px;
   --standalone-main-stack-min-width: 360px;
   --standalone-right-rail-min-width: 320px;
+  --statusbar-rail-width: 220px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,7 +227,8 @@ body.runtime-embedded #workspace-shell {
   grid-template-columns:
     max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))))
     8px
-    minmax(0, 1fr);
+    minmax(0, 1fr)
+    var(--statusbar-rail-width);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
@@ -327,9 +329,13 @@ body.runtime-embedded #terminal-workspace {
     linear-gradient(180deg, rgba(255,255,255,.015), transparent 28%),
     var(--bg);
 }
+body.runtime-embedded #taskbar {
+  grid-column: 4;
+  grid-row: 1;
+}
 body.runtime-embedded #standalone-float-layer {
   position: fixed;
-  inset: 44px 0 36px 0;
+  inset: 44px var(--statusbar-rail-width) 36px 0;
   pointer-events: none;
   z-index: 20;
 }
@@ -4259,18 +4265,47 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 
 /* ------------------------------------------------------------------ */
-/* Taskbar                                                             */
+/* Status rail + panel bar                                             */
 /* ------------------------------------------------------------------ */
 #taskbar {
-  display: flex; align-items: center; gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   background: var(--bg-surface);
-  border-top: 1px solid var(--border);
-  padding: 0 4px;
+  border-left: 1px solid var(--border);
+  padding: 4px;
   flex-shrink: 0;
-  height: 26px;
+  flex-basis: var(--statusbar-rail-width);
+  width: var(--statusbar-rail-width);
+  min-width: var(--statusbar-rail-width);
+  min-height: 0;
   overflow: hidden;
 }
 body.runtime-embedded #taskbar {
+  gap: 6px;
+  width: var(--statusbar-rail-width);
+  min-width: var(--statusbar-rail-width);
+  height: auto;
+  padding: 10px 8px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.02), transparent 120%),
+    var(--bg-surface);
+  box-shadow: inset 1px 0 0 rgba(255,255,255,.03);
+}
+#panelbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  padding: 0 4px;
+  flex: 0 0 auto;
+  height: 26px;
+  min-width: 0;
+  overflow: hidden;
+}
+body.runtime-embedded #panelbar {
   gap: 6px;
   height: 36px;
   padding: 0 10px;
@@ -4325,18 +4360,22 @@ body.runtime-embedded .taskbar-app.active {
 }
 .statusbar-info,
 .statusbar-panel-buttons {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 .statusbar-info {
-  flex: 0 1 auto;
-  overflow: hidden;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .statusbar-panel-buttons {
-  flex: 0 0 auto;
-  justify-content: flex-end;
+  flex: 1 1 auto;
+  justify-content: flex-start;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -4346,14 +4385,20 @@ body.runtime-embedded .taskbar-app.active {
   padding-left: 0;
   border-left: 0;
 }
+#taskbar .relay-status {
+  width: 100%;
+  padding-left: 0;
+  border-left: 0;
+}
 .statusbar-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4px;
   flex: 0 0 auto;
   min-width: 0;
-  max-width: 180px;
+  width: 100%;
+  max-width: none;
   height: 20px;
   padding: 0 8px;
   border: 1px solid var(--border);
@@ -4473,6 +4518,15 @@ body.runtime-embedded .taskbar-aux-btn {
   .statusbar-chip-tasks,
   .statusbar-chip-attention { display: none; }
   .statusbar-chip { max-width: 120px; padding-inline: 6px; }
+}
+#taskbar .statusbar-chip-deploy,
+#taskbar .statusbar-chip-agents,
+#taskbar .statusbar-chip-tasks,
+#taskbar .statusbar-chip-attention {
+  display: inline-flex;
+}
+#taskbar .statusbar-chip {
+  max-width: none;
 }
 
 /* ------------------------------------------------------------------ */
@@ -8081,6 +8135,7 @@ body.diff-view-open #standalone-right-rail,
 body.diff-view-open #standalone-float-layer,
 body.diff-view-open #bottom-panel,
 body.diff-view-open #taskbar,
+body.diff-view-open #panelbar,
 body.diff-view-open #ctx-menu {
   display: none !important;
 }
@@ -10866,6 +10921,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 body.detached-window #workspace-shell,
 body.detached-window #standalone-float-layer,
 body.detached-window #taskbar,
+body.detached-window #panelbar,
 body.detached-window #workspace-resize-handle,
 body.detached-window header,
 body.detached-window #terminal-workspace {
