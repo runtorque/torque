@@ -11,9 +11,13 @@ let _embeddedTerminalDropSurface = null;
 let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
+let _terminalComposeAttachments = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
 let _terminalComposeHistoryOpenCellId = '';
+let _terminalComposeTaskDropdownCellId = '';
+let _terminalComposeTaskDropdownIdx = -1;
+let _terminalComposeTaskDropdownResults = [];
 let _terminalDirectMessageSelectedByAgent = Object.create(null);
 let _terminalDirectMessageReplyToByAgent = Object.create(null);
 let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
@@ -1233,6 +1237,10 @@ function _terminalComposeHistoryMenuId(cellId) {
   return 'terminal-compose-history-menu-' + _terminalComposeDomId(cellId);
 }
 
+function _terminalComposeTaskDropdownId(cellId) {
+  return 'terminal-compose-task-dropdown-' + _terminalComposeDomId(cellId);
+}
+
 function _terminalComposeContainerFor(el) {
   for (let node = el; node; node = node.parentNode) {
     if (node.classList && node.classList.contains('terminal-compose')) {
@@ -1427,10 +1435,205 @@ function terminalComposeHistoryPick(evt, cellId, index) {
     const recall = _terminalComposeRecallState(id);
     recall.draft = String(input.value || '');
     recall.index = idx;
-    _terminalComposeSetValue(input, id, entry.message);
+    _terminalComposeSetValue(input, id, entry.message, { preserveAttachments: true });
     if (typeof input.focus === 'function') input.focus();
   }
   _terminalComposeHistoryClose(id);
+  return false;
+}
+
+function _terminalComposeTaskDropdownFor(cellId) {
+  return document.getElementById
+    ? document.getElementById(_terminalComposeTaskDropdownId(cellId))
+    : null;
+}
+
+function _terminalComposeTaskTrigger(input) {
+  if (!input || typeof input.value !== 'string') return null;
+  var start = typeof input.selectionStart === 'number'
+    ? input.selectionStart
+    : input.value.length;
+  var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  if (start !== end) return null;
+  start = Math.max(0, Math.min(input.value.length, start));
+  var before = input.value.slice(0, start);
+  var match = before.match(/(^|\s):([\w:-]*)$/);
+  if (!match) return null;
+  return {
+    start: before.length - match[2].length - 1,
+    end: start,
+    query: String(match[2] || '').toLowerCase(),
+  };
+}
+
+function _terminalComposeTaskTitle(task) {
+  return String((task && (task.task || task.title)) || '').trim();
+}
+
+function _terminalComposeTaskCandidates(query) {
+  var needle = String(query || '').trim().toLowerCase();
+  var tasks = state && state.board_tasks ? state.board_tasks : {};
+  var matches = [];
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (!task || String(task.archived_at || '').trim()
+        || String(task.lane || '') === 'Archived') {
+      continue;
+    }
+    var taskId = String(task.id || id || '').trim();
+    if (!taskId) continue;
+    var title = _terminalComposeTaskTitle(task);
+    var search = (taskId + ' ' + title).toLowerCase();
+    if (!needle || search.indexOf(needle) >= 0) {
+      matches.push({ id: taskId, title: title });
+      if (matches.length >= 8) break;
+    }
+  }
+  return matches;
+}
+
+function _terminalComposeTaskDropdownHide(cellId) {
+  var id = String(cellId || _terminalComposeTaskDropdownCellId || '');
+  var dropdown = id ? _terminalComposeTaskDropdownFor(id) : null;
+  if (dropdown) dropdown.style.display = 'none';
+  if (!id || _terminalComposeTaskDropdownCellId === id) {
+    _terminalComposeTaskDropdownCellId = '';
+    _terminalComposeTaskDropdownIdx = -1;
+    _terminalComposeTaskDropdownResults = [];
+  }
+}
+
+function _terminalComposeTaskDropdownVisible(cellId) {
+  var id = String(cellId || '');
+  var dropdown = id ? _terminalComposeTaskDropdownFor(id) : null;
+  return !!(id
+    && _terminalComposeTaskDropdownCellId === id
+    && dropdown
+    && dropdown.style.display !== 'none');
+}
+
+function _terminalComposeHighlightTaskOpt(opts) {
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].classList.toggle('active', i === _terminalComposeTaskDropdownIdx);
+  }
+}
+
+function _terminalComposeUpdateTaskDropdown(input) {
+  if (!input) return;
+  var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  var dropdown = cellId ? _terminalComposeTaskDropdownFor(cellId) : null;
+  if (!dropdown) return;
+  var trigger = _terminalComposeTaskTrigger(input);
+  if (!trigger) {
+    _terminalComposeTaskDropdownHide(cellId);
+    return;
+  }
+  var results = _terminalComposeTaskCandidates(trigger.query);
+  if (!results.length) {
+    _terminalComposeTaskDropdownHide(cellId);
+    return;
+  }
+  _terminalComposeTaskDropdownCellId = cellId;
+  _terminalComposeTaskDropdownIdx = -1;
+  _terminalComposeTaskDropdownResults = results;
+  var html = '';
+  for (var i = 0; i < results.length; i++) {
+    var taskId = String(results[i].id || '');
+    var title = String(results[i].title || '');
+    var jsTaskId = esc(taskId).replace(/'/g, "\\'");
+    html += '<div class="deps-option terminal-compose-task-option"'
+      + ' role="option" data-task-id="' + esc(taskId) + '"'
+      + ' onmousedown="return terminalComposePickTaskRef(event, \''
+      + esc(cellId).replace(/'/g, "\\'") + '\', \'' + jsTaskId + '\')">'
+      + '<span class="terminal-compose-task-ref-id">' + esc(taskId) + '</span>'
+      + (title
+        ? '<span class="terminal-compose-task-ref-title">' + esc(title) + '</span>'
+        : '')
+      + '</div>';
+  }
+  dropdown.innerHTML = html;
+  dropdown.style.display = '';
+}
+
+function _terminalComposeTaskDropdownHandleKey(evt, cellId) {
+  var id = String(cellId || '');
+  if (!_terminalComposeTaskDropdownVisible(id)) return false;
+  var count = _terminalComposeTaskDropdownResults.length;
+  if (!count) {
+    _terminalComposeTaskDropdownHide(id);
+    return false;
+  }
+  var dropdown = _terminalComposeTaskDropdownFor(id);
+  var opts = dropdown && dropdown.querySelectorAll
+    ? dropdown.querySelectorAll('.deps-option')
+    : [];
+  if (evt.key === 'ArrowDown') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    _terminalComposeTaskDropdownIdx = (_terminalComposeTaskDropdownIdx + 1) % count;
+    _terminalComposeHighlightTaskOpt(opts);
+    return true;
+  }
+  if (evt.key === 'ArrowUp') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    _terminalComposeTaskDropdownIdx = _terminalComposeTaskDropdownIdx <= 0
+      ? count - 1
+      : _terminalComposeTaskDropdownIdx - 1;
+    _terminalComposeHighlightTaskOpt(opts);
+    return true;
+  }
+  if (evt.key === 'Enter') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    var idx = _terminalComposeTaskDropdownIdx >= 0 ? _terminalComposeTaskDropdownIdx : 0;
+    var result = _terminalComposeTaskDropdownResults[idx];
+    if (result) terminalComposePickTaskRef(evt, id, result.id);
+    return true;
+  }
+  if (evt.key === 'Escape') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    _terminalComposeTaskDropdownHide(id);
+    return true;
+  }
+  return false;
+}
+
+function terminalComposePickTaskRef(evt, cellId, taskId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var id = String(cellId || '');
+  var input = document.getElementById
+    ? document.getElementById(_terminalComposeInputId(id))
+    : null;
+  if (!input) return false;
+  var value = String(input.value || '');
+  var trigger = _terminalComposeTaskTrigger(input);
+  var start = trigger ? trigger.start : (
+    typeof input.selectionStart === 'number' ? input.selectionStart : value.length
+  );
+  var end = trigger ? trigger.end : (
+    typeof input.selectionEnd === 'number' ? input.selectionEnd : start
+  );
+  start = Math.max(0, Math.min(value.length, start));
+  end = Math.max(start, Math.min(value.length, end));
+  var insertText = String(taskId || '').trim();
+  if (!insertText) {
+    _terminalComposeTaskDropdownHide(id);
+    return false;
+  }
+  insertText += ' ';
+  input.value = value.slice(0, start) + insertText + value.slice(end);
+  var cursor = start + insertText.length;
+  if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(cursor, cursor);
+  } else {
+    input.selectionStart = cursor;
+    input.selectionEnd = cursor;
+    if ('selectionDirection' in input) input.selectionDirection = 'none';
+  }
+  _terminalComposeTaskDropdownHide(id);
+  terminalComposeInput(input);
+  if (typeof input.focus === 'function') input.focus();
   return false;
 }
 
@@ -1447,10 +1650,13 @@ function _terminalComposeResetRecall(cellId) {
   if (id) delete _terminalComposeRecall[id];
 }
 
-function _terminalComposeSetValue(input, cellId, value) {
+function _terminalComposeSetValue(input, cellId, value, options) {
   if (!input) return;
   const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
   input.value = String(value || '');
+  const preserveAttachments = !!(options && options.preserveAttachments);
+  if (id && !preserveAttachments) _terminalComposePruneAttachments(id, input.value);
+  if (id) _terminalComposeTaskDropdownHide(id);
   if (id) _terminalComposeDrafts[id] = input.value;
   const end = input.value.length;
   if (typeof input.setSelectionRange === 'function') {
@@ -1494,11 +1700,11 @@ function _terminalComposeHistoryNavigate(input, cellId, direction) {
   if (recall.index < 0) {
     const draft = recall.draft || '';
     _terminalComposeResetRecall(id);
-    _terminalComposeSetValue(input, id, draft);
+    _terminalComposeSetValue(input, id, draft, { preserveAttachments: true });
     return true;
   }
 
-  _terminalComposeSetValue(input, id, entries[recall.index].message);
+  _terminalComposeSetValue(input, id, entries[recall.index].message, { preserveAttachments: true });
   return true;
 }
 
@@ -1508,7 +1714,7 @@ function _terminalComposeRestoreRecallDraft(input, cellId) {
   if (!recall || recall.index < 0) return false;
   const draft = recall.draft || '';
   _terminalComposeResetRecall(id);
-  _terminalComposeSetValue(input, id, draft);
+  _terminalComposeSetValue(input, id, draft, { preserveAttachments: true });
   return true;
 }
 
@@ -1592,11 +1798,92 @@ function terminalComposeValidateDroppedFiles(files) {
   return { accepted: accepted, errors: errors };
 }
 
+function _terminalComposeAttachmentToken(number) {
+  return '[ Image #' + number + ' ]';
+}
+
+function _terminalComposeAttachmentState(cellId) {
+  var id = String(cellId || '');
+  if (!id) return null;
+  if (!_terminalComposeAttachments[id]) {
+    _terminalComposeAttachments[id] = { next: 1, entries: [] };
+  }
+  var stateForCell = _terminalComposeAttachments[id];
+  if (!Array.isArray(stateForCell.entries)) stateForCell.entries = [];
+  var next = Number(stateForCell.next || 1);
+  stateForCell.next = Number.isFinite(next) && next > 0 ? Math.floor(next) : 1;
+  return stateForCell;
+}
+
+function _terminalComposeHighestAttachmentTokenNumber(text) {
+  var highest = 0;
+  var re = /\[ Image #(\d+) \]/g;
+  var match = null;
+  text = String(text || '');
+  while ((match = re.exec(text))) {
+    highest = Math.max(highest, Number(match[1]) || 0);
+  }
+  return highest;
+}
+
+function _terminalComposeRegisterAttachmentPaths(cellId, paths, displayText) {
+  var stateForCell = _terminalComposeAttachmentState(cellId);
+  if (!stateForCell) {
+    return (paths || []).map(function(path) { return String(path || ''); })
+      .filter(Boolean);
+  }
+  stateForCell.next = Math.max(
+    stateForCell.next || 1,
+    _terminalComposeHighestAttachmentTokenNumber(displayText) + 1
+  );
+  var tokens = [];
+  for (var i = 0; i < (paths || []).length; i++) {
+    var path = String(paths[i] || '');
+    if (!path) continue;
+    var token = _terminalComposeAttachmentToken(stateForCell.next);
+    stateForCell.next += 1;
+    stateForCell.entries.push({ token: token, path: path });
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function _terminalComposePruneAttachments(cellId, displayText) {
+  var id = String(cellId || '');
+  var stateForCell = id ? _terminalComposeAttachments[id] : null;
+  if (!stateForCell || !Array.isArray(stateForCell.entries)) return;
+  var text = String(displayText || '');
+  stateForCell.entries = stateForCell.entries.filter(function(entry) {
+    return !!(entry && entry.token && text.indexOf(entry.token) !== -1);
+  });
+  if (!stateForCell.entries.length) delete _terminalComposeAttachments[id];
+}
+
+function _terminalComposePayloadText(cellId, displayText) {
+  var id = String(cellId || '');
+  var text = String(displayText || '');
+  if (!id || !_terminalComposeAttachments[id]) return text;
+  _terminalComposePruneAttachments(id, text);
+  var stateForCell = _terminalComposeAttachments[id];
+  var entries = stateForCell && Array.isArray(stateForCell.entries)
+    ? stateForCell.entries
+    : [];
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    if (!entry || !entry.token) continue;
+    text = text.split(entry.token).join(String(entry.path || ''));
+  }
+  return text;
+}
+
 function _terminalComposeInsertPaths(input, paths) {
   if (!input || !paths || !paths.length) return;
-  var insertText = paths.map(function(path) { return String(path || ''); })
-    .filter(Boolean)
-    .join('\n');
+  var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  var insertText = _terminalComposeRegisterAttachmentPaths(
+    cellId,
+    paths,
+    input.value
+  ).join('\n');
   if (!insertText) return;
   var value = String(input.value || '');
   var start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
@@ -1687,6 +1974,7 @@ function _renderTerminalCompose(root, cell) {
   const buttonId = _terminalComposeButtonId(cellId);
   const historyButtonId = _terminalComposeHistoryButtonId(cellId);
   const historyMenuId = _terminalComposeHistoryMenuId(cellId);
+  const taskDropdownId = _terminalComposeTaskDropdownId(cellId);
   const draft = Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
     ? _terminalComposeDrafts[cellId]
     : '';
@@ -1763,18 +2051,22 @@ function _renderTerminalCompose(root, cell) {
     + ' ondragleave="terminalComposeDragleave(event, \'' + esc(cellId) + '\')"'
     + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
     + '  <div class="terminal-compose-error" aria-live="polite">' + esc(error) + '</div>'
-    + '  </div>'
-    + '  <div class="terminal-compose-history-wrap">'
-    + '    <button id="' + esc(historyButtonId) + '" class="terminal-compose-history-toggle" type="button"'
-    + ' onclick="return terminalComposeHistoryToggle(event, \'' + esc(cellId) + '\')"'
-    + ' title="Message history (use \u2191/\u2193 to recall)" aria-label="Show message history"'
-    + ' aria-haspopup="listbox" aria-expanded="false" aria-controls="' + esc(historyMenuId) + '">History</button>'
-    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu"'
-    + ' role="listbox" aria-label="Recent messages" hidden></div>'
+    + '  <div id="' + esc(taskDropdownId) + '"'
+    + ' class="deps-dropdown terminal-compose-task-dropdown"'
+    + ' role="listbox" aria-label="Matching tickets" style="display:none"></div>'
     + '  </div>'
     + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
     + (disabled ? ' disabled' : '')
     + ' title="Send message">Send</button>'
+    + '  <div class="terminal-compose-history-wrap">'
+    + '    <button id="' + esc(historyButtonId) + '" class="terminal-compose-history-toggle" type="button"'
+    + ' onclick="return terminalComposeHistoryToggle(event, \'' + esc(cellId) + '\')"'
+    + ' title="Message history (use \u2191/\u2193 to recall)" aria-label="Message history"'
+    + ' aria-haspopup="listbox" aria-expanded="false" aria-controls="' + esc(historyMenuId) + '">'
+    + '<span class="terminal-compose-history-icon" aria-hidden="true">\u21ba</span></button>'
+    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu"'
+    + ' role="listbox" aria-label="Recent messages" hidden></div>'
+    + '  </div>'
     + '</form>';
   const input = _terminalComposeTextarea(root);
   if (input) {
@@ -1788,10 +2080,12 @@ function terminalComposeInput(el) {
   if (!el) return;
   const cellId = el.dataset ? (el.dataset.cellId || '') : '';
   if (cellId) _terminalComposeResetRecall(cellId);
+  if (cellId) _terminalComposePruneAttachments(cellId, el.value);
   if (cellId) _terminalComposeDrafts[cellId] = String(el.value || '');
   if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
   _terminalComposeSetButtonState(el);
+  _terminalComposeUpdateTaskDropdown(el);
 }
 
 function terminalComposeClear(cellId) {
@@ -1800,8 +2094,10 @@ function terminalComposeClear(cellId) {
   if (!input) return;
   _terminalComposeResetRecall(id);
   _terminalComposeHistoryClose(id);
+  _terminalComposeTaskDropdownHide(id);
   input.value = '';
   if (id) _terminalComposeDrafts[id] = '';
+  if (id) delete _terminalComposeAttachments[id];
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
 }
@@ -1903,11 +2199,12 @@ function terminalComposeSubmit(evt, cellId) {
     input = document.getElementById(_terminalComposeInputId(id));
   }
   if (!input) return false;
-  const text = String(input.value || '');
-  if (!text.trim()) {
+  const displayText = String(input.value || '');
+  if (!displayText.trim()) {
     terminalComposeClear(id);
     return false;
   }
+  const text = _terminalComposePayloadText(id, displayText);
   const directAgent = _terminalComposeDirectAgentForCellId(id);
   if (directAgent && directAgent.id) {
     const directAgentId = String(directAgent.id || '');
@@ -1933,6 +2230,7 @@ function terminalComposeSubmit(evt, cellId) {
 
 function terminalComposeKeydown(evt, cellId) {
   if (!evt) return;
+  if (_terminalComposeTaskDropdownHandleKey(evt, cellId)) return;
   if (evt.key === 'Escape' && _terminalComposeHistoryIsOpen(cellId)) {
     if (typeof evt.preventDefault === 'function') evt.preventDefault();
     if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -1964,6 +2262,7 @@ function terminalComposeKeydown(evt, cellId) {
       ? evt.target
       : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
     if (_terminalComposeMoveCaret(input, evt, evt.key === 'End', !!(evt.metaKey || evt.ctrlKey))) {
+      _terminalComposeUpdateTaskDropdown(input);
       return;
     }
   }
