@@ -338,6 +338,7 @@ test('card GitHub context menu exposes only Open, Sync, and Unlink actions that 
   assert.doesNotMatch(menuHtml, /Sync GitHub now/);
   assert.doesNotMatch(menuHtml, /Pull preview/);
   assert.doesNotMatch(menuHtml, /Edit external link/);
+  assert.doesNotMatch(menuHtml, /Preview prompt/);
   assert.doesNotMatch(menuHtml, /Unlink external issue/);
 
   menuButton(sandbox, 'Open in GitHub').click();

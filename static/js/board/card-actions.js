@@ -177,8 +177,6 @@ function _boardRenderCardMenu(taskId) {
     html += '<button onclick="event.stopPropagation();boardMarkTaskVerified(\'' + taskId + '\')">Mark verified</button>';
   }
 
-  // Preview prompt
-  html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
   html += '<button onclick="openTaskArtifactBrowser(\'' + taskId + '\')">Artifacts...</button>';
 
   if (dependencies.length || dependents.length) {
