@@ -21,7 +21,8 @@
  * (user-confirmed placement, TORQUE:560); 'header' mounts beside the daemon
  * `#conn-dot`. The component renders identically regardless of mount. The
  * labelled taskbar daemon indicator and this relay indicator are both
- * browser-visible via the `.relay-status` / `#taskbar .relay-status` rules. */
+ * browser-visible via the `.relay-status` / `.statusbar-info .relay-status`
+ * rules. */
 var RELAY_STATUS_MOUNT = 'taskbar';
 
 /* STUCK-RETRY escalation threshold (architect-endorsed). A connection stuck

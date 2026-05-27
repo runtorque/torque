@@ -39,43 +39,6 @@
   </div>
   <div id="workspace-resize-handle" title="Resize sidebar"></div>
   <section id="terminal-workspace"></section>
-  <!-- Status bar (right rail). Keep the stable chip ids/nodes intact; the
-       bottom panel launcher bar lives below the workspace. -->
-  <div id="taskbar">
-    <div id="statusbar-info" class="statusbar-info" aria-label="Workspace status">
-      <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
-           title="Daemon: disconnected">
-        <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
-        <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
-      </div>
-      <span id="statusbar-claude-usage"
-            class="statusbar-chip statusbar-chip--unknown"
-            title="Claude usage limits unavailable until provider usage data arrives.">Claude —</span>
-      <span id="statusbar-codex-usage"
-            class="statusbar-chip statusbar-chip--unknown"
-            title="Codex usage limits unavailable until provider usage data arrives.">Codex —</span>
-      <button id="statusbar-deploy"
-              class="statusbar-chip statusbar-chip-button statusbar-chip--muted statusbar-chip-deploy"
-              type="button"
-              hidden
-              onclick="statusBarOpenDeploy()"
-              title="No deploy-pending tasks">Deploy 0</button>
-      <button id="statusbar-metrics"
-              class="statusbar-chip statusbar-chip-button statusbar-chip--unknown statusbar-chip-metrics"
-              type="button"
-              onclick="healthOpenMetrics()"
-              title="Runtime metrics tick has not arrived yet.">Metrics —</button>
-      <span id="statusbar-workload"
-            class="statusbar-chip statusbar-chip-agents"
-            title="Agent status counts">Agents —</span>
-      <span id="statusbar-tasks"
-            class="statusbar-chip statusbar-chip-tasks"
-            title="Active worker tasks">Tasks —</span>
-      <span id="statusbar-attention"
-            class="statusbar-chip statusbar-chip-attention"
-            title="Attention items">Attention —</span>
-    </div>
-  </div>
 </div>
 <div id="standalone-float-layer"></div>
 <div id="diff-view-root"></div>
@@ -1651,6 +1614,42 @@
         </svg>
       </span>
     </button>
+  </div>
+  <div class="taskbar-spacer" aria-hidden="true"></div>
+  <!-- Status bar. Keep stable chip ids/nodes intact; status_bar.js updates
+       these nodes in place while the panel launcher buttons keep focus. -->
+  <div id="statusbar-info" class="statusbar-info" aria-label="Workspace status">
+    <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
+         title="Daemon: disconnected">
+      <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
+      <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
+    </div>
+    <span id="statusbar-claude-usage"
+          class="statusbar-chip statusbar-chip--unknown"
+          title="Claude usage limits unavailable until provider usage data arrives.">Claude —</span>
+    <span id="statusbar-codex-usage"
+          class="statusbar-chip statusbar-chip--unknown"
+          title="Codex usage limits unavailable until provider usage data arrives.">Codex —</span>
+    <button id="statusbar-deploy"
+            class="statusbar-chip statusbar-chip-button statusbar-chip--muted statusbar-chip-deploy"
+            type="button"
+            hidden
+            onclick="statusBarOpenDeploy()"
+            title="No deploy-pending tasks">Deploy 0</button>
+    <button id="statusbar-metrics"
+            class="statusbar-chip statusbar-chip-button statusbar-chip--unknown statusbar-chip-metrics"
+            type="button"
+            onclick="healthOpenMetrics()"
+            title="Runtime metrics tick has not arrived yet.">Metrics —</button>
+    <span id="statusbar-workload"
+          class="statusbar-chip statusbar-chip-agents"
+          title="Agent status counts">Agents —</span>
+    <span id="statusbar-tasks"
+          class="statusbar-chip statusbar-chip-tasks"
+          title="Active worker tasks">Tasks —</span>
+    <span id="statusbar-attention"
+          class="statusbar-chip statusbar-chip-attention"
+          title="Attention items">Attention —</span>
   </div>
 </div>
 

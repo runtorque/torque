@@ -171,12 +171,6 @@ class StandaloneMainStackFlexDirectionTests(unittest.TestCase):
         )
 
 
-def _taskbar_html(html: str) -> str:
-    start = html.index('<div id="taskbar">')
-    end = html.index('<div id="standalone-float-layer"', start)
-    return html[start:end]
-
-
 def _panelbar_html(html: str) -> str:
     start = html.index('<div id="panelbar">')
     end = html.index("<!-- Context menu", start)
@@ -184,7 +178,7 @@ def _panelbar_html(html: str) -> str:
 
 
 class WebviewStatusBarLayoutTests(unittest.TestCase):
-    """Right status rail + bottom panelbar keep stable ids/buttons."""
+    """Bottom panelbar keeps stable status ids and panel buttons."""
 
     PANEL_APPS = [
         "board",
@@ -199,31 +193,35 @@ class WebviewStatusBarLayoutTests(unittest.TestCase):
         "health",
     ]
 
-    def test_taskbar_status_clusters_and_daemon_anchor_are_preserved(self):
+    def test_bottom_panelbar_status_clusters_and_daemon_anchor_are_preserved(self):
         html = _read(WEBVIEW)
-        taskbar = _taskbar_html(html)
         panelbar = _panelbar_html(html)
 
-        self.assertIn('id="statusbar-info"', taskbar)
-        self.assertNotIn('id="statusbar-panel-buttons"', taskbar)
+        self.assertNotIn('<div id="taskbar">', html)
+        self.assertIn('id="statusbar-info"', panelbar)
         self.assertIn('id="statusbar-panel-buttons"', panelbar)
-        self.assertLess(
-            html.index('<div id="workspace-shell">'),
-            html.index('<div id="taskbar">'),
-            "status rail must live inside the workspace shell after workspace content",
-        )
         self.assertLess(
             html.index('<div id="bottom-panel"'),
             html.index('<div id="panelbar">'),
-            "panel launcher bar must stay at the bottom where the status bar used to be",
+            "panel launcher/status bar must stay below the bottom panel",
+        )
+        self.assertLess(
+            panelbar.index('id="statusbar-panel-buttons"'),
+            panelbar.index('class="taskbar-spacer"'),
+            "panel buttons must stay on the left of the bottom bar",
+        )
+        self.assertLess(
+            panelbar.index('class="taskbar-spacer"'),
+            panelbar.index('id="statusbar-info"'),
+            "statusbar-info must be right-aligned after the spacer",
         )
         self.assertRegex(
-            taskbar,
+            panelbar,
             r'id="statusbar-info"[\s\S]*id="daemon-status-indicator"[\s\S]*id="taskbar-conn-dot"',
             "daemon wrapper and #taskbar-conn-dot anchor must stay inside statusbar-info",
         )
         self.assertRegex(
-            taskbar,
+            panelbar,
             r'id="statusbar-claude-usage"[\s\S]*Claude —',
             "Claude usage chip must render as an unknown placeholder",
         )

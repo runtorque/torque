@@ -991,19 +991,19 @@ function createRelayStatusHarness() {
   });
   sandbox.renderMainCalls = 0;
   sandbox.renderActivePanelCalls = 0;
-  // Header host carrying the daemon `#conn-dot` and taskbar carrying
+  // Header host carrying the daemon `#conn-dot` and status bar carrying
   // `#taskbar-conn-dot`, both attached to body so the relay indicator can
   // mount beside whichever `RELAY_STATUS_MOUNT` selects.
   const header = document.register('header-host');
   const connDot = document.register('conn-dot');
   header.appendChild(connDot);
   document.body.appendChild(header);
-  const taskbar = document.register('taskbar');
+  const panelbar = document.register('panelbar');
   const statusInfo = document.register('statusbar-info');
   const taskbarConnDot = document.register('taskbar-conn-dot');
   statusInfo.appendChild(taskbarConnDot);
-  taskbar.appendChild(statusInfo);
-  document.body.appendChild(taskbar);
+  panelbar.appendChild(statusInfo);
+  document.body.appendChild(panelbar);
   // Modal "Relay" detail row elements (connection sub-block, TORQUE:560).
   [
     'gls-relay-section',
@@ -5419,7 +5419,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
   );
 });
 
-/* -- Taskbar daemon status + restore-layout control (TORQUE:624) ---------- */
+/* -- Bottom bar daemon status + restore-layout control (TORQUE:624) ------- */
 
 function createDaemonStatusHarness(overrides = {}) {
   const { sandbox, document } = createSandbox(overrides);
@@ -5427,7 +5427,7 @@ function createDaemonStatusHarness(overrides = {}) {
   const headerDot = document.register('conn-dot');
   header.appendChild(headerDot);
   document.body.appendChild(header);
-  const taskbar = document.register('taskbar');
+  const panelbar = document.register('panelbar');
   const info = document.register('statusbar-info');
   const panelButtons = document.register('statusbar-panel-buttons');
   const restore = document.register('taskbar-restore-layout');
@@ -5438,37 +5438,42 @@ function createDaemonStatusHarness(overrides = {}) {
   daemon.appendChild(label);
   info.appendChild(daemon);
   panelButtons.appendChild(restore);
-  taskbar.appendChild(info);
-  taskbar.appendChild(panelButtons);
-  document.body.appendChild(taskbar);
+  panelbar.appendChild(panelButtons);
+  panelbar.appendChild(info);
+  document.body.appendChild(panelbar);
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
   runInContext(context, 'dragInProgress = false; _expectedSeq = 1;');
-  return { context, document, sandbox, taskbar, restore, daemon, taskbarDot, label };
+  return { context, document, sandbox, panelbar, restore, daemon, taskbarDot, label };
 }
 
-test('status rail and panelbar keep Restore layout and labelled daemon status members stable', () => {
+test('bottom panelbar keeps Restore layout and labelled daemon status members stable', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  const taskbarStart = html.indexOf('<div id="taskbar">');
-  const taskbarEnd = html.indexOf('<div id="standalone-float-layer"', taskbarStart);
-  assert.ok(taskbarStart >= 0 && taskbarEnd > taskbarStart, '#taskbar markup exists');
-  const taskbarHtml = html.slice(taskbarStart, taskbarEnd);
+  assert.equal(html.includes('<div id="taskbar">'), false);
   const panelbarStart = html.indexOf('<div id="panelbar">');
   const panelbarEnd = html.indexOf('<!-- Context menu', panelbarStart);
   assert.ok(panelbarStart >= 0 && panelbarEnd > panelbarStart, '#panelbar markup exists');
   const panelbarHtml = html.slice(panelbarStart, panelbarEnd);
-  assert.match(taskbarHtml, /id="statusbar-info"/);
-  assert.doesNotMatch(taskbarHtml, /id="statusbar-panel-buttons"/);
+  assert.match(panelbarHtml, /id="statusbar-info"/);
   assert.match(panelbarHtml, /id="statusbar-panel-buttons"/);
   assert.match(panelbarHtml, /id="taskbar-restore-layout"/);
-  assert.match(taskbarHtml, /id="daemon-status-indicator"/);
-  assert.match(taskbarHtml, /id="taskbar-conn-dot"/);
+  assert.match(panelbarHtml, /id="daemon-status-indicator"/);
+  assert.match(panelbarHtml, /id="taskbar-conn-dot"/);
   assert.ok(
-    taskbarHtml.indexOf('id="daemon-status-indicator"') > taskbarHtml.indexOf('id="statusbar-info"'),
-    'daemon status lives in the right status rail cluster',
+    panelbarHtml.indexOf('id="statusbar-panel-buttons"') < panelbarHtml.indexOf('class="taskbar-spacer"'),
+    'panel buttons remain on the left of the bottom bar',
   );
   assert.ok(
-    panelbarHtml.indexOf('id="taskbar-restore-layout"') > panelbarHtml.indexOf('id="statusbar-panel-buttons"'),
+    panelbarHtml.indexOf('class="taskbar-spacer"') < panelbarHtml.indexOf('id="statusbar-info"'),
+    'status cluster is right-aligned after the spacer',
+  );
+  assert.ok(
+    panelbarHtml.indexOf('id="daemon-status-indicator"') > panelbarHtml.indexOf('id="statusbar-info"'),
+    'daemon status lives in the bottom status cluster',
+  );
+  assert.ok(
+    panelbarHtml.indexOf('id="taskbar-restore-layout"') > panelbarHtml.indexOf('id="statusbar-panel-buttons"')
+      && panelbarHtml.indexOf('id="taskbar-restore-layout"') < panelbarHtml.indexOf('class="taskbar-spacer"'),
     'Restore layout remains in the bottom panel-button cluster',
   );
 });
@@ -5538,7 +5543,7 @@ test('runtime delta refreshes daemon status detail without panel invalidation', 
 
 test('daemon status is browser-visible and not only Tauri-gated (CSS)', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(css, /#taskbar \.daemon-connection-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
+  assert.match(css, /\.statusbar-info \.daemon-connection-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
   assert.match(css, /\.daemon-connection-status #taskbar-conn-dot\s*\{[^}]*display:\s*inline-block[^}]*\}/);
   assert.doesNotMatch(css, /body\.tauri-mode[^{]*\.daemon-connection-status\b/);
 });
@@ -5549,7 +5554,7 @@ test('relay indicator mounts after the labelled daemon status wrapper', () => {
   const connDot = document.register('conn-dot');
   header.appendChild(connDot);
   document.body.appendChild(header);
-  const taskbar = document.register('taskbar');
+  const panelbar = document.register('panelbar');
   const statusInfo = document.register('statusbar-info');
   const daemon = document.register('daemon-status-indicator');
   const taskbarConnDot = document.register('taskbar-conn-dot');
@@ -5557,8 +5562,8 @@ test('relay indicator mounts after the labelled daemon status wrapper', () => {
   daemon.appendChild(taskbarConnDot);
   daemon.appendChild(daemonLabel);
   statusInfo.appendChild(daemon);
-  taskbar.appendChild(statusInfo);
-  document.body.appendChild(taskbar);
+  panelbar.appendChild(statusInfo);
+  document.body.appendChild(panelbar);
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/relay_status.js');
   runInContext(context, `
@@ -5741,8 +5746,8 @@ test('relay-status indicator is browser-visible and not Tauri-gated (CSS)', () =
   const baseRule = css.match(/^\.relay-status\s*\{[^}]*\}/m);
   assert.ok(baseRule, '.relay-status base rule exists');
   assert.match(baseRule[0], /display:\s*inline-flex/);
-  // Taskbar context keeps it visible in browser + desktop.
-  assert.match(css, /#taskbar \.relay-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
+  // Bottom status cluster keeps it visible in browser + desktop.
+  assert.match(css, /\.statusbar-info \.relay-status\s*\{[^}]*display:\s*inline-flex[^}]*\}/);
   // The relay indicator must NOT inherit the Tauri-only display gate that the
   // bare #taskbar-conn-dot carries (display:none default + body.tauri-mode
   // show-gate). The base rule above is inline-flex (not none), and no
@@ -21847,7 +21852,7 @@ test('diff review surfaces stale-base warning before merge controls', () => {
 test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #panelbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #panelbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
 });
 
 test('read-only diff modal tracks task modal breakpoints at twenty percent wider', () => {
@@ -26102,33 +26107,32 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 
   assert.match(
     css,
-    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\)\s+var\(--statusbar-rail-width\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s,
   );
   assert.match(
     html,
-    /<div id="workspace-shell">\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<!-- Status bar \(right rail\)\.[\s\S]*?<div id="taskbar">[\s\S]*?<div id="statusbar-info"/s,
+    /<div id="workspace-shell">\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<\/div>\s*<div id="standalone-float-layer"/s,
   );
+  assert.equal(html.includes('<div id="taskbar">'), false);
   assert.match(
     html,
-    /<div id="taskbar">[\s\S]*?<div id="statusbar-info"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>\s*<div id="standalone-float-layer"/s,
-    'status chips should live in the right-rail taskbar inside #workspace-shell',
+    /<div id="bottom-panel"[\s\S]*?<\/div>\s*<!-- Panel bar \(bottom dock for panel apps\) -->\s*<div id="panelbar">\s*<div id="statusbar-panel-buttons"[\s\S]*?<\/div>\s*<div class="taskbar-spacer"[^>]*><\/div>\s*<!-- Status bar\.[\s\S]*?<div id="statusbar-info"/s,
+    'status chips should live right-aligned inside the bottom panelbar',
   );
   assert.match(
     html,
     /<div id="bottom-panel"[\s\S]*?<\/div>\s*<!-- Panel bar \(bottom dock for panel apps\) -->\s*<div id="panelbar">\s*<div id="statusbar-panel-buttons"/s,
     'panel launcher buttons should occupy the bottom bar below the workspace',
   );
+  assert.doesNotMatch(css, /--statusbar-rail-width/);
+  assert.doesNotMatch(css, /body\.runtime-embedded #taskbar\s*\{/);
   assert.match(
     css,
-    /body\.runtime-embedded #taskbar\s*\{[^}]*grid-column:\s*4;[^}]*grid-row:\s*1;/s,
+    /#panelbar\s*\{[^}]*flex:\s*0 0 24px;[^}]*height:\s*24px;[^}]*overflow:\s*hidden;/s,
   );
   assert.match(
     css,
-    /#taskbar\s*\{[^}]*flex-direction:\s*column;[^}]*width:\s*var\(--statusbar-rail-width\);/s,
-  );
-  assert.match(
-    css,
-    /#panelbar\s*\{[^}]*height:\s*26px;[^}]*overflow:\s*hidden;/s,
+    /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*30px;[^}]*height:\s*30px;/s,
   );
   assert.doesNotMatch(
     html,
@@ -26175,18 +26179,18 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
 });
 
-test('right status rail uses dark segmented status-bar styling', () => {
+test('bottom status bar uses dark segmented status-bar styling', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   [
     /--statusbar-bg:\s*color-mix\(in srgb,\s*var\(--bg\)/,
     /--statusbar-divider:\s*color-mix\(in srgb,\s*var\(--border\)/,
-    /#taskbar\s*\{[^}]*gap:\s*0;[^}]*background:\s*var\(--statusbar-bg\);[^}]*border-left:\s*1px solid var\(--statusbar-divider\);[^}]*padding:\s*0;/s,
-    /\.statusbar-info\s*\{[^}]*flex-direction:\s*column;[^}]*gap:\s*0;/s,
+    /#panelbar\s*\{[^}]*gap:\s*0;[^}]*background:\s*var\(--statusbar-bg\);[^}]*border-top:\s*1px solid var\(--statusbar-divider\);[^}]*padding:\s*0 4px;/s,
+    /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*gap:\s*0;/s,
     /\.statusbar-panel-buttons\s*\{[^}]*gap:\s*0;[^}]*overflow-x:\s*auto;/s,
-    /\.statusbar-info > \.daemon-connection-status:first-child,\s*#taskbar \.relay-status\s*\{[^}]*min-height:\s*24px;[^}]*border-bottom:\s*1px solid var\(--statusbar-divider\);/s,
-    /#taskbar \.relay-status\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;/s,
-    /\.statusbar-chip\s*\{[^}]*border:\s*0;[^}]*border-bottom:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*inset 2px 0 0 transparent;/s,
+    /\.statusbar-info > \.daemon-connection-status:first-child,\s*\.statusbar-info \.relay-status\s*\{[^}]*min-height:\s*24px;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);/s,
+    /\.statusbar-info \.relay-status\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;/s,
+    /\.statusbar-chip\s*\{[^}]*border:\s*0;[^}]*border-left:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*inset 2px 0 0 transparent;/s,
     /\.statusbar-chip--warn\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--warn\);/s,
     /\.statusbar-chip--danger\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--danger\);/s,
     /\.taskbar-app\s*\{[^}]*border-right:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;/s,
