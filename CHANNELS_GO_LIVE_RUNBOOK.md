@@ -39,7 +39,11 @@ These are account/console actions only the account owner can do. Enumerated exac
 1. **Cloudflare account** with Workers enabled (free tier supports Workers + D1 + Durable Objects on the SQLite-backed DO class, which this uses via `new_sqlite_classes`).
 2. **D1** enabled on the account (no separate toggle beyond Workers; created via wrangler in §1.3).
 3. **Durable Objects** enabled. The DO class `DaemonRendezvousDurableObject` uses `new_sqlite_classes` (SQLite-backed DO), which is available on the Workers free plan; confirm the account is not on a plan that restricts DO.
-4. **A least-privilege Cloudflare API token** for wrangler (see **§3.1** for exact scopes). The user creates this in the CF dashboard (My Profile → API Tokens → Create Token → Custom Token) and places it in their **gitignored** `.env` as `CLOUDFLARE_API_TOKEN` (+ `CLOUDFLARE_ACCOUNT_ID`). **Never commit. Never put in any community artifact.**
+4. **A known-good Cloudflare API token** for wrangler (see **§3.1** for exact
+   setup). Prefer a Cloudflare **Account API token** created under the account
+   that owns the Worker + D1 database; a My Profile user token also works if it
+   includes the User read permissions called out below. The user places it in
+   their **gitignored** `.env` as `CLOUDFLARE_API_TOKEN` (+ `CLOUDFLARE_ACCOUNT_ID`). **Never commit. Never put in any community artifact.**
 5. **(Only if a custom domain is wanted)** a zone in the account + DNS control. The default `*.workers.dev` subdomain needs no zone and is the recommended go-live target for V1 (smaller token scope, simpler).
 6. **Decision input** for the provisioning path (§1.5) and the `owner_user_id` string to use (the single V1 owner identity; e.g. `owner-<you>`).
 
@@ -189,17 +193,54 @@ After `wrangler deploy`, before any public URL is shared:
 
 ## ═══ 3. SECURITY ═══
 
-### 3.1 Least-privilege Cloudflare API token (exact scopes)
+### 3.1 Known-good Cloudflare API token for Wrangler + remote D1
 
-For the `*.workers.dev` go-live (recommended), the wrangler token needs only:
-- **Account → Workers Scripts → Edit** (deploy the Worker + DO; also used by `wrangler secret put`).
-- **Account → D1 → Edit** (create DB, apply migrations, `d1 execute`).
-- **Account → Account Settings → Read** (resolve account id / `wrangler whoami`). *(Membership read may be implicitly required by some CF UIs.)*
+The previously documented stripped token (**Account → Workers Scripts → Edit** +
+**Account → D1 → Edit** + **Account → Account Settings → Read** + the custom
+domain Zone permissions) was **not sufficient** for the first relay
+auto-deploy: `npx wrangler d1 migrations apply RELAY_DB --remote` failed on
+`/accounts/.../d1/database/.../query` with Cloudflare code **7403** ("account is
+not valid or is not authorized"). Do not repeat that stripped scope.
 
-Add **only if** using a custom domain (not needed for `workers.dev`):
-- **Zone → Workers Routes → Edit**, **Zone → DNS → Edit**, **Zone → Zone → Read**, scoped to the single target zone.
+Use this known-good baseline until a narrower token has been re-smoke-tested
+against both `wrangler d1 migrations apply --remote` and `wrangler deploy`:
 
-Do **not** grant global/all-zone, account-admin, or unrelated product scopes. Scope the token to the **single account** (and single zone, if any). Store in the gitignored `.env` only.
+1. Create a token from Cloudflare's **Edit Cloudflare Workers** template (the
+   same template Cloudflare documents for Wrangler/GitHub Actions) and keep its
+   defaults:
+   - **Account → Workers Scripts → Edit/Write**.
+   - **Account → Workers KV Storage → Edit/Write**.
+   - **Account → Workers R2 Storage → Edit/Write**.
+   - **Account → Workers Tail → Read**.
+   - **Account → Account Settings → Read**.
+   - **Zone → Workers Routes → Edit/Write** (scope the zone resource to the
+     target zone when using a route/custom domain).
+   - For a My Profile/user token, also keep **User → User Details → Read** and
+     **User → Memberships → Read**. Account-owned tokens do not have User
+     resources, but must be created under the target account.
+2. Add **Account → D1 → Edit/Write**. This is the permission that covers D1
+   database creation, `wrangler d1 execute`, and remote migration SQL hitting
+   the `/d1/database/{database_id}/query` API.
+3. Under **Account resources**, include the exact account whose id is exported as
+   `CLOUDFLARE_ACCOUNT_ID` and that owns `TORQUE_RELAY_D1_DATABASE_ID`. A token
+   with D1 permission on the wrong account, or a D1 database id from a different
+   account, can surface as code 7403 during the remote D1 query step.
+4. Add **only if** using a custom domain (the committed
+   `relay.runtorque.com` config does): **Zone → DNS → Edit/Write** and
+   **Zone → Zone → Read**, scoped to the single target zone. The Workers Routes
+   permission comes from the template above.
+
+Do **not** grant account-admin, all-zone, or unrelated product scopes as the
+default. If debugging forces a broader token, treat it as temporary: first
+confirm the account resource and D1 database id, then narrow back to the baseline
+above and prove it with:
+
+```sh
+npx wrangler d1 execute RELAY_DB --remote --command "SELECT 1;"
+npx wrangler d1 migrations apply RELAY_DB --remote
+```
+
+Store the token in the gitignored `.env` only.
 
 ### 3.2 Secret handling — nothing in repo / nothing in community
 
