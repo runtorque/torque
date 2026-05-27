@@ -364,6 +364,85 @@ test('card GitHub context menu exposes only Open, Sync, and Unlink actions that 
   });
 });
 
+test('board multi-select batch Sync and Unlink loop linked selected tasks only', () => {
+  const { sandbox } = createSandbox();
+  sandbox.state.board_tasks['sync-only'] = {
+    id: 'sync-only',
+    group: 'alpha',
+    lane: 'In Progress',
+    task: 'Board-sync-only GitHub issue',
+    board_sync: {
+      provider: 'github',
+      enabled: true,
+      github: {
+        issue_number: 456,
+        issue_url: 'https://github.com/acme/widgets/issues/456',
+      },
+    },
+  };
+  sandbox.state.board_tasks['no-link'] = {
+    id: 'no-link',
+    group: 'alpha',
+    lane: 'In Progress',
+    task: 'No external link yet',
+    board_sync: { provider: 'github', enabled: true },
+  };
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+  vm.runInContext(`
+    var renderCalls = 0;
+    renderBoard = function() { renderCalls++; };
+    _boardSelectedTasks = { 'task-1': true, 'sync-only': true, 'no-link': true };
+  `, context);
+
+  const barHtml = vm.runInContext('_renderBoardSelectionBar()', context);
+  assert.match(barHtml, />Sync \(2\)<\/button>/);
+  assert.match(barHtml, />Unlink \(2\)<\/button>/);
+
+  vm.runInContext('boardBulkSyncGithub();', context);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'board_sync_task', args: { task: 'task-1' }, task: 'task-1' },
+    { cmd: 'board_sync_task', args: { task: 'sync-only' }, task: 'sync-only' },
+  ]);
+  assert.equal(vm.runInContext('_boardSelectedCount()', context), 0);
+  assert.equal(vm.runInContext('renderCalls', context), 1);
+
+  sandbox.sendCalls.length = 0;
+  vm.runInContext(`
+    _boardSelectedTasks = { 'task-1': true, 'sync-only': true, 'no-link': true };
+    boardBulkUnlinkGithub();
+  `, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'external_link_task',
+      id: 'task-1',
+      provider: '',
+      external_id: '',
+      external_url: '',
+      ref: '',
+      board_sync: { version: 1, enabled: false },
+    },
+    {
+      cmd: 'external_link_task',
+      id: 'sync-only',
+      provider: '',
+      external_id: '',
+      external_url: '',
+      ref: '',
+      board_sync: { version: 1, enabled: false },
+    },
+  ]);
+  assert.equal(vm.runInContext('_boardSelectedCount()', context), 0);
+
+  sandbox.sendCalls.length = 0;
+  vm.runInContext(`
+    _boardSelectedTasks = { 'no-link': true };
+    boardBulkSyncGithub();
+    boardBulkUnlinkGithub();
+  `, context);
+  assert.deepEqual(sandbox.sendCalls, []);
+});
+
 test('task modal track checkbox creates an explicit board sync opt-out payload', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
