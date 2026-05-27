@@ -22,6 +22,8 @@ METRICS_TICK_INTERVAL_SECONDS = 2.0
 METRICS_TICK_INTERVAL_CAP_SECONDS = 2.0
 METRICS_ROLLUP_RESOLUTION_SECONDS = 60
 METRICS_RETENTION_SECONDS = 31 * 86400
+FRONTEND_RENDER_WINDOW_SECONDS = 10.0
+FRONTEND_RENDER_STALENESS_SECONDS = 6.0
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -47,6 +49,13 @@ def _rss_mb() -> float:
     if platform.system() == "Darwin":
         return float(usage) / (1024.0 * 1024.0)
     return float(usage) / 1024.0
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -141,16 +150,62 @@ class MetricsCollector:
             "count": int(
                 payload.get("count", payload.get("frames", 1)) or 1
             ),
-            "duration_ms": float(
+            "duration_ms": _safe_float(
                 payload.get(
                     "duration_ms",
-                    payload.get("render_ms", payload.get("ms", 0.0)),
-                )
-                or 0.0
+                    payload.get(
+                        "render_ms",
+                        payload.get("render_ms_p95", payload.get("ms", 0.0)),
+                    ),
+                ),
+                0.0,
+            ),
+            "render_per_s": (
+                _safe_float(payload.get("render_per_s"), 0.0)
+                if payload.get("render_per_s") is not None else None
             ),
         }
         self._frontend_render_samples.append(sample)
         self._add_inline_overhead(started)
+
+    def _frontend_payload(self, now: float) -> dict | None:
+        if not self._frontend_render_samples:
+            return None
+        latest_ts = float(self._frontend_render_samples[-1].get("timestamp", 0.0))
+        if latest_ts <= 0 or (now - latest_ts) > FRONTEND_RENDER_STALENESS_SECONDS:
+            return None
+        cutoff = now - FRONTEND_RENDER_WINDOW_SECONDS
+        samples = [
+            sample for sample in self._frontend_render_samples
+            if float(sample.get("timestamp", 0.0) or 0.0) >= cutoff
+        ]
+        if not samples:
+            return None
+        explicit_rates = [
+            float(sample["render_per_s"])
+            for sample in samples
+            if sample.get("render_per_s") is not None
+        ]
+        if explicit_rates:
+            render_per_s = sum(explicit_rates) / len(explicit_rates)
+        else:
+            first_ts = min(float(sample.get("timestamp", now) or now)
+                           for sample in samples)
+            elapsed = max(1.0, min(FRONTEND_RENDER_WINDOW_SECONDS, now - first_ts))
+            render_per_s = (
+                sum(max(0, int(sample.get("count", 0) or 0))
+                    for sample in samples)
+                / elapsed
+            )
+        durations = [
+            float(sample.get("duration_ms", 0.0) or 0.0)
+            for sample in samples
+            if float(sample.get("duration_ms", 0.0) or 0.0) >= 0.0
+        ]
+        return {
+            "render_per_s": float(render_per_s),
+            "render_ms_p95": _percentile(durations, 0.95),
+        }
 
     def disabled_tick(self, *, now: float | None = None) -> dict:
         generated_at = float(time.time() if now is None else now)
@@ -165,6 +220,7 @@ class MetricsCollector:
                 "ws": {"deltas_per_s": 0.0, "bytes_per_s": 0.0, "subscribers": 0},
                 "db": {"writes_per_s": 0.0, "write_latency_p95_ms": 0.0},
                 "proc": {"rss_mb": 0.0, "cpu_pct": 0.0},
+                "frontend": None,
                 "live": {"agents": 0, "ptys": 0, "prompt_queue_depth": 0},
             },
             "windows": {
@@ -261,6 +317,7 @@ class MetricsCollector:
                     "write_latency_p95_ms": db_latency_p95,
                 },
                 "proc": proc,
+                "frontend": self._frontend_payload(generated_at),
                 "live": live_payload,
             },
             "windows": {
@@ -423,10 +480,7 @@ class MetricsDaemon:
             payload = collector.aggregate_tick(
                 live=self.live_sampler(),
                 now=now,
-                interval_seconds=min(
-                    elapsed,
-                    METRICS_TICK_INTERVAL_CAP_SECONDS,
-                ),
+                interval_seconds=elapsed,
             )
             await self.send_tick(payload)
             if self.db:

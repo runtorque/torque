@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 from torque.db import TorqueDB
 
 install_aiohttp_stub()
-from torque.metrics import MetricsCollector
+from torque.metrics import FRONTEND_RENDER_STALENESS_SECONDS, MetricsCollector
 from torque.state import AgentCell, BoardTask, EngineerSettings, MatrixState
 
 
@@ -375,6 +375,50 @@ class SystemHealthMetricsTests(unittest.TestCase):
         self.assertEqual(tick["perf"]["live"]["agents"], 2)
         self.assertLess(tick["meter_overhead"]["agg_tick_ms"], 50.0)
         self.assertLess(tick["meter_overhead"]["collect_overhead_pct"], 1.0)
+
+    def test_frontend_render_absent_and_stale_emit_null(self):
+        collector = MetricsCollector(enabled=True)
+
+        never_reported = collector.aggregate_tick(
+            live={},
+            now=1_000.0,
+            interval_seconds=2.0,
+        )
+        self.assertIsNone(never_reported["perf"]["frontend"])
+
+        collector.record_frontend_render({
+            "count": 4,
+            "duration_ms": 12.0,
+            "render_per_s": 2.0,
+        })
+        reported_at = collector._frontend_render_samples[-1]["timestamp"]
+        fresh = collector.aggregate_tick(
+            live={},
+            now=reported_at + 1.0,
+            interval_seconds=2.0,
+        )
+        self.assertEqual(fresh["perf"]["frontend"]["render_per_s"], 2.0)
+        self.assertEqual(fresh["perf"]["frontend"]["render_ms_p95"], 12.0)
+
+        stale = collector.aggregate_tick(
+            live={},
+            now=reported_at + FRONTEND_RENDER_STALENESS_SECONDS + 0.1,
+            interval_seconds=2.0,
+        )
+        self.assertIsNone(stale["perf"]["frontend"])
+
+    def test_metrics_enabled_toggle_disables_inline_collection(self):
+        state = MatrixState()
+        state.update_global_settings(metrics_enabled=False)
+
+        state._emit(
+            "event_append",
+            kind="task_dispatched",
+            timestamp=123.0,
+        )
+
+        self.assertFalse(state.metrics_collector.enabled)
+        self.assertEqual(state.metrics_collector._inline_calls, 0)
 
     def test_metrics_perf_rollups_upsert_and_trim(self):
         row = {
