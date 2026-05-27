@@ -455,6 +455,14 @@ function connect() {
       if (typeof healthReceiveMetrics === 'function') {
         healthReceiveMetrics(msg);
       }
+    } else if (msg.type === 'metrics_tick') {
+      if (typeof healthMetricsReceiveTick === 'function') {
+        healthMetricsReceiveTick(msg);
+      }
+    } else if (msg.type === 'metrics_history') {
+      if (typeof healthMetricsReceiveHistory === 'function') {
+        healthMetricsReceiveHistory(msg);
+      }
     } else if (msg.type === 'deploy_state') {
       if (typeof statusBarReceiveDeployState === 'function') {
         statusBarReceiveDeployState(msg);
@@ -612,6 +620,16 @@ function connect() {
     } else if (msg.type === 'memory_entry') {
       if (typeof handleContextEntry === 'function') handleContextEntry(msg);
     } else if (msg.type === 'error') {
+      if (typeof healthMetricsReceiveHistory === 'function'
+          && typeof healthMetricsState !== 'undefined'
+          && healthMetricsState
+          && healthMetricsState.historyLoading
+          && !((typeof healthState !== 'undefined' && healthState && healthState.loading))
+          && ((typeof _panelAppVisible === 'function' && _panelAppVisible('health'))
+            || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'health'))) {
+        healthMetricsReceiveHistory(msg);
+        return;
+      }
       if (typeof healthReceiveMetrics === 'function'
           && typeof healthState !== 'undefined'
           && healthState
@@ -1049,10 +1067,22 @@ function _mergeSurfaceInvalidations(target, source) {
 
 function _renderDeltaSurfaceInvalidations(flags) {
   if (!_surfaceInvalidationsAny(flags)) return;
-  if (typeof renderInvalidatedSurfaces === 'function') {
-    renderInvalidatedSurfaces(flags);
-  } else {
-    render();
+  var _renderStart = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+    ? performance.now()
+    : (Date.now ? Date.now() : 0);
+  try {
+    if (typeof renderInvalidatedSurfaces === 'function') {
+      renderInvalidatedSurfaces(flags);
+    } else {
+      render();
+    }
+  } finally {
+    if (typeof healthRecordFrontendRender === 'function') {
+      var _renderEnd = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+        ? performance.now()
+        : (Date.now ? Date.now() : _renderStart);
+      healthRecordFrontendRender(Math.max(0, _renderEnd - _renderStart), 'surface-delta');
+    }
   }
 }
 
