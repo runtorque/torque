@@ -26118,6 +26118,29 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
 });
 
+test('right status rail uses dark segmented status-bar styling', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  [
+    /--statusbar-bg:\s*color-mix\(in srgb,\s*var\(--bg\)/,
+    /--statusbar-divider:\s*color-mix\(in srgb,\s*var\(--border\)/,
+    /#taskbar\s*\{[^}]*gap:\s*0;[^}]*background:\s*var\(--statusbar-bg\);[^}]*border-left:\s*1px solid var\(--statusbar-divider\);[^}]*padding:\s*0;/s,
+    /\.statusbar-info\s*\{[^}]*flex-direction:\s*column;[^}]*gap:\s*0;/s,
+    /\.statusbar-panel-buttons\s*\{[^}]*gap:\s*0;[^}]*overflow-x:\s*auto;/s,
+    /\.statusbar-info > \.daemon-connection-status:first-child,\s*#taskbar \.relay-status\s*\{[^}]*min-height:\s*24px;[^}]*border-bottom:\s*1px solid var\(--statusbar-divider\);/s,
+    /#taskbar \.relay-status\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;/s,
+    /\.statusbar-chip\s*\{[^}]*border:\s*0;[^}]*border-bottom:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*inset 2px 0 0 transparent;/s,
+    /\.statusbar-chip--warn\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--warn\);/s,
+    /\.statusbar-chip--danger\s*\{[^}]*box-shadow:\s*inset 2px 0 0 var\(--danger\);/s,
+    /\.taskbar-app\s*\{[^}]*border-right:\s*1px solid var\(--statusbar-divider\);[^}]*border-radius:\s*0;/s,
+  ].forEach((pattern) => assert.match(css, pattern));
+
+  const chipRule = css.match(/\.statusbar-chip\s*\{[^}]*\}/s);
+  assert.ok(chipRule, '.statusbar-chip rule exists');
+  assert.doesNotMatch(chipRule[0], /border-radius:\s*999px/);
+  assert.doesNotMatch(chipRule[0], /border:\s*1px solid var\(--border\)/);
+});
+
 test('history and supervisor panels fill standalone dock and float bodies', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 

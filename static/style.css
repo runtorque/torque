@@ -23,6 +23,13 @@
   --standalone-main-stack-min-width: 360px;
   --standalone-right-rail-min-width: 320px;
   --statusbar-rail-width: 220px;
+  --statusbar-bg: color-mix(in srgb, var(--bg) 88%, #000 12%);
+  --statusbar-bg-strong: color-mix(in srgb, var(--bg) 72%, #000 28%);
+  --statusbar-fg: var(--text);
+  --statusbar-muted: color-mix(in srgb, var(--text-dim) 88%, var(--text) 12%);
+  --statusbar-divider: color-mix(in srgb, var(--border) 82%, #000 18%);
+  --statusbar-segment-hover: color-mix(in srgb, var(--accent) 15%, transparent);
+  --statusbar-segment-active: color-mix(in srgb, var(--accent) 23%, transparent);
 }
 
 /* ------------------------------------------------------------------ */
@@ -4271,10 +4278,10 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border);
-  padding: 4px;
+  gap: 0;
+  background: var(--statusbar-bg);
+  border-left: 1px solid var(--statusbar-divider);
+  padding: 0;
   flex-shrink: 0;
   flex-basis: var(--statusbar-rail-width);
   width: var(--statusbar-rail-width);
@@ -4283,22 +4290,24 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   overflow: hidden;
 }
 body.runtime-embedded #taskbar {
-  gap: 6px;
+  gap: 0;
   width: var(--statusbar-rail-width);
   min-width: var(--statusbar-rail-width);
   height: auto;
-  padding: 10px 8px;
+  padding: 0;
   background:
-    linear-gradient(90deg, rgba(255,255,255,.02), transparent 120%),
-    var(--bg-surface);
-  box-shadow: inset 1px 0 0 rgba(255,255,255,.03);
+    linear-gradient(90deg, rgba(255,255,255,.035), transparent 68px),
+    var(--statusbar-bg);
+  box-shadow:
+    inset 1px 0 0 rgba(255,255,255,.035),
+    inset 3px 0 0 var(--statusbar-bg-strong);
 }
 #panelbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border);
+  gap: 0;
+  background: var(--statusbar-bg);
+  border-top: 1px solid var(--statusbar-divider);
   padding: 0 4px;
   flex: 0 0 auto;
   height: 26px;
@@ -4306,30 +4315,33 @@ body.runtime-embedded #taskbar {
   overflow: hidden;
 }
 body.runtime-embedded #panelbar {
-  gap: 6px;
+  gap: 0;
   height: 36px;
   padding: 0 10px;
   background:
-    linear-gradient(180deg, rgba(255,255,255,.02), transparent 120%),
-    var(--bg-surface);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 90%),
+    var(--statusbar-bg);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
 }
 .taskbar-app {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  font-size: 10px; color: var(--text-dim);
-  padding: 3px 8px; border-radius: 4px;
+  min-height: 100%;
+  font-size: 10px; color: var(--statusbar-muted);
+  padding: 0 8px;
+  border-right: 1px solid var(--statusbar-divider);
+  border-radius: 0;
   white-space: nowrap;
   transition: color .15s, background .15s;
 }
 body.runtime-embedded .taskbar-app {
   gap: 6px;
-  min-height: 24px;
+  min-height: 36px;
   font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 7px;
+  padding: 0 10px;
+  border-radius: 0;
 }
 .taskbar-app-icon {
   width: 12px;
@@ -4349,10 +4361,10 @@ body.runtime-embedded .taskbar-app {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.taskbar-app:hover { color: var(--text); background: var(--bg-hover); }
-.taskbar-app.active { color: var(--accent); background: rgba(88,166,255,.1); }
+.taskbar-app:hover { color: var(--statusbar-fg); background: var(--statusbar-segment-hover); }
+.taskbar-app.active { color: var(--accent); background: var(--statusbar-segment-active); }
 body.runtime-embedded .taskbar-app.active {
-  box-shadow: inset 0 0 0 1px rgba(88,166,255,.24);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .taskbar-spacer {
   flex: 1;
@@ -4369,26 +4381,49 @@ body.runtime-embedded .taskbar-app.active {
   flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
+  gap: 0;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: thin;
 }
 .statusbar-panel-buttons {
   flex: 1 1 auto;
+  gap: 0;
   justify-content: flex-start;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .statusbar-panel-buttons::-webkit-scrollbar { display: none; }
-.statusbar-info > .daemon-connection-status:first-child {
-  padding-left: 0;
-  border-left: 0;
-}
+.statusbar-info > .daemon-connection-status:first-child,
 #taskbar .relay-status {
   width: 100%;
-  padding-left: 0;
+  min-height: 24px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--statusbar-divider);
   border-left: 0;
+  background: transparent;
+  color: var(--statusbar-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+#taskbar .relay-status {
+  display: inline-flex;
+  justify-content: flex-start;
+}
+body.runtime-embedded #taskbar .relay-status {
+  min-height: 26px;
+  font-size: 11px;
+}
+#taskbar #taskbar-conn-dot,
+#taskbar .relay-status-dot {
+  width: 7px;
+  height: 7px;
+}
+#taskbar .relay-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .statusbar-chip {
   display: inline-flex;
@@ -4399,21 +4434,23 @@ body.runtime-embedded .taskbar-app.active {
   min-width: 0;
   width: 100%;
   max-width: none;
-  height: 20px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: rgba(255,255,255,.02);
-  color: var(--text-dim);
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--statusbar-divider);
+  border-radius: 0;
+  background: transparent;
+  color: var(--statusbar-muted);
   font-size: 10px;
   line-height: 1;
   letter-spacing: .01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-shadow: inset 2px 0 0 transparent;
 }
 body.runtime-embedded .statusbar-chip {
-  height: 24px;
+  height: 26px;
   padding: 0 10px;
   font-size: 11px;
 }
@@ -4423,29 +4460,27 @@ body.runtime-embedded .statusbar-chip {
   cursor: pointer;
 }
 .statusbar-chip-button:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-  background: var(--bg-hover);
+  color: var(--statusbar-fg);
+  background: var(--statusbar-segment-hover);
 }
 .statusbar-chip--normal {
-  color: var(--text-dim);
-  border-color: var(--border);
+  color: var(--statusbar-fg);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green) 58%, transparent);
 }
 .statusbar-chip--warn {
   color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
-  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  background: color-mix(in srgb, var(--warn) 11%, transparent);
+  box-shadow: inset 2px 0 0 var(--warn);
 }
 .statusbar-chip--danger {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
-  background: color-mix(in srgb, var(--danger) 11%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--danger);
 }
 .statusbar-chip--muted,
 .statusbar-chip--unknown {
-  color: var(--muted);
-  border-color: color-mix(in srgb, var(--border) 75%, transparent);
-  background: rgba(255,255,255,.015);
+  color: var(--statusbar-muted);
+  background: transparent;
   opacity: .86;
 }
 .statusbar-chip-attention.statusbar-chip--warn,
@@ -4457,15 +4492,16 @@ body.runtime-embedded .statusbar-chip {
   align-items: center;
   justify-content: center;
   gap: 0;
-  width: 26px;
-  min-width: 26px;
-  min-height: 24px;
+  width: 32px;
+  min-width: 32px;
+  min-height: 100%;
   font-size: 10px;
-  color: var(--text-dim);
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-cell);
+  color: var(--statusbar-muted);
+  padding: 0 8px;
+  border: 0;
+  border-left: 1px solid var(--statusbar-divider);
+  border-radius: 0;
+  background: transparent;
   transition: color .15s, border-color .15s, background .15s;
 }
 body.runtime-embedded .taskbar-aux-btn {
@@ -4486,9 +4522,8 @@ body.runtime-embedded .taskbar-aux-btn {
   stroke-linejoin: round;
 }
 .taskbar-aux-btn:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-  background: var(--bg-hover);
+  color: var(--statusbar-fg);
+  background: var(--statusbar-segment-hover);
 }
 .taskbar-app.panel-attention,
 .taskbar-app.has-badge {
