@@ -472,6 +472,18 @@ function _statusBarCodexUsageView(providerUsage) {
   );
 }
 
+function _statusBarMetricsView() {
+  if (typeof healthMetricsGetStatusBarView === 'function') {
+    return healthMetricsGetStatusBarView();
+  }
+  return {
+    visible: true,
+    label: 'Metrics —',
+    level: 'unknown',
+    title: 'Runtime metrics tick has not arrived yet.',
+  };
+}
+
 function _statusBarNormalizeLevel(level) {
   level = String(level || '').toLowerCase();
   if (level === 'danger' || level === 'warn' || level === 'normal' || level === 'unknown') return level;
@@ -530,6 +542,7 @@ function refreshStatusBar(opts) {
   var claudeView = _statusBarClaudeUsageView();
   var codexView = _statusBarCodexUsageView();
   var deployView = _statusBarDeployView(_statusBarDeployState);
+  var metricsView = _statusBarMetricsView();
   var agentsView = _statusBarAgentCounts(group);
   var tasksView = _statusBarActiveTaskCount(group);
   var attentionView = _statusBarAttentionCount(group);
@@ -537,6 +550,7 @@ function refreshStatusBar(opts) {
   _statusBarSetChip(_statusBarElement('statusbar-claude-usage'), claudeView);
   _statusBarSetChip(_statusBarElement('statusbar-codex-usage'), codexView);
   _statusBarSetChip(_statusBarElement('statusbar-deploy'), deployView);
+  _statusBarSetChip(_statusBarElement('statusbar-metrics'), metricsView);
   _statusBarSetChip(_statusBarElement('statusbar-workload'), {
     visible: true,
     level: agentsView.error ? 'danger' : (agentsView.running ? 'normal' : 'muted'),

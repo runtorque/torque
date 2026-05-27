@@ -11920,6 +11920,90 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   font-size: 11px;
 }
 .health-notes li { margin: 4px 0; }
+.health-metrics-section {
+  font-family: var(--mono, var(--font));
+  padding: 0;
+  overflow: hidden;
+}
+.health-metrics-section[open] {
+  padding-bottom: 12px;
+}
+.health-metrics-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  padding: 12px;
+  list-style: none;
+}
+.health-metrics-summary::-webkit-details-marker { display: none; }
+.health-metrics-summary::before {
+  content: '▸';
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+.health-metrics-section[open] .health-metrics-summary::before {
+  content: '▾';
+}
+.health-metrics-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.health-metrics-summary-status {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.health-metrics-live,
+.health-metrics-history {
+  padding: 0 12px;
+}
+.health-metrics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+.health-metrics-card {
+  min-height: 126px;
+  background: color-mix(in srgb, var(--bg-cell) 88%, var(--bg));
+}
+.health-card-lag .health-sparkline { color: var(--amber); }
+.health-card-ws .health-sparkline { color: var(--accent); }
+.health-card-db .health-sparkline { color: var(--green); }
+.health-card-mem .health-sparkline { color: #a371f7; }
+.health-card-cpu .health-sparkline { color: var(--warn); }
+.health-card-live .health-sparkline { color: var(--green); }
+.health-card-frontend .health-sparkline { color: #58a6ff; }
+.health-metrics-overhead,
+.health-metrics-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.health-metrics-overhead span,
+.health-metrics-history-meta span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+}
+.health-metrics-history {
+  margin-top: 10px;
+}
+.health-metrics-refreshing {
+  margin-top: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.statusbar-chip-metrics {
+  text-align: left;
+}
 .health-loading,
 .health-empty,
 .health-error {

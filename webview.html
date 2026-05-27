@@ -60,6 +60,11 @@
               hidden
               onclick="statusBarOpenDeploy()"
               title="No deploy-pending tasks">Deploy 0</button>
+      <button id="statusbar-metrics"
+              class="statusbar-chip statusbar-chip-button statusbar-chip--unknown statusbar-chip-metrics"
+              type="button"
+              onclick="healthOpenMetrics()"
+              title="Runtime metrics tick has not arrived yet.">Metrics —</button>
       <span id="statusbar-workload"
             class="statusbar-chip statusbar-chip-agents"
             title="Agent status counts">Agents —</span>

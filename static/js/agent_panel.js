@@ -3677,6 +3677,9 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   if (!shell || !content || !headerRight || !_agentPanelShellMatches(shell, agent, kind)) {
     return false;
   }
+  var _torqueRenderStart = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+    ? performance.now()
+    : (Date.now ? Date.now() : 0);
 
   _agentPanelEventsEnsurePager(agent);
   var switchingTabs = previousTab !== activeTab;
@@ -3744,6 +3747,12 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
       && typeof _engineerSyncEventsCountdown === 'function') {
     _engineerSyncEventsCountdown(el, agent.group || '', activeTab);
   }
+  if (typeof healthRecordFrontendRender === 'function') {
+    var _torqueRenderEnd = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+      ? performance.now()
+      : (Date.now ? Date.now() : _torqueRenderStart);
+    healthRecordFrontendRender(Math.max(0, _torqueRenderEnd - _torqueRenderStart), 'agent-panel-in-place');
+  }
   return true;
 }
 
@@ -3772,6 +3781,9 @@ function renderAgentPanel() {
   }
   var el = document.getElementById('panel-agent');
   if (!el) return;
+  var _torqueRenderStart = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+    ? performance.now()
+    : (Date.now ? Date.now() : 0);
   var agent = _resolveFocusedAgent();
   if (agent && agent.group && typeof lazyLoadEngineerJournal === 'function') {
     lazyLoadEngineerJournal(agent.group);
@@ -3839,6 +3851,12 @@ function renderAgentPanel() {
       && (agentKind === 'engineer' || agentKind === 'architect')
       && typeof _engineerSyncEventsCountdown === 'function') {
     _engineerSyncEventsCountdown(el, agent.group || '', _agentPanelActiveTab(agentKind));
+  }
+  if (typeof healthRecordFrontendRender === 'function') {
+    var _torqueRenderEnd = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+      ? performance.now()
+      : (Date.now ? Date.now() : _torqueRenderStart);
+    healthRecordFrontendRender(Math.max(0, _torqueRenderEnd - _torqueRenderStart), 'agent-panel-full');
   }
 }
 
