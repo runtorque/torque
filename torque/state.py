@@ -32,6 +32,12 @@ from . import cloud_hooks
 from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import TorqueDB
+from .metrics import (
+    METRICS_RETENTION_SECONDS,
+    METRICS_ROLLUP_RESOLUTION_SECONDS,
+    METRICS_SCHEMA_VERSION,
+    MetricsCollector,
+)
 from .engineer_ask_events import (
     ENGINEER_ASK_RESOLVED,
     ENGINEER_AWAITING_HUMAN_INPUT,
@@ -1910,6 +1916,7 @@ class GlobalSettings:
     max_pipeline_depth: int = 10  # 0 = unlimited
     # Events
     max_event_log: int = 500  # max persisted panel events
+    metrics_enabled: bool = True  # enable low-overhead daemon metrics ticks/history
     event_ingest_max_rows: int = 100_000
     event_ingest_max_days: int = 14
     mcp_call_log_args_capture: str = "metadata"  # off | metadata | full
@@ -1940,6 +1947,7 @@ class GlobalSettings:
         self.event_ingest_max_days = normalize_event_ingest_max_days(
             self.event_ingest_max_days
         )
+        self.metrics_enabled = normalize_relay_enabled(self.metrics_enabled)
         self.mcp_call_log_args_capture = normalize_mcp_call_log_args_capture(
             self.mcp_call_log_args_capture
         )
@@ -1978,6 +1986,9 @@ class MatrixState:
         self._ws_clients_lock = asyncio.Lock()
         # Global settings
         self.global_settings: GlobalSettings = GlobalSettings()
+        self.metrics_collector = MetricsCollector(
+            enabled=self.global_settings.metrics_enabled
+        )
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
@@ -2419,6 +2430,261 @@ class MatrixState:
             "notes": notes,
         }
 
+    def metrics_history(
+        self,
+        window: str = "24h",
+        group: str = "",
+        *,
+        now: float | None = None,
+    ) -> dict:
+        """Return the published v1 metrics history payload.
+
+        The bucket grid is shared by perf rollups and workflow aggregates.
+        Perf comes from the bounded metrics rollup table; workflow metrics are
+        derived on-demand from existing durable tables/current board state.
+        """
+        window = str(window or "24h").strip()
+        if window not in _SYSTEM_HEALTH_WINDOWS:
+            raise ValueError("window must be one of: 24h, 7d, 30d")
+        window_seconds, bucket_seconds = _SYSTEM_HEALTH_WINDOWS[window]
+        now_value = float(time.time() if now is None else now)
+        until = (
+            int(now_value // bucket_seconds) * bucket_seconds
+        )
+        if until < now_value:
+            until += bucket_seconds
+        since = until - window_seconds
+        bucket_count = int(window_seconds // bucket_seconds)
+        buckets = [
+            {
+                "start": int(since + (idx * bucket_seconds)),
+                "end": int(since + ((idx + 1) * bucket_seconds)),
+                "label": _health_bucket_label(
+                    since + (idx * bucket_seconds),
+                    bucket_seconds,
+                ),
+            }
+            for idx in range(bucket_count)
+        ]
+
+        requested_group = str(group or "").strip()
+        resolved_group = requested_group or str(self.active_group or "").strip()
+        scope = "group" if resolved_group else "all_groups"
+        notes: list[str] = []
+        if requested_group and requested_group not in self.groups:
+            notes.append(
+                f"Group '{requested_group}' is not currently present; "
+                "workflow series are returned empty for that scope."
+            )
+        perf = self._metrics_perf_history(
+            since=since,
+            until=until,
+            buckets=buckets,
+            bucket_seconds=bucket_seconds,
+            notes=notes,
+        )
+        workflow, coverage, workflow_notes = self._metrics_workflow_history(
+            window=window,
+            group=resolved_group,
+            now=until,
+        )
+        notes.extend(workflow_notes)
+
+        return {
+            "type": "metrics_history",
+            "schema_version": METRICS_SCHEMA_VERSION,
+            "generated_at": now_value,
+            "window": window,
+            "group": resolved_group,
+            "scope": scope,
+            "bucket_seconds": bucket_seconds,
+            "buckets": buckets,
+            "perf": perf,
+            "workflow": workflow,
+            "coverage": coverage,
+            "notes": notes,
+        }
+
+    def _metrics_perf_history(
+        self,
+        *,
+        since: float,
+        until: float,
+        buckets: list[dict],
+        bucket_seconds: int,
+        notes: list[str],
+    ) -> dict:
+        bucket_count = len(buckets)
+        series = {
+            "event_loop_lag_p95_ms": _health_series(bucket_count, 0.0),
+            "ws_deltas_per_s": _health_series(bucket_count, 0.0),
+            "db_write_latency_p95_ms": _health_series(bucket_count, 0.0),
+            "rss_mb": _health_series(bucket_count, 0.0),
+            "cpu_pct": _health_series(bucket_count, 0.0),
+        }
+        accum = [
+            {
+                "samples": 0,
+                "ws": 0.0,
+                "rss": 0.0,
+                "cpu": 0.0,
+                "lag_p95": 0.0,
+                "db_latency_p95": 0.0,
+            }
+            for _ in range(bucket_count)
+        ]
+        rows: list[dict] = []
+        if self.db and hasattr(self.db, "load_metrics_perf_rollups"):
+            rows = self.db.load_metrics_perf_rollups(since, until)
+        else:
+            notes.append("No SQLite metrics rollup table is attached.")
+        for row in rows:
+            idx = _health_bucket_index(
+                _safe_float(row.get("bucket_start", 0.0)),
+                since,
+                bucket_seconds,
+                bucket_count,
+            )
+            if idx < 0:
+                continue
+            sample_count = max(1, int(row.get("sample_count", 1) or 1))
+            item = accum[idx]
+            item["samples"] += sample_count
+            item["ws"] += (
+                _safe_float(row.get("ws_deltas_per_s", 0.0)) * sample_count
+            )
+            item["rss"] += _safe_float(row.get("rss_mb", 0.0)) * sample_count
+            item["cpu"] += _safe_float(row.get("cpu_pct", 0.0)) * sample_count
+            item["lag_p95"] = max(
+                item["lag_p95"],
+                _safe_float(row.get("event_loop_lag_p95_ms", 0.0)),
+            )
+            item["db_latency_p95"] = max(
+                item["db_latency_p95"],
+                _safe_float(row.get("db_write_latency_p95_ms", 0.0)),
+            )
+        for idx, item in enumerate(accum):
+            samples = item["samples"]
+            if samples <= 0:
+                continue
+            series["event_loop_lag_p95_ms"][idx] = item["lag_p95"]
+            series["ws_deltas_per_s"][idx] = item["ws"] / samples
+            series["db_write_latency_p95_ms"][idx] = item["db_latency_p95"]
+            series["rss_mb"][idx] = item["rss"] / samples
+            series["cpu_pct"][idx] = item["cpu"] / samples
+        series["retention"] = {
+            "kept_seconds": METRICS_RETENTION_SECONDS,
+            "rollup_resolution_seconds": METRICS_ROLLUP_RESOLUTION_SECONDS,
+        }
+        return series
+
+    def _metrics_workflow_history(
+        self,
+        *,
+        window: str,
+        group: str,
+        now: float,
+    ) -> tuple[dict, dict, list[str]]:
+        health = self.system_health_metrics(window=window, group=group, now=now)
+        summary = health.get("summary", {}) or {}
+        series = health.get("series", {}) or {}
+        distributions = health.get("distributions", {}) or {}
+        health_coverage = health.get("coverage", {}) or {}
+        shape = summary.get("dispatch_shape", {}) or {}
+        shape_statuses = dict(shape.get("statuses", {}) or {})
+        shape_coverage = health_coverage.get("dispatch_shape", {}) or {}
+        review = summary.get("review_cycles", {}) or {}
+        merge = summary.get("merge", {}) or {}
+        boot_doa = summary.get("worker_boot_doa", {}) or {}
+        utilization = summary.get("utilization", {}) or {}
+        task_age_by_lane = {}
+        for lane, stats in (distributions.get("task_age_by_lane", {}) or {}).items():
+            task_age_by_lane[lane] = {
+                "p50": _safe_float(stats.get("p50_seconds", 0.0)),
+                "p90": _safe_float(stats.get("p90_seconds", 0.0)),
+                "max": _safe_float(stats.get("max_seconds", 0.0)),
+                "buckets": dict(stats.get("buckets", {}) or {}),
+            }
+        workflow = {
+            "dispatch": {
+                "series": list(series.get("dispatches", []) or []),
+                "workers_per_hour": _safe_float(
+                    (summary.get("dispatch", {}) or {}).get(
+                        "workers_per_hour",
+                        0.0,
+                    )
+                ),
+            },
+            "dispatch_shape": {
+                "serial": int(shape.get("serial_tool_calls", 0) or 0),
+                "batch": int(shape.get("batch_tool_calls", 0) or 0),
+                "batch_entries": {
+                    "dispatched": int(shape_statuses.get("dispatched", 0) or 0),
+                    "queued": int(shape_statuses.get("queued", 0) or 0),
+                    "deferred": int(shape_statuses.get("deferred", 0) or 0),
+                    "failed": int(shape_statuses.get("failed", 0) or 0),
+                },
+                "coverage": {
+                    "partial": bool(shape_coverage.get("partial", True)),
+                },
+            },
+            "review_cycles": {
+                "avg_rounds": _safe_float(review.get("average_rounds", 0.0)),
+                "first_pass_clean_pct": _safe_float(
+                    review.get("first_pass_clean_pct", 0.0)
+                ),
+                "series": list(series.get("reviews", []) or []),
+            },
+            "merge": {
+                "merged_per_bucket": list(series.get("merges", []) or []),
+                "median_boundary_to_merge_s": _safe_float(
+                    merge.get("median_boundary_to_merge_seconds", 0.0)
+                ),
+                "open_boundaries": int(merge.get("open_count", 0) or 0),
+                "stale_boundaries": int(merge.get("stale_open_count", 0) or 0),
+            },
+            "task_age": {
+                "by_lane": task_age_by_lane,
+            },
+            "boot_doa": {
+                "series": list(series.get("worker_boot_doa", []) or []),
+                "rate": _safe_float(boot_doa.get("rate", 0.0)),
+            },
+            "utilization": {
+                "series": list(series.get("utilization_pct", []) or []),
+                "busy_seconds": _safe_float(utilization.get("busy_seconds", 0.0)),
+                "capacity_seconds": _safe_float(
+                    utilization.get("capacity_seconds", 0.0)
+                ),
+            },
+        }
+        coverage = {
+            "dispatch_shape": {
+                "partial": bool(shape_coverage.get("partial", True)),
+                "reason": (
+                    "mcp_idempotency coverage is incomplete"
+                    if bool(shape_coverage.get("partial", True))
+                    else ""
+                ),
+            },
+            "merge": {
+                "partial": False,
+                "reason": "boundary-to-merge uses worktree_boundary timestamps",
+            },
+            "task_age": {
+                "partial": False,
+                "reason": "current lane age distribution, not lane history",
+            },
+            "utilization": {
+                "partial": False,
+                "reason": (
+                    "worker busy-time divided by current engineer concurrency "
+                    "capacity"
+                ),
+            },
+        }
+        return workflow, coverage, list(health.get("notes", []) or [])
+
     def _system_health_reviews(
         self,
         tasks: list,
@@ -2728,6 +2994,9 @@ class MatrixState:
         self._maybe_clear_engineer_queue_empty_from_delta(op, kwargs)
         delta = {"op": op, **kwargs}
         self._delta_ops.append(delta)
+        meter = self.metrics_collector
+        if meter.enabled:
+            meter.record_emit(op, kwargs)
         if op == "task_upsert":
             self._notify_task_upsert_observers(kwargs)
 
@@ -3818,12 +4087,29 @@ class MatrixState:
     def _db_save_agent(self, cell: AgentCell):
         """Persist a single agent to SQLite."""
         if self.db:
+            meter = self.metrics_collector
+            started = time.perf_counter() if meter.enabled else 0.0
+            recorded = False
             try:
                 if self._critical_write_capture_agent(cell):
                     return
                 self.db.save_agent_deferred(cell)
+                if meter.enabled:
+                    meter.record_db_write(
+                        latency_ms=(time.perf_counter() - started) * 1000.0
+                    )
+                    recorded = True
             except Exception:
                 log.exception("Failed to save agent %s", cell.id)
+            finally:
+                # Critical-write captures still represent a DB-bound mutation,
+                # but they bypass save_agent_deferred. Count them separately so
+                # write-rate telemetry does not disappear during idempotent
+                # command flows.
+                if meter.enabled and started and not recorded:
+                    meter.record_db_write(
+                        latency_ms=(time.perf_counter() - started) * 1000.0
+                    )
 
     def _db_delete_agent(self, agent_id: str):
         if self.db:
@@ -5317,6 +5603,9 @@ class MatrixState:
                 gls_filtered = {k: v for k, v in gs_raw.items()
                                 if k in gls_fields}
                 self.global_settings = GlobalSettings(**gls_filtered)
+                self.metrics_collector.set_enabled(
+                    self.global_settings.metrics_enabled
+                )
             # Board state — use global default_lanes as fallback
             default = (self.global_settings.default_lanes
                        or list(_DEFAULT_LANES))
@@ -6954,6 +7243,8 @@ class MatrixState:
                     value = normalize_event_ingest_max_rows(value)
                 elif key == "event_ingest_max_days":
                     value = normalize_event_ingest_max_days(value)
+                elif key == "metrics_enabled":
+                    value = normalize_relay_enabled(value)
                 elif key == "mcp_call_log_args_capture":
                     value = normalize_mcp_call_log_args_capture(value)
                 elif key == "mcp_call_log_full_capture_tools":
@@ -6973,6 +7264,10 @@ class MatrixState:
     def _apply_global_settings_updates(self, updates: dict) -> None:
         for key, value in updates.items():
             setattr(self.global_settings, key, value)
+        if "metrics_enabled" in updates:
+            self.metrics_collector.set_enabled(
+                self.global_settings.metrics_enabled
+            )
         self._emit("global_settings_update",
                     **asdict(self.global_settings))
 
@@ -9112,8 +9407,18 @@ class MatrixState:
                 self._delta_ops = ops + self._delta_ops
                 raise
             clients = list(self._ws_clients)
-        if profiling.is_enabled():
+        meter = self.metrics_collector
+        profiling_enabled = profiling.is_enabled()
+        payload_bytes = 0
+        if meter.enabled or profiling_enabled:
             payload_bytes = len(msg.encode("utf-8"))
+        if meter.enabled:
+            meter.record_ws_delta(
+                op_count=op_count,
+                payload_bytes=payload_bytes,
+                subscribers=len(clients),
+            )
+        if profiling_enabled:
             profiling.recorder().observe("ws_delta_payload_bytes", payload_bytes)
             profiling.recorder().observe("ws_delta_ops_count", op_count)
             profiling.recorder().observe("ws_clients_per_broadcast", len(clients))

@@ -3753,6 +3753,67 @@ def cmd_doctor(args):
         sys.exit(1)
 
 
+def db_read_metrics_history(window="24h", group=""):
+    """Build metrics history directly from SQLite for offline CLI reads."""
+    if not _db_available():
+        die(f"Torque database not found: {TORQUE_DB}")
+    from torque.db import TorqueDB
+    from torque.state import MatrixState
+
+    db = TorqueDB(Path(TORQUE_DB))
+    try:
+        db.init()
+        state = MatrixState(db)
+        state.load()
+        return state.metrics_history(window=window, group=group)
+    finally:
+        db.close()
+
+
+def cmd_metrics_history(args):
+    data = None
+    try:
+        with socket.create_connection(("127.0.0.1", int(args.port)), timeout=0.2):
+            pass
+        data = check_ok(api_call(
+            "get_metrics_history",
+            port=args.port,
+            window=args.window,
+            group=args.group or "",
+        ))
+    except Exception:
+        if _db_available():
+            data = db_read_metrics_history(args.window, args.group or "")
+        else:
+            raise
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+    print(
+        f"Metrics history {data.get('window')} "
+        f"scope={data.get('scope')} group={data.get('group') or '<all>'}"
+    )
+    print(
+        f"Buckets: {len(data.get('buckets') or [])} × "
+        f"{data.get('bucket_seconds')}s"
+    )
+    perf = data.get("perf", {}) or {}
+    workflow = data.get("workflow", {}) or {}
+    dispatch = (workflow.get("dispatch") or {})
+    print(
+        "Perf retention: "
+        f"{(perf.get('retention') or {}).get('kept_seconds', 0)}s "
+        f"@ {(perf.get('retention') or {}).get('rollup_resolution_seconds', 0)}s"
+    )
+    print(
+        "Dispatch: "
+        f"{sum(dispatch.get('series') or [])} workers, "
+        f"{dispatch.get('workers_per_hour', 0):.2f}/hour"
+    )
+    for note in data.get("notes") or []:
+        print(f"Note: {note}")
+
+
 def cmd_desktop(args):
     entrypoint = _resolve_desktop_entrypoint()
     if not entrypoint.is_file():
@@ -5203,6 +5264,20 @@ def build_parser():
                    help="Terminate orphaned event-ingest/pty-supervisor "
                         "sidecars whose data dir no longer exists")
     p.set_defaults(func=cmd_doctor)
+
+    # -- metrics ------------------------------------------------------------
+    met = sub.add_parser("metrics", help="Metrics history queries")
+    met.set_defaults(func=None, _sub_parser=met)
+    met_sub = met.add_subparsers(dest="metrics_cmd")
+
+    p = met_sub.add_parser("history", help="Show daemon/workflow metrics history")
+    p.add_argument("--window", choices=["24h", "7d", "30d"], default="24h",
+                   help="History window (default: 24h)")
+    p.add_argument("-g", "--group", default="",
+                   help="Group scope (default: active group)")
+    p.add_argument("--json", action="store_true",
+                   help="Output raw JSON")
+    p.set_defaults(func=cmd_metrics_history)
 
     # -- mcp-log ------------------------------------------------------------
     p = sub.add_parser("mcp-log", help="Dump recent MCP calls for an agent")

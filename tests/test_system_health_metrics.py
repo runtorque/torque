@@ -15,6 +15,7 @@ except ModuleNotFoundError:
 from torque.db import TorqueDB
 
 install_aiohttp_stub()
+from torque.metrics import FRONTEND_RENDER_STALENESS_SECONDS, MetricsCollector
 from torque.state import AgentCell, BoardTask, EngineerSettings, MatrixState
 
 
@@ -349,6 +350,145 @@ class SystemHealthMetricsTests(unittest.TestCase):
         self.assertEqual(shape["statuses"], {"dispatched": 1, "deferred": 1})
         self.assertTrue(payload["coverage"]["dispatch_shape"]["partial"])
 
+    def test_metrics_collector_aggregates_tick_with_overhead(self):
+        collector = MetricsCollector(enabled=True)
+        collector.record_event_loop_lag(2.0)
+        collector.record_event_loop_lag(10.0)
+        collector.record_ws_delta(op_count=4, payload_bytes=200, subscribers=3)
+        collector.record_db_write(latency_ms=7.5)
+
+        tick = collector.aggregate_tick(
+            live={"agents": 2, "ptys": 1, "prompt_queue_depth": 1},
+            now=1_000.0,
+            interval_seconds=2.0,
+        )
+
+        self.assertEqual(tick["type"], "metrics_tick")
+        self.assertEqual(tick["schema_version"], 1)
+        self.assertTrue(tick["enabled"])
+        self.assertEqual(tick["interval_ms"], 2000)
+        self.assertEqual(tick["perf"]["ws"]["deltas_per_s"], 2.0)
+        self.assertEqual(tick["perf"]["ws"]["bytes_per_s"], 100.0)
+        self.assertEqual(tick["perf"]["ws"]["subscribers"], 3)
+        self.assertEqual(tick["perf"]["db"]["writes_per_s"], 0.5)
+        self.assertEqual(tick["perf"]["db"]["write_latency_p95_ms"], 7.5)
+        self.assertEqual(tick["perf"]["live"]["agents"], 2)
+        self.assertLess(tick["meter_overhead"]["agg_tick_ms"], 50.0)
+        self.assertLess(tick["meter_overhead"]["collect_overhead_pct"], 1.0)
+
+    def test_frontend_render_absent_and_stale_emit_null(self):
+        collector = MetricsCollector(enabled=True)
+
+        never_reported = collector.aggregate_tick(
+            live={},
+            now=1_000.0,
+            interval_seconds=2.0,
+        )
+        self.assertIsNone(never_reported["perf"]["frontend"])
+
+        collector.record_frontend_render({
+            "count": 4,
+            "duration_ms": 12.0,
+            "render_per_s": 2.0,
+        })
+        reported_at = collector._frontend_render_samples[-1]["timestamp"]
+        fresh = collector.aggregate_tick(
+            live={},
+            now=reported_at + 1.0,
+            interval_seconds=2.0,
+        )
+        self.assertEqual(fresh["perf"]["frontend"]["render_per_s"], 2.0)
+        self.assertEqual(fresh["perf"]["frontend"]["render_ms_p95"], 12.0)
+
+        stale = collector.aggregate_tick(
+            live={},
+            now=reported_at + FRONTEND_RENDER_STALENESS_SECONDS + 0.1,
+            interval_seconds=2.0,
+        )
+        self.assertIsNone(stale["perf"]["frontend"])
+
+    def test_metrics_enabled_toggle_disables_inline_collection(self):
+        state = MatrixState()
+        state.update_global_settings(metrics_enabled=False)
+
+        state._emit(
+            "event_append",
+            kind="task_dispatched",
+            timestamp=123.0,
+        )
+
+        self.assertFalse(state.metrics_collector.enabled)
+        self.assertEqual(state.metrics_collector._inline_calls, 0)
+
+    def test_metrics_perf_rollups_upsert_and_trim(self):
+        row = {
+            "bucket_start": 120,
+            "bucket_seconds": 60,
+            "sample_count": 1,
+            "event_loop_lag_p95_ms": 10.0,
+            "ws_deltas_per_s": 2.0,
+            "db_write_latency_p95_ms": 3.0,
+            "rss_mb": 100.0,
+            "cpu_pct": 5.0,
+            "updated_at": 125.0,
+        }
+        self.db.save_metrics_perf_rollup(row)
+        row.update({
+            "event_loop_lag_p95_ms": 20.0,
+            "ws_deltas_per_s": 4.0,
+            "db_write_latency_p95_ms": 1.0,
+            "rss_mb": 200.0,
+            "cpu_pct": 7.0,
+            "updated_at": 130.0,
+        })
+        self.db.save_metrics_perf_rollup(row)
+
+        rows = self.db.load_metrics_perf_rollups(0, 1000)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sample_count"], 2)
+        self.assertEqual(rows[0]["event_loop_lag_p95_ms"], 20.0)
+        self.assertEqual(rows[0]["ws_deltas_per_s"], 3.0)
+        self.assertEqual(rows[0]["db_write_latency_p95_ms"], 3.0)
+        self.assertEqual(rows[0]["rss_mb"], 150.0)
+
+        self.db.trim_metrics_perf_rollups(121)
+        self.assertEqual(self.db.load_metrics_perf_rollups(0, 1000), [])
+
+    def test_metrics_history_contract_serves_perf_and_workflow(self):
+        now = 3600 * 100 + 10
+        until = 3600 * 101
+        event_ts = until - 1800
+        self._insert_event(1, event_ts, "task_dispatched", group="g")
+        self.db.save_metrics_perf_rollup({
+            "bucket_start": int((until - 120) // 60) * 60,
+            "bucket_seconds": 60,
+            "sample_count": 1,
+            "event_loop_lag_p95_ms": 11.0,
+            "ws_deltas_per_s": 4.0,
+            "db_write_latency_p95_ms": 2.0,
+            "rss_mb": 123.0,
+            "cpu_pct": 6.0,
+            "updated_at": until - 60,
+        })
+        state = self._state()
+        state.active_group = "g"
+
+        payload = state.metrics_history(window="24h", now=now)
+
+        self.assertEqual(payload["type"], "metrics_history")
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["group"], "g")
+        self.assertEqual(payload["scope"], "group")
+        self.assertEqual(payload["bucket_seconds"], 3600)
+        self.assertEqual(len(payload["buckets"]), 24)
+        self.assertEqual(len(payload["perf"]["ws_deltas_per_s"]), 24)
+        self.assertEqual(sum(payload["workflow"]["dispatch"]["series"]), 1)
+        self.assertIn("dispatch_shape", payload["coverage"])
+        self.assertEqual(
+            payload["perf"]["retention"]["rollup_resolution_seconds"],
+            60,
+        )
+
 
 class SystemHealthServerCommandTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -389,6 +529,33 @@ class SystemHealthServerCommandTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+    async def test_broadcast_metrics_disabled_skips_payload_byte_count(self):
+        state = self.state_mod.MatrixState()
+        state.global_settings.metrics_enabled = False
+        state.metrics_collector.set_enabled(False)
+        encode_calls = {"count": 0}
+
+        class CountingStr(str):
+            def encode(self, *args, **kwargs):
+                encode_calls["count"] += 1
+                return super().encode(*args, **kwargs)
+
+        async def fake_dumps(*_args, **_kwargs):
+            return CountingStr('{"type":"delta","ops":[]}')
+
+        original_dumps = self.state_mod.hot_json_dumps_async
+        original_profiling_enabled = self.state_mod.profiling.is_enabled
+        self.state_mod.hot_json_dumps_async = fake_dumps
+        self.state_mod.profiling.is_enabled = lambda: False
+        try:
+            state._emit("ui_update", key="metrics_disabled_guard", value=True)
+            await state.broadcast()
+        finally:
+            self.state_mod.hot_json_dumps_async = original_dumps
+            self.state_mod.profiling.is_enabled = original_profiling_enabled
+
+        self.assertEqual(encode_calls["count"], 0)
+
     async def test_server_command_returns_metrics_and_validates_window(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
@@ -417,6 +584,29 @@ class SystemHealthServerCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ok["type"], "system_health_metrics")
         self.assertEqual(ok["group"], "g")
         self.assertTrue(panel_log.flushed)
+        self.assertEqual(bad["type"], "error")
+        self.assertIn("window must be one of", bad["message"])
+
+    async def test_server_command_returns_metrics_history_contract(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.active_group = "g"
+        handle_command = self._extract_handle_command(state, panel_log=None)
+
+        ok = await handle_command({
+            "cmd": "get_metrics_history",
+            "window": "24h",
+        })
+        bad = await handle_command({
+            "cmd": "get_metrics_history",
+            "window": "bad",
+        })
+
+        self.assertEqual(ok["type"], "metrics_history")
+        self.assertEqual(ok["schema_version"], 1)
+        self.assertEqual(ok["group"], "g")
+        self.assertIn("perf", ok)
+        self.assertIn("workflow", ok)
         self.assertEqual(bad["type"], "error")
         self.assertIn("window must be one of", bad["message"])
 
