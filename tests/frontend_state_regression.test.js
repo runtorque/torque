@@ -3819,7 +3819,7 @@ test('_boardLaneEntryText and refresh delay track the current lane transition ag
         Date.parse('2026-04-07T12:05:00Z')
       )`,
     ),
-    'moved to In Progress · 5m ago',
+    'Moved to In Progress 5m ago',
   );
   assert.equal(
     runInContext(
@@ -3833,7 +3833,7 @@ test('_boardLaneEntryText and refresh delay track the current lane transition ag
         Date.parse('2026-04-07T12:06:00Z')
       )`,
     ),
-    'moved to In Progress · 6m ago',
+    'Moved to In Progress 6m ago',
   );
   assert.equal(
     runInContext(
@@ -3847,7 +3847,7 @@ test('_boardLaneEntryText and refresh delay track the current lane transition ag
         Date.parse('2026-04-07T13:00:00Z')
       )`,
     ),
-    'created · 1h ago',
+    'Created 1h ago',
   );
   assert.equal(
     runInContext(
@@ -3895,8 +3895,65 @@ test('_renderBoardCard shows the task status bar above the card title', () => {
   assert.match(html, /board-card-id/);
   assert.match(html, /root/);
   assert.match(html, /board-card-last-transition/);
-  assert.match(html, /moved to In Progress · 5m ago/);
+  assert.match(html, /Moved to In Progress 5m ago/);
   assert.doesNotMatch(html, /board-card-heading-meta/);
+});
+
+test('board card task ID copy button is hover-revealed and does not reflow the ID', () => {
+  const { sandbox } = createSandbox();
+  const copied = [];
+  sandbox.navigator.clipboard.writeText = (value) => {
+    copied.push(value);
+    return Promise.resolve();
+  };
+  const context = vm.createContext(sandbox);
+  context.Date.now = () => Date.parse('2026-04-07T12:00:30Z');
+  loadBoardScripts(context);
+
+  context.state.board_tasks = {
+    'TORQUE:741': {
+      id: 'TORQUE:741',
+      group: 'alpha',
+      task: 'Add hover copy',
+      lane: 'Backlog',
+      created_at: '2026-04-07T12:00:00Z',
+      lane_entered_at: '2026-04-07T12:00:00Z',
+      position: 1,
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks['TORQUE:741'],
+      {},
+      0
+    )
+  `);
+
+  assert.match(html, /class="board-card-id-copy"/);
+  assert.match(html, /title="Copy task ID"/);
+  assert.match(html, /aria-label="Copy task ID TORQUE:741"/);
+  assert.match(html, /boardCopyTaskIdFromCard\('TORQUE:741'\)/);
+
+  const copyIndex = html.indexOf('board-card-id-copy');
+  const statusIndex = html.indexOf('board-card-status-bar');
+  const statusEnd = html.indexOf('</div>', statusIndex);
+  const statusHtml = html.slice(statusIndex, statusEnd);
+  assert.ok(copyIndex >= 0 && copyIndex < statusIndex, 'copy button should be outside normal status-bar flow');
+  assert.match(
+    statusHtml,
+    /^board-card-status-bar" title="TORQUE:741 · Created just now"><span class="board-card-id">TORQUE:741<\/span>/,
+    'task ID should remain the first in-flow status-bar child',
+  );
+  assert.doesNotMatch(statusHtml, /board-card-id-copy/);
+
+  runInContext(context, `boardCopyTaskIdFromCard('TORQUE:741')`);
+  assert.deepEqual(copied, ['TORQUE:741']);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /\.board-card-info\s*\{[^}]*position:\s*relative;/s);
+  assert.match(css, /\.board-card-id-copy\s*\{[^}]*position:\s*absolute;[^}]*left:\s*-14px;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s);
+  assert.match(css, /\.board-card:hover \.board-card-id-copy,[\s\S]*\.board-card\.board-card-hovered \.board-card-id-copy,[\s\S]*\.board-card\.focused \.board-card-id-copy,[\s\S]*\.board-card-id-copy:focus-visible\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
 });
 
 test('board cards render created_by attribution badges and update across rerenders', () => {

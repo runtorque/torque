@@ -5706,6 +5706,7 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card-info {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: 1px;
+  position: relative;
 }
 .board-card-status-bar {
   display: flex;
@@ -5723,6 +5724,41 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   flex: 0 0 auto;
   font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
   color: var(--text-dim);
+}
+.board-card-id-copy {
+  position: absolute;
+  left: -14px;
+  top: 1px;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-cell);
+  color: var(--text-dim);
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease, background .12s ease, border-color .12s ease, color .12s ease;
+}
+.board-card:hover .board-card-id-copy,
+.board-card.board-card-hovered .board-card-id-copy,
+.board-card.focused .board-card-id-copy,
+.board-card-id-copy:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.board-card-id-copy:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--text);
 }
 .board-card-status-separator {
   flex: 0 0 auto;

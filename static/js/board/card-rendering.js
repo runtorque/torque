@@ -70,9 +70,9 @@ function _boardLaneEntryText(task, nowMs) {
   var current = typeof nowMs === 'number' ? nowMs : Date.now();
   var diffSec = Math.max(0, Math.floor((current - enteredAt) / 1000));
   var prefix = _boardCreatedInCurrentLane(task, enteredAt)
-    ? 'created'
-    : 'moved to ' + (task && task.lane ? task.lane : 'current lane');
-  return prefix + ' · ' + _boardRelativeAgeText(diffSec);
+    ? 'Created'
+    : 'Moved to ' + (task && task.lane ? task.lane : 'current lane');
+  return prefix + ' ' + _boardRelativeAgeText(diffSec);
 }
 
 function _boardLaneEntryNextRefreshDelay(task, nowMs) {
@@ -844,6 +844,13 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     cardHtml += '<div class="board-card-dot ' + dotClass + '"></div>';
   }
   cardHtml += '<div class="board-card-info">';
+  if (t.id) {
+    var copyTaskId = String(t.id || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    cardHtml += '<button type="button" class="board-card-id-copy"'
+      + ' title="Copy task ID" aria-label="Copy task ID ' + esc(t.id) + '"'
+      + ' onclick="event.stopPropagation();boardCopyTaskIdFromCard(\'' + copyTaskId + '\')">'
+      + '&#x29C9;</button>';
+  }
   // Done checkmark for subordinate cards
   var titlePrefix = (isSubordinate && isDone) ? '&#10003; ' : '';
   var laneEntryText = _boardLaneEntryText(t);
