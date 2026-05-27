@@ -12008,10 +12008,19 @@ test('embedded terminal compose renders only for standalone runtime and preserve
     renderTerminalWorkspace();
   `);
 
-  assert.match(dom.compose.innerHTML, /class="terminal-compose"/);
-  assert.match(dom.compose.innerHTML, /Send a message to Builder/);
-  assert.match(dom.compose.innerHTML, /terminal-compose-history-toggle/);
-  assert.match(dom.compose.innerHTML, />History<\/button>/);
+  const composeHtml = dom.compose.innerHTML;
+  assert.match(composeHtml, /class="terminal-compose"/);
+  assert.match(composeHtml, /Send a message to Builder/);
+  assert.match(composeHtml, /terminal-compose-history-toggle/);
+  assert.match(composeHtml, /aria-label="Message history"/);
+  assert.match(composeHtml, /title="Message history \(use ↑\/↓ to recall\)"/);
+  assert.match(composeHtml, /onclick="return terminalComposeHistoryToggle\(event, 'agent-1'\)"/);
+  assert.match(composeHtml, /<span class="terminal-compose-history-icon" aria-hidden="true">↺<\/span>/);
+  assert.doesNotMatch(composeHtml, />History<\/button>/);
+  const sendIndex = composeHtml.indexOf('<button id="terminal-compose-submit-agent-1"');
+  const historyIndex = composeHtml.indexOf('<div class="terminal-compose-history-wrap">');
+  assert.ok(sendIndex >= 0, 'compose send button is rendered');
+  assert.ok(historyIndex > sendIndex, 'history icon button follows send in DOM/tab order');
 
   const input = document.register('terminal-compose-input-agent-1');
   input.classList.add('terminal-compose-input');

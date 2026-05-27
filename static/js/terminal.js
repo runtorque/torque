@@ -1764,17 +1764,18 @@ function _renderTerminalCompose(root, cell) {
     + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
     + '  <div class="terminal-compose-error" aria-live="polite">' + esc(error) + '</div>'
     + '  </div>'
-    + '  <div class="terminal-compose-history-wrap">'
-    + '    <button id="' + esc(historyButtonId) + '" class="terminal-compose-history-toggle" type="button"'
-    + ' onclick="return terminalComposeHistoryToggle(event, \'' + esc(cellId) + '\')"'
-    + ' title="Message history (use \u2191/\u2193 to recall)" aria-label="Show message history"'
-    + ' aria-haspopup="listbox" aria-expanded="false" aria-controls="' + esc(historyMenuId) + '">History</button>'
-    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu"'
-    + ' role="listbox" aria-label="Recent messages" hidden></div>'
-    + '  </div>'
     + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
     + (disabled ? ' disabled' : '')
     + ' title="Send message">Send</button>'
+    + '  <div class="terminal-compose-history-wrap">'
+    + '    <button id="' + esc(historyButtonId) + '" class="terminal-compose-history-toggle" type="button"'
+    + ' onclick="return terminalComposeHistoryToggle(event, \'' + esc(cellId) + '\')"'
+    + ' title="Message history (use \u2191/\u2193 to recall)" aria-label="Message history"'
+    + ' aria-haspopup="listbox" aria-expanded="false" aria-controls="' + esc(historyMenuId) + '">'
+    + '<span class="terminal-compose-history-icon" aria-hidden="true">\u21ba</span></button>'
+    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu"'
+    + ' role="listbox" aria-label="Recent messages" hidden></div>'
+    + '  </div>'
     + '</form>';
   const input = _terminalComposeTextarea(root);
   if (input) {

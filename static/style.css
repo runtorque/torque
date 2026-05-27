@@ -928,14 +928,21 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   flex: 0 0 auto;
 }
 .terminal-compose-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 10px;
   background: rgba(255,255,255,.045);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 650;
+  line-height: 1;
 }
 .terminal-compose-history-toggle:hover,
 .terminal-compose-history-toggle:focus-visible,
@@ -943,6 +950,9 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border) 52%);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--text);
+}
+.terminal-compose-history-icon {
+  pointer-events: none;
 }
 .terminal-compose-history-menu {
   position: absolute;
