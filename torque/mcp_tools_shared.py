@@ -6454,16 +6454,33 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         cleanup = result.get("cleanup", {}) if result else {}
         cleanup_errors = cleanup.get("errors", [])
         if cleanup_errors:
-            return (
-                _worktree_merge_default_message(
-                    result,
-                    cell,
-                    branch=merge_branch,
-                    base_branch=merge_base_branch,
-                )
-                + ", but cleanup failed:\n"
+            landed_pr = (
+                str(result.get("mode") or "").strip() == "pull_request"
+                and bool(result.get("merged"))
+                and not bool(result.get("pending"))
+                and bool(str(result.get("sha") or "").strip())
+            )
+            if not landed_pr:
+                return (
+                    _worktree_merge_default_message(
+                        result,
+                        cell,
+                        branch=merge_branch,
+                        base_branch=merge_base_branch,
+                    )
+                    + ", but cleanup failed:\n"
+                    + "\n".join(f"  - {err}" for err in cleanup_errors)
+                ), True
+            result = dict(result)
+            cleanup_warning = (
+                "Merge landed, but post-merge cleanup reported warnings:\n"
                 + "\n".join(f"  - {err}" for err in cleanup_errors)
-            ), True
+            )
+            existing_warning = str(result.get("warning") or "").strip()
+            result["warning"] = (
+                f"{existing_warning}\n{cleanup_warning}"
+                if existing_warning else cleanup_warning
+            )
         return json.dumps(
             _worktree_merge_success_payload(
                 result,
