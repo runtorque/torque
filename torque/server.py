@@ -6772,11 +6772,29 @@ async def _hot_json_response(
         body=body, status=status, content_type="application/json")
 
 
+_UI_CLIENT_ID_RE = re.compile(r"[^A-Za-z0-9_.:-]")
+
+
+def _normalize_ui_client_id(value) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return _UI_CLIENT_ID_RE.sub("", raw)[:96]
+
+
+def _ui_client_id_from_request(request) -> str:
+    try:
+        return _normalize_ui_client_id(request.query.get("client_id", ""))
+    except Exception:
+        return ""
+
+
 async def _register_ready_ui_ws_client(state: MatrixState, ws,
-                                       payload_factory) -> bool:
+                                       payload_factory,
+                                       client_id: str = "") -> bool:
     connect_started = time.perf_counter()
     async with state._ws_clients_lock:
-        state._ws_clients.discard(ws)
+        state._discard_ws_clients_locked({ws})
     while True:
         payload = payload_factory()
         if asyncio.iscoroutine(payload):
@@ -6788,7 +6806,7 @@ async def _register_ready_ui_ws_client(state: MatrixState, ws,
             return False
         async with state._ws_clients_lock:
             if state._seq == int(payload.get("seq", 0) or 0):
-                state._ws_clients.add(ws)
+                state._register_ws_client_locked(ws, client_id)
                 profiling.recorder().incr("ws_connects")
                 profiling.recorder().observe_ms(
                     "ws_connect_latency_ms",
@@ -10861,7 +10879,9 @@ async def main(connection=None):
                 await ws_client.send_str(msg)
             except Exception:
                 dead.add(ws_client)
-        state._ws_clients -= dead
+        if dead:
+            async with state._ws_clients_lock:
+                state._discard_ws_clients_locked(dead)
 
     # Persistent supervisor-health banner. Only populated in standalone
     # mode when the supervisor is unavailable / restarted. Latest state
@@ -10877,7 +10897,9 @@ async def main(connection=None):
                 await ws_client.send_str(payload)
             except Exception:
                 dead.add(ws_client)
-        state._ws_clients -= dead
+        if dead:
+            async with state._ws_clients_lock:
+                state._discard_ws_clients_locked(dead)
 
     async def _on_supervisor_event(kind, detail):
         """Translate SupervisedPtyAdapter events into user-visible
@@ -10987,7 +11009,7 @@ async def main(connection=None):
         }
         if dead:
             async with state._ws_clients_lock:
-                state._ws_clients -= dead
+                state._discard_ws_clients_locked(dead)
 
     def _metrics_live_sampler() -> dict:
         active = list(state.iter_active_agents())
@@ -13381,10 +13403,11 @@ async def main(connection=None):
                         "message": "Agent is tombstoned and cannot be focused",
                     }
                 elif cell:
+                    client_id = _normalize_ui_client_id(data.get("_client_id", ""))
                     selected_id = cell.parent_id if (
                         cell.cell_type == "terminal" and cell.parent_id
                     ) else cell.id
-                    if selected_id and selected_id in state.agents:
+                    if selected_id and selected_id in state.agents and not client_id:
                         state.selected_agent_id = selected_id
                         state._emit(
                             "ui_update",
@@ -13396,7 +13419,10 @@ async def main(connection=None):
                             state.selected_agent_id,
                         )
                     if cell.session_id:
-                        await bridge.focus_session(cell.session_id)
+                        await bridge.focus_session(
+                            cell.session_id,
+                            client_id=client_id,
+                        )
 
             elif cmd == "send_text":
                 await _handle_send_text_command(data, state, _send_agent_prompt)
@@ -19251,12 +19277,14 @@ async def main(connection=None):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         compact_snapshot = _request_wants_compact_snapshot(request)
+        ui_client_id = _ui_client_id_from_request(request)
 
-        def ws_state_payload():
-            return _state_payload(compact=compact_snapshot)
+        async def ws_state_payload():
+            payload = await _state_payload(compact=compact_snapshot)
+            return state.overlay_client_focus_state(payload, ui_client_id)
 
         if not await _register_ready_ui_ws_client(
-                state, ws, ws_state_payload):
+                state, ws, ws_state_payload, client_id=ui_client_id):
             return ws
         # Replay the current supervisor banner (if any) to the new client.
         banner = supervisor_banner_state.get("banner")
@@ -19271,17 +19299,21 @@ async def main(connection=None):
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         data = json.loads(msg.data)
+                        if ui_client_id:
+                            data["_client_id"] = ui_client_id
                         if _payload_wants_compact_snapshot(data):
                             compact_snapshot = True
                         if data.get("type") == "connect":
                             sent = await _register_ready_ui_ws_client(
-                                state, ws, ws_state_payload)
+                                state, ws, ws_state_payload,
+                                client_id=ui_client_id)
                             if not sent:
                                 break
                             continue
                         if data.get("cmd") == "resync":
                             sent = await _register_ready_ui_ws_client(
-                                state, ws, ws_state_payload)
+                                state, ws, ws_state_payload,
+                                client_id=ui_client_id)
                             if not sent:
                                 break
                             continue
@@ -19302,13 +19334,15 @@ async def main(connection=None):
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     break
         finally:
-            state._ws_clients.discard(ws)
+            async with state._ws_clients_lock:
+                state._discard_ws_clients_locked({ws})
         return ws
 
     async def handle_terminal_ws(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         cell_id = request.match_info.get("cell_id", "")
+        ui_client_id = _ui_client_id_from_request(request)
         terminal_clients.setdefault(cell_id, set()).add(ws)
         try:
             # Initial sends use `_send_ui_ws_json` so client disconnects
@@ -19357,7 +19391,10 @@ async def main(connection=None):
                         int(payload.get("rows", 0) or 0),
                     )
                 elif payload.get("type") == "focus":
-                    await bridge.focus_session(cell.session_id)
+                    await bridge.focus_session(
+                        cell.session_id,
+                        client_id=ui_client_id,
+                    )
         finally:
             terminal_clients.get(cell_id, set()).discard(ws)
         return ws

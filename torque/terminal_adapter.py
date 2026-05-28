@@ -79,7 +79,7 @@ class TerminalAdapter(Protocol):
         """Close a terminal session."""
         ...
 
-    async def focus_session(self, session_id: str) -> bool:
+    async def focus_session(self, session_id: str, *, client_id: str = "") -> bool:
         """Focus/activate a terminal session. Returns True if found."""
         ...
 

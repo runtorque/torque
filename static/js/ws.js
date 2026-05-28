@@ -1,6 +1,29 @@
 /* WebSocket connection and shared state */
 
-const WS_URL = `ws://${location.host}/ws`;
+function _torqueRandomClientId() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch (_err) {}
+  return 'client-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+}
+
+const TORQUE_CLIENT_ID = _torqueRandomClientId();
+
+function _torqueClientId() {
+  return TORQUE_CLIENT_ID;
+}
+
+function _torqueAppendClientId(url) {
+  const clientId = (typeof _torqueClientId === 'function') ? _torqueClientId() : '';
+  if (!clientId) return url;
+  const sep = String(url).indexOf('?') >= 0 ? '&' : '?';
+  return url + sep + 'client_id=' + encodeURIComponent(clientId);
+}
+
+const WS_PROTOCOL = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = _torqueAppendClientId(`${WS_PROTOCOL}//${location.host}/ws`);
 let ws = null;
 let state = {
   agents: {},
@@ -414,6 +437,8 @@ function connect() {
       _handleFullState(msg);
     } else if (msg.type === 'delta') {
       _handleDelta(msg);
+    } else if (msg.type === 'focus_update') {
+      _handleClientFocusUpdate(msg);
     } else if (msg.type === 'config') {
       if (msg.providers) _cachedProviders = msg.providers;
       if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
@@ -734,6 +759,30 @@ function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
   const next = nextTasks || {};
   for (const [taskId, nextTask] of Object.entries(next)) {
     _maybeTriggerAgentDoneFlourish(prior[taskId] || null, nextTask || null);
+  }
+}
+
+function _applyFocusUpdatePayload(payload) {
+  payload = payload || {};
+  var prevActive = state.active_session_id;
+  if ('active_session_id' in payload) {
+    state.active_session_id = payload.active_session_id;
+  }
+  if ('current_window_id' in payload) {
+    state.current_window_id = payload.current_window_id;
+  }
+  if (state.active_session_id !== prevActive) {
+    _syncSelectionToActiveSession();
+  }
+}
+
+function _handleClientFocusUpdate(msg) {
+  _applyFocusUpdatePayload(msg || {});
+  if (dragInProgress) return;
+  if (typeof _queueDeltaSurfaceRender === 'function') {
+    _queueDeltaSurfaceRender({ main: true, context: true });
+  } else if (typeof render === 'function') {
+    render();
   }
 }
 
@@ -3170,16 +3219,7 @@ function _applyDelta(ops) {
       }
 
       case 'focus_update':
-        if ('active_session_id' in op) {
-          const prevActive = state.active_session_id;
-          state.active_session_id = op.active_session_id;
-          if (state.active_session_id !== prevActive) {
-            _syncSelectionToActiveSession();
-          }
-        }
-        if ('current_window_id' in op) {
-          state.current_window_id = op.current_window_id;
-        }
+        _applyFocusUpdatePayload(op);
         break;
     }
   }
