@@ -3304,6 +3304,176 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             ["REMOTE_UNAVAILABLE: Unable to read current working directory"],
         )
 
+    async def test_worktree_merge_pr_authoritative_guard_suppresses_post_success_false_failures(self):
+        cases = [
+            (
+                "stale_base_check",
+                "STALE BASE: own squash counted as divergence",
+            ),
+            (
+                "pr_merge",
+                "Conflicts detected after squash landed",
+            ),
+            (
+                "target_resolution",
+                "Target worktree was already tombstoned",
+            ),
+            (
+                "github_preflight",
+                "Not a GitHub repository: No such file or directory: "
+                ".torque/worktrees/worker",
+            ),
+        ]
+        for phase, message in cases:
+            with self.subTest(phase=phase):
+                state, worker, task = self._make_pr_merge_state()
+                cleanup_calls = []
+                worktree_mgr = self._FakePrWorktreeManager(
+                    {
+                        "ok": False,
+                        "phase": phase,
+                        "error": message,
+                        "url": "https://github.com/acme/repo/pull/7",
+                        "number": 7,
+                        "head_sha": "head123",
+                        "merge_commit_sha": "squash789",
+                        "merge_state": "CLEAN",
+                        "pending": False,
+                        "pr_status": {
+                            "ok": True,
+                            "state": "MERGED",
+                            "merge_commit_sha": "squash789",
+                        },
+                    },
+                    sync_results=[
+                        {
+                            "ok": True,
+                            "phase": "remote_base_sync",
+                            "synced": False,
+                            "base_sha": "base-before",
+                            "remote_sha": "base-before",
+                        },
+                        {
+                            "ok": True,
+                            "phase": "remote_base_sync",
+                            "synced": True,
+                            "base_sha": "squash789",
+                            "remote_sha": "squash789",
+                        },
+                    ],
+                )
+
+                async def fake_cleanup_after_merge(
+                    _cell,
+                    *,
+                    close_agent=False,
+                    remove_worktree=False,
+                ):
+                    cleanup_calls.append((close_agent, remove_worktree))
+                    return {
+                        "close_agent": close_agent,
+                        "remove_worktree": remove_worktree,
+                        "agent_closed": close_agent,
+                        "worktree_removed": remove_worktree,
+                        "errors": [],
+                    }
+
+                handle_command, restore = self._pr_handle_command(
+                    state,
+                    worker,
+                    worktree_mgr,
+                    fake_cleanup_after_merge,
+                )
+                try:
+                    result = await handle_command({
+                        "cmd": "worktree_merge",
+                        "id": worker.id,
+                        "close_agent_on_merge": True,
+                        "remove_worktree_on_merge": True,
+                    })
+                finally:
+                    restore()
+
+                self.assertTrue(result["ok"], result.get("error"))
+                self.assertTrue(result["merged"])
+                self.assertEqual(result["sha"], "squash789")
+                self.assertEqual(result["mode"], "pull_request")
+                self.assertEqual(task.lane, "Done")
+                self.assertEqual(cleanup_calls, [(True, True)])
+                self.assertIn("ignoring post-success", result["warning"])
+                self.assertIn(phase, result["warning"])
+                self.assertIn("main is at merge commit squash789", result["warning"])
+                self.assertEqual(
+                    result["post_success_warnings"][-1]["phase"],
+                    phase,
+                )
+                self.assertTrue(result["authoritative_post_success_guard"]["ok"])
+                boundary = task.worktree_boundary
+                self.assertEqual(boundary["status"], "merged")
+                self.assertEqual(boundary["merge_commit_sha"], "squash789")
+
+    async def test_worktree_merge_pr_authoritative_guard_requires_base_at_merge_commit(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": False,
+                "phase": "pr_merge",
+                "error": "Conflicts detected after squash landed",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "pending": False,
+                "pr_status": {
+                    "ok": True,
+                    "state": "MERGED",
+                    "merge_commit_sha": "squash789",
+                },
+            },
+            sync_results=[
+                {
+                    "ok": True,
+                    "phase": "remote_base_sync",
+                    "synced": False,
+                    "base_sha": "base-before",
+                    "remote_sha": "base-before",
+                },
+                {
+                    "ok": True,
+                    "phase": "remote_base_sync",
+                    "synced": False,
+                    "base_sha": "different-main",
+                    "remote_sha": "different-main",
+                },
+            ],
+            base_sha="different-main",
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            self.fail("cleanup must not run when base tip does not match merge")
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["phase"], "pr_merge")
+        self.assertIn("Conflicts detected", result["error"])
+        self.assertEqual(task.lane, "In Progress")
+        self.assertEqual(task.worktree_boundary["status"], "open")
+
     async def test_worktree_merge_pr_already_merged_create_result_finalizes(self):
         state, worker, task = self._make_pr_merge_state()
         worktree_mgr = self._FakePrWorktreeManager(
