@@ -63,6 +63,7 @@ function createContext() {
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/canvas.js');
   return context;
 }

@@ -94,7 +94,170 @@ function createGridHarness() {
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
   return { context, sandbox, main };
+}
+
+function createTerminalRowRerenderHarness() {
+  const main = makeMemoElement('MAIN');
+  const document = {
+    activeElement: null,
+    getElementById(id) { return id === 'main' ? main : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+  const sandbox = {
+    console,
+    Date,
+    JSON,
+    Math,
+    location: { host: 'localhost:18932' },
+    document,
+    state: {
+      runtime: { embedded_terminal: false, profile: 'terminal-row', port: '18932' },
+      agents: {
+        'term-1': {
+          id: 'term-1',
+          name: 'Shell One',
+          slug: 'shell-one',
+          group: 'alpha',
+          cell_type: 'terminal',
+          status: 'running',
+          current_process: 'zsh',
+          current_path: '/repo/packages/api',
+          git_root: '/repo',
+          session_id: 'sess-1',
+        },
+      },
+      groups: { alpha: ['term-1'] },
+      group_settings: {},
+      children: {},
+      board_tasks: {},
+      ui: {},
+      selected_principal_id: '',
+      active_session_id: 'sess-1',
+    },
+    selectedAgentId: null,
+    selectedTerminalId: 'term-1',
+    focusedItemId: 'term-1',
+    dragInProgress: false,
+    getComputedStyle() {
+      return {
+        paddingTop: '0px',
+        paddingBottom: '0px',
+        marginTop: '0px',
+        marginBottom: '0px',
+      };
+    },
+    requestAnimationFrame() { return 0; },
+    cancelAnimationFrame() {},
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    renderTerminalWorkspace() {},
+    updateEventsAttentionBadge() {},
+    renderAgentPanel() {},
+    _currentPanelSurfaces() { return []; },
+    getFilterByWindow() { return false; },
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window = Object.assign({ innerHeight: 900 }, sandbox);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
+  return { context, sandbox, main };
+}
+
+function createPendingHireBannerRerenderHarness() {
+  const main = makeMemoElement('MAIN');
+  const banner = makeMemoElement('DIV');
+  banner.hidden = true;
+  const sandbox = {
+    console,
+    Date,
+    JSON,
+    Math,
+    location: { host: 'localhost:18932' },
+    document: {
+      activeElement: null,
+      getElementById(id) {
+        if (id === 'main') return main;
+        if (id === 'pending-hire-banner') return banner;
+        return null;
+      },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    },
+    state: {
+      runtime: { embedded_terminal: false, profile: 'pending-hire-banner', port: '18932' },
+      agents: {
+        'arch-1': {
+          id: 'arch-1',
+          name: 'Planwright',
+          slug: 'planwright',
+          kind: 'architect',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+        },
+      },
+      groups: { alpha: [] },
+      group_settings: {},
+      children: {},
+      board_tasks: {},
+      ui: {},
+      selected_principal_id: '',
+      pending_hires: {
+        'hire-1': {
+          id: 'hire-1',
+          architect_id: 'arch-1',
+          requested_name: 'Alice',
+          created_at: 10,
+        },
+        'hire-2': {
+          id: 'hire-2',
+          architect_id: 'arch-1',
+          requested_name: 'Bob',
+          created_at: 20,
+        },
+      },
+    },
+    selectedAgentId: null,
+    selectedTerminalId: null,
+    focusedItemId: null,
+    dragInProgress: false,
+    sendCalls: [],
+    getComputedStyle() {
+      return {
+        paddingTop: '0px',
+        paddingBottom: '0px',
+        marginTop: '0px',
+        marginBottom: '0px',
+      };
+    },
+    requestAnimationFrame() { return 0; },
+    cancelAnimationFrame() {},
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    renderTerminalWorkspace() {},
+    updateEventsAttentionBadge() {},
+    renderAgentPanel() {},
+    _currentPanelSurfaces() { return []; },
+    getFilterByWindow() { return false; },
+  };
+  sandbox.send = function(message) { sandbox.sendCalls.push(message); };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window = Object.assign({ innerHeight: 900 }, sandbox);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
+  return { context, sandbox, main, banner };
 }
 
 test('TORQUE:264 — render() memoizes empty-state main.innerHTML', () => {
@@ -105,6 +268,61 @@ test('TORQUE:264 — render() memoizes empty-state main.innerHTML', () => {
   assert.equal(main._setCount, 1,
     'second render with identical state must not rewrite innerHTML');
   assert.match(main.innerHTML, /No groups yet/);
+});
+
+test('terminal-row extraction keeps row HTML stable and preserves row-control focus through identical rerenders', () => {
+  const { context, sandbox, main } = createTerminalRowRerenderHarness();
+  const firstRowHtml = context.renderTerminalRow(sandbox.state.agents['term-1']);
+  assert.match(firstRowHtml, /class="term-row active focused"/);
+  assert.match(firstRowHtml, /class="term-action danger"/);
+
+  context.render();
+  const firstGridHtml = main.innerHTML;
+  const firstSetCount = main._setCount;
+  assert.match(firstGridHtml, /Shell One/);
+  assert.match(firstGridHtml, /term-action danger/);
+
+  const focusedControl = { id: 'term-delete-button' };
+  sandbox.document.activeElement = focusedControl;
+  const secondRowHtml = context.renderTerminalRow(sandbox.state.agents['term-1']);
+  assert.equal(secondRowHtml, firstRowHtml,
+    'renderTerminalRow must remain byte-stable for unchanged terminal state after extraction');
+
+  context.render();
+  assert.equal(main._setCount, firstSetCount,
+    'identical terminal-row grid rerender must not clobber the main surface');
+  assert.equal(main.innerHTML, firstGridHtml,
+    'terminal row output should remain stable across an unchanged rerender');
+  assert.equal(sandbox.document.activeElement, focusedControl,
+    'focused terminal-row controls survive because the identical grid render is memoized');
+});
+
+test('pending-hire banner extraction keeps output stable and dismiss state across grid rerenders', () => {
+  const { context, sandbox, banner } = createPendingHireBannerRerenderHarness();
+  context.render();
+  const firstBannerHtml = banner.innerHTML;
+  assert.equal(banner.hidden, false);
+  assert.match(firstBannerHtml, /Planwright/);
+  assert.match(firstBannerHtml, /Alice/);
+  assert.match(firstBannerHtml, /\+1 more hire request/);
+  assert.match(firstBannerHtml, /approvePendingHire\("hire-1"\)/);
+
+  context.render();
+  assert.equal(banner.innerHTML, firstBannerHtml,
+    'renderPendingHireBanner output should remain stable across unchanged grid rerenders');
+
+  context.approvePendingHire('hire-1');
+  const afterDismissHtml = banner.innerHTML;
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'pending_hire_approve', id: 'hire-1' },
+  ]);
+  assert.doesNotMatch(afterDismissHtml, /Alice/);
+  assert.match(afterDismissHtml, /Bob/);
+  assert.doesNotMatch(afterDismissHtml, /\+1 more hire request/);
+
+  context.render();
+  assert.equal(banner.innerHTML, afterDismissHtml,
+    'dismissed pending-hire state should survive later grid rerenders');
 });
 
 test('TORQUE:264 — render() exposes _torqueLastHtml on the main element after first paint', () => {
@@ -287,6 +505,7 @@ function makeAgentCardFocusHarness() {
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
   context.renderAgentDetails = function() { return ''; };
   return {
     context,
