@@ -12,10 +12,10 @@
  *      routing dispatched off [data-canvas-card-id] cards.
  *
  * Harness/setup mirrors frontend_canvas_context_menu.test.js (same vm
- * sandbox + loadScript bootstrap). canvas.js is the only production module
- * required: the tree model is pure over `state`, and the interaction
- * handlers route to functions we stub (onAgentClick / focusAgent /
- * _canvasShowCardMenu / _canvasShowEmptyMenu).
+ * sandbox + loadScript bootstrap) while matching the webview render →
+ * group-tabs → agent-card → canvas load order. The tree model is pure over
+ * `state`, and the interaction handlers route to functions we stub
+ * (onAgentClick / focusAgent / _canvasShowCardMenu / _canvasShowEmptyMenu).
  */
 
 const test = require('node:test');
@@ -43,6 +43,11 @@ function createSandbox() {
       engineer_settings: {},
       agent_digest_settings: {},
     },
+    document: {
+      getElementById() { return null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    },
     esc(value) { return String(value); },
   };
   sandbox.global = sandbox;
@@ -53,9 +58,11 @@ function createSandbox() {
 function createContext() {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);
-  // Match webview load order: canvas is declared before command helpers.
-  // For these tests only canvas.js is needed; the interaction handlers
-  // route to functions we stub per-test.
+  // Match webview load order through canvas; the interaction handlers route to
+  // functions we stub per-test.
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/canvas.js');
   return context;
 }
@@ -470,7 +477,9 @@ function attachInteractionHarness(context, opts) {
     addEventListener(type, fn) { handlers[type] = fn; },
   };
   context.document = {
+    getElementById() { return null; },
     querySelector(sel) { return sel === '.agent-canvas' ? root : null; },
+    querySelectorAll() { return []; },
   };
 
   const calls = { onAgentClick: [], focusAgent: [], cardMenu: [], emptyMenu: [] };
