@@ -50,6 +50,7 @@ let selectedTerminalId = null;
 let focusedItemId = null;
 let _cachedAgentTemplates = [];
 var _selectedAgentGroupSyncedDuringDelta = false;
+var _clientScopedFocusActive = false;
 
 function _selectedAgentRecord(agentId) {
   agentId = String(agentId || '').trim();
@@ -764,6 +765,13 @@ function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
 
 function _applyFocusUpdatePayload(payload) {
   payload = payload || {};
+  const clientScoped = !!payload.client_scoped;
+  if (!clientScoped && _clientScopedFocusActive) {
+    return false;
+  }
+  if (clientScoped) {
+    _clientScopedFocusActive = true;
+  }
   var prevActive = state.active_session_id;
   if ('active_session_id' in payload) {
     state.active_session_id = payload.active_session_id;
@@ -774,6 +782,7 @@ function _applyFocusUpdatePayload(payload) {
   if (state.active_session_id !== prevActive) {
     _syncSelectionToActiveSession();
   }
+  return true;
 }
 
 function _handleClientFocusUpdate(msg) {
@@ -803,6 +812,7 @@ function _handleFullState(msg) {
     : false;
   _resyncPending = false;
   _awaitingFullState = false;
+  _clientScopedFocusActive = !!(msg && msg.client_scoped_focus);
   state = msg;
   if (typeof _compactInitDeferredMaps === 'function') _compactInitDeferredMaps();
   if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();

@@ -3056,7 +3056,38 @@ class MatrixState:
             return payload
         payload["active_session_id"] = focus.get("active_session_id")
         payload["current_window_id"] = focus.get("current_window_id")
+        payload["client_scoped_focus"] = True
         return payload
+
+    @staticmethod
+    def _ops_include_focus_update(ops: list[dict]) -> bool:
+        return any((op or {}).get("op") == "focus_update" for op in ops)
+
+    @staticmethod
+    def _ops_with_client_focus_overlay(
+        ops: list[dict],
+        focus: dict[str, Optional[str]],
+    ) -> list[dict]:
+        """Return delta ops with focus_update patched to client-local focus.
+
+        Global PTY focus deltas are legacy/backcompat state. Browser clients
+        that have established a per-client focus override must not have that
+        local selection yanked by an unrelated global focus change, especially
+        when the global active session stops.
+        """
+        active_session_id = focus.get("active_session_id")
+        current_window_id = focus.get("current_window_id") or "standalone"
+        patched: list[dict] = []
+        for op in ops:
+            if (op or {}).get("op") != "focus_update":
+                patched.append(op)
+                continue
+            focus_op = dict(op)
+            focus_op["active_session_id"] = active_session_id
+            focus_op["current_window_id"] = current_window_id
+            focus_op["client_scoped"] = True
+            patched.append(focus_op)
+        return patched
 
     async def send_client_focus_update(
         self,
@@ -9592,7 +9623,19 @@ class MatrixState:
                 self._seq -= 1
                 self._delta_ops = ops + self._delta_ops
                 raise
-            clients = list(self._ws_clients)
+            client_entries = [
+                (ws, self._ws_client_ids.get(ws, ""))
+                for ws in self._ws_clients
+            ]
+            client_focus_by_id: dict[str, dict[str, Optional[str]]] = {}
+            if self._ops_include_focus_update(ops):
+                for _ws, client_id in client_entries:
+                    client_id = str(client_id or "").strip()
+                    if not client_id or client_id in client_focus_by_id:
+                        continue
+                    focus = self.client_focus_state(client_id)
+                    if focus is not None:
+                        client_focus_by_id[client_id] = focus
         meter = self.metrics_collector
         profiling_enabled = profiling.is_enabled()
         payload_bytes = 0
@@ -9602,18 +9645,28 @@ class MatrixState:
             meter.record_ws_delta(
                 op_count=op_count,
                 payload_bytes=payload_bytes,
-                subscribers=len(clients),
+                subscribers=len(client_entries),
             )
         if profiling_enabled:
             profiling.recorder().observe("ws_delta_payload_bytes", payload_bytes)
             profiling.recorder().observe("ws_delta_ops_count", op_count)
-            profiling.recorder().observe("ws_clients_per_broadcast", len(clients))
+            profiling.recorder().observe("ws_clients_per_broadcast", len(client_entries))
+        msg_by_client_id: dict[str, str] = {}
+        for client_id, focus in client_focus_by_id.items():
+            patched_ops = self._ops_with_client_focus_overlay(ops, focus)
+            msg_by_client_id[client_id] = await hot_json_dumps_async({
+                "type": "delta", "seq": self._seq,
+                "ops": patched_ops,
+            })
         # Send to every client concurrently so a slow/stuck client
         # doesn't stall delivery to the others (the lock above already
         # guarantees ordering — only one broadcast is in flight at a time).
         with profiling.timer("ws_broadcast_ms"):
             results = await asyncio.gather(
-                *(ws.send_str(msg) for ws in clients),
+                *(
+                    ws.send_str(msg_by_client_id.get(client_id, msg))
+                    for ws, client_id in client_entries
+                ),
                 return_exceptions=True,
             )
         # Optional cloud connectors observe the SAME already-coalesced delta
@@ -9622,7 +9675,7 @@ class MatrixState:
         # block local WS delivery.
         cloud_hooks.notify_state_delta_observers(ops, state=self)
         dead: set[web.WebSocketResponse] = {
-            ws for ws, result in zip(clients, results)
+            ws for (ws, _client_id), result in zip(client_entries, results)
             if isinstance(result, BaseException)
         }
         if dead:

@@ -311,6 +311,88 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(state.active_session_id, second.session_id)
 
+    async def test_global_stop_focus_delta_preserves_other_client_focus(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        first = state.add_terminal(
+            name="Terminal 1",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        second = state.add_terminal(
+            name="Terminal 2",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        first.session_id = "session-a"
+        second.session_id = "session-b"
+        first.status = "running"
+        second.status = "running"
+        state._delta_ops = []
+        state._seq = 0
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        class FakeWs:
+            def __init__(self):
+                self.sent = []
+
+            async def send_str(self, payload):
+                self.sent.append(json.loads(payload))
+
+        ws_global = FakeWs()
+        ws_client_b = FakeWs()
+        async with state._ws_clients_lock:
+            state._register_ws_client_locked(ws_global, "")
+            state._register_ws_client_locked(ws_client_b, "client-b")
+
+        state.active_session_id = first.session_id
+        state.current_window_id = "standalone"
+        state.set_client_focus_state(
+            "client-b",
+            active_session_id=second.session_id,
+            current_window_id="standalone",
+        )
+
+        await adapter._mark_session_stopped(first, first.session_id, announce=False)
+
+        self.assertEqual(
+            state.client_focus_state("client-b")["active_session_id"],
+            second.session_id,
+        )
+
+        global_focus_ops = [
+            op
+            for msg in ws_global.sent
+            if msg.get("type") == "delta"
+            for op in msg.get("ops", [])
+            if op.get("op") == "focus_update"
+        ]
+        client_b_focus_ops = [
+            op
+            for msg in ws_client_b.sent
+            if msg.get("type") == "delta"
+            for op in msg.get("ops", [])
+            if op.get("op") == "focus_update"
+        ]
+
+        self.assertEqual(
+            global_focus_ops[-1],
+            {
+                "op": "focus_update",
+                "active_session_id": None,
+                "current_window_id": "standalone",
+            },
+        )
+        self.assertEqual(
+            client_b_focus_ops[-1],
+            {
+                "op": "focus_update",
+                "active_session_id": second.session_id,
+                "current_window_id": "standalone",
+                "client_scoped": True,
+            },
+        )
+
     async def test_write_input_accepts_raw_terminal_bytes(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")
