@@ -95,6 +95,7 @@ function createGridHarness() {
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
   return { context, sandbox, main };
 }
 
@@ -168,6 +169,7 @@ function createTerminalRowRerenderHarness() {
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
   return { context, sandbox, main };
 }
 
@@ -257,6 +259,7 @@ function createPendingHireBannerRerenderHarness() {
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
   return { context, sandbox, main, banner };
 }
 
@@ -323,6 +326,368 @@ test('pending-hire banner extraction keeps output stable and dismiss state acros
   context.render();
   assert.equal(banner.innerHTML, afterDismissHtml,
     'dismissed pending-hire state should survive later grid rerenders');
+});
+
+function makeSectionsRerenderHarness() {
+  let currentControl = null;
+  let controlGeneration = 0;
+  const looseStrip = makeMemoElement('DIV');
+  looseStrip.className = 'loose-workers-strip';
+  looseStrip.scrollTop = 0;
+  looseStrip.scrollLeft = 0;
+  function makeFocusedControl() {
+    controlGeneration += 1;
+    return {
+      dataset: { focusKey: 'agent-digest-toggle:worker-user' },
+      value: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+      scrollTop: 0,
+      scrollLeft: 0,
+      focusCalls: [],
+      focus(opts) { this.focusCalls.push(opts || null); },
+      generation: controlGeneration,
+    };
+  }
+  function maybeHydrateControl(html) {
+    const text = String(html || '');
+    if (text.indexOf('data-focus-key="agent-digest-toggle:worker-user"') >= 0) {
+      currentControl = makeFocusedControl();
+    }
+  }
+  function shellPart(id) {
+    return {
+      id,
+      style: {},
+      classList: makeTinyClassList(),
+      children: [],
+      scrollTop: 0,
+      scrollLeft: 0,
+      scrollHeight: 360,
+      offsetHeight: 160,
+      clientHeight: 160,
+      innerHTML: '',
+      setAttribute(name, value) { this[name] = String(value); },
+      getAttribute(name) { return this[name]; },
+      getBoundingClientRect() { return { height: id === 'agent-split' ? 760 : 12 }; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    };
+  }
+  const split = shellPart('agent-split');
+  const tabsHost = shellPart('agent-group-tabs-host');
+  const grid = shellPart('agent-grid-pane');
+  let gridSetCount = 0;
+  Object.defineProperty(grid, 'innerHTML', {
+    get() { return this._html || ''; },
+    set(value) {
+      this._html = String(value || '');
+      gridSetCount += 1;
+      this.scrollTop = 0;
+      this.scrollLeft = 0;
+      looseStrip.scrollTop = 0;
+      looseStrip.scrollLeft = 0;
+      maybeHydrateControl(this._html);
+    },
+  });
+  grid.querySelector = function(selector) {
+    if (selector === '.loose-workers-strip' && grid.innerHTML.indexOf('loose-workers-strip') >= 0) {
+      return looseStrip;
+    }
+    return null;
+  };
+  const handle = shellPart('agent-focus-resizer');
+  const focus = shellPart('agent-focus-panel');
+  const focusScroll = shellPart('agent-focus-scroll');
+  const main = makeMemoElement('MAIN');
+  main.contains = function(node) {
+    return node === currentControl;
+  };
+  main.querySelector = function(selector) {
+    if (selector === '[data-agent-split]') return split;
+    if (selector === '[data-agent-grid-pane]' || selector === '.agents-grid-pane') return grid;
+    if (selector === '[data-agent-focus-resizer]') return handle;
+    if (selector === '[data-agent-focus-panel]') return focus;
+    if (selector === '[data-agent-focus-scroll]') return focusScroll;
+    if (selector === '[data-agent-group-tabs-host]') return tabsHost;
+    if (selector === '[data-focus-key="agent-digest-toggle\\:worker-user"]'
+        || selector === '[data-focus-key="agent-digest-toggle:worker-user"]') {
+      return currentControl;
+    }
+    if (selector === '.loose-workers-strip') return grid.querySelector(selector);
+    return null;
+  };
+  const originalMainSetter = Object.getOwnPropertyDescriptor(main, 'innerHTML').set;
+  const originalMainGetter = Object.getOwnPropertyDescriptor(main, 'innerHTML').get;
+  Object.defineProperty(main, 'innerHTML', {
+    get() { return originalMainGetter.call(main); },
+    set(value) {
+      originalMainSetter.call(main, value);
+      grid._html = String(value || '');
+      maybeHydrateControl(value);
+    },
+  });
+  const document = {
+    activeElement: null,
+    body: { classList: makeTinyClassList(), style: {} },
+    getElementById(id) {
+      if (id === 'main') return main;
+      if (id === 'agent-group-tabs-host') return tabsHost;
+      if (id === 'app-group-tabs-host') return null;
+      return null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+  main.ownerDocument = document;
+  const sandbox = {
+    console,
+    Date,
+    JSON,
+    Math,
+    CSS: { escape(value) { return String(value).replace(/:/g, '\\:').replace(/"/g, '\\"'); } },
+    location: { host: 'localhost:18932' },
+    window: { innerHeight: 900 },
+    document,
+    state: {
+      runtime: { embedded_terminal: false, profile: 'sections-rerender', port: '18932' },
+      agents: {
+        'arch-a': {
+          id: 'arch-a',
+          name: 'Productmind',
+          slug: 'arch-a',
+          kind: 'architect',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 1,
+        },
+        'eng-arch': {
+          id: 'eng-arch',
+          name: 'Architect Engineer',
+          slug: 'eng-arch',
+          kind: 'engineer',
+          hired_by_architect_id: 'arch-a',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 2,
+        },
+        'worker-arch': {
+          id: 'worker-arch',
+          name: 'Architect Worker',
+          slug: 'worker-arch',
+          kind: 'worker',
+          owner_engineer_id: 'eng-arch',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 3,
+        },
+        'eng-user': {
+          id: 'eng-user',
+          name: 'User Engineer',
+          slug: 'eng-user',
+          kind: 'engineer',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 4,
+        },
+        'worker-user': {
+          id: 'worker-user',
+          name: 'User Worker',
+          slug: 'worker-user',
+          kind: 'worker',
+          owner_engineer_id: 'eng-user',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          current_task_id: 'TASK-1',
+          worktree_branch: 'torque/user/worker-user',
+          created_at: 5,
+        },
+        'loose-worker': {
+          id: 'loose-worker',
+          name: 'Loose Worker',
+          slug: 'loose-worker',
+          kind: 'worker',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 6,
+        },
+        'eng-beta': {
+          id: 'eng-beta',
+          name: 'Beta Engineer',
+          slug: 'eng-beta',
+          kind: 'engineer',
+          group: 'beta',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 7,
+        },
+      },
+      groups: {
+        alpha: ['arch-a', 'eng-arch', 'worker-arch', 'eng-user', 'worker-user', 'loose-worker'],
+        beta: ['eng-beta'],
+      },
+      group_settings: { alpha: { collapsed_default: false }, beta: { collapsed_default: true } },
+      engineer_settings: {},
+      agent_digest_settings: {},
+      children: {},
+      board_tasks: {
+        'TASK-1': { id: 'TASK-1', task: 'Preserve section focus', lane: 'In Progress', action_name: 'feature/implement' },
+      },
+      ui: {},
+      selected_principal_id: '',
+    },
+    selectedAgentId: 'worker-user',
+    selectedTerminalId: null,
+    focusedItemId: 'worker-user',
+    dragInProgress: false,
+    getComputedStyle() {
+      return {
+        paddingTop: '0px',
+        paddingBottom: '0px',
+        marginTop: '0px',
+        marginBottom: '0px',
+      };
+    },
+    requestAnimationFrame(fn) { if (typeof fn === 'function') fn(); return 1; },
+    cancelAnimationFrame() {},
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    renderTerminalWorkspace() {},
+    updateEventsAttentionBadge() {},
+    renderPendingHireBanner() {},
+    renderAgentPanel() {},
+    _currentPanelSurfaces() { return []; },
+    getFilterByWindow() { return false; },
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window = Object.assign(sandbox.window, sandbox);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
+  context.renderAgentDetails = function() { return ''; };
+  return {
+    context,
+    sandbox,
+    main,
+    grid,
+    looseStrip,
+    getCurrentControl() { return currentControl; },
+    getGridSetCount() { return gridSetCount; },
+  };
+}
+
+test('sections extraction preserves section HTML, collapsed groups, scroll, focus, and selection across rerenders', () => {
+  const harness = makeSectionsRerenderHarness();
+  const { context, sandbox, main, grid, looseStrip } = harness;
+  const agents = sandbox.state.groups.alpha.map(id => sandbox.state.agents[id]);
+  const firstSections = JSON.parse(context.JSON.stringify(
+    context._buildHierarchicalAgentSections(agents),
+    function(_key, value) {
+      if (value && value.cell_type === 'agent') return value.id;
+      return value;
+    },
+  ));
+  const firstModel = context._buildStratifiedAgentGridModel(agents);
+  const firstEngineerRowHtml = context._renderEngineerRow(
+    firstModel.userSection.rows[0],
+    function(agent) { return '<span data-id="' + context.esc(agent.id) + '">' + context.esc(agent.name) + '</span>'; },
+  );
+  const firstGridSectionsHtml = context._renderStratifiedAgentGrid(
+    'alpha',
+    firstModel,
+    function(agent) { return '<span data-id="' + context.esc(agent.id) + '">' + context.esc(agent.name) + '</span>'; },
+    {},
+  );
+
+  context.render();
+  assert.match(main._torqueLastGridHtml, /data-agent-section="architect:arch-a"/);
+  assert.match(main._torqueLastGridHtml, /data-agent-strata="engineers"[\s\S]*User Engineer[\s\S]*User Worker/);
+  assert.match(main._torqueLastGridHtml, /data-agent-strata="workers"[\s\S]*Loose Worker/);
+  assert.match(main._torqueLastGridHtml, /class="cell selected focused worker"/,
+    'selected/focused worker marker should be present before rerender');
+  assert.match(main._torqueLastGridHtml, /class="group collapsed" data-group-name="beta"/,
+    'beta starts collapsed from persisted group settings');
+
+  assert.equal(vm.runInContext('collapsedGroups.has(\"alpha\")', context), false);
+  assert.equal(vm.runInContext('collapsedGroups.has(\"beta\")', context), true);
+
+  const focusedControl = harness.getCurrentControl();
+  assert.ok(focusedControl, 'first section render should expose the selected worker control');
+  focusedControl.value = 'operator draft';
+  focusedControl.selectionStart = 3;
+  focusedControl.selectionEnd = 11;
+  focusedControl.scrollTop = 17;
+  focusedControl.scrollLeft = 4;
+  sandbox.document.activeElement = focusedControl;
+  grid.scrollTop = 88;
+  grid.scrollLeft = 6;
+  looseStrip.scrollTop = 22;
+  looseStrip.scrollLeft = 9;
+
+  const gridSetsBeforeDelta = harness.getGridSetCount();
+  sandbox.state.agents['worker-user'].activity_detail = 'Reporting progress';
+  context.render();
+  assert.equal(harness.getGridSetCount(), gridSetsBeforeDelta + 1,
+    'WS-style section delta should rebuild the grid pane exactly once');
+  assert.match(main._torqueLastGridHtml, /Reporting progress/);
+  assert.match(main._torqueLastGridHtml, /class="cell selected focused worker"/,
+    'selected/focused worker marker should survive changed section output');
+  assert.match(main._torqueLastGridHtml, /class="group" data-group-name="alpha"/);
+  assert.match(main._torqueLastGridHtml, /class="group collapsed" data-group-name="beta"/);
+  assert.equal(vm.runInContext('collapsedGroups.has(\"alpha\")', context), false);
+  assert.equal(vm.runInContext('collapsedGroups.has(\"beta\")', context), true);
+  assert.equal(grid.scrollTop, 88);
+  assert.equal(grid.scrollLeft, 6);
+  assert.equal(looseStrip.scrollTop, 22);
+  assert.equal(looseStrip.scrollLeft, 9);
+
+  const restoredControl = harness.getCurrentControl();
+  assert.notEqual(restoredControl, focusedControl,
+    'changed section html should replace the focused control in the harness');
+  assert.equal(restoredControl.value, 'operator draft');
+  assert.equal(restoredControl.selectionStart, 3);
+  assert.equal(restoredControl.selectionEnd, 11);
+  assert.equal(restoredControl.scrollTop, 17);
+  assert.equal(restoredControl.scrollLeft, 4);
+  assert.deepEqual(JSON.parse(JSON.stringify(restoredControl.focusCalls)), [
+    { preventScroll: true },
+  ]);
+
+  sandbox.state.agents['worker-user'].activity_detail = '';
+  const secondSections = JSON.parse(context.JSON.stringify(
+    context._buildHierarchicalAgentSections(agents),
+    function(_key, value) {
+      if (value && value.cell_type === 'agent') return value.id;
+      return value;
+    },
+  ));
+  const secondModel = context._buildStratifiedAgentGridModel(agents);
+  const secondEngineerRowHtml = context._renderEngineerRow(
+    secondModel.userSection.rows[0],
+    function(agent) { return '<span data-id="' + context.esc(agent.id) + '">' + context.esc(agent.name) + '</span>'; },
+  );
+  const secondGridSectionsHtml = context._renderStratifiedAgentGrid(
+    'alpha',
+    secondModel,
+    function(agent) { return '<span data-id="' + context.esc(agent.id) + '">' + context.esc(agent.name) + '</span>'; },
+    {},
+  );
+  assert.deepEqual(secondSections, firstSections,
+    '_buildHierarchicalAgentSections output remains stable for unchanged section inputs');
+  assert.equal(secondEngineerRowHtml, firstEngineerRowHtml,
+    '_renderEngineerRow output remains stable for unchanged row inputs');
+  assert.equal(secondGridSectionsHtml, firstGridSectionsHtml,
+    '_renderStratifiedAgentGrid section output remains stable for unchanged model inputs');
 });
 
 test('TORQUE:264 — render() exposes _torqueLastHtml on the main element after first paint', () => {
@@ -506,6 +871,7 @@ function makeAgentCardFocusHarness() {
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
   context.renderAgentDetails = function() { return ''; };
   return {
     context,

@@ -112,6 +112,7 @@ function buildSandbox(activeElement, lookup) {
   loadScript(sandbox, 'static/js/grid/group-tabs.js');
   loadScript(sandbox, 'static/js/grid/agent-card.js');
   loadScript(sandbox, 'static/js/grid/terminal-row.js');
+  loadScript(sandbox, 'static/js/grid/sections.js');
   return sandbox;
 }
 
@@ -203,6 +204,7 @@ function buildFocusSplitSandbox(options) {
   loadScript(sandbox, 'static/js/grid/group-tabs.js');
   loadScript(sandbox, 'static/js/grid/agent-card.js');
   loadScript(sandbox, 'static/js/grid/terminal-row.js');
+  loadScript(sandbox, 'static/js/grid/sections.js');
   return {
     sandbox,
     store,
