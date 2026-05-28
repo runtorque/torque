@@ -4417,6 +4417,49 @@ class MatrixState:
         self._db_save_auto_dispatch_queue(group)
         return entry, True
 
+    def auto_dispatch_queue_update_dispatch_intent(
+            self, group: str, task_id: str, *,
+            agent_group: Optional[str] = None,
+            target_agent_id: Optional[str] = None,
+            engineer_owner_id: Optional[str] = None,
+            provider: Optional[str] = None):
+        """Update queued dispatch metadata in place without reordering.
+
+        Batch dispatch can revisit tasks that were already persisted in the
+        auto-dispatch queue (for example after an engineer arms actions before
+        issuing the warm-cluster batch).  Preserve their queue position but
+        refresh the grouping/ownership hints so the pump promotes them with
+        the engineer's latest dispatch intent instead of treating them as
+        independent stale entries.
+        """
+        found_group, _idx, entry = self.auto_dispatch_queue_find(task_id)
+        if not entry or found_group != group:
+            return None, False
+
+        changed = False
+
+        def _set_attr(name: str, value: Optional[str], *,
+                      only_non_empty: bool = False) -> None:
+            nonlocal changed
+            if value is None:
+                return
+            cleaned = str(value or "").strip()
+            if only_non_empty and not cleaned:
+                return
+            if getattr(entry, name) == cleaned:
+                return
+            setattr(entry, name, cleaned)
+            changed = True
+
+        _set_attr("agent_group", agent_group)
+        _set_attr("target_agent_id", target_agent_id)
+        _set_attr("engineer_owner_id", engineer_owner_id, only_non_empty=True)
+        _set_attr("provider", provider, only_non_empty=True)
+
+        if changed:
+            self._db_save_auto_dispatch_queue(group)
+        return entry, changed
+
     def auto_dispatch_queue_add(self, group: str, task_id: str, *,
                                 agent_group: str = "",
                                 max_concurrent: int = 1,
