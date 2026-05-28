@@ -117,6 +117,7 @@ function createHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   vm.runInContext(
     'renderAgentCell = function(a) {'
     + ' var kind = String(a.kind || "");'

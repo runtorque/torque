@@ -98,6 +98,7 @@ function createGridHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   return { context, sandbox, main };
 }
 
@@ -174,6 +175,7 @@ function createTerminalRowRerenderHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   return { context, sandbox, main };
 }
 
@@ -266,6 +268,7 @@ function createPendingHireBannerRerenderHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   return { context, sandbox, main, banner };
 }
 
@@ -582,6 +585,7 @@ function makeSectionsRerenderHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   context.renderAgentDetails = function() { return ''; };
   return {
     context,
@@ -597,6 +601,10 @@ function makeSectionsRerenderHarness() {
 test('sections extraction preserves section HTML, collapsed groups, scroll, focus, and selection across rerenders', () => {
   const harness = makeSectionsRerenderHarness();
   const { context, sandbox, main, grid, looseStrip } = harness;
+  assert.equal(typeof context._renderMainGrid, 'function',
+    'grid/main.js must expose the main-grid orchestrator as a runtime global');
+  assert.equal(typeof context._renderAgentGridAndFocus, 'function',
+    'grid/main.js must expose the split shell renderer as a runtime global');
   const agents = sandbox.state.groups.alpha.map(id => sandbox.state.agents[id]);
   const firstSections = JSON.parse(context.JSON.stringify(
     context._buildHierarchicalAgentSections(agents),
@@ -618,6 +626,28 @@ test('sections extraction preserves section HTML, collapsed groups, scroll, focu
   );
 
   context.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(context.window._navAgents)), [
+    'arch-a',
+    'eng-arch',
+    'worker-arch',
+    'eng-user',
+    'worker-user',
+    'loose-worker',
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.window._navGroupOrder)), ['alpha', 'beta']);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.window._navByGroup.alpha)), [
+    'arch-a',
+    'eng-arch',
+    'worker-arch',
+    'eng-user',
+    'worker-user',
+    'loose-worker',
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.window._navByGroup.beta)), []);
+  assert.equal(context.window._navGridRows.length, 3);
+  assert.equal(context.window._navGridItemMeta['worker-user'].rowKey, 'user:engineer:eng-user');
+  assert.equal(context.window._navGridItemMeta['worker-user'].colIndex, 1);
+  assert.ok(context.window._navFocusableItems.includes('worker-user'));
   assert.match(main._torqueLastGridHtml, /data-agent-section="architect:arch-a"/);
   assert.match(main._torqueLastGridHtml, /data-agent-strata="engineers"[\s\S]*User Engineer[\s\S]*User Worker/);
   assert.match(main._torqueLastGridHtml, /data-agent-strata="workers"[\s\S]*Loose Worker/);
@@ -641,6 +671,20 @@ test('sections extraction preserves section HTML, collapsed groups, scroll, focu
   grid.scrollLeft = 6;
   looseStrip.scrollTop = 22;
   looseStrip.scrollLeft = 9;
+
+  const gridSetsBeforeStableRender = harness.getGridSetCount();
+  const stableAggregateHtml = main._torqueLastHtml;
+  context.render();
+  assert.equal(harness.getGridSetCount(), gridSetsBeforeStableRender,
+    'unchanged main-grid rerender must not rewrite the grid pane');
+  assert.equal(main._torqueLastHtml, stableAggregateHtml,
+    '_renderAgentGridAndFocus aggregate cache should stay stable across unchanged rerenders');
+  assert.equal(harness.getCurrentControl(), focusedControl,
+    'unchanged main-grid rerender should preserve the focused control node');
+  assert.equal(grid.scrollTop, 88);
+  assert.equal(grid.scrollLeft, 6);
+  assert.equal(looseStrip.scrollTop, 22);
+  assert.equal(looseStrip.scrollLeft, 9);
 
   const gridSetsBeforeDelta = harness.getGridSetCount();
   sandbox.state.agents['worker-user'].activity_detail = 'Reporting progress';
@@ -882,6 +926,7 @@ function makeAgentCardFocusHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   context.renderAgentDetails = function() { return ''; };
   return {
     context,
@@ -1252,17 +1297,19 @@ test('TORQUE:264 — agent_panel.js gates content/headerRight innerHTML on _torq
     'renderAgentPanel must memoize el.innerHTML to preserve DOM identity under firehose');
 });
 
-test('TORQUE:264 — render.js gates main.innerHTML on _torqueLastHtml', () => {
+test('TORQUE:264 — grid/main.js gates main grid writes on byte-equality caches', () => {
   const source = fs.readFileSync(
-    path.join(repoRoot, 'static/js/render.js'),
+    path.join(repoRoot, 'static/js/grid/main.js'),
     'utf8',
   );
-  assert.match(source, /main\._torqueLastHtml\s*!==\s*html/,
+  assert.match(source, /main\._torqueLastGridHtml\s*!==\s*gridHtml/,
     'main grid innerHTML must be byte-equality memoized — destroying every agent card on every'
     + ' delta tick produces the TORQUE:264 tooltip flicker (style.css :hover::after pseudo-element'
     + ' on .agent-card-tooltip)');
-  assert.match(source, /main\._torqueLastHtml\s*=\s*html/,
-    'main grid cache must be updated after each successful innerHTML write');
+  assert.match(source, /main\._torqueLastGridHtml\s*=\s*gridHtml/,
+    'main grid cache must be updated after each successful grid write');
+  assert.match(source, /main\._torqueLastHtml\s*=/,
+    'aggregate split-shell cache must still be updated after grid/main writes');
 });
 
 test('TORQUE:264 — ws.js exposes _userHovering + _userInteracting() gate', () => {
