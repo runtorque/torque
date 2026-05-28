@@ -114,6 +114,7 @@ function buildSandbox(activeElement, lookup) {
   loadScript(sandbox, 'static/js/grid/terminal-row.js');
   loadScript(sandbox, 'static/js/grid/sections.js');
   loadScript(sandbox, 'static/js/agent-detail.js');
+  loadScript(sandbox, 'static/js/agent-focus.js');
   return sandbox;
 }
 
@@ -164,12 +165,15 @@ function buildFocusSplitSandbox(options) {
   const document = {
     activeElement: null,
     body,
+    listeners: {},
     getElementById(id) {
       return Object.prototype.hasOwnProperty.call(byId, id) ? byId[id] : null;
     },
     querySelector() { return null; },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, handler) { this.listeners[type] = handler; },
+    removeEventListener(type, handler) {
+      if (this.listeners[type] === handler) delete this.listeners[type];
+    },
   };
   main.ownerDocument = document;
   const sandbox = {
@@ -197,6 +201,10 @@ function buildFocusSplitSandbox(options) {
     state: {
       runtime: { profile: 'focus-test', port: '18932' },
     },
+    sendCalls: [],
+  };
+  sandbox.send = function(message) {
+    sandbox.sendCalls.push(message);
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -207,6 +215,7 @@ function buildFocusSplitSandbox(options) {
   loadScript(sandbox, 'static/js/grid/terminal-row.js');
   loadScript(sandbox, 'static/js/grid/sections.js');
   loadScript(sandbox, 'static/js/agent-detail.js');
+  loadScript(sandbox, 'static/js/agent-focus.js');
   return {
     sandbox,
     store,
@@ -364,4 +373,60 @@ test('focus panel auto-size clamps tall content to the viewport cap in auto mode
   assert.equal(parts.focus.style.height, '405px');
   assert.equal(parts.focus.style.flexBasis, '405px');
   assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), false);
+});
+
+test('focus panel resize fraction and collapsed state survive split rerender after extraction', () => {
+  const { sandbox, parts } = buildFocusSplitSandbox({
+    focusPanelHeight: 240,
+    focusContentHeight: 260,
+    splitHeight: 800,
+    handleHeight: 10,
+  });
+  let prevented = false;
+
+  sandbox._agentFocusResizeStart({
+    button: 0,
+    clientY: 300,
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(typeof sandbox.document.listeners.mousemove, 'function');
+  assert.equal(typeof sandbox.document.listeners.mouseup, 'function');
+
+  sandbox.document.listeners.mousemove({ clientY: 145 });
+
+  assert.equal(parts.body.classList.contains('agent-focus-resizing'), true);
+  assert.equal(parts.focus.style.height, '395px');
+  assert.equal(parts.focus.style.flexBasis, '395px');
+  assert.equal(sandbox.sendCalls.length, 0, 'dragging must not persist before mouseup');
+
+  sandbox.document.listeners.mouseup({ clientY: 145 });
+
+  assert.equal(parts.body.classList.contains('agent-focus-resizing'), false);
+  assert.equal(sandbox._agentFocusMode(), 'manual');
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'ui_set_engineer_panel_split');
+  assert.equal(sandbox.sendCalls[0].fraction, 0.5);
+  assert.equal(sandbox.state.engineer_panel_split_fraction, 0.5);
+
+  parts.focus.style.height = '';
+  parts.focus.style.flexBasis = '';
+  sandbox._agentFocusApplyPersistedSplit();
+
+  assert.equal(sandbox._agentFocusMode(), 'manual');
+  assert.equal(parts.focus.style.height, '400px');
+  assert.equal(parts.focus.style.flexBasis, '400px');
+
+  sandbox._agentFocusSetCollapsed(true);
+  assert.equal(sandbox._agentFocusIsCollapsed(), true);
+  parts.split.classList.remove('agent-split--focus-collapsed');
+  parts.handle.attributes = {};
+
+  sandbox._agentFocusApplyPersistedSplit();
+
+  assert.equal(sandbox._agentFocusIsCollapsed(), true);
+  assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), true);
+  assert.equal(parts.handle.getAttribute('role'), 'button');
+  assert.equal(parts.handle.getAttribute('aria-label'), 'Expand focus panel');
+  assert.equal(parts.handle.getAttribute('aria-expanded'), 'false');
 });

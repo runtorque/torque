@@ -82,6 +82,7 @@ function createArchitectHarness() {
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
+  loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/agent_panel.js');
   return { context, sandbox, panel, content, pendingHireBanner };
 }
@@ -95,6 +96,7 @@ function createBannerHarness() {
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
+  loadScript(context, 'static/js/agent-focus.js');
   return { context, sandbox, pendingHireBanner };
 }
 
