@@ -559,6 +559,7 @@ function createEmbeddedTerminalHarness(overrides = {}) {
     loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
     runInContext(context, `
       var _cachedAgentTemplates = [];
       var focusedItemId = null;
@@ -734,6 +735,7 @@ function createBoardHarness(options = {}) {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
   const boot = [
     `_renderBoardSelectionBar = function() { return ''; };`,
@@ -759,6 +761,7 @@ function createSelectionHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/commands.js');
   runInContext(context, `
     render = function() { renderCalls.main++; };
@@ -784,6 +787,7 @@ function createEventsHarness(options = {}) {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/events.js');
   if (options.stubRenderers !== false) {
     runInContext(context, `
@@ -805,6 +809,7 @@ function createContextHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/context.js');
   return { context, document };
 }
@@ -822,6 +827,7 @@ function createEngineerHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
   return { context, document };
 }
@@ -844,6 +850,7 @@ function createEngineerWsHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
   runInContext(context, `
     send = function(message) { sendCalls.push(message); };
@@ -935,6 +942,7 @@ function createChatHarness(overrides = {}) {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
   loadScript(context, 'static/js/markdown.js');
   loadScript(context, 'static/js/chat.js');
@@ -976,6 +984,7 @@ function createAgentHistoryHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
   loadScript(context, 'static/js/templates.js');
   loadScript(context, 'static/js/history.js');
@@ -1018,6 +1027,7 @@ function createWsRenderHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/panel_manager.js');
   runInContext(context, `
     render = function() { renderCalls.main++; };
@@ -1145,6 +1155,7 @@ function createStandaloneDeltaBatchHarness(visibleSurfaces = ['board']) {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     _standalonePanelsEnabled = function() { return true; };
     _visiblePanelSurfaces = function() { return __visibleSurfaces.slice(); };
@@ -1300,6 +1311,7 @@ function createStandaloneWsSyncHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/ws.js');
   runInContext(context, `
     render = function() { renderCalls.main++; };
@@ -1341,6 +1353,7 @@ function createStandaloneRenderHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     var PROCESS_MAP = {};
     var focusedItemId = '';
@@ -1359,6 +1372,7 @@ function createMainRenderHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     var _cachedAgentTemplates = [];
     var focusedItemId = null;
@@ -1384,6 +1398,7 @@ function createMainGridDragHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/commands.js');
   runInContext(context, `
     var _cachedAgentTemplates = [];
@@ -1532,6 +1547,7 @@ function createMainNavigationHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     var _cachedAgentTemplates = [];
     var focusedItemId = null;
@@ -4892,6 +4908,7 @@ test('renderBoardCard shows branch boundary review notes', () => {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
 
   context.state.board_tasks = {
@@ -4981,6 +4998,7 @@ test('renderAgentDetails shows branch boundary status and queued follow-ups', ()
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
 
   context.state.agents = {
     'agent-1': {
@@ -5048,6 +5066,7 @@ test('renderAgentDetails shows boundary PR state without losing expanded draft s
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `render = function() {};`);
 
   context.state.agents = {
@@ -5123,6 +5142,7 @@ test('renderAgentDetails expands task details and preserves the expanded state a
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `render = function() {};`);
 
   context.state.agents = {
@@ -5173,6 +5193,7 @@ test('agent detail inline description editing preserves draft state and save/can
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `render = function() {};`);
 
   context.state.agents = {
@@ -5237,6 +5258,7 @@ test('renderAgentDetails expands one MCP message at a time and keeps the selecti
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `render = function() {};`);
 
   context.state.agents = {
@@ -5278,6 +5300,7 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
 
   context.state.agents = {
     'agent-1': {
@@ -5357,6 +5380,7 @@ test('renderAgentDetails shows architect pending hires but omits decisions from 
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
 
   context.state.agents = {
     'arch-1': {
@@ -5451,6 +5475,7 @@ test('architect pending-hire actions send approve and reject commands', () => {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
 
   runInContext(context, `approvePendingHire('hire-1')`);
   runInContext(context, `rejectPendingHire('hire-2')`);
@@ -7896,6 +7921,7 @@ test('board assignee quick editor offers only live agents while preserving curre
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
 
   context.state.agents = {
@@ -9318,6 +9344,7 @@ test('renderBoard restores lane and card scroll before deferred layout work runs
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
   runInContext(context, `
     _renderBoardSelectionBar = function() { return ''; };
@@ -9379,6 +9406,7 @@ test('renderBoard keeps the inline add-task composer expanded across rerenders',
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
   runInContext(context, `
     _renderBoardSelectionBar = function() { return ''; };
@@ -12049,6 +12077,7 @@ test('embedded terminal direct-message resize and unrelated WS delta preserve sc
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/terminal.js');
   const dom = attachTerminalWorkspaceDom(document);
 
@@ -15479,6 +15508,7 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/terminal.js');
   const dom = attachTerminalWorkspaceDom(document);
 
@@ -18759,6 +18789,7 @@ test('renderAgentCell keeps done flourish timing stable across rerenders', () =>
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     renderCalls = 0;
     render = function() { renderCalls++; };
@@ -20880,6 +20911,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   const futureIso = '2099-01-04T12:30:00.000Z';
 
   document.register('task-modal-title');
@@ -22550,6 +22582,7 @@ test('focus surface gates ignore non-focused traffic and preserve focus-panel sc
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   const main = document.getElementById('main');
   sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
   sandbox.state.groups = { alpha: ['agent-1', 'agent-2'] };
@@ -23347,6 +23380,7 @@ test('agent grid group tabs render standalone controls and switch active group',
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/commands.js');
   runInContext(context, `
     var focusedItemId = null;
@@ -23460,6 +23494,7 @@ test('standalone group tabs render above the agent grid scroll pane', () => {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     var selectedAgentId = null;
     var selectedTerminalId = null;
@@ -23501,6 +23536,7 @@ test('legacy header group switcher clears removed dropdown chrome', () => {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     var focusedItemId = null;
     var selectedTerminalId = null;
@@ -23551,6 +23587,7 @@ test('active group changes reload visible group-scoped Actions and Roles panels'
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     var focusedItemId = null;
     var selectedTerminalId = null;
@@ -23585,6 +23622,7 @@ test('Actions and Roles panels hide stale lists while loading the new active gro
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/modals/task-modal.js');
   loadScript(context, 'static/js/actions.js');
   loadScript(context, 'static/js/templates.js');
@@ -23742,6 +23780,7 @@ test('grid-level New worker affordance survives delta rerenders and uses standal
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadModalScripts(context);
   runInContext(context, `
     send = function(message) { sendCalls.push(message); };
@@ -25219,6 +25258,7 @@ test('add engineer modal draft survives agent grid rerender during websocket del
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadModalScripts(context);
   runInContext(context, `
     renderTerminalWorkspace = function() {};
@@ -25293,6 +25333,7 @@ test('task delta updates visible worker cycle state while preserving main-grid f
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     _cachedAgentTemplates = [];
     selectedTerminalId = null;
@@ -25427,6 +25468,7 @@ test('main hierarchy drops stale focused creation controls across websocket delt
     loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
     runInContext(context, `
       _cachedAgentTemplates = [];
       selectedTerminalId = null;
@@ -25517,6 +25559,7 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     _cachedAgentTemplates = [];
     selectedTerminalId = null;
@@ -26099,6 +26142,7 @@ test('main grid focus falls forward across websocket delta removals', () => {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   runInContext(context, `
     _cachedAgentTemplates = [];
     selectedTerminalId = null;
@@ -27203,6 +27247,7 @@ test('selected_agent_id deltas rescope detached Events panel to selected agent g
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/modals/task-modal.js');
   loadScript(context, 'static/js/events.js');
   runInContext(context, `
@@ -28089,6 +28134,7 @@ test('board navigation does not collapse an already visible standalone board', (
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadBoardScripts(context);
 
   runInContext(context, `

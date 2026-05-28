@@ -70,6 +70,7 @@ function createHarness() {
   loadScript(context, 'static/js/grid/sections.js');
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
   loadScript(context, 'static/js/agent_panel.js');
   return { context, panel, sandbox };
 }

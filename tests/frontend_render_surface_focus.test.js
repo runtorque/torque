@@ -115,6 +115,7 @@ function buildSandbox(activeElement, lookup) {
   loadScript(sandbox, 'static/js/grid/sections.js');
   loadScript(sandbox, 'static/js/agent-detail.js');
   loadScript(sandbox, 'static/js/agent-focus.js');
+  loadScript(sandbox, 'static/js/grid/main.js');
   return sandbox;
 }
 
@@ -216,6 +217,7 @@ function buildFocusSplitSandbox(options) {
   loadScript(sandbox, 'static/js/grid/sections.js');
   loadScript(sandbox, 'static/js/agent-detail.js');
   loadScript(sandbox, 'static/js/agent-focus.js');
+  loadScript(sandbox, 'static/js/grid/main.js');
   return {
     sandbox,
     store,

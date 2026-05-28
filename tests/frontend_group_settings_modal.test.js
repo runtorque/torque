@@ -1013,6 +1013,7 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   const commands = fs.readFileSync(path.join(repoRoot, 'static/js/commands.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
   const groupTabs = fs.readFileSync(path.join(repoRoot, 'static/js/grid/group-tabs.js'), 'utf8');
+  const gridMain = fs.readFileSync(path.join(repoRoot, 'static/js/grid/main.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
   const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
 
@@ -1047,7 +1048,7 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.doesNotMatch(commands, /function\s+onGroupContextMenu\b/);
   assert.doesNotMatch(render, /oncontextmenu="onGroupContextMenu/);
   assert.doesNotMatch(render, /title="Delete group"/);
-  assert.match(render, /title="Group settings"[^`]*\\u2699/);
+  assert.match(gridMain, /title="Group settings"[^`]*\\u2699/);
   assert.match(groupTabs, /openActiveGroupSettings\(event\)[\s\S]*&#9881;/);
   assert.doesNotMatch(main, /openActiveGroupMenu|&#8942;|Delete group/);
 });
