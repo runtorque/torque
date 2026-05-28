@@ -577,7 +577,7 @@ function createAgentDetailContext() {
     requestAnimationFrame = function(fn) {};
   `);
   const source = fs.readFileSync(
-    path.join(repoRoot, 'static/js/render.js'), 'utf8');
+    path.join(repoRoot, 'static/js/agent-detail.js'), 'utf8');
   const fns = [
     'function _toggleAgentDetailTask',
     'function agentDetailEditDescription',

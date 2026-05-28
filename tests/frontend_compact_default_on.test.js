@@ -201,14 +201,15 @@ function createPreservedMergeHarness() {
       return null;
     }
   `);
-  const source = loadFile('static/js/render.js');
+  const renderSource = loadFile('static/js/render.js');
+  const agentDetailSource = loadFile('static/js/agent-detail.js');
   const funcs = [
-    'function _taskBoundaryMeta',
-    'function _taskBoundaryBranchKey',
-    'function _taskBoundarySortValue',
-    'function _preservedMergeDiffForAgent',
+    [renderSource, 'function _taskBoundaryMeta'],
+    [renderSource, 'function _taskBoundaryBranchKey'],
+    [renderSource, 'function _taskBoundarySortValue'],
+    [agentDetailSource, 'function _preservedMergeDiffForAgent'],
   ];
-  for (const sig of funcs) {
+  for (const [source, sig] of funcs) {
     const re = new RegExp(sig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       + '\\([\\s\\S]*?\\n\\}', 'm');
     const m = source.match(re);

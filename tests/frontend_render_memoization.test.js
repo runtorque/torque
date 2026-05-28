@@ -96,6 +96,7 @@ function createGridHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   return { context, sandbox, main };
 }
 
@@ -170,6 +171,7 @@ function createTerminalRowRerenderHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   return { context, sandbox, main };
 }
 
@@ -260,6 +262,7 @@ function createPendingHireBannerRerenderHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   return { context, sandbox, main, banner };
 }
 
@@ -574,6 +577,7 @@ function makeSectionsRerenderHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   context.renderAgentDetails = function() { return ''; };
   return {
     context,
@@ -872,6 +876,7 @@ function makeAgentCardFocusHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   context.renderAgentDetails = function() { return ''; };
   return {
     context,

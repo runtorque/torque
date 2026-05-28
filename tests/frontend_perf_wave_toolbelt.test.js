@@ -247,6 +247,7 @@ function createBoardLaneCacheHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/board.js');
   loadScript(context, 'static/js/board/view-state.js');
   loadScript(context, 'static/js/board/card-rendering.js');
@@ -322,6 +323,7 @@ function createSurfaceStateHarness() {
   loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
   return { context, sandbox };
 }
 
