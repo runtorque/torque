@@ -335,9 +335,16 @@ class LocalPtyAdapter:
         if cell:
             await self._mark_session_stopped(cell, session_id, announce=False)
 
-    async def focus_session(self, session_id: str) -> bool:
+    async def focus_session(self, session_id: str, *, client_id: str = "") -> bool:
         if session_id not in self._sessions:
             return False
+        if client_id:
+            await self.state.send_client_focus_update(
+                client_id,
+                active_session_id=session_id,
+                current_window_id="standalone",
+            )
+            return True
         self.state.active_session_id = session_id
         self.state.current_window_id = "standalone"
         self.state.sync_ui_selection_to_session(session_id)
@@ -744,6 +751,10 @@ class LocalPtyAdapter:
                 active_session_id=None,
                 current_window_id="standalone",
             )
+        await self.state.clear_client_focus_for_session(
+            session_id,
+            current_window_id="standalone",
+        )
         await self.state.broadcast()
         if announce and self.on_session_terminated:
             result = self.on_session_terminated(cell)

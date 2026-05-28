@@ -2467,7 +2467,18 @@ function _deactivateEmbeddedTerminalWorkspace() {
 
 function _embeddedTerminalUrl(cell) {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return protocol + '//' + location.host + '/ws/terminal/' + encodeURIComponent(cell.id);
+  var url = protocol + '//' + location.host + '/ws/terminal/' + encodeURIComponent(cell.id);
+  var clientId = '';
+  try {
+    if (typeof _torqueClientId === 'function') clientId = _torqueClientId();
+  } catch (_err) {}
+  if (!clientId) {
+    try {
+      if (typeof TORQUE_CLIENT_ID !== 'undefined') clientId = TORQUE_CLIENT_ID;
+    } catch (_err2) {}
+  }
+  if (!clientId) return url;
+  return url + '?client_id=' + encodeURIComponent(clientId);
 }
 
 function _embeddedTerminalDroppedFiles(dataTransfer) {

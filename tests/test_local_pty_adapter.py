@@ -155,6 +155,244 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             if cell.session_id:
                 await adapter.close_session(cell.session_id)
 
+    async def test_client_scoped_focus_does_not_broadcast_to_other_clients(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        first = state.add_terminal(
+            name="Terminal 1",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        second = state.add_terminal(
+            name="Terminal 2",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        first.session_id = "session-a"
+        second.session_id = "session-b"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[first.session_id] = self.pty_mod._PtySession(
+            session_id=first.session_id,
+            cell_id=first.id,
+            process=None,
+            master_fd=-1,
+        )
+        adapter._sessions[second.session_id] = self.pty_mod._PtySession(
+            session_id=second.session_id,
+            cell_id=second.id,
+            process=None,
+            master_fd=-1,
+        )
+
+        class FakeWs:
+            def __init__(self):
+                self.sent = []
+
+            async def send_str(self, payload):
+                self.sent.append(json.loads(payload))
+
+        ws_a = FakeWs()
+        ws_b = FakeWs()
+        async with state._ws_clients_lock:
+            state._register_ws_client_locked(ws_a, "client-a")
+            state._register_ws_client_locked(ws_b, "client-b")
+
+        state.active_session_id = first.session_id
+        state.current_window_id = "standalone"
+        emitted = []
+        broadcasts = []
+        state._emit = lambda op, **payload: emitted.append((op, payload))
+
+        async def broadcast():
+            broadcasts.append(True)
+
+        state.broadcast = broadcast
+
+        ok = await adapter.focus_session(second.session_id, client_id="client-b")
+
+        self.assertTrue(ok)
+        self.assertEqual(state.active_session_id, first.session_id)
+        self.assertEqual(emitted, [])
+        self.assertEqual(broadcasts, [])
+        self.assertEqual(ws_a.sent, [])
+        self.assertEqual(
+            ws_b.sent,
+            [{
+                "type": "focus_update",
+                "client_scoped": True,
+                "active_session_id": second.session_id,
+                "current_window_id": "standalone",
+            }],
+        )
+        self.assertEqual(
+            state.client_focus_state("client-b"),
+            {
+                "active_session_id": second.session_id,
+                "current_window_id": "standalone",
+            },
+        )
+
+    async def test_stopping_session_clears_only_clients_focused_on_it(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        first = state.add_terminal(
+            name="Terminal 1",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        second = state.add_terminal(
+            name="Terminal 2",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        first.session_id = "session-a"
+        second.session_id = "session-b"
+        first.status = "running"
+        second.status = "running"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        class FakeWs:
+            def __init__(self):
+                self.sent = []
+
+            async def send_str(self, payload):
+                self.sent.append(json.loads(payload))
+
+        ws_a = FakeWs()
+        ws_b = FakeWs()
+        async with state._ws_clients_lock:
+            state._register_ws_client_locked(ws_a, "client-a")
+            state._register_ws_client_locked(ws_b, "client-b")
+        state.set_client_focus_state(
+            "client-a",
+            active_session_id=first.session_id,
+            current_window_id="standalone",
+        )
+        state.set_client_focus_state(
+            "client-b",
+            active_session_id=second.session_id,
+            current_window_id="standalone",
+        )
+        state.active_session_id = second.session_id
+
+        emitted = []
+        state._emit_agent = lambda cell: emitted.append(
+            ("agent", cell.id, cell.status, cell.session_id))
+        state._db_save_agent = lambda cell: None
+        state._emit = lambda op, **payload: emitted.append((op, payload))
+
+        async def broadcast():
+            emitted.append(("broadcast",))
+
+        state.broadcast = broadcast
+
+        await adapter._mark_session_stopped(first, first.session_id, announce=False)
+
+        self.assertEqual(ws_b.sent, [])
+        self.assertEqual(
+            ws_a.sent,
+            [{
+                "type": "focus_update",
+                "client_scoped": True,
+                "active_session_id": None,
+                "current_window_id": "standalone",
+            }],
+        )
+        self.assertEqual(
+            state.client_focus_state("client-a"),
+            {
+                "active_session_id": None,
+                "current_window_id": "standalone",
+            },
+        )
+        self.assertEqual(
+            state.client_focus_state("client-b")["active_session_id"],
+            second.session_id,
+        )
+        self.assertEqual(state.active_session_id, second.session_id)
+
+    async def test_global_stop_focus_delta_preserves_other_client_focus(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        first = state.add_terminal(
+            name="Terminal 1",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        second = state.add_terminal(
+            name="Terminal 2",
+            group="Torque",
+            terminal_backend="pty",
+        )
+        first.session_id = "session-a"
+        second.session_id = "session-b"
+        first.status = "running"
+        second.status = "running"
+        state._delta_ops = []
+        state._seq = 0
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        class FakeWs:
+            def __init__(self):
+                self.sent = []
+
+            async def send_str(self, payload):
+                self.sent.append(json.loads(payload))
+
+        ws_global = FakeWs()
+        ws_client_b = FakeWs()
+        async with state._ws_clients_lock:
+            state._register_ws_client_locked(ws_global, "")
+            state._register_ws_client_locked(ws_client_b, "client-b")
+
+        state.active_session_id = first.session_id
+        state.current_window_id = "standalone"
+        state.set_client_focus_state(
+            "client-b",
+            active_session_id=second.session_id,
+            current_window_id="standalone",
+        )
+
+        await adapter._mark_session_stopped(first, first.session_id, announce=False)
+
+        self.assertEqual(
+            state.client_focus_state("client-b")["active_session_id"],
+            second.session_id,
+        )
+
+        global_focus_ops = [
+            op
+            for msg in ws_global.sent
+            if msg.get("type") == "delta"
+            for op in msg.get("ops", [])
+            if op.get("op") == "focus_update"
+        ]
+        client_b_focus_ops = [
+            op
+            for msg in ws_client_b.sent
+            if msg.get("type") == "delta"
+            for op in msg.get("ops", [])
+            if op.get("op") == "focus_update"
+        ]
+
+        self.assertEqual(
+            global_focus_ops[-1],
+            {
+                "op": "focus_update",
+                "active_session_id": None,
+                "current_window_id": "standalone",
+            },
+        )
+        self.assertEqual(
+            client_b_focus_ops[-1],
+            {
+                "op": "focus_update",
+                "active_session_id": second.session_id,
+                "current_window_id": "standalone",
+                "client_scoped": True,
+            },
+        )
+
     async def test_write_input_accepts_raw_terminal_bytes(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

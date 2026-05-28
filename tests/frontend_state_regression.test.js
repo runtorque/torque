@@ -10790,6 +10790,19 @@ test('embedded terminal tabs render select and close controls for every cell', (
   assert.match(html, /<span class="terminal-tab-kind">term<\/span>/);
 });
 
+test('embedded terminal websocket URL carries the page client id', () => {
+  const { context } = createEmbeddedTerminalHarness({
+    _torqueClientId() { return 'client-test-123'; },
+  });
+
+  const url = runInContext(context, `_embeddedTerminalUrl({ id: 'agent/one' });`);
+
+  assert.equal(
+    url,
+    'ws://localhost:9000/ws/terminal/agent%2Fone?client_id=client-test-123',
+  );
+});
+
 test('embedded terminal tab bar stays visible with one session', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
@@ -16239,6 +16252,103 @@ test('new agent upserts without a focus_update preserve the active selection', (
   assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
   assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-2');
   assert.equal(jsonValue(context, 'focusedItemId'), 'agent-2');
+});
+
+test('client-scoped focus_update direct messages update local selection without delta seq', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Alpha',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-1',
+        status: 'running',
+      },
+      'agent-2': {
+        id: 'agent-2',
+        name: 'Beta',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-2',
+        status: 'running',
+      },
+    };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.active_session_id = 'sess-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _expectedSeq = 17;
+  `);
+
+  context._handleClientFocusUpdate({
+    type: 'focus_update',
+    client_scoped: true,
+    active_session_id: 'sess-2',
+    current_window_id: 'standalone',
+  });
+
+  assert.equal(jsonValue(context, 'state.active_session_id'), 'sess-2');
+  assert.equal(jsonValue(context, 'state.current_window_id'), 'standalone');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-2');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-2');
+  assert.equal(jsonValue(context, '_expectedSeq'), 17);
+});
+
+test('global focus_update delta does not clobber client-scoped focus override', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Alpha',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-1',
+        status: 'running',
+      },
+      'agent-2': {
+        id: 'agent-2',
+        name: 'Beta',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-2',
+        status: 'running',
+      },
+    };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.active_session_id = 'sess-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _expectedSeq = 17;
+  `);
+
+  context._handleClientFocusUpdate({
+    type: 'focus_update',
+    client_scoped: true,
+    active_session_id: 'sess-2',
+    current_window_id: 'standalone',
+  });
+
+  context._handleDelta({
+    seq: 17,
+    ops: [{
+      op: 'focus_update',
+      active_session_id: null,
+      current_window_id: 'standalone',
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'state.active_session_id'), 'sess-2');
+  assert.equal(jsonValue(context, 'state.current_window_id'), 'standalone');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-2');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-2');
+  assert.equal(jsonValue(context, '_expectedSeq'), 18);
 });
 
 test('focus_update on an architect agent focuses the architect card agent id', () => {

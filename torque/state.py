@@ -1983,7 +1983,13 @@ class MatrixState:
         self.current_window_id: Optional[str] = None
         self._children: dict[str, list[str]] = {}  # agent_id → [child terminal ids]
         self._ws_clients: set[web.WebSocketResponse] = set()
+        self._ws_client_ids: dict[web.WebSocketResponse, str] = {}
         self._ws_clients_lock = asyncio.Lock()
+        # Browser focus is intentionally connection/client-scoped. Multiple
+        # Torque browser sessions can view different embedded terminals through
+        # the same daemon; one client's xterm resize/focus event must not yank
+        # another client's active terminal selection.
+        self._client_focus_state: dict[str, dict[str, Optional[str]]] = {}
         # Global settings
         self.global_settings: GlobalSettings = GlobalSettings()
         self.metrics_collector = MetricsCollector(
@@ -2984,6 +2990,174 @@ class MatrixState:
             if persist:
                 self._db_save_ui("active_group", self.active_group)
         return selected_id
+
+    # -- Per-client PTY focus ----------------------------------------------
+
+    def _register_ws_client_locked(
+        self,
+        ws: web.WebSocketResponse,
+        client_id: str = "",
+    ) -> None:
+        """Register a ready UI websocket plus its optional browser client id.
+
+        Caller must hold ``_ws_clients_lock``. Terminal websocket connections
+        are not registered here; this set is only for the main UI state socket.
+        """
+        self._ws_clients.add(ws)
+        client_id = str(client_id or "").strip()
+        if client_id:
+            self._ws_client_ids[ws] = client_id
+        else:
+            self._ws_client_ids.pop(ws, None)
+
+    def _discard_ws_clients_locked(
+        self,
+        clients: set[web.WebSocketResponse],
+    ) -> None:
+        """Discard UI websockets and associated per-client metadata.
+
+        Caller must hold ``_ws_clients_lock``.
+        """
+        if not clients:
+            return
+        self._ws_clients -= clients
+        for ws in clients:
+            self._ws_client_ids.pop(ws, None)
+
+    def client_focus_state(
+        self,
+        client_id: str,
+    ) -> dict[str, Optional[str]] | None:
+        client_id = str(client_id or "").strip()
+        if not client_id:
+            return None
+        focus = self._client_focus_state.get(client_id)
+        return dict(focus) if focus is not None else None
+
+    def set_client_focus_state(
+        self,
+        client_id: str,
+        *,
+        active_session_id: Optional[str],
+        current_window_id: Optional[str] = "standalone",
+    ) -> None:
+        client_id = str(client_id or "").strip()
+        if not client_id:
+            return
+        self._client_focus_state[client_id] = {
+            "active_session_id": active_session_id,
+            "current_window_id": current_window_id or "standalone",
+        }
+
+    def overlay_client_focus_state(self, payload: dict, client_id: str) -> dict:
+        """Overlay a client's ephemeral focus state onto a state snapshot."""
+        focus = self.client_focus_state(client_id)
+        if not focus:
+            return payload
+        payload["active_session_id"] = focus.get("active_session_id")
+        payload["current_window_id"] = focus.get("current_window_id")
+        payload["client_scoped_focus"] = True
+        return payload
+
+    @staticmethod
+    def _ops_include_focus_update(ops: list[dict]) -> bool:
+        return any((op or {}).get("op") == "focus_update" for op in ops)
+
+    @staticmethod
+    def _ops_with_client_focus_overlay(
+        ops: list[dict],
+        focus: dict[str, Optional[str]],
+    ) -> list[dict]:
+        """Return delta ops with focus_update patched to client-local focus.
+
+        Global PTY focus deltas are legacy/backcompat state. Browser clients
+        that have established a per-client focus override must not have that
+        local selection yanked by an unrelated global focus change, especially
+        when the global active session stops.
+        """
+        active_session_id = focus.get("active_session_id")
+        current_window_id = focus.get("current_window_id") or "standalone"
+        patched: list[dict] = []
+        for op in ops:
+            if (op or {}).get("op") != "focus_update":
+                patched.append(op)
+                continue
+            focus_op = dict(op)
+            focus_op["active_session_id"] = active_session_id
+            focus_op["current_window_id"] = current_window_id
+            focus_op["client_scoped"] = True
+            patched.append(focus_op)
+        return patched
+
+    async def send_client_focus_update(
+        self,
+        client_id: str,
+        *,
+        active_session_id: Optional[str],
+        current_window_id: Optional[str] = "standalone",
+    ) -> bool:
+        """Send a client-scoped focus update without advancing global WS seq.
+
+        Focus changes caused by embedded xterm sockets are local UI concerns,
+        so they are delivered as a direct message to UI websockets with the
+        same client id instead of as a global delta broadcast.
+        """
+        client_id = str(client_id or "").strip()
+        if not client_id:
+            return False
+        self.set_client_focus_state(
+            client_id,
+            active_session_id=active_session_id,
+            current_window_id=current_window_id,
+        )
+        payload = {
+            "type": "focus_update",
+            "client_scoped": True,
+            "active_session_id": active_session_id,
+            "current_window_id": current_window_id or "standalone",
+        }
+        msg = await hot_json_dumps_async(payload, offload=False)
+        async with self._ws_clients_lock:
+            clients = [
+                ws for ws in self._ws_clients
+                if self._ws_client_ids.get(ws) == client_id
+            ]
+        if not clients:
+            return True
+        results = await asyncio.gather(
+            *(ws.send_str(msg) for ws in clients),
+            return_exceptions=True,
+        )
+        dead: set[web.WebSocketResponse] = {
+            ws for ws, result in zip(clients, results)
+            if isinstance(result, BaseException)
+        }
+        if dead:
+            async with self._ws_clients_lock:
+                self._discard_ws_clients_locked(dead)
+        return True
+
+    async def clear_client_focus_for_session(
+        self,
+        session_id: str,
+        *,
+        current_window_id: Optional[str] = "standalone",
+    ) -> None:
+        """Clear any client-local focus entries pointing at a stopped session."""
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            return
+        affected = [
+            client_id
+            for client_id, focus in list(self._client_focus_state.items())
+            if str((focus or {}).get("active_session_id") or "") == session_id
+        ]
+        for client_id in affected:
+            await self.send_client_focus_update(
+                client_id,
+                active_session_id=None,
+                current_window_id=current_window_id,
+            )
 
     # -- Delta emission -----------------------------------------------------
 
@@ -9449,7 +9623,19 @@ class MatrixState:
                 self._seq -= 1
                 self._delta_ops = ops + self._delta_ops
                 raise
-            clients = list(self._ws_clients)
+            client_entries = [
+                (ws, self._ws_client_ids.get(ws, ""))
+                for ws in self._ws_clients
+            ]
+            client_focus_by_id: dict[str, dict[str, Optional[str]]] = {}
+            if self._ops_include_focus_update(ops):
+                for _ws, client_id in client_entries:
+                    client_id = str(client_id or "").strip()
+                    if not client_id or client_id in client_focus_by_id:
+                        continue
+                    focus = self.client_focus_state(client_id)
+                    if focus is not None:
+                        client_focus_by_id[client_id] = focus
         meter = self.metrics_collector
         profiling_enabled = profiling.is_enabled()
         payload_bytes = 0
@@ -9459,18 +9645,28 @@ class MatrixState:
             meter.record_ws_delta(
                 op_count=op_count,
                 payload_bytes=payload_bytes,
-                subscribers=len(clients),
+                subscribers=len(client_entries),
             )
         if profiling_enabled:
             profiling.recorder().observe("ws_delta_payload_bytes", payload_bytes)
             profiling.recorder().observe("ws_delta_ops_count", op_count)
-            profiling.recorder().observe("ws_clients_per_broadcast", len(clients))
+            profiling.recorder().observe("ws_clients_per_broadcast", len(client_entries))
+        msg_by_client_id: dict[str, str] = {}
+        for client_id, focus in client_focus_by_id.items():
+            patched_ops = self._ops_with_client_focus_overlay(ops, focus)
+            msg_by_client_id[client_id] = await hot_json_dumps_async({
+                "type": "delta", "seq": self._seq,
+                "ops": patched_ops,
+            })
         # Send to every client concurrently so a slow/stuck client
         # doesn't stall delivery to the others (the lock above already
         # guarantees ordering — only one broadcast is in flight at a time).
         with profiling.timer("ws_broadcast_ms"):
             results = await asyncio.gather(
-                *(ws.send_str(msg) for ws in clients),
+                *(
+                    ws.send_str(msg_by_client_id.get(client_id, msg))
+                    for ws, client_id in client_entries
+                ),
                 return_exceptions=True,
             )
         # Optional cloud connectors observe the SAME already-coalesced delta
@@ -9479,7 +9675,7 @@ class MatrixState:
         # block local WS delivery.
         cloud_hooks.notify_state_delta_observers(ops, state=self)
         dead: set[web.WebSocketResponse] = {
-            ws for ws, result in zip(clients, results)
+            ws for (ws, _client_id), result in zip(client_entries, results)
             if isinstance(result, BaseException)
         }
         if dead:
@@ -9491,7 +9687,7 @@ class MatrixState:
                     error=f"failed clients: {len(dead)}",
                 )
             async with self._ws_clients_lock:
-                self._ws_clients -= dead
+                self._discard_ws_clients_locked(dead)
         if engineer_groups:
             self._schedule_engineer_recompute(engineer_groups)
 
