@@ -2636,6 +2636,49 @@ class WorktreeManager:
             return ""
         return stdout.splitlines()[0].strip() if stdout else ""
 
+    async def _auto_publish_nested_submodule_preflight_ref(
+            self,
+            sub_wt: str,
+            remote: str,
+            entry: dict,
+            *,
+            reason: str,
+    ) -> dict:
+        branch = str(entry.get("branch", "") or "").strip()
+        head = str(entry.get("head_sha", "") or "").strip()
+        if not branch or not head:
+            return {"ok": False, "error": "No nested branch/head to push."}
+
+        pushed = await self._push_nested_submodule_ref(
+            sub_wt,
+            remote,
+            head,
+            branch,
+        )
+        if not pushed.get("ok"):
+            error = pushed.get("error", "")
+            entry[f"{reason}_publish_error"] = error
+            if entry.get("zero_gitlink_delta"):
+                entry["zero_delta_branch_publish_error"] = error
+            return pushed
+
+        entry["remote_branch_sha"] = head
+        entry["branch_ref_published"] = True
+        entry[f"{reason}_published"] = True
+        if entry.get("zero_gitlink_delta"):
+            entry["zero_delta_branch_published"] = True
+        remote_ref = f"{remote}/{branch}" if remote and branch else ""
+        if remote_ref:
+            refs = [
+                str(ref or "").strip()
+                for ref in (entry.get("remote_refs_containing_gitlink") or [])
+                if str(ref or "").strip()
+            ]
+            if remote_ref not in refs:
+                refs.append(remote_ref)
+            entry["remote_refs_containing_gitlink"] = refs
+        return pushed
+
     def _nested_preflight_error(self, entry: dict, condition: str,
                                 detail: str) -> dict:
         path = entry.get("path", "")
@@ -2741,20 +2784,6 @@ class WorktreeManager:
                     fetch_error,
                 )
 
-            contains, refs = await self._remote_contains_commit(
-                info["module_dir"],
-                remote,
-                new_gitlink,
-            )
-            entry["remote_refs_containing_gitlink"] = refs
-            if not contains:
-                return self._nested_preflight_error(
-                    entry,
-                    "MISSING_FROM_REMOTE",
-                    "The gitlink commit is not reachable from the "
-                    f"{remote} remote.",
-                )
-
             remote_branch_sha = await self._remote_branch_sha(
                 info["module_dir"],
                 remote,
@@ -2766,28 +2795,58 @@ class WorktreeManager:
                 remote,
                 entry["base_branch"],
             )
-            if entry["branch"] and remote_branch_sha != head:
-                if zero_gitlink_delta:
-                    pushed = await self._push_nested_submodule_ref(
+
+            contains, refs = await self._remote_contains_commit(
+                info["module_dir"],
+                remote,
+                new_gitlink,
+            )
+            entry["remote_refs_containing_gitlink"] = refs
+            if not contains:
+                can_publish_gitlink = bool(
+                    entry["branch"]
+                    and head
+                    and new_gitlink
+                    and head == new_gitlink
+                )
+                if can_publish_gitlink:
+                    pushed = await self._auto_publish_nested_submodule_preflight_ref(
                         sub_wt,
                         remote,
-                        head,
-                        entry["branch"],
+                        entry,
+                        reason="missing_gitlink",
                     )
-                    if pushed.get("ok"):
-                        entry["remote_branch_sha"] = head
-                        entry["zero_delta_branch_published"] = True
-                        checked.append(entry)
-                        continue
-                    entry["zero_delta_branch_publish_error"] = (
-                        pushed.get("error", "")
+                    if not pushed.get("ok"):
+                        return self._nested_preflight_error(
+                            entry,
+                            "MISSING_FROM_REMOTE",
+                            "The gitlink commit is not reachable from the "
+                            f"{remote} remote, and automatic ref publish "
+                            f"failed: {pushed.get('error', '')}",
+                        )
+                else:
+                    return self._nested_preflight_error(
+                        entry,
+                        "MISSING_FROM_REMOTE",
+                        "The gitlink commit is not reachable from the "
+                        f"{remote} remote.",
                     )
-                return self._nested_preflight_error(
+
+            if entry["branch"] and entry.get("remote_branch_sha", "") != head:
+                pushed = await self._auto_publish_nested_submodule_preflight_ref(
+                    sub_wt,
+                    remote,
                     entry,
-                    "UNPUSHED",
-                    "The nested submodule branch tip is not pushed to "
-                    f"{remote}/{entry['branch']}.",
+                    reason="branch_tip",
                 )
+                if not pushed.get("ok"):
+                    return self._nested_preflight_error(
+                        entry,
+                        "UNPUSHED",
+                        "The nested submodule branch tip is not pushed to "
+                        f"{remote}/{entry['branch']}: "
+                        f"{pushed.get('error', '')}",
+                    )
 
             checked.append(entry)
         return {"ok": True, "submodules": checked}

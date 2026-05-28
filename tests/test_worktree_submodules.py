@@ -1415,9 +1415,10 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(remote_branch, head)
 
-    async def test_merge_preflight_blocks_unpushed_nonzero_submodule_branch(self):
+    async def test_merge_preflight_auto_publishes_reachable_real_submodule_branch(self):
         cell, wt = await self._create_nested()
         sub_wt = wt / self.sub_path
+        sub_branch = await self._sub_branch(sub_wt)
         (sub_wt / "lib.txt").write_text("sub line one\nreachable elsewhere\n")
         self.assertTrue(
             await self.mgr.checkpoint(
@@ -1434,18 +1435,29 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             cwd=sub_wt,
         )
 
-        check = await self.mgr.check_merge_conflicts(
+        preflight = await self.mgr.nested_submodule_merge_preflight(
             cell,
-            worktree_submodules=[self.sub_path],
+            [self.sub_path],
         )
 
-        self.assertFalse(check["clean"])
-        self.assertIn("UNPUSHED", check["error"])
-        self.assertIn(self.sub_path, check["error"])
+        self.assertTrue(preflight["ok"], preflight)
+        entry = preflight["submodules"][0]
+        self.assertFalse(entry["zero_gitlink_delta"])
+        self.assertTrue(entry["branch_ref_published"], entry)
+        self.assertTrue(entry["branch_tip_published"], entry)
+        remote_branch = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            sub_branch,
+            cwd=self.root,
+        )
+        self.assertEqual(remote_branch, head)
 
-    async def test_merge_preflight_blocks_gitlink_missing_from_remote(self):
+    async def test_merge_preflight_auto_publishes_real_gitlink_missing_from_remote(self):
         cell, wt = await self._create_nested()
         sub_wt = wt / self.sub_path
+        sub_branch = await self._sub_branch(sub_wt)
         (sub_wt / "lib.txt").write_text("sub line one\nlocal only line\n")
         self.assertTrue(
             await self.mgr.checkpoint(
@@ -1454,15 +1466,44 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_submodules=[self.sub_path],
             )
         )
+        head = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+        contains_code, _out, _err = await self._git(
+            "--git-dir",
+            str(self.sub_origin),
+            "branch",
+            "--contains",
+            head,
+            cwd=self.root,
+            check=False,
+        )
+        self.assertNotEqual(0, contains_code)
 
         check = await self.mgr.check_merge_conflicts(
             cell,
             worktree_submodules=[self.sub_path],
         )
 
-        self.assertFalse(check["clean"])
-        self.assertIn("MISSING_FROM_REMOTE", check["error"])
-        self.assertIn(self.sub_path, check["error"])
+        self.assertTrue(check["clean"], check)
+        remote_branch = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            sub_branch,
+            cwd=self.root,
+        )
+        self.assertEqual(remote_branch, head)
+        preflight = await self.mgr.nested_submodule_merge_preflight(
+            cell,
+            [self.sub_path],
+        )
+        self.assertTrue(preflight["ok"], preflight)
+        entry = preflight["submodules"][0]
+        self.assertFalse(entry["zero_gitlink_delta"])
+        self.assertEqual(entry["remote_branch_sha"], head)
+        self.assertIn(
+            f"origin/{sub_branch}",
+            entry["remote_refs_containing_gitlink"],
+        )
 
     async def test_rebase_both_rebases_submodule_and_rebumps_gitlink(self):
         cell, wt = await self._create_nested()
