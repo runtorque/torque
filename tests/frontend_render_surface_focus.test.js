@@ -110,6 +110,7 @@ function buildSandbox(activeElement, lookup) {
   vm.createContext(sandbox);
   loadScript(sandbox, 'static/js/render.js');
   loadScript(sandbox, 'static/js/grid/group-tabs.js');
+  loadScript(sandbox, 'static/js/grid/agent-card.js');
   return sandbox;
 }
 
@@ -199,6 +200,7 @@ function buildFocusSplitSandbox(options) {
   vm.createContext(sandbox);
   loadScript(sandbox, 'static/js/render.js');
   loadScript(sandbox, 'static/js/grid/group-tabs.js');
+  loadScript(sandbox, 'static/js/grid/agent-card.js');
   return {
     sandbox,
     store,

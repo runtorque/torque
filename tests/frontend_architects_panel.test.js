@@ -78,6 +78,7 @@ function createArchitectHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
   loadScript(context, 'static/js/agent_panel.js');
   return { context, sandbox, panel, content, pendingHireBanner };
 }
@@ -87,6 +88,7 @@ function createBannerHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
   return { context, sandbox, pendingHireBanner };
 }
 

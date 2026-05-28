@@ -93,6 +93,7 @@ function createGridHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
   return { context, sandbox, main };
 }
 
@@ -112,6 +113,238 @@ test('TORQUE:264 — render() exposes _torqueLastHtml on the main element after 
   assert.equal(typeof main._torqueLastHtml, 'string');
   assert.equal(main._torqueLastHtml, main.innerHTML,
     'cache must mirror the last-applied html so byte-equality wins on the next render');
+});
+
+function makeTinyClassList() {
+  const names = new Set();
+  return {
+    add(name) { names.add(name); },
+    remove(name) { names.delete(name); },
+    contains(name) { return names.has(name); },
+    toggle(name, force) {
+      const next = force === undefined ? !names.has(name) : !!force;
+      if (next) names.add(name);
+      else names.delete(name);
+      return next;
+    },
+  };
+}
+
+function makeAgentCardFocusHarness() {
+  let currentControl = null;
+  let controlGeneration = 0;
+  function makeFocusedControl() {
+    controlGeneration += 1;
+    return {
+      dataset: { focusKey: 'agent-digest-toggle:a1' },
+      value: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+      scrollTop: 0,
+      scrollLeft: 0,
+      focusCalls: [],
+      focus(opts) { this.focusCalls.push(opts || null); },
+      generation: controlGeneration,
+    };
+  }
+  function maybeHydrateControl(html) {
+    if (String(html || '').indexOf('data-focus-key="agent-digest-toggle:a1"') >= 0) {
+      currentControl = makeFocusedControl();
+    }
+  }
+  function shellPart(id) {
+    return {
+      id,
+      style: {},
+      classList: makeTinyClassList(),
+      children: [],
+      scrollTop: 0,
+      scrollLeft: 0,
+      scrollHeight: 240,
+      offsetHeight: 120,
+      clientHeight: 120,
+      innerHTML: '',
+      setAttribute(name, value) { this[name] = String(value); },
+      getBoundingClientRect() { return { height: id === 'agent-split' ? 720 : 12 }; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    };
+  }
+  const split = shellPart('agent-split');
+  const tabsHost = shellPart('agent-group-tabs-host');
+  const grid = shellPart('agent-grid-pane');
+  let gridSetCount = 0;
+  Object.defineProperty(grid, 'innerHTML', {
+    get() { return this._html || ''; },
+    set(value) {
+      this._html = String(value || '');
+      gridSetCount += 1;
+      maybeHydrateControl(this._html);
+    },
+  });
+  const handle = shellPart('agent-focus-resizer');
+  const focus = shellPart('agent-focus-panel');
+  const focusScroll = shellPart('agent-focus-scroll');
+  const main = makeMemoElement('MAIN');
+  main.ownerDocument = null;
+  main.contains = function(node) {
+    return node === currentControl;
+  };
+  main.querySelector = function(selector) {
+    if (selector === '[data-agent-split]') return split;
+    if (selector === '[data-agent-grid-pane]') return grid;
+    if (selector === '[data-agent-focus-resizer]') return handle;
+    if (selector === '[data-agent-focus-panel]') return focus;
+    if (selector === '[data-agent-focus-scroll]') return focusScroll;
+    if (selector === '[data-agent-group-tabs-host]') return tabsHost;
+    if (selector === '[data-focus-key="agent-digest-toggle:a1"]') return currentControl;
+    return null;
+  };
+  const originalMainSetter = Object.getOwnPropertyDescriptor(main, 'innerHTML').set;
+  const originalMainGetter = Object.getOwnPropertyDescriptor(main, 'innerHTML').get;
+  Object.defineProperty(main, 'innerHTML', {
+    get() { return originalMainGetter.call(main); },
+    set(value) {
+      originalMainSetter.call(main, value);
+      maybeHydrateControl(value);
+    },
+  });
+  const document = {
+    activeElement: null,
+    body: { classList: makeTinyClassList(), style: {} },
+    getElementById(id) {
+      if (id === 'main') return main;
+      if (id === 'agent-group-tabs-host') return tabsHost;
+      if (id === 'app-group-tabs-host') return null;
+      return null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+  main.ownerDocument = document;
+  const sandbox = {
+    console,
+    Date,
+    JSON,
+    Math,
+    CSS: { escape(value) { return String(value).replace(/"/g, '\\"'); } },
+    location: { host: 'localhost:18932' },
+    window: { innerHeight: 900 },
+    document,
+    state: {
+      runtime: { embedded_terminal: false, profile: 'card-focus', port: '18932' },
+      agents: {
+        a1: {
+          id: 'a1',
+          name: 'Agent One',
+          slug: 'agent-one',
+          group: 'alpha',
+          cell_type: 'agent',
+          status: 'running',
+          kind: 'worker',
+          current_task_id: 'TASK-1',
+          worktree_branch: 'torque/user/card-focus-a1',
+        },
+      },
+      groups: { alpha: ['a1'] },
+      group_settings: {},
+      engineer_settings: {},
+      agent_digest_settings: {},
+      children: { a1: [] },
+      board_tasks: {
+        'TASK-1': { id: 'TASK-1', task: 'Keep card focus', lane: 'In Progress', action_name: 'feature/implement' },
+      },
+      ui: {},
+      selected_principal_id: '',
+    },
+    selectedAgentId: 'a1',
+    selectedTerminalId: null,
+    focusedItemId: null,
+    dragInProgress: false,
+    getComputedStyle() {
+      return {
+        paddingTop: '0px',
+        paddingBottom: '0px',
+        marginTop: '0px',
+        marginBottom: '0px',
+      };
+    },
+    requestAnimationFrame(fn) { if (typeof fn === 'function') fn(); return 1; },
+    cancelAnimationFrame() {},
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    renderTerminalWorkspace() {},
+    updateEventsAttentionBadge() {},
+    renderPendingHireBanner() {},
+    renderAgentPanel() {},
+    _currentPanelSurfaces() { return []; },
+    getFilterByWindow() { return false; },
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window = Object.assign(sandbox.window, sandbox);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  context.renderAgentDetails = function() { return ''; };
+  return {
+    context,
+    sandbox,
+    main,
+    grid,
+    getCurrentControl() { return currentControl; },
+    getGridSetCount() { return gridSetCount; },
+  };
+}
+
+test('agent-card extraction preserves stable card HTML and main-surface focus through rerenders', () => {
+  const harness = makeAgentCardFocusHarness();
+  const { context, sandbox, main, grid } = harness;
+  const firstCellHtml = context.renderAgentCell(sandbox.state.agents.a1);
+  const secondCellHtml = context.renderAgentCell(sandbox.state.agents.a1);
+  assert.equal(secondCellHtml, firstCellHtml,
+    'renderAgentCell must remain byte-stable for unchanged card state after extraction');
+  assert.match(firstCellHtml, /data-focus-key="agent-digest-toggle:a1"/);
+
+  context.render();
+  assert.match(main._torqueLastGridHtml, /data-focus-key="agent-digest-toggle:a1"/);
+  assert.match(main._torqueLastGridHtml, /class="cell selected worker"/,
+    'selected card marker should survive the initial grid render');
+  const firstControl = harness.getCurrentControl();
+  assert.ok(firstControl, 'first render should expose the agent-card inline control');
+  firstControl.value = 'pause-caret';
+  firstControl.selectionStart = 2;
+  firstControl.selectionEnd = 7;
+  firstControl.scrollTop = 13;
+  firstControl.scrollLeft = 3;
+  sandbox.document.activeElement = firstControl;
+
+  const gridSetsBeforeStableRender = harness.getGridSetCount();
+  context.render();
+  assert.equal(harness.getGridSetCount(), gridSetsBeforeStableRender,
+    'unchanged card html must not rewrite the grid, preserving hovered card DOM');
+  assert.equal(harness.getCurrentControl(), firstControl,
+    'unchanged rerender should keep the same card control node');
+
+  sandbox.state.agents.a1.activity_detail = 'Reporting progress';
+  context.render();
+  assert.equal(harness.getGridSetCount(), gridSetsBeforeStableRender + 1,
+    'changed card html should rebuild only the grid pane');
+  assert.match(grid.innerHTML, /Reporting progress/);
+  assert.match(main._torqueLastGridHtml, /class="cell selected worker"/,
+    'selected card marker should survive the WS-style grid rebuild');
+  const restoredControl = harness.getCurrentControl();
+  assert.notEqual(restoredControl, firstControl,
+    'changed grid html should replace the card control node in the harness');
+  assert.equal(restoredControl.value, 'pause-caret');
+  assert.equal(restoredControl.selectionStart, 2);
+  assert.equal(restoredControl.selectionEnd, 7);
+  assert.equal(restoredControl.scrollTop, 13);
+  assert.equal(restoredControl.scrollLeft, 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(restoredControl.focusCalls)), [
+    { preventScroll: true },
+  ]);
 });
 
 /* -- A3: hover defer ----------------------------------------------------- */
