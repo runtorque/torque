@@ -5252,28 +5252,96 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                         _engineer_group, tid, max_concurrent
                     )
                 )
+                queued_agent_group = str(agent_group or "").strip()
+                target_for_group = (
+                    group_agents.get(queued_agent_group, "")
+                    if queued_agent_group else ""
+                )
+                updated_entry, intent_changed = (
+                    state.auto_dispatch_queue_update_dispatch_intent(
+                        _engineer_group,
+                        tid,
+                        agent_group=(
+                            queued_agent_group if queued_agent_group
+                            else None
+                        ),
+                        target_agent_id=(
+                            target_for_group if target_for_group else None
+                        ),
+                        engineer_owner_id=(
+                            _engineer_cell.id if queued_agent_group else None
+                        ),
+                        provider=(
+                            provider if provider and queued_agent_group
+                            else None
+                        ),
+                    )
+                )
+                refreshed_entry = updated_entry or refreshed_entry or queued_entry
+                effective_agent_group = (
+                    str(getattr(refreshed_entry, "agent_group", "") or "")
+                    .strip()
+                )
+                effective_target_agent_id = (
+                    str(
+                        getattr(refreshed_entry, "target_agent_id", "") or ""
+                    ).strip()
+                )
+                if effective_agent_group and effective_target_agent_id:
+                    group_agents.setdefault(
+                        effective_agent_group,
+                        effective_target_agent_id,
+                    )
                 queue = state.auto_dispatch_queues.get(_engineer_group, [])
                 queue_position = queued_idx + 1 if queued_idx >= 0 else len(queue)
-                if cap_raised and refreshed_entry:
+                if (cap_raised or intent_changed) and refreshed_entry:
+                    status = "cap_raised" if cap_raised else "deferred"
+                    reason = (
+                        "already_queued_updated"
+                        if cap_raised and intent_changed
+                        else "already_queued_cap_raised"
+                        if cap_raised
+                        else "already_queued_group_updated"
+                    )
+                    message = (
+                        "Task was already deferred for engineer group "
+                        f"'{_engineer_group}'; "
+                    )
+                    if cap_raised:
+                        message += (
+                            "raised stored max_concurrent "
+                            "(engineer-group active worker cap) from "
+                            f"{prior_cap} to {max_concurrent}"
+                        )
+                    if intent_changed:
+                        if cap_raised:
+                            message += " and "
+                        message += (
+                            "refreshed stored batch dispatch intent so "
+                            "auto-dispatch preserves agent_group "
+                            "same-agent affinity"
+                        )
+                    message += "."
                     item = {
                         "index": idx,
                         "task": task_ident,
                         "task_id": tid,
-                        "status": "cap_raised",
-                        "reason": "already_queued_cap_raised",
-                        "message": (
-                            "Task was already deferred for engineer group "
-                            f"'{_engineer_group}'; raised stored "
-                            "max_concurrent (engineer-group active worker "
-                            f"cap) from {prior_cap} to {max_concurrent}."
-                        ),
+                        "status": status,
+                        "reason": reason,
+                        "message": message,
                         "queue_position": queue_position,
-                        "previous_max_concurrent": prior_cap,
                         "max_concurrent": max_concurrent,
                         "queued_at": refreshed_entry.enqueued_at,
                     }
+                    if cap_raised:
+                        item["previous_max_concurrent"] = prior_cap
+                    else:
+                        item["current_max_concurrent"] = prior_cap
+                        item["requested_max_concurrent"] = max_concurrent
                     if refreshed_entry.agent_group:
                         item["agent_group"] = refreshed_entry.agent_group
+                    if refreshed_entry.target_agent_id:
+                        item["agent_id"] = refreshed_entry.target_agent_id
                     results.append(item)
                     continue
                 item = {
