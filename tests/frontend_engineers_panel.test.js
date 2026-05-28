@@ -66,6 +66,7 @@ function createHarness() {
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
   loadScript(context, 'static/js/agent_panel.js');
   return { context, panel, sandbox };
 }
