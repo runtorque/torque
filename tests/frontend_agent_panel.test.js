@@ -212,6 +212,45 @@ test('Behavior tab renders overlay editor, proposals, and version timeline', () 
   ]);
 });
 
+test('Behavior proposal response does not refetch proposals on focused rerender', () => {
+  const { context, panel, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.behavior_overlay_active = {
+    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-1' },
+  };
+  context.state.behavior_overlay_versions = {
+    'eng-1': [
+      { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: 'aaaa', text_bytes: 4, rationale: 'Seed', created_at: 1 },
+    ],
+  };
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
+
+  context.renderAgentPanel();
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_proposals',
+    proposals: [{
+      id: 'bop-loop',
+      agent_id: 'eng-1',
+      status: 'proposed',
+      next_actor_kind: 'architect',
+      proposed_text_sha256: 'bbbb',
+      proposed_text_bytes: 9,
+      rationale: 'No fetch loop',
+    }],
+  });
+
+  assert.equal(context.state.behavior_overlay_proposals['bop-loop'].rationale, 'No fetch loop');
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+});
+
 test('Architect Behavior tab renders hired-engineer governance controls', () => {
   const { context, panel } = createHarness();
   context.state.group_settings = {
@@ -256,6 +295,56 @@ test('Architect Behavior tab renders hired-engineer governance controls', () => 
   assert.match(panel.innerHTML, /Approve/);
   assert.match(panel.innerHTML, /Reject/);
   assert.match(panel.innerHTML, /Request rollback/);
+});
+
+test('active behavior deltas invalidate cached full text before submit', () => {
+  const { context, sendCalls } = createHarness();
+  context.state.agents = {
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+  };
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-1' },
+    version: { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: 'oldhash', text_bytes: 3 },
+    text: 'old',
+  });
+
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_version_append',
+    id: 'bov-2',
+    agent_id: 'eng-1',
+    version_number: 2,
+    text_sha256: 'newhash',
+    text_bytes: 3,
+  });
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_active_update',
+    agent_id: 'eng-1',
+    active_version_id: 'bov-2',
+  });
+  context.behaviorOverlaySubmitDraft('own', 'eng-1', 'eng-1', 'engineer', false);
+
+  assert.equal(sendCalls.some((call) => call.cmd === 'behavior_overlay_propose'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'behavior_overlay_read',
+    agent_id: 'eng-1',
+    seed: true,
+  });
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-2' },
+    version: { id: 'bov-2', agent_id: 'eng-1', version_number: 2, text_sha256: 'newhash', text_bytes: 3 },
+    text: 'new',
+  });
+  context.behaviorOverlaySubmitDraft('own', 'eng-1', 'eng-1', 'engineer', false);
+
+  const proposal = sendCalls[sendCalls.length - 1];
+  assert.equal(proposal.cmd, 'behavior_overlay_propose');
+  assert.equal(proposal.text, 'new');
+  assert.equal(proposal.expected_base_version_id, 'bov-2');
 });
 
 test('behavior approval modal renders diff before enabling user actions', () => {

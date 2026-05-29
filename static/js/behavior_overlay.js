@@ -6,6 +6,7 @@ var _behaviorOverlayReadLoadingByAgent = {};
 var _behaviorOverlayVersionsByAgent = {};
 var _behaviorOverlayVersionsLoadingByAgent = {};
 var _behaviorOverlayProposalListLoadingKey = '';
+var _behaviorOverlayProposalListLoaded = false;
 var _behaviorOverlayDiffByKey = {};
 var _behaviorOverlayDiffLoadingByKey = {};
 var _behaviorOverlayDrafts = {};
@@ -40,7 +41,18 @@ function _behaviorOverlayAttr(value) {
 }
 
 function _behaviorOverlayJs(value) {
-  return JSON.stringify(String(value == null ? '' : value));
+  value = String(value == null ? '' : value);
+  return "'" + value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\x22')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+    .replace(/</g, '\\x3C')
+    .replace(/>/g, '\\x3E')
+    .replace(/&/g, '\\x26') + "'";
 }
 
 function _behaviorOverlayDomId(prefix, key) {
@@ -113,6 +125,39 @@ function _behaviorOverlayBaseVersionId(agentId) {
   var active = _behaviorOverlayActive(agentId);
   var version = _behaviorOverlayActiveVersion(agentId);
   return String(active.active_version_id || version.id || '');
+}
+
+function _behaviorOverlayReadVersionId(agentId) {
+  var read = _behaviorOverlayReadByAgent[String(agentId || '')] || {};
+  return String((read.version && read.version.id) || '');
+}
+
+function _behaviorOverlayReadIsFresh(agentId) {
+  agentId = String(agentId || '').trim();
+  var readVersionId = _behaviorOverlayReadVersionId(agentId);
+  if (!readVersionId) return false;
+  var baseVersionId = _behaviorOverlayBaseVersionId(agentId);
+  return !baseVersionId || readVersionId === baseVersionId;
+}
+
+function _behaviorOverlayClearDraftsForAgent(agentId) {
+  agentId = String(agentId || '').trim();
+  if (!agentId) return;
+  var suffix = ':' + agentId;
+  for (var key in _behaviorOverlayDrafts) {
+    if (!Object.prototype.hasOwnProperty.call(_behaviorOverlayDrafts, key)) continue;
+    if (String(key || '').slice(-suffix.length) === suffix) {
+      delete _behaviorOverlayDrafts[key];
+    }
+  }
+}
+
+function _behaviorOverlayInvalidateFullRead(agentId) {
+  agentId = String(agentId || '').trim();
+  if (!agentId) return;
+  delete _behaviorOverlayReadByAgent[agentId];
+  _behaviorOverlayReadLoadingByAgent[agentId] = false;
+  _behaviorOverlayClearDraftsForAgent(agentId);
 }
 
 function _behaviorOverlayVersionList(agentId) {
@@ -222,7 +267,7 @@ function _behaviorOverlayRequestVersions(agentId, force) {
 
 function _behaviorOverlayRequestProposals(force) {
   if (typeof send !== 'function') return;
-  if (!force && _behaviorOverlayProposalListLoadingKey === 'open') return;
+  if (!force && (_behaviorOverlayProposalListLoaded || _behaviorOverlayProposalListLoadingKey === 'open')) return;
   _behaviorOverlayProposalListLoadingKey = 'open';
   send({ cmd: 'behavior_overlay_proposals', status_filter: '', limit: 200 });
 }
@@ -328,6 +373,13 @@ function behaviorOverlaySubmitDraft(mode, targetAgentId, authorAgentId, authorKi
   authorAgentId = String(authorAgentId || '').trim();
   authorKind = String(authorKind || '').trim() || 'user';
   if (!targetAgentId || !authorAgentId || typeof send !== 'function') return;
+  if (!_behaviorOverlayReadIsFresh(targetAgentId)) {
+    _behaviorOverlayRequestRead(targetAgentId, true, true);
+    if (typeof _showToast === 'function') {
+      _showToast('Refreshing current behavior text before submitting', 'info');
+    }
+    return;
+  }
   var read = _behaviorOverlayReadByAgent[targetAgentId] || {};
   var draft = _behaviorOverlayDraft(mode, targetAgentId, authorAgentId, read.text || '');
   var text = String(draft.text || '');
@@ -565,7 +617,8 @@ function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdi
   var authorId = String((authorAgent && authorAgent.id) || '');
   var authorKind = _behaviorOverlayKind(authorAgent);
   var read = _behaviorOverlayReadByAgent[targetAgentId] || {};
-  var loading = !!_behaviorOverlayReadLoadingByAgent[targetAgentId] && !read.version;
+  var readFresh = _behaviorOverlayReadIsFresh(targetAgentId);
+  var loading = (!!_behaviorOverlayReadLoadingByAgent[targetAgentId] && !read.version) || !readFresh;
   var draft = _behaviorOverlayDraft(mode, targetAgentId, authorId, read.text || '');
   var key = _behaviorOverlayDraftKey(mode, targetAgentId, authorId);
   var textId = _behaviorOverlayDomId('behavior-overlay-text', key);
@@ -588,6 +641,9 @@ function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdi
     + _behaviorOverlayEsc(_behaviorOverlayShortHash(version.text_sha256)) + '</span></div>';
   html += '</div>';
   html += '<label for="' + _behaviorOverlayAttr(textId) + '">Proposed behavior text</label>';
+  if (!readFresh) {
+    html += '<div class="behavior-overlay-warning-inline">Refreshing current full overlay text before edits can be submitted.</div>';
+  }
   html += '<textarea id="' + _behaviorOverlayAttr(textId) + '" class="behavior-overlay-textarea" rows="8"'
     + ' placeholder="Additive, subordinate behavior guidance for this agent…"'
     + ' oninput="behaviorOverlayDraftInput(' + _behaviorOverlayJs(mode) + ','
@@ -605,8 +661,10 @@ function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdi
     + _behaviorOverlayJs(targetAgentId) + ')">Refresh</button>';
   html += '<button type="button" class="btn-secondary" onclick="behaviorOverlayPreviewDraft('
     + _behaviorOverlayJs(mode) + ',' + _behaviorOverlayJs(targetAgentId) + ',' + _behaviorOverlayJs(authorId)
-    + ')">Preview draft diff</button>';
-  html += '<button type="button" class="btn-primary" onclick="behaviorOverlaySubmitDraft('
+    + ')"' + (readFresh ? '' : ' disabled') + '>Preview draft diff</button>';
+  html += '<button type="button" class="btn-primary"'
+    + (readFresh ? '' : ' disabled title="Waiting for current behavior text"')
+    + ' onclick="behaviorOverlaySubmitDraft('
     + _behaviorOverlayJs(mode) + ',' + _behaviorOverlayJs(targetAgentId) + ','
     + _behaviorOverlayJs(authorId) + ',' + _behaviorOverlayJs(authorKind) + ','
     + (directEdit ? 'true' : 'false') + ')">Submit proposal</button>';
@@ -757,6 +815,16 @@ function behaviorOverlayReceiveMessage(msg) {
     var agentId = String(msg.agent_id || '');
     if (agentId) {
       _behaviorOverlayReadLoadingByAgent[agentId] = false;
+      var knownActiveVersionId = String(
+        (state.behavior_overlay_active[agentId] || {}).active_version_id || ''
+      );
+      var msgVersionId = String((msg.version && msg.version.id) || '');
+      if (knownActiveVersionId && msgVersionId && msgVersionId !== knownActiveVersionId) {
+        _behaviorOverlayInvalidateFullRead(agentId);
+        _behaviorOverlayRequestRead(agentId, true, true);
+        _behaviorOverlayRefreshPanelIfFocused(agentId);
+        return true;
+      }
       _behaviorOverlayReadByAgent[agentId] = {
         active: msg.active || {},
         version: msg.version || {},
@@ -792,6 +860,7 @@ function behaviorOverlayReceiveMessage(msg) {
   }
   if (msg.type === 'behavior_overlay_proposals') {
     _behaviorOverlayProposalListLoadingKey = '';
+    _behaviorOverlayProposalListLoaded = true;
     var proposals = Array.isArray(msg.proposals) ? msg.proposals : [];
     for (var p = 0; p < proposals.length; p++) _behaviorOverlayUpsertProposal(proposals[p]);
     var focused = (typeof _focusedEngineerAgent === 'function') ? _focusedEngineerAgent() : null;
@@ -832,9 +901,31 @@ function behaviorOverlayApplyDelta(op) {
   if (!op || !op.op) return;
   behaviorOverlayNormalizeState();
   if (op.op === 'behavior_overlay_active_update') {
+    var activeAgentId = String(op.agent_id || '');
+    var nextActiveVersionId = String(op.active_version_id || '');
+    var previousActiveVersionId = String(
+      (
+        activeAgentId
+        && state.behavior_overlay_active
+        && state.behavior_overlay_active[activeAgentId]
+      )
+        ? state.behavior_overlay_active[activeAgentId].active_version_id
+        : ''
+    );
+    var cachedReadVersionId = _behaviorOverlayReadVersionId(activeAgentId);
     var active = Object.assign({}, op);
     delete active.op;
     if (active.agent_id) state.behavior_overlay_active[active.agent_id] = active;
+    if (
+      activeAgentId
+      && nextActiveVersionId
+      && (
+        (previousActiveVersionId && previousActiveVersionId !== nextActiveVersionId)
+        || (cachedReadVersionId && cachedReadVersionId !== nextActiveVersionId)
+      )
+    ) {
+      _behaviorOverlayInvalidateFullRead(activeAgentId);
+    }
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return;
   }
@@ -858,6 +949,16 @@ function behaviorOverlayApplyDelta(op) {
     });
     _behaviorOverlayVersionsByAgent[agentId] = versions;
     state.behavior_overlay_versions[agentId] = versions;
+    var activeForVersion = state.behavior_overlay_active
+      ? (state.behavior_overlay_active[agentId] || {})
+      : {};
+    if (
+      String(activeForVersion.active_version_id || '') === String(version.id || '')
+      && _behaviorOverlayReadVersionId(agentId)
+      && _behaviorOverlayReadVersionId(agentId) !== String(version.id || '')
+    ) {
+      _behaviorOverlayInvalidateFullRead(agentId);
+    }
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return;
   }
