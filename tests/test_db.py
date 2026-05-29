@@ -65,6 +65,27 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(gs["relay_credential_id"], "cred-9")
         self.assertEqual(gs["relay_private_key_path"], "/keys/relay.pem")
 
+    def test_global_settings_round_trips_status_bar_visibility(self):
+        self.db.save_global_settings(GlobalSettings(
+            status_bar_visibility={
+                "daemon_status": True,
+                "claude_usage": True,
+                "codex_usage": False,
+                "deploy": False,
+                "health": True,
+                "workload": True,
+                "tasks": False,
+                "attention": True,
+            },
+        ))
+
+        gs = self.db.load_all()["global_settings"]
+
+        self.assertEqual(gs["status_bar_visibility"]["daemon_status"], True)
+        self.assertEqual(gs["status_bar_visibility"]["deploy"], False)
+        self.assertEqual(gs["status_bar_visibility"]["tasks"], False)
+        self.assertEqual(gs["status_bar_visibility"]["attention"], True)
+
     def test_global_settings_legacy_db_without_relay_keys_loads_defaults(self):
         # Upgrade path: a global_settings table populated before relay fields
         # existed must reconstruct to safe defaults (relay off, empty strings)

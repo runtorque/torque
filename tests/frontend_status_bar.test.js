@@ -93,6 +93,9 @@ function createSandbox() {
   [
     'statusbar-info',
     'statusbar-panel-buttons',
+    'daemon-status-indicator',
+    'taskbar-conn-dot',
+    'taskbar-daemon-label',
     'statusbar-claude-usage',
     'statusbar-codex-usage',
     'statusbar-deploy',
@@ -103,6 +106,10 @@ function createSandbox() {
   ].forEach((id) => document.ensure(id));
   const panelbar = document.register('panelbar');
   const statusInfo = document.getElementById('statusbar-info');
+  const daemon = document.getElementById('daemon-status-indicator');
+  daemon.appendChild(document.getElementById('taskbar-conn-dot'));
+  daemon.appendChild(document.getElementById('taskbar-daemon-label'));
+  statusInfo.appendChild(daemon);
   [
     'statusbar-claude-usage',
     'statusbar-codex-usage',
@@ -133,6 +140,7 @@ function createSandbox() {
       groups: { Torque: [], Other: [] },
       agents: {},
       board_tasks: {},
+      global_settings: {},
     },
     Date,
     setTimeout(fn, delay) {
@@ -146,6 +154,7 @@ function createSandbox() {
       timers.push({ cleared: id });
     },
     send(message) { sendCalls.push(message); },
+    togglePanel(app) { sendCalls.push({ togglePanel: app }); },
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -193,6 +202,88 @@ test('status chips live right-aligned inside the bottom panelbar without a right
   assert.match(css, /body\.runtime-embedded #panelbar\s*\{[^}]*flex-basis:\s*30px;[^}]*height:\s*30px;/s);
   assert.match(css, /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*auto;/s);
   assert.match(css, /\.taskbar-spacer\s*\{[^}]*flex:\s*1 1 auto;/s);
+  assert.match(panelbarHtml, /id="daemon-status-indicator"[\s\S]*hidden/);
+  assert.match(panelbarHtml, /id="statusbar-metrics"[\s\S]*hidden/);
+  assert.match(panelbarHtml, /id="statusbar-tasks"[\s\S]*onclick="statusBarOpenTasks\(\)"/);
+  assert.match(panelbarHtml, /id="statusbar-attention"[\s\S]*onclick="statusBarOpenAttention\(\)"/);
+});
+
+test('status bar visibility defaults are lean and each toggle gates its chip', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+  sandbox.state.agents = {
+    claude1: {
+      id: 'claude1',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'claude-code',
+      provider_usage: {
+        five_hour: { available: true, used_percentage: 10 },
+      },
+    },
+    codex1: {
+      id: 'codex1',
+      group: 'Torque',
+      cell_type: 'agent',
+      agent_type: 'codex',
+      provider_usage: {
+        five_hour: { available: true, used_percentage: 20 },
+      },
+    },
+    a1: { id: 'a1', group: 'Torque', cell_type: 'agent', status: 'running' },
+  };
+  sandbox.state.board_tasks = {
+    task1: { id: 'task1', group: 'Torque', lane: 'In Progress', agent_id: 'a1' },
+    task2: { id: 'task2', group: 'Torque', lane: 'To Do', labels: ['torque:human'] },
+  };
+  vm.runInContext(`statusBarReceiveDeployState({
+    group: 'Torque',
+    pending_deploy: { count: 1, torque_task_ids: ['TORQUE:1'] },
+  });`, context);
+
+  assert.equal(document.getElementById('daemon-status-indicator').hidden, true);
+  assert.equal(document.getElementById('statusbar-claude-usage').hidden, true);
+  assert.equal(document.getElementById('statusbar-codex-usage').hidden, true);
+  assert.equal(document.getElementById('statusbar-deploy').hidden, false);
+  assert.equal(document.getElementById('statusbar-metrics').hidden, true);
+  assert.equal(document.getElementById('statusbar-workload').hidden, true);
+  assert.equal(document.getElementById('statusbar-tasks').hidden, false);
+  assert.equal(document.getElementById('statusbar-attention').hidden, false);
+
+  sandbox.state.global_settings.status_bar_visibility = {
+    daemon_status: true,
+    claude_usage: true,
+    codex_usage: true,
+    deploy: false,
+    health: true,
+    workload: true,
+    tasks: false,
+    attention: false,
+  };
+  vm.runInContext('refreshStatusBar();', context);
+
+  assert.equal(document.getElementById('daemon-status-indicator').hidden, false);
+  assert.equal(document.getElementById('statusbar-claude-usage').hidden, false);
+  assert.equal(document.getElementById('statusbar-codex-usage').hidden, false);
+  assert.equal(document.getElementById('statusbar-deploy').hidden, true);
+  assert.equal(document.getElementById('statusbar-metrics').hidden, false);
+  assert.equal(document.getElementById('statusbar-workload').hidden, false);
+  assert.equal(document.getElementById('statusbar-tasks').hidden, true);
+  assert.equal(document.getElementById('statusbar-attention').hidden, true);
+});
+
+test('status bar tasks and attention chips navigate through existing panel toggles', () => {
+  const { sandbox, sendCalls } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+
+  vm.runInContext('statusBarOpenTasks(); statusBarOpenAttention();', context);
+
+  assert.deepEqual(sendCalls.filter((call) => call.togglePanel).map((call) => call.togglePanel), [
+    'board',
+    'events',
+  ]);
 });
 
 test('Claude usage view is unknown when no Claude agent has available provider_usage', () => {
@@ -400,6 +491,7 @@ test('refreshStatusBar updates static nodes without wiping panel-button nodes or
   const beforeChildren = panelButtons.children.slice();
   assert.equal(document.activeElement, board);
   assert.deepEqual(beforeStatusChildren.map((child) => child.id), [
+    'daemon-status-indicator',
     'statusbar-claude-usage',
     'statusbar-codex-usage',
     'statusbar-deploy',

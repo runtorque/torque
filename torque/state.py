@@ -56,6 +56,19 @@ from .worktree_boundaries import clear_stale_successor_references
 ARCHIVED_LANE = "Archived"
 _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
 _DEFAULT_LANES = list(_RESERVED_LANES)
+_DEFAULT_STATUS_BAR_VISIBILITY = {
+    # Lean resting default for narrow workspaces: only active tasks and
+    # attention are visible, while deploy remains opt-in-by-state (hidden until
+    # there is something pending).
+    "daemon_status": False,
+    "claude_usage": False,
+    "codex_usage": False,
+    "deploy": True,
+    "health": False,
+    "workload": False,
+    "tasks": True,
+    "attention": True,
+}
 AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 AGENT_MESSAGE_HISTORY_LIMIT = 100
 PEER_MESSAGE_CACHE_LIMIT = 20
@@ -445,6 +458,21 @@ def normalize_relay_enabled(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def default_status_bar_visibility() -> dict[str, bool]:
+    return dict(_DEFAULT_STATUS_BAR_VISIBILITY)
+
+
+def normalize_status_bar_visibility(value) -> dict[str, bool]:
+    """Merge a persisted/user status-bar visibility map with current defaults."""
+    normalized = default_status_bar_visibility()
+    if not isinstance(value, dict):
+        return normalized
+    for key in normalized:
+        if key in value:
+            normalized[key] = normalize_relay_enabled(value.get(key))
+    return normalized
 
 
 def normalize_event_ingest_max_rows(value) -> int:
@@ -1921,6 +1949,11 @@ class GlobalSettings:
     event_ingest_max_days: int = 14
     mcp_call_log_args_capture: str = "metadata"  # off | metadata | full
     mcp_call_log_full_capture_tools: list[str] = field(default_factory=list)
+    # Status bar chip visibility — show/hide only, keyed by the frontend's
+    # stable status-bar item ids. Missing/legacy keys merge with defaults.
+    status_bar_visibility: dict[str, bool] = field(
+        default_factory=default_status_bar_visibility
+    )
     # Boot nudges — fallback kickoff text used when an architect/engineer
     # role has no initial_prompt configured. Workers/terminals are
     # unaffected (they don't receive a default nudge). Empty string disables
@@ -1955,6 +1988,9 @@ class GlobalSettings:
             normalize_mcp_call_log_full_capture_tools(
                 self.mcp_call_log_full_capture_tools
             )
+        )
+        self.status_bar_visibility = normalize_status_bar_visibility(
+            self.status_bar_visibility
         )
         self.relay_enabled = normalize_relay_enabled(self.relay_enabled)
         self.relay_url = normalize_relay_text(self.relay_url)
@@ -7466,6 +7502,8 @@ class MatrixState:
                     value = normalize_mcp_call_log_args_capture(value)
                 elif key == "mcp_call_log_full_capture_tools":
                     value = normalize_mcp_call_log_full_capture_tools(value)
+                elif key == "status_bar_visibility":
+                    value = normalize_status_bar_visibility(value)
                 elif key == "relay_enabled":
                     value = normalize_relay_enabled(value)
                 elif key in (
@@ -7479,14 +7517,20 @@ class MatrixState:
         return updates
 
     def _apply_global_settings_updates(self, updates: dict) -> None:
+        changed_keys = []
         for key, value in updates.items():
+            if getattr(self.global_settings, key, None) != value:
+                changed_keys.append(key)
             setattr(self.global_settings, key, value)
         if "metrics_enabled" in updates:
             self.metrics_collector.set_enabled(
                 self.global_settings.metrics_enabled
             )
-        self._emit("global_settings_update",
-                    **asdict(self.global_settings))
+        self._emit(
+            "global_settings_update",
+            **asdict(self.global_settings),
+            changed_keys=sorted(changed_keys),
+        )
 
     def update_global_settings(self, **fields):
         """Update global settings fields."""

@@ -9,6 +9,16 @@
 var STATUS_BAR_CLAUDE_PROVIDER = 'claude-code';
 var STATUS_BAR_CODEX_PROVIDER = 'codex';
 var STATUS_BAR_DEPLOY_POLL_INTERVAL_MS = 90000;
+var STATUS_BAR_VISIBILITY_DEFAULTS = {
+  daemon_status: false,
+  claude_usage: false,
+  codex_usage: false,
+  deploy: true,
+  health: false,
+  workload: false,
+  tasks: true,
+  attention: true,
+};
 var _statusBarDeployState = null;
 var _statusBarDeployRequestKey = '';
 var _statusBarDeployRequestedAt = 0;
@@ -23,6 +33,52 @@ function _statusBarNowMs() {
 function _statusBarElement(id) {
   if (typeof document === 'undefined' || !document.getElementById) return null;
   return document.getElementById(id);
+}
+
+function statusBarVisibilityDefaults() {
+  var defaults = {};
+  Object.keys(STATUS_BAR_VISIBILITY_DEFAULTS).forEach(function(key) {
+    defaults[key] = !!STATUS_BAR_VISIBILITY_DEFAULTS[key];
+  });
+  return defaults;
+}
+
+function normalizeStatusBarVisibility(value) {
+  var normalized = statusBarVisibilityDefaults();
+  var raw = (value && typeof value === 'object') ? value : {};
+  Object.keys(normalized).forEach(function(key) {
+    if (Object.prototype.hasOwnProperty.call(raw, key)) {
+      var itemValue = raw[key];
+      normalized[key] = (typeof itemValue === 'string')
+        ? ['1', 'true', 'yes', 'on'].indexOf(itemValue.trim().toLowerCase()) >= 0
+        : !!itemValue;
+    }
+  });
+  return normalized;
+}
+
+function statusBarVisibilityFromSettings(settings) {
+  var s = settings || (typeof state !== 'undefined' && state
+    ? state.global_settings
+    : null);
+  return normalizeStatusBarVisibility(s && s.status_bar_visibility);
+}
+
+function statusBarVisibilityEnabled(key, settings) {
+  var visibility = statusBarVisibilityFromSettings(settings);
+  return !!visibility[key];
+}
+
+function _statusBarViewVisible(key, viewVisible) {
+  return viewVisible !== false && statusBarVisibilityEnabled(key);
+}
+
+function _statusBarSetElementVisible(el, visible) {
+  if (!el) return;
+  if ('hidden' in el) el.hidden = !visible;
+  if (el.classList) {
+    el.classList.toggle('statusbar-chip--pref-hidden', !visible);
+  }
 }
 
 function _statusBarDocumentHidden() {
@@ -547,28 +603,43 @@ function refreshStatusBar(opts) {
   var tasksView = _statusBarActiveTaskCount(group);
   var attentionView = _statusBarAttentionCount(group);
 
-  _statusBarSetChip(_statusBarElement('statusbar-claude-usage'), claudeView);
-  _statusBarSetChip(_statusBarElement('statusbar-codex-usage'), codexView);
-  _statusBarSetChip(_statusBarElement('statusbar-deploy'), deployView);
-  _statusBarSetChip(_statusBarElement('statusbar-metrics'), metricsView);
+  _statusBarSetElementVisible(
+    _statusBarElement('daemon-status-indicator'),
+    statusBarVisibilityEnabled('daemon_status')
+  );
+  _statusBarSetChip(_statusBarElement('statusbar-claude-usage'), Object.assign({}, claudeView, {
+    visible: _statusBarViewVisible('claude_usage', claudeView.visible),
+  }));
+  _statusBarSetChip(_statusBarElement('statusbar-codex-usage'), Object.assign({}, codexView, {
+    visible: _statusBarViewVisible('codex_usage', codexView.visible),
+  }));
+  _statusBarSetChip(_statusBarElement('statusbar-deploy'), Object.assign({}, deployView, {
+    visible: _statusBarViewVisible('deploy', deployView.visible),
+  }));
+  _statusBarSetChip(_statusBarElement('statusbar-metrics'), Object.assign({}, metricsView, {
+    visible: _statusBarViewVisible('health', metricsView.visible),
+  }));
   _statusBarSetChip(_statusBarElement('statusbar-workload'), {
-    visible: true,
+    visible: statusBarVisibilityEnabled('workload'),
     level: agentsView.error ? 'danger' : (agentsView.running ? 'normal' : 'muted'),
     label: agentsView.label,
     title: agentsView.title,
   });
   _statusBarSetChip(_statusBarElement('statusbar-tasks'), {
-    visible: true,
+    visible: statusBarVisibilityEnabled('tasks'),
     level: tasksView.count ? 'normal' : 'muted',
     label: tasksView.label,
     title: tasksView.title,
   });
   _statusBarSetChip(_statusBarElement('statusbar-attention'), {
-    visible: true,
+    visible: statusBarVisibilityEnabled('attention'),
     level: attentionView.count ? 'warn' : 'muted',
     label: attentionView.label,
     title: attentionView.title,
   });
+  if (typeof refreshRelayStatusIndicator === 'function') {
+    refreshRelayStatusIndicator();
+  }
   _statusBarScheduleRefresh(_statusBarNextResetView([claudeView, codexView]));
 }
 
@@ -668,6 +739,22 @@ function statusBarOpenDeploy() {
       && typeof togglePanel === 'function') {
     togglePanel('board');
   }
+}
+
+function statusBarOpenTasks() {
+  if (typeof togglePanel === 'function') togglePanel('board');
+}
+
+function statusBarOpenAttention() {
+  if (typeof togglePanel === 'function') togglePanel('events');
+}
+
+function statusBarChipKeydown(event, handler) {
+  if (!event || typeof handler !== 'function') return;
+  var key = event.key || event.code || '';
+  if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  handler();
 }
 
 statusBarStartDeployPolling();

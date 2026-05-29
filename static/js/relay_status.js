@@ -107,6 +107,52 @@ function _relayStatusComputeView(rc) {
   };
 }
 
+function _relayStatusVisibilitySettings() {
+  if (typeof statusBarVisibilityFromSettings === 'function') {
+    return statusBarVisibilityFromSettings();
+  }
+  var defaults = {
+    daemon_status: false,
+    claude_usage: false,
+    codex_usage: false,
+    deploy: true,
+    health: false,
+    workload: false,
+    tasks: true,
+    attention: true,
+  };
+  var gs = (typeof state !== 'undefined' && state) ? state.global_settings : null;
+  var raw = (gs && gs.status_bar_visibility && typeof gs.status_bar_visibility === 'object')
+    ? gs.status_bar_visibility
+    : {};
+  Object.keys(defaults).forEach(function(key) {
+    if (Object.prototype.hasOwnProperty.call(raw, key)) {
+      var value = raw[key];
+      defaults[key] = (typeof value === 'string')
+        ? ['1', 'true', 'yes', 'on'].indexOf(value.trim().toLowerCase()) >= 0
+        : !!value;
+    }
+  });
+  return defaults;
+}
+
+function _relayStatusDaemonStatusVisible() {
+  return !!_relayStatusVisibilitySettings().daemon_status;
+}
+
+function _relayStatusConfigured(rc) {
+  if (!rc || typeof rc !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(rc, 'configured')) return !!rc.configured;
+  if (Object.prototype.hasOwnProperty.call(rc, 'enabled')) return !!rc.enabled;
+  return String(rc.status || '') !== 'disabled';
+}
+
+function _relayStatusShouldShowIndicator(view, rc) {
+  return !!(view && view.visible)
+    && _relayStatusDaemonStatusVisible()
+    && _relayStatusConfigured(rc);
+}
+
 /* Full-detail tooltip. The at-a-glance dot/label stay generic; all five
  * states stay distinct in the tooltip text. */
 function _relayStatusTooltip(rc, statusText, retryCount) {
@@ -193,8 +239,9 @@ function _relayStatusApplyDot(dot, view) {
 function refreshRelayStatusIndicator() {
   var rc = (typeof state !== 'undefined' && state) ? state.relay_connection : null;
   var view = _relayStatusComputeView(rc);
+  var showIndicator = _relayStatusShouldShowIndicator(view, rc);
 
-  if (!view.visible) {
+  if (!showIndicator) {
     if (_relayStatusEls && _relayStatusEls.root) {
       _relayStatusEls.root.hidden = true;
       if (_relayStatusEls.root.classList) {

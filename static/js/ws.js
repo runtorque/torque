@@ -1088,6 +1088,12 @@ function _statusBarDeltaNeedsRefresh(ops, hints) {
       case 'task_upsert':
       case 'task_remove':
         return true;
+      case 'global_settings_update':
+        if (!_globalSettingsDeltaHasChangedKeys(op)
+            || _globalSettingsDeltaChangedKeys(op).indexOf('status_bar_visibility') >= 0) {
+          return true;
+        }
+        break;
       case 'ui_update':
         if (op.key === 'active_group'
             || op.key === 'events_dismissed_attention'
@@ -1371,6 +1377,22 @@ function _terminalWorkspaceViewedAgentIdBeforeDelta() {
   return cell.cell_type === 'agent' ? String(cell.id || '') : '';
 }
 
+function _globalSettingsDeltaChangedKeys(op) {
+  return Array.isArray(op && op.changed_keys)
+    ? op.changed_keys.map(function(key) { return String(key || ''); }).filter(Boolean)
+    : [];
+}
+
+function _globalSettingsDeltaHasChangedKeys(op) {
+  return Array.isArray(op && op.changed_keys);
+}
+
+function _globalSettingsDeltaSkipsBroadInvalidation(op) {
+  if (!_globalSettingsDeltaHasChangedKeys(op)) return false;
+  var changed = _globalSettingsDeltaChangedKeys(op);
+  return changed.every(function(key) { return key === 'status_bar_visibility'; });
+}
+
 function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
   // TORQUE:236 v13 instrumentation: when window.__torqueDebugRender is true,
@@ -1405,8 +1427,12 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'group_rename':
       case 'groups_reorder':
       case 'group_settings_update':
-      case 'global_settings_update':
         _markSurface(flags, 'main', 'context', 'engineer');
+        break;
+      case 'global_settings_update':
+        if (!_globalSettingsDeltaSkipsBroadInvalidation(op)) {
+          _markSurface(flags, 'main', 'context', 'engineer');
+        }
         break;
       case 'focus_update':
         // focus_update carries PTY session/window focus
@@ -2755,12 +2781,16 @@ function _applyDelta(ops) {
       case 'global_settings_update': {
         const gs = Object.assign({}, op);
         delete gs.op;
+        delete gs.changed_keys;
         state.global_settings = gs;
         if (typeof invalidateEffectiveKeybindings === 'function') {
           invalidateEffectiveKeybindings();
         }
         if (typeof _syncKeybindingSettingsFromGlobal === 'function') {
           _syncKeybindingSettingsFromGlobal(gs);
+        }
+        if (typeof _syncStatusBarSettingsFromGlobal === 'function') {
+          _syncStatusBarSettingsFromGlobal(gs);
         }
         if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
           _applyEmbeddedTerminalScrollbackFromSettings();

@@ -1007,6 +1007,7 @@
     <h2>Settings</h2>
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="gls-general" onclick="switchGlsTab('gls-general')">General</button>
+      <button class="gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')">Status bar</button>
       <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')">Keybindings</button>
       <button class="gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')">System</button>
     </div>
@@ -1075,6 +1076,67 @@
         <label>Max pipeline depth <span class="label-hint">0 = unlimited</span></label>
         <input type="number" id="gls-max-pipeline-depth" min="0" value="10" style="width:60px">
       </div>
+    </div>
+
+    <!-- Status bar tab -->
+    <div class="gs-pane" data-pane="gls-statusbar">
+      <section class="gs-settings-section">
+        <div class="gs-settings-section-title">Visible status items</div>
+        <div class="gs-settings-section-body statusbar-settings-list" id="gls-statusbar-visibility-list">
+          <p class="label-hint">
+            Choose which chips appear in the bottom status bar. Relay follows
+            Daemon status and only appears when Relay is configured.
+          </p>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-daemon-status"
+                   data-statusbar-item="daemon_status"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Daemon status
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-claude-usage"
+                   data-statusbar-item="claude_usage"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Claude usage
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-codex-usage"
+                   data-statusbar-item="codex_usage"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Codex usage
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-deploy"
+                   data-statusbar-item="deploy"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Deploy pending
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-health"
+                   data-statusbar-item="health"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Health
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-workload"
+                   data-statusbar-item="workload"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Agents workload
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-tasks"
+                   data-statusbar-item="tasks"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Active tasks
+          </label>
+          <label class="gs-checkbox">
+            <input type="checkbox" id="gls-statusbar-attention"
+                   data-statusbar-item="attention"
+                   onchange="this.dataset.statusBarDirty='1'">
+            Attention
+          </label>
+        </div>
+      </section>
     </div>
 
     <!-- Keybindings tab -->
@@ -1620,15 +1682,17 @@
        these nodes in place while the panel launcher buttons keep focus. -->
   <div id="statusbar-info" class="statusbar-info" aria-label="Workspace status">
     <div id="daemon-status-indicator" class="relay-status daemon-connection-status"
-         title="Daemon: disconnected">
+         title="Daemon: disconnected" hidden>
       <span id="taskbar-conn-dot" title="Disconnected" aria-hidden="true"></span>
       <span id="taskbar-daemon-label" class="relay-status-label">Daemon</span>
     </div>
     <span id="statusbar-claude-usage"
           class="statusbar-chip statusbar-chip--unknown"
+          hidden
           title="Claude usage limits unavailable until provider usage data arrives.">Claude —</span>
     <span id="statusbar-codex-usage"
           class="statusbar-chip statusbar-chip--unknown"
+          hidden
           title="Codex usage limits unavailable until provider usage data arrives.">Codex —</span>
     <button id="statusbar-deploy"
             class="statusbar-chip statusbar-chip-button statusbar-chip--muted statusbar-chip-deploy"
@@ -1639,16 +1703,26 @@
     <button id="statusbar-metrics"
             class="statusbar-chip statusbar-chip-button statusbar-chip--unknown statusbar-chip-metrics"
             type="button"
+            hidden
             onclick="healthOpenMetrics()"
             title="Runtime metrics tick has not arrived yet.">Metrics —</button>
     <span id="statusbar-workload"
           class="statusbar-chip statusbar-chip-agents"
+          hidden
           title="Agent status counts">Agents —</span>
     <span id="statusbar-tasks"
           class="statusbar-chip statusbar-chip-tasks"
+          role="button"
+          tabindex="0"
+          onclick="statusBarOpenTasks()"
+          onkeydown="statusBarChipKeydown(event, statusBarOpenTasks)"
           title="Active worker tasks">Tasks —</span>
     <span id="statusbar-attention"
           class="statusbar-chip statusbar-chip-attention"
+          role="button"
+          tabindex="0"
+          onclick="statusBarOpenAttention()"
+          onkeydown="statusBarChipKeydown(event, statusBarOpenAttention)"
           title="Attention items">Attention —</span>
   </div>
 </div>
