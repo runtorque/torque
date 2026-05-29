@@ -156,6 +156,25 @@ def _normalize_worktree_submodules(paths) -> list[str]:
     return normalized
 
 
+def _ee_pr_flow_submodule_paths(paths) -> list[str]:
+    """Return submodule paths handled by the ee PR-first flow."""
+    normalized = _normalize_worktree_submodules(paths)
+    return [
+        path for path in normalized
+        if [part for part in path.split("/") if part][-1:] == ["ee"]
+    ]
+
+
+def _legacy_nested_submodule_paths(paths,
+                                   pr_flow_submodules: list[str]) -> list[str]:
+    """Return configured nested submodules outside the ee PR-first flow."""
+    pr_flow_set = set(_normalize_worktree_submodules(pr_flow_submodules))
+    return [
+        path for path in _normalize_worktree_submodules(paths)
+        if path not in pr_flow_set
+    ]
+
+
 def _is_test_path(path: str) -> bool:
     """Return whether *path* looks like test-only coverage.
 
@@ -3094,6 +3113,92 @@ class WorktreeManager:
             }
         return {"ok": True}
 
+    async def _push_nested_submodule_pr_head(self, module_dir: str,
+                                             sub_wt: str, remote: str,
+                                             sha: str, branch: str) -> dict:
+        """Push a nested submodule branch as a PR head.
+
+        Normal pushes are preferred.  If the remote branch is stale but safely
+        behind the local reviewed head, retry with an explicit lease.  If the
+        remote branch diverged, fail closed instead of overwriting another ee
+        PR head.
+        """
+        pushed = await self._push_nested_submodule_ref(
+            sub_wt,
+            remote,
+            sha,
+            branch,
+        )
+        if pushed.get("ok"):
+            pushed.update({
+                "phase": "nested_submodule_pr_push",
+                "remote": remote,
+                "branch": branch,
+                "pushed_sha": sha,
+            })
+            return pushed
+
+        error = str(pushed.get("error") or "").strip()
+        if not self._push_rejected_non_fast_forward(error):
+            return _worktree_error(
+                "nested_submodule_pr_push",
+                error or f"git push {remote} {branch} failed",
+                remote=remote,
+                branch=branch,
+                head_sha=sha,
+                non_fast_forward=False,
+            )
+
+        remote_sha = await self._remote_branch_sha(module_dir, remote, branch)
+        safe_to_force = bool(
+            remote_sha
+            and await self._commit_is_ancestor(module_dir, remote_sha, sha)
+        )
+        if not safe_to_force:
+            return _worktree_error(
+                "nested_submodule_pr_push",
+                (
+                    f"Nested submodule PR branch {remote}/{branch} diverged; "
+                    "refusing to force-push because the remote head is not an "
+                    "ancestor of the local reviewed head."
+                ),
+                remote=remote,
+                branch=branch,
+                head_sha=sha,
+                remote_sha=remote_sha,
+                non_fast_forward=True,
+                safety_gate_passed=False,
+            )
+
+        code, _out, force_err = await self._git_run(
+            sub_wt,
+            "push",
+            f"--force-with-lease=refs/heads/{branch}:{remote_sha}",
+            remote,
+            f"{sha}:refs/heads/{branch}",
+        )
+        if code != 0:
+            return _worktree_error(
+                "nested_submodule_pr_push",
+                force_err or f"git push --force-with-lease {remote} {branch} failed",
+                remote=remote,
+                branch=branch,
+                head_sha=sha,
+                remote_sha=remote_sha,
+                non_fast_forward=True,
+                safety_gate_passed=True,
+            )
+        return _worktree_ok(
+            "nested_submodule_pr_push",
+            remote=remote,
+            branch=branch,
+            pushed_sha=sha,
+            remote_sha=remote_sha,
+            non_fast_forward=True,
+            force_with_lease=True,
+            safety_gate_passed=True,
+        )
+
     @staticmethod
     def _push_rejected_non_fast_forward(message: str) -> bool:
         text = (message or "").lower()
@@ -3254,6 +3359,489 @@ class WorktreeManager:
             "ok": True,
             "phase": "nested_submodule_publish",
             "submodules": published,
+        }
+
+    async def _nested_submodule_pr_entry_base(self, cell, info: dict) -> dict:
+        sub_wt = info["worktree_path"]
+        path = info["path"]
+        branch = await self.get_current_branch(sub_wt)
+        head = await self.rev_parse(sub_wt, "HEAD") or ""
+        old_gitlink = await self._nested_submodule_base_gitlink(cell, path)
+        new_gitlink = info.get("gitlink_sha", "")
+        return {
+            "path": path,
+            "worktree_path": sub_wt,
+            "repo_root": info.get("module_dir", ""),
+            "branch": "" if branch == "HEAD" else branch,
+            "base_branch": str(
+                getattr(cell, "worktree_base_branch", "") or ""
+            ).strip() or "main",
+            "old_gitlink_sha": old_gitlink,
+            "new_gitlink_sha": new_gitlink,
+            "head_sha": head,
+            "zero_gitlink_delta": bool(
+                old_gitlink and old_gitlink == new_gitlink == head
+            ),
+            "remote": "",
+            "remote_base_sha": "",
+            "remote_refs_containing_gitlink": [],
+        }
+
+    async def _nested_submodule_pr_local_gate(self, entry: dict) -> dict:
+        sub_wt = entry.get("worktree_path", "")
+        code, status = await self._git_stdout(sub_wt, "status", "--porcelain")
+        if code != 0:
+            error = self._nested_preflight_error(
+                entry,
+                "STATUS_FAILED",
+                "Could not read submodule status.",
+            )
+            error["phase"] = "nested_submodule_pr_preflight"
+            return error
+        if status.strip():
+            error = self._nested_preflight_error(
+                entry,
+                "DIRTY",
+                "Commit or checkpoint nested submodule changes first.",
+            )
+            error["phase"] = "nested_submodule_pr_preflight"
+            return error
+
+        head = entry.get("head_sha", "")
+        new_gitlink = entry.get("new_gitlink_sha", "")
+        if head and new_gitlink and head != new_gitlink:
+            error = self._nested_preflight_error(
+                entry,
+                "HEAD_MISMATCH",
+                "Submodule HEAD does not match the superproject gitlink.",
+            )
+            error["phase"] = "nested_submodule_pr_preflight"
+            return error
+        if not head or not new_gitlink:
+            return _worktree_error(
+                "nested_submodule_pr_preflight",
+                (
+                    f"Nested submodule PR flow failed for "
+                    f"{entry.get('path', '')}: could not resolve submodule "
+                    "HEAD/gitlink."
+                ),
+                condition="MISSING_HEAD",
+                submodule=entry,
+            )
+        return {"ok": True}
+
+    async def _sync_nested_submodule_main_after_pr(self, entry: dict,
+                                                  merged_sha: str) -> dict:
+        module_dir = entry.get("repo_root", "")
+        sub_wt = entry.get("worktree_path", "")
+        remote = entry.get("remote", "") or "origin"
+        base = entry.get("base_branch", "") or "main"
+        fetched, fetch_error = await self._nested_submodule_fetch_remote(
+            sub_wt,
+            remote,
+        )
+        if not fetched:
+            return _worktree_error(
+                "nested_submodule_pr_sync",
+                f"Nested submodule {entry.get('path', '')} remote sync failed: {fetch_error}",
+                submodule=entry,
+            )
+        remote_base_sha = await self._remote_branch_sha(module_dir, remote, base)
+        if not remote_base_sha:
+            return _worktree_error(
+                "nested_submodule_pr_sync",
+                f"Could not resolve {remote}/{base} after nested submodule PR merge.",
+                submodule=entry,
+            )
+        if merged_sha and merged_sha != remote_base_sha:
+            contains_merged = await self._commit_is_ancestor(
+                module_dir,
+                merged_sha,
+                remote_base_sha,
+            )
+            if not contains_merged:
+                return _worktree_error(
+                    "nested_submodule_pr_sync",
+                    (
+                        f"Nested submodule PR merge commit {merged_sha[:12]} "
+                        f"is not reachable from {remote}/{base}."
+                    ),
+                    submodule=entry,
+                    merged_sha=merged_sha,
+                    remote_base_sha=remote_base_sha,
+                )
+        synced = await self._sync_branch_to_remote(
+            module_dir,
+            remote=remote,
+            branch=base,
+            force=True,
+        )
+        if not synced.get("ok"):
+            return _worktree_error(
+                "nested_submodule_pr_sync",
+                (
+                    f"Nested submodule {entry.get('path', '')} base sync "
+                    f"failed: {synced.get('error', '')}"
+                ).strip(),
+                submodule=entry,
+                base_sync=synced,
+            )
+        return _worktree_ok(
+            "nested_submodule_pr_sync",
+            remote=remote,
+            base_branch=base,
+            remote_base_sha=remote_base_sha,
+            base_sync=synced,
+        )
+
+    async def _merge_nested_submodule_entry_via_pr(
+            self,
+            entry: dict,
+            *,
+            title: str,
+            body: str,
+            merge: bool,
+    ) -> dict:
+        path = entry.get("path", "")
+        module_dir = entry.get("repo_root", "")
+        sub_wt = entry.get("worktree_path", "")
+        branch = entry.get("branch", "")
+        base = entry.get("base_branch", "") or "main"
+        head = entry.get("head_sha", "")
+        new_gitlink = entry.get("new_gitlink_sha", "")
+
+        remote = await self._nested_submodule_remote_name(sub_wt)
+        entry["remote"] = remote
+        fetched, fetch_error = await self._nested_submodule_fetch_remote(
+            sub_wt,
+            remote,
+        )
+        if not fetched:
+            error = self._nested_preflight_error(
+                entry,
+                "REMOTE_UNAVAILABLE",
+                fetch_error,
+            )
+            error["phase"] = "nested_submodule_pr_create"
+            return error
+
+        remote_base_sha = await self._remote_branch_sha(module_dir, remote, base)
+        entry["remote_base_sha"] = remote_base_sha
+        contains, refs = await self._remote_contains_commit(
+            module_dir,
+            remote,
+            new_gitlink,
+        )
+        entry["remote_refs_containing_gitlink"] = refs
+        already_on_main = bool(
+            remote_base_sha
+            and new_gitlink
+            and await self._commit_is_ancestor(module_dir, new_gitlink, remote_base_sha)
+        )
+        if already_on_main:
+            return _worktree_ok(
+                "nested_submodule_pr_merge",
+                **entry,
+                skipped=True,
+                skip_reason="gitlink_already_on_remote_main",
+                reviewed_sha=new_gitlink,
+                merged_sha=remote_base_sha,
+                merged_main_sha=remote_base_sha,
+                already_merged=True,
+                pr={},
+                needs_gitlink_bump=new_gitlink != remote_base_sha,
+            )
+
+        if not branch:
+            return _worktree_error(
+                "nested_submodule_pr_create",
+                (
+                    f"Nested submodule PR flow failed for {path}: submodule "
+                    "HEAD is detached and the gitlink is not already on "
+                    f"{remote}/{base}."
+                ),
+                condition="DETACHED_HEAD",
+                submodule=entry,
+            )
+        if not contains and head != new_gitlink:
+            error = self._nested_preflight_error(
+                entry,
+                "MISSING_FROM_REMOTE",
+                "The gitlink commit is not reachable from the remote and does "
+                "not match the nested submodule branch head.",
+            )
+            error["phase"] = "nested_submodule_pr_create"
+            return error
+
+        pushed = await self._push_nested_submodule_pr_head(
+            module_dir,
+            sub_wt,
+            remote,
+            head,
+            branch,
+        )
+        if not pushed.get("ok"):
+            return _worktree_error(
+                pushed.get("phase", "nested_submodule_pr_push"),
+                (
+                    f"Could not push nested submodule {path} PR branch "
+                    f"{branch} to {remote}: {pushed.get('error', '')}"
+                ).strip(),
+                condition=pushed.get("condition", "PUSH_FAILED"),
+                submodule=entry,
+                push=pushed,
+            )
+
+        pr_result = await self.github_create_or_reuse_pr(
+            sub_wt,
+            branch,
+            base,
+            title=title or f"Merge {path} changes",
+            body=body or "",
+        )
+        if not pr_result.get("ok"):
+            return _worktree_error(
+                "nested_submodule_pr_create",
+                pr_result.get("error", "Failed to create nested submodule PR."),
+                submodule=entry,
+                push=pushed,
+                pr=pr_result,
+            )
+        pr_result["phase"] = "nested_submodule_pr_create"
+
+        if not merge:
+            return _worktree_ok(
+                "nested_submodule_pr_create",
+                **entry,
+                pending=True,
+                pending_submodule_pr=True,
+                reviewed_sha=head,
+                pr=pr_result,
+                push=pushed,
+                message=(
+                    "Nested submodule PR is ready; parent PR creation waits "
+                    "until the nested PR has merged."
+                ),
+            )
+
+        already_merged_pr = bool(pr_result.get("already_merged")) or (
+            str(pr_result.get("state") or "").upper() == "MERGED"
+        )
+        if already_merged_pr:
+            merge_result = _worktree_ok(
+                "nested_submodule_pr_merge",
+                url=pr_result.get("url", ""),
+                number=pr_result.get("number"),
+                head_sha=pr_result.get("head_sha", "") or head,
+                merge_commit_sha=pr_result.get("merge_commit_sha", ""),
+                pending=False,
+                already_merged=True,
+                pr_status=pr_result,
+            )
+        else:
+            head_sha = str(pr_result.get("head_sha") or head).strip()
+            merge_result = await self.github_request_merge_commit_merge(
+                sub_wt,
+                pr_result.get("number") or pr_result.get("url", ""),
+                head_sha,
+                subject=title or f"Merge {path} changes",
+                body=body or "",
+                url=pr_result.get("url", ""),
+                phase="nested_submodule_pr_merge",
+            )
+            if not merge_result.get("ok") and not merge_result.get("pending"):
+                status = merge_result.get("pr_status")
+                if isinstance(status, dict) and str(
+                    status.get("state") or ""
+                ).upper() == "OPEN" and str(
+                    status.get("merge_state") or ""
+                ).upper() not in {"DIRTY", "UNKNOWN"}:
+                    merge_result = await self.github_request_merge_commit_merge(
+                        sub_wt,
+                        pr_result.get("number") or pr_result.get("url", ""),
+                        head_sha,
+                        subject=title or f"Merge {path} changes",
+                        body=body or "",
+                        auto=True,
+                        url=pr_result.get("url", ""),
+                        phase="nested_submodule_pr_merge",
+                    )
+
+        if merge_result.get("pending"):
+            return _worktree_ok(
+                "nested_submodule_pr_merge",
+                **entry,
+                pending=True,
+                pending_submodule_pr=True,
+                reviewed_sha=head,
+                pr=pr_result,
+                merge=merge_result,
+                push=pushed,
+            )
+        if not merge_result.get("ok"):
+            return _worktree_error(
+                "nested_submodule_pr_merge",
+                merge_result.get(
+                    "error",
+                    "Nested submodule PR merge failed.",
+                ),
+                submodule=entry,
+                pr=pr_result,
+                merge=merge_result,
+                push=pushed,
+            )
+
+        merged_sha = str(merge_result.get("merge_commit_sha") or "").strip()
+        sync = await self._sync_nested_submodule_main_after_pr(entry, merged_sha)
+        if not sync.get("ok"):
+            return sync
+        merged_main_sha = str(sync.get("remote_base_sha") or merged_sha).strip()
+        if not merged_main_sha:
+            return _worktree_error(
+                "nested_submodule_pr_sync",
+                "Nested submodule PR merged but remote main SHA is unknown.",
+                submodule=entry,
+                pr=pr_result,
+                merge=merge_result,
+            )
+
+        reviewed_is_ancestor = await self._commit_is_ancestor(
+            module_dir,
+            head,
+            merged_main_sha,
+        )
+        if not reviewed_is_ancestor:
+            return _worktree_error(
+                "nested_submodule_pr_merge",
+                (
+                    f"Nested submodule PR for {path} appears to have been "
+                    "squash/rebase merged: reviewed head "
+                    f"{head[:12]} is not an ancestor of merged main "
+                    f"{merged_main_sha[:12]}. ee PRs must use merge commits."
+                ),
+                condition="UNSUPPORTED_MERGE_STRATEGY",
+                submodule=entry,
+                pr=pr_result,
+                merge=merge_result,
+                reviewed_sha=head,
+                merged_main_sha=merged_main_sha,
+            )
+
+        return _worktree_ok(
+            "nested_submodule_pr_merge",
+            **entry,
+            pending=False,
+            reviewed_sha=head,
+            merged_sha=merged_sha or merged_main_sha,
+            merged_main_sha=merged_main_sha,
+            pr=pr_result,
+            merge=merge_result,
+            push=pushed,
+            sync=sync,
+            needs_gitlink_bump=True,
+        )
+
+    async def merge_nested_submodules_via_pr_for_merge(
+            self,
+            cell,
+            worktree_submodules,
+            *,
+            title: str = "",
+            body: str = "",
+            merge: bool = True,
+    ) -> dict:
+        """Publish configured nested submodule changes through PRs first.
+
+        Zero-gitlink-delta submodules intentionally do not push a branch or
+        create a PR.  Real deltas are pushed as PR heads, merge-commit-merged
+        into the submodule base branch, then the parent worktree receives a
+        mechanical gitlink bump to the merged submodule main SHA.
+        """
+        paths = _normalize_worktree_submodules(worktree_submodules)
+        if not paths:
+            return {"ok": True, "phase": "nested_submodule_pr_merge",
+                    "submodules": []}
+        infos = await self._nested_submodule_infos_for_cell(
+            cell,
+            paths,
+            require_worktree=True,
+            strict=False,
+        )
+        if not infos:
+            return {"ok": True, "phase": "nested_submodule_pr_merge",
+                    "submodules": []}
+
+        merged: list[dict] = []
+        updates: list[dict] = []
+        any_pending = False
+        any_real_delta = False
+        for info in infos:
+            entry = await self._nested_submodule_pr_entry_base(cell, info)
+            local_gate = await self._nested_submodule_pr_local_gate(entry)
+            if not local_gate.get("ok"):
+                return local_gate
+            if entry.get("zero_gitlink_delta"):
+                merged.append({
+                    **entry,
+                    "skipped": True,
+                    "skip_reason": "zero_gitlink_delta",
+                })
+                continue
+
+            any_real_delta = True
+            one = await self._merge_nested_submodule_entry_via_pr(
+                entry,
+                title=title,
+                body=body,
+                merge=merge,
+            )
+            if not one.get("ok"):
+                return {
+                    **one,
+                    "submodules": merged + [one.get("submodule", entry)],
+                }
+            merged.append(one)
+            if one.get("pending"):
+                any_pending = True
+            merged_sha = str(one.get("merged_main_sha") or one.get("merged_sha") or "")
+            if one.get("needs_gitlink_bump") and merged_sha:
+                updates.append({"path": entry.get("path", ""), "sha": merged_sha})
+
+        if any_pending:
+            return {
+                "ok": True,
+                "phase": "nested_submodule_pr_merge" if merge else "nested_submodule_pr_create",
+                "pending": True,
+                "pending_submodule_pr": True,
+                "submodules": merged,
+                "real_delta": any_real_delta,
+            }
+
+        bump = {"ok": True, "committed": False, "paths": []}
+        if updates:
+            bump = await self._commit_superproject_gitlink_bumps(
+                getattr(cell, "worktree_path", "") or "",
+                updates,
+                message="Update nested submodule gitlinks after PR merge",
+            )
+            if not bump.get("ok"):
+                return _worktree_error(
+                    "nested_submodule_gitlink_bump",
+                    bump.get(
+                        "error",
+                        "Nested submodule PR flow could not commit parent gitlink bump.",
+                    ),
+                    gitlink_bump=bump,
+                    submodules=merged,
+                )
+        return {
+            "ok": True,
+            "phase": "nested_submodule_pr_merge" if merge else "nested_submodule_pr_create",
+            "pending": False,
+            "pending_submodule_pr": False,
+            "submodules": merged,
+            "gitlink_bump": bump,
+            "real_delta": any_real_delta,
         }
 
     async def _commit_superproject_gitlink_bumps(self, wt_dir: str,
@@ -7798,6 +8386,114 @@ class WorktreeManager:
             pr_status=status,
         )
 
+    async def github_request_merge_commit_merge(
+            self,
+            worktree_path: str,
+            pr_number: int | str,
+            head_sha: str,
+            subject: str = "",
+            body: str = "",
+            auto: bool = False,
+            url: str = "",
+            phase: str = "pr_merge",
+    ) -> dict:
+        """Request a GitHub merge-commit merge guarded by expected head SHA."""
+        pr_selector = str(pr_number or "").strip()
+        head_sha = str(head_sha or "").strip()
+        if not worktree_path or not pr_selector or not head_sha:
+            return _worktree_error(
+                phase,
+                "Worktree path, PR number, and head SHA are required.",
+                url=url,
+                number=pr_number,
+                head_sha=head_sha,
+                pending=False,
+            )
+
+        cmd = [
+            "pr",
+            "merge",
+            pr_selector,
+            "--merge",
+            "--match-head-commit",
+            head_sha,
+        ]
+        if subject:
+            cmd.extend(["--subject", subject])
+        cmd.extend(["--body", body or ""])
+        if auto:
+            cmd.append("--auto")
+
+        merge = await self._run_gh(worktree_path, *cmd)
+        if merge.get("returncode") != 0:
+            err = merge.get("stderr") or merge.get("stdout") \
+                or "gh pr merge failed"
+            status = await self.github_pr_view(worktree_path, pr_selector)
+            result = _worktree_error(
+                phase,
+                f"Failed to merge-commit PR: {err}",
+                url=url or status.get("url", ""),
+                number=status.get("number", pr_number),
+                head_sha=head_sha,
+                merge_commit_sha=status.get("merge_commit_sha", ""),
+                merge_state=status.get("merge_state", ""),
+                pending=False,
+            )
+            if status.get("ok"):
+                result["pr_status"] = status
+            return result
+
+        status = await self.github_pr_view(worktree_path, pr_selector)
+        if not status.get("ok"):
+            return _worktree_error(
+                phase,
+                "Merge-commit command succeeded, but PR status could not be "
+                f"verified: {status.get('error', 'unknown error')}",
+                url=url,
+                number=pr_number,
+                head_sha=head_sha,
+                pending=False,
+            )
+
+        merged = bool(status.get("merged_at")) \
+            or status.get("state") == "MERGED" \
+            or bool(status.get("merge_commit_sha"))
+        if merged:
+            return _worktree_ok(
+                phase,
+                url=status.get("url") or url,
+                number=status.get("number", pr_number),
+                head_sha=head_sha,
+                merge_commit_sha=status.get("merge_commit_sha", ""),
+                merge_state=status.get("merge_state", ""),
+                pending=False,
+                pr_status=status,
+            )
+
+        if auto:
+            return _worktree_ok(
+                phase,
+                url=status.get("url") or url,
+                number=status.get("number", pr_number),
+                head_sha=head_sha,
+                merge_commit_sha="",
+                merge_state=status.get("merge_state", ""),
+                pending=True,
+                pr_status=status,
+            )
+
+        return _worktree_error(
+            phase,
+            "Merge-commit command completed but the PR is not merged.",
+            url=status.get("url") or url,
+            number=status.get("number", pr_number),
+            head_sha=head_sha,
+            merge_commit_sha=status.get("merge_commit_sha", ""),
+            merge_state=status.get("merge_state", ""),
+            pending=False,
+            pr_status=status,
+        )
+
     async def github_delete_remote_branch(self, worktree_path: str,
                                           remote: str,
                                           branch: str) -> dict:
@@ -7873,16 +8569,49 @@ class WorktreeManager:
             )
 
         submodule_paths = _normalize_worktree_submodules(worktree_submodules)
-        if submodule_paths:
+        ee_pr_submodule_paths = _ee_pr_flow_submodule_paths(submodule_paths)
+        legacy_submodule_paths = _legacy_nested_submodule_paths(
+            submodule_paths,
+            ee_pr_submodule_paths,
+        )
+        if ee_pr_submodule_paths:
+            nested_pr = await self.merge_nested_submodules_via_pr_for_merge(
+                cell,
+                ee_pr_submodule_paths,
+                title=title,
+                body=body,
+                merge=False,
+            )
+            if not nested_pr.get("ok"):
+                return nested_pr
+            if nested_pr.get("pending"):
+                first_pr = {}
+                for sub in nested_pr.get("submodules", []) or []:
+                    pr = sub.get("pr") if isinstance(sub, dict) else {}
+                    if isinstance(pr, dict) and pr.get("url"):
+                        first_pr = pr
+                        break
+                return {
+                    **nested_pr,
+                    "phase": "nested_submodule_pr_create",
+                    "url": first_pr.get("url", ""),
+                    "existing": bool(first_pr.get("existing")),
+                    "pending_ee_pr": True,
+                    "message": (
+                        "Nested submodule PR created/reused; parent PR will be "
+                        "created after the nested PR merges."
+                    ),
+                }
+        if legacy_submodule_paths:
             published = await self.publish_nested_submodule_branches_for_merge(
                 cell,
-                submodule_paths,
+                legacy_submodule_paths,
             )
             if not published.get("ok"):
                 return published
             nested_preflight = await self.nested_submodule_merge_preflight(
                 cell,
-                submodule_paths,
+                legacy_submodule_paths,
             )
             if not nested_preflight.get("ok"):
                 return nested_preflight

@@ -67,6 +67,12 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "push_branch": True,
             "pr_create": True,
             "pr_merge": True,
+            "nested_submodule_pr_preflight": False,
+            "nested_submodule_pr_push": True,
+            "nested_submodule_pr_create": True,
+            "nested_submodule_pr_merge": True,
+            "nested_submodule_pr_sync": True,
+            "nested_submodule_gitlink_bump": False,
         }
         for phase, retryable in expected.items():
             with self.subTest(phase=phase):
@@ -352,6 +358,10 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             "push_branch": True,
             "pr_create": True,
             "pr_merge": True,
+            "nested_submodule_pr_preflight": False,
+            "nested_submodule_pr_create": True,
+            "nested_submodule_pr_merge": True,
+            "nested_submodule_gitlink_bump": False,
         }
         for phase, retryable in phases.items():
             calls = []

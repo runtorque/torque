@@ -195,10 +195,18 @@ or reuse a PR, request a squash merge, fast-forward the local base, then run
 post-merge cleanup. `engineer_create_pr` is create-only; it does not merge or
 clean up.
 
+For configured nested `ee/` changes, `engineer_merge` first opens/reuses and
+merge-commit-merges the `torque-ee` PR, then bumps the parent gitlink to the
+merged `torque-ee` main SHA before the parent Torque PR squash-merges. That ee PR
+is review visibility/history for the same folded review boundary, not a second
+Torque review cycle. Zero-delta `ee/` branches create no ee PR.
+
 Use `force_direct=true` only as an explicit local fallback, for example in a
 repo without a usable GitHub remote/`gh` auth or when the operator deliberately
 wants to bypass PR review. It still runs the usual local merge safety gates
-unless the Engineer also passes the separate force flags.
+unless the Engineer also passes the separate force flags. It never bypasses the
+nested ee PR-first sequence for real ee deltas; if `torque-ee` PR operations are
+unavailable, the merge fails closed rather than direct-pushing ee main.
 
 Group Settings → Agents → Worktree can lock the merge mode for the group:
 **Pull request** rejects `force_direct=true`, **Direct local** bypasses the PR

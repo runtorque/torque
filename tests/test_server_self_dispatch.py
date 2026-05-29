@@ -2134,7 +2134,8 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         def __init__(self, merge_result, direct_result=None,
                      push_result=None, force_retry_result=None,
                      sync_results=None, create_result=None,
-                     base_sha="base789", remote_base_sha=None):
+                     base_sha="base789", remote_base_sha=None,
+                     nested_result=None):
             self.merge_result = merge_result
             self.direct_result = direct_result or {"ok": True, "sha": "direct123"}
             self.push_result = push_result or {
@@ -2146,6 +2147,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.create_result = create_result
             self.base_sha = base_sha
             self.remote_base_sha = remote_base_sha
+            self.nested_result = nested_result
             self.calls = []
             self.sync_calls = 0
             self.remote_base_sha_calls = 0
@@ -2183,15 +2185,15 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "base_sha": self.base_sha,
             }
 
-        async def has_uncommitted_changes(self, _cell):
-            self.calls.append(("dirty",))
+        async def has_uncommitted_changes(self, _cell, **kwargs):
+            self.calls.append(("dirty", kwargs))
             return False
 
-        async def stale_base_info(self, _cell):
-            self.calls.append(("stale_base",))
+        async def stale_base_info(self, _cell, **kwargs):
+            self.calls.append(("stale_base", kwargs))
             return {"stale": False}
 
-        async def check_merge_conflicts(self, _cell):
+        async def check_merge_conflicts(self, _cell, **kwargs):
             self.calls.append(("check_merge",))
             return {"clean": True, "tree_sha": "tree-sha"}
 
@@ -2204,8 +2206,8 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.calls.append(("untracked_overwrite",))
             return []
 
-        async def server_merge(self, cell, message, squash=True):
-            self.calls.append(("server_merge", cell.id, message, squash))
+        async def server_merge(self, cell, message, squash=True, **kwargs):
+            self.calls.append(("server_merge", cell.id, message, squash, kwargs))
             if callable(self.direct_result):
                 return self.direct_result(squash)
             return dict(self.direct_result)
@@ -2326,6 +2328,37 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             if callable(self.merge_result):
                 return self.merge_result(auto)
             return dict(self.merge_result)
+
+        async def merge_nested_submodules_via_pr_for_merge(
+            self,
+            cell,
+            worktree_submodules,
+            *,
+            title="",
+            body="",
+            merge=True,
+        ):
+            self.calls.append(
+                (
+                    "nested_pr_flow",
+                    cell.id,
+                    tuple(worktree_submodules or ()),
+                    title,
+                    body,
+                    merge,
+                )
+            )
+            if callable(self.nested_result):
+                return self.nested_result()
+            if self.nested_result is not None:
+                return dict(self.nested_result)
+            return {
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "pending": False,
+                "submodules": [],
+                "gitlink_bump": {"ok": True, "committed": False, "paths": []},
+            }
 
     class _FakeCreatePrWorktreeManager:
         def __init__(self):
@@ -3122,6 +3155,298 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "Covers TORQUE:497 and regression tests.\n\n"
             "PR: https://github.com/acme/repo/pull/7",
         )
+
+    async def test_worktree_merge_zero_delta_nested_pr_flow_skips_parent_unchanged(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", worktree_submodules=["ee"])
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            nested_result={
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "pending": False,
+                "real_delta": False,
+                "submodules": [{
+                    "path": "ee",
+                    "skipped": True,
+                    "skip_reason": "zero_gitlink_delta",
+                }],
+                "gitlink_bump": {"ok": True, "committed": False, "paths": []},
+            },
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["mode"], "pull_request")
+        self.assertFalse(result["nested_submodules"]["real_delta"])
+        call_names = [call[0] for call in worktree_mgr.calls]
+        self.assertIn("nested_pr_flow", call_names)
+        self.assertIn("push", call_names)
+        self.assertIn("create_pr", call_names)
+        self.assertIn("merge_pr", call_names)
+
+    async def test_worktree_merge_pending_nested_pr_blocks_parent_and_cleanup(self):
+        state, worker, task = self._make_pr_merge_state()
+        state.update_group_settings("g", worktree_submodules=["ee"])
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            nested_result={
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "pending": True,
+                "pending_submodule_pr": True,
+                "real_delta": True,
+                "submodules": [{
+                    "path": "ee",
+                    "branch": "torque/submodules/ee/torque/worker",
+                    "pending": True,
+                    "reviewed_sha": "ee-head",
+                    "pr": {
+                        "url": "https://github.com/acme/torque-ee/pull/9",
+                        "number": 9,
+                        "head_sha": "ee-head",
+                        "state": "OPEN",
+                        "merge_state": "BLOCKED",
+                    },
+                }],
+            },
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            cleanup_calls.append(dict(_kwargs))
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["pending"])
+        self.assertFalse(result["merged"])
+        self.assertEqual(result["pr_url"], "https://github.com/acme/torque-ee/pull/9")
+        self.assertEqual(cleanup_calls, [])
+        call_names = [call[0] for call in worktree_mgr.calls]
+        self.assertIn("nested_pr_flow", call_names)
+        self.assertNotIn("push", call_names)
+        self.assertNotIn("create_pr", call_names)
+        self.assertNotIn("merge_pr", call_names)
+        boundary = task.worktree_boundary
+        self.assertEqual(boundary["status"], "open")
+        nested = boundary["nested_submodules"]
+        self.assertTrue(nested["pending_submodule_pr"])
+        self.assertEqual(
+            nested["submodules"][0]["pr"]["url"],
+            "https://github.com/acme/torque-ee/pull/9",
+        )
+
+    async def test_worktree_merge_nested_pr_resume_after_parent_failure(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", worktree_submodules=["ee"])
+        nested_results = [
+            {
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "pending": False,
+                "real_delta": True,
+                "submodules": [{
+                    "path": "ee",
+                    "reviewed_sha": "ee-reviewed",
+                    "merged_main_sha": "ee-merge",
+                    "pr": {
+                        "url": "https://github.com/acme/torque-ee/pull/9",
+                        "number": 9,
+                        "head_sha": "ee-reviewed",
+                        "state": "MERGED",
+                        "merge_commit_sha": "ee-merge",
+                    },
+                }],
+                "gitlink_bump": {
+                    "ok": True,
+                    "committed": True,
+                    "sha": "parent-gitlink-bump",
+                    "paths": ["ee"],
+                },
+            },
+            {
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "pending": False,
+                "real_delta": True,
+                "submodules": [{
+                    "path": "ee",
+                    "skipped": True,
+                    "skip_reason": "gitlink_already_on_remote_main",
+                    "reviewed_sha": "ee-reviewed",
+                    "merged_main_sha": "ee-merge",
+                    "already_merged": True,
+                }],
+                "gitlink_bump": {"ok": True, "committed": False, "paths": []},
+            },
+        ]
+
+        def next_nested():
+            return nested_results.pop(0)
+
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": False,
+                "phase": "pr_merge",
+                "error": "parent merge failed after ee merged",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "OPEN"},
+            },
+            nested_result=next_nested,
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            first = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+            worktree_mgr.merge_result = {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            }
+            second = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(first["ok"])
+        self.assertEqual(first["phase"], "pr_merge")
+        self.assertTrue(second["ok"], second)
+        nested_calls = [
+            call for call in worktree_mgr.calls if call[0] == "nested_pr_flow"
+        ]
+        self.assertEqual(len(nested_calls), 2)
+        self.assertEqual(
+            second["nested_submodules"]["submodules"][0]["skip_reason"],
+            "gitlink_already_on_remote_main",
+        )
+
+    async def test_worktree_merge_force_direct_runs_nested_pr_before_parent_direct(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
+        state.update_group_settings("g", worktree_submodules=["ee"])
+        worktree_mgr = self._FakePrWorktreeManager(
+            {"ok": True, "phase": "pr_merge"},
+            direct_result={"ok": True, "sha": "direct-after-ee"},
+            nested_result={
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "pending": False,
+                "real_delta": True,
+                "submodules": [{
+                    "path": "ee",
+                    "reviewed_sha": "ee-reviewed",
+                    "merged_main_sha": "ee-merge",
+                    "pr": {
+                        "url": "https://github.com/acme/torque-ee/pull/9",
+                        "number": 9,
+                        "state": "MERGED",
+                    },
+                }],
+                "gitlink_bump": {"ok": True, "committed": True, "paths": ["ee"]},
+            },
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "force_direct": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["sha"], "direct-after-ee")
+        call_names = [call[0] for call in worktree_mgr.calls]
+        self.assertLess(call_names.index("nested_pr_flow"),
+                        call_names.index("server_merge"))
+        server_merge_call = [
+            call for call in worktree_mgr.calls if call[0] == "server_merge"
+        ][-1]
+        self.assertEqual(server_merge_call[4], {})
 
     async def test_worktree_merge_pr_success_finalizes_with_github_squash_sha(self):
         state, worker, task = self._make_pr_merge_state()

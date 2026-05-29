@@ -141,6 +141,14 @@ it pushes the worktree branch, creates or reuses a GitHub pull request, and
 requests a squash merge into the base branch. Torque then verifies the merged
 base commit locally before it runs cleanup.
 
+If the branch carries a real configured nested submodule delta (the production
+case is `ee/` / `torque-ee`), Torque now ships that nested change through its own
+PR **before** the parent PR: it pushes the nested branch, opens/reuses the nested
+PR, requests a **merge-commit** merge there, syncs nested `main`, and commits a
+mechanical parent gitlink bump to the merged nested-main SHA. Parent Torque PRs
+still squash-merge. Branches with zero nested gitlink delta do not push a nested
+branch and do not create a nested PR.
+
 **UI**: right-click the agent → **Merge Worktree**.
 
 **Engineer / CLI**: `engineer_merge(...)` (or `torque worktree merge ...`).
@@ -150,7 +158,9 @@ where the GitHub PR flow is not appropriate. Pass `force_direct=true` to
 `engineer_merge` to bypass PR creation and run the legacy local merge path. That
 fallback still honors the normal clean-worktree, task-boundary, conflict,
 sibling-divergence, and stale-base safety gates unless you also pass the
-separate force flags.
+separate force flags. For real `ee/` deltas, `force_direct=true` does **not**
+direct-push `torque-ee` main; Torque still runs the nested PR-first sequence and
+fails closed if that path is unavailable.
 
 Torque tracks the merge result and verifies it landed:
 
@@ -203,6 +213,12 @@ V1 intentionally does **not** run background PR polling. Watch GitHub or rerun
 `engineer_merge` after the checks/reviews pass; the rerun reuses the open PR,
 refreshes metadata, and finalizes local base sync plus cleanup only after the
 PR reports a merge commit SHA.
+
+Nested `ee/` PRs are folded into the existing Torque review boundary. A pending
+nested PR blocks parent PR creation/merge and cleanup; rerun `engineer_merge`
+after it is mergeable. If the nested PR already merged but the parent did not,
+the rerun detects the merged nested-main SHA, avoids creating a duplicate nested
+PR, refreshes the parent gitlink if needed, and resumes the parent merge.
 
 ### When merges conflict
 
