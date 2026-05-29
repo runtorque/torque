@@ -2891,6 +2891,34 @@ def _resolve_visible_agent(state, caller_kind: str, caller_id: str,
     return agent_id, ""
 
 
+def _tombstoned_merge_target_visible_to_caller(
+    state,
+    caller_kind: str,
+    caller_id: str,
+    agent_id: str,
+) -> bool:
+    """Allow post-success merge recovery for a caller's just-closed worker."""
+    cell = state.agents.get(str(agent_id or "").strip())
+    if not cell or getattr(cell, "cell_type", "") != "agent":
+        return False
+    if not _agent_is_tombstoned(state, cell):
+        return False
+    caller = state.agents.get(str(caller_id or "").strip())
+    if not caller or getattr(caller, "cell_type", "") != "agent":
+        return False
+    if str(getattr(cell, "group", "") or "").strip() != str(
+        getattr(caller, "group", "") or ""
+    ).strip():
+        return False
+    if caller_kind == "engineer":
+        return str(getattr(cell, "owner_engineer_id", "") or "").strip() == str(
+            caller_id or ""
+        ).strip() or str(
+            getattr(cell, "created_by_engineer_id", "") or ""
+        ).strip() == str(caller_id or "").strip()
+    return False
+
+
 def _worktree_path_args(args: dict) -> tuple[str, str]:
     path = str(args.get("worktree_path", "") or "").strip()
     branch = str(args.get("branch", "") or args.get("worktree_branch", "") or "").strip()
@@ -6866,6 +6894,53 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         driverless = _has_path_target_args(args)
         cell = None
         agent_id = ""
+        force_sibling_divergence = bool(args.get("force"))
+        force_stale_base = bool(
+            args.get("force_stale_base") or args.get("force")
+        )
+
+        async def _try_post_success_agent_recovery(agent_ident: str):
+            recovered_agent_id = _resolve_agent_including_tombstoned(
+                real_state,
+                agent_ident,
+            )
+            if not recovered_agent_id:
+                return None
+            if not _tombstoned_merge_target_visible_to_caller(
+                real_state,
+                caller_kind,
+                caller_id,
+                recovered_agent_id,
+            ):
+                return None
+            recovery_payload = {"cmd": "worktree_merge", "id": recovered_agent_id}
+            if "close_agent_on_merge" in args:
+                recovery_payload["close_agent_on_merge"] = bool(
+                    args.get("close_agent_on_merge")
+                )
+            if "remove_worktree_on_merge" in args:
+                recovery_payload["remove_worktree_on_merge"] = bool(
+                    args.get("remove_worktree_on_merge")
+                )
+            if "auto_move_to_done" in args:
+                recovery_payload["auto_move_to_done"] = bool(
+                    args.get("auto_move_to_done")
+                )
+            if force_stale_base:
+                recovery_payload["force_stale_base"] = True
+            if force_sibling_divergence:
+                recovery_payload["force"] = True
+            recovered = await handle_command(recovery_payload)
+            if recovered and recovered.get("ok"):
+                recovered_cell = state.agents.get(recovered_agent_id)
+                return json.dumps(
+                    _worktree_merge_success_payload(
+                        recovered,
+                        recovered_cell,
+                    )
+                ), False
+            return None
+
         if driverless:
             path_payload = _driverless_payload_from_args(
                 args,
@@ -6889,9 +6964,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 real_state, caller_kind, caller_id, agent_ident
             )
             if not agent_id:
+                recovered = await _try_post_success_agent_recovery(agent_ident)
+                if recovered:
+                    return recovered
                 return agent_error, True
             cell = state.agents.get(agent_id)
             if not cell or not cell.worktree_path:
+                recovered = await _try_post_success_agent_recovery(agent_ident)
+                if recovered:
+                    return recovered
                 return "Agent has no worktree", True
             merge_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
             merge_base_branch = str(
@@ -6899,10 +6980,6 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             ).strip()
 
         # First check for conflicts / merge boundary eligibility
-        force_sibling_divergence = bool(args.get("force"))
-        force_stale_base = bool(
-            args.get("force_stale_base") or args.get("force")
-        )
         if driverless:
             check_payload = {
                 "cmd": "worktree_check_merge",

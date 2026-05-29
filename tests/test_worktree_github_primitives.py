@@ -946,6 +946,29 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["phase"], "remote_base_sync")
         self.assertEqual(remaining, [])
 
+    async def test_remote_branch_sha_uses_ls_remote_without_updating_refs(self):
+        fake, _calls, remaining = self._fake_exec([
+            (
+                [
+                    "git", "-C", "/repo",
+                    "ls-remote", "origin", "refs/heads/main",
+                ],
+                FakeProcess(stdout="remote_sha\trefs/heads/main\n"),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_remote_branch_sha(
+                "/repo", "origin", "main"
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["phase"], "remote_base_ground_truth")
+        self.assertEqual(result["sha"], "remote_sha")
+        self.assertEqual(result["remote_sha"], "remote_sha")
+        self.assertEqual(remaining, [])
+
     def _gh_pr_view_matcher(self, selector):
         def matcher(cmd, kwargs):
             return (
