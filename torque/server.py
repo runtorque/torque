@@ -1853,15 +1853,13 @@ def _latest_merged_pr_boundary_for_post_success(
     repo_root: str = "",
     branch: str = "",
 ) -> tuple[object | None, dict, dict]:
-    """Find the latest merged PR boundary matching an agent or branch."""
+    """Find a merged PR boundary only when it is still the latest branch work."""
     aid = str(aid or "").strip()
     repo_root = str(repo_root or "").strip()
     branch = str(branch or "").strip()
-    candidates: list[tuple[tuple[str, str, str], object, dict, dict]] = []
+    candidates: list[tuple[tuple[str, str], object, dict, dict]] = []
     for task in state.board_tasks.values():
         boundary = task_boundary(task)
-        if str(boundary.get("status") or "").strip() != "merged":
-            continue
         boundary_repo_root = str(boundary.get("repo_root") or "").strip()
         boundary_branch = str(boundary.get("branch") or "").strip()
         if repo_root and boundary_repo_root != repo_root:
@@ -1875,15 +1873,7 @@ def _latest_merged_pr_boundary_for_post_success(
         if aid and aid not in {recorded_by, task_agent_id}:
             continue
         pr = boundary_pr_metadata(boundary)
-        merge_sha = str(
-            boundary.get("merge_commit_sha")
-            or pr.get("merge_commit_sha")
-            or ""
-        ).strip()
-        if not merge_sha or not pr:
-            continue
         sort_key = (
-            str(boundary.get("merged_at") or ""),
             str(boundary.get("recorded_at") or ""),
             str(getattr(task, "updated_at", "") or ""),
         )
@@ -1892,6 +1882,15 @@ def _latest_merged_pr_boundary_for_post_success(
         return None, {}, {}
     candidates.sort(key=lambda item: item[0])
     _sort_key, task, boundary, pr = candidates[-1]
+    if str(boundary.get("status") or "").strip() != "merged":
+        return None, {}, {}
+    merge_sha = str(
+        boundary.get("merge_commit_sha")
+        or pr.get("merge_commit_sha")
+        or ""
+    ).strip()
+    if not merge_sha or not pr:
+        return None, {}, {}
     return task, boundary, pr
 
 

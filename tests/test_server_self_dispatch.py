@@ -3343,6 +3343,82 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "remote_base_sync",
         )
 
+    async def test_worktree_merge_pr_old_merged_boundary_does_not_mask_new_open_work(self):
+        state, worker, task = self._make_pr_merge_state()
+        old = state.board_add_task(
+            "Previously merged work",
+            "g",
+            lane="Done",
+            id="TORQUE:489",
+            agent_id="",
+        )
+        old.worktree_boundary = {
+            "version": "1",
+            "branch": worker.worktree_branch,
+            "repo_root": worker.worktree_repo_root,
+            "base_branch": worker.worktree_base_branch,
+            "commit_sha": "oldhead",
+            "kind": "marker",
+            "status": "merged",
+            "recorded_at": "2026-05-19T17:00:00+00:00",
+            "recorded_by_agent_id": worker.id,
+            "message": "",
+            "superseded_by_task_id": "",
+            "merged_at": "2026-05-19T17:30:00+00:00",
+            "merge_commit_sha": "oldmerge",
+            "pr": {
+                "provider": "github",
+                "remote": "origin",
+                "base_branch": worker.worktree_base_branch,
+                "head_branch": worker.worktree_branch,
+                "url": "https://github.com/acme/repo/pull/1",
+                "number": 1,
+                "state": "merged",
+                "merge_commit_sha": "oldmerge",
+            },
+        }
+        # The active task is newer work on the reused worker branch. An early
+        # PR-flow failure must not be converted into success for PR #1.
+        task.worktree_boundary["recorded_at"] = "2026-05-19T18:00:00+00:00"
+        task.worktree_boundary["commit_sha"] = "newhead"
+        worktree_mgr = self._FakePrWorktreeManager(
+            {"ok": False, "phase": "pr_merge", "error": "must not merge"},
+            base_sha="oldmerge",
+            remote_base_sha="oldmerge",
+        )
+
+        async def fake_preflight(_worktree_path):
+            return {
+                "ok": False,
+                "phase": "github_preflight",
+                "error": "gh unavailable",
+            }
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            self.fail("cleanup must not run for a masked old-boundary success")
+
+        worktree_mgr.github_preflight = fake_preflight
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["phase"], "github_preflight")
+        self.assertIn("gh unavailable", result["error"])
+        self.assertEqual(task.worktree_boundary["status"], "open")
+        self.assertEqual(old.worktree_boundary["status"], "merged")
+        self.assertEqual(worktree_mgr.sync_calls, 0)
+
     async def test_worktree_merge_pr_post_cleanup_error_is_warning(self):
         state, worker, task = self._make_pr_merge_state()
         worktree_mgr = self._FakePrWorktreeManager({
