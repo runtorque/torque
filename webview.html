@@ -780,6 +780,11 @@
           <option value="prefer_same_agent">Prefer same worker</option>
           <option value="prefer_fresh_agent">Prefer fresh worker</option>
         </select>
+        <label class="gs-checkbox">
+          <input id="gs-engineer-behavior-requires-user-approval" type="checkbox">
+          Require user approval for Engineer behavior overlays
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, architect-approved changes to Engineer Dynamic Behavior overlays create a user approval task with a rendered diff before they apply.">?</span>
+        </label>
         <label>Notification noise
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes in System → Digest settings switch the preset to Custom.">?</span>
         </label>
@@ -1826,6 +1831,23 @@
   </div>
 </div>
 
+<!-- Dynamic Behavior user approval modal -->
+<div class="overlay behavior-overlay-approval-modal" id="modal-behavior-approval">
+  <div class="modal modal-tall">
+    <h3>Review Behavior overlay diff</h3>
+    <div id="behavior-approval-body" class="behavior-overlay-approval-body">
+      <div class="behavior-overlay-diff-placeholder">Loading required diff…</div>
+    </div>
+    <label for="behavior-approval-note">Note (optional)</label>
+    <textarea id="behavior-approval-note" rows="2" placeholder="Optional approval/rejection note"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeBehaviorOverlayApprovalModal()">Cancel</button>
+      <button id="behavior-approval-reject-btn" class="btn-cancel" disabled onclick="behaviorOverlayUserReject()">Reject</button>
+      <button id="behavior-approval-approve-btn" class="btn-primary" disabled onclick="behaviorOverlayUserApprove()">Approve</button>
+    </div>
+  </div>
+</div>
+
 <!-- JS (order matters: constants → compact → ws → keybindings → render → commands/native/markdown → modals → board core/modules → main) -->
 <!-- Enterprise frontend injection seam. Community builds keep this manifest
      empty, so remote/EE panels fail closed unless enterprise assets replace or
@@ -1871,6 +1893,7 @@
 <script src="/static/js/events.js"></script>
 <script src="/static/js/status_bar.js"></script>
 <script src="/static/js/context.js"></script>
+<script src="/static/js/behavior_overlay.js"></script>
 <script src="/static/js/agent_panel.js"></script>
 <script src="/static/js/chat.js"></script>
 <script src="/static/js/supervisor.js"></script>

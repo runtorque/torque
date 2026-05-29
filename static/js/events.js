@@ -300,6 +300,8 @@ function _eventsGetAttentionItems() {
     if (grp && t.group !== grp) continue;
     var parent = _eventsAskParentTask(t);
     var isArchitectAsk = t.labels.indexOf('architect-ask') >= 0;
+    var isBehaviorApproval = typeof behaviorOverlayApprovalTask === 'function'
+      && behaviorOverlayApprovalTask(t);
     var architectId = t.reply_agent_id || t.created_by_architect_id || '';
     var agent = isArchitectAsk && state && state.agents
       ? (state.agents[architectId] || null)
@@ -313,6 +315,10 @@ function _eventsGetAttentionItems() {
       group: t.group,
       message: t.task || '',
       description: t.description || '',
+      behavior_overlay_approval: isBehaviorApproval,
+      behavior_overlay_proposal_id: (
+        isBehaviorApproval && typeof behaviorOverlayProposalIdFromTask === 'function'
+      ) ? behaviorOverlayProposalIdFromTask(t) : '',
       timestamp: t.created_at ? new Date(t.created_at).getTime() / 1000 : 0,
       parent_agent_id: isArchitectAsk ? architectId : (parent ? (parent.agent_id || '') : ''),
       parent_task_title: parent ? (parent.task || '') : '',
@@ -825,6 +831,29 @@ function _renderAttentionCard(item) {
   html += '<button class="events-dismiss-btn" onclick="event.stopPropagation();eventsDismiss(\'' + item.id + '\')" title="Dismiss">\u00D7</button>';
 
   if (item.type === 'ask') {
+    if (item.behavior_overlay_approval) {
+      var proposal = typeof _behaviorOverlayProposal === 'function'
+        ? (_behaviorOverlayProposal(item.behavior_overlay_proposal_id) || {})
+        : {};
+      html += '<div class="events-attention-label">&#x1F9ED; Behavior overlay approval</div>';
+      html += '<div class="events-attention-message">' + esc(item.message) + '</div>';
+      if (proposal.agent_id && typeof _behaviorOverlayName === 'function') {
+        html += '<div class="events-attention-context">Target: '
+          + esc(_behaviorOverlayName(proposal.agent_id)) + '</div>';
+      }
+      if (proposal.rationale) {
+        html += '<div class="events-attention-context-label">Rationale</div>';
+        html += '<div class="events-attention-context">' + esc(proposal.rationale) + '</div>';
+      } else if (item.description) {
+        html += '<div class="events-attention-context">' + esc(item.description) + '</div>';
+      }
+      html += '<div class="events-attention-actions">';
+      html += '<button class="btn-primary btn-sm" onclick="openBehaviorOverlayApprovalModal(\''
+        + esc(item.id).replace(/'/g, "\\'") + '\')">Review behavior diff</button>';
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
     var draft = _eventsResolveDrafts[item.id] || '';
     var askLabel = item.is_architect_ask ? 'Architect asks' : 'Question';
     html += '<div class="events-attention-label">&#x2753; ' + esc(askLabel) + '</div>';

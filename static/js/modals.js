@@ -2234,6 +2234,8 @@ function _showGroupSettings(group, data) {
     ws.same_agent_follow_up_preference,
     'balanced'
   );
+  document.getElementById('gs-engineer-behavior-requires-user-approval').checked =
+    !!s.engineer_behavior_requires_user_approval;
   _setSelectValue(
     'gs-engineer-digest-verbosity',
     ws.digest_verbosity,
@@ -2400,6 +2402,7 @@ function submitGroupSettings() {
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     guidance_hint_cadence: Number.isNaN(guidanceHintCadence) ? 4 : guidanceHintCadence,
+    engineer_behavior_requires_user_approval: document.getElementById('gs-engineer-behavior-requires-user-approval').checked,
     notifications: document.getElementById('gs-notifications').checked,
     notify_on_finish: document.getElementById('gs-notify-finish').checked,
     notify_on_error: document.getElementById('gs-notify-error').checked,

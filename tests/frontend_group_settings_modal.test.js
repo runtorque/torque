@@ -613,6 +613,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       agent_model: "gpt-5.1",
       agent_reasoning_effort: "minimal",
       engineer_merge_mode: "engineer-choice",
+      engineer_behavior_requires_user_approval: true,
       worktree_merge_cleanup: "close_remove",
       worktree_merge_preserve_diff: true
     },
@@ -684,6 +685,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-default-worker-concurrency').value, '4');
   assert.equal(ensure('gs-engineer-wave-size-preference').value, 'large');
   assert.equal(ensure('gs-engineer-same-agent-follow-up-preference').value, 'prefer_same_agent');
+  assert.equal(ensure('gs-engineer-behavior-requires-user-approval').checked, true);
   assert.equal(ensure('gs-engineer-notification-preset').value, 'custom');
   assert.equal(ensure('gs-engineer-digest-verbosity').value, 'detailed');
   assert.equal(ensure('gs-engineer-escalation-style').value, 'keep_moving');
@@ -1217,6 +1219,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-engineer-default-worker-concurrency').value = '3';
   ensure('gs-engineer-wave-size-preference').value = 'small';
   ensure('gs-engineer-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
+  ensure('gs-engineer-behavior-requires-user-approval').checked = true;
   ensure('gs-engineer-digest-verbosity').value = 'compact';
   ensure('gs-engineer-escalation-style').value = 'ask_early';
   ensure('gs-engineer-push-interval').value = '120';
@@ -1265,6 +1268,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].settings.notify_on_finish, false);
   assert.equal(sandbox.sendCalls[0].settings.notify_on_error, true);
   assert.equal(sandbox.sendCalls[0].settings.notify_on_attention, false);
+  assert.equal(sandbox.sendCalls[0].settings.engineer_behavior_requires_user_approval, true);
   assert.deepEqual(
     JSON.parse(JSON.stringify(sandbox.sendCalls[0].settings.worktree_symlinks)),
     ['etl/**/node_modules'],

@@ -61,6 +61,7 @@ var _AGENT_PANEL_MCP_DEFAULT_HOOK = 'PostToolUse';
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
+    { key: 'behavior', label: 'Behavior' },
     { key: 'journal', label: 'Journal' },
     { key: 'hired_engineers', label: 'Hired engineers' },
     { key: 'messages', label: 'Messages' },
@@ -68,6 +69,7 @@ var _agentPanelTabSpecByKind = {
   ],
   engineer: [
     { key: 'journal', label: 'Journal' },
+    { key: 'behavior', label: 'Behavior' },
     { key: 'events', label: 'Events' },
     { key: 'queued', label: 'Queued' },
     { key: 'worklog', label: 'Completed' },
@@ -2957,7 +2959,11 @@ function _renderEngineerWorklog(agent) {
 function _agentPanelTabRenderParts(agent, kind, activeTab) {
   var parts = { bodyHtml: '', headerRightHtml: '' };
   if (kind === 'engineer') {
-    if (activeTab === 'events') {
+    if (activeTab === 'behavior') {
+      parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
+        ? renderBehaviorOverlayTab(agent)
+        : '<div class="agent-panel-empty">Behavior overlay UI is unavailable.</div>';
+    } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);
     } else if (activeTab === 'queued') {
@@ -2978,7 +2984,11 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     return parts;
   }
   if (kind === 'architect') {
-    if (activeTab === 'hired_engineers') {
+    if (activeTab === 'behavior') {
+      parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
+        ? renderBehaviorOverlayTab(agent)
+        : '<div class="agent-panel-empty">Behavior overlay UI is unavailable.</div>';
+    } else if (activeTab === 'hired_engineers') {
       parts.bodyHtml = _agentPanelArchitectHiredEngineers(agent);
     } else if (activeTab === 'messages') {
       parts.bodyHtml = _agentPanelArchitectMessages(agent);

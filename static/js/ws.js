@@ -434,6 +434,10 @@ function connect() {
       if (typeof renderActivePanel === 'function') renderActivePanel();
       return;
     }
+    if (typeof behaviorOverlayReceiveMessage === 'function'
+        && behaviorOverlayReceiveMessage(msg)) {
+      return;
+    }
     if (msg.type === 'state') {
       _handleFullState(msg);
     } else if (msg.type === 'delta') {
@@ -867,6 +871,19 @@ function _handleFullState(msg) {
   if (!state.engineer_streams) state.engineer_streams = {};
   if (!state.engineer_session_maps) state.engineer_session_maps = {};
   if (!state.mcp_calls) state.mcp_calls = {};
+  if (typeof behaviorOverlayNormalizeState === 'function') {
+    behaviorOverlayNormalizeState();
+  } else {
+    if (!state.behavior_overlay_active || typeof state.behavior_overlay_active !== 'object') {
+      state.behavior_overlay_active = {};
+    }
+    if (!state.behavior_overlay_proposals || typeof state.behavior_overlay_proposals !== 'object') {
+      state.behavior_overlay_proposals = {};
+    }
+    if (!state.behavior_overlay_versions || typeof state.behavior_overlay_versions !== 'object') {
+      state.behavior_overlay_versions = {};
+    }
+  }
   if (!state.agent_message_history) state.agent_message_history = {};
   if (!state.direct_messages_by_agent) state.direct_messages_by_agent = {};
   state.agent_peer_threads = _sortAgentPeerThreadMap(state.agent_peer_threads || {});
@@ -1607,6 +1624,16 @@ function _deltaSurfaceInvalidations(ops, hints) {
         } else if (!_dpArchId) {
           // No way to tell which architect this belongs to — be safe and
           // refresh. (Preserves legacy behavior for ops missing the field.)
+          _markSurface(flags, 'engineer');
+        }
+        break;
+      }
+      case 'behavior_overlay_version_append':
+      case 'behavior_overlay_active_update':
+      case 'behavior_overlay_proposal_upsert':
+      case 'behavior_overlay_proposal_resolve': {
+        if (typeof behaviorOverlayDeltaInvalidatesFocusedPanel === 'function'
+            && behaviorOverlayDeltaInvalidatesFocusedPanel(op)) {
           _markSurface(flags, 'engineer');
         }
         break;
@@ -3137,6 +3164,15 @@ function _applyDelta(ops) {
 
       case 'pending_hire_resolve':
         if (state.pending_hires) delete state.pending_hires[op.id];
+        break;
+
+      case 'behavior_overlay_version_append':
+      case 'behavior_overlay_active_update':
+      case 'behavior_overlay_proposal_upsert':
+      case 'behavior_overlay_proposal_resolve':
+        if (typeof behaviorOverlayApplyDelta === 'function') {
+          behaviorOverlayApplyDelta(op);
+        }
         break;
 
       case 'provider_usage': {

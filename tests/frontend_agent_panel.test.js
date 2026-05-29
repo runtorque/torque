@@ -73,7 +73,7 @@ function createHarness() {
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/agent_panel.js');
+  loadScript(context, 'static/js/behavior_overlay.js');
   loadScript(context, 'static/js/agent_panel.js');
   return {
     context,
@@ -165,11 +165,297 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /pytest/);
 });
 
+test('Behavior tab renders overlay editor, proposals, and version timeline', () => {
+  const { context, panel, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.behavior_overlay_active = {
+    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-2' },
+  };
+  context.state.behavior_overlay_versions = {
+    'eng-1': [
+      { id: 'bov-2', agent_id: 'eng-1', version_number: 2, text_sha256: 'abcdef123456', text_bytes: 12, rationale: 'Current', created_at: 10 },
+      { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: '0000000000', text_bytes: 0, rationale: 'Seed', created_at: 1 },
+    ],
+  };
+  context.state.behavior_overlay_proposals = {
+    'bop-1': {
+      id: 'bop-1',
+      agent_id: 'eng-1',
+      status: 'proposed',
+      next_actor_kind: 'architect',
+      approval_route: 'architect',
+      proposed_text_sha256: 'feedface1234',
+      proposed_text_bytes: 18,
+      rationale: 'Improve cadence',
+    },
+  };
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Behavior overlay/);
+  assert.match(panel.innerHTML, /Proposed behavior text/);
+  assert.match(panel.innerHTML, /Open proposals for this agent/);
+  assert.match(panel.innerHTML, /Improve cadence/);
+  assert.match(panel.innerHTML, /Version timeline/);
+  assert.match(panel.innerHTML, /Request rollback/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'behavior_overlay_read', agent_id: 'eng-1', seed: true },
+    { cmd: 'behavior_overlay_versions', agent_id: 'eng-1', limit: 50 },
+    { cmd: 'behavior_overlay_proposals', status_filter: '', limit: 200 },
+  ]);
+});
+
+test('Behavior proposal response does not refetch proposals on focused rerender', () => {
+  const { context, panel, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.behavior_overlay_active = {
+    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-1' },
+  };
+  context.state.behavior_overlay_versions = {
+    'eng-1': [
+      { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: 'aaaa', text_bytes: 4, rationale: 'Seed', created_at: 1 },
+    ],
+  };
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
+
+  context.renderAgentPanel();
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_proposals',
+    proposals: [{
+      id: 'bop-loop',
+      agent_id: 'eng-1',
+      status: 'proposed',
+      next_actor_kind: 'architect',
+      proposed_text_sha256: 'bbbb',
+      proposed_text_bytes: 9,
+      rationale: 'No fetch loop',
+    }],
+  });
+
+  assert.equal(context.state.behavior_overlay_proposals['bop-loop'].rationale, 'No fetch loop');
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+});
+
+test('Architect Behavior tab renders hired-engineer governance controls', () => {
+  const { context, panel } = createHarness();
+  context.state.group_settings = {
+    alpha: { engineer_behavior_requires_user_approval: true },
+  };
+  context.state.agents = {
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent', hired_by_architect_id: 'arch-1' },
+  };
+  context.focusedItemId = 'arch-1';
+  context.state.behavior_overlay_active = {
+    'arch-1': { agent_id: 'arch-1', active_version_id: 'bov-a' },
+    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-e' },
+  };
+  context.state.behavior_overlay_versions = {
+    'eng-1': [
+      { id: 'bov-e', agent_id: 'eng-1', version_number: 2, text_sha256: 'eeee', text_bytes: 5, rationale: 'Current', created_at: 2 },
+      { id: 'bov-old', agent_id: 'eng-1', version_number: 1, text_sha256: 'oooo', text_bytes: 3, rationale: 'Prior', created_at: 1 },
+    ],
+  };
+  context.state.behavior_overlay_proposals = {
+    'bop-2': {
+      id: 'bop-2',
+      agent_id: 'eng-1',
+      status: 'proposed',
+      next_actor_kind: 'architect',
+      approval_route: 'architect_then_user',
+      proposed_text_sha256: '0123456789abcdef',
+      proposed_text_bytes: 42,
+      rationale: 'Architect direct edit',
+    },
+  };
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.architect = 'behavior';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Hired engineer governance/);
+  assert.match(panel.innerHTML, /Builder/);
+  assert.match(panel.innerHTML, /architect → user approval required/);
+  assert.match(panel.innerHTML, /Direct edit hired engineer overlay/);
+  assert.match(panel.innerHTML, /Architect direct edit/);
+  assert.match(panel.innerHTML, /Approve/);
+  assert.match(panel.innerHTML, /Reject/);
+  assert.match(panel.innerHTML, /Request rollback/);
+});
+
+test('active behavior deltas invalidate cached full text before submit', () => {
+  const { context, sendCalls } = createHarness();
+  context.state.agents = {
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+  };
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-1' },
+    version: { id: 'bov-1', agent_id: 'eng-1', version_number: 1, text_sha256: 'oldhash', text_bytes: 3 },
+    text: 'old',
+  });
+
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_version_append',
+    id: 'bov-2',
+    agent_id: 'eng-1',
+    version_number: 2,
+    text_sha256: 'newhash',
+    text_bytes: 3,
+  });
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_active_update',
+    agent_id: 'eng-1',
+    active_version_id: 'bov-2',
+  });
+  context.behaviorOverlaySubmitDraft('own', 'eng-1', 'eng-1', 'engineer', false);
+
+  assert.equal(sendCalls.some((call) => call.cmd === 'behavior_overlay_propose'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'behavior_overlay_read',
+    agent_id: 'eng-1',
+    seed: true,
+  });
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-2' },
+    version: { id: 'bov-2', agent_id: 'eng-1', version_number: 2, text_sha256: 'newhash', text_bytes: 3 },
+    text: 'new',
+  });
+  context.behaviorOverlaySubmitDraft('own', 'eng-1', 'eng-1', 'engineer', false);
+
+  const proposal = sendCalls[sendCalls.length - 1];
+  assert.equal(proposal.cmd, 'behavior_overlay_propose');
+  assert.equal(proposal.text, 'new');
+  assert.equal(proposal.expected_base_version_id, 'bov-2');
+});
+
+test('behavior approval modal renders diff before enabling user actions', () => {
+  const { context, sendCalls } = createHarness();
+  const elements = {};
+  function fakeClassList() {
+    const set = new Set();
+    return {
+      add(name) { set.add(name); },
+      remove(name) { set.delete(name); },
+      contains(name) { return set.has(name); },
+    };
+  }
+  function ensure(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        innerHTML: '',
+        value: '',
+        disabled: false,
+        classList: fakeClassList(),
+      };
+    }
+    return elements[id];
+  }
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    return ensure(id);
+  };
+  context.openNestedModal = function(id) { ensure(id).classList.add('visible'); };
+  context.closeNestedModal = function(id) { ensure(id).classList.remove('visible'); return true; };
+  context.state.agents = {
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
+  };
+  context.state.board_tasks = {
+    'TORQUE:1': {
+      id: 'TORQUE:1',
+      task: 'Dynamic Behavior overlay approval',
+      lane: 'Backlog',
+      labels: ['torque:human', 'behavior-overlay-approval', 'proposal:bop-1'],
+    },
+  };
+  context.state.behavior_overlay_proposals = {
+    'bop-1': {
+      id: 'bop-1',
+      agent_id: 'eng-1',
+      target_kind: 'engineer',
+      base_version_id: 'bov-1',
+      proposed_by_kind: 'architect',
+      proposed_by_agent_id: 'arch-1',
+      proposed_text_sha256: 'hash-123',
+      status: 'approved',
+      next_actor_kind: 'user',
+      rationale: 'Tune review cadence',
+      lint_warning_count: 1,
+    },
+  };
+
+  context.openBehaviorOverlayApprovalModal('TORQUE:1');
+
+  assert.equal(ensure('behavior-approval-approve-btn').disabled, true);
+  assert.equal(ensure('behavior-approval-reject-btn').disabled, true);
+  assert.match(ensure('behavior-approval-body').innerHTML, /Loading required diff/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
+    { cmd: 'behavior_overlay_proposals', status_filter: '', limit: 200 },
+    { cmd: 'behavior_overlay_diff', proposal_id: 'bop-1' },
+  ]);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_diff',
+    proposal: {
+      id: 'bop-1',
+      agent_id: 'eng-1',
+      target_kind: 'engineer',
+      base_version_id: 'bov-1',
+      proposed_by_kind: 'architect',
+      proposed_by_agent_id: 'arch-1',
+      proposed_text_sha256: 'hash-123',
+      rationale: 'Tune review cadence',
+      lint_warnings: [{ code: 'possible_mcp_contract_override', message: 'Check wording', excerpt: 'do not call torque_done' }],
+      status: 'approved',
+      next_actor_kind: 'user',
+    },
+    from_version: { id: 'bov-1', agent_id: 'eng-1' },
+    to_proposal: { id: 'bop-1', agent_id: 'eng-1', proposed_text_sha256: 'hash-123' },
+    diff: '--- bov-1\n+++ bop-1\n@@ -1 +1 @@\n-old\n+new\n',
+  });
+
+  assert.equal(ensure('behavior-approval-approve-btn').disabled, false);
+  assert.equal(ensure('behavior-approval-reject-btn').disabled, false);
+  assert.match(ensure('behavior-approval-body').innerHTML, /Rendered unified diff/);
+  assert.match(ensure('behavior-approval-body').innerHTML, /diff-line-del/);
+  assert.match(ensure('behavior-approval-body').innerHTML, /diff-line-add/);
+  ensure('behavior-approval-note').value = 'Looks good';
+  context.behaviorOverlayUserApprove();
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'behavior_overlay_user_approve',
+    proposal_id: 'bop-1',
+    expected_proposed_text_sha256: 'hash-123',
+    expected_base_version_id: 'bov-1',
+    note: 'Looks good',
+  });
+});
+
 test('agent panel folds MCP into Events subtabs for standalone and toolbelt modes', () => {
   const { context, panel } = createHarness();
   const expectedSpecs = {
-    architect: ['decisions', 'journal', 'hired_engineers', 'messages', 'events'],
-    engineer: ['journal', 'events', 'queued', 'worklog'],
+    architect: ['decisions', 'behavior', 'journal', 'hired_engineers', 'messages', 'events'],
+    engineer: ['journal', 'behavior', 'events', 'queued', 'worklog'],
     worker: ['events', 'messages', 'worklog'],
   };
   const agents = {
