@@ -104,8 +104,18 @@ _PR_PHASES = frozenset({
     "push_branch",
     "pr_create",
     "pr_merge",
+    "nested_submodule_pr_preflight",
+    "nested_submodule_pr_push",
+    "nested_submodule_pr_create",
+    "nested_submodule_pr_merge",
+    "nested_submodule_pr_sync",
+    "nested_submodule_gitlink_bump",
 })
-_PR_NON_RETRYABLE_PHASES = frozenset({"github_preflight"})
+_PR_NON_RETRYABLE_PHASES = frozenset({
+    "github_preflight",
+    "nested_submodule_pr_preflight",
+    "nested_submodule_gitlink_bump",
+})
 _PR_TRANSIENT_ERROR_FRAGMENTS = (
     "temporary",
     "transient",

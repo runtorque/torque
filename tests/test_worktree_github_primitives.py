@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from torque.worktree import (
@@ -37,6 +38,77 @@ class FakeProcess:
 
     async def communicate(self):
         return self.stdout, self.stderr
+
+
+class FakeCreatePrManager(WorktreeManager):
+    def __init__(self, *, nested_pending=True):
+        super().__init__()
+        self.calls = []
+        self.nested_pending = nested_pending
+
+    async def github_preflight(self, worktree_path):
+        self.calls.append(("preflight", worktree_path))
+        return {"ok": True}
+
+    async def github_select_remote(self, worktree_path):
+        self.calls.append(("select_remote", worktree_path))
+        return {"ok": True, "remote": "origin"}
+
+    async def count_commits(self, cell):
+        self.calls.append(("count_commits", cell.worktree_branch))
+        return 1
+
+    async def merge_nested_submodules_via_pr_for_merge(
+            self, cell, submodule_paths, **kwargs):
+        self.calls.append((
+            "nested_pr_flow",
+            list(submodule_paths),
+            dict(kwargs),
+        ))
+        return {
+            "ok": True,
+            "pending": self.nested_pending,
+            "submodules": [
+                {
+                    "path": "ee",
+                    "pr": {
+                        "url": "https://github.com/acme/ee/pull/2",
+                        "existing": False,
+                    },
+                }
+            ],
+        }
+
+    async def publish_nested_submodule_branches_for_merge(
+            self, cell, submodule_paths):
+        self.calls.append(("legacy_publish", list(submodule_paths)))
+        return {"ok": True}
+
+    async def nested_submodule_merge_preflight(self, cell, submodule_paths):
+        self.calls.append(("legacy_preflight", list(submodule_paths)))
+        return {"ok": True}
+
+    async def github_push_branch(self, worktree_path, remote, branch):
+        self.calls.append(("push", worktree_path, remote, branch))
+        return {"ok": True}
+
+    async def github_create_or_reuse_pr(
+            self, worktree_path, branch, base_branch, **kwargs):
+        self.calls.append((
+            "create_parent_pr",
+            worktree_path,
+            branch,
+            base_branch,
+            dict(kwargs),
+        ))
+        return {
+            "ok": True,
+            "phase": "pr_create",
+            "url": "https://github.com/acme/repo/pull/1",
+            "number": 1,
+            "head_sha": "parent123",
+            "existing": False,
+        }
 
 
 class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
@@ -116,6 +188,68 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self._git("commit", "-m", "next work", cwd=repo)
         local_tip = self._git("rev-parse", "feature", cwd=repo).stdout.strip()
         return repo, remote_old, main_tip, local_tip
+
+    async def test_create_pr_non_ee_submodule_uses_legacy_publish(self):
+        mgr = FakeCreatePrManager()
+        cell = SimpleNamespace(
+            worktree_path="/wt",
+            worktree_branch="feature",
+            worktree_base_branch="main",
+            name="Worker",
+        )
+
+        result = await mgr.create_pr(
+            cell,
+            title="Feature",
+            body="Body",
+            worktree_submodules=["vendor/lib"],
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["phase"], "pr_create")
+        self.assertNotIn("pending_ee_pr", result)
+        self.assertNotIn("nested_pr_flow", [call[0] for call in mgr.calls])
+        self.assertIn(("legacy_publish", ["vendor/lib"]), mgr.calls)
+        self.assertIn(("legacy_preflight", ["vendor/lib"]), mgr.calls)
+        self.assertIn(("push", "/wt", "origin", "feature"), mgr.calls)
+        parent_pr_calls = [
+            call for call in mgr.calls if call[0] == "create_parent_pr"
+        ]
+        self.assertEqual(len(parent_pr_calls), 1)
+
+    async def test_create_pr_mixed_submodules_pending_ee_skips_legacy(self):
+        mgr = FakeCreatePrManager()
+        cell = SimpleNamespace(
+            worktree_path="/wt",
+            worktree_branch="feature",
+            worktree_base_branch="main",
+            name="Worker",
+        )
+
+        result = await mgr.create_pr(
+            cell,
+            title="Feature",
+            body="Body",
+            worktree_submodules=["vendor/lib", "ee"],
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["phase"], "nested_submodule_pr_create")
+        self.assertTrue(result["pending_ee_pr"])
+        self.assertEqual(result["url"], "https://github.com/acme/ee/pull/2")
+        self.assertIn(
+            (
+                "nested_pr_flow",
+                ["ee"],
+                {"title": "Feature", "body": "Body", "merge": False},
+            ),
+            mgr.calls,
+        )
+        call_names = [call[0] for call in mgr.calls]
+        self.assertNotIn("legacy_publish", call_names)
+        self.assertNotIn("legacy_preflight", call_names)
+        self.assertNotIn("push", call_names)
+        self.assertNotIn("create_parent_pr", call_names)
 
     async def test_github_preflight_missing_gh_reports_preflight_phase(self):
         fake, _calls, remaining = self._fake_exec([
@@ -773,6 +907,46 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertFalse(result["pending"])
         self.assertEqual(result["phase"], "pr_merge")
+        self.assertEqual(result["merge_commit_sha"], "merge789")
+        self.assertEqual(remaining, [])
+
+    async def test_request_merge_commit_merge_uses_merge_strategy(self):
+        merged = {
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "headRefOid": "abc123",
+            "state": "MERGED",
+            "mergedAt": "2026-05-19T18:00:00Z",
+            "mergeCommit": {"oid": "merge789"},
+            "mergeStateStatus": "CLEAN",
+        }
+        fake, _calls, remaining = self._fake_exec([
+            (
+                [
+                    "gh", "pr", "merge", "7",
+                    "--merge",
+                    "--match-head-commit", "abc123",
+                    "--subject", "Subject",
+                    "--body", "Body",
+                ],
+                FakeProcess(),
+            ),
+            (
+                self._gh_pr_view_matcher("7"),
+                FakeProcess(stdout=json.dumps(merged)),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_request_merge_commit_merge(
+                "/wt", 7, "abc123", subject="Subject", body="Body",
+                phase="nested_submodule_pr_merge",
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["pending"])
+        self.assertEqual(result["phase"], "nested_submodule_pr_merge")
         self.assertEqual(result["merge_commit_sha"], "merge789")
         self.assertEqual(remaining, [])
 

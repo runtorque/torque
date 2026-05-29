@@ -958,8 +958,9 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 super().__init__()
                 self.case = case
                 self.pushed_super_gitlinks = []
-                self.branch = ""
-                self.base_branch = ""
+                self.parent_branch = ""
+                self.parent_base_branch = ""
+                self.nested_pr_create_calls = 0
 
             async def github_preflight(self, worktree_path):
                 return {
@@ -993,8 +994,21 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 title="",
                 body="",
             ):
-                self.branch = branch
-                self.base_branch = base_branch
+                if Path(worktree_path).resolve() == sub_wt.resolve():
+                    self.nested_pr_create_calls += 1
+                    return {
+                        "ok": True,
+                        "phase": "pr_create",
+                        "url": "https://github.com/acme/sub/pull/2",
+                        "number": 2,
+                        "body": body,
+                        "head_sha": await self.rev_parse(worktree_path, branch),
+                        "state": "OPEN",
+                        "merge_state": "CLEAN",
+                        "existing": False,
+                    }
+                self.parent_branch = branch
+                self.parent_base_branch = base_branch
                 return {
                     "ok": True,
                     "phase": "pr_create",
@@ -1007,6 +1021,88 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                     "existing": False,
                 }
 
+            async def github_request_merge_commit_merge(
+                self,
+                worktree_path,
+                pr_number,
+                head_sha,
+                subject="",
+                body="",
+                auto=False,
+                url="",
+                phase="pr_merge",
+            ):
+                self.case.assertEqual(Path(worktree_path).resolve(), sub_wt.resolve())
+                branch = await self.get_current_branch(worktree_path)
+                branch_sha = await self.rev_parse(worktree_path, branch)
+                if head_sha != branch_sha:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": "head SHA did not match nested PR branch",
+                        "pending": False,
+                    }
+                base_sha = await self.rev_parse(worktree_path, "main")
+                code, tree_out, tree_err = await self._git_run(
+                    worktree_path,
+                    "merge-tree",
+                    "--write-tree",
+                    "main",
+                    branch,
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": tree_err or tree_out,
+                        "pending": False,
+                    }
+                code, commit_out, commit_err = await self._git_run(
+                    worktree_path,
+                    "commit-tree",
+                    tree_out.splitlines()[0].strip(),
+                    "-p",
+                    base_sha,
+                    "-p",
+                    branch_sha,
+                    "-m",
+                    subject or "Merge nested PR",
+                    "-m",
+                    body or "",
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": commit_err,
+                        "pending": False,
+                    }
+                merge_sha = commit_out.splitlines()[0].strip()
+                push = await self._git_run(
+                    worktree_path,
+                    "push",
+                    "origin",
+                    f"{merge_sha}:refs/heads/main",
+                )
+                if push[0] != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": push[2],
+                        "pending": False,
+                    }
+                return {
+                    "ok": True,
+                    "phase": phase,
+                    "url": "https://github.com/acme/sub/pull/2",
+                    "number": pr_number,
+                    "head_sha": head_sha,
+                    "merge_commit_sha": merge_sha,
+                    "merge_state": "CLEAN",
+                    "pending": False,
+                    "pr_status": {"ok": True, "state": "MERGED"},
+                }
+
             async def github_request_squash_merge(
                 self,
                 worktree_path,
@@ -1017,7 +1113,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                 auto=False,
                 url="",
             ):
-                branch_sha = await self.rev_parse(worktree_path, self.branch)
+                branch_sha = await self.rev_parse(worktree_path, self.parent_branch)
                 if head_sha != branch_sha:
                     return {
                         "ok": False,
@@ -1025,13 +1121,16 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                         "error": "head SHA did not match pushed branch",
                         "pending": False,
                     }
-                base_sha = await self.rev_parse(worktree_path, self.base_branch)
+                base_sha = await self.rev_parse(
+                    worktree_path,
+                    self.parent_base_branch,
+                )
                 code, tree_out, tree_err = await self._git_run(
                     worktree_path,
                     "merge-tree",
                     "--write-tree",
-                    self.base_branch,
-                    self.branch,
+                    self.parent_base_branch,
+                    self.parent_branch,
                 )
                 if code != 0:
                     return {
@@ -1063,7 +1162,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
                     worktree_path,
                     "push",
                     "origin",
-                    f"{merge_sha}:refs/heads/{self.base_branch}",
+                    f"{merge_sha}:refs/heads/{self.parent_base_branch}",
                 )
                 if push[0] != 0:
                     return {
@@ -1138,6 +1237,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["mode"], "pull_request")
         self.assertTrue(result["nested_submodules"]["ok"])
+        self.assertEqual(fake_mgr.nested_pr_create_calls, 0)
 
         remote_sub_main = await self._git_out(
             "--git-dir",
@@ -1217,11 +1317,10 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             "no_gitlink_change_detached_head",
         )
 
-    async def test_nested_publish_pushes_zero_delta_branch_ref(self):
+    async def test_nested_pr_flow_skips_zero_delta_branch_ref(self):
         cell, wt = await self._create_nested()
         sub_wt = wt / self.sub_path
         sub_branch = await self._sub_branch(sub_wt)
-        head = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
         code, _out, _err = await self._git(
             "--git-dir",
             str(self.sub_origin),
@@ -1233,27 +1332,335 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotEqual(0, code)
 
-        result = await self.mgr.publish_nested_submodule_branches_for_merge(
+        result = await self.mgr.merge_nested_submodules_via_pr_for_merge(
             cell,
             [self.sub_path],
+            title="No ee delta",
+            body="No nested delta should publish.",
         )
 
         self.assertTrue(result["ok"], result)
-        self.assertEqual(result["submodules"][0]["pushed_sha"], head)
         self.assertTrue(result["submodules"][0]["zero_gitlink_delta"])
-        remote_branch = await self._git_out(
+        self.assertEqual(result["submodules"][0]["skip_reason"], "zero_gitlink_delta")
+        code, _out, _err = await self._git(
             "--git-dir",
             str(self.sub_origin),
             "rev-parse",
-            sub_branch,
+            "--verify",
+            f"refs/heads/{sub_branch}",
             cwd=self.root,
+            check=False,
         )
-        self.assertEqual(remote_branch, head)
-        preflight = await self.mgr.nested_submodule_merge_preflight(
+        self.assertNotEqual(0, code, "zero-delta flow must not push PR head")
+
+    async def test_nested_pr_flow_merge_commit_bumps_parent_gitlink_to_main(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nreviewed ee line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Reviewed nested PR work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        reviewed = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+
+        class LocalNestedPrManager(WorktreeManager):
+            def __init__(self):
+                super().__init__()
+                self.create_calls = 0
+                self.merge_calls = 0
+
+            async def github_create_or_reuse_pr(
+                self,
+                worktree_path,
+                branch,
+                base_branch,
+                title="",
+                body="",
+            ):
+                self.create_calls += 1
+                return {
+                    "ok": True,
+                    "phase": "pr_create",
+                    "url": "https://github.com/acme/torque-ee/pull/2",
+                    "number": 2,
+                    "body": body,
+                    "head_sha": await self.rev_parse(worktree_path, branch),
+                    "state": "OPEN",
+                    "merge_state": "CLEAN",
+                    "existing": False,
+                }
+
+            async def github_request_merge_commit_merge(
+                self,
+                worktree_path,
+                pr_number,
+                head_sha,
+                subject="",
+                body="",
+                auto=False,
+                url="",
+                phase="nested_submodule_pr_merge",
+            ):
+                self.merge_calls += 1
+                branch = await self.get_current_branch(worktree_path)
+                branch_sha = await self.rev_parse(worktree_path, branch)
+                base_sha = await self.rev_parse(worktree_path, "main")
+                if head_sha != branch_sha:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": "head mismatch",
+                        "pending": False,
+                    }
+                code, tree_out, tree_err = await self._git_run(
+                    worktree_path,
+                    "merge-tree",
+                    "--write-tree",
+                    "main",
+                    branch,
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": tree_err or tree_out,
+                        "pending": False,
+                    }
+                code, commit_out, commit_err = await self._git_run(
+                    worktree_path,
+                    "commit-tree",
+                    tree_out.splitlines()[0].strip(),
+                    "-p",
+                    base_sha,
+                    "-p",
+                    branch_sha,
+                    "-m",
+                    subject or "Merge nested PR",
+                    "-m",
+                    body or "",
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": commit_err,
+                        "pending": False,
+                    }
+                merge_sha = commit_out.splitlines()[0].strip()
+                push = await self._git_run(
+                    worktree_path,
+                    "push",
+                    "origin",
+                    f"{merge_sha}:refs/heads/main",
+                )
+                if push[0] != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": push[2],
+                        "pending": False,
+                    }
+                return {
+                    "ok": True,
+                    "phase": phase,
+                    "url": "https://github.com/acme/torque-ee/pull/2",
+                    "number": pr_number,
+                    "head_sha": head_sha,
+                    "merge_commit_sha": merge_sha,
+                    "merge_state": "CLEAN",
+                    "pending": False,
+                    "pr_status": {"ok": True, "state": "MERGED"},
+                }
+
+        mgr = LocalNestedPrManager()
+        result = await mgr.merge_nested_submodules_via_pr_for_merge(
             cell,
             [self.sub_path],
+            title="Ship nested ee PR",
+            body="Folded review already approved.",
         )
-        self.assertTrue(preflight["ok"], preflight)
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["gitlink_bump"]["committed"])
+        self.assertEqual(mgr.create_calls, 1)
+        self.assertEqual(mgr.merge_calls, 1)
+        remote_main = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "main",
+            cwd=self.root,
+        )
+        self.assertEqual(result["submodules"][0]["merged_main_sha"], remote_main)
+        self.assertEqual(await self._gitlink_sha(wt, "HEAD"), remote_main)
+        self.assertEqual(
+            0,
+            (
+                await self._git(
+                    "--git-dir",
+                    str(self.sub_origin),
+                    "merge-base",
+                    "--is-ancestor",
+                    reviewed,
+                    remote_main,
+                    cwd=self.root,
+                    check=False,
+                )
+            )[0],
+        )
+
+        resumed = await mgr.merge_nested_submodules_via_pr_for_merge(
+            cell,
+            [self.sub_path],
+            title="Ship nested ee PR",
+            body="Folded review already approved.",
+        )
+        self.assertTrue(resumed["ok"], resumed)
+        self.assertEqual(mgr.create_calls, 1)
+        self.assertEqual(mgr.merge_calls, 1)
+        self.assertEqual(
+            resumed["submodules"][0]["skip_reason"],
+            "gitlink_already_on_remote_main",
+        )
+
+    async def test_nested_pr_flow_rejects_squash_merged_submodule_pr(self):
+        cell, wt = await self._create_nested()
+        sub_wt = wt / self.sub_path
+        (sub_wt / "lib.txt").write_text("sub line one\nsquashed ee line\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Reviewed nested squash work",
+                worktree_submodules=[self.sub_path],
+            )
+        )
+        reviewed = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
+
+        class SquashNestedPrManager(WorktreeManager):
+            async def github_create_or_reuse_pr(
+                self,
+                worktree_path,
+                branch,
+                base_branch,
+                title="",
+                body="",
+            ):
+                return {
+                    "ok": True,
+                    "phase": "pr_create",
+                    "url": "https://github.com/acme/torque-ee/pull/3",
+                    "number": 3,
+                    "head_sha": await self.rev_parse(worktree_path, branch),
+                    "state": "OPEN",
+                    "merge_state": "CLEAN",
+                    "existing": False,
+                }
+
+            async def github_request_merge_commit_merge(
+                self,
+                worktree_path,
+                pr_number,
+                head_sha,
+                subject="",
+                body="",
+                auto=False,
+                url="",
+                phase="nested_submodule_pr_merge",
+            ):
+                branch = await self.get_current_branch(worktree_path)
+                base_sha = await self.rev_parse(worktree_path, "main")
+                code, tree_out, tree_err = await self._git_run(
+                    worktree_path,
+                    "merge-tree",
+                    "--write-tree",
+                    "main",
+                    branch,
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": tree_err or tree_out,
+                        "pending": False,
+                    }
+                code, commit_out, commit_err = await self._git_run(
+                    worktree_path,
+                    "commit-tree",
+                    tree_out.splitlines()[0].strip(),
+                    "-p",
+                    base_sha,
+                    "-m",
+                    "Squash nested PR",
+                )
+                if code != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": commit_err,
+                        "pending": False,
+                    }
+                squash_sha = commit_out.splitlines()[0].strip()
+                push = await self._git_run(
+                    worktree_path,
+                    "push",
+                    "origin",
+                    f"{squash_sha}:refs/heads/main",
+                )
+                if push[0] != 0:
+                    return {
+                        "ok": False,
+                        "phase": phase,
+                        "error": push[2],
+                        "pending": False,
+                    }
+                return {
+                    "ok": True,
+                    "phase": phase,
+                    "url": "https://github.com/acme/torque-ee/pull/3",
+                    "number": pr_number,
+                    "head_sha": head_sha,
+                    "merge_commit_sha": squash_sha,
+                    "merge_state": "CLEAN",
+                    "pending": False,
+                    "pr_status": {"ok": True, "state": "MERGED"},
+                }
+
+        result = await SquashNestedPrManager().merge_nested_submodules_via_pr_for_merge(
+            cell,
+            [self.sub_path],
+            title="Ship squash-shaped nested PR",
+            body="This should be rejected by ancestry guard.",
+        )
+
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["condition"], "UNSUPPORTED_MERGE_STRATEGY")
+        self.assertIn("must use merge commits", result["error"])
+        remote_main = await self._git_out(
+            "--git-dir",
+            str(self.sub_origin),
+            "rev-parse",
+            "main",
+            cwd=self.root,
+        )
+        self.assertNotEqual(
+            0,
+            (
+                await self._git(
+                    "--git-dir",
+                    str(self.sub_origin),
+                    "merge-base",
+                    "--is-ancestor",
+                    reviewed,
+                    remote_main,
+                    cwd=self.root,
+                    check=False,
+                )
+            )[0],
+        )
+        self.assertNotEqual(await self._gitlink_sha(wt, "HEAD"), remote_main)
 
     async def test_nested_base_sync_preserves_dirty_checked_out_branch(self):
         base_sub = self.repo_root / self.sub_path

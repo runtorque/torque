@@ -2410,7 +2410,7 @@ async def _run_direct_worktree_merge(
         latest_boundary_state_for_cell=latest_boundary_state_for_cell,
         boundary_reason_message=boundary_reason_message,
         panel_event=panel_event,
-        publish_nested_submodule_branches=True,
+        publish_nested_submodule_branches=False,
     )
     if not gates.get("ok"):
         result = gates.get("result") or _worktree_merge_error(
@@ -2430,6 +2430,81 @@ async def _run_direct_worktree_merge(
             squash,
             state=state,
         )
+    fallback_title = f"Merge {cell.name or cell.worktree_branch or 'worktree'} worktree"
+    derived_title, derived_body = _split_merge_message_for_pr(
+        msg,
+        fallback_title=fallback_title,
+    )
+    nested_merge_result = None
+    worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
+    nested_pr_submodules = _ee_pr_flow_submodules(worktree_submodules)
+    legacy_submodules = _legacy_nested_submodules(
+        worktree_submodules,
+        nested_pr_submodules,
+    )
+    if nested_pr_submodules:
+        merge_nested_pr = getattr(
+            worktree_mgr,
+            "merge_nested_submodules_via_pr_for_merge",
+            None,
+        )
+        if not callable(merge_nested_pr):
+            result = _worktree_merge_error(
+                aid,
+                "Nested submodule PR integration is unavailable.",
+                phase="nested_submodule_pr_merge",
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+        nested_merge_result = await merge_nested_pr(
+            cell,
+            nested_pr_submodules,
+            title=str(data.get("pr_title", "") or "").strip() or derived_title,
+            body=str(data.get("pr_body", "") or "").strip() or derived_body,
+            merge=True,
+        )
+        _record_nested_submodule_metadata_on_latest_boundary(
+            state,
+            cell,
+            nested_merge_result,
+        )
+        if nested_merge_result.get("pending"):
+            result = {
+                "type": "worktree_merge",
+                "id": aid,
+                "ok": True,
+                "mode": "direct",
+                "pending": True,
+                "merged": False,
+                "nested_submodules": nested_merge_result,
+                "message": (
+                    "Nested submodule PR is pending; parent direct merge has "
+                    "not run."
+                ),
+            }
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+        if not nested_merge_result.get("ok"):
+            result = _worktree_merge_error(
+                aid,
+                nested_merge_result.get(
+                    "error",
+                    "Nested submodule PR merge failed.",
+                ),
+                phase=nested_merge_result.get(
+                    "phase",
+                    "nested_submodule_pr_merge",
+                ),
+                nested_submodules=nested_merge_result,
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
     preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot = (
         await _capture_worktree_merge_preserve_diff(
             state=state,
@@ -2445,15 +2520,14 @@ async def _run_direct_worktree_merge(
         data,
         preserve_merge_diff=preserve_merge_diff,
     )
-    worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
     merge_result = (
         await worktree_mgr.server_merge(
             cell,
             msg,
             squash=squash,
-            worktree_submodules=worktree_submodules,
+            worktree_submodules=legacy_submodules,
         )
-        if worktree_submodules
+        if legacy_submodules
         else await worktree_mgr.server_merge(cell, msg, squash=squash)
     )
     if merge_result.get("ok"):
@@ -2500,6 +2574,8 @@ async def _run_direct_worktree_merge(
         _attach_stale_base(result, gates.get("stale_base"))
     if gates.get("workflow_breach") and isinstance(result, dict):
         result["workflow_breach"] = gates["workflow_breach"]
+    if nested_merge_result and isinstance(result, dict):
+        result["nested_submodules"] = nested_merge_result
     return result
 
 
@@ -2645,7 +2721,7 @@ async def _run_pr_worktree_merge(
         latest_boundary_state_for_cell=latest_boundary_state_for_cell,
         boundary_reason_message=boundary_reason_message,
         panel_event=panel_event,
-        publish_nested_submodule_branches=True,
+        publish_nested_submodule_branches=False,
     )
     if not gates.get("ok"):
         result = gates.get("result") or _worktree_merge_error(
@@ -2736,7 +2812,87 @@ async def _run_pr_worktree_merge(
 
     worktree_submodules = _configured_worktree_submodules_for_cell(state, cell)
     nested_merge_result = None
-    if worktree_submodules:
+    nested_pr_submodules = _ee_pr_flow_submodules(worktree_submodules)
+    legacy_submodules = _legacy_nested_submodules(
+        worktree_submodules,
+        nested_pr_submodules,
+    )
+    if nested_pr_submodules:
+        merge_nested = getattr(
+            worktree_mgr,
+            "merge_nested_submodules_via_pr_for_merge",
+            None,
+        )
+        if not callable(merge_nested):
+            result = _worktree_merge_error(
+                aid,
+                "Nested submodule PR integration is unavailable.",
+                mode="pull_request",
+                phase="nested_submodule_pr_merge",
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+        nested_merge_result = await merge_nested(
+            cell,
+            nested_pr_submodules,
+            title=title,
+            body=body,
+            merge=True,
+        )
+        _record_nested_submodule_metadata_on_latest_boundary(
+            state,
+            cell,
+            nested_merge_result,
+        )
+        if nested_merge_result.get("pending"):
+            result = {
+                "type": "worktree_merge",
+                "id": aid,
+                "ok": True,
+                "mode": "pull_request",
+                "pending": True,
+                "merged": False,
+                "nested_submodules": nested_merge_result,
+                "message": (
+                    "Nested submodule PR is pending; parent pull request has "
+                    "not been created or merged."
+                ),
+            }
+            first_url = ""
+            for item in nested_merge_result.get("submodules", []) or []:
+                pr = item.get("pr") if isinstance(item, dict) else {}
+                if isinstance(pr, dict) and pr.get("url"):
+                    first_url = str(pr.get("url") or "")
+                    break
+            if first_url:
+                result["url"] = first_url
+                result["pr_url"] = first_url
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+        if not nested_merge_result.get("ok"):
+            result = _worktree_merge_error(
+                aid,
+                nested_merge_result.get(
+                    "error",
+                    "Nested submodule PR merge failed.",
+                ),
+                mode="pull_request",
+                phase=nested_merge_result.get(
+                    "phase",
+                    "nested_submodule_pr_merge",
+                ),
+                nested_submodules=nested_merge_result,
+            )
+            _attach_stale_base(result, gates.get("stale_base"))
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+            return result
+
+    if legacy_submodules:
         merge_nested = getattr(
             worktree_mgr,
             "_merge_nested_submodules_for_merge",
@@ -2753,30 +2909,35 @@ async def _run_pr_worktree_merge(
             if gates.get("workflow_breach"):
                 result["workflow_breach"] = gates["workflow_breach"]
             return result
-        nested_merge_result = await merge_nested(
+        legacy_nested_result = await merge_nested(
             cell,
-            worktree_submodules,
+            legacy_submodules,
             message=msg,
         )
-        if not nested_merge_result.get("ok"):
+        if not legacy_nested_result.get("ok"):
             result = _worktree_merge_error(
                 aid,
-                nested_merge_result.get(
+                legacy_nested_result.get(
                     "error",
                     "Nested submodule merge failed.",
                 ),
                 mode="pull_request",
                 phase="nested_submodule_merge",
-                nested_submodules=nested_merge_result,
+                nested_submodules=legacy_nested_result,
             )
             _attach_stale_base(result, gates.get("stale_base"))
             if gates.get("workflow_breach"):
                 result["workflow_breach"] = gates["workflow_breach"]
             return result
+        nested_merge_result = _combine_nested_submodule_results(
+            nested_merge_result,
+            legacy_nested_result,
+        )
 
-        # The nested merge can add a final superproject gitlink commit. Re-run
-        # the cheap superproject conflict/overwrite guards against that final
-        # branch tip before publishing the PR branch.
+    # The nested flow can add a final superproject gitlink commit. Re-run the
+    # cheap superproject conflict/overwrite guards against that final branch tip
+    # before publishing the parent PR branch.
+    if nested_merge_result:
         post_nested_check = await worktree_mgr.check_merge_conflicts(cell)
         if not post_nested_check.get("clean"):
             result = _worktree_merge_error(
@@ -3285,6 +3446,134 @@ def _latest_open_boundary_task_for_cell(state: MatrixState, cell):
         branch=cell.worktree_branch,
         statuses={"open"},
     )
+
+
+def _record_nested_submodule_metadata_on_latest_boundary(
+    state: MatrixState,
+    cell,
+    nested_result: dict | None,
+) -> dict | None:
+    """Attach nested submodule PR state to the latest open branch boundary."""
+    if not state or not cell or not isinstance(nested_result, dict):
+        return None
+    latest = _latest_open_boundary_task_for_cell(state, cell)
+    if not latest:
+        return None
+    boundary = dict(task_boundary(latest))
+    submodules = []
+    for item in nested_result.get("submodules", []) or []:
+        if not isinstance(item, dict):
+            continue
+        pr = item.get("pr") if isinstance(item.get("pr"), dict) else {}
+        merge = item.get("merge") if isinstance(item.get("merge"), dict) else {}
+        submodules.append({
+            key: value
+            for key, value in {
+                "path": item.get("path", ""),
+                "branch": item.get("branch", ""),
+                "base_branch": item.get("base_branch", ""),
+                "remote": item.get("remote", ""),
+                "old_gitlink_sha": item.get("old_gitlink_sha", ""),
+                "reviewed_sha": item.get("reviewed_sha", "")
+                                or item.get("head_sha", ""),
+                "merged_sha": item.get("merged_sha", ""),
+                "merged_main_sha": item.get("merged_main_sha", ""),
+                "pending": bool(item.get("pending")),
+                "skipped": bool(item.get("skipped")),
+                "skip_reason": item.get("skip_reason", ""),
+                "pr": {
+                    key: value
+                    for key, value in {
+                        "url": pr.get("url", ""),
+                        "number": pr.get("number"),
+                        "head_sha": pr.get("head_sha", ""),
+                        "state": pr.get("state", ""),
+                        "merge_state": pr.get("merge_state", ""),
+                        "merge_commit_sha": pr.get("merge_commit_sha", ""),
+                        "existing": pr.get("existing"),
+                    }.items()
+                    if value not in ("", None, {})
+                },
+                "merge": {
+                    key: value
+                    for key, value in {
+                        "phase": merge.get("phase", ""),
+                        "pending": merge.get("pending"),
+                        "merge_commit_sha": merge.get("merge_commit_sha", ""),
+                        "merge_state": merge.get("merge_state", ""),
+                    }.items()
+                    if value not in ("", None, {})
+                },
+            }.items()
+            if value not in ("", None, {}, [])
+        })
+    boundary["nested_submodules"] = {
+        "phase": nested_result.get("phase", ""),
+        "pending": bool(nested_result.get("pending")),
+        "pending_submodule_pr": bool(nested_result.get("pending_submodule_pr")),
+        "real_delta": bool(nested_result.get("real_delta")),
+        "submodules": submodules,
+    }
+    gitlink_bump = nested_result.get("gitlink_bump")
+    if isinstance(gitlink_bump, dict):
+        boundary["nested_submodules"]["gitlink_bump"] = {
+            key: value
+            for key, value in gitlink_bump.items()
+            if value not in ("", None, {}, [])
+        }
+    latest.worktree_boundary = boundary
+    latest.updated_at = datetime.now(timezone.utc).isoformat()
+    state._emit("task_upsert", **asdict(latest))
+    state._db_save_task(latest)
+    return boundary
+
+
+def _ee_pr_flow_submodules(worktree_submodules) -> list[str]:
+    """Return configured submodule paths handled by the ee PR-first flow."""
+    paths = []
+    seen = set()
+    for raw in worktree_submodules or []:
+        path = str(raw or "").strip().strip("/")
+        if not path or path in seen:
+            continue
+        parts = [part for part in path.split("/") if part]
+        if parts and parts[-1] == "ee":
+            paths.append(path)
+            seen.add(path)
+    return paths
+
+
+def _legacy_nested_submodules(worktree_submodules,
+                              pr_flow_submodules: list[str]) -> list[str]:
+    pr_set = set(pr_flow_submodules or [])
+    return [
+        str(path or "").strip().strip("/")
+        for path in (worktree_submodules or [])
+        if str(path or "").strip().strip("/")
+        and str(path or "").strip().strip("/") not in pr_set
+    ]
+
+
+def _combine_nested_submodule_results(primary: dict | None,
+                                      secondary: dict | None) -> dict | None:
+    if not primary:
+        return secondary
+    if not secondary:
+        return primary
+    combined = dict(primary)
+    combined["submodules"] = (
+        list(primary.get("submodules", []) or [])
+        + list(secondary.get("submodules", []) or [])
+    )
+    combined["legacy_nested_submodules"] = secondary
+    if "gitlink_bump" not in combined and isinstance(
+        secondary.get("gitlink_bump"), dict
+    ):
+        combined["gitlink_bump"] = secondary["gitlink_bump"]
+    combined["real_delta"] = bool(primary.get("real_delta")) or bool(
+        secondary.get("submodules")
+    )
+    return combined
 
 
 def _summarize_paths(paths: list[str], limit: int = 3) -> str:
@@ -15290,6 +15579,21 @@ async def main(connection=None):
                     if "error" in pr_result:
                         result = {"type": "worktree_pr",
                                   "error": pr_result["error"]}
+                    elif pr_result.get("pending_ee_pr"):
+                        result = {
+                            "type": "worktree_pr",
+                            "url": pr_result.get("url", ""),
+                            "message": pr_result.get(
+                                "message",
+                                "Nested submodule PR created/reused; parent PR "
+                                "will be created after it merges.",
+                            ),
+                            "pending": True,
+                            "pending_ee_pr": True,
+                            "nested_submodules": pr_result,
+                        }
+                        if getattr(cell, "driverless", False):
+                            result["driverless"] = True
                     else:
                         msg = ("PR already exists"
                                if pr_result.get("existing")

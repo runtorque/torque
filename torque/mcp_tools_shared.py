@@ -3623,6 +3623,8 @@ def _worktree_merge_success_payload(result: dict | None, cell, *,
         payload["url"] = str(result.get("url") or "").strip()
     if isinstance(result.get("pr"), dict):
         payload["pr"] = result["pr"]
+    if isinstance(result.get("nested_submodules"), dict):
+        payload["nested_submodules"] = result["nested_submodules"]
     if result.get("auto_force_push"):
         payload["auto_force_push"] = True
     if isinstance(result.get("push"), dict):
@@ -7230,6 +7232,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "pr_url": pr_url,
             "message": (result or {}).get("message", "PR created"),
         }
+        if (result or {}).get("pending"):
+            payload["pending"] = True
+        if (result or {}).get("pending_ee_pr"):
+            payload["pending_ee_pr"] = True
+        if isinstance((result or {}).get("nested_submodules"), dict):
+            payload["nested_submodules"] = result["nested_submodules"]
         if driverless:
             payload["driverless"] = True
         phase = _worktree_result_phase(result)

@@ -133,7 +133,7 @@ operator sync actions.
 | Tool | What it does |
 |---|---|
 | `engineer_diff` | Structured diff: `summary_only`, `stat_only`, `paths`, or full text. Start with `summary_only=true`. |
-| `engineer_merge` | Default PR-based merge: push the worktree branch, create/reuse a GitHub PR, request a squash merge, sync the local base, then run cleanup after the merge is confirmed. Returns conflict context or `pending: true` when checks/reviews block the PR. Pass `pr_title` (short imperative PR title/squash subject) and `pr_body` (Markdown PR description/squash body covering what changed, why, task IDs, and tests). Use `force_direct=true` only for the explicit local fallback. |
+| `engineer_merge` | Default PR-based merge: push the worktree branch, create/reuse a GitHub PR, request a squash merge, sync the local base, then run cleanup after the merge is confirmed. For real configured `ee/` deltas, first push/open the `torque-ee` PR, merge it with a merge commit, and bump the parent gitlink to merged ee-main; zero-delta ee creates no ee PR. Returns conflict context or `pending: true` when parent or ee checks/reviews block the PR. Pass `pr_title` (short imperative PR title/squash subject) and `pr_body` (Markdown PR description/squash body covering what changed, why, task IDs, and tests). Use `force_direct=true` only for the explicit local fallback; it does not bypass the ee PR-first flow. |
 | `engineer_rebase` | Rebase a conflicted worktree branch onto its base. Aborts on conflict and returns details. |
 | `engineer_create_pr` | Push and open a GitHub PR via `gh`; create-only, with no merge attempt or cleanup. |
 | `engineer_worktree_checkpoint` | Snapshot a worktree before a risky operation. |
@@ -143,7 +143,9 @@ operator sync actions.
 Cleanup flags are recorded there while the PR is pending, but cleanup is
 executed only after an actual merge. Torque V1 does not poll GitHub in the
 background; rerun `engineer_merge` after branch-protection checks pass to
-refresh status and finalize the boundary.
+refresh status and finalize the boundary. Nested ee PR metadata is stored
+alongside the parent boundary, and reruns are idempotent after an ee PR merged
+but before the parent PR did.
 
 For GitHub board-sync groups, the PR path also appends missing linked-issue
 closing refs to the created or reused PR body when
