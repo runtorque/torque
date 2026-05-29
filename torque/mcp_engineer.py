@@ -37,6 +37,8 @@ ENGINEER_DEFERRED_TOOL_NAMES = {
 ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES = {
     "engineer_message_architect",
     "engineer_reply",
+    "engineer_behavior_overlay_propose",
+    "engineer_behavior_overlay_request_rollback",
 }
 
 
@@ -94,6 +96,64 @@ for _tool in ENGINEER_TOOLS:
         _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
     make_tool_search_spec("engineer_tool_search", "engineer"),
+    {
+        "name": "engineer_behavior_overlay_read",
+        "description": "Read this engineer's active Dynamic Behavior overlay.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "engineer_behavior_overlay_versions",
+        "description": "List this engineer's Dynamic Behavior overlay versions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Maximum versions."},
+            },
+        },
+    },
+    {
+        "name": "engineer_behavior_overlay_diff",
+        "description": "Diff this engineer's overlay versions or a proposal.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "proposal_id": {"type": "string"},
+                "from_version_id": {"type": "string"},
+                "to_version_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "engineer_behavior_overlay_propose",
+        "description": (
+            "Propose a change to this engineer's own Dynamic Behavior "
+            "overlay for architect governance."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Proposed overlay text."},
+                "rationale": {"type": "string", "description": "Why this improves behavior."},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["text", "rationale"],
+        },
+    },
+    {
+        "name": "engineer_behavior_overlay_request_rollback",
+        "description": "Request rollback of this engineer's overlay to an earlier version.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "version_id": {"type": "string"},
+                "rationale": {"type": "string"},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["version_id", "rationale"],
+        },
+    },
     {
         "name": "engineer_mcp_calls",
         "deferred": True,

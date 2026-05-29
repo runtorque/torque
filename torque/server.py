@@ -23,6 +23,7 @@ from aiohttp import web
 from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
+from .behavior_overlay import proposal_summary, version_summary
 from .config import (
     WS_PORT,
     DB_FILE,
@@ -8300,9 +8301,34 @@ def _agent_name_exists_for_kind(state: MatrixState, name: str, *,
     return False
 
 
+def _behavior_overlay_prompt_block_for_cell(
+        state: MatrixState = None,
+        cell=None,
+        *,
+        agent_id: str = "",
+        kind: str = "") -> str:
+    """Fetch a supported agent's active Dynamic Behavior prompt block."""
+    if state is None:
+        return ""
+    target_id = str(agent_id or getattr(cell, "id", "") or "").strip()
+    target_kind = str(kind or getattr(cell, "kind", "") or "").strip()
+    if target_kind not in {"architect", "engineer"} or not target_id:
+        return ""
+    try:
+        return state.render_behavior_overlay_for_agent(target_id, seed=True)
+    except Exception:
+        log.exception("Failed to render behavior overlay for %s", target_id)
+        try:
+            from .behavior_overlay import render_behavior_overlay_block
+            return render_behavior_overlay_block(agent_id=target_id)
+        except Exception:
+            return ""
+
+
 def _architect_persistent_prompt_text(group: str = "",
                                       action_system_prompt: str = "",
-                                      state: MatrixState = None) -> str:
+                                      state: MatrixState = None,
+                                      architect_id: str = "") -> str:
     """Build the persistent prompt for user-created architect agents."""
     from .architect import build_architect_system_prompt
 
@@ -8321,6 +8347,11 @@ def _architect_persistent_prompt_text(group: str = "",
         architect_settings=architect_settings,
         action_system_prompt=action_system_prompt,
         group_settings=group_settings,
+        behavior_overlay_block=_behavior_overlay_prompt_block_for_cell(
+            state,
+            agent_id=architect_id,
+            kind="architect",
+        ),
     ).rstrip()
 
     torque_preamble = build_torque_system_prompt(
@@ -8881,6 +8912,226 @@ def _handle_pending_hire_list_command(data: dict, state: MatrixState) -> dict:
     }
 
 
+def _behavior_overlay_error(exc: Exception) -> dict:
+    return {"type": "error", "message": str(exc)}
+
+
+def _handle_behavior_overlay_read_command(
+        data: dict, state: MatrixState) -> dict:
+    agent_id = str(data.get("agent_id", "") or "").strip()
+    if not agent_id:
+        return {"type": "error", "message": "agent_id is required"}
+    version = state.load_behavior_overlay_active_version(agent_id)
+    active = state.load_behavior_overlay_active(agent_id) or {}
+    if not version and data.get("seed", False):
+        version = state.ensure_behavior_overlay_seed(agent_id)
+        active = state.load_behavior_overlay_active(agent_id) or {}
+    return {
+        "type": "behavior_overlay",
+        "agent_id": agent_id,
+        "active": active,
+        "version": version_summary(version),
+        "text": str((version or {}).get("text", "") or ""),
+    }
+
+
+def _handle_behavior_overlay_versions_command(
+        data: dict, state: MatrixState) -> dict:
+    agent_id = str(data.get("agent_id", "") or "").strip()
+    if not agent_id:
+        return {"type": "error", "message": "agent_id is required"}
+    return {
+        "type": "behavior_overlay_versions",
+        "agent_id": agent_id,
+        "versions": [
+            version_summary(row)
+            for row in state.list_behavior_overlay_versions(
+                agent_id,
+                limit=int(data.get("limit", 50) or 50),
+            )
+        ],
+    }
+
+
+def _handle_behavior_overlay_proposals_command(
+        data: dict, state: MatrixState) -> dict:
+    return {
+        "type": "behavior_overlay_proposals",
+        "proposals": [
+            proposal_summary(row)
+            for row in state.list_behavior_overlay_proposals(
+                status_filter=str(data.get("status_filter", "") or ""),
+                agent_id=str(data.get("agent_id", "") or ""),
+                next_actor_kind=str(data.get("next_actor_kind", "") or ""),
+                proposed_by_agent_id=str(data.get("proposed_by_agent_id", "") or ""),
+                limit=int(data.get("limit", 100) or 100),
+            )
+        ],
+    }
+
+
+def _handle_behavior_overlay_diff_command(
+        data: dict, state: MatrixState) -> dict:
+    try:
+        return state.behavior_overlay_diff_payload(
+            proposal_id=str(data.get("proposal_id", "") or ""),
+            from_version_id=str(data.get("from_version_id", "") or ""),
+            to_version_id=str(data.get("to_version_id", "") or ""),
+            agent_id=str(data.get("agent_id", "") or ""),
+        )
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+
+
+def _behavior_overlay_maybe_create_user_task(
+        proposal: dict,
+        state: MatrixState) -> dict:
+    if (
+            proposal
+            and proposal.get("status") in {"proposed", "approved"}
+            and str(proposal.get("next_actor_kind", "") or "") == "user"
+            and not str(proposal.get("user_task_id", "") or "").strip()):
+        task_id = state.create_behavior_overlay_user_task(proposal["id"])
+        if task_id:
+            proposal = state.load_behavior_overlay_proposal(proposal["id"]) or proposal
+    return proposal
+
+
+def _handle_behavior_overlay_propose_command(
+        data: dict, state: MatrixState) -> dict:
+    try:
+        proposal = state.create_behavior_overlay_proposal(
+            agent_id=str(data.get("agent_id", "") or ""),
+            proposed_by_agent_id=str(data.get("proposed_by_agent_id", "") or ""),
+            proposed_by_kind=str(data.get("proposed_by_kind", "") or ""),
+            text=str(data.get("text", "") or ""),
+            rationale=str(data.get("rationale", "") or ""),
+            proposal_type=str(data.get("proposal_type", "set_text") or "set_text"),
+            target_version_id=str(data.get("target_version_id", "") or ""),
+            expected_base_version_id=str(data.get("expected_base_version_id", "") or ""),
+            idempotency_key=str(data.get("idempotency_key", "") or ""),
+            architect_approver_id=str(data.get("architect_approver_id", "") or ""),
+            auto_apply_architect_direct=bool(
+                data.get("auto_apply_architect_direct", False)
+            ),
+        )
+        proposal = _behavior_overlay_maybe_create_user_task(proposal, state)
+        return {
+            "type": "behavior_overlay_proposal",
+            "proposal": proposal_summary(proposal),
+            "proposal_id": str(proposal.get("id", "") or ""),
+            "status": str(proposal.get("status", "") or ""),
+            "approval_route": str(proposal.get("approval_route", "") or ""),
+            "next_actor_kind": str(proposal.get("next_actor_kind", "") or ""),
+            "user_task_id": str(proposal.get("user_task_id", "") or ""),
+        }
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+
+
+def _handle_behavior_overlay_architect_approve_command(
+        data: dict, state: MatrixState) -> dict:
+    try:
+        proposal = state.architect_approve_behavior_overlay_proposal(
+            str(data.get("proposal_id", "") or data.get("id", "") or ""),
+            architect_id=str(data.get("architect_id", "") or ""),
+            expected_proposed_text_sha256=str(
+                data.get("expected_proposed_text_sha256", "") or ""
+            ),
+            note=str(data.get("note", "") or ""),
+        )
+        proposal = _behavior_overlay_maybe_create_user_task(proposal, state)
+        return {
+            "type": "behavior_overlay_proposal",
+            "proposal": proposal_summary(proposal),
+            "proposal_id": proposal.get("id", ""),
+            "status": proposal.get("status", ""),
+            "user_task_id": proposal.get("user_task_id", ""),
+        }
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+
+
+def _handle_behavior_overlay_reject_command(
+        data: dict, state: MatrixState, *, actor_kind: str) -> dict:
+    try:
+        proposal = state.reject_behavior_overlay_proposal(
+            str(data.get("proposal_id", "") or data.get("id", "") or ""),
+            actor_kind=actor_kind,
+            actor_id=str(data.get("actor_id", "") or data.get("architect_id", "") or ""),
+            note=str(data.get("note", "") or ""),
+        )
+        return {
+            "type": "behavior_overlay_proposal",
+            "proposal": proposal_summary(proposal),
+            "proposal_id": proposal.get("id", ""),
+            "status": proposal.get("status", ""),
+        }
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+
+
+def _handle_behavior_overlay_user_approve_command(
+        data: dict, state: MatrixState) -> dict:
+    try:
+        proposal = state.load_behavior_overlay_proposal(
+            str(data.get("proposal_id", "") or data.get("id", "") or "")
+        )
+        if not proposal:
+            return {"type": "error", "message": "behavior overlay proposal not found"}
+        expected = str(data.get("expected_proposed_text_sha256", "") or "").strip()
+        if expected and expected != str(proposal.get("proposed_text_sha256", "") or ""):
+            return {"type": "error", "message": "proposed text hash does not match"}
+        if str(proposal.get("next_actor_kind", "") or "") != "user":
+            return {
+                "type": "error",
+                "message": "behavior overlay proposal is not awaiting user approval",
+            }
+        proposal = state.apply_behavior_overlay_proposal(
+            proposal["id"],
+            actor_kind="user",
+            actor_id="user",
+            note=str(data.get("note", "") or ""),
+        )
+        return {
+            "type": "behavior_overlay_proposal",
+            "proposal": proposal_summary(proposal),
+            "proposal_id": proposal.get("id", ""),
+            "status": proposal.get("status", ""),
+        }
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+
+
+def _handle_behavior_overlay_user_rollback_command(
+        data: dict, state: MatrixState) -> dict:
+    try:
+        proposal = state.create_behavior_overlay_proposal(
+            agent_id=str(data.get("agent_id", "") or ""),
+            proposed_by_agent_id="user",
+            proposed_by_kind="user",
+            rationale=str(data.get("rationale", "") or "User-requested rollback"),
+            proposal_type="rollback",
+            target_version_id=str(data.get("version_id", "") or ""),
+            expected_base_version_id=str(data.get("expected_base_version_id", "") or ""),
+            idempotency_key=str(data.get("idempotency_key", "") or ""),
+        )
+        proposal = state.apply_behavior_overlay_proposal(
+            proposal["id"],
+            actor_kind="user",
+            actor_id="user",
+            note=str(data.get("rationale", "") or "User-requested rollback"),
+        )
+        return {
+            "type": "behavior_overlay_proposal",
+            "proposal": proposal_summary(proposal),
+            "proposal_id": proposal.get("id", ""),
+            "status": proposal.get("status", ""),
+        }
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+
+
 def _handle_task_detail_command(data: dict, state: MatrixState) -> dict:
     """Return one full BoardTask dict for compact snapshot lazy-loading."""
     task_id = str(data.get("id", "") or data.get("task_id", "") or "").strip()
@@ -9295,6 +9546,13 @@ async def _handle_engineer_dismiss_command(
     engineer.dismissed_at = dismissed_at
     state._emit_agent(engineer)
     state._db_save_agent(engineer)
+    overlay_cleanup = {
+        "cancelled_proposals": state.cancel_behavior_overlay_proposals_for_agent(
+            engineer.id,
+            reason="engineer dismissed",
+            actor_kind="system",
+        )
+    }
 
     errors: list[str] = []
     closed_sessions = 0
@@ -9323,6 +9581,7 @@ async def _handle_engineer_dismiss_command(
         "dismissed_at": dismissed_at,
         "closed_sessions": closed_sessions,
         "closed_cells": [cell.id for cell in cells_to_close],
+        "behavior_overlay_cleanup": overlay_cleanup,
     }
     if errors:
         result["close_errors"] = errors
@@ -9723,12 +9982,22 @@ async def _handle_delete_engineer_command(
             transferred_tasks += 1
         state.board_update_task(task.id, assigned_engineer_id="")
 
+    overlay_cleanup = state.cleanup_behavior_overlay_for_agent_delete(
+        engineer.id,
+        reason="engineer deleted",
+    )
+
     tombstoned = await close_agent_session_only(engineer)
     del tombstoned
-    return {
+    result = {
         "transferred_agents": transferred_agents,
         "transferred_tasks": transferred_tasks,
     }
+    if (
+            overlay_cleanup.get("cancelled_proposals")
+            or overlay_cleanup.get("active_cleared")):
+        result["behavior_overlay_cleanup"] = overlay_cleanup
+    return result
 
 
 async def _handle_rename_engineer_command(
@@ -9785,6 +10054,7 @@ async def _handle_delete_architect_command(
     if not architect:
         return {"type": "error", "message": "Architect not found"}
 
+    hired_engineer_ids = []
     transferred_engineers = 0
     for cell in list(state.iter_active_agents()):
         if cell.cell_type != "agent":
@@ -9793,6 +10063,7 @@ async def _handle_delete_architect_command(
             continue
         if str(getattr(cell, "hired_by_architect_id", "") or "").strip() != architect.id:
             continue
+        hired_engineer_ids.append(cell.id)
         cell.hired_by_architect_id = ""
         transferred_engineers += 1
         state._emit_agent(cell)
@@ -9808,12 +10079,23 @@ async def _handle_delete_architect_command(
         if saved:
             archived_decisions += 1
 
+    overlay_cleanup = state.cleanup_behavior_overlay_for_architect_delete(
+        architect.id,
+        hired_engineer_ids=hired_engineer_ids,
+        reason="architect deleted",
+    )
+
     tombstoned = await close_agent_session_only(architect)
     del tombstoned
-    return {
+    result = {
         "transferred_engineers": transferred_engineers,
         "archived_decisions": archived_decisions,
     }
+    if (
+            overlay_cleanup.get("cancelled_proposals")
+            or overlay_cleanup.get("active_cleared")):
+        result["behavior_overlay_cleanup"] = overlay_cleanup
+    return result
 
 
 async def _handle_remove_agent_command(
@@ -10287,6 +10569,7 @@ async def _handle_restart_agent_command(
             group=cell.group,
             action_system_prompt=launch_cfg.get("system_prompt", ""),
             state=state,
+            architect_id=cell.id,
         )
     apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)
@@ -11409,12 +11692,17 @@ async def main(connection=None):
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs,
                 specializations_preamble=spec_preamble,
-                owner_is_user=_agent_owner_is_user(cell))
+                owner_is_user=_agent_owner_is_user(cell),
+                behavior_overlay_block=_behavior_overlay_prompt_block_for_cell(
+                    state,
+                    cell,
+                ))
         if cell.kind == "architect":
             return _architect_persistent_prompt_text(
                 group=cell.group,
                 action_system_prompt=launch_cfg.get("system_prompt", ""),
                 state=state,
+                architect_id=cell.id,
             )
         return _build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""),
@@ -12449,6 +12737,18 @@ async def main(connection=None):
         if cmd == "pending_hires_snapshot":
             return _handle_pending_hires_snapshot_command(data, state)
 
+        if cmd == "behavior_overlay_read":
+            return _handle_behavior_overlay_read_command(data, state)
+
+        if cmd == "behavior_overlay_versions":
+            return _handle_behavior_overlay_versions_command(data, state)
+
+        if cmd == "behavior_overlay_proposals":
+            return _handle_behavior_overlay_proposals_command(data, state)
+
+        if cmd == "behavior_overlay_diff":
+            return _handle_behavior_overlay_diff_command(data, state)
+
         if cmd == "archived_tasks":
             return _handle_archived_tasks_command(data, state)
 
@@ -13069,6 +13369,41 @@ async def main(connection=None):
 
             elif cmd == "pending_hire_list":
                 result = _handle_pending_hire_list_command(data, state)
+
+            elif cmd == "behavior_overlay_propose":
+                result = _handle_behavior_overlay_propose_command(data, state)
+
+            elif cmd == "behavior_overlay_architect_approve":
+                result = _handle_behavior_overlay_architect_approve_command(
+                    data,
+                    state,
+                )
+
+            elif cmd == "behavior_overlay_architect_reject":
+                result = _handle_behavior_overlay_reject_command(
+                    data,
+                    state,
+                    actor_kind="architect",
+                )
+
+            elif cmd == "behavior_overlay_user_approve":
+                result = _handle_behavior_overlay_user_approve_command(
+                    data,
+                    state,
+                )
+
+            elif cmd == "behavior_overlay_user_reject":
+                result = _handle_behavior_overlay_reject_command(
+                    data,
+                    state,
+                    actor_kind="user",
+                )
+
+            elif cmd == "behavior_overlay_user_rollback":
+                result = _handle_behavior_overlay_user_rollback_command(
+                    data,
+                    state,
+                )
 
             elif cmd in {"engineer_dismiss", "architect_engineer_dismiss"}:
                 result = await _handle_engineer_dismiss_command(

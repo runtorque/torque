@@ -362,7 +362,8 @@ def _build_policy_section(architect_settings=None, group_settings=None) -> str:
 def build_architect_system_prompt(group: str,
                                   architect_settings=None,
                                   action_system_prompt: str = "",
-                                  group_settings=None) -> str:
+                                  group_settings=None,
+                                  behavior_overlay_block: str = "") -> str:
     """Assemble the architect boot prompt.
 
     Concatenates: base identity → shared memory guidance → action
@@ -396,5 +397,9 @@ def build_architect_system_prompt(group: str,
         ).strip()
     if custom:
         parts.append("## Custom Instructions\n" + custom)
+
+    overlay = str(behavior_overlay_block or "").strip()
+    if overlay:
+        parts.append(overlay)
 
     return "\n\n".join(parts) + "\n"

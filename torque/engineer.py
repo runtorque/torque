@@ -727,7 +727,8 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
                                  action_system_prompt: str = "",
                                  group_settings=None,
                                  specializations_preamble: str = "",
-                                 owner_is_user: bool = False) -> str:
+                                 owner_is_user: bool = False,
+                                 behavior_overlay_block: str = "") -> str:
     """Assemble the engineer boot prompt with architect escalation guidance.
 
     When ``owner_is_user`` is True (a user-owned engineer with no hiring
@@ -751,6 +752,9 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
             + build_owner_user_message_guidance("engineer_message_user")
             + "\n"
         )
+    overlay = str(behavior_overlay_block or "").strip()
+    if overlay:
+        result = result.rstrip() + "\n\n" + overlay + "\n"
     return result
 
 

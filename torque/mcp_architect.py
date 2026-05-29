@@ -598,6 +598,125 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_behavior_overlay_read",
+        "description": (
+            "Read this architect's active Dynamic Behavior overlay, or a "
+            "hired engineer's overlay when agent_id is provided."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"agent_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_versions",
+        "description": "List overlay versions for self or a hired engineer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_diff",
+        "description": "Diff overlay versions or a visible proposal.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "from_version_id": {"type": "string"},
+                "to_version_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_proposal_list",
+        "description": "List behavior overlay proposals visible to this architect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status_filter": {
+                    "type": "string",
+                    "enum": ["proposed", "approved", "rejected", "applied"],
+                },
+                "agent_id": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_propose",
+        "description": "Propose a change to this architect's own overlay; routes to user approval.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "rationale": {"type": "string"},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["text", "rationale"],
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_propose_for_engineer",
+        "description": "Author a Dynamic Behavior overlay change for a hired engineer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {"type": "string"},
+                "text": {"type": "string"},
+                "rationale": {"type": "string"},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["engineer_id", "text", "rationale"],
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_approve",
+        "description": "Approve a hired engineer behavior overlay proposal.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "proposal_id": {"type": "string"},
+                "expected_proposed_text_sha256": {"type": "string"},
+                "note": {"type": "string"},
+            },
+            "required": ["proposal_id"],
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_reject",
+        "description": "Reject a visible behavior overlay proposal.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "proposal_id": {"type": "string"},
+                "note": {"type": "string"},
+            },
+            "required": ["proposal_id"],
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_rollback",
+        "description": "Request rollback for this architect or a hired engineer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string"},
+                "version_id": {"type": "string"},
+                "rationale": {"type": "string"},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["version_id", "rationale"],
+        },
+    },
+    {
         "name": "architect_engineer_message",
         "description": "Send a direct message from this architect to a hired engineer.",
         "inputSchema": {
