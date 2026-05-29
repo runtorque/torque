@@ -8816,6 +8816,32 @@ def _build_group_system_prompt_preview(
     group_name = str(group or "").strip() or "default"
     group_settings = _preview_group_settings_for_prompt(
         state, group_name, group_settings_payload)
+    behavior_overlay_block = ""
+    if normalized_kind in {"engineer", "architect"} and state is not None:
+        try:
+            preview_cell = SimpleNamespace(
+                id=f"preview-{normalized_kind}",
+                kind=normalized_kind,
+                group=group_name,
+            )
+            # Group Settings previews are role-specific previews.  They show
+            # the active group/kind role overlay and intentionally omit any
+            # per-agent overlay so the modal does not imply a particular
+            # Architect/Engineer instance is being previewed.
+            behavior_overlay_block = state.render_behavior_overlay_stack_for_cell(
+                preview_cell,
+                include_role=True,
+                include_agent=False,
+                seed_agent=False,
+                seed_role=False,
+            )
+        except Exception:
+            log.exception(
+                "failed to render role behavior overlay for system prompt "
+                "preview group=%s kind=%s",
+                group_name,
+                normalized_kind,
+            )
 
     if normalized_kind == "engineer":
         from .engineer import build_engineer_system_prompt
@@ -8828,6 +8854,7 @@ def _build_group_system_prompt_preview(
             action_system_prompt,
             group_settings=group_settings,
             specializations_preamble=specializations_preamble,
+            behavior_overlay_block=behavior_overlay_block,
         ).rstrip() + "\n"
 
     if normalized_kind == "architect":
@@ -8840,6 +8867,7 @@ def _build_group_system_prompt_preview(
             architect_settings=architect_settings,
             action_system_prompt=action_system_prompt,
             group_settings=group_settings,
+            behavior_overlay_block=behavior_overlay_block,
         ).rstrip()
         torque_preamble = build_torque_system_prompt(
             include_shared_memory=False,

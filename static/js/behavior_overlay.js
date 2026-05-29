@@ -18,6 +18,7 @@ var _behaviorOverlayApprovalModal = {
   proposalId: '',
   diffKey: '',
 };
+var _behaviorOverlayRoleKinds = ['engineer', 'architect', 'worker'];
 
 function _behaviorOverlayEsc(value) {
   value = String(value == null ? '' : value);
@@ -60,6 +61,133 @@ function _behaviorOverlayDomId(prefix, key) {
     + String(key || '').replace(/[^A-Za-z0-9_-]/g, '-');
 }
 
+function _behaviorOverlayTitleCase(value) {
+  value = String(value || '').trim();
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+}
+
+function _behaviorOverlayNormalizeRoleKind(kind) {
+  kind = String(kind || '').trim().toLowerCase();
+  return _behaviorOverlayRoleKinds.indexOf(kind) >= 0 ? kind : '';
+}
+
+function _behaviorOverlayRoleScopeId(group, roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  group = String(group || '').trim();
+  return roleKind && group ? ('role:' + group + ':' + roleKind) : '';
+}
+
+function _behaviorOverlayRoleScope(group, roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  group = String(group || '').trim();
+  var scopeId = _behaviorOverlayRoleScopeId(group, roleKind);
+  return scopeId ? {
+    scope_kind: 'role',
+    scope_group: group,
+    scope_key: roleKind,
+    role_kind: roleKind,
+    agent_id: '',
+    scope_id: scopeId,
+  } : null;
+}
+
+function _behaviorOverlayScopeFromId(scopeId) {
+  scopeId = String(scopeId || '').trim();
+  if (scopeId.indexOf('role:') === 0) {
+    var parts = scopeId.split(':');
+    var roleKind = _behaviorOverlayNormalizeRoleKind(parts[parts.length - 1] || '');
+    var group = parts.slice(1, parts.length - 1).join(':');
+    return _behaviorOverlayRoleScope(group, roleKind);
+  }
+  if (!scopeId) return null;
+  var agentId = scopeId.indexOf('agent:') === 0
+    ? scopeId.slice('agent:'.length)
+    : scopeId;
+  return {
+    scope_kind: 'agent',
+    scope_group: '',
+    scope_key: agentId,
+    role_kind: '',
+    agent_id: agentId,
+    // Keep the legacy agent-id cache key for Phase-2 per-agent UI.
+    scope_id: agentId,
+  };
+}
+
+function _behaviorOverlayScopeFromPayload(payload, fallbackKey) {
+  payload = payload || {};
+  var scopeKind = String(payload.scope_kind || '').trim();
+  var roleKind = _behaviorOverlayNormalizeRoleKind(
+    payload.role_kind || payload.role || (
+      scopeKind === 'role' ? (payload.scope_key || payload.target_kind || '') : ''
+    )
+  );
+  var group = String(payload.scope_group || payload.group || '').trim();
+  if (scopeKind === 'role' || roleKind) {
+    return _behaviorOverlayRoleScope(group, roleKind);
+  }
+  var agentId = String(payload.agent_id || '').trim();
+  if (agentId.indexOf('role:') === 0) return _behaviorOverlayScopeFromId(agentId);
+  if (!agentId && payload.scope_id && String(payload.scope_id).indexOf('agent:') === 0) {
+    agentId = String(payload.scope_id).slice('agent:'.length);
+  }
+  if (!agentId) agentId = String(payload.scope_key || fallbackKey || '').trim();
+  if (agentId) return _behaviorOverlayScopeFromId(agentId);
+  if (fallbackKey) return _behaviorOverlayScopeFromId(fallbackKey);
+  return null;
+}
+
+function _behaviorOverlayScopeKey(value) {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    var fromId = _behaviorOverlayScopeFromId(value);
+    return fromId ? fromId.scope_id : '';
+  }
+  var scope = _behaviorOverlayScopeFromPayload(value, '');
+  return scope ? scope.scope_id : '';
+}
+
+function _behaviorOverlayScopeArgs(value) {
+  var scope = typeof value === 'string'
+    ? _behaviorOverlayScopeFromId(value)
+    : _behaviorOverlayScopeFromPayload(value, '');
+  if (!scope) return {};
+  if (scope.scope_kind === 'role') {
+    return {
+      scope_kind: 'role',
+      scope_group: scope.scope_group,
+      scope_key: scope.scope_key,
+      role_kind: scope.scope_key,
+    };
+  }
+  return { agent_id: scope.agent_id || scope.scope_key || '' };
+}
+
+function _behaviorOverlayScopeLabel(value) {
+  var scope = typeof value === 'string'
+    ? _behaviorOverlayScopeFromId(value)
+    : _behaviorOverlayScopeFromPayload(value, '');
+  if (!scope) return '';
+  if (scope.scope_kind === 'role') {
+    return _behaviorOverlayTitleCase(scope.scope_key)
+      + ' role overlay'
+      + (scope.scope_group ? (' · ' + scope.scope_group) : '');
+  }
+  return _behaviorOverlayName(scope.agent_id || scope.scope_key || '');
+}
+
+function _behaviorOverlayProposalScopeKey(proposal) {
+  return _behaviorOverlayScopeKey(proposal || {});
+}
+
+function _behaviorOverlayProposalLabel(proposal) {
+  proposal = proposal || {};
+  if (String(proposal.scope_kind || '') === 'role') {
+    return _behaviorOverlayScopeLabel(proposal);
+  }
+  return _behaviorOverlayName(proposal.agent_id || proposal.scope_key || '');
+}
+
 function behaviorOverlayNormalizeState() {
   if (typeof state === 'undefined' || !state) return;
   if (!state.behavior_overlay_active || typeof state.behavior_overlay_active !== 'object') {
@@ -84,6 +212,9 @@ function _behaviorOverlayKind(agent) {
 }
 
 function _behaviorOverlayName(agentId) {
+  if (String(agentId || '').indexOf('role:') === 0) {
+    return _behaviorOverlayScopeLabel(agentId);
+  }
   var agent = _behaviorOverlayAgent(agentId);
   return agent ? (agent.name || agent.slug || agent.id || agentId) : agentId;
 }
@@ -109,7 +240,7 @@ function _behaviorOverlayGroupSetting(agent) {
 
 function _behaviorOverlayActive(agentId) {
   behaviorOverlayNormalizeState();
-  agentId = String(agentId || '').trim();
+  agentId = _behaviorOverlayScopeKey(agentId);
   var read = _behaviorOverlayReadByAgent[agentId] || {};
   return (state.behavior_overlay_active && state.behavior_overlay_active[agentId])
     || read.active
@@ -117,7 +248,8 @@ function _behaviorOverlayActive(agentId) {
 }
 
 function _behaviorOverlayActiveVersion(agentId) {
-  var read = _behaviorOverlayReadByAgent[String(agentId || '')] || {};
+  agentId = _behaviorOverlayScopeKey(agentId);
+  var read = _behaviorOverlayReadByAgent[agentId] || {};
   return read.version || {};
 }
 
@@ -128,12 +260,13 @@ function _behaviorOverlayBaseVersionId(agentId) {
 }
 
 function _behaviorOverlayReadVersionId(agentId) {
-  var read = _behaviorOverlayReadByAgent[String(agentId || '')] || {};
+  agentId = _behaviorOverlayScopeKey(agentId);
+  var read = _behaviorOverlayReadByAgent[agentId] || {};
   return String((read.version && read.version.id) || '');
 }
 
 function _behaviorOverlayReadIsFresh(agentId) {
-  agentId = String(agentId || '').trim();
+  agentId = _behaviorOverlayScopeKey(agentId);
   var readVersionId = _behaviorOverlayReadVersionId(agentId);
   if (!readVersionId) return false;
   var baseVersionId = _behaviorOverlayBaseVersionId(agentId);
@@ -141,7 +274,7 @@ function _behaviorOverlayReadIsFresh(agentId) {
 }
 
 function _behaviorOverlayClearDraftsForAgent(agentId) {
-  agentId = String(agentId || '').trim();
+  agentId = _behaviorOverlayScopeKey(agentId);
   if (!agentId) return;
   var suffix = ':' + agentId;
   for (var key in _behaviorOverlayDrafts) {
@@ -153,7 +286,7 @@ function _behaviorOverlayClearDraftsForAgent(agentId) {
 }
 
 function _behaviorOverlayInvalidateFullRead(agentId) {
-  agentId = String(agentId || '').trim();
+  agentId = _behaviorOverlayScopeKey(agentId);
   if (!agentId) return;
   delete _behaviorOverlayReadByAgent[agentId];
   _behaviorOverlayReadLoadingByAgent[agentId] = false;
@@ -162,7 +295,7 @@ function _behaviorOverlayInvalidateFullRead(agentId) {
 
 function _behaviorOverlayVersionList(agentId) {
   behaviorOverlayNormalizeState();
-  agentId = String(agentId || '').trim();
+  agentId = _behaviorOverlayScopeKey(agentId);
   if (_behaviorOverlayVersionsByAgent[agentId]) return _behaviorOverlayVersionsByAgent[agentId];
   var map = state.behavior_overlay_versions || {};
   var rows = map[agentId];
@@ -193,13 +326,17 @@ function _behaviorOverlayProposalValues() {
   return rows;
 }
 
-function _behaviorOverlayOpenProposalsForAgent(agentId) {
-  agentId = String(agentId || '').trim();
+function _behaviorOverlayOpenProposalsForScope(scopeKey) {
+  scopeKey = _behaviorOverlayScopeKey(scopeKey);
   return _behaviorOverlayProposalValues().filter(function(proposal) {
     var status = String((proposal && proposal.status) || '');
-    return String((proposal && proposal.agent_id) || '') === agentId
+    return _behaviorOverlayProposalScopeKey(proposal) === scopeKey
       && (status === 'proposed' || status === 'approved');
   });
+}
+
+function _behaviorOverlayOpenProposalsForAgent(agentId) {
+  return _behaviorOverlayOpenProposalsForScope(agentId);
 }
 
 function _behaviorOverlayHiredEngineers(architect) {
@@ -240,7 +377,8 @@ function _behaviorOverlayDraft(mode, targetAgentId, authorAgentId, seedText) {
 }
 
 function behaviorOverlayDraftInput(mode, targetAgentId, authorAgentId, field, value) {
-  var read = _behaviorOverlayReadByAgent[String(targetAgentId || '')] || {};
+  targetAgentId = _behaviorOverlayScopeKey(targetAgentId);
+  var read = _behaviorOverlayReadByAgent[targetAgentId] || {};
   var draft = _behaviorOverlayDraft(mode, targetAgentId, authorAgentId, read.text || '');
   if (field === 'rationale') draft.rationale = String(value || '');
   else {
@@ -250,19 +388,21 @@ function behaviorOverlayDraftInput(mode, targetAgentId, authorAgentId, field, va
 }
 
 function _behaviorOverlayRequestRead(agentId, seed, force) {
-  agentId = String(agentId || '').trim();
+  var args = _behaviorOverlayScopeArgs(agentId);
+  agentId = _behaviorOverlayScopeKey(agentId);
   if (!agentId || typeof send !== 'function') return;
   if (!force && (_behaviorOverlayReadByAgent[agentId] || _behaviorOverlayReadLoadingByAgent[agentId])) return;
   _behaviorOverlayReadLoadingByAgent[agentId] = true;
-  send({ cmd: 'behavior_overlay_read', agent_id: agentId, seed: seed !== false });
+  send(Object.assign({ cmd: 'behavior_overlay_read', seed: seed !== false }, args));
 }
 
 function _behaviorOverlayRequestVersions(agentId, force) {
-  agentId = String(agentId || '').trim();
+  var args = _behaviorOverlayScopeArgs(agentId);
+  agentId = _behaviorOverlayScopeKey(agentId);
   if (!agentId || typeof send !== 'function') return;
   if (!force && (_behaviorOverlayVersionsByAgent[agentId] || _behaviorOverlayVersionsLoadingByAgent[agentId])) return;
   _behaviorOverlayVersionsLoadingByAgent[agentId] = true;
-  send({ cmd: 'behavior_overlay_versions', agent_id: agentId, limit: 50 });
+  send(Object.assign({ cmd: 'behavior_overlay_versions', limit: 50 }, args));
 }
 
 function _behaviorOverlayRequestProposals(force) {
@@ -287,20 +427,23 @@ function _behaviorOverlayRequestProposalDiff(proposalId, targetAgentId, force) {
   if (!force && (_behaviorOverlayDiffByKey[key] || _behaviorOverlayDiffLoadingByKey[key])) return key;
   _behaviorOverlayDiffLoadingByKey[key] = true;
   var msg = { cmd: 'behavior_overlay_diff', proposal_id: proposalId };
-  if (targetAgentId) msg.agent_id = String(targetAgentId || '');
+  if (targetAgentId) Object.assign(msg, _behaviorOverlayScopeArgs(targetAgentId));
   send(msg);
   return key;
 }
 
 function behaviorOverlayViewProposalDiff(proposalId, targetAgentId) {
   var key = _behaviorOverlayRequestProposalDiff(proposalId, targetAgentId, false);
-  if (targetAgentId) _behaviorOverlaySelectedDiffKeyByAgent[String(targetAgentId)] = key;
+  targetAgentId = _behaviorOverlayScopeKey(targetAgentId);
+  if (targetAgentId) _behaviorOverlaySelectedDiffKeyByAgent[targetAgentId] = key;
+  if (_behaviorOverlayRefreshRolePaneIfOpenForScope(targetAgentId)) return;
   if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return;
   if (typeof renderAgentPanel === 'function') renderAgentPanel();
 }
 
 function behaviorOverlayDiffVersions(agentId, fromVersionId, toVersionId) {
-  agentId = String(agentId || '').trim();
+  var args = _behaviorOverlayScopeArgs(agentId);
+  agentId = _behaviorOverlayScopeKey(agentId);
   fromVersionId = String(fromVersionId || '').trim();
   toVersionId = String(toVersionId || '').trim();
   if (!agentId || !fromVersionId || !toVersionId || typeof send !== 'function') return;
@@ -308,12 +451,11 @@ function behaviorOverlayDiffVersions(agentId, fromVersionId, toVersionId) {
   _behaviorOverlaySelectedDiffKeyByAgent[agentId] = key;
   if (!_behaviorOverlayDiffByKey[key] && !_behaviorOverlayDiffLoadingByKey[key]) {
     _behaviorOverlayDiffLoadingByKey[key] = true;
-    send({
+    send(Object.assign({
       cmd: 'behavior_overlay_diff',
-      agent_id: agentId,
       from_version_id: fromVersionId,
       to_version_id: toVersionId,
-    });
+    }, args));
   }
   if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return;
   if (typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -354,7 +496,7 @@ function _behaviorOverlayDraftUnifiedDiff(fromText, toText, fromLabel, toLabel) 
 }
 
 function behaviorOverlayPreviewDraft(mode, targetAgentId, authorAgentId) {
-  targetAgentId = String(targetAgentId || '').trim();
+  targetAgentId = _behaviorOverlayScopeKey(targetAgentId);
   var read = _behaviorOverlayReadByAgent[targetAgentId] || {};
   var draft = _behaviorOverlayDraft(mode, targetAgentId, authorAgentId, read.text || '');
   var key = 'draft:' + _behaviorOverlayDraftKey(mode, targetAgentId, authorAgentId);
@@ -364,12 +506,14 @@ function behaviorOverlayPreviewDraft(mode, targetAgentId, authorAgentId) {
     draft: true,
   };
   _behaviorOverlaySelectedDiffKeyByAgent[targetAgentId] = key;
+  if (_behaviorOverlayRefreshRolePaneIfOpenForScope(targetAgentId)) return;
   if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return;
   if (typeof renderAgentPanel === 'function') renderAgentPanel();
 }
 
 function behaviorOverlaySubmitDraft(mode, targetAgentId, authorAgentId, authorKind, directEdit) {
-  targetAgentId = String(targetAgentId || '').trim();
+  var targetArgs = _behaviorOverlayScopeArgs(targetAgentId);
+  targetAgentId = _behaviorOverlayScopeKey(targetAgentId);
   authorAgentId = String(authorAgentId || '').trim();
   authorKind = String(authorKind || '').trim() || 'user';
   if (!targetAgentId || !authorAgentId || typeof send !== 'function') return;
@@ -384,9 +528,8 @@ function behaviorOverlaySubmitDraft(mode, targetAgentId, authorAgentId, authorKi
   var draft = _behaviorOverlayDraft(mode, targetAgentId, authorAgentId, read.text || '');
   var text = String(draft.text || '');
   var baseVersionId = _behaviorOverlayBaseVersionId(targetAgentId);
-  send({
+  send(Object.assign({
     cmd: 'behavior_overlay_propose',
-    agent_id: targetAgentId,
     proposed_by_agent_id: authorAgentId,
     proposed_by_kind: authorKind,
     text: text,
@@ -395,20 +538,20 @@ function behaviorOverlaySubmitDraft(mode, targetAgentId, authorAgentId, authorKi
     expected_base_version_id: baseVersionId,
     architect_approver_id: directEdit ? authorAgentId : '',
     auto_apply_architect_direct: !!directEdit,
-  });
+  }, targetArgs));
   draft.dirty = false;
   if (typeof _showToast === 'function') _showToast('Behavior overlay proposal submitted', 'info');
 }
 
 function behaviorOverlayRequestRollback(targetAgentId, versionId, authorAgentId, authorKind, directEdit) {
-  targetAgentId = String(targetAgentId || '').trim();
+  var targetArgs = _behaviorOverlayScopeArgs(targetAgentId);
+  targetAgentId = _behaviorOverlayScopeKey(targetAgentId);
   versionId = String(versionId || '').trim();
   authorAgentId = String(authorAgentId || '').trim();
   authorKind = String(authorKind || '').trim() || 'user';
   if (!targetAgentId || !versionId || !authorAgentId || typeof send !== 'function') return;
-  send({
+  send(Object.assign({
     cmd: 'behavior_overlay_propose',
-    agent_id: targetAgentId,
     proposed_by_agent_id: authorAgentId,
     proposed_by_kind: authorKind,
     proposal_type: 'rollback',
@@ -417,7 +560,7 @@ function behaviorOverlayRequestRollback(targetAgentId, versionId, authorAgentId,
     rationale: 'Rollback requested from Behavior tab',
     architect_approver_id: directEdit ? authorAgentId : '',
     auto_apply_architect_direct: !!directEdit,
-  });
+  }, targetArgs));
 }
 
 function behaviorOverlayArchitectApprove(proposalId, architectId) {
@@ -508,7 +651,7 @@ function _behaviorOverlayProposalCard(proposal, viewer, opts) {
   opts = opts || {};
   proposal = proposal || {};
   var proposalId = String(proposal.id || '');
-  var targetAgentId = String(proposal.agent_id || '');
+  var targetKey = _behaviorOverlayProposalScopeKey(proposal);
   var viewerKind = _behaviorOverlayKind(viewer);
   var viewerId = String((viewer && viewer.id) || '');
   var canArchitectAct = viewerKind === 'architect'
@@ -517,12 +660,15 @@ function _behaviorOverlayProposalCard(proposal, viewer, opts) {
     + _behaviorOverlayAttr(proposalId) + '">';
   html += '<div class="behavior-overlay-card-head">';
   html += '<span class="detail-section-primary">'
-    + _behaviorOverlayEsc(_behaviorOverlayName(targetAgentId)) + '</span>';
+    + _behaviorOverlayEsc(_behaviorOverlayProposalLabel(proposal)) + '</span>';
   html += '<span class="detail-task-status">'
     + _behaviorOverlayEsc(_behaviorOverlayProposalStatusLabel(proposal)) + '</span>';
   html += '</div>';
   html += '<div class="detail-section-card-meta behavior-overlay-meta-row">';
   html += '<span>' + _behaviorOverlayEsc(proposal.proposal_type || 'set_text') + '</span>';
+  if (String(proposal.scope_kind || '') === 'role') {
+    html += '<span>role · ' + _behaviorOverlayEsc(proposal.scope_group || 'group') + '</span>';
+  }
   html += '<span>' + _behaviorOverlayEsc(proposal.approval_route || 'route') + '</span>';
   html += '<span>' + _behaviorOverlayEsc((proposal.proposed_text_bytes || 0) + ' bytes') + '</span>';
   html += '<span>sha ' + _behaviorOverlayEsc(_behaviorOverlayShortHash(proposal.proposed_text_sha256)) + '</span>';
@@ -537,7 +683,7 @@ function _behaviorOverlayProposalCard(proposal, viewer, opts) {
   }
   html += '<div class="detail-section-card-actions behavior-overlay-actions">';
   html += '<button type="button" class="btn-secondary btn-sm" onclick="behaviorOverlayViewProposalDiff('
-    + _behaviorOverlayJs(proposalId) + ',' + _behaviorOverlayJs(targetAgentId) + ')">View diff</button>';
+    + _behaviorOverlayJs(proposalId) + ',' + _behaviorOverlayJs(targetKey) + ')">View diff</button>';
   if (canArchitectAct) {
     html += '<button type="button" class="btn-primary btn-sm" onclick="behaviorOverlayArchitectApprove('
       + _behaviorOverlayJs(proposalId) + ',' + _behaviorOverlayJs(viewerId) + ')">Approve</button>';
@@ -613,7 +759,7 @@ function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, di
 }
 
 function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdit) {
-  var targetAgentId = String((targetAgent && targetAgent.id) || '');
+  var targetAgentId = _behaviorOverlayScopeKey((targetAgent && targetAgent.id) || targetAgent);
   var authorId = String((authorAgent && authorAgent.id) || '');
   var authorKind = _behaviorOverlayKind(authorAgent);
   var read = _behaviorOverlayReadByAgent[targetAgentId] || {};
@@ -632,7 +778,11 @@ function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdi
     + _behaviorOverlayEsc(loading ? 'loading' : ('v' + (version.version_number || '0'))) + '</span></div>';
   html += '<div class="behavior-overlay-summary-grid">';
   html += '<div><span class="detail-label">Target</span><span class="detail-val">'
-    + _behaviorOverlayEsc((targetAgent && (targetAgent.name || targetAgent.id)) || targetAgentId) + '</span></div>';
+    + _behaviorOverlayEsc((targetAgent && targetAgent.name) || _behaviorOverlayScopeLabel(targetAgentId) || targetAgentId) + '</span></div>';
+  if (String((targetAgent && targetAgent.scope_kind) || '') === 'role') {
+    html += '<div><span class="detail-label">Scope</span><span class="detail-val">'
+      + _behaviorOverlayEsc('role · ' + (targetAgent.scope_group || '')) + '</span></div>';
+  }
   html += '<div><span class="detail-label">Active version</span><span class="detail-val">'
     + _behaviorOverlayEsc(active.active_version_id || version.id || '—') + '</span></div>';
   html += '<div><span class="detail-label">Text</span><span class="detail-val">'
@@ -645,7 +795,7 @@ function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdi
     html += '<div class="behavior-overlay-warning-inline">Refreshing current full overlay text before edits can be submitted.</div>';
   }
   html += '<textarea id="' + _behaviorOverlayAttr(textId) + '" class="behavior-overlay-textarea" rows="8"'
-    + ' placeholder="Additive, subordinate behavior guidance for this agent…"'
+    + ' placeholder="Additive, subordinate behavior guidance for this scope…"'
     + ' oninput="behaviorOverlayDraftInput(' + _behaviorOverlayJs(mode) + ','
     + _behaviorOverlayJs(targetAgentId) + ',' + _behaviorOverlayJs(authorId)
     + ',\'text\',this.value)">'
@@ -765,6 +915,102 @@ function renderBehaviorOverlayTab(agent) {
   return html;
 }
 
+function _behaviorOverlayRolePaneMountId(roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  return roleKind ? ('gs-' + roleKind + '-role-behavior-overlay') : '';
+}
+
+function _behaviorOverlayRoleTarget(group, roleKind) {
+  var scope = _behaviorOverlayRoleScope(group, roleKind);
+  if (!scope) return null;
+  return Object.assign({}, scope, {
+    id: scope.scope_id,
+    name: _behaviorOverlayScopeLabel(scope),
+    kind: scope.scope_key,
+    group: scope.scope_group,
+  });
+}
+
+function _behaviorOverlayRolePaneHtml(group, roleKind) {
+  var target = _behaviorOverlayRoleTarget(group, roleKind);
+  if (!target) {
+    return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
+  }
+  var targetKey = target.id;
+  _behaviorOverlayRequestRead(targetKey, true, false);
+  _behaviorOverlayRequestVersions(targetKey, false);
+  _behaviorOverlayRequestProposals(false);
+  var author = { id: 'user', name: 'User', kind: 'user' };
+  var proposals = _behaviorOverlayOpenProposalsForScope(targetKey);
+  var roleLabel = _behaviorOverlayTitleCase(roleKind);
+  var html = '<div class="behavior-overlay-tab behavior-overlay-role-tab" data-behavior-overlay-role="'
+    + _behaviorOverlayAttr(roleKind) + '" data-behavior-overlay-scope="'
+    + _behaviorOverlayAttr(targetKey) + '">';
+  html += '<div class="agent-panel-worklog-header behavior-overlay-header">';
+  html += '<span class="agent-panel-worklog-title">Role Dynamic Behavior overlay</span>';
+  html += '<span class="agent-panel-worklog-note">'
+    + _behaviorOverlayEsc(roleLabel + ' role overlays apply group-wide and always require user diff approval before activation.')
+    + '</span>';
+  html += '</div>';
+  html += '<section class="detail-section-card behavior-overlay-section">';
+  html += '<div class="detail-section-card-head"><span class="detail-section-primary">Scope</span>'
+    + '<span class="detail-task-status">role · ' + _behaviorOverlayEsc(roleKind) + '</span></div>';
+  html += '<div class="behavior-overlay-summary-grid">';
+  html += '<div><span class="detail-label">Group</span><span class="detail-val">'
+    + _behaviorOverlayEsc(group) + '</span></div>';
+  html += '<div><span class="detail-label">Role kind</span><span class="detail-val">'
+    + _behaviorOverlayEsc(roleKind) + '</span></div>';
+  html += '<div><span class="detail-label">Approval route</span><span class="detail-val">user approval required</span></div>';
+  html += '<div><span class="detail-label">Prompt application</span><span class="detail-val">'
+    + _behaviorOverlayEsc(roleKind === 'worker'
+      ? 'next worker dispatch'
+      : 'next launch / relaunch')
+    + '</span></div>';
+  html += '</div>';
+  html += '</section>';
+  html += _behaviorOverlayEditor(author, target, 'role', author, false);
+  html += _behaviorOverlayDiffSection(targetKey);
+  html += _behaviorOverlayProposalsSection(author, proposals, 'Open proposals for this role');
+  html += _behaviorOverlayTimeline(author, targetKey, 'user', 'user', false);
+  html += '</div>';
+  return html;
+}
+
+function renderBehaviorOverlayRolePane(group, roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  group = String(group || '').trim();
+  var mountId = _behaviorOverlayRolePaneMountId(roleKind);
+  var mount = mountId && typeof document !== 'undefined'
+    ? document.getElementById(mountId)
+    : null;
+  if (!mount) return false;
+  var snapshot = null;
+  if (typeof _captureSurfaceState === 'function') {
+    snapshot = _captureSurfaceState(mount, { scrollSelectors: [':root'] });
+  }
+  mount.innerHTML = _behaviorOverlayRolePaneHtml(group, roleKind);
+  if (typeof _restoreSurfaceState === 'function') {
+    _restoreSurfaceState(mount, snapshot, { scrollSelectors: [':root'] });
+  }
+  return true;
+}
+
+function renderGroupBehaviorRolePanes(group) {
+  for (var i = 0; i < _behaviorOverlayRoleKinds.length; i++) {
+    renderBehaviorOverlayRolePane(group, _behaviorOverlayRoleKinds[i]);
+  }
+}
+
+function _behaviorOverlayRefreshRolePaneIfOpenForScope(scopeKey) {
+  var scope = _behaviorOverlayScopeFromId(scopeKey);
+  if (!scope || scope.scope_kind !== 'role') return false;
+  if (typeof _settingsGroup === 'undefined'
+      || String(_settingsGroup || '').trim() !== String(scope.scope_group || '').trim()) {
+    return false;
+  }
+  return renderBehaviorOverlayRolePane(scope.scope_group, scope.scope_key);
+}
+
 function _behaviorOverlayRefreshPanelIfFocused(agentId) {
   agentId = String(agentId || '').trim();
   var focused = (typeof _focusedEngineerAgent === 'function')
@@ -812,7 +1058,7 @@ function behaviorOverlayReceiveMessage(msg) {
   if (!msg || !msg.type) return false;
   behaviorOverlayNormalizeState();
   if (msg.type === 'behavior_overlay') {
-    var agentId = String(msg.agent_id || '');
+    var agentId = _behaviorOverlayScopeKey(msg);
     if (agentId) {
       _behaviorOverlayReadLoadingByAgent[agentId] = false;
       var knownActiveVersionId = String(
@@ -823,6 +1069,7 @@ function behaviorOverlayReceiveMessage(msg) {
         _behaviorOverlayInvalidateFullRead(agentId);
         _behaviorOverlayRequestRead(agentId, true, true);
         _behaviorOverlayRefreshPanelIfFocused(agentId);
+        _behaviorOverlayRefreshRolePaneIfOpenForScope(agentId);
         return true;
       }
       _behaviorOverlayReadByAgent[agentId] = {
@@ -847,15 +1094,17 @@ function behaviorOverlayReceiveMessage(msg) {
         state.behavior_overlay_versions[agentId] = versions;
       }
       _behaviorOverlayRefreshPanelIfFocused(agentId);
+      _behaviorOverlayRefreshRolePaneIfOpenForScope(agentId);
     }
     return true;
   }
   if (msg.type === 'behavior_overlay_versions') {
-    var vidAgent = String(msg.agent_id || '');
+    var vidAgent = _behaviorOverlayScopeKey(msg);
     _behaviorOverlayVersionsLoadingByAgent[vidAgent] = false;
     _behaviorOverlayVersionsByAgent[vidAgent] = Array.isArray(msg.versions) ? msg.versions.slice() : [];
     state.behavior_overlay_versions[vidAgent] = _behaviorOverlayVersionsByAgent[vidAgent];
     _behaviorOverlayRefreshPanelIfFocused(vidAgent);
+    _behaviorOverlayRefreshRolePaneIfOpenForScope(vidAgent);
     return true;
   }
   if (msg.type === 'behavior_overlay_proposals') {
@@ -865,6 +1114,9 @@ function behaviorOverlayReceiveMessage(msg) {
     for (var p = 0; p < proposals.length; p++) _behaviorOverlayUpsertProposal(proposals[p]);
     var focused = (typeof _focusedEngineerAgent === 'function') ? _focusedEngineerAgent() : null;
     if (focused) _behaviorOverlayRefreshPanelIfFocused(focused.id || '');
+    if (typeof _settingsGroup !== 'undefined' && _settingsGroup) {
+      renderGroupBehaviorRolePanes(_settingsGroup);
+    }
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return true;
   }
@@ -876,21 +1128,20 @@ function behaviorOverlayReceiveMessage(msg) {
     }
     if (msg.proposal) _behaviorOverlayUpsertProposal(msg.proposal);
     if (msg.to_proposal) _behaviorOverlayUpsertProposal(msg.to_proposal);
-    var affectedAgent = String(
-      (msg.to_proposal && msg.to_proposal.agent_id)
-      || (msg.proposal && msg.proposal.agent_id)
-      || (msg.from_version && msg.from_version.agent_id)
-      || (msg.to_version && msg.to_version.agent_id)
-      || ''
+    var affectedAgent = _behaviorOverlayScopeKey(
+      msg.to_proposal || msg.proposal || msg.from_version || msg.to_version || {}
     );
     _behaviorOverlayRefreshPanelIfFocused(affectedAgent);
+    _behaviorOverlayRefreshRolePaneIfOpenForScope(affectedAgent);
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return true;
   }
   if (msg.type === 'behavior_overlay_proposal') {
     if (msg.proposal) _behaviorOverlayUpsertProposal(msg.proposal);
     var proposal = msg.proposal || _behaviorOverlayProposal(msg.proposal_id) || {};
-    _behaviorOverlayRefreshPanelIfFocused(proposal.agent_id || '');
+    var proposalScopeKey = _behaviorOverlayProposalScopeKey(proposal);
+    _behaviorOverlayRefreshPanelIfFocused(proposalScopeKey);
+    _behaviorOverlayRefreshRolePaneIfOpenForScope(proposalScopeKey);
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return true;
   }
@@ -901,7 +1152,7 @@ function behaviorOverlayApplyDelta(op) {
   if (!op || !op.op) return;
   behaviorOverlayNormalizeState();
   if (op.op === 'behavior_overlay_active_update') {
-    var activeAgentId = String(op.agent_id || '');
+    var activeAgentId = _behaviorOverlayScopeKey(op);
     var nextActiveVersionId = String(op.active_version_id || '');
     var previousActiveVersionId = String(
       (
@@ -915,7 +1166,7 @@ function behaviorOverlayApplyDelta(op) {
     var cachedReadVersionId = _behaviorOverlayReadVersionId(activeAgentId);
     var active = Object.assign({}, op);
     delete active.op;
-    if (active.agent_id) state.behavior_overlay_active[active.agent_id] = active;
+    if (activeAgentId) state.behavior_overlay_active[activeAgentId] = active;
     if (
       activeAgentId
       && nextActiveVersionId
@@ -926,13 +1177,14 @@ function behaviorOverlayApplyDelta(op) {
     ) {
       _behaviorOverlayInvalidateFullRead(activeAgentId);
     }
+    _behaviorOverlayRefreshRolePaneIfOpenForScope(activeAgentId);
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return;
   }
   if (op.op === 'behavior_overlay_version_append') {
     var version = Object.assign({}, op);
     delete version.op;
-    var agentId = String(version.agent_id || '');
+    var agentId = _behaviorOverlayScopeKey(version);
     if (!agentId || !version.id) return;
     var versions = _behaviorOverlayVersionList(agentId).slice();
     var replaced = false;
@@ -959,6 +1211,7 @@ function behaviorOverlayApplyDelta(op) {
     ) {
       _behaviorOverlayInvalidateFullRead(agentId);
     }
+    _behaviorOverlayRefreshRolePaneIfOpenForScope(agentId);
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return;
   }
@@ -966,7 +1219,9 @@ function behaviorOverlayApplyDelta(op) {
       || op.op === 'behavior_overlay_proposal_resolve') {
     var proposal = Object.assign({}, op);
     delete proposal.op;
+    var proposalScopeKey = _behaviorOverlayProposalScopeKey(proposal);
     _behaviorOverlayUpsertProposal(proposal);
+    _behaviorOverlayRefreshRolePaneIfOpenForScope(proposalScopeKey);
     if (_behaviorOverlayApprovalModal.open) renderBehaviorOverlayApprovalModal();
     return;
   }
@@ -982,12 +1237,17 @@ function behaviorOverlayDeltaInvalidatesFocusedPanel(op) {
   if (focusedKind !== 'engineer' && focusedKind !== 'architect') return false;
   if (typeof _agentPanelActiveTab === 'function'
       && _agentPanelActiveTab(focusedKind) !== 'behavior') return false;
-  var agentId = String(op.agent_id || '');
+  var agentId = _behaviorOverlayScopeKey(op);
   if (!agentId && op.id && state && state.behavior_overlay_proposals) {
     var cached = state.behavior_overlay_proposals[op.id];
-    if (cached) agentId = String(cached.agent_id || '');
+    if (cached) agentId = _behaviorOverlayProposalScopeKey(cached);
   }
   if (!agentId) return false;
+  var affectedScope = _behaviorOverlayScopeFromId(agentId);
+  if (affectedScope && affectedScope.scope_kind === 'role') {
+    return String(focused.group || '') === String(affectedScope.scope_group || '')
+      && focusedKind === String(affectedScope.scope_key || '');
+  }
   if (agentId === String(focused.id || '')) return true;
   if (focusedKind === 'architect') {
     var target = _behaviorOverlayAgent(agentId);
@@ -1020,9 +1280,13 @@ function behaviorOverlayApprovalCardHtml(task) {
   if (!behaviorOverlayApprovalTask(task)) return '';
   var proposalId = behaviorOverlayProposalIdFromTask(task);
   var proposal = _behaviorOverlayProposal(proposalId) || {};
-  var target = _behaviorOverlayName(proposal.agent_id || '');
+  var target = _behaviorOverlayProposalLabel(proposal);
   var html = '<div class="behavior-overlay-approval-card" data-behavior-overlay-approval="1">';
-  html += '<div class="behavior-overlay-approval-card-title">Behavior overlay approval</div>';
+  html += '<div class="behavior-overlay-approval-card-title">'
+    + _behaviorOverlayEsc(String(proposal.scope_kind || '') === 'role'
+      ? 'Role behavior overlay approval'
+      : 'Behavior overlay approval')
+    + '</div>';
   html += '<div class="behavior-overlay-approval-card-body">Review the rendered diff before approving this governed behavior change.';
   if (target) html += ' Target: ' + _behaviorOverlayEsc(target) + '.';
   html += '</div>';
@@ -1108,12 +1372,19 @@ function renderBehaviorOverlayApprovalModal() {
   var diffReady = !!diffPayload;
   var targetAgent = _behaviorOverlayAgent(proposal.agent_id || '');
   var authorAgent = _behaviorOverlayAgent(proposal.proposed_by_agent_id || '');
+  var isRoleScope = String(proposal.scope_kind || '') === 'role';
   var html = '';
   html += '<div class="behavior-overlay-approval-summary">';
   html += '<div><span class="detail-label">Task</span><span class="detail-val">'
     + _behaviorOverlayEsc((task && (task.id + ' · ' + task.task)) || _behaviorOverlayApprovalModal.taskId) + '</span></div>';
   html += '<div><span class="detail-label">Target</span><span class="detail-val">'
-    + _behaviorOverlayEsc((targetAgent && (targetAgent.name || targetAgent.id)) || proposal.agent_id || '—') + '</span></div>';
+    + _behaviorOverlayEsc(isRoleScope
+      ? (_behaviorOverlayProposalLabel(proposal) || '—')
+      : ((targetAgent && (targetAgent.name || targetAgent.id)) || proposal.agent_id || '—')) + '</span></div>';
+  html += '<div><span class="detail-label">Scope</span><span class="detail-val">'
+    + _behaviorOverlayEsc(isRoleScope
+      ? ('role · ' + (proposal.scope_group || '—'))
+      : 'agent') + '</span></div>';
   html += '<div><span class="detail-label">Target kind</span><span class="detail-val">'
     + _behaviorOverlayEsc(proposal.target_kind || (targetAgent && targetAgent.kind) || '—') + '</span></div>';
   html += '<div><span class="detail-label">Author</span><span class="detail-val">'
