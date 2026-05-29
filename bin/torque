@@ -5,7 +5,6 @@ Talks to the Torque daemon over HTTP (POST /api/cmd).
 """
 
 import argparse
-import difflib
 import json
 import os
 from pathlib import Path
@@ -37,6 +36,7 @@ from torque.mcp_retry import (
     is_transient_exception,
     is_transient_http_status,
 )
+from torque.behavior_overlay import behavior_overlay_diff
 
 DEFAULT_PORT = 18932
 DESKTOP_DEFAULT_PORT = 18933
@@ -3504,13 +3504,12 @@ def cmd_behavior_diff(args):
         to_text = str(to_version.get("text", "") or "")
         from_label = args.from_version
         to_label = args.to_version
-    diff = "".join(difflib.unified_diff(
-        from_text.splitlines(keepends=True),
-        to_text.splitlines(keepends=True),
-        fromfile=from_label,
-        tofile=to_label,
-        lineterm="",
-    ))
+    diff = behavior_overlay_diff(
+        from_text,
+        to_text,
+        from_label=from_label,
+        to_label=to_label,
+    )
     if args.json:
         print(json.dumps({"diff": diff}, indent=2))
     else:

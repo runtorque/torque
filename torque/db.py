@@ -3713,7 +3713,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "WHERE agent_id=?",
             (agent_id,),
         ).fetchone()
-        current = int((row[0] if row else None) or -1)
+        current_value = row[0] if row else None
+        current = -1 if current_value is None else int(current_value)
         return current + 1
 
     def save_behavior_overlay_version(self, row_dict: dict) -> dict:

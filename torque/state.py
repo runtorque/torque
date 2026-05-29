@@ -7850,11 +7850,16 @@ class MatrixState:
             from_version_id: str = "",
             to_version_id: str = "",
             agent_id: str = "") -> dict:
+        target_agent_id = str(agent_id or "").strip()
         from_label = "from"
         to_label = "to"
         if proposal_id:
             proposal = self.load_behavior_overlay_proposal(proposal_id)
             if not proposal:
+                raise ValueError("behavior overlay proposal not found")
+            if (
+                    target_agent_id
+                    and str(proposal.get("agent_id", "") or "") != target_agent_id):
                 raise ValueError("behavior overlay proposal not found")
             base = self.load_behavior_overlay_version(
                 proposal.get("base_version_id", "")
@@ -7875,13 +7880,18 @@ class MatrixState:
                     to_label=to_label,
                 ),
             }
-        if not from_version_id and agent_id:
-            active = self.load_behavior_overlay_active(agent_id) or {}
+        if not from_version_id and target_agent_id:
+            active = self.load_behavior_overlay_active(target_agent_id) or {}
             from_version_id = str(active.get("active_version_id", "") or "")
         from_version = self.load_behavior_overlay_version(from_version_id) or {}
         to_version = self.load_behavior_overlay_version(to_version_id) or {}
         if not from_version or not to_version:
             raise ValueError("behavior overlay version not found")
+        if target_agent_id:
+            if (
+                    str(from_version.get("agent_id", "") or "") != target_agent_id
+                    or str(to_version.get("agent_id", "") or "") != target_agent_id):
+                raise ValueError("behavior overlay version not found")
         return {
             "type": "behavior_overlay_diff",
             "from_version": version_summary(from_version),

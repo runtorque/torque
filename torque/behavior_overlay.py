@@ -161,13 +161,16 @@ def behavior_overlay_diff(
         from_label: str = "active",
         to_label: str = "proposed") -> str:
     """Return a unified diff between two overlay text bodies."""
-    return "".join(difflib.unified_diff(
-        str(from_text or "").splitlines(keepends=True),
-        str(to_text or "").splitlines(keepends=True),
+    lines = list(difflib.unified_diff(
+        str(from_text or "").splitlines(),
+        str(to_text or "").splitlines(),
         fromfile=from_label,
         tofile=to_label,
         lineterm="",
     ))
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
 
 
 def version_summary(row: dict | None) -> dict:
