@@ -150,7 +150,8 @@ CREATE TABLE IF NOT EXISTS group_settings (
     architect_suppress_empty_digests INTEGER NOT NULL DEFAULT 1,
     architect_enabled_events      TEXT NOT NULL DEFAULT '',
     architect_journal_checkpoint_frequency TEXT NOT NULL DEFAULT 'every_10_actions',
-    architect_review_gate_thresholds TEXT NOT NULL DEFAULT '{"ship_direct_max":50,"review_default_above":150,"self_review_bypass_allowed":false}'
+    architect_review_gate_thresholds TEXT NOT NULL DEFAULT '{"ship_direct_max":50,"review_default_above":150,"self_review_bypass_allowed":false}',
+    engineer_behavior_requires_user_approval INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -586,6 +587,97 @@ CREATE INDEX IF NOT EXISTS idx_pending_hires_status
     ON pending_hires(status);
 CREATE INDEX IF NOT EXISTS idx_pending_hires_architect
     ON pending_hires(architect_id);
+
+CREATE TABLE IF NOT EXISTS behavior_overlay_versions (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    version_number INTEGER NOT NULL,
+    parent_version_id TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    text_sha256 TEXT NOT NULL,
+    author_agent_id TEXT NOT NULL DEFAULT '',
+    author_kind TEXT NOT NULL DEFAULT '',
+    rationale TEXT NOT NULL DEFAULT '',
+    approver_id TEXT NOT NULL DEFAULT '',
+    approver_kind TEXT NOT NULL DEFAULT '',
+    source_proposal_id TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(agent_id, version_number)
+);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_agent
+    ON behavior_overlay_versions(agent_id, version_number DESC);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_proposal
+    ON behavior_overlay_versions(source_proposal_id);
+
+CREATE TABLE IF NOT EXISTS behavior_overlay_active (
+    agent_id TEXT PRIMARY KEY,
+    active_version_id TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    updated_by_kind TEXT NOT NULL DEFAULT '',
+    updated_by_id TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS behavior_overlay_proposals (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL DEFAULT '',
+    proposal_type TEXT NOT NULL DEFAULT 'set_text',
+    base_version_id TEXT NOT NULL DEFAULT '',
+    target_version_id TEXT NOT NULL DEFAULT '',
+    proposed_text TEXT NOT NULL DEFAULT '',
+    proposed_text_sha256 TEXT NOT NULL DEFAULT '',
+    proposed_by_agent_id TEXT NOT NULL DEFAULT '',
+    proposed_by_kind TEXT NOT NULL DEFAULT '',
+    rationale TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'proposed',
+    approval_route TEXT NOT NULL,
+    next_actor_kind TEXT NOT NULL DEFAULT '',
+    requires_user_approval INTEGER NOT NULL DEFAULT 0,
+    architect_approver_id TEXT NOT NULL DEFAULT '',
+    architect_approved_at REAL,
+    user_task_id TEXT NOT NULL DEFAULT '',
+    user_approved_at REAL,
+    lint_warnings_json TEXT NOT NULL DEFAULT '[]',
+    resolved_by_kind TEXT NOT NULL DEFAULT '',
+    resolved_by_id TEXT NOT NULL DEFAULT '',
+    resolved_at REAL,
+    resolution_note TEXT NOT NULL DEFAULT '',
+    applied_version_id TEXT NOT NULL DEFAULT '',
+    applied_at REAL,
+    idempotency_key TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_agent_status
+    ON behavior_overlay_proposals(agent_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_route
+    ON behavior_overlay_proposals(approval_route, status);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_next_actor
+    ON behavior_overlay_proposals(next_actor_kind, status);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_user_task
+    ON behavior_overlay_proposals(user_task_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_idempotency
+    ON behavior_overlay_proposals(proposed_by_agent_id, idempotency_key)
+    WHERE idempotency_key != '';
+
+CREATE TABLE IF NOT EXISTS behavior_overlay_activations (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    previous_version_id TEXT NOT NULL DEFAULT '',
+    active_version_id TEXT NOT NULL,
+    proposal_id TEXT NOT NULL DEFAULT '',
+    actor_kind TEXT NOT NULL DEFAULT '',
+    actor_id TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_agent
+    ON behavior_overlay_activations(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_proposal
+    ON behavior_overlay_activations(proposal_id);
 
 CREATE TABLE IF NOT EXISTS mcp_idempotency (
     idempotency_key TEXT PRIMARY KEY,
@@ -1714,6 +1806,19 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
+    try:
+        conn.execute(
+            "SELECT engineer_behavior_requires_user_approval "
+            "FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE group_settings ADD COLUMN "
+                "engineer_behavior_requires_user_approval "
+                "INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     try:
         conn.execute(
             "SELECT engineer_owner_id FROM auto_dispatch_queue LIMIT 0")

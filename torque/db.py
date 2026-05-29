@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional
 
 from torque import __version__
+from torque.behavior_overlay import overlay_text_sha256, overlay_text_bytes
 from torque.config import ATTACHMENTS_DIR
 from torque import profiling
 from torque.db_board import (
@@ -132,6 +133,7 @@ _GS_BOOL_FIELDS = {
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
     "terminal_close_on_disconnect", "architect_suppress_empty_digests",
+    "engineer_behavior_requires_user_approval",
 }
 
 _AGENT_PEER_MESSAGE_COLUMNS = [
@@ -550,6 +552,69 @@ def _decode_pending_hire_row(row, cols) -> dict:
         pending_hire.get("resolved_at", 0)
     )
     return pending_hire
+
+
+def _json_loads_default(value, default):
+    if isinstance(value, (dict, list)):
+        return copy.deepcopy(value)
+    try:
+        parsed = json.loads(str(value or ""))
+    except (json.JSONDecodeError, TypeError):
+        return copy.deepcopy(default)
+    if isinstance(default, list) and not isinstance(parsed, list):
+        return copy.deepcopy(default)
+    if isinstance(default, dict) and not isinstance(parsed, dict):
+        return copy.deepcopy(default)
+    return parsed
+
+
+def _decode_behavior_overlay_version_row(row, cols) -> dict:
+    version = dict(zip(cols, row))
+    version["version_number"] = int(version.get("version_number", 0) or 0)
+    version["created_at"] = float(version.get("created_at", 0) or 0)
+    version["metadata"] = _json_loads_default(
+        version.pop("metadata_json", "{}"), {}
+    )
+    text = str(version.get("text", "") or "")
+    version["text_sha256"] = str(
+        version.get("text_sha256", "") or overlay_text_sha256(text)
+    )
+    version["text_bytes"] = overlay_text_bytes(text)
+    return version
+
+
+def _decode_behavior_overlay_active_row(row, cols) -> dict:
+    active = dict(zip(cols, row))
+    active["updated_at"] = float(active.get("updated_at", 0) or 0)
+    return active
+
+
+def _decode_behavior_overlay_proposal_row(row, cols) -> dict:
+    proposal = dict(zip(cols, row))
+    proposal["requires_user_approval"] = bool(
+        proposal.get("requires_user_approval", 0)
+    )
+    for key in (
+            "architect_approved_at", "user_approved_at", "resolved_at",
+            "applied_at"):
+        proposal[key] = float(proposal.get(key, 0) or 0)
+    for key in ("created_at", "updated_at"):
+        proposal[key] = float(proposal.get(key, 0) or 0)
+    proposal["lint_warnings"] = _json_loads_default(
+        proposal.pop("lint_warnings_json", "[]"), []
+    )
+    text = str(proposal.get("proposed_text", "") or "")
+    proposal["proposed_text_sha256"] = str(
+        proposal.get("proposed_text_sha256", "") or overlay_text_sha256(text)
+    )
+    proposal["proposed_text_bytes"] = overlay_text_bytes(text)
+    return proposal
+
+
+def _decode_behavior_overlay_activation_row(row, cols) -> dict:
+    activation = dict(zip(cols, row))
+    activation["created_at"] = float(activation.get("created_at", 0) or 0)
+    return activation
 
 
 def _digest_event_json(event: dict) -> str:
@@ -3559,6 +3624,397 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return
         self._conn.execute("DELETE FROM pending_hires WHERE id=?", (hire_id,))
         self._conn.commit()
+
+    # -- Dynamic Behavior overlay persistence -------------------------------
+
+    _BEHAVIOR_VERSION_COLS = (
+        "id, agent_id, version_number, parent_version_id, text, text_sha256, "
+        "author_agent_id, author_kind, rationale, approver_id, approver_kind, "
+        "source_proposal_id, created_at, metadata_json"
+    )
+    _BEHAVIOR_PROPOSAL_COLS = (
+        "id, agent_id, target_kind, proposal_type, base_version_id, "
+        "target_version_id, proposed_text, proposed_text_sha256, "
+        "proposed_by_agent_id, proposed_by_kind, rationale, status, "
+        "approval_route, next_actor_kind, requires_user_approval, "
+        "architect_approver_id, architect_approved_at, user_task_id, "
+        "user_approved_at, lint_warnings_json, resolved_by_kind, "
+        "resolved_by_id, resolved_at, resolution_note, applied_version_id, "
+        "applied_at, idempotency_key, created_at, updated_at"
+    )
+
+    def load_behavior_overlay_version(self, version_id: str) -> dict | None:
+        version_id = str(version_id or "").strip()
+        if not version_id:
+            return None
+        cursor = self._conn.execute(
+            f"SELECT {self._BEHAVIOR_VERSION_COLS} "
+            "FROM behavior_overlay_versions WHERE id=?",
+            (version_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _decode_behavior_overlay_version_row(
+            row, [d[0] for d in cursor.description]
+        )
+
+    def load_behavior_overlay_active(self, agent_id: str) -> dict | None:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return None
+        cursor = self._conn.execute(
+            "SELECT agent_id, active_version_id, updated_at, "
+            "updated_by_kind, updated_by_id, reason "
+            "FROM behavior_overlay_active WHERE agent_id=?",
+            (agent_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _decode_behavior_overlay_active_row(
+            row, [d[0] for d in cursor.description]
+        )
+
+    def load_behavior_overlay_active_version(
+            self, agent_id: str) -> dict | None:
+        active = self.load_behavior_overlay_active(agent_id)
+        if not active:
+            return None
+        return self.load_behavior_overlay_version(
+            active.get("active_version_id", "")
+        )
+
+    def list_behavior_overlay_versions(
+            self, agent_id: str, *, limit: int = 50) -> list[dict]:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return []
+        try:
+            limit_int = max(1, min(int(limit), 500))
+        except (TypeError, ValueError):
+            limit_int = 50
+        cursor = self._conn.execute(
+            f"SELECT {self._BEHAVIOR_VERSION_COLS} "
+            "FROM behavior_overlay_versions WHERE agent_id=? "
+            "ORDER BY version_number DESC LIMIT ?",
+            (agent_id, limit_int),
+        )
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [_decode_behavior_overlay_version_row(row, cols) for row in rows]
+
+    def next_behavior_overlay_version_number(self, agent_id: str) -> int:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return 0
+        row = self._conn.execute(
+            "SELECT MAX(version_number) FROM behavior_overlay_versions "
+            "WHERE agent_id=?",
+            (agent_id,),
+        ).fetchone()
+        current = int((row[0] if row else None) or -1)
+        return current + 1
+
+    def save_behavior_overlay_version(self, row_dict: dict) -> dict:
+        row = dict(row_dict or {})
+        version_id = str(row.get("id", "") or "").strip()
+        agent_id = str(row.get("agent_id", "") or "").strip()
+        if not version_id:
+            raise ValueError("behavior overlay version id is required")
+        if not agent_id:
+            raise ValueError("behavior overlay agent_id is required")
+        text = str(row.get("text", "") or "")
+        metadata = row.get("metadata", row.get("metadata_json", {})) or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        self._conn.execute(
+            "INSERT OR REPLACE INTO behavior_overlay_versions "
+            f"({self._BEHAVIOR_VERSION_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                version_id,
+                agent_id,
+                int(row.get("version_number", 0) or 0),
+                str(row.get("parent_version_id", "") or ""),
+                text,
+                str(row.get("text_sha256", "") or overlay_text_sha256(text)),
+                str(row.get("author_agent_id", "") or ""),
+                str(row.get("author_kind", "") or ""),
+                str(row.get("rationale", "") or ""),
+                str(row.get("approver_id", "") or ""),
+                str(row.get("approver_kind", "") or ""),
+                str(row.get("source_proposal_id", "") or ""),
+                float(row.get("created_at", time.time()) or time.time()),
+                json.dumps(metadata, separators=(",", ":")),
+            ),
+        )
+        self._conn.commit()
+        saved = self.load_behavior_overlay_version(version_id)
+        if not saved:
+            raise RuntimeError(
+                f"failed to load saved behavior overlay version {version_id}"
+            )
+        return saved
+
+    async def save_behavior_overlay_version_async(self, row_dict: dict) -> dict:
+        return await self._enqueue_async_write(
+            "behavior_overlay_versions",
+            "save_behavior_overlay_version",
+            _snapshot_db_payload(row_dict or {}),
+        )
+
+    def save_behavior_overlay_active(self, row_dict: dict) -> dict:
+        row = dict(row_dict or {})
+        agent_id = str(row.get("agent_id", "") or "").strip()
+        active_version_id = str(row.get("active_version_id", "") or "").strip()
+        if not agent_id:
+            raise ValueError("behavior overlay active agent_id is required")
+        if not active_version_id:
+            raise ValueError("behavior overlay active_version_id is required")
+        self._conn.execute(
+            "INSERT OR REPLACE INTO behavior_overlay_active "
+            "(agent_id, active_version_id, updated_at, updated_by_kind, "
+            "updated_by_id, reason) VALUES (?,?,?,?,?,?)",
+            (
+                agent_id,
+                active_version_id,
+                float(row.get("updated_at", time.time()) or time.time()),
+                str(row.get("updated_by_kind", "") or ""),
+                str(row.get("updated_by_id", "") or ""),
+                str(row.get("reason", "") or ""),
+            ),
+        )
+        self._conn.commit()
+        saved = self.load_behavior_overlay_active(agent_id)
+        if not saved:
+            raise RuntimeError(
+                f"failed to load saved behavior overlay active row {agent_id}"
+            )
+        return saved
+
+    def delete_behavior_overlay_active(self, agent_id: str) -> None:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return
+        self._conn.execute(
+            "DELETE FROM behavior_overlay_active WHERE agent_id=?",
+            (agent_id,),
+        )
+        self._conn.commit()
+
+    def save_behavior_overlay_activation(self, row_dict: dict) -> dict:
+        row = dict(row_dict or {})
+        activation_id = str(row.get("id", "") or "").strip()
+        agent_id = str(row.get("agent_id", "") or "").strip()
+        active_version_id = str(row.get("active_version_id", "") or "").strip()
+        if not activation_id:
+            raise ValueError("behavior overlay activation id is required")
+        if not agent_id:
+            raise ValueError("behavior overlay activation agent_id is required")
+        if not active_version_id:
+            raise ValueError(
+                "behavior overlay activation active_version_id is required"
+            )
+        self._conn.execute(
+            "INSERT OR REPLACE INTO behavior_overlay_activations "
+            "(id, agent_id, previous_version_id, active_version_id, "
+            "proposal_id, actor_kind, actor_id, action, reason, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                activation_id,
+                agent_id,
+                str(row.get("previous_version_id", "") or ""),
+                active_version_id,
+                str(row.get("proposal_id", "") or ""),
+                str(row.get("actor_kind", "") or ""),
+                str(row.get("actor_id", "") or ""),
+                str(row.get("action", "") or ""),
+                str(row.get("reason", "") or ""),
+                float(row.get("created_at", time.time()) or time.time()),
+            ),
+        )
+        self._conn.commit()
+        cursor = self._conn.execute(
+            "SELECT id, agent_id, previous_version_id, active_version_id, "
+            "proposal_id, actor_kind, actor_id, action, reason, created_at "
+            "FROM behavior_overlay_activations WHERE id=?",
+            (activation_id,),
+        )
+        saved = cursor.fetchone()
+        if not saved:
+            raise RuntimeError(
+                f"failed to load saved behavior overlay activation {activation_id}"
+            )
+        return _decode_behavior_overlay_activation_row(
+            saved, [d[0] for d in cursor.description]
+        )
+
+    def load_behavior_overlay_proposal(self, proposal_id: str) -> dict | None:
+        proposal_id = str(proposal_id or "").strip()
+        if not proposal_id:
+            return None
+        cursor = self._conn.execute(
+            f"SELECT {self._BEHAVIOR_PROPOSAL_COLS} "
+            "FROM behavior_overlay_proposals WHERE id=?",
+            (proposal_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _decode_behavior_overlay_proposal_row(
+            row, [d[0] for d in cursor.description]
+        )
+
+    def load_behavior_overlay_proposal_by_idempotency(
+            self, proposed_by_agent_id: str,
+            idempotency_key: str) -> dict | None:
+        proposed_by_agent_id = str(proposed_by_agent_id or "").strip()
+        idempotency_key = str(idempotency_key or "").strip()
+        if not proposed_by_agent_id or not idempotency_key:
+            return None
+        cursor = self._conn.execute(
+            f"SELECT {self._BEHAVIOR_PROPOSAL_COLS} "
+            "FROM behavior_overlay_proposals "
+            "WHERE proposed_by_agent_id=? AND idempotency_key=?",
+            (proposed_by_agent_id, idempotency_key),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _decode_behavior_overlay_proposal_row(
+            row, [d[0] for d in cursor.description]
+        )
+
+    def save_behavior_overlay_proposal(self, row_dict: dict) -> dict:
+        row = dict(row_dict or {})
+        proposal_id = str(row.get("id", "") or "").strip()
+        if not proposal_id:
+            raise ValueError("behavior overlay proposal id is required")
+        existing = self.load_behavior_overlay_proposal(proposal_id) or {}
+        now = time.time()
+        created_at = float(
+            row.get("created_at", existing.get("created_at", now)) or now
+        )
+        updated_at = float(row.get("updated_at", now) or now)
+        proposed_text = str(
+            row.get("proposed_text", existing.get("proposed_text", "")) or ""
+        )
+        lint_warnings = row.get(
+            "lint_warnings",
+            row.get("lint_warnings_json", existing.get("lint_warnings", [])),
+        )
+        if not isinstance(lint_warnings, list):
+            lint_warnings = []
+        status = str(
+            row.get("status", existing.get("status", "proposed")) or "proposed"
+        )
+        if status not in {"proposed", "approved", "rejected", "applied"}:
+            raise ValueError(
+                "status must be one of: proposed, approved, rejected, applied"
+            )
+        proposal_type = str(
+            row.get("proposal_type", existing.get("proposal_type", "set_text"))
+            or "set_text"
+        )
+        if proposal_type not in {"set_text", "rollback"}:
+            raise ValueError("proposal_type must be set_text or rollback")
+        approval_route = str(
+            row.get("approval_route", existing.get("approval_route", "")) or ""
+        )
+        if approval_route not in {"architect", "user", "architect_then_user"}:
+            raise ValueError(
+                "approval_route must be architect, user, or architect_then_user"
+            )
+        self._conn.execute(
+            "INSERT OR REPLACE INTO behavior_overlay_proposals "
+            f"({self._BEHAVIOR_PROPOSAL_COLS}) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                proposal_id,
+                str(row.get("agent_id", existing.get("agent_id", "")) or ""),
+                str(row.get("target_kind", existing.get("target_kind", "")) or ""),
+                proposal_type,
+                str(row.get("base_version_id", existing.get("base_version_id", "")) or ""),
+                str(row.get("target_version_id", existing.get("target_version_id", "")) or ""),
+                proposed_text,
+                str(
+                    row.get(
+                        "proposed_text_sha256",
+                        existing.get(
+                            "proposed_text_sha256",
+                            overlay_text_sha256(proposed_text),
+                        ),
+                    ) or overlay_text_sha256(proposed_text)
+                ),
+                str(row.get("proposed_by_agent_id", existing.get("proposed_by_agent_id", "")) or ""),
+                str(row.get("proposed_by_kind", existing.get("proposed_by_kind", "")) or ""),
+                str(row.get("rationale", existing.get("rationale", "")) or ""),
+                status,
+                approval_route,
+                str(row.get("next_actor_kind", existing.get("next_actor_kind", "")) or ""),
+                int(bool(row.get(
+                    "requires_user_approval",
+                    existing.get("requires_user_approval", False),
+                ))),
+                str(row.get("architect_approver_id", existing.get("architect_approver_id", "")) or ""),
+                row.get("architect_approved_at", existing.get("architect_approved_at", None)),
+                str(row.get("user_task_id", existing.get("user_task_id", "")) or ""),
+                row.get("user_approved_at", existing.get("user_approved_at", None)),
+                json.dumps(lint_warnings, separators=(",", ":")),
+                str(row.get("resolved_by_kind", existing.get("resolved_by_kind", "")) or ""),
+                str(row.get("resolved_by_id", existing.get("resolved_by_id", "")) or ""),
+                row.get("resolved_at", existing.get("resolved_at", None)),
+                str(row.get("resolution_note", existing.get("resolution_note", "")) or ""),
+                str(row.get("applied_version_id", existing.get("applied_version_id", "")) or ""),
+                row.get("applied_at", existing.get("applied_at", None)),
+                str(row.get("idempotency_key", existing.get("idempotency_key", "")) or ""),
+                created_at,
+                updated_at,
+            ),
+        )
+        self._conn.commit()
+        saved = self.load_behavior_overlay_proposal(proposal_id)
+        if not saved:
+            raise RuntimeError(
+                f"failed to load saved behavior overlay proposal {proposal_id}"
+            )
+        return saved
+
+    async def save_behavior_overlay_proposal_async(self, row_dict: dict) -> dict:
+        return await self._enqueue_async_write(
+            "behavior_overlay_proposals",
+            "save_behavior_overlay_proposal",
+            _snapshot_db_payload(row_dict or {}),
+        )
+
+    def list_behavior_overlay_proposals(
+            self, *,
+            status_filter: str = "",
+            agent_id: str = "",
+            next_actor_kind: str = "",
+            proposed_by_agent_id: str = "",
+            limit: int = 100) -> list[dict]:
+        query = f"SELECT {self._BEHAVIOR_PROPOSAL_COLS} FROM behavior_overlay_proposals WHERE 1=1"
+        params: list = []
+        for column, value in (
+                ("status", status_filter),
+                ("agent_id", agent_id),
+                ("next_actor_kind", next_actor_kind),
+                ("proposed_by_agent_id", proposed_by_agent_id)):
+            value = str(value or "").strip()
+            if value:
+                query += f" AND {column}=?"
+                params.append(value)
+        try:
+            limit_int = max(1, min(int(limit), 500))
+        except (TypeError, ValueError):
+            limit_int = 100
+        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(limit_int)
+        cursor = self._conn.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [_decode_behavior_overlay_proposal_row(row, cols) for row in rows]
 
     def save_engineer_task_log_entry(self, record: dict) -> int:
         """Insert a persisted Engineer dispatch/worklog row."""

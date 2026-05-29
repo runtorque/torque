@@ -19,6 +19,7 @@ import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
+from .behavior_overlay import proposal_summary, version_summary
 from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
@@ -548,6 +549,10 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "actions_list",
     "agent_show",
     "agents_list",
+    "behavior_overlay_diff",
+    "behavior_overlay_proposal_list",
+    "behavior_overlay_read",
+    "behavior_overlay_versions",
     "board_list",
     "board_summary",
     "decision_list",
@@ -666,6 +671,47 @@ def _resolve_architect_hired_engineer(state, caller_id: str,
     if engineer_id not in hired_ids:
         return None, "engineer not found in scope"
     return engineer_id, ""
+
+
+def _resolve_behavior_overlay_architect_target(
+        state,
+        caller_id: str,
+        agent_ident: str = "") -> tuple[str | None, str]:
+    """Resolve architect overlay target: caller self or a hired engineer."""
+    ident = str(agent_ident or "").strip()
+    if not ident:
+        return str(caller_id or "").strip(), ""
+    engineer_id, error = _resolve_architect_hired_engineer(
+        state,
+        caller_id,
+        ident,
+    )
+    if engineer_id:
+        return engineer_id, ""
+    resolved = _resolve_agent_including_tombstoned(state, ident)
+    resolved_cell = state.agents.get(resolved or "")
+    if resolved_cell and str(getattr(resolved_cell, "kind", "") or "") == "worker":
+        return None, "worker behavior overlays are not supported in v1"
+    return None, error
+
+
+def _behavior_overlay_visible_to_architect(
+        state,
+        caller_id: str,
+        proposal: dict | None) -> bool:
+    if not proposal:
+        return False
+    target_id = str(proposal.get("agent_id", "") or "").strip()
+    if target_id == str(caller_id or "").strip():
+        return True
+    hired_ids = {
+        eid for eid, (_cell, relation) in _architect_visible_engineers(
+            state,
+            caller_id,
+        ).items()
+        if relation == "hired"
+    }
+    return target_id in hired_ids
 
 
 def _resolve_group_engineer(state, caller_id: str,
@@ -3551,7 +3597,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     async def handle_command(payload):
         command_payload = dict(payload or {})
-        if idempotency_key and "idempotency_key" not in command_payload:
+        if idempotency_key and not str(
+                command_payload.get("idempotency_key", "") or "").strip():
             command_payload["idempotency_key"] = derive_idempotency_key(
                 idempotency_key,
                 command_payload,
@@ -4354,6 +4401,114 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
         }), False
 
+    if tool_name == "behavior_overlay_read":
+        if caller_kind == "engineer":
+            target_id = str(caller_id or "").strip()
+        elif caller_kind == "architect":
+            target_id, target_error = _resolve_behavior_overlay_architect_target(
+                real_state,
+                caller_id,
+                args.get("agent_id", ""),
+            )
+            if not target_id:
+                return target_error, True
+        else:
+            return "behavior overlay tools are not available to this caller", True
+        version = real_state.load_behavior_overlay_active_version(target_id)
+        active = real_state.load_behavior_overlay_active(target_id) or {}
+        return json.dumps({
+            "type": "behavior_overlay",
+            "agent_id": target_id,
+            "active": active,
+            "version": version_summary(version),
+            "text": str((version or {}).get("text", "") or ""),
+        }), False
+
+    if tool_name == "behavior_overlay_versions":
+        if caller_kind == "engineer":
+            target_id = str(caller_id or "").strip()
+        elif caller_kind == "architect":
+            target_id, target_error = _resolve_behavior_overlay_architect_target(
+                real_state,
+                caller_id,
+                args.get("agent_id", ""),
+            )
+            if not target_id:
+                return target_error, True
+        else:
+            return "behavior overlay tools are not available to this caller", True
+        return json.dumps({
+            "type": "behavior_overlay_versions",
+            "agent_id": target_id,
+            "versions": [
+                version_summary(row)
+                for row in real_state.list_behavior_overlay_versions(
+                    target_id,
+                    limit=int(args.get("limit", 50) or 50),
+                )
+            ],
+        }), False
+
+    if tool_name == "behavior_overlay_diff":
+        proposal_id = str(args.get("proposal_id", "") or "").strip()
+        try:
+            if proposal_id:
+                proposal = real_state.load_behavior_overlay_proposal(proposal_id)
+                if caller_kind == "engineer":
+                    if not proposal or proposal.get("agent_id") != str(caller_id or "").strip():
+                        return "behavior overlay proposal not found", True
+                elif caller_kind == "architect":
+                    if not _behavior_overlay_visible_to_architect(
+                            real_state, caller_id, proposal):
+                        return "behavior overlay proposal not found", True
+                payload = real_state.behavior_overlay_diff_payload(
+                    proposal_id=proposal_id,
+                )
+            else:
+                if caller_kind == "engineer":
+                    target_id = str(caller_id or "").strip()
+                elif caller_kind == "architect":
+                    target_id, target_error = _resolve_behavior_overlay_architect_target(
+                        real_state,
+                        caller_id,
+                        args.get("agent_id", ""),
+                    )
+                    if not target_id:
+                        return target_error, True
+                else:
+                    return "behavior overlay tools are not available to this caller", True
+                payload = real_state.behavior_overlay_diff_payload(
+                    agent_id=target_id,
+                    from_version_id=str(args.get("from_version_id", "") or ""),
+                    to_version_id=str(args.get("to_version_id", "") or ""),
+                )
+            return json.dumps(payload), False
+        except Exception as exc:
+            return str(exc), True
+
+    if tool_name == "behavior_overlay_proposal_list" and caller_kind == "architect":
+        target_filter = ""
+        if str(args.get("agent_id", "") or "").strip():
+            target_filter, target_error = _resolve_behavior_overlay_architect_target(
+                real_state,
+                caller_id,
+                args.get("agent_id", ""),
+            )
+            if not target_filter:
+                return target_error, True
+        proposals = []
+        for proposal in real_state.list_behavior_overlay_proposals(
+                status_filter=str(args.get("status_filter", "") or ""),
+                agent_id=target_filter,
+                limit=int(args.get("limit", 100) or 100)):
+            if _behavior_overlay_visible_to_architect(
+                    real_state, caller_id, proposal):
+                proposals.append(proposal_summary(proposal))
+        return json.dumps({
+            "type": "behavior_overlay_proposals",
+            "proposals": proposals,
+        }), False
+
     if tool_name == "agents_list":
         agents = []
         for c in state.iter_active_agents():
@@ -4597,6 +4752,162 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(result) if result else '{"type":"ok"}', False
 
     # -- Write tools --------------------------------------------------------
+
+    if tool_name == "behavior_overlay_propose" and caller_kind == "engineer":
+        if not str(getattr(_engineer_cell, "hired_by_architect_id", "") or "").strip():
+            return "engineer has no hiring architect to govern behavior overlays", True
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "agent_id": str(caller_id or "").strip(),
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "engineer",
+            "text": str(args.get("text", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_request_rollback" and caller_kind == "engineer":
+        if not str(getattr(_engineer_cell, "hired_by_architect_id", "") or "").strip():
+            return "engineer has no hiring architect to govern behavior overlays", True
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "agent_id": str(caller_id or "").strip(),
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "engineer",
+            "proposal_type": "rollback",
+            "target_version_id": str(args.get("version_id", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_propose" and caller_kind == "architect":
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "agent_id": str(caller_id or "").strip(),
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "architect",
+            "text": str(args.get("text", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_propose_for_engineer" and caller_kind == "architect":
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state,
+            caller_id,
+            str(args.get("engineer_id", "") or ""),
+        )
+        if not engineer_id:
+            resolved = _resolve_agent_including_tombstoned(
+                real_state,
+                str(args.get("engineer_id", "") or ""),
+            )
+            resolved_cell = real_state.agents.get(resolved or "")
+            if resolved_cell and str(getattr(resolved_cell, "kind", "") or "") == "worker":
+                return "worker behavior overlays are not supported in v1", True
+            return engineer_error, True
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "agent_id": engineer_id,
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "architect",
+            "text": str(args.get("text", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+            "architect_approver_id": str(caller_id or "").strip(),
+            "auto_apply_architect_direct": True,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_approve" and caller_kind == "architect":
+        proposal_id = str(args.get("proposal_id", "") or "").strip()
+        proposal = real_state.load_behavior_overlay_proposal(proposal_id)
+        if not _behavior_overlay_visible_to_architect(
+                real_state, caller_id, proposal):
+            return "behavior overlay proposal not found", True
+        result = await handle_command({
+            "cmd": "behavior_overlay_architect_approve",
+            "proposal_id": proposal_id,
+            "architect_id": str(caller_id or "").strip(),
+            "expected_proposed_text_sha256": str(
+                args.get("expected_proposed_text_sha256", "") or ""
+            ),
+            "note": str(args.get("note", "") or ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_reject" and caller_kind == "architect":
+        proposal_id = str(args.get("proposal_id", "") or "").strip()
+        proposal = real_state.load_behavior_overlay_proposal(proposal_id)
+        if not _behavior_overlay_visible_to_architect(
+                real_state, caller_id, proposal):
+            return "behavior overlay proposal not found", True
+        result = await handle_command({
+            "cmd": "behavior_overlay_architect_reject",
+            "proposal_id": proposal_id,
+            "architect_id": str(caller_id or "").strip(),
+            "actor_id": str(caller_id or "").strip(),
+            "note": str(args.get("note", "") or ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_rollback" and caller_kind == "architect":
+        target_id, target_error = _resolve_behavior_overlay_architect_target(
+            real_state,
+            caller_id,
+            args.get("agent_id", ""),
+        )
+        if not target_id:
+            return target_error, True
+        target_cell = real_state.agents.get(target_id)
+        is_engineer_target = (
+            str(getattr(target_cell, "kind", "") or "").strip() == "engineer"
+        )
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "agent_id": target_id,
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "architect",
+            "proposal_type": "rollback",
+            "target_version_id": str(args.get("version_id", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+            "architect_approver_id": str(caller_id or "").strip(),
+            "auto_apply_architect_direct": bool(is_engineer_target),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
 
     if tool_name == "engineer_hire" and caller_kind == "architect":
         name = str(args.get("name", "") or "").strip()

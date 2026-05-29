@@ -31,6 +31,16 @@ from .config import (
 from . import cloud_hooks
 from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
+from .behavior_overlay import (
+    DEFAULT_BEHAVIOR_OVERLAY_TEXT,
+    behavior_overlay_diff,
+    lint_overlay_text,
+    overlay_text_sha256,
+    proposal_summary,
+    render_behavior_overlay_block,
+    validate_overlay_text,
+    version_summary,
+)
 from .db import TorqueDB
 from .metrics import (
     METRICS_RETENTION_SECONDS,
@@ -1827,6 +1837,7 @@ class GroupSettings:
     architect_review_gate_thresholds: dict = field(
         default_factory=lambda: dict(_DEFAULT_ARCHITECT_REVIEW_GATE_THRESHOLDS)
     )
+    engineer_behavior_requires_user_approval: bool = False
 
 
 @dataclass
@@ -3786,6 +3797,8 @@ class MatrixState:
     def to_dict(self) -> dict:
         decisions = {}
         pending_hires = {}
+        behavior_overlay_proposals = {}
+        behavior_overlay_active = {}
         if self.db:
             try:
                 decisions = {
@@ -3805,6 +3818,20 @@ class MatrixState:
                 }
             except Exception:
                 log.exception("Failed to load pending hires snapshot")
+            try:
+                behavior_overlay_proposals = {
+                    proposal["id"]: proposal_summary(proposal)
+                    for proposal in self.list_behavior_overlay_proposals(
+                        limit=500
+                    )
+                    if proposal.get("status") in {"proposed", "approved"}
+                }
+                for agent_id in self.agents:
+                    active = self.load_behavior_overlay_active(agent_id)
+                    if active:
+                        behavior_overlay_active[agent_id] = dict(active)
+            except Exception:
+                log.exception("Failed to load behavior overlay snapshot")
         return {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
@@ -3880,6 +3907,8 @@ class MatrixState:
             "engineer_streams": self._engineer_streams_snapshot(),
             "decisions": decisions,
             "pending_hires": pending_hires,
+            "behavior_overlay_proposals": behavior_overlay_proposals,
+            "behavior_overlay_active": behavior_overlay_active,
             # Ephemeral daemon-global relay connection-state for the status bar.
             "relay_connection": dict(self.relay_connection),
             # Resolved relay config with per-field provenance for Settings.
@@ -4108,6 +4137,23 @@ class MatrixState:
         and expands full BoardTask rows. Compact clients fetch those heavier
         slices with explicit lazy-load commands after the socket is ready.
         """
+        behavior_overlay_proposals = {}
+        behavior_overlay_active = {}
+        if self.db:
+            try:
+                behavior_overlay_proposals = {
+                    proposal["id"]: proposal_summary(proposal)
+                    for proposal in self.list_behavior_overlay_proposals(
+                        limit=500
+                    )
+                    if proposal.get("status") in {"proposed", "approved"}
+                }
+                for agent_id in self.agents:
+                    active = self.load_behavior_overlay_active(agent_id)
+                    if active:
+                        behavior_overlay_active[agent_id] = dict(active)
+            except Exception:
+                log.exception("Failed to load compact behavior overlay snapshot")
         return {
             "snapshot_protocol": COMPACT_SNAPSHOT_PROTOCOL,
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
@@ -4173,6 +4219,8 @@ class MatrixState:
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
+            "behavior_overlay_proposals": behavior_overlay_proposals,
+            "behavior_overlay_active": behavior_overlay_active,
             # Ephemeral daemon-global relay connection-state for the status bar.
             "relay_connection": dict(self.relay_connection),
             # Resolved relay config with per-field provenance for Settings.
@@ -7295,6 +7343,743 @@ class MatrixState:
                 self._emit("pending_hire_resolve", id=str(hire_id or "").strip())
             except Exception:
                 log.exception("Failed to delete pending hire %s", hire_id)
+
+    # -- Dynamic Behavior overlays ------------------------------------------
+
+    def _emit_behavior_overlay_version(self, version: dict | None):
+        payload = version_summary(version)
+        if payload:
+            self._emit("behavior_overlay_version_append", **payload)
+
+    def _emit_behavior_overlay_active(self, active: dict | None,
+                                      agent_id: str = ""):
+        if active:
+            self._emit("behavior_overlay_active_update", **dict(active))
+            return
+        aid = str(agent_id or "").strip()
+        if aid:
+            self._emit(
+                "behavior_overlay_active_update",
+                agent_id=aid,
+                active_version_id="",
+                updated_at=time.time(),
+                updated_by_kind="system",
+                updated_by_id="",
+                reason="cleared",
+            )
+
+    def _emit_behavior_overlay_proposal(self, proposal: dict | None):
+        payload = proposal_summary(proposal)
+        if not payload:
+            return
+        status = str(payload.get("status", "") or "")
+        op = (
+            "behavior_overlay_proposal_upsert"
+            if status in {"proposed", "approved"}
+            else "behavior_overlay_proposal_resolve"
+        )
+        self._emit(op, **payload)
+
+    def load_behavior_overlay_version(self, version_id: str) -> dict | None:
+        if self.db:
+            try:
+                return self.db.load_behavior_overlay_version(version_id)
+            except Exception:
+                log.exception("Failed to load behavior overlay version %s",
+                              version_id)
+        return None
+
+    def load_behavior_overlay_active(self, agent_id: str) -> dict | None:
+        if self.db:
+            try:
+                return self.db.load_behavior_overlay_active(agent_id)
+            except Exception:
+                log.exception("Failed to load behavior overlay active %s",
+                              agent_id)
+        return None
+
+    def load_behavior_overlay_active_version(
+            self, agent_id: str) -> dict | None:
+        if self.db:
+            try:
+                return self.db.load_behavior_overlay_active_version(agent_id)
+            except Exception:
+                log.exception(
+                    "Failed to load behavior overlay active version %s",
+                    agent_id,
+                )
+        return None
+
+    def list_behavior_overlay_versions(
+            self, agent_id: str, *, limit: int = 50) -> list[dict]:
+        if self.db:
+            try:
+                return self.db.list_behavior_overlay_versions(
+                    agent_id,
+                    limit=limit,
+                )
+            except Exception:
+                log.exception("Failed to list behavior overlay versions %s",
+                              agent_id)
+        return []
+
+    def load_behavior_overlay_proposal(self, proposal_id: str) -> dict | None:
+        if self.db:
+            try:
+                return self.db.load_behavior_overlay_proposal(proposal_id)
+            except Exception:
+                log.exception("Failed to load behavior overlay proposal %s",
+                              proposal_id)
+        return None
+
+    def list_behavior_overlay_proposals(
+            self, *,
+            status_filter: str = "",
+            agent_id: str = "",
+            next_actor_kind: str = "",
+            proposed_by_agent_id: str = "",
+            limit: int = 100) -> list[dict]:
+        if self.db:
+            try:
+                return self.db.list_behavior_overlay_proposals(
+                    status_filter=status_filter,
+                    agent_id=agent_id,
+                    next_actor_kind=next_actor_kind,
+                    proposed_by_agent_id=proposed_by_agent_id,
+                    limit=limit,
+                )
+            except Exception:
+                log.exception("Failed to list behavior overlay proposals")
+        return []
+
+    def ensure_behavior_overlay_seed(
+            self,
+            agent_id: str,
+            *,
+            actor_kind: str = "system",
+            actor_id: str = "",
+            reason: str = "default empty behavior overlay seed") -> dict | None:
+        """Ensure an explicit empty floor version + active row exists."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id or not self.db:
+            return None
+        active_version = self.load_behavior_overlay_active_version(agent_id)
+        if active_version:
+            return active_version
+        now = time.time()
+        version = self.db.save_behavior_overlay_version({
+            "id": "bov-" + uuid.uuid4().hex[:12],
+            "agent_id": agent_id,
+            "version_number": self.db.next_behavior_overlay_version_number(agent_id),
+            "parent_version_id": "",
+            "text": DEFAULT_BEHAVIOR_OVERLAY_TEXT,
+            "text_sha256": overlay_text_sha256(DEFAULT_BEHAVIOR_OVERLAY_TEXT),
+            "author_agent_id": str(actor_id or ""),
+            "author_kind": actor_kind,
+            "rationale": reason,
+            "approver_id": str(actor_id or ""),
+            "approver_kind": actor_kind,
+            "source_proposal_id": "",
+            "created_at": now,
+            "metadata": {"default_empty": True},
+        })
+        active = self.db.save_behavior_overlay_active({
+            "agent_id": agent_id,
+            "active_version_id": version["id"],
+            "updated_at": now,
+            "updated_by_kind": actor_kind,
+            "updated_by_id": str(actor_id or ""),
+            "reason": reason,
+        })
+        activation = self.db.save_behavior_overlay_activation({
+            "id": "boa-" + uuid.uuid4().hex[:12],
+            "agent_id": agent_id,
+            "previous_version_id": "",
+            "active_version_id": version["id"],
+            "proposal_id": "",
+            "actor_kind": actor_kind,
+            "actor_id": str(actor_id or ""),
+            "action": "seed",
+            "reason": reason,
+            "created_at": now,
+        })
+        del activation
+        self._emit_behavior_overlay_version(version)
+        self._emit_behavior_overlay_active(active)
+        return version
+
+    def render_behavior_overlay_for_agent(
+            self, agent_id: str, *, seed: bool = False) -> str:
+        """Return the rendered prompt block for a supported agent."""
+        agent_id = str(agent_id or "").strip()
+        version = (
+            self.ensure_behavior_overlay_seed(agent_id) if seed
+            else self.load_behavior_overlay_active_version(agent_id)
+        )
+        return render_behavior_overlay_block(
+            agent_id=agent_id,
+            version_id=str((version or {}).get("id", "") or ""),
+            text=str((version or {}).get("text", "") or ""),
+            sha256=str((version or {}).get("text_sha256", "") or ""),
+            fail_closed=True,
+        )
+
+    def _behavior_overlay_current_base(self, agent_id: str) -> dict | None:
+        return self.ensure_behavior_overlay_seed(agent_id)
+
+    def _behavior_overlay_route(self, target, author_kind: str) -> tuple[str, bool]:
+        target_kind = str(getattr(target, "kind", "") or "").strip()
+        if str(author_kind or "").strip() == "user":
+            return "user", True
+        if target_kind == "architect":
+            return "user", True
+        if target_kind != "engineer":
+            raise ValueError("behavior overlays are supported only for architects and engineers")
+        group = str(getattr(target, "group", "") or "").strip()
+        requires_user = bool(
+            getattr(
+                self.get_group_settings(group),
+                "engineer_behavior_requires_user_approval",
+                False,
+            )
+        )
+        return ("architect_then_user" if requires_user else "architect",
+                requires_user)
+
+    def create_behavior_overlay_proposal(
+            self,
+            *,
+            agent_id: str,
+            proposed_by_agent_id: str,
+            proposed_by_kind: str,
+            text: str = "",
+            rationale: str = "",
+            proposal_type: str = "set_text",
+            target_version_id: str = "",
+            expected_base_version_id: str = "",
+            idempotency_key: str = "",
+            architect_approver_id: str = "",
+            auto_apply_architect_direct: bool = False) -> dict:
+        """Create a governed overlay proposal.
+
+        Routes are computed and persisted at creation time.  ``auto_apply`` is
+        used only for architect-authored engineer edits when the group setting
+        leaves the architect as final authority.
+        """
+        if not self.db:
+            raise RuntimeError("database is required for behavior overlays")
+        agent_id = str(agent_id or "").strip()
+        author_id = str(proposed_by_agent_id or "").strip()
+        author_kind = str(proposed_by_kind or "").strip()
+        idempotency_key = str(idempotency_key or "").strip()
+        if idempotency_key:
+            existing = self.db.load_behavior_overlay_proposal_by_idempotency(
+                author_id,
+                idempotency_key,
+            )
+            if existing:
+                return existing
+        target = self.agents.get(agent_id)
+        if not target or str(getattr(target, "cell_type", "") or "") != "agent":
+            raise ValueError("target agent not found")
+        target_kind = str(getattr(target, "kind", "") or "").strip()
+        if target_kind not in {"architect", "engineer"}:
+            raise ValueError("worker behavior overlays are not supported in v1")
+        proposal_type = str(proposal_type or "set_text").strip() or "set_text"
+        if proposal_type not in {"set_text", "rollback"}:
+            raise ValueError("proposal_type must be set_text or rollback")
+
+        base = self._behavior_overlay_current_base(agent_id)
+        if not base:
+            raise RuntimeError("failed to initialize behavior overlay base")
+        base_version_id = str(base.get("id", "") or "")
+        expected_base_version_id = str(expected_base_version_id or "").strip()
+        if expected_base_version_id and expected_base_version_id != base_version_id:
+            raise ValueError("stale behavior overlay base version")
+
+        route, requires_user = self._behavior_overlay_route(target, author_kind)
+        if proposal_type == "set_text":
+            proposed_text = validate_overlay_text(str(text or ""))
+            target_version_id = ""
+        else:
+            target_version_id = str(target_version_id or "").strip()
+            target_version = self.load_behavior_overlay_version(target_version_id)
+            if not target_version or target_version.get("agent_id") != agent_id:
+                raise ValueError("rollback target version not found for agent")
+            proposed_text = validate_overlay_text(
+                str(target_version.get("text", "") or "")
+            )
+        warnings = lint_overlay_text(proposed_text)
+        now = time.time()
+        status = "proposed"
+        next_actor = "user" if route == "user" else "architect"
+        arch_id = ""
+        arch_approved_at = None
+        if (
+                auto_apply_architect_direct
+                and author_kind == "architect"
+                and target_kind == "engineer"
+                and route == "architect"):
+            arch_id = str(architect_approver_id or author_id)
+            arch_approved_at = now
+        elif (
+                author_kind == "architect"
+                and target_kind == "engineer"
+                and route == "architect_then_user"):
+            # Architect-authored direct edit is already architect-endorsed, but
+            # the persisted route still captures the setting-gated user step.
+            status = "approved"
+            next_actor = "user"
+            arch_id = str(architect_approver_id or author_id)
+            arch_approved_at = now
+        proposal = self.db.save_behavior_overlay_proposal({
+            "id": "bop-" + uuid.uuid4().hex[:12],
+            "agent_id": agent_id,
+            "target_kind": target_kind,
+            "proposal_type": proposal_type,
+            "base_version_id": base_version_id,
+            "target_version_id": target_version_id,
+            "proposed_text": proposed_text,
+            "proposed_text_sha256": overlay_text_sha256(proposed_text),
+            "proposed_by_agent_id": author_id,
+            "proposed_by_kind": author_kind,
+            "rationale": str(rationale or ""),
+            "status": status,
+            "approval_route": route,
+            "next_actor_kind": next_actor,
+            "requires_user_approval": requires_user,
+            "architect_approver_id": arch_id,
+            "architect_approved_at": arch_approved_at,
+            "lint_warnings": warnings,
+            "idempotency_key": idempotency_key,
+            "created_at": now,
+            "updated_at": now,
+        })
+        self._emit_behavior_overlay_proposal(proposal)
+        if auto_apply_architect_direct and route == "architect":
+            proposal = self.apply_behavior_overlay_proposal(
+                proposal["id"],
+                actor_kind="architect",
+                actor_id=str(architect_approver_id or author_id),
+                note=str(rationale or ""),
+            )
+        return proposal
+
+    def _behavior_overlay_next_version_number(self, agent_id: str) -> int:
+        if not self.db:
+            return 0
+        return self.db.next_behavior_overlay_version_number(agent_id)
+
+    def apply_behavior_overlay_proposal(
+            self,
+            proposal_id: str,
+            *,
+            actor_kind: str,
+            actor_id: str = "",
+            note: str = "") -> dict:
+        if not self.db:
+            raise RuntimeError("database is required for behavior overlays")
+        proposal = self.load_behavior_overlay_proposal(proposal_id)
+        if not proposal:
+            raise ValueError("behavior overlay proposal not found")
+        if proposal.get("status") == "applied":
+            return proposal
+        if proposal.get("status") == "rejected":
+            raise ValueError("behavior overlay proposal has already been rejected")
+        agent_id = str(proposal.get("agent_id", "") or "")
+        active = self.load_behavior_overlay_active(agent_id)
+        active_version_id = str((active or {}).get("active_version_id", "") or "")
+        if active_version_id != str(proposal.get("base_version_id", "") or ""):
+            raise ValueError("stale behavior overlay base version")
+
+        now = time.time()
+        proposal_type = str(proposal.get("proposal_type", "") or "set_text")
+        if proposal_type == "rollback":
+            target_version = self.load_behavior_overlay_version(
+                proposal.get("target_version_id", "")
+            )
+            if not target_version or target_version.get("agent_id") != agent_id:
+                raise ValueError("rollback target version not found for agent")
+            validate_overlay_text(str(target_version.get("text", "") or ""))
+            new_active_version_id = str(target_version.get("id", "") or "")
+            action = "rollback"
+            version = target_version
+        else:
+            proposed_text = validate_overlay_text(
+                str(proposal.get("proposed_text", "") or "")
+            )
+            version = self.db.save_behavior_overlay_version({
+                "id": "bov-" + uuid.uuid4().hex[:12],
+                "agent_id": agent_id,
+                "version_number": self._behavior_overlay_next_version_number(agent_id),
+                "parent_version_id": active_version_id,
+                "text": proposed_text,
+                "text_sha256": overlay_text_sha256(proposed_text),
+                "author_agent_id": proposal.get("proposed_by_agent_id", ""),
+                "author_kind": proposal.get("proposed_by_kind", ""),
+                "rationale": proposal.get("rationale", ""),
+                "approver_id": str(actor_id or ""),
+                "approver_kind": str(actor_kind or ""),
+                "source_proposal_id": proposal.get("id", ""),
+                "created_at": now,
+            })
+            new_active_version_id = version["id"]
+            action = "apply"
+            self._emit_behavior_overlay_version(version)
+        active = self.db.save_behavior_overlay_active({
+            "agent_id": agent_id,
+            "active_version_id": new_active_version_id,
+            "updated_at": now,
+            "updated_by_kind": str(actor_kind or ""),
+            "updated_by_id": str(actor_id or ""),
+            "reason": str(note or proposal.get("rationale", "") or ""),
+        })
+        self.db.save_behavior_overlay_activation({
+            "id": "boa-" + uuid.uuid4().hex[:12],
+            "agent_id": agent_id,
+            "previous_version_id": active_version_id,
+            "active_version_id": new_active_version_id,
+            "proposal_id": proposal.get("id", ""),
+            "actor_kind": str(actor_kind or ""),
+            "actor_id": str(actor_id or ""),
+            "action": action,
+            "reason": str(note or proposal.get("rationale", "") or ""),
+            "created_at": now,
+        })
+        saved = self.db.save_behavior_overlay_proposal({
+            "id": proposal["id"],
+            "status": "applied",
+            "next_actor_kind": "",
+            "resolved_by_kind": str(actor_kind or ""),
+            "resolved_by_id": str(actor_id or ""),
+            "resolved_at": now,
+            "resolution_note": str(note or ""),
+            "applied_version_id": new_active_version_id,
+            "applied_at": now,
+            "user_approved_at": now if actor_kind == "user" else proposal.get("user_approved_at"),
+            "updated_at": now,
+        })
+        self._emit_behavior_overlay_active(active)
+        self._emit_behavior_overlay_proposal(saved)
+        self.resolve_behavior_overlay_user_task(
+            str(saved.get("user_task_id", "") or ""),
+            status="Approved",
+            note=str(note or ""),
+        )
+        return saved
+
+    def architect_approve_behavior_overlay_proposal(
+            self,
+            proposal_id: str,
+            *,
+            architect_id: str,
+            expected_proposed_text_sha256: str = "",
+            note: str = "") -> dict:
+        proposal = self.load_behavior_overlay_proposal(proposal_id)
+        if not proposal:
+            raise ValueError("behavior overlay proposal not found")
+        expected = str(expected_proposed_text_sha256 or "").strip()
+        if expected and expected != str(proposal.get("proposed_text_sha256", "") or ""):
+            raise ValueError("proposed text hash does not match")
+        if proposal.get("status") == "applied":
+            return proposal
+        if proposal.get("status") == "rejected":
+            raise ValueError("behavior overlay proposal has already been rejected")
+        if str(proposal.get("next_actor_kind", "") or "") != "architect":
+            raise ValueError("behavior overlay proposal is not awaiting architect approval")
+        route = str(proposal.get("approval_route", "") or "")
+        if route == "architect":
+            return self.apply_behavior_overlay_proposal(
+                proposal_id,
+                actor_kind="architect",
+                actor_id=architect_id,
+                note=note,
+            )
+        if route != "architect_then_user":
+            raise ValueError("behavior overlay proposal route is not architect-governed")
+        now = time.time()
+        saved = self.db.save_behavior_overlay_proposal({
+            "id": proposal["id"],
+            "status": "approved",
+            "next_actor_kind": "user",
+            "architect_approver_id": str(architect_id or ""),
+            "architect_approved_at": now,
+            "resolution_note": str(note or ""),
+            "updated_at": now,
+        })
+        self._emit_behavior_overlay_proposal(saved)
+        return saved
+
+    def reject_behavior_overlay_proposal(
+            self,
+            proposal_id: str,
+            *,
+            actor_kind: str,
+            actor_id: str = "",
+            note: str = "") -> dict:
+        proposal = self.load_behavior_overlay_proposal(proposal_id)
+        if not proposal:
+            raise ValueError("behavior overlay proposal not found")
+        if proposal.get("status") == "rejected":
+            return proposal
+        if proposal.get("status") == "applied":
+            raise ValueError("behavior overlay proposal has already been applied")
+        now = time.time()
+        saved = self.db.save_behavior_overlay_proposal({
+            "id": proposal["id"],
+            "status": "rejected",
+            "next_actor_kind": "",
+            "resolved_by_kind": str(actor_kind or ""),
+            "resolved_by_id": str(actor_id or ""),
+            "resolved_at": now,
+            "resolution_note": str(note or ""),
+            "updated_at": now,
+        })
+        self._emit_behavior_overlay_proposal(saved)
+        self.resolve_behavior_overlay_user_task(
+            str(saved.get("user_task_id", "") or ""),
+            status="Rejected",
+            note=str(note or ""),
+        )
+        return saved
+
+    def behavior_overlay_diff_payload(
+            self,
+            *,
+            proposal_id: str = "",
+            from_version_id: str = "",
+            to_version_id: str = "",
+            agent_id: str = "") -> dict:
+        from_label = "from"
+        to_label = "to"
+        if proposal_id:
+            proposal = self.load_behavior_overlay_proposal(proposal_id)
+            if not proposal:
+                raise ValueError("behavior overlay proposal not found")
+            base = self.load_behavior_overlay_version(
+                proposal.get("base_version_id", "")
+            ) or {}
+            from_text = str(base.get("text", "") or "")
+            to_text = str(proposal.get("proposed_text", "") or "")
+            from_label = str(proposal.get("base_version_id", "") or "base")
+            to_label = proposal_id
+            return {
+                "type": "behavior_overlay_diff",
+                "proposal": proposal,
+                "from_version": version_summary(base),
+                "to_proposal": proposal_summary(proposal),
+                "diff": behavior_overlay_diff(
+                    from_text,
+                    to_text,
+                    from_label=from_label,
+                    to_label=to_label,
+                ),
+            }
+        if not from_version_id and agent_id:
+            active = self.load_behavior_overlay_active(agent_id) or {}
+            from_version_id = str(active.get("active_version_id", "") or "")
+        from_version = self.load_behavior_overlay_version(from_version_id) or {}
+        to_version = self.load_behavior_overlay_version(to_version_id) or {}
+        if not from_version or not to_version:
+            raise ValueError("behavior overlay version not found")
+        return {
+            "type": "behavior_overlay_diff",
+            "from_version": version_summary(from_version),
+            "to_version": version_summary(to_version),
+            "diff": behavior_overlay_diff(
+                str(from_version.get("text", "") or ""),
+                str(to_version.get("text", "") or ""),
+                from_label=from_version.get("id", "from"),
+                to_label=to_version.get("id", "to"),
+            ),
+        }
+
+    def create_behavior_overlay_user_task(
+            self,
+            proposal_id: str,
+            *,
+            note: str = "") -> str:
+        """Create (or return existing) Backlog attention task for user route."""
+        proposal = self.load_behavior_overlay_proposal(proposal_id)
+        if not proposal:
+            return ""
+        existing_task_id = str(proposal.get("user_task_id", "") or "")
+        if existing_task_id and existing_task_id in self.board_tasks:
+            return existing_task_id
+        target = self.agents.get(str(proposal.get("agent_id", "") or ""))
+        group = str(getattr(target, "group", "") or "") if target else ""
+        if not group or group not in self.groups:
+            return ""
+        title = "Dynamic Behavior overlay approval"
+        target_label = (
+            f"{getattr(target, 'name', '')} "
+            f"({getattr(target, 'kind', '')}:{getattr(target, 'id', '')})"
+            if target else proposal.get("agent_id", "")
+        )
+        description = "\n".join([
+            "A governed Dynamic Behavior overlay proposal is awaiting user approval.",
+            "",
+            f"Proposal: {proposal_id}",
+            f"Target: {target_label}",
+            f"Route: {proposal.get('approval_route', '')}",
+            f"Author: {proposal.get('proposed_by_kind', '')}:{proposal.get('proposed_by_agent_id', '')}",
+            f"Rationale: {proposal.get('rationale', '')}",
+            "",
+            "Use `torque behavior diff --proposal "
+            f"{proposal_id}` to inspect the text diff, then approve/reject "
+            "with `torque behavior approve` or `torque behavior reject`.",
+            str(note or "").strip(),
+        ]).strip()
+        task = self.board_add_task(
+            task=title,
+            group=group,
+            lane="Backlog" if "Backlog" in self.board_lanes else "",
+            description=description,
+            labels=[
+                "torque:human",
+                "behavior-overlay-approval",
+                f"proposal:{proposal_id}",
+            ],
+            created_by_architect_id=str(
+                proposal.get("architect_approver_id", "")
+                or (
+                    proposal.get("proposed_by_agent_id", "")
+                    if proposal.get("proposed_by_kind") == "architect"
+                    else ""
+                )
+            ),
+        )
+        if not task:
+            return ""
+        saved = self.db.save_behavior_overlay_proposal({
+            "id": proposal_id,
+            "user_task_id": task.id,
+            "updated_at": time.time(),
+        })
+        self._emit_behavior_overlay_proposal(saved)
+        return task.id
+
+    def resolve_behavior_overlay_user_task(
+            self,
+            task_id: str,
+            *,
+            status: str,
+            note: str = "") -> None:
+        task_id = self.resolve_task_alias(str(task_id or "").strip())
+        if not task_id or task_id not in self.board_tasks:
+            return
+        task = self.board_tasks.get(task_id)
+        labels = set(getattr(task, "labels", []) or [])
+        if "behavior-overlay-approval" not in labels:
+            return
+        status_text = str(status or "Resolved").strip()
+        message = f"Behavior overlay approval {status_text.lower()}."
+        if note:
+            message += f" Note: {note}"
+        fields = {"status": status_text}
+        if "Done" in self.board_lanes:
+            fields["lane"] = "Done"
+        fields["messages"] = list(getattr(task, "messages", []) or []) + [{
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": "behavior_overlay",
+            "message": message,
+            "agent_name": "Torque",
+        }]
+        self.board_update_task(task_id, **fields)
+
+    def cancel_behavior_overlay_proposals_for_agent(
+            self,
+            agent_id: str,
+            *,
+            reason: str,
+            actor_kind: str = "system",
+            actor_id: str = "") -> int:
+        count = 0
+        for proposal in self.list_behavior_overlay_proposals(agent_id=agent_id,
+                                                             limit=500):
+            if proposal.get("status") in {"rejected", "applied"}:
+                continue
+            self.reject_behavior_overlay_proposal(
+                proposal["id"],
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                note=reason,
+            )
+            count += 1
+        return count
+
+    def clear_behavior_overlay_active_for_agent(
+            self,
+            agent_id: str,
+            *,
+            reason: str = "agent deleted") -> bool:
+        if not self.db:
+            return False
+        active = self.load_behavior_overlay_active(agent_id)
+        if not active:
+            return False
+        self.db.delete_behavior_overlay_active(agent_id)
+        self._emit_behavior_overlay_active(None, agent_id=agent_id)
+        return True
+
+    def cleanup_behavior_overlay_for_agent_delete(
+            self,
+            agent_id: str,
+            *,
+            reason: str = "agent deleted") -> dict:
+        """Tombstone overlay lifecycle for a deleted target agent.
+
+        Version and activation history remains immutable; the active pointer is
+        cleared and pending proposals/user approval tasks are rejected/resolved.
+        """
+        cancelled = self.cancel_behavior_overlay_proposals_for_agent(
+            agent_id,
+            reason=reason,
+            actor_kind="system",
+        )
+        active_cleared = self.clear_behavior_overlay_active_for_agent(
+            agent_id,
+            reason=reason,
+        )
+        return {
+            "cancelled_proposals": cancelled,
+            "active_cleared": active_cleared,
+        }
+
+    def cleanup_behavior_overlay_for_architect_delete(
+            self,
+            architect_id: str,
+            *,
+            hired_engineer_ids: list[str] | None = None,
+            reason: str = "architect deleted") -> dict:
+        cancelled = 0
+        # Architect's own target overlay is no longer active.
+        own = self.cleanup_behavior_overlay_for_agent_delete(
+            architect_id,
+            reason=reason,
+        )
+        cancelled += int(own.get("cancelled_proposals", 0) or 0)
+        # Proposals authored/endorsed by the architect or targeting engineers
+        # whose governor is being removed must not dangle.
+        target_ids = set(str(x or "").strip() for x in (hired_engineer_ids or []))
+        for proposal in self.list_behavior_overlay_proposals(limit=500):
+            if proposal.get("status") in {"rejected", "applied"}:
+                continue
+            if (
+                    proposal.get("agent_id") in target_ids
+                    or proposal.get("proposed_by_agent_id") == architect_id
+                    or proposal.get("architect_approver_id") == architect_id):
+                self.reject_behavior_overlay_proposal(
+                    proposal["id"],
+                    actor_kind="system",
+                    actor_id=architect_id,
+                    note=reason,
+                )
+                cancelled += 1
+        return {
+            "cancelled_proposals": cancelled,
+            "active_cleared": bool(own.get("active_cleared")),
+        }
 
     def _architect_journal_path(self, architect_id: str) -> Path:
         return Path(DATA_DIR) / "architect_journals" / (

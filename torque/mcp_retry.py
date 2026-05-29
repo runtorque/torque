@@ -86,6 +86,12 @@ _SCOPED_WRITE_SUFFIXES = {
     "worktree_checkpoint",
     "specialization_save",
     "specialization_delete",
+    "behavior_overlay_propose",
+    "behavior_overlay_propose_for_engineer",
+    "behavior_overlay_request_rollback",
+    "behavior_overlay_approve",
+    "behavior_overlay_reject",
+    "behavior_overlay_rollback",
 }
 
 
@@ -208,6 +214,10 @@ _API_READ_COMMANDS = {
     "mcp_calls",
     "architect_decision_list",
     "pending_hire_list",
+    "behavior_overlay_read",
+    "behavior_overlay_versions",
+    "behavior_overlay_proposals",
+    "behavior_overlay_diff",
 }
 
 _shared_session: Any = None

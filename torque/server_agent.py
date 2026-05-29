@@ -19,6 +19,7 @@ from .artifacts import (
     legacy_image_prompt_block,
     upstream_artifact_prompt_block,
 )
+from .behavior_overlay import BEHAVIOR_OVERLAY_START_MARKER
 from .config import log
 from .identity import prepend_agent_identity_anchor
 
@@ -567,6 +568,22 @@ class AgentLaunchService:
         agent_type = launch_cfg.get("agent_type", "") or cell.agent_type
         if not prompt_text or not agent_type:
             return
+        kind = str(getattr(cell, "kind", "") or "").strip()
+        if (
+                kind in {"architect", "engineer"}
+                and BEHAVIOR_OVERLAY_START_MARKER not in prompt_text):
+            renderer = getattr(self.state, "render_behavior_overlay_for_agent", None)
+            if callable(renderer):
+                try:
+                    overlay = renderer(cell.id, seed=True)
+                except Exception:
+                    log.exception(
+                        "Failed to append behavior overlay for cell=%s",
+                        getattr(cell, "id", ""),
+                    )
+                    overlay = ""
+                if overlay:
+                    prompt_text = prompt_text.rstrip() + "\n\n" + overlay
         adapter = get_adapter(agent_type)
         if not adapter or adapter.name == "generic":
             return

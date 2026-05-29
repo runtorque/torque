@@ -5,6 +5,7 @@ Talks to the Torque daemon over HTTP (POST /api/cmd).
 """
 
 import argparse
+import difflib
 import json
 import os
 from pathlib import Path
@@ -362,6 +363,57 @@ def db_read_agents():
             d["group"] = d.pop("group_name", "")
             agents[d["id"]] = d
         return agents
+    return _db_read(_query)
+
+
+def _db_table_exists(conn, table):
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return bool(row)
+
+
+def _json_decode(value, default):
+    try:
+        parsed = json.loads(value or "")
+    except (json.JSONDecodeError, TypeError):
+        return default
+    if isinstance(default, list) and not isinstance(parsed, list):
+        return default
+    if isinstance(default, dict) and not isinstance(parsed, dict):
+        return default
+    return parsed
+
+
+def db_read_behavior_overlay():
+    """Read behavior overlay tables directly from SQLite."""
+    def _query(conn):
+        if not _db_table_exists(conn, "behavior_overlay_versions"):
+            return {"versions": {}, "active": {}, "proposals": {}}
+        conn.row_factory = sqlite3.Row
+        versions = {}
+        for row in conn.execute("SELECT * FROM behavior_overlay_versions"):
+            d = dict(row)
+            d["metadata"] = _json_decode(d.pop("metadata_json", "{}"), {})
+            versions[d["id"]] = d
+        active = {
+            row["agent_id"]: dict(row)
+            for row in conn.execute("SELECT * FROM behavior_overlay_active")
+        }
+        proposals = {}
+        for row in conn.execute("SELECT * FROM behavior_overlay_proposals"):
+            d = dict(row)
+            d["requires_user_approval"] = bool(
+                d.get("requires_user_approval", 0))
+            d["lint_warnings"] = _json_decode(
+                d.pop("lint_warnings_json", "[]"), [])
+            proposals[d["id"]] = d
+        return {
+            "versions": versions,
+            "active": active,
+            "proposals": proposals,
+        }
     return _db_read(_query)
 
 
@@ -3296,6 +3348,256 @@ def cmd_architect_settings(args):
             print(f"  {key}: {value}")
 
 
+def _behavior_state_and_agent(identifier=""):
+    if not _db_available():
+        die(f"Torque database not found: {TORQUE_DB}")
+    state_data = db_read_state()
+    agent = resolve_cell(state_data, identifier) if identifier else None
+    return state_data, agent, db_read_behavior_overlay()
+
+
+def _behavior_version_summary(version):
+    if not version:
+        return {}
+    text = str(version.get("text", "") or "")
+    return {
+        "id": version.get("id", ""),
+        "agent_id": version.get("agent_id", ""),
+        "version_number": int(version.get("version_number", 0) or 0),
+        "parent_version_id": version.get("parent_version_id", ""),
+        "text_sha256": version.get("text_sha256", ""),
+        "text_bytes": len(text.encode("utf-8")),
+        "author_kind": version.get("author_kind", ""),
+        "author_agent_id": version.get("author_agent_id", ""),
+        "approver_kind": version.get("approver_kind", ""),
+        "approver_id": version.get("approver_id", ""),
+        "rationale": version.get("rationale", ""),
+        "created_at": version.get("created_at", 0),
+    }
+
+
+def _behavior_proposal_summary(proposal):
+    if not proposal:
+        return {}
+    text = str(proposal.get("proposed_text", "") or "")
+    warnings = proposal.get("lint_warnings", []) or []
+    return {
+        "id": proposal.get("id", ""),
+        "agent_id": proposal.get("agent_id", ""),
+        "target_kind": proposal.get("target_kind", ""),
+        "proposal_type": proposal.get("proposal_type", ""),
+        "base_version_id": proposal.get("base_version_id", ""),
+        "target_version_id": proposal.get("target_version_id", ""),
+        "proposed_text_sha256": proposal.get("proposed_text_sha256", ""),
+        "proposed_text_bytes": len(text.encode("utf-8")),
+        "proposed_by_kind": proposal.get("proposed_by_kind", ""),
+        "proposed_by_agent_id": proposal.get("proposed_by_agent_id", ""),
+        "status": proposal.get("status", ""),
+        "approval_route": proposal.get("approval_route", ""),
+        "next_actor_kind": proposal.get("next_actor_kind", ""),
+        "requires_user_approval": bool(
+            proposal.get("requires_user_approval", False)),
+        "user_task_id": proposal.get("user_task_id", ""),
+        "lint_warning_count": len(warnings) if isinstance(warnings, list) else 0,
+        "created_at": proposal.get("created_at", 0),
+        "updated_at": proposal.get("updated_at", 0),
+    }
+
+
+def cmd_behavior_read(args):
+    _state, agent, overlay = _behavior_state_and_agent(args.agent)
+    active = overlay["active"].get(agent["id"], {})
+    version = overlay["versions"].get(active.get("active_version_id", ""))
+    payload = {
+        "agent_id": agent["id"],
+        "agent": agent.get("name", ""),
+        "kind": agent.get("kind", ""),
+        "active": active,
+        "version": _behavior_version_summary(version),
+        "text": str((version or {}).get("text", "") or ""),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Behavior overlay for {agent.get('name', agent['id'])}:")
+        if not version:
+            print("  active: <none>")
+        else:
+            print(f"  active version: {version['id']} (v{version.get('version_number')})")
+            print(f"  bytes: {payload['version']['text_bytes']}")
+            print(payload["text"] or "  <empty>")
+
+
+def cmd_behavior_versions(args):
+    _state, agent, overlay = _behavior_state_and_agent(args.agent)
+    versions = [
+        v for v in overlay["versions"].values()
+        if v.get("agent_id") == agent["id"]
+    ]
+    versions.sort(key=lambda v: int(v.get("version_number", 0) or 0),
+                  reverse=True)
+    if args.limit:
+        versions = versions[:args.limit]
+    payload = {
+        "agent_id": agent["id"],
+        "versions": [_behavior_version_summary(v) for v in versions],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for item in payload["versions"]:
+            print(
+                f"{item['id']}  v{item['version_number']}  "
+                f"{item['text_bytes']}B  {item['author_kind']}  "
+                f"{item['rationale'][:60]}"
+            )
+
+
+def cmd_behavior_proposals(args):
+    state_data = db_read_state()
+    overlay = db_read_behavior_overlay()
+    agent_id = ""
+    if args.agent:
+        agent_id = resolve_cell(state_data, args.agent)["id"]
+    proposals = []
+    for proposal in overlay["proposals"].values():
+        if args.status and proposal.get("status") != args.status:
+            continue
+        if agent_id and proposal.get("agent_id") != agent_id:
+            continue
+        proposals.append(proposal)
+    proposals.sort(key=lambda p: float(p.get("created_at", 0) or 0),
+                   reverse=True)
+    payload = {
+        "proposals": [_behavior_proposal_summary(p) for p in proposals],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for item in payload["proposals"]:
+            print(
+                f"{item['id']}  {item['status']}  {item['approval_route']}  "
+                f"next={item['next_actor_kind'] or '-'}  "
+                f"target={item['agent_id']}  {item['proposed_text_bytes']}B"
+            )
+
+
+def cmd_behavior_diff(args):
+    overlay = db_read_behavior_overlay()
+    if args.proposal:
+        proposal = overlay["proposals"].get(args.proposal)
+        if not proposal:
+            die(f"Proposal not found: {args.proposal}")
+        base = overlay["versions"].get(proposal.get("base_version_id", ""))
+        from_text = str((base or {}).get("text", "") or "")
+        to_text = str(proposal.get("proposed_text", "") or "")
+        from_label = proposal.get("base_version_id", "base")
+        to_label = proposal.get("id", "proposal")
+    else:
+        if not args.from_version or not args.to_version:
+            die("--from-version and --to-version are required without --proposal")
+        from_version = overlay["versions"].get(args.from_version)
+        to_version = overlay["versions"].get(args.to_version)
+        if not from_version or not to_version:
+            die("Version not found")
+        from_text = str(from_version.get("text", "") or "")
+        to_text = str(to_version.get("text", "") or "")
+        from_label = args.from_version
+        to_label = args.to_version
+    diff = "".join(difflib.unified_diff(
+        from_text.splitlines(keepends=True),
+        to_text.splitlines(keepends=True),
+        fromfile=from_label,
+        tofile=to_label,
+        lineterm="",
+    ))
+    if args.json:
+        print(json.dumps({"diff": diff}, indent=2))
+    else:
+        print(diff, end="" if diff.endswith("\n") else "\n")
+
+
+def cmd_behavior_approve(args):
+    resp = api_call(
+        "behavior_overlay_user_approve",
+        port=args.port,
+        proposal_id=args.proposal,
+        expected_proposed_text_sha256=args.expected_sha or "",
+        note=args.note or "",
+    )
+    data = check_ok(resp)
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Approved behavior overlay proposal {data.get('proposal_id', args.proposal)}")
+
+
+def cmd_behavior_reject(args):
+    resp = api_call(
+        "behavior_overlay_user_reject",
+        port=args.port,
+        proposal_id=args.proposal,
+        actor_id="user",
+        note=args.note or "",
+    )
+    data = check_ok(resp)
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Rejected behavior overlay proposal {data.get('proposal_id', args.proposal)}")
+
+
+def cmd_behavior_rollback(args):
+    state_data = get_state(args.port)
+    agent = resolve_cell(state_data, args.agent)
+    resp = api_call(
+        "behavior_overlay_user_rollback",
+        port=args.port,
+        agent_id=agent["id"],
+        version_id=args.version_id,
+        rationale=args.rationale or "User-requested rollback",
+        expected_base_version_id=args.expected_base_version_id or "",
+    )
+    data = check_ok(resp)
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Rolled back behavior overlay for {agent.get('name', agent['id'])}")
+
+
+def cmd_behavior_setting(args):
+    state_data = get_state(args.port)
+    group = resolve_group(state_data, args.group)
+    if args.requires_user_approval is None:
+        resp = api_call("get_group_settings", port=args.port, group=group)
+        data = check_ok(resp)
+        value = (
+            data.get("settings", {})
+            .get("engineer_behavior_requires_user_approval", False)
+        )
+        if args.json:
+            print(json.dumps({
+                "group": group,
+                "engineer_behavior_requires_user_approval": bool(value),
+            }, indent=2))
+        else:
+            print(
+                "engineer_behavior_requires_user_approval: "
+                f"{bool(value)}"
+            )
+        return
+    value = str(args.requires_user_approval).lower() in {
+        "1", "true", "yes", "on"}
+    resp = api_call(
+        "update_group_settings",
+        port=args.port,
+        group=group,
+        settings={"engineer_behavior_requires_user_approval": value},
+    )
+    check_ok(resp)
+    print(f"Updated {group}: engineer_behavior_requires_user_approval={value}")
+
+
 def cmd_architect_dismiss(args):
     """Dismiss/pause an architect while preserving history."""
     state_data = get_state(args.port)
@@ -5465,6 +5767,66 @@ def build_parser():
                             help="Rehire/resume a dismissed architect")
     p.add_argument("identifier", help="Architect ID, slug, or name")
     p.set_defaults(func=cmd_architect_rehire)
+
+    # -- behavior overlays -------------------------------------------------
+    beh = sub.add_parser("behavior", help="Dynamic Behavior overlay commands")
+    beh.set_defaults(func=None, _sub_parser=beh)
+    beh_sub = beh.add_subparsers(dest="behavior_cmd")
+
+    p = beh_sub.add_parser("read", help="Read an agent's active behavior overlay")
+    p.add_argument("agent", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_read)
+
+    p = beh_sub.add_parser("versions", help="List behavior overlay versions")
+    p.add_argument("agent", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_versions)
+
+    p = beh_sub.add_parser("proposals", help="List behavior overlay proposals")
+    p.add_argument("--agent", default="", help="Optional target agent")
+    p.add_argument("--status", default="", choices=[
+        "", "proposed", "approved", "rejected", "applied",
+    ])
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_proposals)
+
+    p = beh_sub.add_parser("diff", help="Render a proposal or version diff")
+    p.add_argument("--proposal", default="", help="Proposal id")
+    p.add_argument("--from-version", dest="from_version", default="")
+    p.add_argument("--to-version", dest="to_version", default="")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_diff)
+
+    p = beh_sub.add_parser("approve", help="Approve a user-routed proposal")
+    p.add_argument("proposal", help="Proposal id")
+    p.add_argument("--expected-sha", default="")
+    p.add_argument("--note", default="")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_approve)
+
+    p = beh_sub.add_parser("reject", help="Reject a user-routed proposal")
+    p.add_argument("proposal", help="Proposal id")
+    p.add_argument("--note", default="")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_reject)
+
+    p = beh_sub.add_parser("rollback", help="Rollback an agent overlay as user")
+    p.add_argument("agent", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("version_id", help="Version id to activate")
+    p.add_argument("--rationale", default="")
+    p.add_argument("--expected-base-version-id", default="")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_rollback)
+
+    p = beh_sub.add_parser("setting", help="Read/update behavior governance setting")
+    p.add_argument("group", help="Group name")
+    p.add_argument("--requires-user-approval", choices=[
+        "true", "false", "1", "0", "yes", "no", "on", "off",
+    ])
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_behavior_setting)
 
     # -- workflow breach ----------------------------------------------------
     p = sub.add_parser("workflow-breach",
