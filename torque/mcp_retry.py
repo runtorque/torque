@@ -88,10 +88,12 @@ _SCOPED_WRITE_SUFFIXES = {
     "specialization_delete",
     "behavior_overlay_propose",
     "behavior_overlay_propose_for_engineer",
+    "behavior_overlay_propose_for_role",
     "behavior_overlay_request_rollback",
     "behavior_overlay_approve",
     "behavior_overlay_reject",
     "behavior_overlay_rollback",
+    "behavior_overlay_rollback_role",
 }
 
 

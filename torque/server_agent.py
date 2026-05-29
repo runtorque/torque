@@ -19,7 +19,7 @@ from .artifacts import (
     legacy_image_prompt_block,
     upstream_artifact_prompt_block,
 )
-from .behavior_overlay import BEHAVIOR_OVERLAY_START_MARKER
+from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
 from .identity import prepend_agent_identity_anchor
 
@@ -569,21 +569,39 @@ class AgentLaunchService:
         if not prompt_text or not agent_type:
             return
         kind = str(getattr(cell, "kind", "") or "").strip()
-        if (
-                kind in {"architect", "engineer"}
-                and BEHAVIOR_OVERLAY_START_MARKER not in prompt_text):
-            renderer = getattr(self.state, "render_behavior_overlay_for_agent", None)
+        if kind in {"architect", "engineer"}:
+            renderer = getattr(
+                self.state,
+                "render_behavior_overlay_stack_for_cell",
+                None,
+            )
             if callable(renderer):
                 try:
-                    overlay = renderer(cell.id, seed=True)
+                    overlay = renderer(
+                        cell,
+                        include_role=True,
+                        include_agent=True,
+                        seed_agent=True,
+                        seed_role=False,
+                    )
                 except Exception:
                     log.exception(
                         "Failed to append behavior overlay for cell=%s",
                         getattr(cell, "id", ""),
                     )
                     overlay = ""
-                if overlay:
-                    prompt_text = prompt_text.rstrip() + "\n\n" + overlay
+                missing_blocks = []
+                for block in split_behavior_overlay_blocks(overlay):
+                    marker = behavior_overlay_block_marker(block)
+                    if marker and marker not in prompt_text:
+                        missing_blocks.append(block.rstrip())
+                if missing_blocks:
+                    prompt_text = (
+                        prompt_text.rstrip()
+                        + "\n\n"
+                        + "\n\n".join(missing_blocks)
+                        + "\n"
+                    )
         adapter = get_adapter(agent_type)
         if not adapter or adapter.name == "generic":
             return

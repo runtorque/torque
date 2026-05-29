@@ -7546,6 +7546,7 @@ def _normalize_prompt_block(text: str) -> str:
 
 def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
                             prompt_body: str = "", postscript: str = "",
+                            behavior_overlay_block: str = "",
                             disable_role_preamble: bool = False,
                             include_identity_anchor: bool = True) -> str:
     """Assemble the final worker prompt with optional role preamble.
@@ -7554,6 +7555,8 @@ def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
     {identity anchor block}
 
     {role preamble block}
+
+    {role-scoped Dynamic Behavior block}
 
     {task/action prompt block}
 
@@ -7577,6 +7580,10 @@ def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
             preamble = role_mgr.render_preamble(role)
             if preamble:
                 blocks.append(_normalize_prompt_block(preamble))
+
+    overlay_block = _normalize_prompt_block(behavior_overlay_block)
+    if overlay_block:
+        blocks.append(overlay_block)
 
     body_block = _normalize_prompt_block(prompt_body)
     if body_block:
@@ -8306,16 +8313,29 @@ def _behavior_overlay_prompt_block_for_cell(
         cell=None,
         *,
         agent_id: str = "",
-        kind: str = "") -> str:
-    """Fetch a supported agent's active Dynamic Behavior prompt block."""
+        kind: str = "",
+        include_role: bool = True,
+        include_agent: bool = True,
+        worker_dispatch: bool = False) -> str:
+    """Fetch a supported agent's Dynamic Behavior prompt block stack."""
     if state is None:
         return ""
     target_id = str(agent_id or getattr(cell, "id", "") or "").strip()
     target_kind = str(kind or getattr(cell, "kind", "") or "").strip()
-    if target_kind not in {"architect", "engineer"} or not target_id:
+    if target_kind not in {"architect", "engineer", "worker"} or not target_id:
         return ""
     try:
-        return state.render_behavior_overlay_for_agent(target_id, seed=True)
+        target_cell = cell or state.agents.get(target_id)
+        if not target_cell:
+            return ""
+        return state.render_behavior_overlay_stack_for_cell(
+            target_cell,
+            include_role=include_role,
+            include_agent=include_agent and target_kind in {"architect", "engineer"},
+            seed_agent=True,
+            seed_role=False,
+            worker_dispatch=worker_dispatch,
+        )
     except Exception:
         log.exception("Failed to render behavior overlay for %s", target_id)
         try:
@@ -8916,20 +8936,37 @@ def _behavior_overlay_error(exc: Exception) -> dict:
     return {"type": "error", "message": str(exc)}
 
 
+def _behavior_overlay_scope_kwargs(data: dict) -> dict:
+    return {
+        "agent_id": str(data.get("agent_id", "") or ""),
+        "scope_kind": str(data.get("scope_kind", "") or ""),
+        "scope_group": str(data.get("scope_group", "") or data.get("group", "") or ""),
+        "scope_key": str(data.get("scope_key", "") or ""),
+        "group": str(data.get("group", "") or ""),
+        "role_kind": str(data.get("role_kind", "") or data.get("role", "") or ""),
+    }
+
+
 def _handle_behavior_overlay_read_command(
         data: dict, state: MatrixState) -> dict:
-    agent_id = str(data.get("agent_id", "") or "").strip()
-    if not agent_id:
-        return {"type": "error", "message": "agent_id is required"}
-    version = state.load_behavior_overlay_active_version(agent_id)
-    active = state.load_behavior_overlay_active(agent_id) or {}
+    try:
+        scope = state._behavior_scope_from_args(**_behavior_overlay_scope_kwargs(data))
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
+    version = state.db.load_behavior_overlay_active_version(scope) if state.db else None
+    active = state.db.load_behavior_overlay_active(scope) if state.db else {}
     if not version and data.get("seed", False):
-        version = state.ensure_behavior_overlay_seed(agent_id)
-        active = state.load_behavior_overlay_active(agent_id) or {}
+        version = state.ensure_behavior_overlay_seed(
+            agent_id=scope.agent_id,
+            scope_kind=scope.scope_kind,
+            scope_group=scope.scope_group,
+            scope_key=scope.scope_key,
+        )
+        active = state.db.load_behavior_overlay_active(scope) if state.db else {}
     return {
         "type": "behavior_overlay",
-        "agent_id": agent_id,
-        "active": active,
+        **scope.as_row_fields(),
+        "active": active or {},
         "version": version_summary(version),
         "text": str((version or {}).get("text", "") or ""),
     }
@@ -8937,16 +8974,19 @@ def _handle_behavior_overlay_read_command(
 
 def _handle_behavior_overlay_versions_command(
         data: dict, state: MatrixState) -> dict:
-    agent_id = str(data.get("agent_id", "") or "").strip()
-    if not agent_id:
-        return {"type": "error", "message": "agent_id is required"}
+    try:
+        scope = state._behavior_scope_from_args(**_behavior_overlay_scope_kwargs(data))
+    except Exception as exc:
+        return _behavior_overlay_error(exc)
     return {
         "type": "behavior_overlay_versions",
-        "agent_id": agent_id,
+        **scope.as_row_fields(),
         "versions": [
             version_summary(row)
             for row in state.list_behavior_overlay_versions(
-                agent_id,
+                scope_key=scope.scope_key,
+                scope_kind=scope.scope_kind,
+                scope_group=scope.scope_group,
                 limit=int(data.get("limit", 50) or 50),
             )
         ],
@@ -8962,6 +9002,11 @@ def _handle_behavior_overlay_proposals_command(
             for row in state.list_behavior_overlay_proposals(
                 status_filter=str(data.get("status_filter", "") or ""),
                 agent_id=str(data.get("agent_id", "") or ""),
+                scope_kind=str(data.get("scope_kind", "") or ""),
+                scope_group=str(data.get("scope_group", "") or data.get("group", "") or ""),
+                scope_key=str(data.get("scope_key", "") or ""),
+                group=str(data.get("group", "") or ""),
+                role_kind=str(data.get("role_kind", "") or data.get("role", "") or ""),
                 next_actor_kind=str(data.get("next_actor_kind", "") or ""),
                 proposed_by_agent_id=str(data.get("proposed_by_agent_id", "") or ""),
                 limit=int(data.get("limit", 100) or 100),
@@ -8978,6 +9023,11 @@ def _handle_behavior_overlay_diff_command(
             from_version_id=str(data.get("from_version_id", "") or ""),
             to_version_id=str(data.get("to_version_id", "") or ""),
             agent_id=str(data.get("agent_id", "") or ""),
+            scope_kind=str(data.get("scope_kind", "") or ""),
+            scope_group=str(data.get("scope_group", "") or data.get("group", "") or ""),
+            scope_key=str(data.get("scope_key", "") or ""),
+            group=str(data.get("group", "") or ""),
+            role_kind=str(data.get("role_kind", "") or data.get("role", "") or ""),
         )
     except Exception as exc:
         return _behavior_overlay_error(exc)
@@ -9002,6 +9052,11 @@ def _handle_behavior_overlay_propose_command(
     try:
         proposal = state.create_behavior_overlay_proposal(
             agent_id=str(data.get("agent_id", "") or ""),
+            scope_kind=str(data.get("scope_kind", "") or ""),
+            scope_group=str(data.get("scope_group", "") or data.get("group", "") or ""),
+            scope_key=str(data.get("scope_key", "") or ""),
+            group=str(data.get("group", "") or ""),
+            role_kind=str(data.get("role_kind", "") or data.get("role", "") or ""),
             proposed_by_agent_id=str(data.get("proposed_by_agent_id", "") or ""),
             proposed_by_kind=str(data.get("proposed_by_kind", "") or ""),
             text=str(data.get("text", "") or ""),
@@ -9108,6 +9163,11 @@ def _handle_behavior_overlay_user_rollback_command(
     try:
         proposal = state.create_behavior_overlay_proposal(
             agent_id=str(data.get("agent_id", "") or ""),
+            scope_kind=str(data.get("scope_kind", "") or ""),
+            scope_group=str(data.get("scope_group", "") or data.get("group", "") or ""),
+            scope_key=str(data.get("scope_key", "") or ""),
+            group=str(data.get("group", "") or ""),
+            role_kind=str(data.get("role_kind", "") or data.get("role", "") or ""),
             proposed_by_agent_id="user",
             proposed_by_kind="user",
             rationale=str(data.get("rationale", "") or "User-requested rollback"),
@@ -16237,6 +16297,13 @@ async def main(connection=None):
                                         ),
                                         prompt_body=prompt,
                                         postscript=postscript,
+                                        behavior_overlay_block=
+                                        _behavior_overlay_prompt_block_for_cell(
+                                            state,
+                                            cell=cell,
+                                            include_agent=False,
+                                            worker_dispatch=True,
+                                        ),
                                         disable_role_preamble=
                                         disable_role_preamble,
                                         include_identity_anchor=
@@ -16660,6 +16727,13 @@ async def main(connection=None):
                             base_dir=base_dir,
                             prompt_body=prompt_text,
                             postscript=postscript,
+                            behavior_overlay_block=
+                            _behavior_overlay_prompt_block_for_cell(
+                                state,
+                                cell=preview_cell,
+                                include_agent=False,
+                                worker_dispatch=True,
+                            ),
                             disable_role_preamble=disable_role_preamble,
                         ),
                     }

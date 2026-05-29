@@ -590,7 +590,10 @@ CREATE INDEX IF NOT EXISTS idx_pending_hires_architect
 
 CREATE TABLE IF NOT EXISTS behavior_overlay_versions (
     id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
+    scope_kind TEXT NOT NULL DEFAULT 'agent',
+    scope_group TEXT NOT NULL DEFAULT '',
+    scope_key TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT '',
     version_number INTEGER NOT NULL,
     parent_version_id TEXT NOT NULL DEFAULT '',
     text TEXT NOT NULL,
@@ -603,25 +606,32 @@ CREATE TABLE IF NOT EXISTS behavior_overlay_versions (
     source_proposal_id TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL,
     metadata_json TEXT NOT NULL DEFAULT '{}',
-    UNIQUE(agent_id, version_number)
+    UNIQUE(scope_kind, scope_group, scope_key, version_number)
 );
-CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_agent
-    ON behavior_overlay_versions(agent_id, version_number DESC);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_scope
+    ON behavior_overlay_versions(scope_kind, scope_group, scope_key, version_number DESC);
 CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_proposal
     ON behavior_overlay_versions(source_proposal_id);
 
 CREATE TABLE IF NOT EXISTS behavior_overlay_active (
-    agent_id TEXT PRIMARY KEY,
+    scope_kind TEXT NOT NULL DEFAULT 'agent',
+    scope_group TEXT NOT NULL DEFAULT '',
+    scope_key TEXT NOT NULL,
+    agent_id TEXT NOT NULL DEFAULT '',
     active_version_id TEXT NOT NULL,
     updated_at REAL NOT NULL,
     updated_by_kind TEXT NOT NULL DEFAULT '',
     updated_by_id TEXT NOT NULL DEFAULT '',
-    reason TEXT NOT NULL DEFAULT ''
+    reason TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(scope_kind, scope_group, scope_key)
 );
 
 CREATE TABLE IF NOT EXISTS behavior_overlay_proposals (
     id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
+    scope_kind TEXT NOT NULL DEFAULT 'agent',
+    scope_group TEXT NOT NULL DEFAULT '',
+    scope_key TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT '',
     target_kind TEXT NOT NULL DEFAULT '',
     proposal_type TEXT NOT NULL DEFAULT 'set_text',
     base_version_id TEXT NOT NULL DEFAULT '',
@@ -650,8 +660,8 @@ CREATE TABLE IF NOT EXISTS behavior_overlay_proposals (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_agent_status
-    ON behavior_overlay_proposals(agent_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_scope_status
+    ON behavior_overlay_proposals(scope_kind, scope_group, scope_key, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_route
     ON behavior_overlay_proposals(approval_route, status);
 CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_next_actor
@@ -659,12 +669,15 @@ CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_next_actor
 CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_user_task
     ON behavior_overlay_proposals(user_task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_idempotency
-    ON behavior_overlay_proposals(proposed_by_agent_id, idempotency_key)
+    ON behavior_overlay_proposals(proposed_by_agent_id, idempotency_key, scope_kind, scope_group, scope_key)
     WHERE idempotency_key != '';
 
 CREATE TABLE IF NOT EXISTS behavior_overlay_activations (
     id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
+    scope_kind TEXT NOT NULL DEFAULT 'agent',
+    scope_group TEXT NOT NULL DEFAULT '',
+    scope_key TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT '',
     previous_version_id TEXT NOT NULL DEFAULT '',
     active_version_id TEXT NOT NULL,
     proposal_id TEXT NOT NULL DEFAULT '',
@@ -674,8 +687,8 @@ CREATE TABLE IF NOT EXISTS behavior_overlay_activations (
     reason TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_agent
-    ON behavior_overlay_activations(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_scope
+    ON behavior_overlay_activations(scope_kind, scope_group, scope_key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_proposal
     ON behavior_overlay_activations(proposal_id);
 
@@ -755,6 +768,268 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
         return True
     except sqlite3.OperationalError:
         return False
+
+
+def _behavior_overlay_v2_indexes(conn: sqlite3.Connection) -> None:
+    """Ensure behavior-overlay v2 indexes and remove v1 index names."""
+    for name in (
+            "idx_behavior_overlay_versions_agent",
+            "idx_behavior_overlay_proposals_agent_status",
+            "idx_behavior_overlay_activations_agent",
+            "idx_behavior_overlay_proposals_idempotency"):
+        conn.execute(f"DROP INDEX IF EXISTS {name}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_scope "
+        "ON behavior_overlay_versions(scope_kind, scope_group, scope_key, "
+        "version_number DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_versions_proposal "
+        "ON behavior_overlay_versions(source_proposal_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_scope_status "
+        "ON behavior_overlay_proposals(scope_kind, scope_group, scope_key, "
+        "status, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_route "
+        "ON behavior_overlay_proposals(approval_route, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_next_actor "
+        "ON behavior_overlay_proposals(next_actor_kind, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_proposals_user_task "
+        "ON behavior_overlay_proposals(user_task_id)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "idx_behavior_overlay_proposals_idempotency "
+        "ON behavior_overlay_proposals(proposed_by_agent_id, idempotency_key, "
+        "scope_kind, scope_group, scope_key) WHERE idempotency_key != ''"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_scope "
+        "ON behavior_overlay_activations(scope_kind, scope_group, scope_key, "
+        "created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_behavior_overlay_activations_proposal "
+        "ON behavior_overlay_activations(proposal_id)"
+    )
+
+
+def _agent_group_expr(agent_column: str) -> str:
+    return (
+        f"COALESCE((SELECT group_name FROM agents WHERE id={agent_column}), '')"
+    )
+
+
+def _migrate_behavior_overlay_scope_schema(conn: sqlite3.Connection) -> None:
+    """Migrate Phase-1 agent-keyed overlay tables to scope-keyed v2.
+
+    ``behavior_overlay_active`` changes primary key shape, so this intentionally
+    performs a real table rebuild instead of an ``ALTER ADD COLUMN`` shortcut.
+    The helper is idempotent: if all tables already expose scope columns it
+    only re-ensures indexes.
+    """
+    required = (
+        "behavior_overlay_versions",
+        "behavior_overlay_active",
+        "behavior_overlay_proposals",
+        "behavior_overlay_activations",
+    )
+    if not all(_table_exists(conn, table) for table in required):
+        return
+    already_v2 = all(
+        _column_exists(conn, table, "scope_kind")
+        and _column_exists(conn, table, "scope_group")
+        and _column_exists(conn, table, "scope_key")
+        for table in required
+    )
+    if already_v2:
+        _behavior_overlay_v2_indexes(conn)
+        conn.commit()
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN")
+        for table in required:
+            conn.execute(f"DROP TABLE IF EXISTS __torque_{table}_v2")
+        conn.execute("""
+            CREATE TABLE __torque_behavior_overlay_versions_v2 (
+                id TEXT PRIMARY KEY,
+                scope_kind TEXT NOT NULL DEFAULT 'agent',
+                scope_group TEXT NOT NULL DEFAULT '',
+                scope_key TEXT NOT NULL DEFAULT '',
+                agent_id TEXT NOT NULL DEFAULT '',
+                version_number INTEGER NOT NULL,
+                parent_version_id TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL,
+                text_sha256 TEXT NOT NULL,
+                author_agent_id TEXT NOT NULL DEFAULT '',
+                author_kind TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                approver_id TEXT NOT NULL DEFAULT '',
+                approver_kind TEXT NOT NULL DEFAULT '',
+                source_proposal_id TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                UNIQUE(scope_kind, scope_group, scope_key, version_number)
+            )
+        """)
+        conn.execute("""
+            INSERT OR REPLACE INTO __torque_behavior_overlay_versions_v2 (
+                id, scope_kind, scope_group, scope_key, agent_id,
+                version_number, parent_version_id, text, text_sha256,
+                author_agent_id, author_kind, rationale, approver_id,
+                approver_kind, source_proposal_id, created_at, metadata_json
+            )
+            SELECT
+                id, 'agent', """ + _agent_group_expr("agent_id") + """,
+                agent_id, agent_id, version_number, parent_version_id, text,
+                text_sha256, author_agent_id, author_kind, rationale,
+                approver_id, approver_kind, source_proposal_id, created_at,
+                metadata_json
+            FROM behavior_overlay_versions
+        """)
+
+        conn.execute("""
+            CREATE TABLE __torque_behavior_overlay_active_v2 (
+                scope_kind TEXT NOT NULL DEFAULT 'agent',
+                scope_group TEXT NOT NULL DEFAULT '',
+                scope_key TEXT NOT NULL,
+                agent_id TEXT NOT NULL DEFAULT '',
+                active_version_id TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                updated_by_kind TEXT NOT NULL DEFAULT '',
+                updated_by_id TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(scope_kind, scope_group, scope_key)
+            )
+        """)
+        conn.execute("""
+            INSERT OR REPLACE INTO __torque_behavior_overlay_active_v2 (
+                scope_kind, scope_group, scope_key, agent_id,
+                active_version_id, updated_at, updated_by_kind,
+                updated_by_id, reason
+            )
+            SELECT
+                'agent', """ + _agent_group_expr("agent_id") + """,
+                agent_id, agent_id, active_version_id, updated_at,
+                updated_by_kind, updated_by_id, reason
+            FROM behavior_overlay_active
+        """)
+
+        conn.execute("""
+            CREATE TABLE __torque_behavior_overlay_proposals_v2 (
+                id TEXT PRIMARY KEY,
+                scope_kind TEXT NOT NULL DEFAULT 'agent',
+                scope_group TEXT NOT NULL DEFAULT '',
+                scope_key TEXT NOT NULL DEFAULT '',
+                agent_id TEXT NOT NULL DEFAULT '',
+                target_kind TEXT NOT NULL DEFAULT '',
+                proposal_type TEXT NOT NULL DEFAULT 'set_text',
+                base_version_id TEXT NOT NULL DEFAULT '',
+                target_version_id TEXT NOT NULL DEFAULT '',
+                proposed_text TEXT NOT NULL DEFAULT '',
+                proposed_text_sha256 TEXT NOT NULL DEFAULT '',
+                proposed_by_agent_id TEXT NOT NULL DEFAULT '',
+                proposed_by_kind TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'proposed',
+                approval_route TEXT NOT NULL,
+                next_actor_kind TEXT NOT NULL DEFAULT '',
+                requires_user_approval INTEGER NOT NULL DEFAULT 0,
+                architect_approver_id TEXT NOT NULL DEFAULT '',
+                architect_approved_at REAL,
+                user_task_id TEXT NOT NULL DEFAULT '',
+                user_approved_at REAL,
+                lint_warnings_json TEXT NOT NULL DEFAULT '[]',
+                resolved_by_kind TEXT NOT NULL DEFAULT '',
+                resolved_by_id TEXT NOT NULL DEFAULT '',
+                resolved_at REAL,
+                resolution_note TEXT NOT NULL DEFAULT '',
+                applied_version_id TEXT NOT NULL DEFAULT '',
+                applied_at REAL,
+                idempotency_key TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT OR REPLACE INTO __torque_behavior_overlay_proposals_v2 (
+                id, scope_kind, scope_group, scope_key, agent_id, target_kind,
+                proposal_type, base_version_id, target_version_id,
+                proposed_text, proposed_text_sha256, proposed_by_agent_id,
+                proposed_by_kind, rationale, status, approval_route,
+                next_actor_kind, requires_user_approval,
+                architect_approver_id, architect_approved_at, user_task_id,
+                user_approved_at, lint_warnings_json, resolved_by_kind,
+                resolved_by_id, resolved_at, resolution_note,
+                applied_version_id, applied_at, idempotency_key,
+                created_at, updated_at
+            )
+            SELECT
+                id, 'agent', """ + _agent_group_expr("agent_id") + """,
+                agent_id, agent_id, target_kind, proposal_type,
+                base_version_id, target_version_id, proposed_text,
+                proposed_text_sha256, proposed_by_agent_id, proposed_by_kind,
+                rationale, status, approval_route, next_actor_kind,
+                requires_user_approval, architect_approver_id,
+                architect_approved_at, user_task_id, user_approved_at,
+                lint_warnings_json, resolved_by_kind, resolved_by_id,
+                resolved_at, resolution_note, applied_version_id, applied_at,
+                idempotency_key, created_at, updated_at
+            FROM behavior_overlay_proposals
+        """)
+
+        conn.execute("""
+            CREATE TABLE __torque_behavior_overlay_activations_v2 (
+                id TEXT PRIMARY KEY,
+                scope_kind TEXT NOT NULL DEFAULT 'agent',
+                scope_group TEXT NOT NULL DEFAULT '',
+                scope_key TEXT NOT NULL DEFAULT '',
+                agent_id TEXT NOT NULL DEFAULT '',
+                previous_version_id TEXT NOT NULL DEFAULT '',
+                active_version_id TEXT NOT NULL,
+                proposal_id TEXT NOT NULL DEFAULT '',
+                actor_kind TEXT NOT NULL DEFAULT '',
+                actor_id TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT OR REPLACE INTO __torque_behavior_overlay_activations_v2 (
+                id, scope_kind, scope_group, scope_key, agent_id,
+                previous_version_id, active_version_id, proposal_id,
+                actor_kind, actor_id, action, reason, created_at
+            )
+            SELECT
+                id, 'agent', """ + _agent_group_expr("agent_id") + """,
+                agent_id, agent_id, previous_version_id, active_version_id,
+                proposal_id, actor_kind, actor_id, action, reason, created_at
+            FROM behavior_overlay_activations
+        """)
+
+        for table in required:
+            conn.execute(f"DROP TABLE {table}")
+            conn.execute(
+                f"ALTER TABLE __torque_{table}_v2 RENAME TO {table}"
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+    _behavior_overlay_v2_indexes(conn)
+    conn.commit()
 
 
 def _quote_ident(name: str) -> str:
@@ -1126,6 +1401,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate_legacy_engineer_schema_names(conn)
     conn.executescript(_SCHEMA_SQL)
+    _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads
     try:
         conn.execute("SELECT author_cell_id FROM engineer_journal LIMIT 0")

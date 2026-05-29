@@ -19,7 +19,12 @@ import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
-from .behavior_overlay import proposal_summary, version_summary
+from .behavior_overlay import (
+    BEHAVIOR_OVERLAY_ROLE_KINDS,
+    BehaviorOverlayScope,
+    proposal_summary,
+    version_summary,
+)
 from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
@@ -701,6 +706,11 @@ def _behavior_overlay_visible_to_architect(
         proposal: dict | None) -> bool:
     if not proposal:
         return False
+    if str(proposal.get("scope_kind", "") or "agent") == "role":
+        return (
+            str(proposal.get("scope_group", "") or "")
+            == _caller_group(state, caller_id)
+        )
     target_id = str(proposal.get("agent_id", "") or "").strip()
     if target_id == str(caller_id or "").strip():
         return True
@@ -712,6 +722,64 @@ def _behavior_overlay_visible_to_architect(
         if relation == "hired"
     }
     return target_id in hired_ids
+
+
+def _behavior_role_scope_for_caller(
+        state,
+        caller_id: str,
+        role_kind: str = "") -> tuple[BehaviorOverlayScope | None, str]:
+    group = _caller_group(state, caller_id)
+    if not group:
+        return None, "caller group not found"
+    kind = str(role_kind or "").strip()
+    if kind not in BEHAVIOR_OVERLAY_ROLE_KINDS:
+        return None, "role_kind must be architect, engineer, or worker"
+    try:
+        return BehaviorOverlayScope.role(group, kind), ""
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _behavior_scope_from_mcp_args(
+        state,
+        caller_kind: str,
+        caller_id: str,
+        args: dict,
+        *,
+        default: str = "agent") -> tuple[BehaviorOverlayScope | None, str]:
+    requested = str(args.get("scope_kind", "") or default or "agent").strip()
+    if requested == "effective":
+        requested = "effective"
+    if caller_kind == "engineer":
+        if requested == "role":
+            return _behavior_role_scope_for_caller(state, caller_id, "engineer")
+        if requested == "agent":
+            return BehaviorOverlayScope.agent(
+                str(caller_id or "").strip(),
+                group=_caller_group(state, caller_id),
+            ), ""
+        return None, "scope_kind must be agent or role"
+    if caller_kind == "architect":
+        if requested == "role":
+            return _behavior_role_scope_for_caller(
+                state,
+                caller_id,
+                str(args.get("role_kind", "") or args.get("role", "") or ""),
+            )
+        if requested == "agent":
+            target_id, target_error = _resolve_behavior_overlay_architect_target(
+                state,
+                caller_id,
+                args.get("agent_id", ""),
+            )
+            if not target_id:
+                return None, target_error
+            target = state.agents.get(target_id)
+            return BehaviorOverlayScope.agent(
+                target_id,
+                group=str(getattr(target, "group", "") or ""),
+            ), ""
+    return None, "behavior overlay tools are not available to this caller"
 
 
 def _resolve_group_engineer(state, caller_id: str,
@@ -4402,48 +4470,70 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         }), False
 
     if tool_name == "behavior_overlay_read":
-        if caller_kind == "engineer":
-            target_id = str(caller_id or "").strip()
-        elif caller_kind == "architect":
-            target_id, target_error = _resolve_behavior_overlay_architect_target(
-                real_state,
-                caller_id,
-                args.get("agent_id", ""),
+        requested = str(args.get("scope_kind", "") or "agent").strip()
+        if requested == "effective":
+            if caller_kind == "engineer":
+                target_id = str(caller_id or "").strip()
+            elif caller_kind == "architect":
+                target_id, target_error = _resolve_behavior_overlay_architect_target(
+                    real_state,
+                    caller_id,
+                    args.get("agent_id", ""),
+                )
+                if not target_id:
+                    return target_error, True
+            else:
+                return "behavior overlay tools are not available to this caller", True
+            target = real_state.agents.get(target_id)
+            role_scope = BehaviorOverlayScope.role(
+                str(getattr(target, "group", "") or ""),
+                str(getattr(target, "kind", "") or ""),
             )
-            if not target_id:
-                return target_error, True
-        else:
-            return "behavior overlay tools are not available to this caller", True
-        version = real_state.load_behavior_overlay_active_version(target_id)
-        active = real_state.load_behavior_overlay_active(target_id) or {}
+            agent_scope = BehaviorOverlayScope.agent(
+                target_id,
+                group=str(getattr(target, "group", "") or ""),
+            )
+            layers = []
+            for scope in (role_scope, agent_scope):
+                version = real_state.db.load_behavior_overlay_active_version(scope) if real_state.db else None
+                active = real_state.db.load_behavior_overlay_active(scope) if real_state.db else {}
+                layers.append({
+                    **scope.as_row_fields(),
+                    "active": active or {},
+                    "version": version_summary(version),
+                    "text": str((version or {}).get("text", "") or ""),
+                })
+            return json.dumps({"type": "behavior_overlay_effective", "layers": layers}), False
+        scope, scope_error = _behavior_scope_from_mcp_args(
+            real_state, caller_kind, caller_id, args, default="agent"
+        )
+        if not scope:
+            return scope_error, True
+        version = real_state.db.load_behavior_overlay_active_version(scope) if real_state.db else None
+        active = real_state.db.load_behavior_overlay_active(scope) if real_state.db else {}
         return json.dumps({
             "type": "behavior_overlay",
-            "agent_id": target_id,
+            **scope.as_row_fields(),
             "active": active,
             "version": version_summary(version),
             "text": str((version or {}).get("text", "") or ""),
         }), False
 
     if tool_name == "behavior_overlay_versions":
-        if caller_kind == "engineer":
-            target_id = str(caller_id or "").strip()
-        elif caller_kind == "architect":
-            target_id, target_error = _resolve_behavior_overlay_architect_target(
-                real_state,
-                caller_id,
-                args.get("agent_id", ""),
-            )
-            if not target_id:
-                return target_error, True
-        else:
-            return "behavior overlay tools are not available to this caller", True
+        scope, scope_error = _behavior_scope_from_mcp_args(
+            real_state, caller_kind, caller_id, args, default="agent"
+        )
+        if not scope:
+            return scope_error, True
         return json.dumps({
             "type": "behavior_overlay_versions",
-            "agent_id": target_id,
+            **scope.as_row_fields(),
             "versions": [
                 version_summary(row)
                 for row in real_state.list_behavior_overlay_versions(
-                    target_id,
+                    scope_kind=scope.scope_kind,
+                    scope_group=scope.scope_group,
+                    scope_key=scope.scope_key,
                     limit=int(args.get("limit", 50) or 50),
                 )
             ],
@@ -4455,7 +4545,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if proposal_id:
                 proposal = real_state.load_behavior_overlay_proposal(proposal_id)
                 if caller_kind == "engineer":
-                    if not proposal or proposal.get("agent_id") != str(caller_id or "").strip():
+                    requested = str(args.get("scope_kind", "") or "agent")
+                    if requested == "role":
+                        if (
+                                not proposal
+                                or proposal.get("scope_kind") != "role"
+                                or proposal.get("scope_group") != _caller_group(real_state, caller_id)
+                                or proposal.get("scope_key") != "engineer"):
+                            return "behavior overlay proposal not found", True
+                    elif not proposal or proposal.get("agent_id") != str(caller_id or "").strip():
                         return "behavior overlay proposal not found", True
                 elif caller_kind == "architect":
                     if not _behavior_overlay_visible_to_architect(
@@ -4465,20 +4563,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     proposal_id=proposal_id,
                 )
             else:
-                if caller_kind == "engineer":
-                    target_id = str(caller_id or "").strip()
-                elif caller_kind == "architect":
-                    target_id, target_error = _resolve_behavior_overlay_architect_target(
-                        real_state,
-                        caller_id,
-                        args.get("agent_id", ""),
-                    )
-                    if not target_id:
-                        return target_error, True
-                else:
-                    return "behavior overlay tools are not available to this caller", True
+                scope, scope_error = _behavior_scope_from_mcp_args(
+                    real_state, caller_kind, caller_id, args, default="agent"
+                )
+                if not scope:
+                    return scope_error, True
                 payload = real_state.behavior_overlay_diff_payload(
-                    agent_id=target_id,
+                    agent_id=scope.agent_id,
+                    scope_kind=scope.scope_kind,
+                    scope_group=scope.scope_group,
+                    scope_key=scope.scope_key,
                     from_version_id=str(args.get("from_version_id", "") or ""),
                     to_version_id=str(args.get("to_version_id", "") or ""),
                 )
@@ -4488,6 +4582,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "behavior_overlay_proposal_list" and caller_kind == "architect":
         target_filter = ""
+        scope_filter = None
+        if str(args.get("scope_kind", "") or "") == "role":
+            scope_filter, scope_error = _behavior_scope_from_mcp_args(
+                real_state, caller_kind, caller_id, args, default="role"
+            )
+            if not scope_filter:
+                return scope_error, True
         if str(args.get("agent_id", "") or "").strip():
             target_filter, target_error = _resolve_behavior_overlay_architect_target(
                 real_state,
@@ -4500,6 +4601,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         for proposal in real_state.list_behavior_overlay_proposals(
                 status_filter=str(args.get("status_filter", "") or ""),
                 agent_id=target_filter,
+                scope_kind=scope_filter.scope_kind if scope_filter else "",
+                scope_group=scope_filter.scope_group if scope_filter else "",
+                scope_key=scope_filter.scope_key if scope_filter else "",
                 limit=int(args.get("limit", 100) or 100)):
             if _behavior_overlay_visible_to_architect(
                     real_state, caller_id, proposal):
@@ -4754,6 +4858,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     # -- Write tools --------------------------------------------------------
 
     if tool_name == "behavior_overlay_propose" and caller_kind == "engineer":
+        if str(args.get("scope_kind", "") or "agent") == "role":
+            return (
+                "engineer role behavior overlay writes are not supported in v1; "
+                "ask the architect to curate a user-approved role proposal",
+                True,
+            )
         if not str(getattr(_engineer_cell, "hired_by_architect_id", "") or "").strip():
             return "engineer has no hiring architect to govern behavior overlays", True
         result = await handle_command({
@@ -4773,6 +4883,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(result), False
 
     if tool_name == "behavior_overlay_request_rollback" and caller_kind == "engineer":
+        if str(args.get("scope_kind", "") or "agent") == "role":
+            return (
+                "engineer role behavior overlay rollback requests are not "
+                "supported in v1; ask the architect to curate a user-approved "
+                "role rollback",
+                True,
+            )
         if not str(getattr(_engineer_cell, "hired_by_architect_id", "") or "").strip():
             return "engineer has no hiring architect to govern behavior overlays", True
         result = await handle_command({
@@ -4842,6 +4959,35 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result), False
 
+    if tool_name == "behavior_overlay_propose_for_role" and caller_kind == "architect":
+        if _agent_dismissed_at(real_state.agents.get(str(caller_id or "").strip())):
+            return _architect_dismissed_error(caller_id), True
+        scope, scope_error = _behavior_role_scope_for_caller(
+            real_state,
+            caller_id,
+            str(args.get("role_kind", "") or args.get("role", "") or ""),
+        )
+        if not scope:
+            return scope_error, True
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "scope_kind": "role",
+            "group": scope.scope_group,
+            "role_kind": scope.scope_key,
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "architect",
+            "text": str(args.get("text", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+            "architect_approver_id": str(caller_id or "").strip(),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
     if tool_name == "behavior_overlay_approve" and caller_kind == "architect":
         proposal_id = str(args.get("proposal_id", "") or "").strip()
         proposal = real_state.load_behavior_overlay_proposal(proposal_id)
@@ -4904,6 +5050,36 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "idempotency_key": str(args.get("idempotency_key", "") or ""),
             "architect_approver_id": str(caller_id or "").strip(),
             "auto_apply_architect_direct": bool(is_engineer_target),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "behavior_overlay_rollback_role" and caller_kind == "architect":
+        if _agent_dismissed_at(real_state.agents.get(str(caller_id or "").strip())):
+            return _architect_dismissed_error(caller_id), True
+        scope, scope_error = _behavior_role_scope_for_caller(
+            real_state,
+            caller_id,
+            str(args.get("role_kind", "") or args.get("role", "") or ""),
+        )
+        if not scope:
+            return scope_error, True
+        result = await handle_command({
+            "cmd": "behavior_overlay_propose",
+            "scope_kind": "role",
+            "group": scope.scope_group,
+            "role_kind": scope.scope_key,
+            "proposed_by_agent_id": str(caller_id or "").strip(),
+            "proposed_by_kind": "architect",
+            "proposal_type": "rollback",
+            "target_version_id": str(args.get("version_id", "") or ""),
+            "rationale": str(args.get("rationale", "") or ""),
+            "expected_base_version_id": str(
+                args.get("expected_base_version_id", "") or ""
+            ),
+            "idempotency_key": str(args.get("idempotency_key", "") or ""),
+            "architect_approver_id": str(caller_id or "").strip(),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

@@ -36,7 +36,7 @@ from torque.mcp_retry import (
     is_transient_exception,
     is_transient_http_status,
 )
-from torque.behavior_overlay import behavior_overlay_diff
+from torque.behavior_overlay import behavior_overlay_diff, behavior_overlay_scope_id
 
 DEFAULT_PORT = 18932
 DESKTOP_DEFAULT_PORT = 18933
@@ -392,18 +392,40 @@ def db_read_behavior_overlay():
         if not _db_table_exists(conn, "behavior_overlay_versions"):
             return {"versions": {}, "active": {}, "proposals": {}}
         conn.row_factory = sqlite3.Row
+        agents = {}
+        if _db_table_exists(conn, "agents"):
+            for row in conn.execute("SELECT id, group_name FROM agents"):
+                agents[row["id"]] = row["group_name"]
+
+        def _with_scope(d):
+            if not d.get("scope_kind"):
+                d["scope_kind"] = "agent"
+            if "scope_group" not in d:
+                d["scope_group"] = agents.get(d.get("agent_id", ""), "")
+            if not d.get("scope_key"):
+                d["scope_key"] = d.get("agent_id", "")
+            d["scope_id"] = behavior_overlay_scope_id(
+                scope_kind=d.get("scope_kind", "agent"),
+                scope_group=d.get("scope_group", ""),
+                scope_key=d.get("scope_key", ""),
+                agent_id=d.get("agent_id", ""),
+            )
+            return d
+
         versions = {}
         for row in conn.execute("SELECT * FROM behavior_overlay_versions"):
-            d = dict(row)
+            d = _with_scope(dict(row))
             d["metadata"] = _json_decode(d.pop("metadata_json", "{}"), {})
             versions[d["id"]] = d
-        active = {
-            row["agent_id"]: dict(row)
-            for row in conn.execute("SELECT * FROM behavior_overlay_active")
-        }
+        active = {}
+        for row in conn.execute("SELECT * FROM behavior_overlay_active"):
+            d = _with_scope(dict(row))
+            active[d["scope_id"]] = d
+            if d.get("agent_id"):
+                active[d["agent_id"]] = d
         proposals = {}
         for row in conn.execute("SELECT * FROM behavior_overlay_proposals"):
-            d = dict(row)
+            d = _with_scope(dict(row))
             d["requires_user_approval"] = bool(
                 d.get("requires_user_approval", 0))
             d["lint_warnings"] = _json_decode(
@@ -3362,6 +3384,10 @@ def _behavior_version_summary(version):
     text = str(version.get("text", "") or "")
     return {
         "id": version.get("id", ""),
+        "scope_kind": version.get("scope_kind", "agent"),
+        "scope_group": version.get("scope_group", ""),
+        "scope_key": version.get("scope_key", version.get("agent_id", "")),
+        "scope_id": version.get("scope_id", ""),
         "agent_id": version.get("agent_id", ""),
         "version_number": int(version.get("version_number", 0) or 0),
         "parent_version_id": version.get("parent_version_id", ""),
@@ -3383,6 +3409,10 @@ def _behavior_proposal_summary(proposal):
     warnings = proposal.get("lint_warnings", []) or []
     return {
         "id": proposal.get("id", ""),
+        "scope_kind": proposal.get("scope_kind", "agent"),
+        "scope_group": proposal.get("scope_group", ""),
+        "scope_key": proposal.get("scope_key", proposal.get("agent_id", "")),
+        "scope_id": proposal.get("scope_id", ""),
         "agent_id": proposal.get("agent_id", ""),
         "target_kind": proposal.get("target_kind", ""),
         "proposal_type": proposal.get("proposal_type", ""),
@@ -3404,14 +3434,58 @@ def _behavior_proposal_summary(proposal):
     }
 
 
+def _behavior_cli_scope(args, state_data=None):
+    role = str(getattr(args, "role", "") or "").strip()
+    if role:
+        group = str(getattr(args, "group", "") or "").strip()
+        if not group:
+            die("--group is required with --role")
+        return {
+            "scope_kind": "role",
+            "scope_group": group,
+            "scope_key": role,
+            "scope_id": behavior_overlay_scope_id(
+                scope_kind="role",
+                scope_group=group,
+                scope_key=role,
+            ),
+            "agent": None,
+        }
+    agent_ident = str(getattr(args, "agent", "") or "").strip()
+    if not agent_ident:
+        die("agent is required unless --role is used")
+    state_data = state_data or db_read_state()
+    agent = resolve_cell(state_data, agent_ident)
+    group = agent.get("group", "")
+    return {
+        "scope_kind": "agent",
+        "scope_group": group,
+        "scope_key": agent["id"],
+        "scope_id": behavior_overlay_scope_id(
+            scope_kind="agent",
+            scope_group=group,
+            scope_key=agent["id"],
+            agent_id=agent["id"],
+        ),
+        "agent": agent,
+    }
+
+
 def cmd_behavior_read(args):
-    _state, agent, overlay = _behavior_state_and_agent(args.agent)
-    active = overlay["active"].get(agent["id"], {})
+    state_data = db_read_state()
+    overlay = db_read_behavior_overlay()
+    scope = _behavior_cli_scope(args, state_data)
+    agent = scope["agent"]
+    active = overlay["active"].get(scope["scope_id"], {})
     version = overlay["versions"].get(active.get("active_version_id", ""))
     payload = {
-        "agent_id": agent["id"],
-        "agent": agent.get("name", ""),
-        "kind": agent.get("kind", ""),
+        "scope_kind": scope["scope_kind"],
+        "scope_group": scope["scope_group"],
+        "scope_key": scope["scope_key"],
+        "scope_id": scope["scope_id"],
+        "agent_id": agent["id"] if agent else "",
+        "agent": agent.get("name", "") if agent else "",
+        "kind": agent.get("kind", "") if agent else scope["scope_key"],
         "active": active,
         "version": _behavior_version_summary(version),
         "text": str((version or {}).get("text", "") or ""),
@@ -3419,7 +3493,12 @@ def cmd_behavior_read(args):
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
-        print(f"Behavior overlay for {agent.get('name', agent['id'])}:")
+        label = (
+            f"{scope['scope_key']} role in {scope['scope_group']}"
+            if scope["scope_kind"] == "role"
+            else agent.get("name", agent["id"])
+        )
+        print(f"Behavior overlay for {label}:")
         if not version:
             print("  active: <none>")
         else:
@@ -3429,17 +3508,23 @@ def cmd_behavior_read(args):
 
 
 def cmd_behavior_versions(args):
-    _state, agent, overlay = _behavior_state_and_agent(args.agent)
+    state_data = db_read_state()
+    scope = _behavior_cli_scope(args, state_data)
+    overlay = db_read_behavior_overlay()
     versions = [
         v for v in overlay["versions"].values()
-        if v.get("agent_id") == agent["id"]
+        if v.get("scope_id") == scope["scope_id"]
     ]
     versions.sort(key=lambda v: int(v.get("version_number", 0) or 0),
                   reverse=True)
     if args.limit:
         versions = versions[:args.limit]
     payload = {
-        "agent_id": agent["id"],
+        "scope_kind": scope["scope_kind"],
+        "scope_group": scope["scope_group"],
+        "scope_key": scope["scope_key"],
+        "scope_id": scope["scope_id"],
+        "agent_id": (scope["agent"] or {}).get("id", ""),
         "versions": [_behavior_version_summary(v) for v in versions],
     }
     if args.json:
@@ -3457,13 +3542,19 @@ def cmd_behavior_proposals(args):
     state_data = db_read_state()
     overlay = db_read_behavior_overlay()
     agent_id = ""
+    scope_id = ""
     if args.agent:
         agent_id = resolve_cell(state_data, args.agent)["id"]
+    if getattr(args, "role", ""):
+        scope = _behavior_cli_scope(args, state_data)
+        scope_id = scope["scope_id"]
     proposals = []
     for proposal in overlay["proposals"].values():
         if args.status and proposal.get("status") != args.status:
             continue
         if agent_id and proposal.get("agent_id") != agent_id:
+            continue
+        if scope_id and proposal.get("scope_id") != scope_id:
             continue
         proposals.append(proposal)
     proposals.sort(key=lambda p: float(p.get("created_at", 0) or 0),
@@ -3478,7 +3569,8 @@ def cmd_behavior_proposals(args):
             print(
                 f"{item['id']}  {item['status']}  {item['approval_route']}  "
                 f"next={item['next_actor_kind'] or '-'}  "
-                f"target={item['agent_id']}  {item['proposed_text_bytes']}B"
+                f"target={item.get('scope_id') or item['agent_id']}  "
+                f"{item['proposed_text_bytes']}B"
             )
 
 
@@ -3548,12 +3640,21 @@ def cmd_behavior_reject(args):
 
 def cmd_behavior_rollback(args):
     state_data = get_state(args.port)
-    agent = resolve_cell(state_data, args.agent)
+    if getattr(args, "role", "") and not args.version_id and args.agent:
+        args.version_id = args.agent
+        args.agent = ""
+    scope = _behavior_cli_scope(args, state_data)
+    if not args.version_id:
+        die("version_id is required")
+    agent = scope["agent"]
     resp = api_call(
         "behavior_overlay_user_rollback",
         port=args.port,
-        agent_id=agent["id"],
-        version_id=args.version_id,
+        agent_id=agent["id"] if agent else "",
+        scope_kind=scope["scope_kind"],
+        group=scope["scope_group"],
+        role_kind=scope["scope_key"] if scope["scope_kind"] == "role" else "",
+        version_id=args.version_id or "",
         rationale=args.rationale or "User-requested rollback",
         expected_base_version_id=args.expected_base_version_id or "",
     )
@@ -3561,7 +3662,12 @@ def cmd_behavior_rollback(args):
     if args.json:
         print(json.dumps(data, indent=2))
     else:
-        print(f"Rolled back behavior overlay for {agent.get('name', agent['id'])}")
+        label = (
+            f"{scope['scope_key']} role in {scope['scope_group']}"
+            if scope["scope_kind"] == "role"
+            else agent.get("name", agent["id"])
+        )
+        print(f"Rolled back behavior overlay for {label}")
 
 
 def cmd_behavior_setting(args):
@@ -5772,19 +5878,25 @@ def build_parser():
     beh.set_defaults(func=None, _sub_parser=beh)
     beh_sub = beh.add_subparsers(dest="behavior_cmd")
 
-    p = beh_sub.add_parser("read", help="Read an agent's active behavior overlay")
-    p.add_argument("agent", help="Architect/engineer id, slug, name, or prefix")
+    p = beh_sub.add_parser("read", help="Read an agent or role active behavior overlay")
+    p.add_argument("agent", nargs="?", default="", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("--role", choices=["architect", "engineer", "worker"], default="")
+    p.add_argument("--group", default="", help="Group name for --role")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_behavior_read)
 
     p = beh_sub.add_parser("versions", help="List behavior overlay versions")
-    p.add_argument("agent", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("agent", nargs="?", default="", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("--role", choices=["architect", "engineer", "worker"], default="")
+    p.add_argument("--group", default="", help="Group name for --role")
     p.add_argument("--limit", type=int, default=50)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_behavior_versions)
 
     p = beh_sub.add_parser("proposals", help="List behavior overlay proposals")
     p.add_argument("--agent", default="", help="Optional target agent")
+    p.add_argument("--role", choices=["architect", "engineer", "worker"], default="")
+    p.add_argument("--group", default="", help="Group name for --role")
     p.add_argument("--status", default="", choices=[
         "", "proposed", "approved", "rejected", "applied",
     ])
@@ -5811,15 +5923,20 @@ def build_parser():
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_behavior_reject)
 
-    p = beh_sub.add_parser("rollback", help="Rollback an agent overlay as user")
-    p.add_argument("agent", help="Architect/engineer id, slug, name, or prefix")
-    p.add_argument("version_id", help="Version id to activate")
+    p = beh_sub.add_parser("rollback", help="Rollback an agent or role overlay as user")
+    p.add_argument("agent", nargs="?", default="", help="Architect/engineer id, slug, name, or prefix")
+    p.add_argument("version_id", nargs="?", default="", help="Version id to activate")
+    p.add_argument("--role", choices=["architect", "engineer", "worker"], default="")
+    p.add_argument("--group", default="", help="Group name for --role")
     p.add_argument("--rationale", default="")
     p.add_argument("--expected-base-version-id", default="")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_behavior_rollback)
 
-    p = beh_sub.add_parser("setting", help="Read/update behavior governance setting")
+    p = beh_sub.add_parser(
+        "setting",
+        help="Read/update per-agent Engineer behavior governance setting",
+    )
     p.add_argument("group", help="Group name")
     p.add_argument("--requires-user-approval", choices=[
         "true", "false", "1", "0", "yes", "no", "on", "off",
