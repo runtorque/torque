@@ -7210,6 +7210,50 @@ class WorktreeManager:
             synced=True,
         )
 
+    async def github_remote_branch_sha(self, repo_root: str, remote: str,
+                                       branch: str) -> dict:
+        """Read the remote branch SHA without updating local refs."""
+        phase = "remote_base_ground_truth"
+        repo_root = str(repo_root or "").strip()
+        remote = str(remote or "").strip()
+        branch = str(branch or "").strip()
+        if not repo_root or not remote or not branch:
+            return _worktree_error(
+                phase,
+                "Repo root, remote, and branch are required.",
+            )
+
+        ref = f"refs/heads/{branch}"
+        result = await self._run_capture(
+            "git", "-C", repo_root, "ls-remote", remote, ref,
+        )
+        if result.get("returncode") != 0:
+            err = result.get("stderr") or result.get("stdout") \
+                or "git ls-remote failed"
+            return _worktree_error(
+                phase,
+                f"Failed to inspect {remote}/{branch}: {err}",
+                remote=remote,
+                base_branch=branch,
+            )
+        stdout = str(result.get("stdout") or "").strip()
+        parts = stdout.split()
+        sha = parts[0].strip() if parts else ""
+        if not sha:
+            return _worktree_error(
+                phase,
+                f"Remote branch {remote}/{branch} was not found.",
+                remote=remote,
+                base_branch=branch,
+            )
+        return _worktree_ok(
+            phase,
+            remote=remote,
+            base_branch=branch,
+            sha=sha,
+            remote_sha=sha,
+        )
+
     async def github_push_branch(self, worktree_path: str, remote: str,
                                  branch: str) -> dict:
         """Push a worktree branch to the selected remote."""

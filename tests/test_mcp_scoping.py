@@ -628,6 +628,103 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
 
+    async def test_engineer_merge_tombstoned_post_success_retry_uses_guard_not_blind_rebase(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        worker.worktree_repo_root = "/repo"
+        task = state.board_add_task(
+            "Merged worker",
+            "torque",
+            lane="Done",
+            id="TORQUE:777",
+            agent_id=worker.id,
+        )
+        task.worktree_boundary = {
+            "version": "1",
+            "repo_root": worker.worktree_repo_root,
+            "branch": worker.worktree_branch,
+            "base_branch": worker.worktree_base_branch,
+            "commit_sha": "head123",
+            "kind": "marker",
+            "status": "merged",
+            "recorded_at": "2026-05-29T18:00:00+00:00",
+            "recorded_by_agent_id": worker.id,
+            "message": "",
+            "superseded_by_task_id": "",
+            "merged_at": "2026-05-29T18:05:00+00:00",
+            "merge_commit_sha": "squash789",
+            "pr": {
+                "provider": "github",
+                "remote": "origin",
+                "base_branch": worker.worktree_base_branch,
+                "head_branch": worker.worktree_branch,
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "state": "merged",
+                "merge_commit_sha": "squash789",
+                "requested_cleanup": {
+                    "close_agent_on_merge": True,
+                    "remove_worktree_on_merge": True,
+                },
+            },
+        }
+        state.remove_agent(worker.id)
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_merge":
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "mode": "pull_request",
+                    "pending": False,
+                    "merged": True,
+                    "sha": "squash789",
+                    "branch": "torque/alice/worker-a",
+                    "base_branch": "main",
+                    "pr_url": "https://github.com/acme/repo/pull/7",
+                    "warning": (
+                        "Merge landed (PR is MERGED and main is at merge "
+                        "commit squash789); ignoring post-success "
+                        "target_resolution failure: Agent/worktree is tombstoned"
+                    ),
+                    "cleanup": {
+                        "close_agent": True,
+                        "remove_worktree": True,
+                        "agent_closed": True,
+                        "worktree_removed": True,
+                        "errors": [],
+                    },
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {
+                "agent": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "ok")
+        self.assertEqual(payload["sha"], "squash789")
+        self.assertTrue(payload["merged"])
+        self.assertIn("ignoring post-success target_resolution", payload["warning"])
+        self.assertEqual([call["cmd"] for call in calls], ["worktree_merge"])
+        self.assertNotIn("rebase", text.lower())
+
     async def test_engineer_merge_landed_pr_cleanup_errors_are_warnings(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

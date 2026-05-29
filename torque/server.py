@@ -87,6 +87,7 @@ from .worktree import (
 )
 from .worktree_boundaries import (
     advance_latest_boundary_after_mechanical_commit,
+    boundary_pr_metadata,
     boundary_submodule_branches,
     boundary_summary,
     branch_boundary_tasks,
@@ -1631,8 +1632,10 @@ async def _confirm_pr_merged_and_base_at_merge(
     pr_result: dict | None = None,
     merge_result: dict | None = None,
     post_merge_sync: dict | None = None,
+    force_status_query: bool = False,
+    skip_base_sync: bool = False,
 ) -> dict:
-    """Authoritative guard: PR is merged AND local base is the merge SHA."""
+    """Authoritative guard: PR is merged AND origin/base is the merge SHA."""
     pr_result = pr_result or {}
     merge_result = merge_result or {}
     merge_sha = _merge_commit_sha_from_sources(
@@ -1650,7 +1653,9 @@ async def _confirm_pr_merged_and_base_at_merge(
 
     selector = _pr_selector_from_sources(merge_result, pr_result)
     status_helper = getattr(worktree_mgr, "github_pr_status", None)
-    if (not status or not merge_sha) and callable(status_helper) and selector:
+    if (
+        force_status_query or not status or not merge_sha
+    ) and callable(status_helper) and selector:
         try:
             queried = await status_helper(worktree_path, selector)
         except Exception as exc:  # pragma: no cover - defensive logging path
@@ -1662,8 +1667,9 @@ async def _confirm_pr_merged_and_base_at_merge(
         else:
             if queried.get("ok") and _pr_status_indicates_merged(queried):
                 status = queried
-                if not merge_sha:
-                    merge_sha = _merge_commit_sha_from_status(queried)
+                queried_sha = _merge_commit_sha_from_status(queried)
+                if queried_sha:
+                    merge_sha = queried_sha
 
     if not status or not _pr_status_indicates_merged(status) or not merge_sha:
         return {"ok": False, "reason": "pr_not_confirmed_merged"}
@@ -1679,7 +1685,13 @@ async def _confirm_pr_merged_and_base_at_merge(
 
     sync_helper = getattr(worktree_mgr, "github_sync_remote_base", None)
     sync_result = None
-    if callable(sync_helper) and repo_root and remote and base_branch:
+    if (
+        not skip_base_sync
+        and callable(sync_helper)
+        and repo_root
+        and remote
+        and base_branch
+    ):
         try:
             sync_result = await sync_helper(
                 worktree_path,
@@ -1700,6 +1712,42 @@ async def _confirm_pr_merged_and_base_at_merge(
                 "merge_commit_sha": merge_sha,
                 "pr_status": status,
                 "base_match": match,
+                "base_sync": sync_result,
+            }
+
+    remote_sha_helper = getattr(worktree_mgr, "github_remote_branch_sha", None)
+    if callable(remote_sha_helper) and repo_root and remote and base_branch:
+        try:
+            remote_sha_result = await remote_sha_helper(
+                repo_root or worktree_path,
+                remote,
+                base_branch,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            log.warning(
+                "Post-success remote base confirmation failed for %s/%s: %s",
+                remote,
+                base_branch,
+                exc,
+            )
+            remote_sha_result = None
+        if isinstance(remote_sha_result, dict):
+            remote_sha = str(remote_sha_result.get("sha") or "").strip()
+        else:
+            remote_sha = str(remote_sha_result or "").strip()
+            remote_sha_result = {"sha": remote_sha} if remote_sha else None
+        if _sha_equal(remote_sha, merge_sha):
+            return {
+                "ok": True,
+                "merge_commit_sha": merge_sha,
+                "pr_status": status,
+                "base_match": {
+                    "source": "remote_ground_truth",
+                    "remote": remote,
+                    "base_branch": base_branch,
+                    "sha": remote_sha,
+                    "result": remote_sha_result,
+                },
                 "base_sync": sync_result,
             }
 
@@ -1795,6 +1843,195 @@ def _fallback_successful_worktree_merge_result(
             phase="post_merge_finalize",
             detail={"error": cleanup_error},
         )
+    return result
+
+
+def _latest_merged_pr_boundary_for_post_success(
+    state: MatrixState,
+    *,
+    aid: str = "",
+    repo_root: str = "",
+    branch: str = "",
+) -> tuple[object | None, dict, dict]:
+    """Find the latest merged PR boundary matching an agent or branch."""
+    aid = str(aid or "").strip()
+    repo_root = str(repo_root or "").strip()
+    branch = str(branch or "").strip()
+    candidates: list[tuple[tuple[str, str, str], object, dict, dict]] = []
+    for task in state.board_tasks.values():
+        boundary = task_boundary(task)
+        if str(boundary.get("status") or "").strip() != "merged":
+            continue
+        boundary_repo_root = str(boundary.get("repo_root") or "").strip()
+        boundary_branch = str(boundary.get("branch") or "").strip()
+        if repo_root and boundary_repo_root != repo_root:
+            continue
+        if branch and boundary_branch != branch:
+            continue
+        recorded_by = str(
+            boundary.get("recorded_by_agent_id") or ""
+        ).strip()
+        task_agent_id = str(getattr(task, "agent_id", "") or "").strip()
+        if aid and aid not in {recorded_by, task_agent_id}:
+            continue
+        pr = boundary_pr_metadata(boundary)
+        merge_sha = str(
+            boundary.get("merge_commit_sha")
+            or pr.get("merge_commit_sha")
+            or ""
+        ).strip()
+        if not merge_sha or not pr:
+            continue
+        sort_key = (
+            str(boundary.get("merged_at") or ""),
+            str(boundary.get("recorded_at") or ""),
+            str(getattr(task, "updated_at", "") or ""),
+        )
+        candidates.append((sort_key, task, boundary, pr))
+    if not candidates:
+        return None, {}, {}
+    candidates.sort(key=lambda item: item[0])
+    _sort_key, task, boundary, pr = candidates[-1]
+    return task, boundary, pr
+
+
+async def _recover_authoritative_post_success_from_boundary(
+    *,
+    state: MatrixState,
+    worktree_mgr: WorktreeManager,
+    aid: str,
+    failure: dict,
+    cell=None,
+    worktree_path: str = "",
+    repo_root: str = "",
+    branch: str = "",
+    base_branch: str = "",
+    remote: str = "",
+    stale_base: dict | None = None,
+) -> dict | None:
+    """Return success when a later phase fails after a confirmed PR merge."""
+    task, boundary, pr = _latest_merged_pr_boundary_for_post_success(
+        state,
+        aid=aid,
+        repo_root=repo_root,
+        branch=branch,
+    )
+    if not boundary:
+        return None
+
+    merge_sha = str(
+        boundary.get("merge_commit_sha")
+        or pr.get("merge_commit_sha")
+        or ""
+    ).strip()
+    boundary_repo_root = str(boundary.get("repo_root") or "").strip()
+    boundary_branch = str(boundary.get("branch") or "").strip()
+    boundary_base = str(
+        base_branch
+        or boundary.get("base_branch")
+        or pr.get("base_branch")
+        or ""
+    ).strip()
+    boundary_remote = str(remote or pr.get("remote") or "origin").strip()
+    confirm_path = str(
+        worktree_path
+        or getattr(cell, "worktree_path", "")
+        or boundary_repo_root
+        or repo_root
+        or ""
+    ).strip()
+    confirm_repo_root = str(
+        repo_root
+        or getattr(cell, "worktree_repo_root", "")
+        or getattr(cell, "git_root", "")
+        or boundary_repo_root
+        or confirm_path
+        or ""
+    ).strip()
+    if not (
+        merge_sha
+        and confirm_path
+        and confirm_repo_root
+        and boundary_remote
+        and boundary_base
+    ):
+        return None
+
+    pr_result = dict(pr)
+    pr_result.setdefault("state", "MERGED")
+    pr_result.setdefault("merge_commit_sha", merge_sha)
+    merge_result = {
+        "ok": True,
+        "phase": "post_success_boundary",
+        "merge_commit_sha": merge_sha,
+        "url": pr_result.get("url", ""),
+        "number": pr_result.get("number"),
+        "pr_status": pr_result,
+    }
+    confirmation = await _confirm_pr_merged_and_base_at_merge(
+        worktree_mgr=worktree_mgr,
+        worktree_path=confirm_path,
+        repo_root=confirm_repo_root,
+        remote=boundary_remote,
+        base_branch=boundary_base,
+        pr_result=pr_result,
+        merge_result=merge_result,
+        force_status_query=True,
+    )
+    if not confirmation.get("ok"):
+        return None
+
+    cleanup_requested = dict(pr.get("requested_cleanup") or {})
+    close_requested = bool(cleanup_requested.get("close_agent_on_merge"))
+    remove_requested = bool(cleanup_requested.get("remove_worktree_on_merge"))
+    agent_name = str(
+        getattr(cell, "name", "")
+        or getattr(task, "task", "")
+        or aid
+        or ""
+    ).strip()
+    result = {
+        "type": "worktree_merge",
+        "id": aid,
+        "ok": True,
+        "sha": merge_sha,
+        "branch": boundary_branch or branch,
+        "base_branch": boundary_base,
+        "agent_name": agent_name,
+        "cleanup": {
+            "close_agent": close_requested,
+            "remove_worktree": remove_requested,
+            "agent_closed": close_requested,
+            "worktree_removed": remove_requested,
+            "errors": [],
+            "recovered_after_success": True,
+        },
+        "mode": "pull_request",
+        "pending": False,
+        "merged": True,
+        "url": pr.get("url", ""),
+        "pr_url": pr.get("url", ""),
+        "pr": pr,
+        "authoritative_post_success_guard": confirmation,
+    }
+    _attach_stale_base(result, stale_base)
+    phase = str(failure.get("phase") or "post_success_check").strip()
+    warning = _post_success_guard_warning(
+        failure,
+        merge_sha,
+        base_branch=boundary_base,
+    )
+    log.warning(warning)
+    _append_post_success_warning(
+        result,
+        warning,
+        phase=phase,
+        detail={
+            "failure": failure,
+            "confirmation": confirmation,
+            "boundary_task_id": str(getattr(task, "id", "") or ""),
+        },
+    )
     return result
 
 
@@ -2285,6 +2522,27 @@ async def _run_pr_worktree_merge(
     board_sync_manager=None,
 ) -> dict:
     if not (cell and cell.worktree_path and cell.worktree_branch):
+        failure = {
+            "phase": "target_resolution",
+            "error": "Agent has no worktree.",
+        }
+        recovered = await _recover_authoritative_post_success_from_boundary(
+            state=state,
+            worktree_mgr=worktree_mgr,
+            aid=aid,
+            failure=failure,
+            cell=cell,
+            worktree_path=str(getattr(cell, "worktree_path", "") or ""),
+            repo_root=str(
+                getattr(cell, "worktree_repo_root", "")
+                or getattr(cell, "git_root", "")
+                or ""
+            ),
+            branch=str(getattr(cell, "worktree_branch", "") or ""),
+            base_branch=str(getattr(cell, "worktree_base_branch", "") or ""),
+        )
+        if recovered:
+            return recovered
         return _worktree_merge_error(aid, "Agent has no worktree.")
 
     wt = cell.worktree_path
@@ -2294,6 +2552,23 @@ async def _run_pr_worktree_merge(
 
     preflight = await worktree_mgr.github_preflight(wt)
     if not preflight.get("ok"):
+        recovered = await _recover_authoritative_post_success_from_boundary(
+            state=state,
+            worktree_mgr=worktree_mgr,
+            aid=aid,
+            failure={
+                **preflight,
+                "phase": preflight.get("phase", "github_preflight"),
+            },
+            cell=cell,
+            worktree_path=wt,
+            repo_root=repo_root or wt,
+            branch=branch,
+            base_branch=base_branch,
+            stale_base=None,
+        )
+        if recovered:
+            return recovered
         return _worktree_merge_error(
             aid,
             preflight.get("error", "GitHub PR preflight failed."),
@@ -2303,6 +2578,23 @@ async def _run_pr_worktree_merge(
 
     remote_info = await worktree_mgr.github_select_remote(wt)
     if not remote_info.get("ok"):
+        recovered = await _recover_authoritative_post_success_from_boundary(
+            state=state,
+            worktree_mgr=worktree_mgr,
+            aid=aid,
+            failure={
+                **remote_info,
+                "phase": remote_info.get("phase", "github_remote"),
+            },
+            cell=cell,
+            worktree_path=wt,
+            repo_root=repo_root or wt,
+            branch=branch,
+            base_branch=base_branch,
+            stale_base=None,
+        )
+        if recovered:
+            return recovered
         return _worktree_merge_error(
             aid,
             remote_info.get("error", "GitHub remote selection failed."),
@@ -2318,6 +2610,25 @@ async def _run_pr_worktree_merge(
         base_branch,
     )
     if not base_sync.get("ok"):
+        recovered = await _recover_authoritative_post_success_from_boundary(
+            state=state,
+            worktree_mgr=worktree_mgr,
+            aid=aid,
+            failure={
+                **base_sync,
+                "phase": base_sync.get("phase", "remote_base_sync"),
+            },
+            cell=cell,
+            worktree_path=wt,
+            repo_root=repo_root or wt,
+            remote=remote,
+            branch=branch,
+            base_branch=base_branch,
+            stale_base=None,
+        )
+        if recovered:
+            recovered["remote_base_sync"] = base_sync
+            return recovered
         return _worktree_merge_error(
             aid,
             base_sync.get("error", "Remote base sync failed."),
@@ -2342,6 +2653,27 @@ async def _run_pr_worktree_merge(
             aid,
             "Merge preflight failed.",
         )
+        failure = dict(result) if isinstance(result, dict) else {
+            "error": "Merge preflight failed.",
+        }
+        failure.setdefault("phase", "merge_preflight")
+        recovered = await _recover_authoritative_post_success_from_boundary(
+            state=state,
+            worktree_mgr=worktree_mgr,
+            aid=aid,
+            failure=failure,
+            cell=cell,
+            worktree_path=wt,
+            repo_root=repo_root or wt,
+            remote=remote,
+            branch=branch,
+            base_branch=base_branch,
+            stale_base=gates.get("stale_base"),
+        )
+        if recovered:
+            if gates.get("workflow_breach"):
+                recovered["workflow_breach"] = gates["workflow_breach"]
+            return recovered
         if isinstance(result, dict):
             result["mode"] = "pull_request"
             if gates.get("workflow_breach"):
@@ -2804,6 +3136,20 @@ async def _run_pr_worktree_merge(
         )
     post_merge_sync_warning = ""
     if not post_merge_sync.get("ok"):
+        confirmation = await _confirm_pr_merged_and_base_at_merge(
+            worktree_mgr=worktree_mgr,
+            worktree_path=wt,
+            repo_root=repo_root or wt,
+            remote=remote,
+            base_branch=base_branch,
+            pr_result=pr_result,
+            merge_result=merge_result,
+            post_merge_sync=post_merge_sync,
+            force_status_query=True,
+            skip_base_sync=True,
+        )
+        if confirmation.get("ok"):
+            authoritative_guard = confirmation
         post_merge_sync_warning = (
             "Pull request is merged, but post-merge local base sync failed: "
             + _post_success_result_error(
@@ -14950,11 +15296,40 @@ async def main(connection=None):
                     "direct local worktree merge; the PR workflow was bypassed."
                 )
                 if error_result:
-                    result = _worktree_merge_error(
-                        aid,
-                        error_result.get("message", "No worktree"),
-                        phase="target_resolution",
+                    failure = {
+                        "phase": "target_resolution",
+                        "error": error_result.get("message", "No worktree"),
+                    }
+                    known_cell = state.agents.get(
+                        str(data.get("id", "") or "").strip()
                     )
+                    result = await _recover_authoritative_post_success_from_boundary(
+                        state=state,
+                        worktree_mgr=worktree_mgr,
+                        aid=aid,
+                        failure=failure,
+                        cell=known_cell,
+                        worktree_path=str(
+                            getattr(known_cell, "worktree_path", "") or ""
+                        ),
+                        repo_root=str(
+                            getattr(known_cell, "worktree_repo_root", "")
+                            or getattr(known_cell, "git_root", "")
+                            or ""
+                        ),
+                        branch=str(
+                            getattr(known_cell, "worktree_branch", "") or ""
+                        ),
+                        base_branch=str(
+                            getattr(known_cell, "worktree_base_branch", "") or ""
+                        ),
+                    )
+                    if not result:
+                        result = _worktree_merge_error(
+                            aid,
+                            error_result.get("message", "No worktree"),
+                            phase="target_resolution",
+                        )
                 elif getattr(cell, "driverless", False) and _worktree_merge_requested_cleanup(
                         state,
                         cell,
