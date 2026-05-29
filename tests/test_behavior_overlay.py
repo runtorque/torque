@@ -1023,6 +1023,10 @@ class BehaviorOverlayMigrationTests(unittest.TestCase):
             self.assertEqual(active["scope_key"], eng.id)
             self.assertEqual(active["active_version_id"], "v-old")
             self.assertEqual(active["updated_at"], 11.0)
+            self.assertEqual(
+                migrated.load_behavior_overlay_active(eng.id)["scope_group"],
+                "g",
+            )
             version = migrated.load_behavior_overlay_version("v-old")
             self.assertEqual(version["scope_group"], "g")
             proposal = migrated.load_behavior_overlay_proposal("p-old")

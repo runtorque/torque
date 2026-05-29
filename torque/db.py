@@ -28,6 +28,7 @@ from typing import Optional
 
 from torque import __version__
 from torque.behavior_overlay import (
+    BehaviorOverlayScope,
     coerce_behavior_overlay_scope,
     behavior_overlay_scope_id,
     overlay_text_bytes,
@@ -3695,7 +3696,19 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     )
 
     def _behavior_scope(self, scope=None, **kwargs):
-        return coerce_behavior_overlay_scope(scope, **kwargs)
+        scope_obj = coerce_behavior_overlay_scope(scope, **kwargs)
+        if scope_obj.scope_kind == "agent" and not scope_obj.scope_group:
+            try:
+                row = self._conn.execute(
+                    "SELECT group_name FROM agents WHERE id=?",
+                    (scope_obj.scope_key,),
+                ).fetchone()
+            except Exception:
+                row = None
+            group = str(row[0] if row else "" or "").strip()
+            if group:
+                return BehaviorOverlayScope.agent(scope_obj.scope_key, group=group)
+        return scope_obj
 
     def load_behavior_overlay_version(self, version_id: str) -> dict | None:
         version_id = str(version_id or "").strip()
@@ -3726,6 +3739,19 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (scope_obj.scope_kind, scope_obj.scope_group, scope_obj.scope_key),
         )
         row = cursor.fetchone()
+        if (
+                not row
+                and scope_obj.scope_kind == "agent"
+                and not scope_obj.scope_group):
+            cursor = self._conn.execute(
+                "SELECT scope_kind, scope_group, scope_key, agent_id, "
+                "active_version_id, updated_at, updated_by_kind, updated_by_id, "
+                "reason FROM behavior_overlay_active "
+                "WHERE scope_kind='agent' AND scope_key=? "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (scope_obj.scope_key,),
+            )
+            row = cursor.fetchone()
         if not row:
             return None
         return _decode_behavior_overlay_active_row(
@@ -3751,18 +3777,27 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             limit_int = max(1, min(int(limit), 500))
         except (TypeError, ValueError):
             limit_int = 50
-        cursor = self._conn.execute(
-            f"SELECT {self._BEHAVIOR_VERSION_COLS} "
-            "FROM behavior_overlay_versions "
-            "WHERE scope_kind=? AND scope_group=? AND scope_key=? "
-            "ORDER BY version_number DESC LIMIT ?",
-            (
-                scope_obj.scope_kind,
-                scope_obj.scope_group,
-                scope_obj.scope_key,
-                limit_int,
-            ),
-        )
+        if scope_obj.scope_kind == "agent" and not scope_obj.scope_group:
+            cursor = self._conn.execute(
+                f"SELECT {self._BEHAVIOR_VERSION_COLS} "
+                "FROM behavior_overlay_versions "
+                "WHERE scope_kind='agent' AND scope_key=? "
+                "ORDER BY version_number DESC LIMIT ?",
+                (scope_obj.scope_key, limit_int),
+            )
+        else:
+            cursor = self._conn.execute(
+                f"SELECT {self._BEHAVIOR_VERSION_COLS} "
+                "FROM behavior_overlay_versions "
+                "WHERE scope_kind=? AND scope_group=? AND scope_key=? "
+                "ORDER BY version_number DESC LIMIT ?",
+                (
+                    scope_obj.scope_kind,
+                    scope_obj.scope_group,
+                    scope_obj.scope_key,
+                    limit_int,
+                ),
+            )
         rows = cursor.fetchall()
         cols = [d[0] for d in cursor.description]
         return [_decode_behavior_overlay_version_row(row, cols) for row in rows]
