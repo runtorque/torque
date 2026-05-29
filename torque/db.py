@@ -3389,19 +3389,6 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (decision_id,),
         )
         row = cursor.fetchone()
-        if (
-                not row
-                and scope_obj.scope_kind == "agent"
-                and not scope_obj.scope_group):
-            cursor = self._conn.execute(
-                "SELECT scope_kind, scope_group, scope_key, agent_id, "
-                "active_version_id, updated_at, updated_by_kind, "
-                "updated_by_id, reason FROM behavior_overlay_active "
-                "WHERE scope_kind='agent' AND scope_key=? "
-                "ORDER BY updated_at DESC LIMIT 1",
-                (scope_obj.scope_key,),
-            )
-            row = cursor.fetchone()
         if not row:
             return None
         cols = [d[0] for d in cursor.description]
