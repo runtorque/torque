@@ -565,6 +565,7 @@
     <div class="gs-pane" data-pane="workers">
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">General</button>
+        <button class="gs-subtab" data-subtab="worker-behavior" onclick="switchGsSubTab('workers',this)">Behavior</button>
         <button class="gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
         <button class="gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
       </div>
@@ -600,6 +601,11 @@
         </label>
         <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
         <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
+      </div>
+
+      <!-- Behavior sub-tab -->
+      <div class="gs-subpane" data-subpane="worker-behavior">
+        <div id="gs-worker-role-behavior-overlay" class="behavior-overlay-role-pane" data-role-kind="worker"></div>
       </div>
 
       <!-- Worktree sub-tab -->
@@ -733,6 +739,8 @@
 
       <!-- Behavior sub-tab -->
       <div class="gs-subpane" data-subpane="engineer-behavior">
+        <div id="gs-engineer-role-behavior-overlay" class="behavior-overlay-role-pane" data-role-kind="engineer"></div>
+
         <label>Default Specializations
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs applied to new engineers at creation. Each engineer can override this default after creation.">?</span>
         </label>
@@ -782,8 +790,8 @@
         </select>
         <label class="gs-checkbox">
           <input id="gs-engineer-behavior-requires-user-approval" type="checkbox">
-          Require user approval for Engineer behavior overlays
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, architect-approved changes to Engineer Dynamic Behavior overlays create a user approval task with a rendered diff before they apply.">?</span>
+          Require user approval for per-agent Engineer behavior overlays
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Per-agent Engineer overlays only. Role overlays are stricter and always require user approval regardless of this setting.">?</span>
         </label>
         <label>Notification noise
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes in System → Digest settings switch the preset to Custom.">?</span>
@@ -900,6 +908,8 @@
 
       <!-- Behavior sub-tab -->
       <div class="gs-subpane" data-subpane="architect-behavior">
+        <div id="gs-architect-role-behavior-overlay" class="behavior-overlay-role-pane" data-role-kind="architect"></div>
+
         <label>Autonomy</label>
         <select id="gs-architect-autonomy-mode">
           <option value="dispatch_freely">Dispatch freely</option>

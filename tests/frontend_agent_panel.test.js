@@ -451,6 +451,335 @@ test('behavior approval modal renders diff before enabling user actions', () => 
   });
 });
 
+test('Group Settings role Behavior panes render for engineer, architect, and worker scopes', () => {
+  const { context, sendCalls } = createHarness();
+  const elements = {};
+  function ensure(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        innerHTML: '',
+        scrollTop: 0,
+        scrollLeft: 0,
+        contains() { return false; },
+        querySelector() { return null; },
+      };
+    }
+    return elements[id];
+  }
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    return ensure(id);
+  };
+  vm.runInContext(`_settingsGroup = 'alpha';`, context);
+  context.state.behavior_overlay_active = {};
+  context.state.behavior_overlay_versions = {};
+  for (const roleKind of ['engineer', 'architect', 'worker']) {
+    const key = `role:alpha:${roleKind}`;
+    context.state.behavior_overlay_active[key] = { scope_kind: 'role', scope_group: 'alpha', scope_key: roleKind, active_version_id: `bov-${roleKind}` };
+    context.state.behavior_overlay_versions[key] = [
+      { id: `bov-${roleKind}`, scope_kind: 'role', scope_group: 'alpha', scope_key: roleKind, version_number: 1, text_sha256: `${roleKind}-hash`, text_bytes: 9, rationale: 'Seed', created_at: 1 },
+    ];
+    context.renderBehaviorOverlayRolePane('alpha', roleKind);
+    const html = ensure(`gs-${roleKind}-role-behavior-overlay`).innerHTML;
+    assert.match(html, /Role Dynamic Behavior overlay/);
+    assert.match(html, new RegExp(`role · ${roleKind}`));
+    assert.match(html, /user approval required/);
+    assert.match(html, /Proposed behavior text/);
+    assert.match(html, /Open proposals for this role/);
+    assert.match(html, /Version timeline/);
+  }
+
+  const roleReadCalls = sendCalls.filter((call) => call.cmd === 'behavior_overlay_read');
+  assert.ok(roleReadCalls.some((call) => call.scope_kind === 'role' && call.role_kind === 'engineer' && call.scope_group === 'alpha'));
+  assert.ok(roleReadCalls.some((call) => call.scope_kind === 'role' && call.role_kind === 'architect' && call.scope_group === 'alpha'));
+  assert.ok(roleReadCalls.some((call) => call.scope_kind === 'role' && call.role_kind === 'worker' && call.scope_group === 'alpha'));
+});
+
+test('role behavior deltas invalidate only matching focused behavior scopes', () => {
+  const { context } = createHarness();
+  context.state.agents = {
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
+    'worker-1': { id: 'worker-1', name: 'Worker', kind: 'worker', group: 'alpha', cell_type: 'agent' },
+  };
+  context.focusedItemId = 'eng-1';
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
+
+  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    active_version_id: 'bov-new',
+  }), true);
+  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'architect',
+    active_version_id: 'bov-arch',
+  }), false);
+  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role',
+    scope_group: 'beta',
+    scope_key: 'engineer',
+    active_version_id: 'bov-beta',
+  }), false);
+
+  context.focusedItemId = 'worker-1';
+  assert.equal(context.behaviorOverlayDeltaInvalidatesFocusedPanel({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'worker',
+    active_version_id: 'bov-worker',
+  }), false, 'workers have no per-worker Behavior tab');
+});
+
+test('role active deltas invalidate cached full text before submit', () => {
+  const { context, sendCalls } = createHarness();
+  const roleKey = 'role:alpha:engineer';
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    scope_id: roleKey,
+    active: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-r1' },
+    version: { id: 'bov-r1', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 1, text_sha256: 'oldhash', text_bytes: 3 },
+    text: 'old',
+  });
+
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_version_append',
+    id: 'bov-r2',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    version_number: 2,
+    text_sha256: 'newhash',
+    text_bytes: 3,
+  });
+  context.behaviorOverlayApplyDelta({
+    op: 'behavior_overlay_active_update',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    active_version_id: 'bov-r2',
+  });
+  context.behaviorOverlaySubmitDraft('role', roleKey, 'user', 'user', false);
+
+  assert.equal(sendCalls.some((call) => call.cmd === 'behavior_overlay_propose'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'behavior_overlay_read',
+    seed: true,
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    role_kind: 'engineer',
+  });
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    scope_id: roleKey,
+    active: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-r2' },
+    version: { id: 'bov-r2', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 2, text_sha256: 'newhash', text_bytes: 3 },
+    text: 'new',
+  });
+  context.behaviorOverlaySubmitDraft('role', roleKey, 'user', 'user', false);
+
+  const proposal = sendCalls[sendCalls.length - 1];
+  assert.equal(proposal.cmd, 'behavior_overlay_propose');
+  assert.equal(proposal.text, 'new');
+  assert.equal(proposal.expected_base_version_id, 'bov-r2');
+  assert.equal(proposal.scope_kind, 'role');
+  assert.equal(proposal.scope_group, 'alpha');
+  assert.equal(proposal.scope_key, 'engineer');
+  assert.equal(proposal.role_kind, 'engineer');
+});
+
+test('role pane rerender routes through capture and restore', () => {
+  const { context, captureCalls, restoreCalls } = createHarness();
+  const elements = {};
+  function ensure(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        innerHTML: '',
+        value: '',
+        selectionStart: 0,
+        selectionEnd: 0,
+        scrollTop: 0,
+        scrollLeft: 0,
+        focused: false,
+        contains(el) { return el && (el === this || el._insideRolePane); },
+        querySelector() { return null; },
+        focus() { this.focused = true; },
+      };
+    }
+    return elements[id];
+  }
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    return ensure(id);
+  };
+  const textarea = ensure('behavior-overlay-text-role-user-role-alpha-engineer');
+  textarea.value = 'operator draft';
+  textarea.selectionStart = 4;
+  textarea.selectionEnd = 12;
+  textarea._insideRolePane = true;
+  context.document.activeElement = textarea;
+  context._captureSurfaceState = function(root, opts) {
+    captureCalls.push({ root, opts });
+    return {
+      focus: {
+        key: '#' + textarea.id,
+        value: textarea.value,
+        selectionStart: textarea.selectionStart,
+        selectionEnd: textarea.selectionEnd,
+        scrollTop: textarea.scrollTop,
+        scrollLeft: textarea.scrollLeft,
+      },
+      scrolls: [{ selector: ':root', top: root.scrollTop || 0, left: root.scrollLeft || 0 }],
+    };
+  };
+  context._restoreSurfaceState = function(root, snapshot) {
+    restoreCalls.push({ root, snapshot });
+    const focused = ensure(snapshot.focus.key.slice(1));
+    focused.value = snapshot.focus.value;
+    focused.selectionStart = snapshot.focus.selectionStart;
+    focused.selectionEnd = snapshot.focus.selectionEnd;
+    focused.focus();
+  };
+  vm.runInContext(`_settingsGroup = 'alpha';`, context);
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    active: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-r1' },
+    version: { id: 'bov-r1', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 1, text_sha256: 'hash', text_bytes: 3 },
+    text: 'old',
+  });
+
+  assert.ok(captureCalls.length > 0);
+  assert.ok(restoreCalls.length > 0);
+  assert.equal(textarea.focused, true);
+  assert.equal(textarea.value, 'operator draft');
+  assert.equal(textarea.selectionStart, 4);
+  assert.equal(textarea.selectionEnd, 12);
+});
+
+test('role-scope behavior approval modal renders diff before enabling user actions', () => {
+  const { context, sendCalls } = createHarness();
+  const elements = {};
+  function fakeClassList() {
+    const set = new Set();
+    return {
+      add(name) { set.add(name); },
+      remove(name) { set.delete(name); },
+      contains(name) { return set.has(name); },
+    };
+  }
+  function ensure(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        innerHTML: '',
+        value: '',
+        disabled: false,
+        classList: fakeClassList(),
+      };
+    }
+    return elements[id];
+  }
+  const panel = context.document.getElementById('panel-agent');
+  context.document.getElementById = function(id) {
+    if (id === 'panel-agent') return panel;
+    return ensure(id);
+  };
+  context.openNestedModal = function(id) { ensure(id).classList.add('visible'); };
+  context.closeNestedModal = function(id) { ensure(id).classList.remove('visible'); return true; };
+  context.state.board_tasks = {
+    'TORQUE:2': {
+      id: 'TORQUE:2',
+      task: 'Dynamic Behavior overlay approval',
+      lane: 'Backlog',
+      labels: ['torque:human', 'behavior-overlay-approval', 'proposal:bop-role', 'scope:role', 'role:engineer', 'group:alpha'],
+    },
+  };
+  context.state.behavior_overlay_proposals = {
+    'bop-role': {
+      id: 'bop-role',
+      scope_kind: 'role',
+      scope_group: 'alpha',
+      scope_key: 'engineer',
+      target_kind: 'engineer',
+      base_version_id: 'bov-role-base',
+      proposed_by_kind: 'architect',
+      proposed_by_agent_id: 'arch-1',
+      proposed_text_sha256: 'role-hash-123',
+      status: 'proposed',
+      next_actor_kind: 'user',
+      rationale: 'Shared engineer defaults',
+    },
+  };
+
+  assert.match(context.behaviorOverlayApprovalCardHtml(context.state.board_tasks['TORQUE:2']), /Role behavior overlay approval/);
+  assert.match(context.behaviorOverlayApprovalCardHtml(context.state.board_tasks['TORQUE:2']), /Engineer role overlay · alpha/);
+  context.openBehaviorOverlayApprovalModal('TORQUE:2');
+
+  assert.equal(ensure('behavior-approval-approve-btn').disabled, true);
+  assert.equal(ensure('behavior-approval-reject-btn').disabled, true);
+  assert.match(ensure('behavior-approval-body').innerHTML, /Loading required diff/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
+    { cmd: 'behavior_overlay_proposals', status_filter: '', limit: 200 },
+    { cmd: 'behavior_overlay_diff', proposal_id: 'bop-role' },
+  ]);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_diff',
+    proposal: {
+      id: 'bop-role',
+      scope_kind: 'role',
+      scope_group: 'alpha',
+      scope_key: 'engineer',
+      target_kind: 'engineer',
+      base_version_id: 'bov-role-base',
+      proposed_by_kind: 'architect',
+      proposed_by_agent_id: 'arch-1',
+      proposed_text_sha256: 'role-hash-123',
+      rationale: 'Shared engineer defaults',
+      status: 'proposed',
+      next_actor_kind: 'user',
+    },
+    from_version: { id: 'bov-role-base', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer' },
+    to_proposal: { id: 'bop-role', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', proposed_text_sha256: 'role-hash-123' },
+    diff: '--- bov-role-base\n+++ bop-role\n@@ -0,0 +1 @@\n+shared default\n',
+  });
+
+  assert.equal(ensure('behavior-approval-approve-btn').disabled, false);
+  assert.equal(ensure('behavior-approval-reject-btn').disabled, false);
+  assert.match(ensure('behavior-approval-body').innerHTML, /role · alpha/);
+  assert.match(ensure('behavior-approval-body').innerHTML, /diff-line-add/);
+  ensure('behavior-approval-note').value = 'Approve shared defaults';
+  context.behaviorOverlayUserApprove();
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'behavior_overlay_user_approve',
+    proposal_id: 'bop-role',
+    expected_proposed_text_sha256: 'role-hash-123',
+    expected_base_version_id: 'bov-role-base',
+    note: 'Approve shared defaults',
+  });
+});
+
 test('agent panel folds MCP into Events subtabs for standalone and toolbelt modes', () => {
   const { context, panel } = createHarness();
   const expectedSpecs = {

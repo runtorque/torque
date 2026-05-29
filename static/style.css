@@ -12094,6 +12094,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 
 /* Dynamic Behavior overlay UI */
 .behavior-overlay-tab { display: flex; flex-direction: column; gap: 12px; }
+.behavior-overlay-role-pane { margin-bottom: 16px; }
 .behavior-overlay-header { align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .behavior-overlay-section { display: flex; flex-direction: column; gap: 10px; }
 .behavior-overlay-summary-grid,

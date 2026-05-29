@@ -34,6 +34,7 @@ from torque.server import (  # noqa: E402
     _handle_behavior_overlay_diff_command,
     _handle_behavior_overlay_read_command,
     _handle_behavior_overlay_versions_command,
+    _build_group_system_prompt_preview,
 )
 from torque.state import GroupSettings, MatrixState  # noqa: E402
 
@@ -811,6 +812,79 @@ class BehaviorOverlayPromptTests(unittest.TestCase):
             self.assertLess(stack.index("role layer"), stack.index("agent layer"))
             self.assertIn('scope_kind="role"', stack)
             self.assertIn('scope_kind="agent"', stack)
+
+    def test_group_system_prompt_preview_shows_role_not_agent_overlay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            self.addCleanup(db.close)
+            state = MatrixState(db=db)
+            state.add_group("g")
+            arch = state.add_agent(name="Arch", group="g")
+            arch.kind = "architect"
+            state._db_save_agent(arch)
+            eng = state.add_agent(name="Eng", group="g")
+            eng.kind = "engineer"
+            eng.hired_by_architect_id = arch.id
+            state._db_save_agent(eng)
+
+            role = state.create_behavior_overlay_proposal(
+                scope_kind="role",
+                group="g",
+                role_kind="engineer",
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="engineer role preview layer",
+                rationale="role",
+            )
+            state.apply_behavior_overlay_proposal(
+                role["id"],
+                actor_kind="user",
+                actor_id="user",
+            )
+            agent = state.create_behavior_overlay_proposal(
+                agent_id=eng.id,
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="specific engineer agent overlay",
+                rationale="agent",
+                architect_approver_id=arch.id,
+                auto_apply_architect_direct=True,
+            )
+            self.assertEqual(agent["status"], "applied")
+
+            engineer_preview = _build_group_system_prompt_preview(
+                state,
+                "g",
+                "engineer",
+            )
+            self.assertIn("engineer role preview layer", engineer_preview)
+            self.assertIn('scope_kind="role"', engineer_preview)
+            self.assertNotIn("specific engineer agent overlay", engineer_preview)
+            self.assertNotIn('scope_kind="agent"', engineer_preview)
+
+            arch_role = state.create_behavior_overlay_proposal(
+                scope_kind="role",
+                group="g",
+                role_kind="architect",
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="architect role preview layer",
+                rationale="role",
+            )
+            state.apply_behavior_overlay_proposal(
+                arch_role["id"],
+                actor_kind="user",
+                actor_id="user",
+            )
+            architect_preview = _build_group_system_prompt_preview(
+                state,
+                "g",
+                "architect",
+            )
+            self.assertIn("architect role preview layer", architect_preview)
+            self.assertIn('scope_kind="role"', architect_preview)
+            self.assertNotIn('scope_kind="agent"', architect_preview)
 
     def test_persistent_prompt_fallback_appends_missing_agent_when_role_present(self):
         with tempfile.TemporaryDirectory() as tmp:

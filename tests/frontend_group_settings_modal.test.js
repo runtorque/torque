@@ -103,7 +103,7 @@ function createSandbox() {
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
     group: ['group-general', 'group-worker-defaults', 'group-terminals', 'group-sync', 'group-advanced'],
-    workers: ['worker-execution', 'worker-worktree', 'worker-notifications'],
+    workers: ['worker-execution', 'worker-behavior', 'worker-worktree', 'worker-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
     architect: ['architect-general', 'architect-behavior', 'architect-system'],
   };
@@ -813,11 +813,14 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
 
   assert.match(
     html,
-    /<div class="gs-pane" data-pane="workers">[\s\S]*?data-subtab="worker-execution"[\s\S]*?data-subtab="worker-worktree"[\s\S]*?data-subtab="worker-notifications"/,
+    /<div class="gs-pane" data-pane="workers">[\s\S]*?data-subtab="worker-execution"[\s\S]*?data-subtab="worker-behavior"[\s\S]*?data-subtab="worker-worktree"[\s\S]*?data-subtab="worker-notifications"/,
   );
   assert.match(html, /data-subtab="worker-execution"[^>]*>General<\/button>/);
+  assert.match(html, /data-subtab="worker-behavior"[^>]*>Behavior<\/button>/);
   assert.doesNotMatch(html, /data-subtab="worker-execution"[^>]*>Execution<\/button>/);
   assert.match(html, /data-subpane="worker-execution"/);
+  assert.match(html, /data-subpane="worker-behavior"/);
+  assert.match(html, /id="gs-worker-role-behavior-overlay"/);
   assert.match(html, /data-subpane="worker-worktree"/);
   assert.match(html, /data-subpane="worker-notifications"/);
   assert.doesNotMatch(html, /data-pane="agents"/);
@@ -829,6 +832,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   );
   assert.match(html, /data-subpane="engineer-general"/);
   assert.match(html, /data-subpane="engineer-behavior"/);
+  assert.match(html, /id="gs-engineer-role-behavior-overlay"/);
   assert.match(html, /data-subpane="engineer-system"/);
   assert.doesNotMatch(html, /<details[^>]+id="gs-engineer-[^\"]+-section"/);
 
@@ -838,6 +842,7 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
   );
   assert.match(html, /data-subpane="architect-general"/);
   assert.match(html, /data-subpane="architect-behavior"/);
+  assert.match(html, /id="gs-architect-role-behavior-overlay"/);
   assert.match(html, /data-subpane="architect-system"/);
   assert.doesNotMatch(html, /<details[^>]+id="gs-architect-[^\"]+-section"/);
 
