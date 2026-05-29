@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
+import shlex
 from typing import Any
 
 HEALTH_HEALTHY = "healthy"
@@ -24,11 +26,21 @@ HEALTH_SEVERITY = {
 }
 
 IDLE_RISK_AFTER_SECS = 10 * 60
+LIVE_WORK_SIGNAL_SECS = IDLE_RISK_AFTER_SECS
 STALLED_AFTER_SECS = 20 * 60
 THRASH_WINDOW_SECS = 30 * 60
 THRASH_MIN_MESSAGES = 6
 THRASH_MIN_TRANSITIONS = 3
 ARCHIVED_LANE = "Archived"
+
+_BASELINE_PROCESS_NAMES = {
+    "bash",
+    "csh",
+    "fish",
+    "sh",
+    "tcsh",
+    "zsh",
+}
 
 _PROGRESS_ACTIONS = {"progress", "derive", "ask"}
 _BLOCKED_ACTIONS = {"blocked", "error"}
@@ -170,7 +182,12 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
     if reasons:
         return TaskHealthSnapshot(state=HEALTH_BLOCKED, details=details)
 
-    stale_reasons = _stale_in_progress_reasons(task, tasks_by_id, agents_by_id)
+    stale_reasons = _stale_in_progress_reasons(
+        task,
+        tasks_by_id,
+        agents_by_id,
+        now_ts,
+    )
     if stale_reasons:
         details["reasons"] = stale_reasons
         details["agent_idle"] = True
@@ -197,6 +214,10 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
         details["reasons"] = ["no_progress_timeout"]
         return TaskHealthSnapshot(state=HEALTH_STALLED, details=details)
     if silence_secs >= IDLE_RISK_AFTER_SECS:
+        if _has_live_work_signal(agent, now_ts):
+            details["reasons"] = ["live_work_signal"]
+            details["live_work_signal"] = True
+            return TaskHealthSnapshot(state=HEALTH_HEALTHY, details=details)
         details["reasons"] = ["progress_silence_warning"]
         return TaskHealthSnapshot(state=HEALTH_IDLE_RISK, details=details)
 
@@ -218,7 +239,8 @@ def _has_unmet_dependencies(task: Any, tasks_by_id: dict[str, Any]) -> bool:
 
 
 def _stale_in_progress_reasons(task: Any, tasks_by_id: dict[str, Any],
-                               agents_by_id: dict[str, Any]) -> list[str]:
+                               agents_by_id: dict[str, Any],
+                               now_ts: float) -> list[str]:
     if getattr(task, "lane", "") != "In Progress":
         return []
     agent_id = getattr(task, "agent_id", "") or ""
@@ -229,7 +251,7 @@ def _stale_in_progress_reasons(task: Any, tasks_by_id: dict[str, Any],
         return []
     if getattr(agent, "status", "") != "running":
         return []
-    if getattr(agent, "activity", ""):
+    if _has_live_work_signal(agent, now_ts):
         return []
     if _task_has_open_child(task, tasks_by_id):
         return []
@@ -246,6 +268,63 @@ def _stale_in_progress_reasons(task: Any, tasks_by_id: dict[str, Any],
             and getattr(agent, "worktree_checkpoints", 0) > 0):
         reasons.append("clean_checkpointed_branch")
     return reasons
+
+
+def _has_live_work_signal(agent: Any | None, now_ts: float) -> bool:
+    """Return true for real work signals that should soften idle hints.
+
+    Heartbeats are intentionally excluded: they are passive liveness pings and
+    must not hide dead-on-arrival workers that only wake enough to heartbeat.
+    """
+    if not agent:
+        return False
+    if str(getattr(agent, "activity", "") or "").strip():
+        return True
+    if str(getattr(agent, "activity_detail", "") or "").strip():
+        return True
+    if _has_foreground_work_process(agent):
+        return True
+    if _ts_within(getattr(agent, "last_checkpoint_at", 0), now_ts,
+                  LIVE_WORK_SIGNAL_SECS):
+        return True
+    return _ts_within(getattr(agent, "last_progress_at", 0), now_ts,
+                      LIVE_WORK_SIGNAL_SECS)
+
+
+def _has_foreground_work_process(agent: Any) -> bool:
+    current = _process_name(getattr(agent, "current_process", ""))
+    if not current:
+        return False
+    command = _process_name(getattr(agent, "command", ""))
+    if command and current == command:
+        return False
+    return current not in _BASELINE_PROCESS_NAMES
+
+
+def _process_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = text.split()
+    token = parts[0] if parts else text
+    return os.path.basename(token).strip().lower()
+
+
+def _ts_within(value: Any, now_ts: float, window_secs: float) -> bool:
+    try:
+        ts = float(value or 0)
+    except (TypeError, ValueError):
+        return False
+    if ts <= 0:
+        return False
+    try:
+        now = float(now_ts)
+    except (TypeError, ValueError):
+        return False
+    return max(0.0, now - ts) <= window_secs
 
 
 def _task_has_open_child(task: Any, tasks_by_id: dict[str, Any]) -> bool:

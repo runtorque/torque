@@ -252,6 +252,177 @@ class TaskHealthTests(unittest.TestCase):
             snapshots["task-1"].details["reasons"],
         )
 
+    def test_live_work_signals_suppress_stale_and_idle_risk(self):
+        base = 80_000
+        now = base + (11 * 60)
+        cases = {
+            "activity_detail": {
+                "activity_detail": "Running tests",
+            },
+            "foreground_subprocess": {
+                "command": "codex",
+                "current_process": "pytest",
+            },
+            "recent_checkpoint": {
+                "last_checkpoint_at": now - 60,
+            },
+        }
+
+        for name, fields in cases.items():
+            with self.subTest(name=name):
+                task = self.state_mod.BoardTask(
+                    id="task-1",
+                    task="Active despite quiet progress",
+                    group="g",
+                    lane="In Progress",
+                    agent_id="agent-1",
+                    updated_at=_iso(base),
+                )
+                agent = self.state_mod.AgentCell(
+                    id="agent-1",
+                    name="Worker",
+                    group="g",
+                    cell_type="agent",
+                    status="running",
+                    last_progress_at=base,
+                    worktree_path="/repo/.torque/worktrees/agent-1",
+                    worktree_checkpoints=2,
+                    worktree_dirty=False,
+                    **fields,
+                )
+
+                snapshots = self.task_health_mod.compute_task_health(
+                    {"task-1": task},
+                    {"agent-1": agent},
+                    now_ts=now,
+                )
+
+                self.assertEqual(snapshots["task-1"].state, "healthy")
+                self.assertEqual(
+                    snapshots["task-1"].details["reasons"],
+                    ["live_work_signal"],
+                )
+                self.assertTrue(
+                    snapshots["task-1"].details["live_work_signal"]
+                )
+
+    def test_recent_progress_suppresses_stale_in_progress(self):
+        base = 81_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Checkpointing active work",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(base),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                last_progress_at=base + (5 * 60),
+                worktree_path="/repo/.torque/worktrees/agent-1",
+                worktree_checkpoints=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (6 * 60),
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "healthy")
+        self.assertNotIn(
+            "clean_checkpointed_branch",
+            snapshots["task-1"].details["reasons"],
+        )
+
+    def test_default_agent_process_does_not_mask_progress_silence(self):
+        base = 82_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Quiet default process",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(base),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                command="codex",
+                current_process="codex",
+                last_progress_at=base,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (11 * 60),
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "idle-risk")
+        self.assertEqual(
+            snapshots["task-1"].details["reasons"],
+            ["progress_silence_warning"],
+        )
+
+    def test_heartbeat_only_doa_still_reaches_idle_risk_and_stalled(self):
+        base = 83_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Dead reviewer",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(base),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Reviewer",
+                group="g",
+                cell_type="agent",
+                session_id="",
+                last_progress_at=0,
+                last_heartbeat_at=base + (10 * 60),
+                activity_detail="",
+                current_process="",
+                last_checkpoint_at=0,
+            )
+        }
+
+        idle_snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (11 * 60),
+        )
+        stalled_snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (21 * 60),
+        )
+
+        self.assertEqual(idle_snapshots["task-1"].state, "idle-risk")
+        self.assertEqual(
+            idle_snapshots["task-1"].details["reasons"],
+            ["progress_silence_warning"],
+        )
+        self.assertEqual(stalled_snapshots["task-1"].state, "stalled")
+        self.assertEqual(
+            stalled_snapshots["task-1"].details["reasons"],
+            ["no_progress_timeout"],
+        )
+
     def test_open_derived_handoff_is_not_flagged_stale_in_progress(self):
         parent = self.state_mod.BoardTask(
             id="task-parent",
