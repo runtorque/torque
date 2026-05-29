@@ -1400,6 +1400,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate_legacy_engineer_schema_names(conn)
+    _migrate_behavior_overlay_scope_schema(conn)
     conn.executescript(_SCHEMA_SQL)
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads

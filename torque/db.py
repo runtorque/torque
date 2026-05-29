@@ -3389,6 +3389,19 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (decision_id,),
         )
         row = cursor.fetchone()
+        if (
+                not row
+                and scope_obj.scope_kind == "agent"
+                and not scope_obj.scope_group):
+            cursor = self._conn.execute(
+                "SELECT scope_kind, scope_group, scope_key, agent_id, "
+                "active_version_id, updated_at, updated_by_kind, "
+                "updated_by_id, reason FROM behavior_overlay_active "
+                "WHERE scope_kind='agent' AND scope_key=? "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (scope_obj.scope_key,),
+            )
+            row = cursor.fetchone()
         if not row:
             return None
         cols = [d[0] for d in cursor.description]
@@ -3867,9 +3880,18 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except ValueError:
             return
         self._conn.execute(
-            "DELETE FROM behavior_overlay_active "
-            "WHERE scope_kind=? AND scope_group=? AND scope_key=?",
-            (scope_obj.scope_kind, scope_obj.scope_group, scope_obj.scope_key),
+            (
+                "DELETE FROM behavior_overlay_active "
+                "WHERE scope_kind=? AND scope_group=? AND scope_key=?"
+                if scope_obj.scope_group or scope_obj.scope_kind != "agent"
+                else "DELETE FROM behavior_overlay_active "
+                     "WHERE scope_kind=? AND scope_key=?"
+            ),
+            (
+                (scope_obj.scope_kind, scope_obj.scope_group, scope_obj.scope_key)
+                if scope_obj.scope_group or scope_obj.scope_kind != "agent"
+                else (scope_obj.scope_kind, scope_obj.scope_key)
+            ),
         )
         self._conn.commit()
 

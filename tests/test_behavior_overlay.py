@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -14,8 +16,10 @@ except ModuleNotFoundError:
 install_aiohttp_stub()
 
 from torque.behavior_overlay import (  # noqa: E402
+    BEHAVIOR_OVERLAY_ROLE_MAX_BYTES,
     BEHAVIOR_OVERLAY_MAX_BYTES,
     BEHAVIOR_OVERLAY_START_MARKER,
+    BehaviorOverlayScope,
     BehaviorOverlayValidationError,
     behavior_overlay_diff,
     lint_overlay_text,
@@ -27,6 +31,9 @@ from torque.mcp_tools_shared import dispatch_scoped_tool  # noqa: E402
 from torque.server import (  # noqa: E402
     _handle_delete_architect_command,
     _handle_delete_engineer_command,
+    _handle_behavior_overlay_diff_command,
+    _handle_behavior_overlay_read_command,
+    _handle_behavior_overlay_versions_command,
 )
 from torque.state import GroupSettings, MatrixState  # noqa: E402
 
@@ -229,6 +236,206 @@ class BehaviorOverlayTests(unittest.TestCase):
                 text="not allowed",
                 rationale="test",
             )
+
+    def test_role_overlay_routes_user_and_is_group_scoped(self):
+        self.state.add_group("h")
+        other_arch = self.state.add_agent(name="Other Arch", group="h")
+        other_arch.kind = "architect"
+        other_arch.persistent = True
+        self.state._db_save_agent(other_arch)
+        other_eng = self.state.add_agent(name="Other Eng", group="h")
+        other_eng.kind = "engineer"
+        other_eng.hired_by_architect_id = other_arch.id
+        self.state._db_save_agent(other_eng)
+
+        proposal = self.state.create_behavior_overlay_proposal(
+            scope_kind="role",
+            group="g",
+            role_kind="engineer",
+            proposed_by_agent_id=self.architect.id,
+            proposed_by_kind="architect",
+            text="Prefer shared role defaults.",
+            rationale="role",
+        )
+        self.assertEqual(proposal["scope_kind"], "role")
+        self.assertEqual(proposal["scope_group"], "g")
+        self.assertEqual(proposal["scope_key"], "engineer")
+        self.assertEqual(proposal["approval_route"], "user")
+        self.assertEqual(proposal["next_actor_kind"], "user")
+        self.assertTrue(proposal["requires_user_approval"])
+
+        applied = self.state.apply_behavior_overlay_proposal(
+            proposal["id"],
+            actor_kind="user",
+            actor_id="user",
+        )
+        self.assertEqual(applied["status"], "applied")
+        g_stack = self.state.render_behavior_overlay_stack_for_cell(
+            self.engineer,
+            seed_agent=False,
+        )
+        h_stack = self.state.render_behavior_overlay_stack_for_cell(
+            other_eng,
+            seed_agent=False,
+        )
+        self.assertIn("Prefer shared role defaults.", g_stack)
+        self.assertIn('scope_kind="role"', g_stack)
+        self.assertIn('scope_group="g"', g_stack)
+        self.assertNotIn("Prefer shared role defaults.", h_stack)
+
+    def test_webview_ws_commands_accept_role_scope_params(self):
+        proposal = self.state.create_behavior_overlay_proposal(
+            scope_kind="role",
+            group="g",
+            role_kind="engineer",
+            proposed_by_agent_id=self.architect.id,
+            proposed_by_kind="architect",
+            text="Visible through WS commands.",
+            rationale="role",
+        )
+        self.state.apply_behavior_overlay_proposal(
+            proposal["id"],
+            actor_kind="user",
+            actor_id="user",
+        )
+        read = _handle_behavior_overlay_read_command(
+            {
+                "scope_kind": "role",
+                "group": "g",
+                "role_kind": "engineer",
+            },
+            self.state,
+        )
+        self.assertEqual(read["type"], "behavior_overlay")
+        self.assertEqual(read["scope_id"], "role:g:engineer")
+        self.assertEqual(read["text"], "Visible through WS commands.")
+        versions = _handle_behavior_overlay_versions_command(
+            {
+                "scope_kind": "role",
+                "group": "g",
+                "role_kind": "engineer",
+            },
+            self.state,
+        )
+        self.assertEqual(versions["versions"][0]["scope_id"], "role:g:engineer")
+        diff = _handle_behavior_overlay_diff_command(
+            {"proposal_id": proposal["id"], "scope_kind": "role", "group": "g", "role_kind": "engineer"},
+            self.state,
+        )
+        self.assertEqual(diff["type"], "behavior_overlay_diff")
+        self.assertEqual(diff["to_proposal"]["scope_id"], "role:g:engineer")
+
+    def test_role_overlay_ignores_engineer_user_approval_setting_and_worker_role_supported(self):
+        self.state.update_group_settings(
+            "g",
+            engineer_behavior_requires_user_approval=False,
+        )
+        proposal = self.state.create_behavior_overlay_proposal(
+            scope_kind="role",
+            group="g",
+            role_kind="worker",
+            proposed_by_agent_id=self.architect.id,
+            proposed_by_kind="architect",
+            text="Check tests before final status.",
+            rationale="worker role",
+        )
+        self.assertEqual(proposal["approval_route"], "user")
+        self.assertEqual(proposal["target_kind"], "worker")
+        self.state.apply_behavior_overlay_proposal(
+            proposal["id"],
+            actor_kind="user",
+            actor_id="user",
+        )
+        stack = self.state.render_behavior_overlay_stack_for_cell(
+            self.worker,
+            include_agent=False,
+            worker_dispatch=True,
+        )
+        self.assertIn("Check tests before final status.", stack)
+        self.assertIn("task/action prompts", stack)
+
+    def test_engineer_role_write_rejected_and_architect_withdraws_own_role_proposal(self):
+        with self.assertRaisesRegex(ValueError, "engineer role writes are not supported"):
+            self.state.create_behavior_overlay_proposal(
+                scope_kind="role",
+                group="g",
+                role_kind="engineer",
+                proposed_by_agent_id=self.engineer.id,
+                proposed_by_kind="engineer",
+                text="not allowed",
+                rationale="role",
+            )
+        proposal = self.state.create_behavior_overlay_proposal(
+            scope_kind="role",
+            group="g",
+            role_kind="architect",
+            proposed_by_agent_id=self.architect.id,
+            proposed_by_kind="architect",
+            text="Keep decisions crisp.",
+            rationale="role",
+        )
+        task_id = self.state.create_behavior_overlay_user_task(proposal["id"])
+        withdrawn = self.state.reject_behavior_overlay_proposal(
+            proposal["id"],
+            actor_kind="architect",
+            actor_id=self.architect.id,
+        )
+        self.assertEqual(withdrawn["status"], "rejected")
+        self.assertEqual(withdrawn["resolved_by_kind"], "architect")
+        self.assertEqual(withdrawn["resolution_note"], "withdrawn by author")
+        self.assertEqual(self.state.board_tasks[task_id].lane, "Done")
+
+    def test_role_size_cap_and_corrupt_role_dropped_before_agent(self):
+        with self.assertRaises(BehaviorOverlayValidationError):
+            self.state.create_behavior_overlay_proposal(
+                scope_kind="role",
+                group="g",
+                role_kind="engineer",
+                proposed_by_agent_id=self.architect.id,
+                proposed_by_kind="architect",
+                text="x" * (BEHAVIOR_OVERLAY_ROLE_MAX_BYTES + 1),
+                rationale="too large",
+            )
+        role = self.state.create_behavior_overlay_proposal(
+            scope_kind="role",
+            group="g",
+            role_kind="engineer",
+            proposed_by_agent_id=self.architect.id,
+            proposed_by_kind="architect",
+            text="role ok",
+            rationale="role",
+        )
+        self.state.apply_behavior_overlay_proposal(
+            role["id"],
+            actor_kind="user",
+            actor_id="user",
+        )
+        agent = self.state.create_behavior_overlay_proposal(
+            agent_id=self.engineer.id,
+            proposed_by_agent_id=self.architect.id,
+            proposed_by_kind="architect",
+            text="agent survives",
+            rationale="agent",
+            architect_approver_id=self.architect.id,
+            auto_apply_architect_direct=True,
+        )
+        self.assertEqual(agent["status"], "applied")
+        active_role = self.state.load_behavior_overlay_active_version(
+            scope_kind="role",
+            scope_group="g",
+            scope_key="engineer",
+        )
+        self.db._conn.execute(
+            "UPDATE behavior_overlay_versions SET text=? WHERE id=?",
+            ("R" * (BEHAVIOR_OVERLAY_ROLE_MAX_BYTES + 1), active_role["id"]),
+        )
+        self.db._conn.commit()
+        stack = self.state.render_behavior_overlay_stack_for_cell(
+            self.engineer,
+            seed_agent=False,
+        )
+        self.assertNotIn("R" * 40, stack)
+        self.assertIn("agent survives", stack)
 
     def test_expected_base_version_stale_check(self):
         self.state.ensure_behavior_overlay_seed(self.engineer.id)
@@ -452,6 +659,75 @@ class BehaviorOverlayTests(unittest.TestCase):
         self.assertTrue(is_error)
         self.assertIn("architect_dismissed", text)
 
+    def test_mcp_role_scope_write_and_engineer_read_only(self):
+        async def handle_command(payload):
+            if payload.get("cmd") == "behavior_overlay_propose":
+                proposal = self.state.create_behavior_overlay_proposal(
+                    scope_kind=payload.get("scope_kind", ""),
+                    group=payload.get("group", ""),
+                    role_kind=payload.get("role_kind", ""),
+                    agent_id=payload.get("agent_id", ""),
+                    proposed_by_agent_id=payload.get("proposed_by_agent_id", ""),
+                    proposed_by_kind=payload.get("proposed_by_kind", ""),
+                    text=payload.get("text", ""),
+                    rationale=payload.get("rationale", ""),
+                    proposal_type=payload.get("proposal_type", "set_text"),
+                    target_version_id=payload.get("target_version_id", ""),
+                    expected_base_version_id=payload.get("expected_base_version_id", ""),
+                    idempotency_key=payload.get("idempotency_key", ""),
+                    architect_approver_id=payload.get("architect_approver_id", ""),
+                )
+                return {"type": "behavior_overlay_proposal", "proposal": proposal}
+            return {"type": "ok", "payload": payload}
+
+        text, is_error = asyncio.run(dispatch_scoped_tool(
+            "architect_behavior_overlay_propose_for_role",
+            {
+                "role_kind": "engineer",
+                "text": "shared via mcp",
+                "rationale": "role",
+            },
+            handle_command,
+            self.state,
+            tool_prefix="architect_",
+            caller_kind="architect",
+            caller_id=self.architect.id,
+        ))
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["proposal"]["approval_route"], "user")
+        self.assertEqual(payload["proposal"]["scope_kind"], "role")
+
+        text, is_error = asyncio.run(dispatch_scoped_tool(
+            "engineer_behavior_overlay_propose",
+            {
+                "scope_kind": "role",
+                "text": "nope",
+                "rationale": "role",
+            },
+            handle_command,
+            self.state,
+            tool_prefix="engineer_",
+            caller_kind="engineer",
+            caller_id=self.engineer.id,
+        ))
+        self.assertTrue(is_error)
+        self.assertIn("not supported in v1", text)
+
+        text, is_error = asyncio.run(dispatch_scoped_tool(
+            "engineer_behavior_overlay_read",
+            {"scope_kind": "role"},
+            handle_command,
+            self.state,
+            tool_prefix="engineer_",
+            caller_kind="engineer",
+            caller_id=self.engineer.id,
+        ))
+        self.assertFalse(is_error, text)
+        read_payload = json.loads(text)
+        self.assertEqual(read_payload["scope_kind"], "role")
+        self.assertEqual(read_payload["scope_key"], "engineer")
+
 
 class BehaviorOverlayPromptTests(unittest.TestCase):
     def test_prompt_builders_append_overlay_only_when_provided(self):
@@ -482,3 +758,321 @@ class BehaviorOverlayPromptTests(unittest.TestCase):
                 behavior_overlay_block=overlay,
             ).rstrip().endswith(overlay.rstrip())
         )
+
+    def test_stack_renderer_orders_role_before_agent_and_empty_role_noop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            self.addCleanup(db.close)
+            state = MatrixState(db=db)
+            state.add_group("g")
+            arch = state.add_agent(name="Arch", group="g")
+            arch.kind = "architect"
+            state._db_save_agent(arch)
+            eng = state.add_agent(name="Eng", group="g")
+            eng.kind = "engineer"
+            eng.hired_by_architect_id = arch.id
+            state._db_save_agent(eng)
+
+            empty_stack = state.render_behavior_overlay_stack_for_cell(
+                eng,
+                seed_agent=False,
+            )
+            self.assertEqual(empty_stack, "")
+
+            role = state.create_behavior_overlay_proposal(
+                scope_kind="role",
+                group="g",
+                role_kind="engineer",
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="role layer",
+                rationale="role",
+            )
+            state.apply_behavior_overlay_proposal(
+                role["id"],
+                actor_kind="user",
+                actor_id="user",
+            )
+            agent = state.create_behavior_overlay_proposal(
+                agent_id=eng.id,
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="agent layer",
+                rationale="agent",
+                architect_approver_id=arch.id,
+                auto_apply_architect_direct=True,
+            )
+            self.assertEqual(agent["status"], "applied")
+            stack = state.render_behavior_overlay_stack_for_cell(
+                eng,
+                seed_agent=False,
+            )
+            self.assertLess(stack.index("role layer"), stack.index("agent layer"))
+            self.assertIn('scope_kind="role"', stack)
+            self.assertIn('scope_kind="agent"', stack)
+
+    def test_persistent_prompt_fallback_appends_missing_agent_when_role_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            self.addCleanup(db.close)
+            state = MatrixState(db=db)
+            state.add_group("g")
+            arch = state.add_agent(name="Arch", group="g")
+            arch.kind = "architect"
+            state._db_save_agent(arch)
+            eng = state.add_agent(name="Eng", group="g")
+            eng.kind = "engineer"
+            eng.hired_by_architect_id = arch.id
+            eng.agent_type = "codex"
+            eng.directory = tmp
+            state._db_save_agent(eng)
+            role = state.create_behavior_overlay_proposal(
+                scope_kind="role",
+                group="g",
+                role_kind="engineer",
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="role only already present",
+                rationale="role",
+            )
+            state.apply_behavior_overlay_proposal(role["id"], actor_kind="user")
+            agent = state.create_behavior_overlay_proposal(
+                agent_id=eng.id,
+                proposed_by_agent_id=arch.id,
+                proposed_by_kind="architect",
+                text="missing agent layer",
+                rationale="agent",
+                architect_approver_id=arch.id,
+                auto_apply_architect_direct=True,
+            )
+            self.assertEqual(agent["status"], "applied")
+            role_only = state.render_behavior_overlay_stack_for_cell(
+                eng,
+                include_agent=False,
+                seed_agent=False,
+            )
+
+            from torque import server_agent
+
+            captured = {}
+
+            class FakeAdapter:
+                name = "fake"
+
+                def inject_persistent_prompt(self, working_dir, filename, prompt):
+                    captured["prompt"] = prompt
+                    return " --fake-prompt"
+
+            old_get_adapter = server_agent.get_adapter
+            server_agent.get_adapter = lambda _agent_type: FakeAdapter()
+            try:
+                svc = server_agent.AgentLaunchService(
+                    state=state,
+                    connection=None,
+                    bridge=None,
+                    worktree_mgr=None,
+                    template_mgr=None,
+                )
+                launch_cfg = {
+                    "agent_type": "codex",
+                    "directory": tmp,
+                    "command": "codex",
+                }
+                svc.apply_persistent_prompt(
+                    eng,
+                    launch_cfg,
+                    "base\n\n" + role_only,
+                )
+            finally:
+                server_agent.get_adapter = old_get_adapter
+            prompt = captured["prompt"]
+            self.assertEqual(prompt.count("role only already present"), 1)
+            self.assertIn("missing agent layer", prompt)
+
+
+class BehaviorOverlayMigrationTests(unittest.TestCase):
+    def test_v1_overlay_tables_rebuild_to_scoped_v2_and_second_run_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "torque.db"
+            seed = TorqueDB(path)
+            seed.init()
+            state = MatrixState(db=seed)
+            state.add_group("g")
+            eng = state.add_agent(name="Eng", group="g")
+            eng.kind = "engineer"
+            state._db_save_agent(eng)
+            seed.close()
+
+            conn = sqlite3.connect(path)
+            for table in (
+                    "behavior_overlay_activations",
+                    "behavior_overlay_proposals",
+                    "behavior_overlay_active",
+                    "behavior_overlay_versions"):
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
+            conn.executescript("""
+                CREATE TABLE behavior_overlay_versions (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    version_number INTEGER NOT NULL,
+                    parent_version_id TEXT NOT NULL DEFAULT '',
+                    text TEXT NOT NULL,
+                    text_sha256 TEXT NOT NULL,
+                    author_agent_id TEXT NOT NULL DEFAULT '',
+                    author_kind TEXT NOT NULL DEFAULT '',
+                    rationale TEXT NOT NULL DEFAULT '',
+                    approver_id TEXT NOT NULL DEFAULT '',
+                    approver_kind TEXT NOT NULL DEFAULT '',
+                    source_proposal_id TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(agent_id, version_number)
+                );
+                CREATE TABLE behavior_overlay_active (
+                    agent_id TEXT PRIMARY KEY,
+                    active_version_id TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    updated_by_kind TEXT NOT NULL DEFAULT '',
+                    updated_by_id TEXT NOT NULL DEFAULT '',
+                    reason TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE behavior_overlay_proposals (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    target_kind TEXT NOT NULL DEFAULT '',
+                    proposal_type TEXT NOT NULL DEFAULT 'set_text',
+                    base_version_id TEXT NOT NULL DEFAULT '',
+                    target_version_id TEXT NOT NULL DEFAULT '',
+                    proposed_text TEXT NOT NULL DEFAULT '',
+                    proposed_text_sha256 TEXT NOT NULL DEFAULT '',
+                    proposed_by_agent_id TEXT NOT NULL DEFAULT '',
+                    proposed_by_kind TEXT NOT NULL DEFAULT '',
+                    rationale TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'proposed',
+                    approval_route TEXT NOT NULL,
+                    next_actor_kind TEXT NOT NULL DEFAULT '',
+                    requires_user_approval INTEGER NOT NULL DEFAULT 0,
+                    architect_approver_id TEXT NOT NULL DEFAULT '',
+                    architect_approved_at REAL,
+                    user_task_id TEXT NOT NULL DEFAULT '',
+                    user_approved_at REAL,
+                    lint_warnings_json TEXT NOT NULL DEFAULT '[]',
+                    resolved_by_kind TEXT NOT NULL DEFAULT '',
+                    resolved_by_id TEXT NOT NULL DEFAULT '',
+                    resolved_at REAL,
+                    resolution_note TEXT NOT NULL DEFAULT '',
+                    applied_version_id TEXT NOT NULL DEFAULT '',
+                    applied_at REAL,
+                    idempotency_key TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE TABLE behavior_overlay_activations (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    previous_version_id TEXT NOT NULL DEFAULT '',
+                    active_version_id TEXT NOT NULL,
+                    proposal_id TEXT NOT NULL DEFAULT '',
+                    actor_kind TEXT NOT NULL DEFAULT '',
+                    actor_id TEXT NOT NULL DEFAULT '',
+                    action TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL
+                );
+            """)
+            conn.execute(
+                "INSERT INTO behavior_overlay_versions VALUES "
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "v-old", eng.id, 0, "", "old text", "sha",
+                    eng.id, "engineer", "seed", "", "", "", 10.0, "{}",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO behavior_overlay_active VALUES (?,?,?,?,?,?)",
+                (eng.id, "v-old", 11.0, "system", "sys", "active"),
+            )
+            conn.execute(
+                "INSERT INTO behavior_overlay_proposals VALUES "
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "p-old", eng.id, "engineer", "set_text", "v-old", "",
+                    "new text", "sha2", eng.id, "engineer", "why",
+                    "proposed", "architect", "architect", 0, "", None, "",
+                    None, "[]", "", "", None, "", "", None, "idem", 12.0,
+                    13.0,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO behavior_overlay_activations VALUES "
+                "(?,?,?,?,?,?,?,?,?,?)",
+                ("a-old", eng.id, "", "v-old", "", "system", "sys", "seed", "why", 14.0),
+            )
+            conn.commit()
+            conn.close()
+
+            migrated = TorqueDB(path)
+            migrated.init()
+            active = migrated.load_behavior_overlay_active(
+                BehaviorOverlayScope.agent(eng.id, group="g")
+            )
+            self.assertEqual(active["scope_kind"], "agent")
+            self.assertEqual(active["scope_group"], "g")
+            self.assertEqual(active["scope_key"], eng.id)
+            self.assertEqual(active["active_version_id"], "v-old")
+            self.assertEqual(active["updated_at"], 11.0)
+            version = migrated.load_behavior_overlay_version("v-old")
+            self.assertEqual(version["scope_group"], "g")
+            proposal = migrated.load_behavior_overlay_proposal("p-old")
+            self.assertEqual(proposal["scope_group"], "g")
+            pk_cols = [
+                row[1]
+                for row in migrated._conn.execute(
+                    "PRAGMA table_info(behavior_overlay_active)"
+                ).fetchall()
+                if row[5]
+            ]
+            self.assertEqual(pk_cols, ["scope_kind", "scope_group", "scope_key"])
+            role_scope = BehaviorOverlayScope.role("g", "engineer")
+            role_version = migrated.save_behavior_overlay_version({
+                "id": "v-role",
+                **role_scope.as_row_fields(),
+                "version_number": 0,
+                "text": "",
+                "text_sha256": "empty",
+                "created_at": 20.0,
+            })
+            migrated.save_behavior_overlay_active({
+                **role_scope.as_row_fields(),
+                "active_version_id": role_version["id"],
+                "updated_at": 21.0,
+            })
+            counts_before = {
+                table: migrated._conn.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0]
+                for table in (
+                    "behavior_overlay_versions",
+                    "behavior_overlay_active",
+                    "behavior_overlay_proposals",
+                    "behavior_overlay_activations",
+                )
+            }
+            migrated.close()
+
+            second = TorqueDB(path)
+            second.init()
+            self.addCleanup(second.close)
+            counts_after = {
+                table: second._conn.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0]
+                for table in counts_before
+            }
+            self.assertEqual(counts_after, counts_before)
+            self.assertEqual(
+                second.load_behavior_overlay_active(role_scope)["active_version_id"],
+                "v-role",
+            )

@@ -267,6 +267,7 @@ def render_behavior_overlay_block(
         scope_kind: str = "agent",
         scope_group: str = "",
         scope_key: str = "",
+        scope_id: str = "",
         version_id: str = "",
         text: str = DEFAULT_BEHAVIOR_OVERLAY_TEXT,
         sha256: str = "",
