@@ -843,6 +843,7 @@ function createEngineerWsHarness() {
   document.register('conn-dot');
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/behavior_overlay.js');
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
@@ -1149,6 +1150,7 @@ function createStandaloneDeltaBatchHarness(visibleSurfaces = ['board']) {
   document.register('main');
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/behavior_overlay.js');
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/grid/group-tabs.js');
   loadScript(context, 'static/js/grid/agent-card.js');
@@ -15765,6 +15767,79 @@ test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (
   // Engineer panel must NOT have re-rendered for cross-agent MCP traffic.
   assert.equal(sandbox.renderCalls.engineer, 0,
     'mcp_call_append for non-focused agent should not refresh engineer panel');
+});
+
+test('behavior overlay deltas invalidate only the focused Behavior tab target', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'eng-1';
+    focusedItemId = 'eng-1';
+    state.groups = { alpha: ['eng-1', 'eng-2'] };
+    state.agents = {
+      'eng-1': { id: 'eng-1', kind: 'engineer', cell_type: 'agent', group: 'alpha' },
+      'eng-2': { id: 'eng-2', kind: 'engineer', cell_type: 'agent', group: 'alpha' }
+    };
+    _agentPanelKind = function(agent) { return agent.kind || 'worker'; };
+    _agentPanelActiveTab = function() { return 'behavior'; };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'behavior_overlay_version_append',
+      id: 'bov-peer',
+      agent_id: 'eng-2',
+      version_number: 2,
+      text_sha256: 'peer',
+      text_bytes: 4,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'peer behavior overlay deltas must not refresh the focused engineer panel');
+  assert.equal(sandbox.renderCalls.main, 0,
+    'behavior overlay deltas must not mark broad main surface');
+  assert.equal(sandbox.renderCalls.board, 0,
+    'behavior overlay deltas must not mark board surface');
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'behavior_overlay_active_update',
+      agent_id: 'eng-1',
+      active_version_id: 'bov-focused',
+      updated_at: 1,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'focused Behavior tab target should refresh surgically via engineer surface');
+});
+
+test('behavior overlay deltas do not invalidate focused engineer when another tab is active', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'eng-1';
+    focusedItemId = 'eng-1';
+    state.agents = {
+      'eng-1': { id: 'eng-1', kind: 'engineer', cell_type: 'agent', group: 'alpha' }
+    };
+    _agentPanelKind = function(agent) { return agent.kind || 'worker'; };
+    _agentPanelActiveTab = function() { return 'journal'; };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'behavior_overlay_proposal_upsert',
+      id: 'bop-1',
+      agent_id: 'eng-1',
+      status: 'proposed',
+      next_actor_kind: 'architect',
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'behavior overlay deltas should not clobber non-Behavior tabs');
 });
 
 test('mcp_call_append for focused agent on Events.MCP DOES invalidate engineer panel (TORQUE:236 v4)', () => {

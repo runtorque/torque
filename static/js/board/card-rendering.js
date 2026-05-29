@@ -967,6 +967,9 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       + ' title="' + esc(t.external_url) + '">&#x1F517;</a>';
   }
   if (meta) cardHtml += '<div class="board-card-meta">' + meta + '</div>';
+  if (typeof behaviorOverlayApprovalCardHtml === 'function') {
+    cardHtml += behaviorOverlayApprovalCardHtml(t);
+  }
   if (!isSubordinate) cardHtml += _renderBoardQuickEdit(t);
   // Pipeline chain indicator (only for subordinate cards)
   if (isSubordinate && t.parent_task_id) {

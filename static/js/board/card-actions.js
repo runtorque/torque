@@ -165,7 +165,12 @@ function _boardRenderCardMenu(taskId) {
 
   // Resolve (ask tasks with human label)
   if (task.labels && task.labels.indexOf('torque:human') >= 0 && task.lane !== 'Done') {
-    html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
+    if (typeof behaviorOverlayApprovalTask === 'function'
+        && behaviorOverlayApprovalTask(task)) {
+      html += '<button onclick="event.stopPropagation();openBehaviorOverlayApprovalModal(\'' + taskId + '\')">Review behavior diff...</button>';
+    } else {
+      html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
+    }
   }
 
   if (_boardIsArchived(task)) {
