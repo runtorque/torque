@@ -3916,6 +3916,10 @@ body.runtime-embedded #modal-group .modal-summary {
   margin-top: 8px !important; cursor: pointer;
 }
 .gs-checkbox input[type="checkbox"] { width: auto; margin: 0; }
+.statusbar-settings-list .label-hint {
+  display: block;
+  margin: 6px 0 10px;
+}
 .gs-inline-card {
   display: flex;
   align-items: center;
@@ -4432,9 +4436,18 @@ body.runtime-embedded .statusbar-chip {
   font: inherit;
   cursor: pointer;
 }
+.statusbar-chip[role="button"] {
+  cursor: pointer;
+}
 .statusbar-chip-button:hover {
   color: var(--statusbar-fg);
   background: var(--statusbar-segment-hover);
+}
+.statusbar-chip[role="button"]:hover,
+.statusbar-chip[role="button"]:focus-visible {
+  color: var(--statusbar-fg);
+  background: var(--statusbar-segment-hover);
+  outline: none;
 }
 .statusbar-chip--normal {
   color: var(--statusbar-fg);

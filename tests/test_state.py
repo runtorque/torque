@@ -228,6 +228,62 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.update_global_settings(relay_enabled="false")
         self.assertIs(state.global_settings.relay_enabled, False)
 
+    def test_update_global_settings_normalizes_status_bar_visibility(self):
+        state = self.state_mod.MatrixState()
+        self.assertEqual(
+            state.global_settings.status_bar_visibility,
+            {
+                "daemon_status": False,
+                "claude_usage": False,
+                "codex_usage": False,
+                "deploy": True,
+                "health": False,
+                "workload": False,
+                "tasks": True,
+                "attention": True,
+            },
+        )
+
+        state.update_global_settings(
+            status_bar_visibility={
+                "daemon_status": "true",
+                "tasks": "false",
+                "attention": True,
+                "unknown": True,
+            }
+        )
+
+        self.assertEqual(
+            state.global_settings.status_bar_visibility,
+            {
+                "daemon_status": True,
+                "claude_usage": False,
+                "codex_usage": False,
+                "deploy": True,
+                "health": False,
+                "workload": False,
+                "tasks": False,
+                "attention": True,
+            },
+        )
+
+        state = self.state_mod.MatrixState()
+        emitted = []
+        state._emit = lambda event, **payload: emitted.append((event, payload))
+        from dataclasses import asdict
+        submitted = asdict(state.global_settings)
+        submitted["status_bar_visibility"] = {
+            "tasks": False,
+            "attention": True,
+        }
+        state.update_global_settings(**submitted)
+
+        self.assertEqual(emitted[-1][0], "global_settings_update")
+        self.assertEqual(
+            emitted[-1][1]["changed_keys"],
+            ["status_bar_visibility"],
+        )
+
     def test_relay_fields_default_off_and_serialize(self):
         state = self.state_mod.MatrixState()
         gs = state.global_settings

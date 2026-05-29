@@ -1113,6 +1113,7 @@ function createRelayStatusHarness() {
   loadScript(context, 'static/js/relay_status.js');
   loadScript(context, 'static/js/ws.js');
   runInContext(context, `
+    state.global_settings = { status_bar_visibility: { daemon_status: true } };
     render = function() { renderMainCalls++; };
     renderActivePanel = function() { renderActivePanelCalls++; };
     dragInProgress = false;
@@ -5700,6 +5701,9 @@ test('daemon status is browser-visible and not only Tauri-gated (CSS)', () => {
 
 test('relay indicator mounts after the labelled daemon status wrapper', () => {
   const { sandbox, document } = createSandbox();
+  sandbox.state.global_settings = {
+    status_bar_visibility: { daemon_status: true },
+  };
   const header = document.register('header-host');
   const connDot = document.register('conn-dot');
   header.appendChild(connDot);
@@ -5840,6 +5844,9 @@ test('relay_connection snapshot read populates state and renders the indicator',
       board_lanes: [],
       board_tasks: {},
       panel_events: [],
+      global_settings: {
+        status_bar_visibility: { daemon_status: true },
+      },
       relay_connection: {
         status: 'connected',
         enabled: true,
@@ -5888,6 +5895,41 @@ test('relay_connection indicator mounts beside #taskbar-conn-dot (confirmed plac
   );
   // Distinct labelled element — not a second bare dot.
   assert.equal(jsonValue(context, '_relayStatusEls.label.textContent'), 'Relay');
+});
+
+test('relay status-bar chip is derived from daemon-status visibility and relay configuration', () => {
+  const { context } = createRelayStatusHarness();
+  runInContext(context, `
+    state.relay_connection = {
+      status: 'connected', enabled: true, configured: true,
+      relay_host: 'relay.runtorque.com', retry_count: 0,
+    };
+    state.global_settings.status_bar_visibility.daemon_status = false;
+    refreshRelayStatusIndicator();
+  `);
+  assert.equal(jsonValue(context, '!!_relayStatusEls'), false, 'daemon hidden: relay never mounts');
+
+  runInContext(context, `
+    state.global_settings.status_bar_visibility.daemon_status = true;
+    state.relay_connection.enabled = false;
+    state.relay_connection.configured = false;
+    refreshRelayStatusIndicator();
+  `);
+  assert.equal(jsonValue(context, '!!_relayStatusEls'), false, 'unconfigured: relay still not mounted');
+
+  runInContext(context, `
+    state.relay_connection.enabled = true;
+    state.relay_connection.configured = true;
+    refreshRelayStatusIndicator();
+  `);
+  assert.equal(jsonValue(context, '!!_relayStatusEls && !!_relayStatusEls.root'), true);
+  assert.equal(jsonValue(context, '_relayStatusEls.root.hidden'), false);
+
+  runInContext(context, `
+    state.global_settings.status_bar_visibility.daemon_status = false;
+    refreshRelayStatusIndicator();
+  `);
+  assert.equal(jsonValue(context, '_relayStatusEls.root.hidden'), true);
 });
 
 test('relay-status indicator is browser-visible and not Tauri-gated (CSS)', () => {
@@ -6487,6 +6529,91 @@ test('global settings save sends relay_enabled=false when the checkbox is explic
     'explicit toggle -> relay_enabled written',
   );
   assert.equal(saved.relay_enabled, false);
+});
+
+test('status bar settings sync preserves focused dirty toggles and scroll', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  const list = document.register('gls-statusbar-visibility-list');
+  list.scrollTop = 42;
+  [
+    'gls-statusbar-daemon-status',
+    'gls-statusbar-claude-usage',
+    'gls-statusbar-codex-usage',
+    'gls-statusbar-deploy',
+    'gls-statusbar-health',
+    'gls-statusbar-workload',
+    'gls-statusbar-tasks',
+    'gls-statusbar-attention',
+  ].forEach((id) => document.register(id));
+  const tasks = document.getElementById('gls-statusbar-tasks');
+  const attention = document.getElementById('gls-statusbar-attention');
+  const daemon = document.getElementById('gls-statusbar-daemon-status');
+  tasks.checked = false;
+  tasks.dataset.statusBarDirty = '1';
+  document.activeElement = tasks;
+
+  context.__settings = {
+    status_bar_visibility: {
+      daemon_status: true,
+      tasks: true,
+      attention: false,
+    },
+  };
+  runInContext(context, `_syncStatusBarSettingsFromGlobal(__settings);`);
+
+  assert.equal(tasks.checked, false, 'dirty focused task toggle is not clobbered');
+  assert.equal(tasks.dataset.statusBarDirty, '1');
+  assert.equal(attention.checked, false, 'non-dirty toggle follows settings');
+  assert.equal(daemon.checked, true, 'daemon toggle follows settings');
+  assert.equal(list.scrollTop, 42, 'scroll is preserved because the list is not rebuilt');
+  assert.equal(document.activeElement, tasks, 'focus is preserved');
+
+  runInContext(context, `_syncStatusBarSettingsFromGlobal(__settings, { force: true });`);
+
+  assert.equal(tasks.checked, true, 'force refresh applies authoritative settings');
+  assert.equal(Object.prototype.hasOwnProperty.call(tasks.dataset, 'statusBarDirty'), false);
+});
+
+test('global settings save includes status_bar_visibility from the new Status bar tab', () => {
+  const { context, document, sandbox } = createRelayStatusHarness();
+  loadScript(context, 'static/js/modals.js');
+  runInContext(context, 'send = function(m) { sendCalls.push(m); };');
+  [
+    'gls-default-cmd', 'gls-filter-window', 'gls-focus-new-tabs',
+    'gls-focus-on-click', 'gls-max-pipeline-depth',
+    'gls-max-event-log', 'gls-xterm-scrollback',
+    'gls-statusbar-daemon-status',
+    'gls-statusbar-claude-usage',
+    'gls-statusbar-codex-usage',
+    'gls-statusbar-deploy',
+    'gls-statusbar-health',
+    'gls-statusbar-workload',
+    'gls-statusbar-tasks',
+    'gls-statusbar-attention',
+  ].forEach((id) => document.register(id));
+  document.getElementById('gls-max-pipeline-depth').value = '10';
+  document.getElementById('gls-max-event-log').value = '500';
+  document.getElementById('gls-xterm-scrollback').value = '9000';
+  document.getElementById('gls-statusbar-daemon-status').checked = true;
+  document.getElementById('gls-statusbar-deploy').checked = false;
+  document.getElementById('gls-statusbar-tasks').checked = true;
+  document.getElementById('gls-statusbar-attention').checked = false;
+
+  runInContext(context, 'submitGlobalSettings();');
+
+  const saved = JSON.parse(JSON.stringify(sandbox.sendCalls[0].settings.status_bar_visibility));
+  assert.deepEqual(saved, {
+    daemon_status: true,
+    claude_usage: false,
+    codex_usage: false,
+    deploy: false,
+    health: false,
+    workload: false,
+    tasks: true,
+    attention: false,
+  });
 });
 
 test('refreshRelayConfigModal force-open clears the enabled checkbox dirty flag', () => {
@@ -14447,6 +14574,42 @@ test('ws global settings delta live-applies xterm scrollback hook', () => {
 
   assert.equal(jsonValue(context, 'state.global_settings.xterm_scrollback'), 7777);
   assert.equal(jsonValue(context, 'scrollbackApplyCalls'), 1);
+});
+
+test('ws status-bar-only settings delta does not rerender broad panel surfaces', () => {
+  const { context } = createWsRenderHarness();
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'global_settings_update',
+      changed_keys: ['status_bar_visibility'],
+      default_command: '',
+      filter_by_window: true,
+      focus_new_tabs: true,
+      focus_on_click: false,
+      xterm_scrollback: 2000,
+      default_lanes: ['Backlog', 'Done'],
+      keybindings: {},
+      max_pipeline_depth: 10,
+      max_event_log: 500,
+      status_bar_visibility: { tasks: false, attention: true },
+    }],
+  });
+
+  assert.deepEqual(jsonValue(context, 'renderCalls'), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+  });
+  assert.deepEqual(jsonValue(context, 'state.global_settings.status_bar_visibility'), {
+    tasks: false,
+    attention: true,
+  });
+  assert.equal(jsonValue(context, 'Object.prototype.hasOwnProperty.call(state.global_settings, "changed_keys")'), false);
 });
 
 test('ws architect_journal_append delta invalidates the engineer surface and rerenders agent panel', () => {

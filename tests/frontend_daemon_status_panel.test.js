@@ -139,11 +139,15 @@ test('global settings System tab markup is present without removing existing tab
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
 
   assert.match(html, /data-tab="gls-general"[^>]*>General<\/button>/);
+  assert.match(html, /data-tab="gls-statusbar"[^>]*>Status bar<\/button>/);
   assert.match(html, /data-tab="gls-keybindings"[^>]*>Keybindings<\/button>/);
   assert.match(html, /data-tab="gls-system"[^>]*>System<\/button>/);
   assert.match(html, /<div class="gs-pane active" data-pane="gls-general">/);
+  assert.match(html, /<div class="gs-pane" data-pane="gls-statusbar">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-keybindings">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-system">/);
+  assert.match(html, /id="gls-statusbar-daemon-status"/);
+  assert.match(html, /id="gls-statusbar-attention"/);
   assert.match(html, /id="gls-daemon-version"/);
   assert.match(html, /id="gls-daemon-log-path"/);
 });

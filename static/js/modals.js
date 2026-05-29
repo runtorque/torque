@@ -2622,6 +2622,83 @@ var _glsKeybindings = {};     // current keybinding overrides being edited
 var _glsDefaults = {};        // default keybinding specs from server
 var _glsCapturing = null;     // action name currently capturing a keypress
 var _glsPendingConflict = null; // pending custom in-modal reassign confirmation
+var GLS_STATUS_BAR_VISIBILITY_ITEMS = [
+  'daemon_status',
+  'claude_usage',
+  'codex_usage',
+  'deploy',
+  'health',
+  'workload',
+  'tasks',
+  'attention',
+];
+var GLS_STATUS_BAR_VISIBILITY_DEFAULTS = {
+  daemon_status: false,
+  claude_usage: false,
+  codex_usage: false,
+  deploy: true,
+  health: false,
+  workload: false,
+  tasks: true,
+  attention: true,
+};
+
+function _glsStatusBarVisibilityDefaults() {
+  if (typeof statusBarVisibilityDefaults === 'function') {
+    return statusBarVisibilityDefaults();
+  }
+  var defaults = {};
+  GLS_STATUS_BAR_VISIBILITY_ITEMS.forEach(function(key) {
+    defaults[key] = !!GLS_STATUS_BAR_VISIBILITY_DEFAULTS[key];
+  });
+  return defaults;
+}
+
+function _glsNormalizeStatusBarVisibility(value) {
+  if (typeof normalizeStatusBarVisibility === 'function') {
+    return normalizeStatusBarVisibility(value);
+  }
+  var normalized = _glsStatusBarVisibilityDefaults();
+  var raw = (value && typeof value === 'object') ? value : {};
+  Object.keys(normalized).forEach(function(key) {
+    if (Object.prototype.hasOwnProperty.call(raw, key)) {
+      var itemValue = raw[key];
+      normalized[key] = (typeof itemValue === 'string')
+        ? ['1', 'true', 'yes', 'on'].indexOf(itemValue.trim().toLowerCase()) >= 0
+        : !!itemValue;
+    }
+  });
+  return normalized;
+}
+
+function _glsStatusBarInputId(key) {
+  return 'gls-statusbar-' + String(key || '').replace(/_/g, '-');
+}
+
+function _syncStatusBarSettingsFromGlobal(settings, opts) {
+  opts = opts || {};
+  var s = settings || (state && state.global_settings) || {};
+  var visibility = _glsNormalizeStatusBarVisibility(s.status_bar_visibility);
+  GLS_STATUS_BAR_VISIBILITY_ITEMS.forEach(function(key) {
+    var input = document.getElementById(_glsStatusBarInputId(key));
+    if (!input) return;
+    var locked = !opts.force && (
+      (typeof document !== 'undefined' && document.activeElement === input)
+      || (input.dataset && input.dataset.statusBarDirty === '1')
+    );
+    if (!locked) input.checked = !!visibility[key];
+    if (opts.force && input.dataset) delete input.dataset.statusBarDirty;
+  });
+}
+
+function _collectStatusBarVisibilitySettings() {
+  var visibility = _glsStatusBarVisibilityDefaults();
+  GLS_STATUS_BAR_VISIBILITY_ITEMS.forEach(function(key) {
+    var input = document.getElementById(_glsStatusBarInputId(key));
+    if (input) visibility[key] = !!input.checked;
+  });
+  return visibility;
+}
 
 function _glsXtermScrollbackDefault() {
   return (typeof XTERM_SCROLLBACK_DEFAULT === 'number')
@@ -2862,6 +2939,9 @@ function _showGlobalSettingsModal(data) {
   // General > Board
   document.getElementById('gls-max-pipeline-depth').value =
     s.max_pipeline_depth !== undefined ? s.max_pipeline_depth : 10;
+
+  // Status bar
+  _syncStatusBarSettingsFromGlobal(s, { force: !modalWasVisible });
 
   // Keybindings
   _renderKeybindingList();
@@ -3148,6 +3228,7 @@ function submitGlobalSettings() {
     keybindings: typeof sanitizeKeybindingOverrides === 'function'
       ? sanitizeKeybindingOverrides(_glsKeybindings)
       : _glsKeybindings,
+    status_bar_visibility: _collectStatusBarVisibilitySettings(),
     max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
     max_event_log: parseInt(document.getElementById('gls-max-event-log').value) || 500,
   };
