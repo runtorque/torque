@@ -98,8 +98,20 @@ ENGINEER_TOOLS.extend([
     make_tool_search_spec("engineer_tool_search", "engineer"),
     {
         "name": "engineer_behavior_overlay_read",
-        "description": "Read this engineer's active Dynamic Behavior overlay.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "description": (
+            "Read this engineer's active Dynamic Behavior overlay. "
+            "Use scope_kind=role for the inherited group Engineer-role "
+            "overlay or effective for role+agent visibility."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role", "effective"],
+                },
+            },
+        },
     },
     {
         "name": "engineer_behavior_overlay_versions",
@@ -107,6 +119,10 @@ ENGINEER_TOOLS.extend([
         "inputSchema": {
             "type": "object",
             "properties": {
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                },
                 "limit": {"type": "integer", "description": "Maximum versions."},
             },
         },
@@ -117,6 +133,10 @@ ENGINEER_TOOLS.extend([
         "inputSchema": {
             "type": "object",
             "properties": {
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                },
                 "proposal_id": {"type": "string"},
                 "from_version_id": {"type": "string"},
                 "to_version_id": {"type": "string"},
@@ -136,6 +156,11 @@ ENGINEER_TOOLS.extend([
                 "rationale": {"type": "string", "description": "Why this improves behavior."},
                 "expected_base_version_id": {"type": "string"},
                 "idempotency_key": {"type": "string"},
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                    "description": "Role writes are rejected in v1.",
+                },
             },
             "required": ["text", "rationale"],
         },
@@ -150,6 +175,11 @@ ENGINEER_TOOLS.extend([
                 "rationale": {"type": "string"},
                 "expected_base_version_id": {"type": "string"},
                 "idempotency_key": {"type": "string"},
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                    "description": "Role rollbacks are rejected in v1.",
+                },
             },
             "required": ["version_id", "rationale"],
         },

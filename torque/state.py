@@ -32,9 +32,15 @@ from . import cloud_hooks
 from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
 from .behavior_overlay import (
+    BEHAVIOR_OVERLAY_COMBINED_MAX_BYTES,
+    BEHAVIOR_OVERLAY_ROLE_KINDS,
+    BehaviorOverlayScope,
+    BehaviorOverlayValidationError,
     DEFAULT_BEHAVIOR_OVERLAY_TEXT,
     behavior_overlay_diff,
+    coerce_behavior_overlay_scope,
     lint_overlay_text,
+    overlay_text_bytes,
     overlay_text_sha256,
     proposal_summary,
     render_behavior_overlay_block,
@@ -7346,21 +7352,65 @@ class MatrixState:
 
     # -- Dynamic Behavior overlays ------------------------------------------
 
+    def _behavior_scope_for_agent(self, agent_id: str) -> BehaviorOverlayScope:
+        agent_id = str(agent_id or "").strip()
+        cell = self.agents.get(agent_id)
+        group = str(getattr(cell, "group", "") or "").strip() if cell else ""
+        return BehaviorOverlayScope.agent(agent_id, group=group)
+
+    def _behavior_scope_from_args(
+            self,
+            *,
+            agent_id: str = "",
+            scope_kind: str = "",
+            scope_group: str = "",
+            scope_key: str = "",
+            group: str = "",
+            role_kind: str = "") -> BehaviorOverlayScope:
+        if str(role_kind or "").strip():
+            return BehaviorOverlayScope.role(
+                str(group or scope_group or "").strip(),
+                str(role_kind or "").strip(),
+            )
+        if str(scope_kind or "").strip() == "role":
+            return BehaviorOverlayScope.role(
+                str(group or scope_group or "").strip(),
+                str(scope_key or "").strip(),
+            )
+        if str(scope_kind or "").strip() == "agent" and scope_key:
+            return self._behavior_scope_for_agent(str(scope_key or ""))
+        return self._behavior_scope_for_agent(str(agent_id or scope_key or ""))
+
+    def _behavior_overlay_scope_payload(
+            self, scope: BehaviorOverlayScope) -> dict:
+        return scope.as_row_fields()
+
+    def _behavior_overlay_scope_target_kind(
+            self, scope: BehaviorOverlayScope) -> str:
+        if scope.scope_kind == "role":
+            return scope.scope_key
+        target = self.agents.get(scope.scope_key)
+        return str(getattr(target, "kind", "") or "").strip() if target else ""
+
     def _emit_behavior_overlay_version(self, version: dict | None):
         payload = version_summary(version)
         if payload:
             self._emit("behavior_overlay_version_append", **payload)
 
     def _emit_behavior_overlay_active(self, active: dict | None,
-                                      agent_id: str = ""):
+                                      agent_id: str = "",
+                                      scope: BehaviorOverlayScope | None = None):
         if active:
             self._emit("behavior_overlay_active_update", **dict(active))
             return
-        aid = str(agent_id or "").strip()
-        if aid:
+        try:
+            scope_obj = scope or self._behavior_scope_for_agent(agent_id)
+        except Exception:
+            scope_obj = None
+        if scope_obj:
             self._emit(
                 "behavior_overlay_active_update",
-                agent_id=aid,
+                **scope_obj.as_row_fields(),
                 active_version_id="",
                 updated_at=time.time(),
                 updated_by_kind="system",
@@ -7389,20 +7439,36 @@ class MatrixState:
                               version_id)
         return None
 
-    def load_behavior_overlay_active(self, agent_id: str) -> dict | None:
+    def load_behavior_overlay_active(self, agent_id: str = "", **scope_kwargs) -> dict | None:
         if self.db:
             try:
-                return self.db.load_behavior_overlay_active(agent_id)
+                if scope_kwargs:
+                    scope = self._behavior_scope_from_args(
+                        agent_id=agent_id,
+                        **scope_kwargs,
+                    )
+                    return self.db.load_behavior_overlay_active(scope)
+                return self.db.load_behavior_overlay_active(
+                    self._behavior_scope_for_agent(agent_id)
+                )
             except Exception:
                 log.exception("Failed to load behavior overlay active %s",
                               agent_id)
         return None
 
     def load_behavior_overlay_active_version(
-            self, agent_id: str) -> dict | None:
+            self, agent_id: str = "", **scope_kwargs) -> dict | None:
         if self.db:
             try:
-                return self.db.load_behavior_overlay_active_version(agent_id)
+                if scope_kwargs:
+                    scope = self._behavior_scope_from_args(
+                        agent_id=agent_id,
+                        **scope_kwargs,
+                    )
+                    return self.db.load_behavior_overlay_active_version(scope)
+                return self.db.load_behavior_overlay_active_version(
+                    self._behavior_scope_for_agent(agent_id)
+                )
             except Exception:
                 log.exception(
                     "Failed to load behavior overlay active version %s",
@@ -7411,11 +7477,21 @@ class MatrixState:
         return None
 
     def list_behavior_overlay_versions(
-            self, agent_id: str, *, limit: int = 50) -> list[dict]:
+            self, agent_id: str = "", *, limit: int = 50,
+            **scope_kwargs) -> list[dict]:
         if self.db:
             try:
+                if scope_kwargs:
+                    scope = self._behavior_scope_from_args(
+                        agent_id=agent_id,
+                        **scope_kwargs,
+                    )
+                    return self.db.list_behavior_overlay_versions(
+                        scope,
+                        limit=limit,
+                    )
                 return self.db.list_behavior_overlay_versions(
-                    agent_id,
+                    self._behavior_scope_for_agent(agent_id),
                     limit=limit,
                 )
             except Exception:
@@ -7436,14 +7512,30 @@ class MatrixState:
             self, *,
             status_filter: str = "",
             agent_id: str = "",
+            scope_kind: str = "",
+            scope_group: str = "",
+            scope_key: str = "",
+            group: str = "",
+            role_kind: str = "",
             next_actor_kind: str = "",
             proposed_by_agent_id: str = "",
             limit: int = 100) -> list[dict]:
         if self.db:
             try:
+                scope = None
+                if scope_kind or scope_key or role_kind:
+                    scope = self._behavior_scope_from_args(
+                        agent_id=agent_id,
+                        scope_kind=scope_kind,
+                        scope_group=scope_group,
+                        scope_key=scope_key,
+                        group=group,
+                        role_kind=role_kind,
+                    )
                 return self.db.list_behavior_overlay_proposals(
                     status_filter=status_filter,
                     agent_id=agent_id,
+                    scope=scope,
                     next_actor_kind=next_actor_kind,
                     proposed_by_agent_id=proposed_by_agent_id,
                     limit=limit,
@@ -7454,23 +7546,43 @@ class MatrixState:
 
     def ensure_behavior_overlay_seed(
             self,
-            agent_id: str,
+            agent_id: str = "",
             *,
+            scope_kind: str = "",
+            scope_group: str = "",
+            scope_key: str = "",
+            group: str = "",
+            role_kind: str = "",
             actor_kind: str = "system",
             actor_id: str = "",
             reason: str = "default empty behavior overlay seed") -> dict | None:
         """Ensure an explicit empty floor version + active row exists."""
-        agent_id = str(agent_id or "").strip()
-        if not agent_id or not self.db:
+        if not self.db:
             return None
-        active_version = self.load_behavior_overlay_active_version(agent_id)
+        try:
+            scope = self._behavior_scope_from_args(
+                agent_id=agent_id,
+                scope_kind=scope_kind,
+                scope_group=scope_group,
+                scope_key=scope_key,
+                group=group,
+                role_kind=role_kind,
+            )
+        except Exception:
+            return None
+        active_version = self.db.load_behavior_overlay_active_version(scope)
         if active_version:
             return active_version
         now = time.time()
+        metadata = {
+            "default_empty": True,
+            "scope_label": scope.label,
+            "max_bytes": scope.max_bytes,
+        }
         version = self.db.save_behavior_overlay_version({
             "id": "bov-" + uuid.uuid4().hex[:12],
-            "agent_id": agent_id,
-            "version_number": self.db.next_behavior_overlay_version_number(agent_id),
+            **self._behavior_overlay_scope_payload(scope),
+            "version_number": self.db.next_behavior_overlay_version_number(scope),
             "parent_version_id": "",
             "text": DEFAULT_BEHAVIOR_OVERLAY_TEXT,
             "text_sha256": overlay_text_sha256(DEFAULT_BEHAVIOR_OVERLAY_TEXT),
@@ -7481,10 +7593,10 @@ class MatrixState:
             "approver_kind": actor_kind,
             "source_proposal_id": "",
             "created_at": now,
-            "metadata": {"default_empty": True},
+            "metadata": metadata,
         })
         active = self.db.save_behavior_overlay_active({
-            "agent_id": agent_id,
+            **self._behavior_overlay_scope_payload(scope),
             "active_version_id": version["id"],
             "updated_at": now,
             "updated_by_kind": actor_kind,
@@ -7493,7 +7605,7 @@ class MatrixState:
         })
         activation = self.db.save_behavior_overlay_activation({
             "id": "boa-" + uuid.uuid4().hex[:12],
-            "agent_id": agent_id,
+            **self._behavior_overlay_scope_payload(scope),
             "previous_version_id": "",
             "active_version_id": version["id"],
             "proposal_id": "",
@@ -7512,22 +7624,156 @@ class MatrixState:
             self, agent_id: str, *, seed: bool = False) -> str:
         """Return the rendered prompt block for a supported agent."""
         agent_id = str(agent_id or "").strip()
+        scope = self._behavior_scope_for_agent(agent_id)
         version = (
             self.ensure_behavior_overlay_seed(agent_id) if seed
-            else self.load_behavior_overlay_active_version(agent_id)
+            else self.db.load_behavior_overlay_active_version(scope) if self.db else None
         )
         return render_behavior_overlay_block(
-            agent_id=agent_id,
+            **scope.as_row_fields(),
             version_id=str((version or {}).get("id", "") or ""),
             text=str((version or {}).get("text", "") or ""),
             sha256=str((version or {}).get("text_sha256", "") or ""),
             fail_closed=True,
         )
 
-    def _behavior_overlay_current_base(self, agent_id: str) -> dict | None:
-        return self.ensure_behavior_overlay_seed(agent_id)
+    def _behavior_overlay_valid_layer(
+            self,
+            scope: BehaviorOverlayScope,
+            version: dict | None,
+            *,
+            include_empty: bool) -> tuple[BehaviorOverlayScope, dict, str] | None:
+        if not version:
+            return None
+        text = str(version.get("text", "") or "")
+        if not text and not include_empty:
+            return None
+        try:
+            from .behavior_overlay import validate_overlay_text
+            text = validate_overlay_text(
+                text,
+                scope_kind=scope.scope_kind,
+                max_bytes=scope.max_bytes,
+            )
+        except BehaviorOverlayValidationError:
+            log.warning(
+                "Dropping invalid behavior overlay layer scope=%s version=%s",
+                scope.scope_id,
+                version.get("id", ""),
+            )
+            return None
+        return scope, version, text
 
-    def _behavior_overlay_route(self, target, author_kind: str) -> tuple[str, bool]:
+    def render_behavior_overlay_stack_for_cell(
+            self,
+            cell,
+            *,
+            include_role: bool = True,
+            include_agent: bool = True,
+            seed_agent: bool = True,
+            seed_role: bool = False,
+            worker_dispatch: bool = False) -> str:
+        """Render role then agent overlay blocks for a cell.
+
+        Empty role overlays are omitted to preserve zero behavior delta on
+        rollout.  The Phase-1 empty agent seed block is preserved when
+        ``seed_agent`` is true for persistent Architect/Engineer prompts.
+        """
+        if not cell or not self.db:
+            return ""
+        kind = str(getattr(cell, "kind", "") or "").strip()
+        group = str(getattr(cell, "group", "") or "").strip()
+        layers: list[tuple[BehaviorOverlayScope, dict, str]] = []
+        if include_role and kind in BEHAVIOR_OVERLAY_ROLE_KINDS and group:
+            role_scope = BehaviorOverlayScope.role(group, kind)
+            role_version = (
+                self.ensure_behavior_overlay_seed(
+                    scope_kind="role",
+                    scope_group=group,
+                    scope_key=kind,
+                )
+                if seed_role else
+                self.db.load_behavior_overlay_active_version(role_scope)
+            )
+            layer = self._behavior_overlay_valid_layer(
+                role_scope,
+                role_version,
+                include_empty=False,
+            )
+            if layer:
+                layers.append(layer)
+        if include_agent and kind in {"architect", "engineer"}:
+            agent_scope = self._behavior_scope_for_agent(
+                str(getattr(cell, "id", "") or "")
+            )
+            agent_version = (
+                self.ensure_behavior_overlay_seed(agent_scope.scope_key)
+                if seed_agent else
+                self.db.load_behavior_overlay_active_version(agent_scope)
+            )
+            layer = self._behavior_overlay_valid_layer(
+                agent_scope,
+                agent_version,
+                include_empty=bool(seed_agent),
+            )
+            if layer:
+                layers.append(layer)
+        # Render-time combined body cap: drop less-specific role first.
+        if sum(overlay_text_bytes(text) for _s, _v, text in layers) > (
+                BEHAVIOR_OVERLAY_COMBINED_MAX_BYTES):
+            role_layers = [
+                layer for layer in layers if layer[0].scope_kind == "role"
+            ]
+            if role_layers:
+                log.warning(
+                    "Dropping role behavior overlay on combined cap overflow: %s",
+                    ", ".join(layer[0].scope_id for layer in role_layers),
+                )
+            layers = [
+                layer for layer in layers if layer[0].scope_kind != "role"
+            ]
+        if sum(overlay_text_bytes(text) for _s, _v, text in layers) > (
+                BEHAVIOR_OVERLAY_COMBINED_MAX_BYTES):
+            log.warning(
+                "Dropping behavior overlay stack on combined cap overflow for cell=%s",
+                getattr(cell, "id", ""),
+            )
+            layers = []
+        blocks = []
+        for scope, version, text in layers:
+            blocks.append(render_behavior_overlay_block(
+                **scope.as_row_fields(),
+                version_id=str(version.get("id", "") or ""),
+                text=text,
+                sha256=str(version.get("text_sha256", "") or ""),
+                fail_closed=True,
+                worker_dispatch=worker_dispatch and scope.scope_kind == "role",
+            ).rstrip())
+        return ("\n\n".join(blocks) + "\n") if blocks else ""
+
+    def _behavior_overlay_current_base(
+            self, scope: BehaviorOverlayScope) -> dict | None:
+        return self.ensure_behavior_overlay_seed(
+            agent_id=scope.agent_id,
+            scope_kind=scope.scope_kind,
+            scope_group=scope.scope_group,
+            scope_key=scope.scope_key,
+        )
+
+    def _behavior_overlay_route(
+            self,
+            scope: BehaviorOverlayScope,
+            target,
+            author_kind: str) -> tuple[str, bool]:
+        if scope.scope_kind == "role":
+            if str(author_kind or "").strip() == "user":
+                return "user", True
+            if str(author_kind or "").strip() != "architect":
+                raise ValueError(
+                    "role behavior overlays are architect-authored and "
+                    "user-approved in v1; engineer role writes are not supported"
+                )
+            return "user", True
         target_kind = str(getattr(target, "kind", "") or "").strip()
         if str(author_kind or "").strip() == "user":
             return "user", True
@@ -7549,9 +7795,14 @@ class MatrixState:
     def create_behavior_overlay_proposal(
             self,
             *,
-            agent_id: str,
-            proposed_by_agent_id: str,
-            proposed_by_kind: str,
+            agent_id: str = "",
+            scope_kind: str = "",
+            scope_group: str = "",
+            scope_key: str = "",
+            group: str = "",
+            role_kind: str = "",
+            proposed_by_agent_id: str = "",
+            proposed_by_kind: str = "",
             text: str = "",
             rationale: str = "",
             proposal_type: str = "set_text",
@@ -7568,28 +7819,53 @@ class MatrixState:
         """
         if not self.db:
             raise RuntimeError("database is required for behavior overlays")
-        agent_id = str(agent_id or "").strip()
         author_id = str(proposed_by_agent_id or "").strip()
         author_kind = str(proposed_by_kind or "").strip()
+        scope = self._behavior_scope_from_args(
+            agent_id=agent_id,
+            scope_kind=scope_kind,
+            scope_group=scope_group,
+            scope_key=scope_key,
+            group=group,
+            role_kind=role_kind,
+        )
         idempotency_key = str(idempotency_key or "").strip()
         if idempotency_key:
             existing = self.db.load_behavior_overlay_proposal_by_idempotency(
                 author_id,
                 idempotency_key,
+                scope,
             )
             if existing:
                 return existing
-        target = self.agents.get(agent_id)
-        if not target or str(getattr(target, "cell_type", "") or "") != "agent":
-            raise ValueError("target agent not found")
-        target_kind = str(getattr(target, "kind", "") or "").strip()
-        if target_kind not in {"architect", "engineer"}:
-            raise ValueError("worker behavior overlays are not supported in v1")
+        target = None
+        if scope.scope_kind == "agent":
+            target = self.agents.get(scope.scope_key)
+            if not target or str(getattr(target, "cell_type", "") or "") != "agent":
+                raise ValueError("target agent not found")
+            target_kind = str(getattr(target, "kind", "") or "").strip()
+            if target_kind not in {"architect", "engineer"}:
+                raise ValueError("worker behavior overlays are not supported in v1")
+        else:
+            target_kind = scope.scope_key
+            author = self.agents.get(author_id)
+            if author_kind not in {"architect", "user"}:
+                raise ValueError(
+                    "role behavior overlays are architect-authored and "
+                    "user-approved in v1; engineer role writes are not supported"
+                )
+            if author_kind == "architect" and (
+                    not author
+                    or str(getattr(author, "kind", "") or "") != "architect"
+                    or str(getattr(author, "group", "") or "") != scope.scope_group
+                    or int(getattr(author, "dismissed_at", 0) or 0) > 0
+                    or float(getattr(author, "deleted_at", 0.0) or 0.0) > 0):
+                raise ValueError("active architect in scope group is required for role behavior overlays")
         proposal_type = str(proposal_type or "set_text").strip() or "set_text"
         if proposal_type not in {"set_text", "rollback"}:
             raise ValueError("proposal_type must be set_text or rollback")
 
-        base = self._behavior_overlay_current_base(agent_id)
+        base = self._behavior_overlay_current_base(scope)
         if not base:
             raise RuntimeError("failed to initialize behavior overlay base")
         base_version_id = str(base.get("id", "") or "")
@@ -7597,17 +7873,27 @@ class MatrixState:
         if expected_base_version_id and expected_base_version_id != base_version_id:
             raise ValueError("stale behavior overlay base version")
 
-        route, requires_user = self._behavior_overlay_route(target, author_kind)
+        route, requires_user = self._behavior_overlay_route(scope, target, author_kind)
         if proposal_type == "set_text":
-            proposed_text = validate_overlay_text(str(text or ""))
+            proposed_text = validate_overlay_text(
+                str(text or ""),
+                scope_kind=scope.scope_kind,
+                max_bytes=scope.max_bytes,
+            )
             target_version_id = ""
         else:
             target_version_id = str(target_version_id or "").strip()
             target_version = self.load_behavior_overlay_version(target_version_id)
-            if not target_version or target_version.get("agent_id") != agent_id:
-                raise ValueError("rollback target version not found for agent")
+            if (
+                    not target_version
+                    or target_version.get("scope_kind") != scope.scope_kind
+                    or target_version.get("scope_group") != scope.scope_group
+                    or target_version.get("scope_key") != scope.scope_key):
+                raise ValueError("rollback target version not found for scope")
             proposed_text = validate_overlay_text(
-                str(target_version.get("text", "") or "")
+                str(target_version.get("text", "") or ""),
+                scope_kind=scope.scope_kind,
+                max_bytes=scope.max_bytes,
             )
         warnings = lint_overlay_text(proposed_text)
         now = time.time()
@@ -7615,7 +7901,9 @@ class MatrixState:
         next_actor = "user" if route == "user" else "architect"
         arch_id = ""
         arch_approved_at = None
-        if (
+        if scope.scope_kind == "role":
+            next_actor = "user"
+        elif (
                 auto_apply_architect_direct
                 and author_kind == "architect"
                 and target_kind == "engineer"
@@ -7634,7 +7922,7 @@ class MatrixState:
             arch_approved_at = now
         proposal = self.db.save_behavior_overlay_proposal({
             "id": "bop-" + uuid.uuid4().hex[:12],
-            "agent_id": agent_id,
+            **self._behavior_overlay_scope_payload(scope),
             "target_kind": target_kind,
             "proposal_type": proposal_type,
             "base_version_id": base_version_id,
@@ -7656,7 +7944,7 @@ class MatrixState:
             "updated_at": now,
         })
         self._emit_behavior_overlay_proposal(proposal)
-        if auto_apply_architect_direct and route == "architect":
+        if scope.scope_kind == "agent" and auto_apply_architect_direct and route == "architect":
             proposal = self.apply_behavior_overlay_proposal(
                 proposal["id"],
                 actor_kind="architect",
@@ -7665,10 +7953,10 @@ class MatrixState:
             )
         return proposal
 
-    def _behavior_overlay_next_version_number(self, agent_id: str) -> int:
+    def _behavior_overlay_next_version_number(self, scope: BehaviorOverlayScope) -> int:
         if not self.db:
             return 0
-        return self.db.next_behavior_overlay_version_number(agent_id)
+        return self.db.next_behavior_overlay_version_number(scope)
 
     def apply_behavior_overlay_proposal(
             self,
@@ -7686,8 +7974,8 @@ class MatrixState:
             return proposal
         if proposal.get("status") == "rejected":
             raise ValueError("behavior overlay proposal has already been rejected")
-        agent_id = str(proposal.get("agent_id", "") or "")
-        active = self.load_behavior_overlay_active(agent_id)
+        scope = coerce_behavior_overlay_scope(proposal)
+        active = self.db.load_behavior_overlay_active(scope)
         active_version_id = str((active or {}).get("active_version_id", "") or "")
         if active_version_id != str(proposal.get("base_version_id", "") or ""):
             raise ValueError("stale behavior overlay base version")
@@ -7698,20 +7986,30 @@ class MatrixState:
             target_version = self.load_behavior_overlay_version(
                 proposal.get("target_version_id", "")
             )
-            if not target_version or target_version.get("agent_id") != agent_id:
-                raise ValueError("rollback target version not found for agent")
-            validate_overlay_text(str(target_version.get("text", "") or ""))
+            if (
+                    not target_version
+                    or target_version.get("scope_kind") != scope.scope_kind
+                    or target_version.get("scope_group") != scope.scope_group
+                    or target_version.get("scope_key") != scope.scope_key):
+                raise ValueError("rollback target version not found for scope")
+            validate_overlay_text(
+                str(target_version.get("text", "") or ""),
+                scope_kind=scope.scope_kind,
+                max_bytes=scope.max_bytes,
+            )
             new_active_version_id = str(target_version.get("id", "") or "")
             action = "rollback"
             version = target_version
         else:
             proposed_text = validate_overlay_text(
-                str(proposal.get("proposed_text", "") or "")
+                str(proposal.get("proposed_text", "") or ""),
+                scope_kind=scope.scope_kind,
+                max_bytes=scope.max_bytes,
             )
             version = self.db.save_behavior_overlay_version({
                 "id": "bov-" + uuid.uuid4().hex[:12],
-                "agent_id": agent_id,
-                "version_number": self._behavior_overlay_next_version_number(agent_id),
+                **self._behavior_overlay_scope_payload(scope),
+                "version_number": self._behavior_overlay_next_version_number(scope),
                 "parent_version_id": active_version_id,
                 "text": proposed_text,
                 "text_sha256": overlay_text_sha256(proposed_text),
@@ -7727,7 +8025,7 @@ class MatrixState:
             action = "apply"
             self._emit_behavior_overlay_version(version)
         active = self.db.save_behavior_overlay_active({
-            "agent_id": agent_id,
+            **self._behavior_overlay_scope_payload(scope),
             "active_version_id": new_active_version_id,
             "updated_at": now,
             "updated_by_kind": str(actor_kind or ""),
@@ -7736,7 +8034,7 @@ class MatrixState:
         })
         self.db.save_behavior_overlay_activation({
             "id": "boa-" + uuid.uuid4().hex[:12],
-            "agent_id": agent_id,
+            **self._behavior_overlay_scope_payload(scope),
             "previous_version_id": active_version_id,
             "active_version_id": new_active_version_id,
             "proposal_id": proposal.get("id", ""),
@@ -7824,7 +8122,18 @@ class MatrixState:
             return proposal
         if proposal.get("status") == "applied":
             raise ValueError("behavior overlay proposal has already been applied")
+        if (
+                str(actor_kind or "").strip() == "architect"
+                and str(proposal.get("scope_kind", "") or "agent") == "role"
+                and str(proposal.get("proposed_by_agent_id", "") or "") != str(actor_id or "").strip()):
+            raise ValueError("architect may withdraw only its own role behavior overlay proposal")
         now = time.time()
+        resolution_note = str(note or "")
+        if (
+                str(actor_kind or "").strip() == "architect"
+                and str(proposal.get("scope_kind", "") or "agent") == "role"
+                and not resolution_note):
+            resolution_note = "withdrawn by author"
         saved = self.db.save_behavior_overlay_proposal({
             "id": proposal["id"],
             "status": "rejected",
@@ -7832,7 +8141,7 @@ class MatrixState:
             "resolved_by_kind": str(actor_kind or ""),
             "resolved_by_id": str(actor_id or ""),
             "resolved_at": now,
-            "resolution_note": str(note or ""),
+            "resolution_note": resolution_note,
             "updated_at": now,
         })
         self._emit_behavior_overlay_proposal(saved)
@@ -7849,8 +8158,23 @@ class MatrixState:
             proposal_id: str = "",
             from_version_id: str = "",
             to_version_id: str = "",
-            agent_id: str = "") -> dict:
+            agent_id: str = "",
+            scope_kind: str = "",
+            scope_group: str = "",
+            scope_key: str = "",
+            group: str = "",
+            role_kind: str = "") -> dict:
         target_agent_id = str(agent_id or "").strip()
+        scope = None
+        if scope_kind or scope_key or role_kind:
+            scope = self._behavior_scope_from_args(
+                agent_id=agent_id,
+                scope_kind=scope_kind,
+                scope_group=scope_group,
+                scope_key=scope_key,
+                group=group,
+                role_kind=role_kind,
+            )
         from_label = "from"
         to_label = "to"
         if proposal_id:
@@ -7860,6 +8184,11 @@ class MatrixState:
             if (
                     target_agent_id
                     and str(proposal.get("agent_id", "") or "") != target_agent_id):
+                raise ValueError("behavior overlay proposal not found")
+            if scope and (
+                    proposal.get("scope_kind") != scope.scope_kind
+                    or proposal.get("scope_group") != scope.scope_group
+                    or proposal.get("scope_key") != scope.scope_key):
                 raise ValueError("behavior overlay proposal not found")
             base = self.load_behavior_overlay_version(
                 proposal.get("base_version_id", "")
@@ -7883,6 +8212,9 @@ class MatrixState:
         if not from_version_id and target_agent_id:
             active = self.load_behavior_overlay_active(target_agent_id) or {}
             from_version_id = str(active.get("active_version_id", "") or "")
+        if not from_version_id and scope:
+            active = self.db.load_behavior_overlay_active(scope) if self.db else {}
+            from_version_id = str((active or {}).get("active_version_id", "") or "")
         from_version = self.load_behavior_overlay_version(from_version_id) or {}
         to_version = self.load_behavior_overlay_version(to_version_id) or {}
         if not from_version or not to_version:
@@ -7892,6 +8224,13 @@ class MatrixState:
                     str(from_version.get("agent_id", "") or "") != target_agent_id
                     or str(to_version.get("agent_id", "") or "") != target_agent_id):
                 raise ValueError("behavior overlay version not found")
+        if scope:
+            for version in (from_version, to_version):
+                if (
+                        str(version.get("scope_kind", "") or "") != scope.scope_kind
+                        or str(version.get("scope_group", "") or "") != scope.scope_group
+                        or str(version.get("scope_key", "") or "") != scope.scope_key):
+                    raise ValueError("behavior overlay version not found")
         return {
             "type": "behavior_overlay_diff",
             "from_version": version_summary(from_version),
@@ -7916,16 +8255,27 @@ class MatrixState:
         existing_task_id = str(proposal.get("user_task_id", "") or "")
         if existing_task_id and existing_task_id in self.board_tasks:
             return existing_task_id
+        scope_kind = str(proposal.get("scope_kind", "") or "agent")
         target = self.agents.get(str(proposal.get("agent_id", "") or ""))
-        group = str(getattr(target, "group", "") or "") if target else ""
+        group = (
+            str(proposal.get("scope_group", "") or "")
+            if scope_kind == "role"
+            else str(getattr(target, "group", "") or "") if target else ""
+        )
         if not group or group not in self.groups:
             return ""
         title = "Dynamic Behavior overlay approval"
-        target_label = (
-            f"{getattr(target, 'name', '')} "
-            f"({getattr(target, 'kind', '')}:{getattr(target, 'id', '')})"
-            if target else proposal.get("agent_id", "")
-        )
+        if scope_kind == "role":
+            target_label = (
+                f"{proposal.get('target_kind', proposal.get('scope_key', ''))} "
+                f"role overlay for group {group}"
+            )
+        else:
+            target_label = (
+                f"{getattr(target, 'name', '')} "
+                f"({getattr(target, 'kind', '')}:{getattr(target, 'id', '')})"
+                if target else proposal.get("agent_id", "")
+            )
         description = "\n".join([
             "A governed Dynamic Behavior overlay proposal is awaiting user approval.",
             "",
@@ -7949,7 +8299,14 @@ class MatrixState:
                 "torque:human",
                 "behavior-overlay-approval",
                 f"proposal:{proposal_id}",
-            ],
+                f"scope:{scope_kind}",
+            ] + (
+                [
+                    f"role:{proposal.get('target_kind', proposal.get('scope_key', ''))}",
+                    f"group:{group}",
+                ]
+                if scope_kind == "role" else []
+            ),
             created_by_architect_id=str(
                 proposal.get("architect_approver_id", "")
                 or (

@@ -605,7 +605,17 @@ _ARCHITECT_TOOL_SPECS = [
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"agent_id": {"type": "string"}},
+            "properties": {
+                "agent_id": {"type": "string"},
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role", "effective"],
+                },
+                "role_kind": {
+                    "type": "string",
+                    "enum": ["architect", "engineer", "worker"],
+                },
+            },
         },
     },
     {
@@ -615,6 +625,14 @@ _ARCHITECT_TOOL_SPECS = [
             "type": "object",
             "properties": {
                 "agent_id": {"type": "string"},
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                },
+                "role_kind": {
+                    "type": "string",
+                    "enum": ["architect", "engineer", "worker"],
+                },
                 "limit": {"type": "integer"},
             },
         },
@@ -626,6 +644,14 @@ _ARCHITECT_TOOL_SPECS = [
             "type": "object",
             "properties": {
                 "agent_id": {"type": "string"},
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                },
+                "role_kind": {
+                    "type": "string",
+                    "enum": ["architect", "engineer", "worker"],
+                },
                 "proposal_id": {"type": "string"},
                 "from_version_id": {"type": "string"},
                 "to_version_id": {"type": "string"},
@@ -643,6 +669,14 @@ _ARCHITECT_TOOL_SPECS = [
                     "enum": ["proposed", "approved", "rejected", "applied"],
                 },
                 "agent_id": {"type": "string"},
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["agent", "role"],
+                },
+                "role_kind": {
+                    "type": "string",
+                    "enum": ["architect", "engineer", "worker"],
+                },
                 "limit": {"type": "integer"},
             },
         },
@@ -674,6 +708,27 @@ _ARCHITECT_TOOL_SPECS = [
                 "idempotency_key": {"type": "string"},
             },
             "required": ["engineer_id", "text", "rationale"],
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_propose_for_role",
+        "description": (
+            "Propose a group-scoped role Dynamic Behavior overlay. "
+            "Role overlays are architect-authored and always user-approved."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "role_kind": {
+                    "type": "string",
+                    "enum": ["architect", "engineer", "worker"],
+                },
+                "text": {"type": "string"},
+                "rationale": {"type": "string"},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["role_kind", "text", "rationale"],
         },
     },
     {
@@ -714,6 +769,24 @@ _ARCHITECT_TOOL_SPECS = [
                 "idempotency_key": {"type": "string"},
             },
             "required": ["version_id", "rationale"],
+        },
+    },
+    {
+        "name": "architect_behavior_overlay_rollback_role",
+        "description": "Propose rollback for a group-scoped role overlay; routes to user approval.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "role_kind": {
+                    "type": "string",
+                    "enum": ["architect", "engineer", "worker"],
+                },
+                "version_id": {"type": "string"},
+                "rationale": {"type": "string"},
+                "expected_base_version_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["role_kind", "version_id", "rationale"],
         },
     },
     {
