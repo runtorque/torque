@@ -1139,18 +1139,24 @@ function _behaviorOverlayRefreshRolePaneIfOpenForScope(scopeKey) {
   return renderBehaviorOverlayRolePane(scope.scope_group, scope.scope_key);
 }
 
+function _behaviorOverlayRefreshFocusedBehaviorPanel() {
+  if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return true;
+  if (typeof renderAgentPanel === 'function') {
+    renderAgentPanel();
+    return true;
+  }
+  return false;
+}
+
+function _behaviorOverlayRefreshPanelForVisibleScope(scopeLike) {
+  if (!behaviorOverlayDeltaInvalidatesFocusedPanel(scopeLike || {})) return false;
+  return _behaviorOverlayRefreshFocusedBehaviorPanel();
+}
+
 function _behaviorOverlayRefreshPanelIfFocused(agentId) {
   agentId = String(agentId || '').trim();
-  var focused = (typeof _focusedEngineerAgent === 'function')
-    ? _focusedEngineerAgent()
-    : (typeof _resolveFocusedAgent === 'function' ? _resolveFocusedAgent() : null);
-  if (!focused) return;
-  var kind = _behaviorOverlayKind(focused);
-  if (typeof _agentPanelActiveTab === 'function'
-      && _agentPanelActiveTab(kind) !== 'behavior') return;
-  if (!behaviorOverlayDeltaInvalidatesFocusedPanel({ agent_id: agentId })) return;
-  if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return;
-  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  if (!agentId) return false;
+  return _behaviorOverlayRefreshPanelForVisibleScope({ agent_id: agentId });
 }
 
 function _behaviorOverlayDiffKeyFromPayload(msg) {
@@ -1239,9 +1245,14 @@ function behaviorOverlayReceiveMessage(msg) {
     _behaviorOverlayProposalListLoadingKey = '';
     _behaviorOverlayProposalListLoaded = true;
     var proposals = Array.isArray(msg.proposals) ? msg.proposals : [];
-    for (var p = 0; p < proposals.length; p++) _behaviorOverlayUpsertProposal(proposals[p]);
-    var focused = (typeof _focusedEngineerAgent === 'function') ? _focusedEngineerAgent() : null;
-    if (focused) _behaviorOverlayRefreshPanelIfFocused(focused.id || '');
+    var refreshFocusedPanel = false;
+    for (var p = 0; p < proposals.length; p++) {
+      if (!refreshFocusedPanel && behaviorOverlayDeltaInvalidatesFocusedPanel(proposals[p])) {
+        refreshFocusedPanel = true;
+      }
+      _behaviorOverlayUpsertProposal(proposals[p]);
+    }
+    if (refreshFocusedPanel) _behaviorOverlayRefreshFocusedBehaviorPanel();
     if (typeof _settingsGroup !== 'undefined' && _settingsGroup) {
       renderGroupBehaviorRolePanes(_settingsGroup);
     }

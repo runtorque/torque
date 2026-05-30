@@ -330,6 +330,95 @@ test('Architect Behavior tab renders hired-engineer governance controls', () => 
   assert.match(panel.innerHTML, /Request rollback/);
 });
 
+test('architect Engineer Behavior tab refreshes when proposal list response adds visible proposals', () => {
+  const { context, panel, sendCalls } = createHarness();
+  const roleKey = 'role:alpha:engineer';
+  context.state.group_settings = {
+    alpha: { engineer_behavior_requires_user_approval: true },
+  };
+  context.state.agents = {
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent', hired_by_architect_id: 'arch-1' },
+  };
+  context.focusedItemId = 'arch-1';
+  context.state.behavior_overlay_active = {
+    [roleKey]: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-role' },
+    'eng-1': { agent_id: 'eng-1', active_version_id: 'bov-eng' },
+  };
+  context.state.behavior_overlay_versions = {
+    [roleKey]: [
+      { id: 'bov-role', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 1, text_sha256: 'rolehash', text_bytes: 9, rationale: 'Role seed', created_at: 1 },
+    ],
+    'eng-1': [
+      { id: 'bov-eng', agent_id: 'eng-1', version_number: 1, text_sha256: 'enghash', text_bytes: 8, rationale: 'Engineer seed', created_at: 1 },
+    ],
+  };
+  vm.runInContext(`
+    _agentPanelLastSelectedTabByKind.architect = 'behavior';
+    _behaviorOverlayInnerTabByAgent['arch-1'] = 'engineer';
+    _behaviorOverlayReadByAgent['role:alpha:engineer'] = {
+      active: state.behavior_overlay_active['role:alpha:engineer'],
+      version: state.behavior_overlay_versions['role:alpha:engineer'][0],
+      text: 'role text',
+      received_at: Date.now(),
+    };
+    _behaviorOverlayReadByAgent['eng-1'] = {
+      active: state.behavior_overlay_active['eng-1'],
+      version: state.behavior_overlay_versions['eng-1'][0],
+      text: 'engineer text',
+      received_at: Date.now(),
+    };
+    _behaviorOverlayVersionsByAgent['role:alpha:engineer'] = state.behavior_overlay_versions['role:alpha:engineer'].slice();
+    _behaviorOverlayVersionsByAgent['eng-1'] = state.behavior_overlay_versions['eng-1'].slice();
+  `, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /data-agent-panel-behavior-view="engineer"/);
+  assert.match(panel.innerHTML, /All engineers \(role\)/);
+  assert.match(panel.innerHTML, /Hired engineer governance/);
+  assert.doesNotMatch(panel.innerHTML, /Late proposal/);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_proposals',
+    proposals: [{
+      id: 'bop-late',
+      agent_id: 'eng-1',
+      target_kind: 'engineer',
+      status: 'proposed',
+      next_actor_kind: 'architect',
+      approval_route: 'architect',
+      proposed_text_sha256: 'latehash',
+      proposed_text_bytes: 18,
+      rationale: 'Late proposal',
+    }],
+  });
+
+  assert.match(panel.innerHTML, /Late proposal/);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay_proposals',
+    proposals: [{
+      id: 'bop-role-late',
+      scope_kind: 'role',
+      scope_group: 'alpha',
+      scope_key: 'engineer',
+      role_kind: 'engineer',
+      status: 'proposed',
+      next_actor_kind: 'user',
+      approval_route: 'user',
+      proposed_text_sha256: 'rolelatehash',
+      proposed_text_bytes: 20,
+      rationale: 'Late role proposal',
+    }],
+  });
+
+  assert.match(panel.innerHTML, /Late role proposal/);
+  assert.equal(sendCalls.filter((call) => call.cmd === 'behavior_overlay_proposals').length, 1);
+});
+
 test('active behavior deltas invalidate cached full text before submit', () => {
   const { context, sendCalls } = createHarness();
   context.state.agents = {
