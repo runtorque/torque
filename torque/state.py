@@ -6935,6 +6935,52 @@ class MatrixState:
 
         return False
 
+    def engineer_can_access_task(
+            self,
+            engineer_id: str,
+            task,
+            *,
+            allow_created: bool = True,
+            allow_unassigned: bool = False) -> bool:
+        """Return whether an Engineer may act on ``task``.
+
+        Task access is group-bound and owned by explicit task assignment. Some
+        mutating surfaces also allow the Engineer that created a task to keep
+        managing it while it is unassigned or after reassignment.
+        """
+        engineer_id = str(engineer_id or "").strip()
+        engineer = self.agents.get(engineer_id)
+        if self.agent_is_tombstoned(engineer):
+            return False
+        if not engineer or getattr(engineer, "cell_type", "") != "agent":
+            return False
+        if str(getattr(engineer, "kind", "") or "").strip() != "engineer":
+            return False
+
+        if isinstance(task, str):
+            task = self.board_tasks.get(str(task or "").strip())
+        if not task:
+            return False
+        engineer_group = str(getattr(engineer, "group", "") or "").strip()
+        task_group = str(getattr(task, "group", "") or "").strip()
+        if not engineer_group or task_group != engineer_group:
+            return False
+
+        assigned_engineer_id = str(
+            getattr(task, "assigned_engineer_id", "") or ""
+        ).strip()
+        if assigned_engineer_id == engineer_id:
+            return True
+        if allow_created:
+            created_by_engineer_id = str(
+                getattr(task, "created_by_engineer_id", "") or ""
+            ).strip()
+            if created_by_engineer_id == engineer_id:
+                return True
+        if allow_unassigned and not assigned_engineer_id:
+            return True
+        return False
+
     def _save_engineer_settings(self, group: str, emit: bool = True):
         ws = self.engineer_settings.get(group)
         if not ws:

@@ -5173,6 +5173,36 @@ def _reject_missing_deliverable(task, action_label: str) -> dict | None:
     }
 
 
+def _task_upload_actor_source(state: MatrixState, actor, task) -> str:
+    if not actor or getattr(actor, "cell_type", "") != "agent":
+        return "agent"
+    if str(getattr(actor, "kind", "") or "").strip() == "engineer":
+        return "engineer"
+    settings = state.get_group_settings(str(getattr(task, "group", "") or ""))
+    if settings and str(getattr(settings, "engineer_agent_id", "") or "") == str(
+            getattr(actor, "id", "") or ""):
+        return "engineer"
+    return "agent"
+
+
+def _task_upload_engineer_scope_error(
+        state: MatrixState, actor, task) -> dict | None:
+    """Return a scoped-upload error for Engineer callers outside task scope."""
+    if (
+            not actor
+            or getattr(actor, "cell_type", "") != "agent"
+            or str(getattr(actor, "kind", "") or "").strip() != "engineer"):
+        return None
+    if state.engineer_can_access_task(
+            str(getattr(actor, "id", "") or ""),
+            task,
+            allow_created=True,
+            allow_unassigned=False,
+    ):
+        return None
+    return {"type": "error", "message": "task not found in scope"}
+
+
 def _reject_pending_review(task, action_label: str) -> dict | None:
     """Reject ``torque_done`` / ``torque_ready`` when a structural review is
     required and no reviewer-issued bypass is set (TORQUE:256).
@@ -16558,58 +16588,55 @@ async def main(connection=None):
                     }
                 else:
                     actor = state.agents.get(cell_id) if cell_id else None
+                    result = _task_upload_engineer_scope_error(
+                        state, actor, task)
                     provenance = {
-                        "source": (
-                            "engineer"
-                            if actor and actor.id == state.get_group_settings(
-                                task.group
-                            ).engineer_agent_id
-                            else "agent"
-                        ),
+                        "source": _task_upload_actor_source(state, actor, task),
                         "agent_id": actor.id if actor else "",
                         "agent_name": (actor.slug or actor.name) if actor else "",
                     }
-                    try:
-                        artifact = store_task_upload(
-                            task_id=tid,
-                            local_path=data.get("local_path", ""),
-                            filename=data.get("filename", ""),
-                            content_base64=data.get("content_base64", ""),
-                            content_text=data.get("content_text", ""),
-                            artifact_type=data.get("artifact_type", ""),
-                            title=data.get("title", ""),
-                            mime_type=data.get("mime_type", ""),
-                            summary=data.get("summary", ""),
-                            prompt_mode=data.get("prompt_mode", ""),
-                            provenance=provenance,
-                        )
-                    except FileNotFoundError as exc:
-                        result = {"type": "error", "message": str(exc)}
-                    except ValueError as exc:
-                        result = {"type": "error", "message": str(exc)}
-                    else:
-                        artifacts = normalize_artifacts(task.artifacts or [])
-                        artifacts.append(artifact)
-                        state.board_update_task(tid, artifacts=artifacts)
-                        refreshed = state.board_tasks.get(tid)
-                        serialized_artifact = serialize_task_artifact(
-                            artifact,
-                            task_id=tid,
-                            task_label=(
-                                refreshed.task if refreshed else task.task
-                            ),
-                        )
-                        _emit_task_artifact_uploaded_event(
-                            _panel_event,
-                            refreshed or task,
-                            actor,
-                            serialized_artifact,
-                        )
-                        result = {
-                            "type": "task_artifact_uploaded",
-                            "task_id": tid,
-                            "artifact": serialized_artifact,
-                        }
+                    if not result:
+                        try:
+                            artifact = store_task_upload(
+                                task_id=tid,
+                                local_path=data.get("local_path", ""),
+                                filename=data.get("filename", ""),
+                                content_base64=data.get("content_base64", ""),
+                                content_text=data.get("content_text", ""),
+                                artifact_type=data.get("artifact_type", ""),
+                                title=data.get("title", ""),
+                                mime_type=data.get("mime_type", ""),
+                                summary=data.get("summary", ""),
+                                prompt_mode=data.get("prompt_mode", ""),
+                                provenance=provenance,
+                            )
+                        except FileNotFoundError as exc:
+                            result = {"type": "error", "message": str(exc)}
+                        except ValueError as exc:
+                            result = {"type": "error", "message": str(exc)}
+                        else:
+                            artifacts = normalize_artifacts(task.artifacts or [])
+                            artifacts.append(artifact)
+                            state.board_update_task(tid, artifacts=artifacts)
+                            refreshed = state.board_tasks.get(tid)
+                            serialized_artifact = serialize_task_artifact(
+                                artifact,
+                                task_id=tid,
+                                task_label=(
+                                    refreshed.task if refreshed else task.task
+                                ),
+                            )
+                            _emit_task_artifact_uploaded_event(
+                                _panel_event,
+                                refreshed or task,
+                                actor,
+                                serialized_artifact,
+                            )
+                            result = {
+                                "type": "task_artifact_uploaded",
+                                "task_id": tid,
+                                "artifact": serialized_artifact,
+                            }
 
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(state, data.get("id", ""))
