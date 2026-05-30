@@ -577,6 +577,7 @@ CREATE TABLE IF NOT EXISTS pending_hires (
     requested_command TEXT NOT NULL DEFAULT '',
     requested_provider TEXT NOT NULL DEFAULT '',
     requested_directory TEXT NOT NULL DEFAULT '',
+    requested_specializations TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'pending',
     resolution_note TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT 0,
@@ -1833,6 +1834,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
             "default_engineer_specializations TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+    # Migrate: add requested_specializations column to pending_hires
+    try:
+        conn.execute(
+            "SELECT requested_specializations FROM pending_hires LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE pending_hires ADD COLUMN "
+            "requested_specializations TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
     # Migrate: add architect settings columns to group_settings.
     for col, col_type, default in (

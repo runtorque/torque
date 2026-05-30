@@ -78,6 +78,21 @@ class SpecializationManagerTests(unittest.TestCase):
         self.assertEqual(project_entry["path"],
                          str(self.project_specs / "security.yaml"))
 
+    def test_canonical_project_names_excludes_user_specializations(self):
+        (self.user_specs / "local-only.yaml").write_text(
+            "name: local-only\npreamble: local\n",
+            encoding="utf-8",
+        )
+        (self.project_specs / "ui-ux.yaml").write_text(
+            "name: ui-ux\npreamble: project\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            self.mgr.canonical_project_names(base_dir=str(self.project)),
+            ["ui-ux"],
+        )
+
     def test_delete_removes_file(self):
         self.mgr.save_specialization(
             "events",

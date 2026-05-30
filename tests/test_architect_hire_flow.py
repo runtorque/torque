@@ -42,6 +42,21 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        self.project_specs = Path(self.tmp.name) / ".torque" / "specializations"
+        self.project_specs.mkdir(parents=True)
+        for name in (
+                "ui-ux",
+                "orchestration-core",
+                "runtime-pty",
+                "desktop-shell",
+                "worktree-release",
+                "prompts-config",
+                "quality-observability",
+        ):
+            self.project_specs.joinpath(f"{name}.yaml").write_text(
+                f"name: {name}\npreamble: {name} focus.\n",
+                encoding="utf-8",
+            )
         self.db_path = Path(self.tmp.name) / "torque.db"
         self.db = self.db_mod.TorqueDB(self.db_path)
         self.db.init()
@@ -101,8 +116,52 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             caller_id=caller_id,
         )
 
+    async def test_architect_engineer_hire_mcp_forwards_specializations(self):
+        architect = self._add_architect("arch-1", "Architect")
+        calls = []
+
+        async def fake_handle(payload):
+            calls.append(dict(payload))
+            return {
+                "hire_id": "hire-1",
+                "status": "pending",
+                "requested_specializations": list(
+                    payload.get("specializations", []) or []
+                ),
+            }
+
+        text, is_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_engineer_hire",
+            {"name": "Alice", "specializations": ["ui-ux"]},
+            fake_handle,
+            self.state,
+            caller_id=architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            calls[0],
+            {
+                "cmd": "architect_engineer_hire",
+                "architect_id": architect.id,
+                "name": "Alice",
+                "command": "",
+                "provider": "",
+                "directory": "",
+                "specializations": ["ui-ux"],
+            },
+        )
+        self.assertEqual(
+            json.loads(text)["requested_specializations"],
+            ["ui-ux"],
+        )
+
     async def test_architect_engineer_hire_creates_pending_row_and_emits_delta(self):
         architect = self._add_architect("arch-1", "Architect")
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "torque")
+            return self.tmp.name
 
         result = await self.server_mod._handle_architect_engineer_hire_command(
             {
@@ -111,11 +170,23 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
                 "command": "codex --full-auto",
                 "provider": "codex",
                 "directory": "/tmp/project",
+                "specializations": [
+                    "ui-ux",
+                    "",
+                    "orchestration-core",
+                    "ui-ux",
+                ],
             },
             self.state,
+            resolve_base_dir=fake_resolve_base_dir,
+            specialization_mgr=self.server_mod.SpecializationManager(),
         )
 
         self.assertEqual(result["status"], "pending")
+        self.assertEqual(
+            result["requested_specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
         pending_hire = self.state.load_pending_hire(result["hire_id"])
         self.assertIsNotNone(pending_hire)
         self.assertEqual(pending_hire["architect_id"], architect.id)
@@ -123,7 +194,38 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pending_hire["requested_command"], "codex --full-auto")
         self.assertEqual(pending_hire["requested_provider"], "codex")
         self.assertEqual(pending_hire["requested_directory"], "/tmp/project")
+        self.assertEqual(
+            pending_hire["requested_specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
         self.assertEqual(self.state._delta_ops[-1]["op"], "pending_hire_upsert")
+        self.assertEqual(
+            self.state._delta_ops[-1]["requested_specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
+
+    async def test_architect_engineer_hire_rejects_unknown_project_specialization(self):
+        architect = self._add_architect("arch-1", "Architect")
+
+        async def fake_resolve_base_dir(_group):
+            return self.tmp.name
+
+        result = await self.server_mod._handle_architect_engineer_hire_command(
+            {
+                "architect_id": architect.id,
+                "name": "Alice",
+                "specializations": ["ui-ux", "local-only"],
+            },
+            self.state,
+            resolve_base_dir=fake_resolve_base_dir,
+            specialization_mgr=self.server_mod.SpecializationManager(),
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("Unknown specialization", result["message"])
+        self.assertIn("Valid specializations:", result["message"])
+        self.assertIn("ui-ux", result["message"])
+        self.assertEqual(self.state.load_pending_hires(), [])
 
     async def test_pending_hire_approve_spawns_hired_engineer_and_resolves_row(self):
         architect = self._add_architect("arch-1", "Architect")
@@ -134,6 +236,7 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             "requested_command": "codex --full-auto",
             "requested_provider": "codex",
             "requested_directory": "",
+            "requested_specializations": ["ui-ux", "orchestration-core"],
             "status": "pending",
         })
         self.assertIsNotNone(pending_hire)
@@ -177,6 +280,7 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             resolve_base_dir=fake_resolve_base_dir,
             resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
             create_agent_with_config=service.create_agent_with_config,
+            specialization_mgr=self.server_mod.SpecializationManager(),
             send_agent_prompt=fake_send_agent_prompt,
         )
 
@@ -184,6 +288,14 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineer.kind, "engineer")
         self.assertTrue(engineer.persistent)
         self.assertEqual(engineer.hired_by_architect_id, architect.id)
+        self.assertEqual(
+            engineer.engineer_specializations,
+            ["ui-ux", "orchestration-core"],
+        )
+        self.assertEqual(
+            result["specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
         self.assertEqual(result["slug"], engineer.slug)
         updated_hire = self.state.load_pending_hire(pending_hire["id"])
         self.assertEqual(updated_hire["status"], "approved")
@@ -200,6 +312,9 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             self.state.global_settings.engineer_default_boot_nudge,
             sent_prompts[1]["prompt"],
         )
+        self.assertIn("Specializations: ui-ux (primary), orchestration-core",
+                      sent_prompts[0]["prompt"])
+        self.assertIn("ui-ux focus.", sent_prompts[0]["prompt"])
 
         second = await self.server_mod._handle_pending_hire_approve_command(
             {"id": pending_hire["id"]},
@@ -207,6 +322,7 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             resolve_base_dir=fake_resolve_base_dir,
             resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
             create_agent_with_config=service.create_agent_with_config,
+            specialization_mgr=self.server_mod.SpecializationManager(),
             send_agent_prompt=fake_send_agent_prompt,
         )
         self.assertEqual(second["engineer_id"], engineer.id)

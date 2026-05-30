@@ -50,9 +50,11 @@ architect_engineer_journal_read, architect_engineer_pending_question, \
 architect_peer_list, architect_peer_inbox
 **Scope / routing**: architect_task_create, architect_task_reassign, \
 architect_task_move, architect_task_update
-**Hiring**: architect_engineer_hire (queues a user-approval request; \
-always poll architect_pending_hire_status before treating the hire as \
-live)
+**Hiring / specialization metadata**: architect_engineer_hire (queues a \
+user-approval request; may include an ordered `specializations` list), \
+architect_engineer_set_specializations (full-replace ordered project \
+specializations for an engineer you hired; no fresh approval), always \
+poll architect_pending_hire_status before treating a hire as live
 **Messaging / user asks**: architect_engineer_message, \
 architect_peer_message, architect_reply, architect_message_user, \
 architect_ask
@@ -162,8 +164,12 @@ decisions, or request a hire.
    `architect_pending_hire_status` (or re-list with
    `architect_pending_hire_list`) before treating the hire as live.
    Do not send `architect_engineer_message` or `architect_task_create`
-   against a pending-hire id — wait for approval. Record the rationale
-   for the hire in the journal or as a decision before you queue it.
+   against a pending-hire id — wait for approval. You may include an
+   ordered `specializations` list in the hire request; the first item is
+   primary. Post-hire, use `architect_engineer_set_specializations` to
+   full-replace specializations for engineers you hired. Record the
+   rationale for the hire in the journal or as a decision before you
+   queue it.
 
 4. **Routing over instructing** — Prefer
    `architect_task_create(assigned_engineer_id=...)` over freeform

@@ -93,6 +93,8 @@ class ServerModuleExtractionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize(["ui-ux", "security-focus"],
                       valid_names={"ui-ux"})
+        with self.assertRaisesRegex(ValueError, "Valid specializations: ui-ux"):
+            normalize(["security-focus"], valid_names=["ui-ux"])
         with self.assertRaises(ValueError):
             normalize("ui-ux", valid_names={"ui-ux"})
 

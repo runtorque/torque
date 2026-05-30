@@ -405,21 +405,47 @@ def _resolve_pending_engineer_specializations(
     ]
 
 
-def _known_specialization_names(specialization_mgr, base_dir: str = "") -> set:
-    """Return valid specialization slugs for a group/project base dir."""
-    names = set()
-    for item in specialization_mgr.list_specializations(base_dir=base_dir):
+def _project_specialization_names(specialization_mgr,
+                                  base_dir: str = "") -> list[str]:
+    """Return architect-routable project specialization slugs only."""
+    resolver = getattr(specialization_mgr, "canonical_project_names", None)
+    if callable(resolver):
+        return [
+            str(name or "").strip()
+            for name in resolver(base_dir=base_dir)
+            if str(name or "").strip()
+        ]
+    names = []
+    seen = set()
+    for item in specialization_mgr.list_specializations(
+            base_dir=base_dir,
+            scope="project",
+    ):
         name = str((item or {}).get("name", "") or "").strip()
-        if name:
-            names.add(name)
+        if not name or name in seen:
+            continue
+        names.append(name)
+        seen.add(name)
     return names
 
 
 def _normalize_engineer_specialization_selection(
-        raw, valid_names: set | None = None) -> list:
+        raw, valid_names: list | set | tuple | None = None) -> list:
     """Validate, dedupe, and preserve engineer specialization order."""
     if not isinstance(raw, list):
         raise ValueError("specializations must be a list")
+    valid_list = None
+    valid_set = None
+    if valid_names is not None:
+        valid_list = []
+        valid_seen = set()
+        for item in valid_names:
+            token = str(item or "").strip()
+            if not token or token in valid_seen:
+                continue
+            valid_list.append(token)
+            valid_seen.add(token)
+        valid_set = set(valid_list)
     names = []
     seen = set()
     unknown = []
@@ -428,17 +454,20 @@ def _normalize_engineer_specialization_selection(
         if not token or token in seen:
             continue
         seen.add(token)
-        if valid_names is not None and token not in valid_names:
+        if valid_set is not None and token not in valid_set:
             unknown.append(token)
             continue
         names.append(token)
     if unknown:
-        raise ValueError(
+        message = (
             "Unknown specialization"
             + ("s" if len(unknown) != 1 else "")
             + ": "
             + ", ".join(unknown)
         )
+        if valid_list is not None:
+            message += ". Valid specializations: " + ", ".join(valid_list)
+        raise ValueError(message)
     return names
 
 
@@ -9206,6 +9235,7 @@ async def _handle_add_engineer_command(
         resolve_base_dir,
         resolve_engineer_launch_config,
         create_agent_with_config,
+        specialization_mgr=None,
         send_agent_prompt) -> dict:
     """Create and launch a persistent engineer agent."""
     name = str(data.get("name", "") or "").strip()
@@ -9221,6 +9251,8 @@ async def _handle_add_engineer_command(
     if group not in state.groups:
         state.add_group(group)
     base_dir = await resolve_base_dir(group)
+    pending_specializations = _resolve_pending_engineer_specializations(
+        data, state, group, True)
     overrides = {
         key: str(data.get(key, "") or "").strip()
         for key in ("command", "provider", "directory")
@@ -9235,11 +9267,24 @@ async def _handle_add_engineer_command(
 
     from .engineer import build_engineer_system_prompt
 
+    spec_preamble = ""
+    if pending_specializations and specialization_mgr is not None:
+        try:
+            spec_preamble = specialization_mgr.render_engineer_preamble(
+                pending_specializations,
+                base_dir=base_dir,
+            )
+        except Exception:
+            log.exception(
+                "failed to render specializations for new engineer in group=%s",
+                group,
+            )
     persistent_prompt_text = build_engineer_system_prompt(
         group,
         state.get_engineer_settings(group),
         launch_cfg.get("system_prompt", ""),
         group_settings=state.get_group_settings(group),
+        specializations_preamble=spec_preamble,
         owner_is_user=not str(
             data.get("hired_by_architect_id", "") or "").strip(),
     )
@@ -9265,6 +9310,11 @@ async def _handle_add_engineer_command(
     if not cell:
         return {"type": "error", "message": "Failed to create engineer"}
 
+    if pending_specializations:
+        cell.engineer_specializations = list(pending_specializations)
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
@@ -9282,6 +9332,9 @@ async def _handle_add_engineer_command(
         "slug": cell.slug,
         "name": cell.name,
         "kind": "engineer",
+        "specializations": list(
+            getattr(cell, "engineer_specializations", []) or []
+        ),
     }
 
 
@@ -9459,7 +9512,9 @@ async def _handle_add_worker_command(
 
 async def _handle_architect_engineer_hire_command(
         data: dict,
-        state: MatrixState) -> dict:
+        state: MatrixState, *,
+        resolve_base_dir=None,
+        specialization_mgr=None) -> dict:
     """Queue a user-approved pending hire for an architect."""
     architect = _resolve_architect_cell(
         state,
@@ -9476,6 +9531,24 @@ async def _handle_architect_engineer_hire_command(
     if not name:
         return {"type": "error", "message": "Engineer name is required"}
 
+    requested_specializations = []
+    if "specializations" in data:
+        try:
+            if not callable(resolve_base_dir) or specialization_mgr is None:
+                raise ValueError("specialization validation is unavailable")
+            base_dir = await resolve_base_dir(architect.group)
+            requested_specializations = (
+                _normalize_engineer_specialization_selection(
+                    data.get("specializations"),
+                    valid_names=_project_specialization_names(
+                        specialization_mgr,
+                        base_dir,
+                    ),
+                )
+            )
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
+
     pending_hire = await state.save_pending_hire_async({
         "id": "hire-" + uuid.uuid4().hex[:12],
         "architect_id": architect.id,
@@ -9483,6 +9556,7 @@ async def _handle_architect_engineer_hire_command(
         "requested_command": str(data.get("command", "") or "").strip(),
         "requested_provider": str(data.get("provider", "") or "").strip(),
         "requested_directory": str(data.get("directory", "") or "").strip(),
+        "requested_specializations": requested_specializations,
         "status": "pending",
         "resolution_note": "",
         "created_engineer_id": "",
@@ -9492,6 +9566,9 @@ async def _handle_architect_engineer_hire_command(
     return {
         "hire_id": pending_hire["id"],
         "status": pending_hire["status"],
+        "requested_specializations": list(
+            pending_hire.get("requested_specializations", []) or []
+        ),
     }
 
 
@@ -9501,6 +9578,7 @@ async def _handle_pending_hire_approve_command(
         resolve_base_dir,
         resolve_engineer_launch_config,
         create_agent_with_config,
+        specialization_mgr=None,
         send_agent_prompt) -> dict:
     """Approve a pending architect hire and create the engineer."""
     pending_hire = state.load_pending_hire(data.get("id", ""))
@@ -9533,6 +9611,9 @@ async def _handle_pending_hire_approve_command(
             "command": pending_hire.get("requested_command", ""),
             "provider": pending_hire.get("requested_provider", ""),
             "directory": pending_hire.get("requested_directory", ""),
+            "specializations": list(
+                pending_hire.get("requested_specializations", []) or []
+            ),
             "group": architect.group,
             "hired_by_architect_id": architect.id,
         },
@@ -9540,6 +9621,7 @@ async def _handle_pending_hire_approve_command(
         resolve_base_dir=resolve_base_dir,
         resolve_engineer_launch_config=resolve_engineer_launch_config,
         create_agent_with_config=create_agent_with_config,
+        specialization_mgr=specialization_mgr,
         send_agent_prompt=send_agent_prompt,
     )
     if created.get("type") == "error":
@@ -9556,6 +9638,7 @@ async def _handle_pending_hire_approve_command(
     return {
         "engineer_id": created["id"],
         "slug": created["slug"],
+        "specializations": list(created.get("specializations", []) or []),
     }
 
 
@@ -9580,6 +9663,73 @@ async def _handle_pending_hire_reject_command(
     if not saved:
         return {"type": "error", "message": "Failed to resolve pending hire"}
     return {"ok": True}
+
+
+async def _handle_set_engineer_specializations_command(
+        data: dict,
+        state: MatrixState, *,
+        resolve_base_dir,
+        specialization_mgr,
+        architect_id: str = "") -> dict:
+    """Full-replace an engineer's ordered specialization list."""
+    engineer_ident = str(data.get("engineer_id", "") or "").strip()
+    if not engineer_ident:
+        return {
+            "type": "error",
+            "message": "engineer_id is required",
+        }
+    agent_id = _resolve_agent_id(state, engineer_ident)
+    cell = state.agents.get(agent_id) if agent_id else None
+    scoped_architect_id = str(
+        architect_id or data.get("architect_id", "") or ""
+    ).strip()
+    if not cell or cell.kind != "engineer":
+        message = (
+            "engineer not found in scope"
+            if scoped_architect_id
+            else f"Engineer \"{engineer_ident}\" not found"
+        )
+        return {"type": "error", "message": message}
+    if scoped_architect_id:
+        architect = _resolve_architect_cell(
+            state,
+            architect_id=scoped_architect_id,
+        )
+        if not architect:
+            return {"type": "error", "message": "Architect not found"}
+        hired_by = str(
+            getattr(cell, "hired_by_architect_id", "") or ""
+        ).strip()
+        if hired_by != architect.id:
+            return {"type": "error", "message": "engineer not found in scope"}
+        if _agent_dismissed_at(architect):
+            return _architect_dismissed_error(architect.id)
+    if state.agent_is_tombstoned(cell):
+        return {"type": "error", "message": "engineer is tombstoned"}
+    try:
+        base_dir = await resolve_base_dir(cell.group)
+        names = _normalize_engineer_specialization_selection(
+            data.get("specializations", []),
+            valid_names=_project_specialization_names(
+                specialization_mgr,
+                base_dir,
+            ),
+        )
+    except ValueError as exc:
+        return {
+            "type": "error",
+            "message": str(exc),
+        }
+    if list(getattr(cell, "engineer_specializations", []) or []) != names:
+        cell.engineer_specializations = list(names)
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+    return {
+        "type": "engineer_specializations",
+        "engineer_id": cell.id,
+        "specializations": list(names),
+        "primary_specialization": names[0] if names else "",
+    }
 
 
 def _handle_pending_hire_list_command(data: dict, state: MatrixState) -> dict:
@@ -13769,40 +13919,12 @@ async def main(connection=None):
             }
 
         if cmd == "set_engineer_specializations":
-            engineer_ident = str(data.get("engineer_id", "") or "").strip()
-            if not engineer_ident:
-                return {
-                    "type": "error",
-                    "message": "engineer_id is required",
-                }
-            agent_id = _resolve_agent_id(state, engineer_ident)
-            cell = state.agents.get(agent_id) if agent_id else None
-            if not cell or cell.kind != "engineer":
-                return {
-                    "type": "error",
-                    "message": f"Engineer \"{engineer_ident}\" not found",
-                }
-            raw = data.get("specializations", [])
-            try:
-                base_dir = await _resolve_base_dir(cell.group)
-                names = _normalize_engineer_specialization_selection(
-                    raw,
-                    valid_names=_known_specialization_names(
-                        specialization_mgr, base_dir),
-                )
-            except ValueError as exc:
-                return {
-                    "type": "error",
-                    "message": str(exc),
-                }
-            cell.engineer_specializations = names
-            state._emit_agent(cell)
-            state._db_save_agent(cell)
-            return {
-                "type": "engineer_specializations",
-                "engineer_id": cell.id,
-                "specializations": names,
-            }
+            return await _handle_set_engineer_specializations_command(
+                data,
+                state,
+                resolve_base_dir=_resolve_base_dir,
+                specialization_mgr=specialization_mgr,
+            )
 
         if cmd == "get_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
@@ -14042,6 +14164,7 @@ async def main(connection=None):
                     resolve_base_dir=_resolve_base_dir,
                     resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     create_agent_with_config=_create_agent_with_config,
+                    specialization_mgr=specialization_mgr,
                     send_agent_prompt=_send_agent_prompt,
                 )
 
@@ -14071,6 +14194,17 @@ async def main(connection=None):
                 result = await _handle_architect_engineer_hire_command(
                     data,
                     state,
+                    resolve_base_dir=_resolve_base_dir,
+                    specialization_mgr=specialization_mgr,
+                )
+
+            elif cmd == "architect_engineer_set_specializations":
+                result = await _handle_set_engineer_specializations_command(
+                    data,
+                    state,
+                    resolve_base_dir=_resolve_base_dir,
+                    specialization_mgr=specialization_mgr,
+                    architect_id=str(data.get("architect_id", "") or ""),
                 )
 
             elif cmd == "pending_hire_approve":
@@ -14080,6 +14214,7 @@ async def main(connection=None):
                     resolve_base_dir=_resolve_base_dir,
                     resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     create_agent_with_config=_create_agent_with_config,
+                    specialization_mgr=specialization_mgr,
                     send_agent_prompt=_send_agent_prompt,
                 )
 
@@ -14433,7 +14568,7 @@ async def main(connection=None):
                                 update_fields["engineer_specializations"] = (
                                     _normalize_engineer_specialization_selection(
                                         data.get("engineer_specializations"),
-                                        valid_names=_known_specialization_names(
+                                        valid_names=_project_specialization_names(
                                             specialization_mgr, base_dir),
                                     )
                                 )

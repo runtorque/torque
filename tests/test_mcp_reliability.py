@@ -171,6 +171,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "engineer_message_architect",
             "engineer_reply",
             "architect_engineer_hire",
+            "architect_engineer_set_specializations",
             "architect_engineer_dismiss",
             "architect_engineer_rehire",
             "architect_task_create",

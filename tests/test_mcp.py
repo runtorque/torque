@@ -755,6 +755,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_task_move", architect_tool_names)
         self.assertIn("architect_decision_create", architect_tool_names)
         self.assertIn("architect_engineer_hire", architect_tool_names)
+        self.assertIn("architect_engineer_set_specializations", architect_tool_names)
         self.assertIn("architect_engineer_message", architect_tool_names)
         self.assertIn("architect_peer_list", architect_tool_names)
         self.assertIn("architect_peer_message", architect_tool_names)
@@ -1011,6 +1012,30 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent_type", task_dispatch_props)
         self.assertIn("provider", task_dispatch_props)
         self.assertIn("provider", await props_for("engineer_batch_dispatch"))
+
+    async def test_architect_engineer_specialization_tool_schemas(self):
+        hire_tool = next(
+            tool for tool in self.mcp_mod.ARCHITECT_TOOLS
+            if tool["name"] == "architect_engineer_hire"
+        )
+        hire_props = hire_tool["inputSchema"]["properties"]
+        self.assertIn("specializations", hire_props)
+        self.assertEqual(hire_props["specializations"]["type"], "array")
+
+        set_tool = next(
+            tool for tool in self.mcp_mod.ARCHITECT_TOOLS
+            if tool["name"] == "architect_engineer_set_specializations"
+        )
+        set_schema = set_tool["inputSchema"]
+        self.assertEqual(
+            set_schema["required"],
+            ["engineer_id", "specializations"],
+        )
+        self.assertEqual(
+            set_schema["properties"]["specializations"]["type"],
+            "array",
+        )
+        self.assertIn("Full-replace", set_tool["description"])
 
     async def test_engineer_batch_dispatch_schema_frames_parallel_waves(self):
         tool = next(

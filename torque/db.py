@@ -551,6 +551,13 @@ def _decode_decision_row(row, cols) -> dict:
 
 def _decode_pending_hire_row(row, cols) -> dict:
     pending_hire = dict(zip(cols, row))
+    raw_specs = pending_hire.get("requested_specializations", "[]")
+    specs = _json_loads_default(raw_specs, [])
+    pending_hire["requested_specializations"] = [
+        str(item or "").strip()
+        for item in specs
+        if str(item or "").strip()
+    ]
     pending_hire["created_at"] = _decision_int(
         pending_hire.get("created_at", 0)
     )
@@ -891,6 +898,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._ensure_agent_tombstone_columns()
         self._ensure_agent_engineer_specializations_column()
         self._ensure_board_task_suggested_specialization_column()
+        self._ensure_pending_hire_requested_specializations_column()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
@@ -939,6 +947,17 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "ALTER TABLE agents ADD COLUMN engineer_specializations "
                 "TEXT NOT NULL DEFAULT '[]'"
+            )
+            self._conn.commit()
+
+    def _ensure_pending_hire_requested_specializations_column(self):
+        try:
+            self._conn.execute(
+                "SELECT requested_specializations FROM pending_hires LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE pending_hires ADD COLUMN "
+                "requested_specializations TEXT NOT NULL DEFAULT '[]'"
             )
             self._conn.commit()
 
@@ -3532,7 +3551,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return None
         cursor = self._conn.execute(
             "SELECT id, architect_id, requested_name, requested_command, "
-            "requested_provider, requested_directory, status, resolution_note, "
+            "requested_provider, requested_directory, "
+            "requested_specializations, status, resolution_note, "
             "created_at, resolved_at, created_engineer_id "
             "FROM pending_hires WHERE id=?",
             (hire_id,),
@@ -3584,12 +3604,26 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         else:
             resolved_at = now_ts
 
+        requested_specializations = _json_loads_default(
+            row.get(
+                "requested_specializations",
+                existing.get("requested_specializations", []),
+            ),
+            [],
+        )
+        requested_specializations = [
+            str(item or "").strip()
+            for item in requested_specializations
+            if str(item or "").strip()
+        ]
+
         self._conn.execute(
             "INSERT OR REPLACE INTO pending_hires "
             "(id, architect_id, requested_name, requested_command, "
-            "requested_provider, requested_directory, status, resolution_note, "
+            "requested_provider, requested_directory, "
+            "requested_specializations, status, resolution_note, "
             "created_at, resolved_at, created_engineer_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 hire_id,
                 architect_id,
@@ -3612,6 +3646,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         existing.get("requested_directory", ""),
                     ) or ""
                 ),
+                json.dumps(requested_specializations),
                 status,
                 str(
                     row.get(
@@ -3648,7 +3683,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Load persisted pending-hire rows, newest first."""
         query = (
             "SELECT id, architect_id, requested_name, requested_command, "
-            "requested_provider, requested_directory, status, resolution_note, "
+            "requested_provider, requested_directory, "
+            "requested_specializations, status, resolution_note, "
             "created_at, resolved_at, created_engineer_id "
             "FROM pending_hires WHERE 1=1"
         )

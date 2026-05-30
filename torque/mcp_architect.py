@@ -510,8 +510,43 @@ _ARCHITECT_TOOL_SPECS = [
                     "type": "string",
                     "description": "Optional working directory override.",
                 },
+                "specializations": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional complete ordered project specialization "
+                        "list for the new engineer. The first entry is "
+                        "primary; [] means generalist."
+                    ),
+                },
             },
             "required": ["name"],
+        },
+    },
+    {
+        "name": "architect_engineer_set_specializations",
+        "description": (
+            "Full-replace the ordered project specialization list for an "
+            "engineer hired by this architect. The first entry is primary; "
+            "[] clears the list/generalist. No fresh user approval is needed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Hired engineer id/slug/name.",
+                },
+                "specializations": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Complete replacement ordered list of project "
+                        "specialization slugs."
+                    ),
+                },
+            },
+            "required": ["engineer_id", "specializations"],
         },
     },
     {
