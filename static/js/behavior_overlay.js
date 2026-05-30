@@ -12,6 +12,7 @@ var _behaviorOverlayDiffLoadingByKey = {};
 var _behaviorOverlayDrafts = {};
 var _behaviorOverlaySelectedDiffKeyByAgent = {};
 var _behaviorOverlayGovernanceTargetByArchitect = {};
+var _behaviorOverlayInnerTabByAgent = {};
 var _behaviorOverlayApprovalModal = {
   open: false,
   taskId: '',
@@ -64,6 +65,23 @@ function _behaviorOverlayDomId(prefix, key) {
 function _behaviorOverlayTitleCase(value) {
   value = String(value || '').trim();
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+}
+
+function _behaviorOverlayPluralRoleLabel(roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  if (roleKind === 'engineer') return 'engineers';
+  if (roleKind === 'architect') return 'architects';
+  if (roleKind === 'worker') return 'workers';
+  return 'agents';
+}
+
+function _behaviorOverlayRoleScopeTitle(roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  return 'All ' + _behaviorOverlayPluralRoleLabel(roleKind) + ' (role)';
+}
+
+function _behaviorOverlayVersionLabel(versionNumber) {
+  return 'v' + (versionNumber == null ? '?' : String(versionNumber));
 }
 
 function _behaviorOverlayNormalizeRoleKind(kind) {
@@ -732,8 +750,8 @@ function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, di
       html += '<div class="behavior-overlay-version-row" data-agent-panel-anchor="behavior-version-'
         + _behaviorOverlayAttr(vid) + '">';
       html += '<div class="behavior-overlay-version-main">';
-      html += '<span class="behavior-overlay-version-number">v'
-        + _behaviorOverlayEsc(version.version_number || '?') + '</span>';
+      html += '<span class="behavior-overlay-version-number">'
+        + _behaviorOverlayEsc(_behaviorOverlayVersionLabel(version.version_number)) + '</span>';
       html += '<span class="behavior-overlay-version-meta">'
         + _behaviorOverlayEsc(_behaviorOverlayTimestamp(version.created_at)) + '</span>';
       if (isActive) html += '<span class="detail-task-status">active</span>';
@@ -773,9 +791,11 @@ function _behaviorOverlayEditor(agent, targetAgent, mode, authorAgent, directEdi
   var version = _behaviorOverlayActiveVersion(targetAgentId);
   var html = '<section class="detail-section-card behavior-overlay-section behavior-overlay-editor">';
   html += '<div class="detail-section-card-head"><span class="detail-section-primary">';
-  html += _behaviorOverlayEsc(mode === 'direct' ? 'Direct edit hired engineer overlay' : 'Current overlay');
+  html += _behaviorOverlayEsc(mode === 'direct'
+    ? 'Direct edit hired engineer overlay'
+    : (mode === 'role' ? 'Role overlay text' : 'Current overlay'));
   html += '</span><span class="detail-task-status">'
-    + _behaviorOverlayEsc(loading ? 'loading' : ('v' + (version.version_number || '0'))) + '</span></div>';
+    + _behaviorOverlayEsc(loading ? 'loading' : _behaviorOverlayVersionLabel(version.version_number)) + '</span></div>';
   html += '<div class="behavior-overlay-summary-grid">';
   html += '<div><span class="detail-label">Target</span><span class="detail-val">'
     + _behaviorOverlayEsc((targetAgent && targetAgent.name) || _behaviorOverlayScopeLabel(targetAgentId) || targetAgentId) + '</span></div>';
@@ -832,6 +852,108 @@ function _behaviorOverlayDiffSection(agentId) {
     + _behaviorOverlayEsc(title) + '</span></div>'
     + _behaviorOverlayRenderedDiff(key)
     + '</section>';
+}
+
+function _behaviorOverlayInnerTabs(agent) {
+  var kind = _behaviorOverlayKind(agent);
+  if (kind === 'architect') {
+    return [
+      { key: 'architect', label: 'Architect overlays' },
+      { key: 'engineer', label: 'Engineer overlays' },
+    ];
+  }
+  if (kind === 'engineer') {
+    return [{ key: 'engineer', label: 'Engineer overlays' }];
+  }
+  return [];
+}
+
+function _behaviorOverlayInnerTab(agent) {
+  var agentId = String((agent && agent.id) || '');
+  var selected = agentId ? String(_behaviorOverlayInnerTabByAgent[agentId] || '') : '';
+  var tabs = _behaviorOverlayInnerTabs(agent);
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].key === selected) return selected;
+  }
+  return tabs.length ? tabs[0].key : '';
+}
+
+function _behaviorOverlayRenderInnerTabs(agent) {
+  var tabs = _behaviorOverlayInnerTabs(agent);
+  if (!tabs.length) return '';
+  var active = _behaviorOverlayInnerTab(agent);
+  var html = '<div class="agent-panel-events-subtabs behavior-overlay-subtabs" role="tablist" aria-label="Behavior overlay scopes">';
+  for (var i = 0; i < tabs.length; i++) {
+    var tab = tabs[i];
+    html += '<button type="button"'
+      + ' id="agent-panel-behavior-subtab-' + _behaviorOverlayAttr(tab.key) + '"'
+      + ' class="agent-panel-events-subtab behavior-overlay-subtab' + (active === tab.key ? ' active' : '') + '"'
+      + ' data-agent-panel-behavior-inner-tab="' + _behaviorOverlayAttr(tab.key) + '"'
+      + ' role="tab"'
+      + ' aria-selected="' + (active === tab.key ? 'true' : 'false') + '"'
+      + ' onclick="behaviorOverlaySelectInnerTab(' + _behaviorOverlayJs(tab.key) + ')">'
+      + _behaviorOverlayEsc(tab.label)
+      + '</button>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function behaviorOverlaySelectInnerTab(tab) {
+  var focused = (typeof _focusedEngineerAgent === 'function')
+    ? _focusedEngineerAgent()
+    : (typeof _resolveFocusedAgent === 'function' ? _resolveFocusedAgent() : null);
+  if (!focused) return;
+  var kind = _behaviorOverlayKind(focused);
+  if (typeof _agentPanelActiveTab === 'function'
+      && _agentPanelActiveTab(kind) !== 'behavior') return;
+  tab = String(tab || '');
+  var tabs = _behaviorOverlayInnerTabs(focused);
+  var next = tabs.length ? tabs[0].key : '';
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].key === tab) {
+      next = tab;
+      break;
+    }
+  }
+  if (!next) return;
+  var agentId = String(focused.id || '');
+  if (agentId && _behaviorOverlayInnerTabByAgent[agentId] === next) return;
+  if (agentId) _behaviorOverlayInnerTabByAgent[agentId] = next;
+  if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function _behaviorOverlayRolePaneForAgent(group, roleKind) {
+  roleKind = _behaviorOverlayNormalizeRoleKind(roleKind);
+  group = String(group || '').trim();
+  if (!roleKind || !group) {
+    return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
+  }
+  var title = _behaviorOverlayRoleScopeTitle(roleKind);
+  return _behaviorOverlayRolePaneHtml(group, roleKind, {
+    title: title,
+    note: title + ' applies group-wide and is layered before each individual ' + roleKind + ' overlay.',
+    embedded: true,
+  });
+}
+
+function _behaviorOverlayArchitectScope(agent) {
+  var group = String((agent && agent.group) || '');
+  var html = '';
+  html += _behaviorOverlayRolePaneForAgent(group, 'architect');
+  html += _behaviorOverlayOwn(agent);
+  return html;
+}
+
+function _behaviorOverlayEngineerScope(agent) {
+  var kind = _behaviorOverlayKind(agent);
+  var group = String((agent && agent.group) || '');
+  var html = '';
+  html += _behaviorOverlayRolePaneForAgent(group, 'engineer');
+  if (kind === 'architect') html += _behaviorOverlayHiredGovernance(agent);
+  else html += _behaviorOverlayOwn(agent);
+  return html;
 }
 
 function _behaviorOverlayOwn(agent) {
@@ -904,13 +1026,16 @@ function renderBehaviorOverlayTab(agent) {
   if (kind !== 'engineer' && kind !== 'architect') {
     return '<div class="agent-panel-empty">Behavior overlays are supported for engineers and architects.</div>';
   }
-  var html = '<div class="behavior-overlay-tab" data-agent-panel-anchor="behavior-overlay-root">';
+  var activeInner = _behaviorOverlayInnerTab(agent);
+  var html = '<div class="behavior-overlay-tab" data-agent-panel-anchor="behavior-overlay-root" data-agent-panel-behavior-view="'
+    + _behaviorOverlayAttr(activeInner) + '">';
   html += '<div class="agent-panel-worklog-header behavior-overlay-header">';
-  html += '<span class="agent-panel-worklog-title">Behavior overlay</span>';
-  html += '<span class="agent-panel-worklog-note">Additive, governed prompt guidance; full text and diffs load on demand.</span>';
+  html += '<span class="agent-panel-worklog-title">Behavior overlays</span>';
+  html += '<span class="agent-panel-worklog-note">Additive, governed prompt guidance; role-wide and per-agent scopes are separated below.</span>';
   html += '</div>';
-  html += _behaviorOverlayOwn(agent);
-  if (kind === 'architect') html += _behaviorOverlayHiredGovernance(agent);
+  html += _behaviorOverlayRenderInnerTabs(agent);
+  if (activeInner === 'architect') html += _behaviorOverlayArchitectScope(agent);
+  else html += _behaviorOverlayEngineerScope(agent);
   html += '</div>';
   return html;
 }
@@ -931,7 +1056,8 @@ function _behaviorOverlayRoleTarget(group, roleKind) {
   });
 }
 
-function _behaviorOverlayRolePaneHtml(group, roleKind) {
+function _behaviorOverlayRolePaneHtml(group, roleKind, opts) {
+  opts = opts || {};
   var target = _behaviorOverlayRoleTarget(group, roleKind);
   if (!target) {
     return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
@@ -943,13 +1069,15 @@ function _behaviorOverlayRolePaneHtml(group, roleKind) {
   var author = { id: 'user', name: 'User', kind: 'user' };
   var proposals = _behaviorOverlayOpenProposalsForScope(targetKey);
   var roleLabel = _behaviorOverlayTitleCase(roleKind);
+  var title = opts.title || 'Role Dynamic Behavior overlay';
+  var note = opts.note || (roleLabel + ' role overlays apply group-wide and always require user diff approval before activation.');
   var html = '<div class="behavior-overlay-tab behavior-overlay-role-tab" data-behavior-overlay-role="'
     + _behaviorOverlayAttr(roleKind) + '" data-behavior-overlay-scope="'
     + _behaviorOverlayAttr(targetKey) + '">';
   html += '<div class="agent-panel-worklog-header behavior-overlay-header">';
-  html += '<span class="agent-panel-worklog-title">Role Dynamic Behavior overlay</span>';
+  html += '<span class="agent-panel-worklog-title">' + _behaviorOverlayEsc(title) + '</span>';
   html += '<span class="agent-panel-worklog-note">'
-    + _behaviorOverlayEsc(roleLabel + ' role overlays apply group-wide and always require user diff approval before activation.')
+    + _behaviorOverlayEsc(note)
     + '</span>';
   html += '</div>';
   html += '<section class="detail-section-card behavior-overlay-section">';
@@ -1011,18 +1139,24 @@ function _behaviorOverlayRefreshRolePaneIfOpenForScope(scopeKey) {
   return renderBehaviorOverlayRolePane(scope.scope_group, scope.scope_key);
 }
 
+function _behaviorOverlayRefreshFocusedBehaviorPanel() {
+  if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return true;
+  if (typeof renderAgentPanel === 'function') {
+    renderAgentPanel();
+    return true;
+  }
+  return false;
+}
+
+function _behaviorOverlayRefreshPanelForVisibleScope(scopeLike) {
+  if (!behaviorOverlayDeltaInvalidatesFocusedPanel(scopeLike || {})) return false;
+  return _behaviorOverlayRefreshFocusedBehaviorPanel();
+}
+
 function _behaviorOverlayRefreshPanelIfFocused(agentId) {
   agentId = String(agentId || '').trim();
-  var focused = (typeof _focusedEngineerAgent === 'function')
-    ? _focusedEngineerAgent()
-    : (typeof _resolveFocusedAgent === 'function' ? _resolveFocusedAgent() : null);
-  if (!focused) return;
-  var kind = _behaviorOverlayKind(focused);
-  if (typeof _agentPanelActiveTab === 'function'
-      && _agentPanelActiveTab(kind) !== 'behavior') return;
-  if (!behaviorOverlayDeltaInvalidatesFocusedPanel({ agent_id: agentId })) return;
-  if (typeof _agentPanelRefreshCurrentTab === 'function' && _agentPanelRefreshCurrentTab()) return;
-  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  if (!agentId) return false;
+  return _behaviorOverlayRefreshPanelForVisibleScope({ agent_id: agentId });
 }
 
 function _behaviorOverlayDiffKeyFromPayload(msg) {
@@ -1111,9 +1245,14 @@ function behaviorOverlayReceiveMessage(msg) {
     _behaviorOverlayProposalListLoadingKey = '';
     _behaviorOverlayProposalListLoaded = true;
     var proposals = Array.isArray(msg.proposals) ? msg.proposals : [];
-    for (var p = 0; p < proposals.length; p++) _behaviorOverlayUpsertProposal(proposals[p]);
-    var focused = (typeof _focusedEngineerAgent === 'function') ? _focusedEngineerAgent() : null;
-    if (focused) _behaviorOverlayRefreshPanelIfFocused(focused.id || '');
+    var refreshFocusedPanel = false;
+    for (var p = 0; p < proposals.length; p++) {
+      if (!refreshFocusedPanel && behaviorOverlayDeltaInvalidatesFocusedPanel(proposals[p])) {
+        refreshFocusedPanel = true;
+      }
+      _behaviorOverlayUpsertProposal(proposals[p]);
+    }
+    if (refreshFocusedPanel) _behaviorOverlayRefreshFocusedBehaviorPanel();
     if (typeof _settingsGroup !== 'undefined' && _settingsGroup) {
       renderGroupBehaviorRolePanes(_settingsGroup);
     }
@@ -1244,12 +1383,13 @@ function behaviorOverlayDeltaInvalidatesFocusedPanel(op) {
   }
   if (!agentId) return false;
   var affectedScope = _behaviorOverlayScopeFromId(agentId);
+  var activeInner = _behaviorOverlayInnerTab(focused);
   if (affectedScope && affectedScope.scope_kind === 'role') {
     return String(focused.group || '') === String(affectedScope.scope_group || '')
-      && focusedKind === String(affectedScope.scope_key || '');
+      && activeInner === String(affectedScope.scope_key || '');
   }
-  if (agentId === String(focused.id || '')) return true;
-  if (focusedKind === 'architect') {
+  if (agentId === String(focused.id || '')) return activeInner === focusedKind;
+  if (focusedKind === 'architect' && activeInner === 'engineer') {
     var target = _behaviorOverlayAgent(agentId);
     return !!(target && String(target.hired_by_architect_id || '') === String(focused.id || ''));
   }

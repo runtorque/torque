@@ -142,7 +142,7 @@ function worker(id, name, ownerEngineerId, createdAt) {
   };
 }
 
-test('focused architect panel shows decisions, hired engineers, messages, and events tabs', () => {
+test('focused architect panel shows decisions, behavior, journal, messages, and events tabs', () => {
   const { context, panel, sandbox } = createArchitectHarness();
   sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
   sandbox.focusedItemId = 'arch-1';
@@ -151,31 +151,29 @@ test('focused architect panel shows decisions, hired engineers, messages, and ev
 
   assert.match(panel.innerHTML, /Architect: Productmind · Group: torque/);
   assert.match(panel.innerHTML, /Decisions/);
-  assert.match(panel.innerHTML, /Hired engineers/);
+  assert.doesNotMatch(panel.innerHTML, /id="agent-panel-tab-hired_engineers"/);
   assert.match(panel.innerHTML, /Messages/);
   assert.match(panel.innerHTML, /Events/);
 });
 
-test('focused architect hired-engineers tab nests hired engineers and workers only', () => {
-  const { context, panel, sandbox } = createArchitectHarness();
+test('expanded architect roster section still nests hired engineers and workers only', () => {
+  const { context, sandbox } = createArchitectHarness();
   sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
   sandbox.state.agents['eng-hired'] = engineer('eng-hired', 'Alice', 20, 'arch-1');
   sandbox.state.agents['worker-hired'] = worker('worker-hired', 'Worker A', 'eng-hired', 30);
   sandbox.state.agents['eng-user'] = engineer('eng-user', 'Bob', 40, '');
   sandbox.state.agents['worker-user'] = worker('worker-user', 'Worker B', 'eng-user', 50);
-  sandbox.focusedItemId = 'arch-1';
+  sandbox.state.groups.torque = ['arch-1', 'eng-hired', 'worker-hired', 'eng-user', 'worker-user'];
+  vm.runInContext(`_engineerArchitectExpanded['arch-1'] = true;`, context);
 
-  context.renderAgentPanel();
-  context.agentPanelSelectTab('hired_engineers');
+  const html = vm.runInContext(`_agentPanelLegacyRenderArchitectRoster('torque')`, context);
 
-  assert.match(panel.innerHTML, /Architect: Productmind · Group: torque/);
-  assert.doesNotMatch(panel.innerHTML, /<div class="engineers-roster">[\s\S]*agent-panel-hierarchy-breadcrumb[\s\S]*<div class="engineers-roster-list/);
-  assert.match(panel.innerHTML, /Hired engineers<\/span><span class="engineers-roster-count">1<\/span>/);
-  assert.match(panel.innerHTML, /engineers-roster-header[\s\S]*<\/div><div class="engineers-roster-list/);
-  assert.match(panel.innerHTML, /Alice/);
-  assert.match(panel.innerHTML, /Worker A/);
-  assert.doesNotMatch(panel.innerHTML, /Bob/);
-  assert.doesNotMatch(panel.innerHTML, /Worker B/);
+  assert.match(html, /Hired engineers<\/span><span class="architect-roster-section-count">1<\/span>/);
+  assert.match(html, /agent-panel-hierarchy-list agent-panel-hierarchy-list-architect architect-roster-subtree/);
+  assert.match(html, /Alice/);
+  assert.match(html, /Worker A/);
+  assert.doesNotMatch(html, /Bob/);
+  assert.doesNotMatch(html, /Worker B/);
 });
 
 test('pending hire banner approves a request and hides optimistically', () => {

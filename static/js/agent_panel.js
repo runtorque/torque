@@ -63,7 +63,6 @@ var _agentPanelTabSpecByKind = {
     { key: 'decisions', label: 'Decisions' },
     { key: 'behavior', label: 'Behavior' },
     { key: 'journal', label: 'Journal' },
-    { key: 'hired_engineers', label: 'Hired engineers' },
     { key: 'messages', label: 'Messages' },
     { key: 'events', label: 'Events' },
   ],
@@ -2988,8 +2987,6 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
       parts.bodyHtml = typeof renderBehaviorOverlayTab === 'function'
         ? renderBehaviorOverlayTab(agent)
         : '<div class="agent-panel-empty">Behavior overlay UI is unavailable.</div>';
-    } else if (activeTab === 'hired_engineers') {
-      parts.bodyHtml = _agentPanelArchitectHiredEngineers(agent);
     } else if (activeTab === 'messages') {
       parts.bodyHtml = _agentPanelArchitectMessages(agent);
     } else if (activeTab === 'events') {
@@ -3190,57 +3187,6 @@ function _renderWorkerPanel(agent) {
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
-}
-
-function _agentPanelArchitectHiredEngineers(agent) {
-  var engineers = [];
-  var architectId = String((agent && agent.id) || '');
-  var group = String((agent && agent.group) || '');
-  var allAgents = (state && state.agents) || {};
-  for (var key in allAgents) {
-    var candidate = allAgents[key];
-    if (!candidate) continue;
-    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(candidate)) continue;
-    if (String(candidate.kind || '') !== 'engineer') continue;
-    if (String(candidate.hired_by_architect_id || '') !== architectId) continue;
-    engineers.push(candidate);
-  }
-  engineers.sort(function(a, b) {
-    var aName = String((a && (a.name || a.slug || a.id)) || '');
-    var bName = String((b && (b.name || b.slug || b.id)) || '');
-    return aName.localeCompare(bName);
-  });
-  var html = '<div class="engineers-roster">';
-  html += '<div class="engineers-roster-header">';
-  html += '<span class="engineers-roster-title">Hired engineers</span>';
-  html += '<span class="engineers-roster-count">' + engineers.length + '</span>';
-  html += '</div>';
-  if (!engineers.length) {
-    html += '<div class="engineers-roster-empty">No hired engineers yet.</div>';
-    html += '</div>';
-    return html;
-  }
-  html += '<div class="engineers-roster-list agent-panel-hierarchy-list agent-panel-hierarchy-list-architect">';
-  if (typeof _agentPanelLegacyRenderEngineerTreeRows === 'function') {
-    html += _agentPanelLegacyRenderEngineerTreeRows(
-      group,
-      engineers,
-      'architect-roster-level-1 architect-section-engineer-row',
-      'architect-roster-level-2 architect-section-worker-row'
-    );
-  } else {
-    for (var i = 0; i < engineers.length; i++) {
-      var engineer = engineers[i];
-      html += '<div class="engineer-row architect-roster-level-1">';
-      html += '<div class="engineer-row-main">';
-      html += '<span class="engineer-row-name">' + _agentPanelEsc(engineer.name || engineer.id || '') + '</span>';
-      html += _agentPanelKindBadge('engineer');
-      html += '</div></div>';
-    }
-  }
-  html += '</div>';
-  html += '</div>';
-  return html;
 }
 
 function _agentPanelArchitectDecisionRows(decisions) {
