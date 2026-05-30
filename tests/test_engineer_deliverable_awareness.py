@@ -39,7 +39,7 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
         task = self.BoardTask(id="t1", task="Plain task", group="g")
         self.assertEqual(self._build(task), "")
 
-    def test_block_includes_engineer_tool_with_task_id(self):
+    def test_block_includes_engineer_tool_with_task(self):
         task = self.BoardTask(
             id="TORQUE:99",
             task="Audit MCP surface",
@@ -52,7 +52,7 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
         block = self._build(task)
         self.assertIn("Deliverable contract on this task", block)
         self.assertIn("engineer_task_upload_artifact", block)
-        self.assertIn('task_id="TORQUE:99"', block)
+        self.assertIn('task="TORQUE:99"', block)
         self.assertIn("Audit report", block)
         self.assertIn("report", block)
         self.assertIn("markdown", block)
@@ -222,7 +222,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         block = data["deliverable_awareness"]
         self.assertIn("Deliverable contract on this task", block)
         self.assertIn("engineer_task_upload_artifact", block)
-        self.assertIn('task_id="TORQUE:500"', block)
+        self.assertIn('task="TORQUE:500"', block)
         self.assertIn("Audit report", block)
         self.assertIn("engineer_tool_search", block)
 
@@ -315,7 +315,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         self.assertIn("TORQUE:600", recipient_msg)
         self.assertIn("Deliverable contract on this task", recipient_msg)
         self.assertIn("engineer_task_upload_artifact", recipient_msg)
-        self.assertIn('task_id="TORQUE:600"', recipient_msg)
+        self.assertIn('task="TORQUE:600"', recipient_msg)
         # Sender entry stays clean (no awareness pollution on architect side).
         sender_msg = architect.mcp_messages[0]["message"]
         self.assertNotIn("Deliverable contract on this task", sender_msg)

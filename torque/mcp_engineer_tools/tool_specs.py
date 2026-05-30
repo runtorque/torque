@@ -402,7 +402,17 @@ ENGINEER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task ID or legacy alias to attach the artifact to.",
+                    "description": (
+                        "Task ID or legacy alias to attach the artifact to. "
+                        "Prefer this parameter; task_id is accepted as an alias."
+                    ),
+                },
+                "task_id": {
+                    "type": "string",
+                    "description": (
+                        "Alias for task, accepted for compatibility with older "
+                        "engineer deliverable prompts."
+                    ),
                 },
                 "local_path": {
                     "type": "string",
@@ -451,7 +461,10 @@ ENGINEER_TOOLS = [
                     "description": "Optional prompt shaping mode.",
                 },
             },
-            "required": ["task"],
+            "anyOf": [
+                {"required": ["task"]},
+                {"required": ["task_id"]},
+            ],
         },
     },
     {

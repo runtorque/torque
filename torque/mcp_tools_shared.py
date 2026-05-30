@@ -5491,9 +5491,20 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(result) if result else '{"type":"ok"}', False
 
     if tool_name == "task_upload_artifact":
-        tid = _resolve_task(state, args.get("task", ""))
+        task_ident = args.get("task", "") or args.get("task_id", "")
+        tid = _resolve_task(real_state, task_ident)
         if not tid:
             return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if (
+                caller_kind == "engineer"
+                and not real_state.engineer_can_access_task(
+                    caller_id,
+                    task,
+                    allow_created=True,
+                    allow_unassigned=False,
+                )):
+            return "task not found in scope", True
         payload = {"cmd": "task_upload_artifact", "task_id": tid}
         if caller_id:
             payload["cell_id"] = caller_id

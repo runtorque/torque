@@ -153,6 +153,12 @@ It cannot see another Engineer's Workers, journals, or tasks even within the sam
 
 Engineer-created Workers and tasks are auto-stamped with that Engineer's ownership. Deleting an Engineer transfers its owned Workers and assigned tasks back to you (the User) by clearing those ids.
 
+Engineers intentionally do **not** get a repo worktree, and
+TORQUE:580-guarded `main` should stay unwritten from the orchestrator session.
+Durable Engineer deliverables should be attached to the scoped task with
+`engineer_task_upload_artifact`; anything that must become a repository file
+should be handed to a dispatched Worker, which has the worktree and branch.
+
 ## Engineer ↔ Architect messaging
 
 If an Architect hired this Engineer, the two have a direct messaging channel:

@@ -261,7 +261,7 @@ def build_engineer_deliverable_awareness(task) -> str:
         descriptor = f"{type_label}, {deliverable_format.strip()}"
     word = deliverable_word(deliverable_type)
     upload_call = (
-        f'engineer_task_upload_artifact(task_id="{task_id}", '
+        f'engineer_task_upload_artifact(task="{task_id}", '
         f'content_text="<your full {word}>", '
         f'artifact_type="{deliverable_type or "generated_doc"}", '
         f'title="{title_default}")'
