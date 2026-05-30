@@ -52,6 +52,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "notifications",
     "resume",
     "engineer_hire",
+    "engineer_set_specializations",
     "engineer_dismiss",
     "engineer_rehire",
     "engineer_restore",

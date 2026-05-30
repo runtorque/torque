@@ -1196,6 +1196,79 @@ class TorqueDBTests(unittest.TestCase):
         }
         self.assertIn("default_engineer_specializations", columns)
 
+    def test_pending_hire_requested_specializations_round_trip(self):
+        pending = self.db.save_pending_hire({
+            "id": "hire-specs",
+            "architect_id": "architect-1",
+            "requested_name": "Specialist",
+            "requested_specializations": [
+                "ui-ux",
+                "orchestration-core",
+            ],
+            "status": "pending",
+        })
+
+        self.assertEqual(
+            pending["requested_specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
+
+        resolved = self.db.save_pending_hire({
+            "id": "hire-specs",
+            "status": "approved",
+            "created_engineer_id": "engineer-1",
+        })
+        self.assertEqual(
+            resolved["requested_specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
+
+    def test_pending_hire_requested_specializations_migration_defaults_empty(self):
+        legacy_path = Path(self.tmp.name) / "legacy-pending-hires.db"
+        conn = sqlite3.connect(str(legacy_path))
+        try:
+            conn.execute(
+                """
+                CREATE TABLE pending_hires (
+                    id TEXT PRIMARY KEY,
+                    architect_id TEXT NOT NULL,
+                    requested_name TEXT NOT NULL,
+                    requested_command TEXT NOT NULL DEFAULT '',
+                    requested_provider TEXT NOT NULL DEFAULT '',
+                    requested_directory TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    resolution_note TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    resolved_at INTEGER NOT NULL DEFAULT 0,
+                    created_engineer_id TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO pending_hires "
+                "(id, architect_id, requested_name, status) "
+                "VALUES (?,?,?,?)",
+                ("hire-old", "architect-1", "Legacy", "pending"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        loaded = migrated.load_pending_hire("hire-old")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["requested_specializations"], [])
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(pending_hires)"
+            )
+        }
+        self.assertIn("requested_specializations", columns)
+
     def test_worktree_symlink_gitignored_paths_migration_adds_column(self):
         legacy_path = Path(self.tmp.name) / "legacy-gitignored-symlinks.db"
         legacy = TorqueDB(legacy_path)

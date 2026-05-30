@@ -5119,13 +5119,35 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         name = str(args.get("name", "") or "").strip()
         if not name:
             return "name is required", True
-        result = await handle_command({
+        payload = {
             "cmd": "architect_engineer_hire",
             "architect_id": str(caller_id or "").strip(),
             "name": name,
             "command": str(args.get("command", "") or "").strip(),
             "provider": str(args.get("provider", "") or "").strip(),
             "directory": str(args.get("directory", "") or "").strip(),
+        }
+        if "specializations" in args:
+            payload["specializations"] = args.get("specializations")
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "engineer_set_specializations" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        result = await handle_command({
+            "cmd": "architect_engineer_set_specializations",
+            "architect_id": str(caller_id or "").strip(),
+            "engineer_id": engineer_id,
+            "specializations": args.get("specializations", []),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

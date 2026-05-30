@@ -218,6 +218,25 @@ class SpecializationManager:
                     seen_names.add(name)
         return sorted(results, key=lambda item: (item["global"], item["name"]))
 
+    def canonical_project_names(self, base_dir: str = "") -> list[str]:
+        """Return canonical specialization slugs from project config only.
+
+        Architect routing metadata is intentionally constrained to the
+        project's checked-in taxonomy.  User/global specializations are useful
+        for local prompt authoring, but must not become architect-managed
+        routing slugs by accident.
+        """
+        names: list[str] = []
+        seen = set()
+        for item in self.list_specializations(base_dir=base_dir,
+                                              scope="project"):
+            name = str((item or {}).get("name", "") or "").strip()
+            if not name or name in seen:
+                continue
+            names.append(name)
+            seen.add(name)
+        return names
+
     def get_specialization(self, name: str, base_dir: str = "",
                            scope: str = "") -> dict | None:
         raw = self._load_raw(name, base_dir, scope=scope)

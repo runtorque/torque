@@ -18,6 +18,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         install_aiohttp_stub()
         self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
+        self.server_mod = importlib.import_module("torque.server")
+        self.server_mod = importlib.reload(self.server_mod)
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
         self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
@@ -29,6 +31,21 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        self.project_specs = Path(self.tmp.name) / ".torque" / "specializations"
+        self.project_specs.mkdir(parents=True)
+        for name in (
+                "ui-ux",
+                "orchestration-core",
+                "runtime-pty",
+                "desktop-shell",
+                "worktree-release",
+                "prompts-config",
+                "quality-observability",
+        ):
+            self.project_specs.joinpath(f"{name}.yaml").write_text(
+                f"name: {name}\npreamble: {name} focus.\n",
+                encoding="utf-8",
+            )
         self.db_path = Path(self.tmp.name) / "torque.db"
         self.db = self.db_mod.TorqueDB(self.db_path)
         self.db.init()
@@ -184,6 +201,17 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             if not agent or not getattr(agent, "session_id", ""):
                 return {"type": "ok", "delivered": False, "reason": "no_session"}
             return {"type": "ok", "delivered": True}
+        if payload["cmd"] == "architect_engineer_set_specializations":
+            async def fake_resolve_base_dir(_group):
+                return self.tmp.name
+
+            return await self.server_mod._handle_set_engineer_specializations_command(
+                payload,
+                self.state,
+                resolve_base_dir=fake_resolve_base_dir,
+                specialization_mgr=self.server_mod.SpecializationManager(),
+                architect_id=str(payload.get("architect_id", "") or ""),
+            )
         if payload["cmd"] == "engineer_reply":
             group = payload.get("group", "")
             if not str(payload.get("answer", "") or "").strip():
@@ -1529,6 +1557,172 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             ["ui-ux", "security-focus"],
         )
         self.assertEqual(engineers[bob.id]["specializations"], [])
+
+    async def test_architect_engineer_set_specializations_replaces_and_persists(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        self.state._delta_ops = []
+
+        text, is_error = await self._call(
+            "architect_engineer_set_specializations",
+            {
+                "engineer_id": "alice",
+                "specializations": [
+                    "ui-ux",
+                    "",
+                    "orchestration-core",
+                    "ui-ux",
+                ],
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "engineer_specializations")
+        self.assertEqual(payload["engineer_id"], alice.id)
+        self.assertEqual(
+            payload["specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
+        self.assertEqual(payload["primary_specialization"], "ui-ux")
+        self.assertEqual(
+            alice.engineer_specializations,
+            ["ui-ux", "orchestration-core"],
+        )
+        self.assertEqual(self.state._delta_ops[-1]["op"], "agent_upsert")
+        self.assertEqual(
+            self.db.load_all()["agents"][alice.id]["engineer_specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
+
+        list_text, list_error = await self._call(
+            "architect_engineer_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(list_error, list_text)
+        engineers = {
+            item["id"]: item for item in json.loads(list_text)["engineers"]
+        }
+        self.assertEqual(
+            engineers[alice.id]["specializations"],
+            ["ui-ux", "orchestration-core"],
+        )
+
+        self.state._delta_ops = []
+        clear_text, clear_error = await self._call(
+            "architect_engineer_set_specializations",
+            {"engineer_id": alice.id, "specializations": []},
+            architect.id,
+        )
+        self.assertFalse(clear_error, clear_text)
+        clear_payload = json.loads(clear_text)
+        self.assertEqual(clear_payload["specializations"], [])
+        self.assertEqual(clear_payload["primary_specialization"], "")
+        self.assertEqual(alice.engineer_specializations, [])
+        self.assertEqual(self.state._delta_ops[-1]["op"], "agent_upsert")
+
+        self.state._delta_ops = []
+        noop_text, noop_error = await self._call(
+            "architect_engineer_set_specializations",
+            {"engineer_id": alice.id, "specializations": []},
+            architect.id,
+        )
+        self.assertFalse(noop_error, noop_text)
+        self.assertEqual(self.state._delta_ops, [])
+
+    async def test_architect_engineer_set_specializations_rejects_invalid_and_out_of_scope(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=other_architect.id
+        )
+        user_engineer = self._add_engineer("eng-user", "User Owned")
+
+        invalid_text, invalid_error = await self._call(
+            "architect_engineer_set_specializations",
+            {
+                "engineer_id": alice.id,
+                "specializations": ["ui-ux", "local-only"],
+            },
+            architect.id,
+        )
+        self.assertTrue(invalid_error)
+        self.assertIn("Unknown specialization", invalid_text)
+        self.assertIn("Valid specializations:", invalid_text)
+        self.assertEqual(alice.engineer_specializations, [])
+
+        other_text, other_error = await self._call(
+            "architect_engineer_set_specializations",
+            {"engineer_id": bob.id, "specializations": ["ui-ux"]},
+            architect.id,
+        )
+        self.assertTrue(other_error)
+        self.assertEqual(other_text, "engineer not found in scope")
+
+        user_text, user_error = await self._call(
+            "architect_engineer_set_specializations",
+            {"engineer_id": user_engineer.id, "specializations": ["ui-ux"]},
+            architect.id,
+        )
+        self.assertTrue(user_error)
+        self.assertEqual(user_text, "engineer not found in scope")
+
+    async def test_architect_engineer_set_specializations_updates_routing_surfaces(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+
+        set_text, set_error = await self._call(
+            "architect_engineer_set_specializations",
+            {"engineer_id": alice.id, "specializations": ["ui-ux"]},
+            architect.id,
+        )
+        self.assertFalse(set_error, set_text)
+
+        ok_text, ok_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Polish task modal layout",
+                "group": "torque",
+                "assigned_engineer_id": alice.id,
+                "suggested_specialization": "ui-ux",
+            },
+            architect.id,
+        )
+        self.assertFalse(ok_error, ok_text)
+        ok_payload = json.loads(ok_text)
+        self.assertNotIn("suggested_specialization_warning", ok_payload)
+
+        other_task = self._add_task(
+            "task-runtime",
+            "PTY reconnection",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            suggested_specialization="runtime-pty",
+        )
+        filtered_text, filtered_error = await self._call(
+            "architect_board_summary",
+            {"specialization_engineer_id": alice.id},
+            architect.id,
+        )
+        self.assertFalse(filtered_error, filtered_text)
+        filtered = json.loads(filtered_text)
+        self.assertNotIn(
+            other_task.id,
+            {item["id"] for item in filtered["tasks"]["items"]},
+        )
+        self.assertIn(
+            ok_payload["task_id"],
+            {item["id"] for item in filtered["tasks"]["items"]},
+        )
 
     async def test_architect_task_create_persists_specialization_and_warns_on_mismatch(self):
         architect = self._add_architect("arch-1", "Architect")
