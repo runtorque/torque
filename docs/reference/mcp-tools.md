@@ -248,10 +248,21 @@ The Architect can update only tasks it created itself or that the user created. 
 
 | Tool | What it does |
 |---|---|
-| `architect_engineer_hire` | Queue a new Engineer hire for user approval. Returns `status: "pending"`. The Architect must poll status before treating the Engineer as live. |
+| `architect_engineer_hire` | Queue a new Engineer hire for user approval, optionally with an ordered `specializations` list. Returns `status: "pending"`. The Architect must poll status before treating the Engineer as live. |
+| `architect_engineer_set_specializations` | Full-replace the ordered specialization list for an Engineer hired by this Architect. No fresh user approval is needed. |
 | `architect_engineer_dismiss` | Pause a hired Engineer. Closes session, preserves history. Reversible. |
 | `architect_engineer_rehire` | Resume a previously dismissed Engineer with full history. |
 | `architect_engineer_restore` | Restore from a 7-day deleted window. |
+
+`architect_engineer_hire(name, command?, provider?, directory?, specializations?)`
+stores `specializations` on the pending hire until the user approves it.
+`architect_engineer_set_specializations(engineer_id, specializations)` is a
+hired-Engineer-only roster edit. For both tools, `specializations` is the
+complete ordered list: the first slug is primary, and `[]` means
+generalist/no specialization. Valid slugs are the project taxonomy:
+`ui-ux`, `orchestration-core`, `runtime-pty`, `desktop-shell`,
+`worktree-release`, `prompts-config`, and `quality-observability`. Unknown
+slugs are rejected with the valid set listed in the error.
 
 ### Messaging
 

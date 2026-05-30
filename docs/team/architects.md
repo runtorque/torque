@@ -65,12 +65,33 @@ flowchart LR
 
 Concretely:
 
-1. The Architect calls `architect_engineer_hire(name=..., command=..., provider=..., directory=...)`. The hire returns immediately with `status: "pending"`.
+1. The Architect calls `architect_engineer_hire(name=..., command=..., provider=..., directory=..., specializations=[...])`.
+   The hire returns immediately with `status: "pending"`.
 2. A board-visible task appears asking you to approve the hire.
 3. You approve. Torque creates the Engineer agent with `hired_by_architect_id` set to this Architect's ID.
 4. The Architect must **poll** `architect_pending_hire_status(...)` before treating the Engineer as live. Sending tasks to a still-pending Engineer errors.
 
+The optional `specializations` list is ordered: the first slug is the
+Engineer's primary specialization, and `[]` means a generalist. Hire-time
+specializations ride the same pending-hire → user-approval flow, so the
+approved Engineer starts with the list the Architect requested.
+
 Why the approval step? Because hires are real budget — a new persistent agent, a new system prompt, a new digest cadence, a new chunk of your subscription quota. The Architect proposes; you approve.
+
+### Engineer specializations
+
+Architect-managed Engineer specializations use the project taxonomy from
+`.torque/specializations/`: `ui-ux`, `orchestration-core`, `runtime-pty`,
+`desktop-shell`, `worktree-release`, `prompts-config`, and
+`quality-observability`.
+
+- `architect_engineer_hire(..., specializations=[...])` proposes the ordered
+  list for a new Engineer. Unknown slugs are rejected before a pending hire is
+  created, and `[]` explicitly requests a generalist.
+- `architect_engineer_set_specializations(engineer_id, specializations=[...])`
+  full-replaces the ordered list for an Engineer this Architect hired. The
+  first entry becomes primary; `[]` clears the list/generalist. This is an
+  ownership-scoped roster edit and does **not** require a fresh user approval.
 
 ### Dismiss and rehire
 
@@ -175,7 +196,7 @@ Beyond those, launch settings (provider, boot command, model, reasoning effort, 
 
 A short list of things that will surprise you if you don't know them:
 
-- **Hires are always pending.** `architect_engineer_hire` returns `status: "pending"` immediately. The hire is not live until you approve. The Architect must poll status — sending tasks to a pending engineer errors.
+- **Hires are always pending.** `architect_engineer_hire` returns `status: "pending"` immediately, including when it carries a requested specialization list. The hire is not live until you approve. The Architect must poll status — sending tasks to a pending engineer errors.
 - **A dismissed Architect blocks mutations.** If you dismiss the Architect itself (`dismissed_at > 0`), all its mutations (task create, hire, message, decision write, journal write) are rejected with "architect is dismissed". Reads still work. Rehire to unblock.
 - **Decision links append-only.** You can link tasks/engineers to a decision but not unlink. To retire a decision, archive it (`architect_decision_update(archive: true)`).
 - **Suggested actions don't auto-bind.** When the Architect creates a task with a `suggested_action`, the Engineer is free to choose a different action when dispatching. The suggestion is non-binding.
@@ -231,6 +252,7 @@ architect_engineer_hire(
   command="claude",
   provider="claude-code",
   directory="/repo",
+  specializations=["runtime-pty", "orchestration-core"],
 )
 # returns {id: "...", status: "pending"}
 ```
