@@ -167,6 +167,18 @@
     <input id="engineer-name-input" placeholder="e.g. Alice" autocomplete="off">
     <label>Boot command <span class="label-hint">(optional)</span></label>
     <input id="engineer-command-input" placeholder="Use default engineer command" autocomplete="off">
+    <div id="engineer-specializations-row" class="hidden">
+      <label>Specializations <span class="label-hint">(optional)</span>
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered project specialization slugs for this architect hire. The first selected specialization is primary.">?</span>
+      </label>
+      <div id="engineer-specializations-picker" class="specializations-picker">
+        <ul id="engineer-specializations-selected" class="specializations-selected"></ul>
+        <div class="specializations-controls">
+          <select id="engineer-specializations-available"></select>
+          <button type="button" class="btn-secondary" onclick="addEngineerAddSpecialization()">+ Add</button>
+        </div>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="engineer-submit-btn" onclick="submitAddEngineer()">Create Engineer</button>

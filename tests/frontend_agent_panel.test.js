@@ -165,6 +165,159 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /pytest/);
 });
 
+test('engineer panel specialization editor reads cell field and writes full replacement', () => {
+  const { context, panel, sendCalls } = createHarness();
+  context.state.specializations_group = 'alpha';
+  context.state.specializations = [
+    { name: 'ui-ux', preamble: 'UX.', global: false },
+    { name: 'desktop-shell', preamble: 'Desktop.', global: false },
+  ];
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+    hired_by_architect_id: 'arch-1',
+    engineer_specializations: ['ui-ux'],
+  });
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Specializations/);
+  assert.match(panel.innerHTML, /ui-ux[\s\S]*\(primary\)/);
+
+  context.agentPanelStartEngineerSpecializationsEdit('eng-1');
+  context.agentPanelAddEngineerSpecialization('eng-1', 'desktop-shell');
+  context.agentPanelMoveEngineerSpecialization('eng-1', 1, -1);
+  // A routine rerender must preserve the unsaved ordered draft.
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /desktop-shell \(primary\)[\s\S]*ui-ux/);
+  context.agentPanelSaveEngineerSpecializations('eng-1');
+
+  const setCall = sendCalls.find(
+    (msg) => msg.cmd === 'architect_engineer_set_specializations',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(setCall)), {
+    cmd: 'architect_engineer_set_specializations',
+    architect_id: 'arch-1',
+    engineer_id: 'eng-1',
+    specializations: ['desktop-shell', 'ui-ux'],
+  });
+});
+
+test('engineer panel specialization editor reflects set response reorder and clear-to-empty', () => {
+  const { context, panel } = createHarness();
+  context.state.specializations_group = 'alpha';
+  context.state.specializations = [
+    { name: 'ui-ux', global: false },
+    { name: 'desktop-shell', global: false },
+  ];
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+    hired_by_architect_id: 'arch-1',
+    engineer_specializations: ['ui-ux', 'desktop-shell'],
+  });
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+
+  context.renderAgentPanel();
+  context.agentPanelReceiveEngineerSpecializations({
+    type: 'engineer_specializations',
+    engineer_id: 'eng-1',
+    specializations: ['desktop-shell', 'ui-ux'],
+  });
+  assert.deepEqual(context.state.agents['eng-1'].engineer_specializations, ['desktop-shell', 'ui-ux']);
+  assert.match(panel.innerHTML, /desktop-shell[\s\S]*\(primary\)[\s\S]*ui-ux/);
+
+  context.agentPanelReceiveEngineerSpecializations({
+    type: 'engineer_specializations',
+    engineer_id: 'eng-1',
+    specializations: [],
+  });
+  assert.deepEqual(context.state.agents['eng-1'].engineer_specializations, []);
+  assert.match(panel.innerHTML, /Generalist \(no specialization\)/);
+});
+
+test('engineer panel specialization editor surfaces API error contract inline and toast', () => {
+  const { context, panel } = createHarness();
+  const toastCalls = [];
+  context._showToast = function(message, type) {
+    toastCalls.push({ message, type });
+  };
+  context.state.specializations_group = 'alpha';
+  context.state.specializations = [{ name: 'ui-ux', global: false }];
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+    hired_by_architect_id: 'arch-1',
+    engineer_specializations: ['ui-ux'],
+  });
+  context.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+
+  const messages = [
+    'specializations must be a list',
+    'Unknown specialization(s): security. Valid specializations: ui-ux',
+    'engineer not found in scope',
+  ];
+  for (const message of messages) {
+    context.agentPanelStartEngineerSpecializationsEdit('eng-1');
+    context.agentPanelSaveEngineerSpecializations('eng-1');
+    assert.equal(
+      context.agentPanelHandleEngineerSpecializationsError({ type: 'error', message }),
+      true,
+    );
+    assert.match(panel.innerHTML, new RegExp(message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.deepEqual(toastCalls, messages.map((message) => ({ message, type: 'error' })));
+});
+
 test('Behavior tab renders overlay editor, proposals, and version timeline', () => {
   const { context, panel, sendCalls } = createHarness();
   setFocusedAgent(context, {
@@ -1159,10 +1312,10 @@ test('worker panel header shows clickable upward architect and engineer parent c
 
   assert.equal(context.focusedItemId, 'eng-1');
   assert.match(panel.innerHTML, /Engineer: Panelsmith · Group: alpha/);
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
-    cmd: 'focus_agent',
-    id: 'eng-1',
-  });
+  assert.ok(
+    sendCalls.some((msg) => msg.cmd === 'focus_agent' && msg.id === 'eng-1'),
+    'breadcrumb focus should send focus_agent even if the engineer panel also refreshes specialization options',
+  );
   assert.ok(restoreCalls.length > restoreCountBeforeClick, 'breadcrumb focus rerender restores panel state');
 });
 

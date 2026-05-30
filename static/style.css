@@ -3155,6 +3155,44 @@ body.standalone-mode .preview-popup {
   display: flex; gap: 6px; align-items: center;
 }
 .specializations-controls select { flex: 1; }
+.agent-panel-specializations-card {
+  margin-bottom: 10px;
+}
+.agent-panel-specialization-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.agent-panel-specialization-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--bg-input, rgba(255,255,255,0.03));
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.agent-panel-specialization-chip.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.agent-panel-specialization-primary,
+.agent-panel-specialization-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.agent-panel-specializations-error {
+  color: var(--red);
+  border: 1px solid rgba(255, 91, 91, 0.35);
+  background: rgba(255, 91, 91, 0.08);
+  border-radius: var(--radius);
+  padding: 5px 7px;
+  margin: 6px 0;
+  font-size: 11px;
+}
+.agent-panel-specializations-picker {
+  margin-top: 6px;
+}
 .specializations-footer {
   font-size: 11px;
   display: flex; align-items: center; gap: 8px;

@@ -319,6 +319,8 @@ function toggleHint(btn) {
 let _confirmResolve = null;
 let _addEngineerGroup = '';
 let _addEngineerArchitectId = '';
+let _addEngineerSpecs = [];
+let _addEngineerSpecializationsGroup = null;
 
 // Modal stack for nested modals. When a nested modal is opened on top of
 // another (e.g. "New specialization" inside the engineer-launch dialog),
@@ -434,6 +436,8 @@ function closeModals() {
   _modalStack = [];
   _addEngineerGroup = '';
   _addEngineerArchitectId = '';
+  _addEngineerSpecs = [];
+  _addEngineerSpecializationsGroup = null;
   _addArchitectGroup = '';
   _pendingHireRejectId = '';
   _architectDecisionModalArchitectId = '';
@@ -516,6 +520,211 @@ function submitGroup() {
 }
 
 /* -- Add Engineer ----------------------------------------------------- */
+function _orderedSpecializationsListMatchesGroup(group) {
+  if (!state) return false;
+  return String((state.specializations_group) || '') === String(group || '');
+}
+
+function _orderedSpecializationsCatalog(group, opts) {
+  opts = opts || {};
+  const matchesGroup = _orderedSpecializationsListMatchesGroup(group);
+  const raw = matchesGroup && state && Array.isArray(state.specializations)
+    ? state.specializations
+    : [];
+  const names = [];
+  const metaByName = {};
+  const seen = new Set();
+  raw.forEach(function(item) {
+    if (!item) return;
+    if (opts.projectOnly && !!item.global) return;
+    const name = String(item.name || '').trim();
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    names.push(name);
+    metaByName[name] = item;
+  });
+  return {
+    matchesGroup: matchesGroup,
+    names: names,
+    metaByName: metaByName,
+  };
+}
+
+function _normalizeOrderedSpecializationSelection(raw, availableNames, opts) {
+  opts = opts || {};
+  const out = [];
+  const seen = new Set();
+  const available = Array.isArray(availableNames) ? availableNames : [];
+  const availableSet = available.length ? new Set(available) : null;
+  (Array.isArray(raw) ? raw : []).forEach(function(item) {
+    const name = String(item || '').trim();
+    if (!name || seen.has(name)) return;
+    if (opts.filterKnown && availableSet && !availableSet.has(name)) return;
+    seen.add(name);
+    out.push(name);
+  });
+  return out;
+}
+
+function _orderedSpecializationsEqual(a, b) {
+  a = Array.isArray(a) ? a : [];
+  b = Array.isArray(b) ? b : [];
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function _renderOrderedSpecializationsPicker(opts) {
+  opts = opts || {};
+  const selectedEl = document.getElementById(opts.selectedId || '');
+  const availableEl = document.getElementById(opts.availableId || '');
+  if (!selectedEl || !availableEl) return;
+  const catalog = _orderedSpecializationsCatalog(opts.group || '', {
+    projectOnly: opts.projectOnly !== false,
+  });
+  const selected = _normalizeOrderedSpecializationSelection(
+    typeof opts.getSelected === 'function' ? opts.getSelected() : [],
+    catalog.names,
+    { filterKnown: opts.filterKnown !== false && catalog.matchesGroup }
+  );
+  if (typeof opts.setSelected === 'function'
+      && !_orderedSpecializationsEqual(selected, opts.getSelected())) {
+    opts.setSelected(selected.slice());
+  }
+
+  selectedEl.innerHTML = '';
+  selected.forEach(function(name, idx) {
+    const li = document.createElement('li');
+    li.className = 'specialization-entry';
+    const label = document.createElement('span');
+    label.className = 'specialization-entry-label';
+    label.textContent = name + (idx === 0 ? ' (primary)' : '');
+    li.appendChild(label);
+
+    const controls = document.createElement('span');
+    controls.className = 'specialization-controls-row';
+    if (idx > 0) {
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.textContent = '↑';
+      up.title = 'Move up';
+      up.onclick = function() {
+        if (typeof opts.onMove === 'function') opts.onMove(idx, -1);
+      };
+      controls.appendChild(up);
+    }
+    if (idx < selected.length - 1) {
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.textContent = '↓';
+      down.title = 'Move down';
+      down.onclick = function() {
+        if (typeof opts.onMove === 'function') opts.onMove(idx, 1);
+      };
+      controls.appendChild(down);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = 'Remove';
+    remove.onclick = function() {
+      if (typeof opts.onRemove === 'function') opts.onRemove(idx);
+    };
+    controls.appendChild(remove);
+    li.appendChild(controls);
+    selectedEl.appendChild(li);
+  });
+
+  availableEl.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = !catalog.matchesGroup
+    ? 'Loading specializations...'
+    : (catalog.names.length ? 'Pick a specialization...' : 'No specializations available');
+  availableEl.appendChild(placeholder);
+  catalog.names.forEach(function(name) {
+    if (selected.indexOf(name) >= 0) return;
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    const meta = catalog.metaByName[name];
+    if (meta && meta.preamble) opt.title = String(meta.preamble).slice(0, 200);
+    availableEl.appendChild(opt);
+  });
+}
+
+function _addEngineerSpecializationsVisible() {
+  return !!String(_addEngineerArchitectId || '').trim();
+}
+
+function _addEngineerCurrentSpecializations() {
+  const catalog = _orderedSpecializationsCatalog(
+    _addEngineerSpecializationsGroup || _addEngineerGroup || '',
+    { projectOnly: true }
+  );
+  return _normalizeOrderedSpecializationSelection(
+    _addEngineerSpecs,
+    catalog.names,
+    { filterKnown: catalog.matchesGroup }
+  );
+}
+
+function renderAddEngineerSpecializations() {
+  const row = document.getElementById('engineer-specializations-row');
+  if (!row) return;
+  if (!_addEngineerSpecializationsVisible()) {
+    row.classList.add('hidden');
+    return;
+  }
+  row.classList.remove('hidden');
+  _renderOrderedSpecializationsPicker({
+    selectedId: 'engineer-specializations-selected',
+    availableId: 'engineer-specializations-available',
+    group: _addEngineerSpecializationsGroup || _addEngineerGroup || '',
+    projectOnly: true,
+    getSelected: function() { return _addEngineerSpecs || []; },
+    setSelected: function(next) { _addEngineerSpecs = next; },
+    onMove: addEngineerMoveSpecialization,
+    onRemove: addEngineerRemoveSpecialization,
+  });
+}
+
+function addEngineerAddSpecialization() {
+  if (!_addEngineerSpecializationsVisible()) return;
+  const availableEl = document.getElementById('engineer-specializations-available');
+  if (!availableEl) return;
+  const name = String(availableEl.value || '').trim();
+  if (!name) return;
+  const catalog = _orderedSpecializationsCatalog(
+    _addEngineerSpecializationsGroup || _addEngineerGroup || '',
+    { projectOnly: true }
+  );
+  if (catalog.matchesGroup && catalog.names.indexOf(name) < 0) return;
+  if (_addEngineerSpecs.indexOf(name) < 0) _addEngineerSpecs.push(name);
+  _addEngineerSpecs = _normalizeOrderedSpecializationSelection(
+    _addEngineerSpecs,
+    catalog.names,
+    { filterKnown: catalog.matchesGroup }
+  );
+  renderAddEngineerSpecializations();
+}
+
+function addEngineerRemoveSpecialization(idx) {
+  if (idx < 0 || idx >= _addEngineerSpecs.length) return;
+  _addEngineerSpecs.splice(idx, 1);
+  renderAddEngineerSpecializations();
+}
+
+function addEngineerMoveSpecialization(idx, delta) {
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= _addEngineerSpecs.length) return;
+  const moved = _addEngineerSpecs.splice(idx, 1)[0];
+  _addEngineerSpecs.splice(newIdx, 0, moved);
+  renderAddEngineerSpecializations();
+}
+
 function _normalizeAddEngineerOptions(options, architectId) {
   const ctx = { group: '', hired_by_architect_id: '' };
   if (options && typeof options === 'object') {
@@ -573,17 +782,30 @@ function openAddEngineerModal(options, architectId) {
   const modal = document.getElementById('modal-engineer');
   if (!modal) return;
   const ctx = _normalizeAddEngineerOptions(options, architectId);
-  _addEngineerGroup = ctx.group;
+  const architect = ctx.hired_by_architect_id && state && state.agents
+    ? state.agents[ctx.hired_by_architect_id]
+    : null;
+  _addEngineerGroup = ctx.group || (architect ? String(architect.group || '') : '');
   _addEngineerArchitectId = ctx.hired_by_architect_id;
+  _addEngineerSpecializationsGroup = _addEngineerGroup;
+  _addEngineerSpecs = [];
   const nameInput = document.getElementById('engineer-name-input');
   const commandInput = document.getElementById('engineer-command-input');
   const summary = document.getElementById('modal-engineer-summary');
+  const title = document.getElementById('modal-engineer-title');
+  const submitBtn = document.getElementById('engineer-submit-btn');
+  if (title) title.textContent = _addEngineerArchitectId ? 'Hire Engineer' : 'Add Engineer';
+  if (submitBtn) submitBtn.textContent = _addEngineerArchitectId ? 'Request Hire' : 'Create Engineer';
   if (summary) {
     summary.textContent = _engineerModalSummary(_addEngineerGroup, _addEngineerArchitectId);
     summary.classList.remove('hidden');
   }
   if (nameInput) nameInput.value = '';
   if (commandInput) commandInput.value = '';
+  if (_addEngineerArchitectId && typeof send === 'function') {
+    send({ cmd: 'list_specializations', group: _addEngineerSpecializationsGroup || '' });
+  }
+  renderAddEngineerSpecializations();
   modal.classList.add('visible');
   if (nameInput && typeof nameInput.focus === 'function') nameInput.focus();
   if (nameInput && typeof nameInput.select === 'function') nameInput.select();
@@ -595,11 +817,20 @@ function submitAddEngineer() {
   const name = nameInput ? nameInput.value.trim() : '';
   const command = commandInput ? commandInput.value.trim() : '';
   if (!name) return;
-  const payload = { cmd: 'add_engineer', name };
-  if (_addEngineerGroup) payload.group = _addEngineerGroup;
-  if (_addEngineerArchitectId) payload.hired_by_architect_id = _addEngineerArchitectId;
+  const payload = _addEngineerArchitectId
+    ? {
+      cmd: 'architect_engineer_hire',
+      architect_id: _addEngineerArchitectId,
+      name: name,
+      specializations: _addEngineerCurrentSpecializations(),
+    }
+    : { cmd: 'add_engineer', name };
+  if (!_addEngineerArchitectId && _addEngineerGroup) payload.group = _addEngineerGroup;
   if (command) payload.command = command;
   send(payload);
+  if (_addEngineerArchitectId && typeof _showToast === 'function') {
+    _showToast('Engineer hire requested', 'success');
+  }
   closeModals();
 }
 

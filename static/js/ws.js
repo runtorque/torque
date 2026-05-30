@@ -569,11 +569,17 @@ function connect() {
       if (typeof renderEngineerLaunchSpecializations === 'function') {
         renderEngineerLaunchSpecializations();
       }
+      if (typeof renderAddEngineerSpecializations === 'function') {
+        renderAddEngineerSpecializations();
+      }
       if (typeof renderGsEngineerSpecializations === 'function') {
         renderGsEngineerSpecializations();
       }
       if (typeof renderEditEngineerSpecializations === 'function') {
         renderEditEngineerSpecializations();
+      }
+      if (typeof agentPanelRenderEngineerSpecializationsEditor === 'function') {
+        agentPanelRenderEngineerSpecializationsEditor();
       }
       if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
           || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
@@ -588,10 +594,14 @@ function connect() {
         specializationLibraryReceiveDetail(msg);
       }
     } else if (msg.type === 'engineer_specializations') {
-      const agents = state.agents || {};
-      const cell = agents[msg.engineer_id];
-      if (cell) {
-        cell.engineer_specializations = msg.specializations || [];
+      if (typeof agentPanelReceiveEngineerSpecializations === 'function') {
+        agentPanelReceiveEngineerSpecializations(msg);
+      } else {
+        const agents = state.agents || {};
+        const cell = agents[msg.engineer_id];
+        if (cell) {
+          cell.engineer_specializations = msg.specializations || [];
+        }
       }
       if (typeof renderEditEngineerSpecializations === 'function') {
         renderEditEngineerSpecializations();
@@ -673,7 +683,12 @@ function connect() {
       if (typeof _showSystemPromptPreviewError === 'function') {
         systemPromptErrorHandled = _showSystemPromptPreviewError(msg);
       }
-      if (!systemPromptErrorHandled) {
+      var specializationEditorErrorHandled = false;
+      if (!systemPromptErrorHandled
+          && typeof agentPanelHandleEngineerSpecializationsError === 'function') {
+        specializationEditorErrorHandled = agentPanelHandleEngineerSpecializationsError(msg);
+      }
+      if (!systemPromptErrorHandled && !specializationEditorErrorHandled) {
         if (typeof handleContextError === 'function') handleContextError(msg);
         else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
       }
@@ -2256,6 +2271,13 @@ function _agentDeltaInvalidatesEngineer(previous, next, op) {
   // textarea + scroll on every worker activity pulse — the dominant firehose
   // surviving the TORQUE:236 v4 mcp/event surface gate.
   const focusedKind = _focusedEngineerAgentKind(focused);
+  if (focusedKind === 'architect') {
+    const hiredPrev = previous ? String(previous.hired_by_architect_id || '') : '';
+    const hiredNext = next ? String(next.hired_by_architect_id || '') : '';
+    if (focusedId && (hiredPrev === focusedId || hiredNext === focusedId)) {
+      return true;
+    }
+  }
   if (focusedKind === 'engineer' || focusedKind === 'architect') {
     const ownerPrev = previous ? String(previous.owner_engineer_id || '') : '';
     const ownerNext = next ? String(next.owner_engineer_id || '') : '';

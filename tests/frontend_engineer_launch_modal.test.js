@@ -237,6 +237,56 @@ test('openEngineerLaunchDialog fetches specializations and renders them', () => 
   assert.equal(specFetch.group, 'alpha');
 });
 
+test('architect hire dialog sends ordered project specializations from state taxonomy', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.agents['arch-1'] = {
+    id: 'arch-1',
+    name: 'Planner',
+    group: 'alpha',
+    kind: 'architect',
+    cell_type: 'agent',
+  };
+  sandbox.state.specializations_group = 'alpha';
+  sandbox.state.specializations = [
+    { name: 'ui-ux', preamble: 'UX.', global: false },
+    { name: 'desktop-shell', preamble: 'Desktop.', global: false },
+    { name: 'personal-only', preamble: 'User.', global: true },
+  ];
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+
+  vm.runInContext(`openAddEngineerForSection('alpha', 'arch-1')`, context);
+  ensure('engineer-name-input').value = 'Ava';
+  ensure('engineer-command-input').value = 'codex --model gpt-5.4';
+
+  // These are not in the project taxonomy exposed through state.specializations.
+  ensure('engineer-specializations-available').value = 'orchestration-core';
+  vm.runInContext('addEngineerAddSpecialization()', context);
+  ensure('engineer-specializations-available').value = 'personal-only';
+  vm.runInContext('addEngineerAddSpecialization()', context);
+
+  ensure('engineer-specializations-available').value = 'ui-ux';
+  vm.runInContext('addEngineerAddSpecialization()', context);
+  ensure('engineer-specializations-available').value = 'desktop-shell';
+  vm.runInContext('addEngineerAddSpecialization()', context);
+  vm.runInContext('addEngineerMoveSpecialization(1, -1)', context);
+  vm.runInContext('submitAddEngineer()', context);
+
+  const specFetch = sandbox.sendCalls.find((msg) => msg.cmd === 'list_specializations');
+  assert.deepEqual(JSON.parse(JSON.stringify(specFetch)), {
+    cmd: 'list_specializations',
+    group: 'alpha',
+  });
+  const hireCall = sandbox.sendCalls.find((msg) => msg.cmd === 'architect_engineer_hire');
+  assert.deepEqual(JSON.parse(JSON.stringify(hireCall)), {
+    cmd: 'architect_engineer_hire',
+    architect_id: 'arch-1',
+    name: 'Ava',
+    specializations: ['desktop-shell', 'ui-ux'],
+    command: 'codex --model gpt-5.4',
+  });
+});
+
 test('specializations picker reorders and submits ordered list on save', () => {
   const { sandbox, ensure } = createSandbox();
   sandbox.state.specializations = [

@@ -16156,6 +16156,77 @@ test('agent_upsert for engineer-owned worker DOES invalidate focused engineer pa
     'agent_upsert for worker owned by focused engineer should refresh panel');
 });
 
+test('agent_upsert for architect-owned engineer specializations invalidates only focused owner architect', () => {
+  const ownedHarness = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(ownedHarness.context, `
+    selectedAgentId = 'arch-a';
+    focusedItemId = 'arch-a';
+    if (!state.agents) state.agents = {};
+    state.agents['arch-a'] = { id: 'arch-a', group: 'alpha', kind: 'architect', cell_type: 'agent' };
+    state.agents['eng-a'] = {
+      id: 'eng-a',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-a',
+      engineer_specializations: ['ui-ux']
+    };
+  `);
+  ownedHarness.context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'eng-a',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-a',
+      engineer_specializations: ['desktop-shell', 'ui-ux'],
+    }],
+  });
+  ownedHarness.flushRaf();
+  assert.equal(
+    ownedHarness.sandbox.renderCalls.engineer,
+    1,
+    'focused owner architect should refresh for a hired-engineer specialization delta',
+  );
+
+  const siblingHarness = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(siblingHarness.context, `
+    selectedAgentId = 'arch-a';
+    focusedItemId = 'arch-a';
+    if (!state.agents) state.agents = {};
+    state.agents['arch-a'] = { id: 'arch-a', group: 'alpha', kind: 'architect', cell_type: 'agent' };
+    state.agents['arch-b'] = { id: 'arch-b', group: 'alpha', kind: 'architect', cell_type: 'agent' };
+    state.agents['eng-b'] = {
+      id: 'eng-b',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-b',
+      engineer_specializations: ['ui-ux']
+    };
+  `);
+  siblingHarness.context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'eng-b',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-b',
+      engineer_specializations: [],
+    }],
+  });
+  siblingHarness.flushRaf();
+  assert.equal(
+    siblingHarness.sandbox.renderCalls.engineer,
+    0,
+    'focused architect should not refresh for another architect’s engineer',
+  );
+});
+
 test('standalone agent_upsert deltas batch current-group engineer rendering', () => {
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
   // TORQUE:236 v5: engineer-surface invalidation is now gated on focused-agent
@@ -24054,13 +24125,19 @@ test('architect context menu New engineer opens a scoped modal and submits archi
 
   runInContext(context, `submitAddEngineer();`);
 
-  assert.deepEqual(jsonValue(context, `sendCalls`), [{
-    cmd: 'add_engineer',
-    name: 'Casey',
-    group: 'torque',
-    hired_by_architect_id: 'arch-a',
-    command: 'codex --fast',
-  }]);
+  assert.deepEqual(jsonValue(context, `sendCalls`), [
+    {
+      cmd: 'list_specializations',
+      group: 'torque',
+    },
+    {
+      cmd: 'architect_engineer_hire',
+      architect_id: 'arch-a',
+      name: 'Casey',
+      specializations: [],
+      command: 'codex --fast',
+    },
+  ]);
 });
 
 test('grid-level New engineer submits a user-hired engineer without architect context', () => {
