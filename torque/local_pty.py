@@ -12,6 +12,7 @@ import shlex
 import shutil
 import signal
 import tempfile
+import time
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
@@ -1027,6 +1028,14 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         # ``kind`` is one of: "connect_failed", "disconnected",
         # "reconnected", "fresh_instance".
         self.on_supervisor_event = None
+        # Per-session input-write circuit breaker. A hung agent that stops
+        # draining its PTY makes every write to it fail (after the supervisor
+        # backpressure / client timeout); without a breaker the daemon keeps
+        # re-attempting, and each attempt can stall the shared channel. After
+        # WRITE_BREAKER_THRESHOLD consecutive failures we "open" the breaker
+        # for that session and drop input fast (no supervisor round-trip) until
+        # the cooldown lets a single probe through. session_id -> state dict.
+        self._write_breaker: dict[str, dict] = {}
 
     def _prime_reconnected_input_ready(self, cell: AgentCell) -> None:
         sid = cell.session_id or ""
@@ -1322,19 +1331,82 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             # Exit never came back — unblock UI anyway.
             await self._finalize_supervised(session, announce=False)
 
+    # -- input-write circuit breaker --------------------------------------
+
+    WRITE_BREAKER_THRESHOLD = 3
+    WRITE_BREAKER_COOLDOWN_SECONDS = 30.0
+
+    def _write_breaker_should_skip(self, session_id: str) -> bool:
+        st = self._write_breaker.get(session_id)
+        if not st or not st.get("opened_at"):
+            return False
+        if time.monotonic() - st["opened_at"] < self.WRITE_BREAKER_COOLDOWN_SECONDS:
+            return True
+        # Cooldown elapsed: half-open — let one probe write through.
+        st["opened_at"] = 0.0
+        return False
+
+    def _write_breaker_record_failure(self, session_id: str) -> None:
+        st = self._write_breaker.setdefault(
+            session_id, {"fails": 0, "opened_at": 0.0})
+        st["fails"] += 1
+        if st["fails"] >= self.WRITE_BREAKER_THRESHOLD and not st["opened_at"]:
+            st["opened_at"] = time.monotonic()
+            log.warning(
+                "Input-write breaker OPEN for %s after %d consecutive "
+                "failures — agent appears to have stopped draining stdin; "
+                "dropping input until it recovers",
+                session_id, st["fails"])
+            self._mark_session_input_stuck(session_id, True)
+
+    def _write_breaker_record_success(self, session_id: str) -> None:
+        st = self._write_breaker.pop(session_id, None)
+        if st and st.get("opened_at"):
+            log.info("Input-write breaker recovered for %s", session_id)
+            self._mark_session_input_stuck(session_id, False)
+
+    def _mark_session_input_stuck(self, session_id: str, stuck: bool) -> None:
+        session = self._sessions.get(session_id)
+        cell = self.state.agents.get(session.cell_id) if session else None
+        if not cell:
+            return
+        # needs_attention/activity_detail are ephemeral (memory-only), so an
+        # _emit_agent delta is enough — no DB write.
+        if stuck:
+            cell.needs_attention = True
+            cell.activity_detail = "Input delivery stalled (agent not reading)"
+        elif cell.activity_detail == "Input delivery stalled (agent not reading)":
+            cell.activity_detail = ""
+        self.state._emit_agent(cell)
+
+    def supervisor_write_breaker_snapshot(self) -> dict:
+        """Open breakers as ``{session_id: seconds_open}`` (for diagnostics)."""
+        now = time.monotonic()
+        return {
+            sid: round(now - st["opened_at"], 1)
+            for sid, st in self._write_breaker.items()
+            if st.get("opened_at")
+        }
+
     async def write_input(self, session_id: str, data: str) -> None:
         session = self._sessions.get(session_id)
         if not session or session.closed:
             return
         if not data:
             return
+        if self._write_breaker_should_skip(session_id):
+            # Breaker open: drop fast without a (likely-stalling) round-trip.
+            return
         payload = data.encode("utf-8", errors="ignore")
         try:
             await self._client.write_input(session_id, payload)
         except Exception:
-            log.exception(
+            self._write_breaker_record_failure(session_id)
+            log.warning(
                 "Supervisor write failed for %s — dropping input",
                 session_id)
+            return
+        self._write_breaker_record_success(session_id)
 
     async def resize_session(
         self, session_id: str, cols: int, rows: int,

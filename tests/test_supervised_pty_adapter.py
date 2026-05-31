@@ -10,6 +10,7 @@ reconcile-after-reconnect scenario.
 import asyncio
 import importlib
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -145,6 +146,50 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(got.wait(), timeout=3.0)
         finally:
             await adapter.shutdown()
+
+    async def test_write_breaker_opens_short_circuits_and_recovers(self):
+        import types
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Term BK",
+            group="Torque",
+            terminal_backend="pty",
+            command="cat",
+        )
+        sid = "sess-breaker"
+        cell.session_id = sid
+        adapter._sessions[sid] = types.SimpleNamespace(
+            closed=False, cell_id=cell.id)
+
+        attempts = {"n": 0}
+
+        class FailingClient:
+            async def write_input(self, session_id, payload):
+                attempts["n"] += 1
+                raise OSError("boom")
+
+        adapter._client = FailingClient()
+
+        # Consecutive failures open the breaker at the threshold.
+        for _ in range(adapter.WRITE_BREAKER_THRESHOLD):
+            await adapter.write_input(sid, "x")
+        self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD)
+        self.assertIn(sid, adapter.supervisor_write_breaker_snapshot())
+        self.assertTrue(cell.needs_attention)
+
+        # While open, further writes short-circuit (no new round-trips).
+        for _ in range(5):
+            await adapter.write_input(sid, "x")
+        self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD)
+
+        # After the cooldown, a single probe write is allowed through.
+        adapter._write_breaker[sid]["opened_at"] = (
+            time.monotonic() - adapter.WRITE_BREAKER_COOLDOWN_SECONDS - 1
+        )
+        await adapter.write_input(sid, "x")
+        self.assertEqual(attempts["n"], adapter.WRITE_BREAKER_THRESHOLD + 1)
 
     async def test_close_session_marks_cell_stopped(self):
         state, adapter = await self._make_adapter()
