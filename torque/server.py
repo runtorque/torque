@@ -12216,7 +12216,7 @@ async def main(connection=None):
     def _metrics_live_sampler() -> dict:
         active = list(state.iter_active_agents())
         prompt_tails = getattr(agent_launch, "_prompt_queue_tails", {}) or {}
-        return {
+        sample = {
             "agents": sum(
                 1 for cell in active
                 if getattr(cell, "cell_type", "") == "agent"
@@ -12227,6 +12227,19 @@ async def main(connection=None):
             ),
             "prompt_queue_depth": len(prompt_tails),
         }
+        # daemon↔supervisor hop health (when the supervised adapter is active).
+        connected_fn = getattr(bridge, "supervisor_connected", None)
+        if callable(connected_fn):
+            try:
+                sample["supervisor_connected"] = bool(connected_fn())
+                sample["supervisor_latency_ms"] = bridge.supervisor_last_latency_ms()
+                snapshot = getattr(
+                    bridge, "supervisor_write_breaker_snapshot", None)
+                sample["stuck_sessions"] = (
+                    len(snapshot()) if callable(snapshot) else 0)
+            except Exception:
+                pass
+        return sample
 
     def _schedule_daemon_stop() -> None:
         nonlocal daemon_stop_task

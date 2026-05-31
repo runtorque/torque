@@ -1379,6 +1379,15 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             cell.activity_detail = ""
         self.state._emit_agent(cell)
 
+    def supervisor_connected(self) -> bool:
+        """Whether the daemon's supervisor client currently has a live link."""
+        fn = getattr(self._client, "is_connected", None)
+        return bool(fn()) if callable(fn) else False
+
+    def supervisor_last_latency_ms(self):
+        """Latency of the last successful supervisor round-trip (ms), or None."""
+        return getattr(self._client, "last_op_latency_ms", None)
+
     def supervisor_write_breaker_snapshot(self) -> dict:
         """Open breakers as ``{session_id: seconds_open}`` (for diagnostics)."""
         now = time.monotonic()

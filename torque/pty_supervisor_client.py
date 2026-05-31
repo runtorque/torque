@@ -97,6 +97,21 @@ class PtySupervisorClient:
         # prior connection) can't tear down the connection that replaced it —
         # which otherwise oscillates connect→disconnect forever.
         self._connection_gen = 0
+        # Latency (ms) of the most recent successful request round-trip, for
+        # the daemon↔supervisor health surface. None until the first call.
+        self._last_op_latency_ms: Optional[float] = None
+
+    def is_connected(self) -> bool:
+        return (
+            not self._closed
+            and self._ready.is_set()
+            and self._writer is not None
+            and self._reader is not None
+        )
+
+    @property
+    def last_op_latency_ms(self) -> Optional[float]:
+        return self._last_op_latency_ms
 
     # -- connect / close ---------------------------------------------------
 
@@ -240,8 +255,12 @@ class PtySupervisorClient:
                 self._pending = None
                 self._handle_disconnect()
                 raise SupervisorUnavailable(str(exc)) from exc
+            started = loop.time()
             try:
-                return await asyncio.wait_for(fut, timeout=_CALL_TIMEOUT_SECONDS)
+                result = await asyncio.wait_for(
+                    fut, timeout=_CALL_TIMEOUT_SECONDS)
+                self._last_op_latency_ms = (loop.time() - started) * 1000.0
+                return result
             except asyncio.TimeoutError as exc:
                 # Response was lost or never dispatched while the socket stayed
                 # nominally open. Tear the connection down so _reconnect_loop

@@ -317,6 +317,18 @@ function _healthMetricsLiveHtml() {
       'health-card-live'
     ),
     _healthMetricsCard(
+      'Supervisor link',
+      (live.supervisor_connected === undefined
+        ? '—'
+        : (live.supervisor_connected ? 'connected' : 'disconnected')),
+      (live.supervisor_latency_ms != null
+        ? _healthMetricFormat(live.supervisor_latency_ms, 1, 'ms')
+        : '—')
+        + ' · ' + _healthMetricFormat(live.stuck_sessions, 0, ' stuck'),
+      null,
+      'health-card-supervisor'
+    ),
+    _healthMetricsCard(
       'Frontend renders',
       frontend ? _healthMetricFormatRate(frontend.render_per_s, 1, '/s') : '—',
       frontend
