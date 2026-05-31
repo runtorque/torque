@@ -7881,13 +7881,25 @@ def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | No
     return None
 
 
-async def _handle_doctor_command(db: TorqueDB) -> dict:
+async def _handle_doctor_command(db: TorqueDB, bridge=None) -> dict:
     # build_doctor_report probes the PTY supervisor socket (a bounded but
     # blocking call), so run it off the event loop on a fresh read-only
     # connection rather than stalling the daemon — and never reuse db._conn
     # across the worker thread.
-    return await asyncio.to_thread(
+    report = await asyncio.to_thread(
         build_doctor_report_for_db, db.db_path, runtime_python=sys.executable)
+    # Inject live runtime state the offline DB can't know: sessions whose
+    # input-write circuit breaker is open (agents that stopped draining stdin).
+    snapshot = getattr(bridge, "supervisor_write_breaker_snapshot", None)
+    if callable(snapshot):
+        try:
+            breakers = dict(snapshot() or {})
+        except Exception:
+            breakers = {}
+        sup = report.setdefault("pty_supervisor", {})
+        sup["open_write_breakers"] = breakers
+        sup["stuck_sessions"] = len(breakers)
+    return report
 
 
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"
@@ -13567,7 +13579,7 @@ async def main(connection=None):
             return response
 
         if cmd == "doctor":
-            return await _handle_doctor_command(db)
+            return await _handle_doctor_command(db, bridge)
 
         if cmd == "get_metrics_history":
             try:

@@ -1377,6 +1377,20 @@ def _check_pty_supervisor_reachable(report: dict) -> dict:
     }
 
 
+def _warn_stuck_input_sessions(report: dict) -> dict | None:
+    sup = report.get("pty_supervisor", {}) or {}
+    breakers = sup.get("open_write_breakers") or {}
+    if not breakers:
+        return None
+    return {
+        "name": "stuck_input_sessions",
+        "details": {
+            "count": len(breakers),
+            "sessions": sorted(breakers.keys()),
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -1403,6 +1417,7 @@ _DOCTOR_WARNINGS = [
     _warn_legacy_toolbelt_data_dir,
     _warn_legacy_appsupport_python_runtime,
     _warn_primary_runtime_missing,
+    _warn_stuck_input_sessions,
 ]
 
 
@@ -1698,6 +1713,8 @@ def format_doctor_report(report: dict) -> str:
         f"{pty_supervisor.get('pid') if pty_supervisor.get('pid') is not None else '—'}",
         "  ping_ms:                        "
         f"{pty_supervisor.get('ping_ms') if pty_supervisor.get('ping_ms') is not None else '—'}",
+        "  stuck_input_sessions:           "
+        f"{pty_supervisor.get('stuck_sessions') if 'stuck_sessions' in pty_supervisor else '— (daemon offline)'}",
         "",
         (
             "Result: PASS (with warnings)"
@@ -1715,6 +1732,17 @@ def format_doctor_report(report: dict) -> str:
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
                 )
+            elif name == "stuck_input_sessions":
+                sessions = details.get("sessions", []) or []
+                summary = ", ".join(s[:12] for s in sessions[:6])
+                line = (
+                    f"  - {details.get('count', 0)} agent session(s) have an "
+                    "open input-write breaker (agent not draining stdin); "
+                    "restart the affected agent"
+                )
+                if summary:
+                    line += f": {summary}"
+                lines.append(line)
             elif name == "task_aliases_missing_canonical":
                 aliases = details.get("aliases", []) or []
                 summary = ", ".join(

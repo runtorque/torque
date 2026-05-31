@@ -115,6 +115,30 @@ class TorqueDoctorTests(unittest.TestCase):
             self.assertFalse(sec["reachable"])
             self.assertIsNone(sec["pid"])
 
+    def test_stuck_input_sessions_warning_and_render(self):
+        from torque.doctor import (
+            _warn_stuck_input_sessions,
+            build_doctor_report_for_db,
+            format_doctor_report,
+        )
+        # No open breakers => no warning.
+        self.assertIsNone(_warn_stuck_input_sessions({"pty_supervisor": {}}))
+        # Open breakers => warning carrying count + session ids.
+        warning = _warn_stuck_input_sessions(
+            {"pty_supervisor": {"open_write_breakers": {"sess-aaaa1111": 12.0}}}
+        )
+        self.assertEqual(warning["name"], "stuck_input_sessions")
+        self.assertEqual(warning["details"]["count"], 1)
+
+        # Render: inject the runtime fields the daemon adds, then format.
+        report = build_doctor_report_for_db(self.db_path)
+        report["pty_supervisor"]["open_write_breakers"] = {"sess-aaaa1111": 12.0}
+        report["pty_supervisor"]["stuck_sessions"] = 1
+        report.setdefault("warnings", []).append(warning)
+        text = format_doctor_report(report)
+        self.assertIn("stuck_input_sessions:", text)
+        self.assertIn("open input-write breaker", text)
+
     def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
         home = self._home_dir()
         self._save_engineer()
