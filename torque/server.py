@@ -75,6 +75,7 @@ from .events import (
     health_check,
 )
 from .event_ingest_db import event_call_row_from_record, redact_event_for_mcp_call_log
+from .perceived_empty import PerceivedEmptyDetector
 from .metrics import MetricsDaemon
 from .adapters import get_adapter, get_providers
 from .adapters.base import AgentEvent
@@ -11587,6 +11588,7 @@ async def main(connection=None):
         event_bus,
         state,
     )
+    perceived_empty_detector = PerceivedEmptyDetector()
     log.info("Event bus, event-ingest client, health monitor, "
              "and notifications initialized")
 
@@ -20444,6 +20446,79 @@ async def main(connection=None):
                 surface="events",
                 event="dedupe",
             )
+        if not response.get("duplicate"):
+            try:
+                cell_id = headers.get("X-Torque-Cell-Id", "")
+                cell = state.agents.get(cell_id) if cell_id else None
+                episode = perceived_empty_detector.ingest_envelope(
+                    envelope,
+                    cursor=int(response.get("cursor") or 0),
+                    cell=cell,
+                    threshold_n=(
+                        state.global_settings
+                        .perceived_empty_probe_threshold
+                    ),
+                    window_seconds=(
+                        state.global_settings
+                        .perceived_empty_window_seconds
+                    ),
+                )
+                if episode is not None:
+                    episode_record = episode.to_db_record()
+                    episode_id = 0
+                    if hasattr(db, "record_perceived_empty_episode_safe"):
+                        episode_id = db.record_perceived_empty_episode_safe(
+                            **episode_record
+                        )
+                    elif hasattr(db, "record_perceived_empty_episode"):
+                        episode_id = db.record_perceived_empty_episode(
+                            **episode_record
+                        )
+                    message = (
+                        "Perceived-empty tool-result episode detected "
+                        f"({episode.confidence}): {episode.trigger_reason}. "
+                        "Tool results were present in Torque evidence; "
+                        "operator review needed."
+                    )
+                    state.flag_perceived_empty_episode(
+                        episode.cell_id,
+                        detail=message,
+                    )
+                    payload = {
+                        **episode_record,
+                        "id": episode_id,
+                        "tool_calls": episode.tool_calls,
+                    }
+                    state._emit(
+                        "perceived_empty_episode",
+                        group=episode.group,
+                        cell_id=episode.cell_id,
+                        episode=payload,
+                    )
+                    event_cell = cell or state.agents.get(episode.cell_id)
+                    _panel_event(
+                        "perceived_empty_episode",
+                        episode.cell_id,
+                        episode.agent_name
+                        or getattr(event_cell, "name", "")
+                        or episode.cell_id,
+                        episode.group
+                        or getattr(event_cell, "group", ""),
+                        message,
+                        task_id=getattr(event_cell, "current_task_id", ""),
+                    )
+                    if notifier:
+                        notifier.on_health_alert(episode.cell_id, message)
+                    state.recompute_task_health()
+                    if hasattr(db, "record_mcp_health_event_safe"):
+                        db.record_mcp_health_event_safe(
+                            surface="events",
+                            event="perceived_empty_episode",
+                            tool_name=episode.trigger_reason[:100],
+                            error=episode.cell_id,
+                        )
+            except Exception:
+                log.exception("Failed to process perceived-empty detector")
         try:
             raw_tool = str(raw.get("tool_name") or raw.get("name") or "")
             raw_hook = str(raw.get("hook_event_name") or raw.get("type") or "")

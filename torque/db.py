@@ -1456,6 +1456,132 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except Exception:
             log.debug("Failed to record MCP health event", exc_info=True)
 
+    def record_perceived_empty_episode(
+        self,
+        *,
+        timestamp: float,
+        cell_id: str,
+        group_name: str = "",
+        agent_name: str = "",
+        session_id: str = "",
+        transcript_path: str = "",
+        trigger_reason: str = "",
+        confidence: str = "",
+        threshold_n: int = 0,
+        window_seconds: int = 0,
+        tool_calls_json: str = "[]",
+    ) -> int:
+        cur = self._conn.execute(
+            "INSERT INTO perceived_empty_episodes "
+            "(timestamp, cell_id, group_name, agent_name, session_id, "
+            "transcript_path, trigger_reason, confidence, threshold_n, "
+            "window_seconds, tool_calls_json, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                float(timestamp or time.time()),
+                str(cell_id or ""),
+                str(group_name or ""),
+                str(agent_name or ""),
+                str(session_id or ""),
+                str(transcript_path or ""),
+                str(trigger_reason or "")[:500],
+                str(confidence or "")[:50],
+                int(threshold_n or 0),
+                int(window_seconds or 0),
+                str(tool_calls_json or "[]"),
+                time.time(),
+            ),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def record_perceived_empty_episode_safe(self, **kwargs) -> int:
+        try:
+            return self.record_perceived_empty_episode(**kwargs)
+        except Exception:
+            pass
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                cur = conn.execute(
+                    "INSERT INTO perceived_empty_episodes "
+                    "(timestamp, cell_id, group_name, agent_name, session_id, "
+                    "transcript_path, trigger_reason, confidence, threshold_n, "
+                    "window_seconds, tool_calls_json, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        float(kwargs.get("timestamp") or time.time()),
+                        str(kwargs.get("cell_id") or ""),
+                        str(kwargs.get("group_name") or ""),
+                        str(kwargs.get("agent_name") or ""),
+                        str(kwargs.get("session_id") or ""),
+                        str(kwargs.get("transcript_path") or ""),
+                        str(kwargs.get("trigger_reason") or "")[:500],
+                        str(kwargs.get("confidence") or "")[:50],
+                        int(kwargs.get("threshold_n") or 0),
+                        int(kwargs.get("window_seconds") or 0),
+                        str(kwargs.get("tool_calls_json") or "[]"),
+                        time.time(),
+                    ),
+                )
+                conn.commit()
+                return int(cur.lastrowid or 0)
+            finally:
+                conn.close()
+        except Exception:
+            log.debug("Failed to record perceived-empty episode", exc_info=True)
+            return 0
+
+    def load_perceived_empty_episodes(
+        self,
+        *,
+        cell_id: str = "",
+        limit: int = 50,
+    ) -> list[dict]:
+        clauses = []
+        params: list = []
+        if str(cell_id or "").strip():
+            clauses.append("cell_id = ?")
+            params.append(str(cell_id or "").strip())
+        try:
+            row_limit = max(1, min(500, int(limit or 50)))
+        except (TypeError, ValueError):
+            row_limit = 50
+        sql = (
+            "SELECT id, timestamp, cell_id, group_name, agent_name, "
+            "session_id, transcript_path, trigger_reason, confidence, "
+            "threshold_n, window_seconds, tool_calls_json, created_at "
+            "FROM perceived_empty_episodes"
+        )
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+        params.append(row_limit)
+        rows = self._conn.execute(sql, params).fetchall()
+        episodes = []
+        for row in rows:
+            d = {
+                "id": row[0],
+                "timestamp": row[1],
+                "cell_id": row[2],
+                "group_name": row[3],
+                "agent_name": row[4],
+                "session_id": row[5],
+                "transcript_path": row[6],
+                "trigger_reason": row[7],
+                "confidence": row[8],
+                "threshold_n": row[9],
+                "window_seconds": row[10],
+                "tool_calls_json": row[11],
+                "created_at": row[12],
+            }
+            try:
+                d["tool_calls"] = json.loads(row[11] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                d["tool_calls"] = []
+            episodes.append(d)
+        return episodes
+
     def _record_reliability_event_safe(
         self,
         *,

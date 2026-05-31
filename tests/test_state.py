@@ -284,6 +284,38 @@ class MatrixStateCleanupTests(unittest.TestCase):
             ["status_bar_visibility"],
         )
 
+    def test_update_global_settings_normalizes_perceived_empty_knobs(self):
+        state = self.state_mod.MatrixState()
+
+        state.update_global_settings(
+            perceived_empty_probe_threshold="1",
+            perceived_empty_window_seconds="99999",
+        )
+
+        self.assertEqual(state.global_settings.perceived_empty_probe_threshold, 2)
+        self.assertEqual(state.global_settings.perceived_empty_window_seconds, 3600)
+
+    def test_flag_perceived_empty_episode_sets_attention_without_stopping(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = state.add_agent(
+            name="Worker",
+            group="g",
+        )
+        cell.status = "running"
+        cell.kind = "worker"
+
+        flagged = state.flag_perceived_empty_episode(
+            cell.id,
+            detail="Perceived-empty tool-result episode detected",
+        )
+
+        self.assertTrue(flagged)
+        self.assertTrue(cell.needs_attention)
+        self.assertEqual(cell.status, "running")
+        self.assertEqual(cell.last_event_text,
+                         "Perceived-empty tool-result episode detected")
+
     def test_relay_fields_default_off_and_serialize(self):
         state = self.state_mod.MatrixState()
         gs = state.global_settings

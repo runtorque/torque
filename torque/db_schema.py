@@ -744,6 +744,24 @@ CREATE TABLE IF NOT EXISTS mcp_health_events (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_health_events_recent
     ON mcp_health_events(timestamp DESC, surface, tool_name, event);
+
+CREATE TABLE IF NOT EXISTS perceived_empty_episodes (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp         REAL NOT NULL,
+    cell_id           TEXT NOT NULL DEFAULT '',
+    group_name        TEXT NOT NULL DEFAULT '',
+    agent_name        TEXT NOT NULL DEFAULT '',
+    session_id        TEXT NOT NULL DEFAULT '',
+    transcript_path   TEXT NOT NULL DEFAULT '',
+    trigger_reason    TEXT NOT NULL DEFAULT '',
+    confidence        TEXT NOT NULL DEFAULT '',
+    threshold_n       INTEGER NOT NULL DEFAULT 0,
+    window_seconds    INTEGER NOT NULL DEFAULT 0,
+    tool_calls_json   TEXT NOT NULL DEFAULT '[]',
+    created_at        REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_perceived_empty_episodes_recent
+    ON perceived_empty_episodes(timestamp DESC, cell_id);
 """
 
 _LEGACY_ENGINEER_PREFIX = "wea" + "ver"

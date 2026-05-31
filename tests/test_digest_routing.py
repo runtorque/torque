@@ -619,6 +619,45 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id])
 
+    def test_perceived_empty_episode_routes_to_owner_and_architect(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.update_agent_digest_settings(engineer.id, enabled_events=[])
+        state.update_agent_digest_settings(architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": worker.id,
+                "group": group,
+                "kind": "perceived_empty_episode",
+            },
+        )
+
+        self.assertEqual(recipients, [engineer.id, architect.id])
+
     def test_blank_cell_task_event_routes_to_assigned_engineer(self):
         state, group = self._make_state()
         legacy = self._add_agent(
