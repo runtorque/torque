@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import pty
+import select
 import signal
 import socket
 import struct
@@ -53,7 +54,72 @@ DEFAULT_LOG_FILE_NAME = "pty_supervisor.log"
 # Snapshot replay can be large (up to BUFFER_LIMIT bytes base64-encoded).
 MAX_FRAME_BYTES = 2 * BUFFER_LIMIT + 4096
 
+# Upper bound on a single write to a PTY master. The master fd is non-blocking
+# so a child that has stopped draining its stdin makes os.write raise EAGAIN
+# rather than block; we wait (via select) up to this deadline for the input
+# buffer to drain, then report backpressure instead of stalling the shared
+# supervisor connection forever (which used to wedge every other session).
+WRITE_DEADLINE_SECONDS = 5.0
+
+# Poll cadence for the readable wait so the read thread periodically rechecks
+# session liveness even if no bytes and no EOF arrive.
+READ_POLL_INTERVAL_SECONDS = 1.0
+
 log = logging.getLogger("torque.pty_supervisor")
+
+
+def _select_read_chunk(fd: int, closed: "Callable[[], bool]") -> bytes:
+    """Block (in a worker thread) until the non-blocking master ``fd`` is
+    readable, then read one chunk.
+
+    Returns ``b""`` on EOF / closed fd so the read loop terminates. Raises
+    ``OSError`` only for genuinely unexpected errors.
+    """
+    while not closed():
+        try:
+            readable, _, _ = select.select([fd], [], [], READ_POLL_INTERVAL_SECONDS)
+        except (OSError, ValueError):
+            return b""  # fd closed underneath us
+        if not readable:
+            continue
+        try:
+            return os.read(fd, 4096)
+        except BlockingIOError:
+            continue
+        except OSError as exc:
+            if exc.errno in (errno.EIO, errno.EBADF):
+                return b""
+            raise
+    return b""
+
+
+def _bounded_pty_write(fd: int, data: bytes, deadline: float) -> int:
+    """Write ``data`` to the non-blocking master ``fd``, bounded by a monotonic
+    ``deadline``.
+
+    Runs in a worker thread and always returns within the deadline (it waits
+    for writability via ``select`` with the remaining budget, never a bare
+    blocking ``os.write``), so a full PTY input buffer can't pin the thread.
+    Returns the number of bytes written; a short count means the buffer stayed
+    full past the deadline (backpressure).
+    """
+    view = memoryview(data)
+    written = 0
+    while written < len(data):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            _, writable, _ = select.select([], [fd], [], remaining)
+        except (OSError, ValueError):
+            break
+        if not writable:
+            continue
+        try:
+            written += os.write(fd, view[written:])
+        except BlockingIOError:
+            continue
+    return written
 
 
 # -- Wire framing ----------------------------------------------------------
@@ -305,13 +371,29 @@ class PtySupervisor:
             })
             return
         if payload:
+            deadline = time.monotonic() + WRITE_DEADLINE_SECONDS
             try:
-                await asyncio.to_thread(os.write, sess.master_fd, payload)
+                written = await asyncio.to_thread(
+                    _bounded_pty_write, sess.master_fd, payload, deadline)
             except OSError as exc:
                 await write_frame(writer, {
                     "type": "error",
                     "code": "write_failed",
                     "message": str(exc),
+                })
+                return
+            if written < len(payload):
+                # The child stopped draining stdin and its PTY input buffer
+                # stayed full past the deadline. Report backpressure rather
+                # than blocking this connection (and thus every other
+                # session's ops) on a single wedged agent.
+                await write_frame(writer, {
+                    "type": "error",
+                    "code": "write_backpressure",
+                    "message": (
+                        f"wrote {written}/{len(payload)} bytes before "
+                        f"{WRITE_DEADLINE_SECONDS:.0f}s deadline"
+                    ),
                 })
                 return
         await write_frame(writer, {"type": "ok", "op": "write"})
@@ -417,6 +499,10 @@ class PtySupervisor:
         bootstrap_dir: str,
     ) -> SupervisorSession:
         master_fd, slave_fd = pty.openpty()
+        # The supervisor side (master) is non-blocking so reads/writes are
+        # readiness-gated via select; the child keeps the blocking slave fd and
+        # behaves normally.
+        os.set_blocking(master_fd, False)
         set_winsize(master_fd, cols, rows)
         try:
             process = await asyncio.create_subprocess_exec(
@@ -451,7 +537,10 @@ class PtySupervisor:
             while True:
                 try:
                     chunk = await asyncio.to_thread(
-                        os.read, session.master_fd, 4096)
+                        _select_read_chunk,
+                        session.master_fd,
+                        lambda: session.closed,
+                    )
                 except OSError as exc:
                     if exc.errno in (errno.EIO, errno.EBADF):
                         break
