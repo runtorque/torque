@@ -47,7 +47,7 @@ from .direct_message_mirrors import (
     save_direct_ask_mirror,
     save_direct_ask_reply_mirror,
 )
-from .doctor import build_doctor_report
+from .doctor import build_doctor_report_for_db
 from dataclasses import asdict, dataclass
 from .state import (
     ARCHIVED_LANE,
@@ -7881,8 +7881,13 @@ def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | No
     return None
 
 
-def _handle_doctor_command(db: TorqueDB) -> dict:
-    return build_doctor_report(db._conn, db.db_path, runtime_python=sys.executable)
+async def _handle_doctor_command(db: TorqueDB) -> dict:
+    # build_doctor_report probes the PTY supervisor socket (a bounded but
+    # blocking call), so run it off the event loop on a fresh read-only
+    # connection rather than stalling the daemon — and never reuse db._conn
+    # across the worker thread.
+    return await asyncio.to_thread(
+        build_doctor_report_for_db, db.db_path, runtime_python=sys.executable)
 
 
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"
@@ -13562,7 +13567,7 @@ async def main(connection=None):
             return response
 
         if cmd == "doctor":
-            return _handle_doctor_command(db)
+            return await _handle_doctor_command(db)
 
         if cmd == "get_metrics_history":
             try:

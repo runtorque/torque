@@ -1330,6 +1330,53 @@ def _warn_primary_runtime_missing(report: dict) -> dict | None:
     }
 
 
+def _collect_pty_supervisor_section(db_path: Path) -> dict:
+    """Probe the PTY supervisor socket directly (no daemon required).
+
+    A present-but-unreachable socket is the signature of a down or wedged
+    supervisor — the "supervisor disconnected / can't send messages" class of
+    incident — and this surfaces it without log spelunking.
+    """
+    from .pty_supervisor import DEFAULT_SOCKET_NAME, _ping_socket
+    socket_path = Path(db_path).parent / DEFAULT_SOCKET_NAME
+    section = {
+        "socket_path": str(socket_path),
+        "socket_present": socket_path.exists(),
+        "reachable": False,
+        "pid": None,
+        "protocol_version": None,
+        "ping_ms": None,
+    }
+    if not section["socket_present"]:
+        return section
+    started = time.monotonic()
+    pong = _ping_socket(socket_path, timeout=2.0)
+    if isinstance(pong, dict) and pong.get("type") == "pong":
+        section["reachable"] = True
+        section["pid"] = pong.get("pid")
+        section["protocol_version"] = pong.get("version")
+        section["ping_ms"] = round((time.monotonic() - started) * 1000, 1)
+    return section
+
+
+def _check_pty_supervisor_reachable(report: dict) -> dict:
+    sup = report.get("pty_supervisor", {}) or {}
+    present = bool(sup.get("socket_present"))
+    reachable = bool(sup.get("reachable"))
+    # No socket = supervisor simply not running (e.g. daemon stopped) — not a
+    # failure. Socket present but not answering = down/wedged — that's a fail.
+    status = "fail" if (present and not reachable) else "pass"
+    return {
+        "name": "pty_supervisor_reachable",
+        "status": status,
+        "details": {
+            "socket_present": present,
+            "reachable": reachable,
+            "ping_ms": sup.get("ping_ms"),
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -1339,6 +1386,7 @@ _DOCTOR_CHECKS = [
     _check_invalid_architect_hired_binding,
     _check_stage_6_legacy_columns_removed,
     _check_stage_6_engineer_tool_aliases_removed,
+    _check_pty_supervisor_reachable,
 ]
 
 _DOCTOR_WARNINGS = [
@@ -1394,6 +1442,7 @@ def build_doctor_report(
             architect_names=architect_names,
         ),
         "worktrees": _collect_worktrees_section(conn),
+        "pty_supervisor": _collect_pty_supervisor_section(db_path),
     }
     report["roles_templates"] = {
         "roles_dir": report["roles"]["roles_dir"],
@@ -1485,6 +1534,7 @@ def format_doctor_report(report: dict) -> str:
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
+    pty_supervisor = report.get("pty_supervisor", {}) or {}
     warnings = list(report.get("warnings", []) or [])
 
     engineer_line = f"  engineer:    {int(agents.get('engineer', 0) or 0)}"
@@ -1638,6 +1688,16 @@ def format_doctor_report(report: dict) -> str:
         f"{str(bool(stage_6_cleanup.get('legacy_columns_present'))).lower()}",
         "  engineer_tool_aliases_present:    "
         f"{str(bool(stage_6_cleanup.get('engineer_tool_aliases_present'))).lower()}",
+        "",
+        "[pty_supervisor]",
+        "  socket_present:                 "
+        f"{str(bool(pty_supervisor.get('socket_present'))).lower()}",
+        "  reachable:                      "
+        f"{str(bool(pty_supervisor.get('reachable'))).lower()}",
+        "  pid:                            "
+        f"{pty_supervisor.get('pid') if pty_supervisor.get('pid') is not None else '—'}",
+        "  ping_ms:                        "
+        f"{pty_supervisor.get('ping_ms') if pty_supervisor.get('ping_ms') is not None else '—'}",
         "",
         (
             "Result: PASS (with warnings)"
