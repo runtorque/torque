@@ -29,6 +29,15 @@ log = logging.getLogger("torque.pty_supervisor_client")
 
 _RESPONSE_TYPES = {"ok", "error", "pong", "list"}
 
+# Upper bound for a single request/response round-trip. Supervisor ops
+# (list/write/create/resize/close) are sub-second in practice; this only
+# exists so a lost or never-dispatched response cannot leave a request
+# awaiting forever while holding ``_request_lock`` — which would wedge every
+# later list/write on the shared client (the panel reads "Not loaded" and
+# user→agent messages silently stall). On timeout we drop the connection so
+# the reconnect loop rebuilds a clean channel instead of hanging permanently.
+_CALL_TIMEOUT_SECONDS = 30.0
+
 # Callbacks are (msg_dict) -> None | coroutine.
 OutputCallback = Callable[[dict], Optional[Awaitable[None]]]
 ExitCallback = Callable[[dict], Optional[Awaitable[None]]]
@@ -83,6 +92,11 @@ class PtySupervisorClient:
         self.on_reconnect: Optional[
             Callable[[dict], Optional[Awaitable[None]]]] = None
         self._last_supervisor_pid: Optional[int] = None
+        # Monotonic id for the live connection. Bumped on every connect and on
+        # every disconnect so a stale ``_read_loop`` task (left over from a
+        # prior connection) can't tear down the connection that replaced it —
+        # which otherwise oscillates connect→disconnect forever.
+        self._connection_gen = 0
 
     # -- connect / close ---------------------------------------------------
 
@@ -96,7 +110,9 @@ class PtySupervisorClient:
         self._reader = reader
         self._writer = writer
         self._ready.set()
-        self._reader_task = asyncio.create_task(self._read_loop())
+        self._connection_gen += 1
+        gen = self._connection_gen
+        self._reader_task = asyncio.create_task(self._read_loop(gen))
         pong = await self.call("ping")
         if pong.get("type") != "pong":
             raise SupervisorProtocolError(
@@ -225,7 +241,17 @@ class PtySupervisorClient:
                 self._handle_disconnect()
                 raise SupervisorUnavailable(str(exc)) from exc
             try:
-                return await fut
+                return await asyncio.wait_for(fut, timeout=_CALL_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError as exc:
+                # Response was lost or never dispatched while the socket stayed
+                # nominally open. Tear the connection down so _reconnect_loop
+                # rebuilds a clean channel; without this the lock is held
+                # forever and every later list/write wedges.
+                self._pending = None
+                self._handle_disconnect()
+                raise SupervisorUnavailable(
+                    f"supervisor op {op!r} timed out after "
+                    f"{_CALL_TIMEOUT_SECONDS:.0f}s") from exc
             finally:
                 if self._pending is fut:
                     self._pending = None
@@ -242,10 +268,10 @@ class PtySupervisorClient:
 
     # -- dispatcher --------------------------------------------------------
 
-    async def _read_loop(self) -> None:
+    async def _read_loop(self, gen: int) -> None:
         try:
             while True:
-                if self._reader is None:
+                if self._reader is None or gen != self._connection_gen:
                     break
                 try:
                     msg = await read_frame(self._reader)
@@ -262,7 +288,7 @@ class PtySupervisorClient:
         except Exception:
             log.exception("Client read loop failed")
         finally:
-            self._handle_disconnect()
+            self._handle_disconnect(gen)
 
     async def _dispatch_frame(self, msg: dict) -> None:
         mtype = msg.get("type")
@@ -286,7 +312,15 @@ class PtySupervisorClient:
             return
         log.warning("Unknown frame type from supervisor: %s", mtype)
 
-    def _handle_disconnect(self) -> None:
+    def _handle_disconnect(self, gen: Optional[int] = None) -> None:
+        # Ignore teardown requests from a stale reader task (one whose
+        # connection has already been replaced); only the current connection
+        # may disconnect itself.
+        if gen is not None and gen != self._connection_gen:
+            return
+        # Invalidate the current connection so the now-stale reader task's
+        # eventual finally is a no-op against whatever connects next.
+        self._connection_gen += 1
         self._ready.clear()
         if self._pending and not self._pending.done():
             self._pending.set_exception(

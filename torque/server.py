@@ -20517,9 +20517,19 @@ async def main(connection=None):
             )
         raise ValueError(f"Unsupported failed-write endpoint: {endpoint}")
 
-    replay_summary = await replay_failed_writes(db, _replay_failed_write)
-    if replay_summary.get("attempted"):
-        log.info("Failed-write replay summary: %s", replay_summary)
+    async def _run_failed_write_replay() -> None:
+        # Run off the startup critical path: a queued write whose replay blocks
+        # (e.g. one that triggers an auto-dispatch that hangs) must never hold
+        # up the HTTP/WS bind below, or the daemon never becomes reachable and
+        # the launcher times out. Replay still happens, just concurrently.
+        try:
+            replay_summary = await replay_failed_writes(db, _replay_failed_write)
+            if replay_summary.get("attempted"):
+                log.info("Failed-write replay summary: %s", replay_summary)
+        except Exception:
+            log.exception("Failed-write replay on startup errored")
+
+    asyncio.create_task(_run_failed_write_replay())
 
     # -- Scheduler ----------------------------------------------------------
 
@@ -20551,7 +20561,10 @@ async def main(connection=None):
         return web.FileResponse(WEBVIEW_FILE)
 
     async def handle_ws(request):
-        ws = web.WebSocketResponse()
+        # heartbeat: aiohttp sends a WS ping every 30s and closes the
+        # connection if no pong is returned, so the daemon detects and prunes
+        # dead/half-open UI clients instead of holding zombie sockets open.
+        ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         compact_snapshot = _request_wants_compact_snapshot(request)
         ui_client_id = _ui_client_id_from_request(request)
