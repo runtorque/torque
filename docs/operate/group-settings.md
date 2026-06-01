@@ -84,7 +84,7 @@ When worktrees are enabled, these settings control the execution environment:
 | **Squash on merge** | Prefer squash merge for the explicit direct-local fallback. The default `engineer_merge` path creates/reuses a GitHub PR and requests a squash merge regardless of this setting. |
 | **Engineer merge mode** | Locks `engineer_merge` for this group. **Pull request** (default) requires the PR workflow and rejects `force_direct=true`; **Direct local** bypasses the PR path for every engineer merge; **Engineer choice** keeps the default PR workflow with `force_direct=true` as an explicit local fallback. Disallowed attempts and lock overrides are recorded as workflow-breach audit events. |
 | **Merge instructions** | Extra text Torque appends to merge prompts. |
-| **Default post-merge cleanup** | What Torque should do by default after a successful merge when no explicit cleanup choice is provided. For PR merges, cleanup runs after the PR actually merges, not when the PR is created or left pending. |
+| **Default post-merge cleanup** | What Torque should do by default after a successful merge when no explicit cleanup choice is provided. The default keeps the worker/worktree warm for same-worker continuity; opt in to auto-sweep to close the worker and delete the merged worktree/branch. For PR merges, cleanup runs after the PR actually merges, not when the PR is created or left pending. |
 | **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |
 | **Symlink paths** | Repo-relative exact paths or glob patterns that should be mirrored into every worktree as symlinks. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked. |
 

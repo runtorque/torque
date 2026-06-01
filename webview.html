@@ -655,10 +655,11 @@
           </label>
           <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
           <label>Default post-merge cleanup
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Same-worker queued follow-up tasks still keep the worker and worktree alive.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Keep worker and worktree preserves warm continuity by default. Auto-sweep is opt-in and runs only after the branch is actually merged; same-worker queued follow-up tasks still keep the worker and worktree alive.">?</span>
           </label>
           <select id="gs-wt-merge-cleanup">
-            <option value="keep">Keep worker and worktree</option>
+            <option value="keep">Keep worker and worktree (default / warm)</option>
+            <option value="auto_sweep">Auto-sweep merged branch and worktree</option>
             <option value="close">Close worker only</option>
             <option value="remove">Delete worktree only</option>
             <option value="close_remove">Close worker and delete worktree</option>

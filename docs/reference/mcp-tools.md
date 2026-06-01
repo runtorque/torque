@@ -147,6 +147,10 @@ refresh status and finalize the boundary. Nested ee PR metadata is stored
 alongside the parent boundary, and reruns are idempotent after an ee PR merged
 but before the parent PR did.
 
+Group settings default to keep-warm post-merge continuity. Opting the group
+into the auto-sweep cleanup mode makes the same confirmed-merge finalization
+close the worker and remove the merged worktree/local branch by default.
+
 For GitHub board-sync groups, the PR path also appends missing linked-issue
 closing refs to the created or reused PR body when
 `board_sync_github.github_close_issues_via_pr` is enabled. Same-repo issues use

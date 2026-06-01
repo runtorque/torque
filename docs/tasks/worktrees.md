@@ -44,7 +44,7 @@ torque group settings backend -s worktree_symlink_gitignored_paths=true
 | **Auto-checkpoint on stop** | Auto-commit changes when an agent's session ends. |
 | **Checkpoint on progress / done** | Throttled auto-checkpoints when the agent reports `torque_progress` or `torque_done`. |
 | **Squash on merge** | Use `git merge --squash` for the explicit direct-local merge fallback. The default PR merge path always requests a GitHub squash merge. |
-| **Default post-merge cleanup** | Default cleanup behavior after the branch is actually merged when no explicit choice is given. |
+| **Default post-merge cleanup** | Default cleanup behavior after the branch is actually merged when no explicit choice is given. Defaults to keeping the worker/worktree warm; opt in to auto-sweep to close the worker and delete the merged worktree/branch. |
 | **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open boundary task. |
 | **Symlink paths** | Repo-relative paths or globs to mirror into each worktree as symlinks (e.g. `etl/**/node_modules`). Useful for shared caches. |
 | **Symlink gitignored paths** | Opt-in setting that asks Git for ignored files/directories and symlinks them into new worktrees. Torque skips `.torque/` runtime state and never replaces paths that already exist in the worktree. |
@@ -195,7 +195,7 @@ be a different SHA.
 ### Settings the merge respects
 
 - **Squash on merge** (default on) — applies to `force_direct=true` direct-local merges. The default PR path always requests a squash merge.
-- **Default post-merge cleanup** — keep / close session / remove worktree / close session and remove worktree. Cleanup runs only after a confirmed PR merge or direct merge, never when a PR is merely created or left pending.
+- **Default post-merge cleanup** — keep-warm (default) / close session / remove worktree / auto-sweep (close session and remove the merged worktree/branch). Cleanup runs only after a confirmed PR merge or direct merge, never when a PR is merely created or left pending. Merged streams are marked merged and hidden from the open-stream dashboard; the auto-sweep option removes the stale branch/worktree side too.
 - **Preserve merge diff by default** — captures the full pre-merge patch and stores it as a diff artifact on the latest open boundary task.
 
 If the branch has queued same-agent follow-up tasks attached, Torque keeps the agent and worktree alive regardless of cleanup choice — the next wave continues on a freshly reset branch.

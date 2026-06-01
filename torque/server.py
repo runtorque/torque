@@ -16101,7 +16101,7 @@ async def main(connection=None):
                 ).get("close_agent_on_merge"):
                     result = _worktree_merge_error(
                         aid,
-                        "close_agent_on_merge/close_remove cleanup is not supported in driverless mode",
+                        "close_agent_on_merge/auto_sweep cleanup is not supported in driverless mode",
                         phase="driverless_cleanup",
                         driverless=True,
                     )

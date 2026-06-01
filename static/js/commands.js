@@ -843,8 +843,8 @@ function _worktreeMergeDialogDefaults(cell) {
   var gs = (state.group_settings && group) ? state.group_settings[group] : null;
   var mode = (gs && gs.worktree_merge_cleanup) || 'keep';
   return {
-    close: mode === 'close' || mode === 'close_remove',
-    remove: mode === 'remove' || mode === 'close_remove',
+    close: mode === 'close' || mode === 'close_remove' || mode === 'auto_sweep',
+    remove: mode === 'remove' || mode === 'close_remove' || mode === 'auto_sweep',
     preserveDiff: !!(gs && gs.worktree_merge_preserve_diff),
   };
 }
