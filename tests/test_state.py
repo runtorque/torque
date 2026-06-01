@@ -2238,7 +2238,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "engineer-1",
         )
 
-    def test_load_backfills_architect_queue_empty_digest_default(self):
+    def test_load_preserves_custom_architect_digest_filter_without_floor(self):
         from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
@@ -2271,19 +2271,9 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.load()
 
         settings = state.get_agent_digest_settings("arch-1")
-        self.assertEqual(
-            settings.enabled_events,
-            [
-                "task_completed",
-                "engineer_queue_empty",
-                "engineer_awaiting_human_input",
-                "engineer_ask_resolved",
-            ],
-        )
+        self.assertEqual(settings.enabled_events, ["task_completed"])
         persisted = db.load_agent_digest_settings("arch-1")
-        self.assertIn("engineer_queue_empty", persisted["enabled_events"])
-        self.assertIn("engineer_awaiting_human_input", persisted["enabled_events"])
-        self.assertIn("engineer_ask_resolved", persisted["enabled_events"])
+        self.assertEqual(persisted["enabled_events"], ["task_completed"])
 
     def test_architect_settings_round_trip_through_group_settings(self):
         from torque.db import TorqueDB
@@ -2346,13 +2336,13 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
     def test_architect_digest_settings_have_user_pain_aware_defaults(self):
-        """Architect ArchitectSettings ship with empty-window digest suppression."""
+        """Architect settings default to quiet, empty-window digest suppression."""
         settings = self.state_mod.ArchitectSettings(group="g")
         self.assertEqual(settings.architect_push_interval, 300)
         self.assertEqual(settings.architect_max_interval, 600)
         self.assertEqual(settings.architect_heartbeat_interval, 0)
         self.assertTrue(settings.architect_suppress_empty_digests)
-        self.assertIn("task_done", settings.architect_enabled_events)
+        self.assertEqual(settings.architect_enabled_events, [])
 
     def test_architect_digest_knobs_round_trip_through_group_settings(self):
         from torque.db import TorqueDB
@@ -2370,7 +2360,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 architect_max_interval=240,
                 architect_heartbeat_interval=600,
                 architect_suppress_empty_digests=False,
-                architect_enabled_events=["task_done", "task_blocked"],
+                architect_enabled_events=["task_done", "pipeline_complete"],
             ),
         )
 
@@ -2384,7 +2374,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertFalse(settings.architect_suppress_empty_digests)
         self.assertEqual(
             settings.architect_enabled_events,
-            ["task_done", "task_blocked"],
+            ["task_done", "pipeline_complete"],
         )
 
     def test_default_agent_digest_settings_inherits_architect_knobs(self):
@@ -2416,8 +2406,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(defaults.enabled_events, ["task_done"])
         self.assertTrue(defaults.architect_digest)
 
-    def test_default_agent_digest_settings_falls_back_to_default_events(self):
-        """Empty architect_enabled_events means 'use default catalog'."""
+    def test_default_agent_digest_settings_empty_events_stays_quiet(self):
+        """Empty architect_enabled_events means only the server floor is active."""
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
         state.update_architect_settings("g", architect_enabled_events=[])
@@ -2432,8 +2422,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.groups["g"].append(architect.id)
 
         defaults = state._default_agent_digest_settings(architect.id, architect)
-        self.assertIn("task_done", defaults.enabled_events)
-        self.assertIn("task_completed", defaults.enabled_events)
+        self.assertEqual(defaults.enabled_events, [])
 
     def test_load_backfills_suppress_empty_for_legacy_architect_rows(self):
         """Pre-existing architect digest rows should pick up suppress_empty."""
@@ -2482,6 +2471,52 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 "architect_digest_suppress_empty_backfilled"
             ),
             "1",
+        )
+
+    def test_load_backfills_legacy_broad_architect_filters_to_quiet(self):
+        """Pre-existing broad default architect rows should become quiet."""
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        db.save_agent_digest_settings(
+            "arch-1",
+            {
+                "agent_id": "arch-1",
+                "architect_digest": True,
+                "enabled_events": list(
+                    self.state_mod._ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS
+                ),
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        settings = state.get_agent_digest_settings("arch-1")
+        self.assertEqual(settings.enabled_events, [])
+        self.assertEqual(
+            db.load_ui_state_value("architect_digest_quiet_default_backfilled"),
+            "1",
+        )
+        self.assertEqual(
+            db.load_all_agent_digest_settings()["arch-1"]["enabled_events"],
+            [],
         )
 
     def test_backfill_runs_only_once_respects_user_override(self):

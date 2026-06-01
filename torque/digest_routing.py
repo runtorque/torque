@@ -7,7 +7,11 @@ from .engineer_ask_events import (
     ENGINEER_ASK_RESOLVED,
     ENGINEER_AWAITING_HUMAN_INPUT,
 )
-from .state import AgentDigestSettings, ENGINEER_MANDATORY_EVENTS
+from .state import (
+    ARCHITECT_MANDATORY_EVENTS,
+    AgentDigestSettings,
+    ENGINEER_MANDATORY_EVENTS,
+)
 
 ARCHITECT_COARSE_EVENTS = frozenset({
     # Plan vocabulary.
@@ -190,7 +194,7 @@ def _default_digest_settings(state, recipient_id: str) -> AgentDigestSettings:
     is_architect = bool(cell and _cell_kind(cell) == "architect")
     kwargs = {}
     if is_architect:
-        kwargs["enabled_events"] = list(ARCHITECT_COARSE_EVENTS)
+        kwargs["enabled_events"] = []
     return AgentDigestSettings(
         agent_id=str(recipient_id or "").strip(),
         push_interval=300 if is_architect else 60,
@@ -221,13 +225,17 @@ def recipient_wants_digest_event(state, recipient_id: str, event: dict, *,
     if not ignore_pause and getattr(settings, "paused", False):
         return False
     kind = str(event.get("kind", "") or "").strip()
+    if _cell_kind(recipient) == "architect":
+        if kind not in ARCHITECT_COARSE_EVENTS:
+            return False
+        if kind in ARCHITECT_MANDATORY_EVENTS:
+            return True
+        enabled = list(getattr(settings, "enabled_events", []) or [])
+        return kind in enabled
     if kind not in ENGINEER_MANDATORY_EVENTS:
         enabled = list(getattr(settings, "enabled_events", []) or [])
         if kind not in enabled:
             return False
-    if _cell_kind(recipient) == "architect" and (
-            kind not in ARCHITECT_COARSE_EVENTS):
-        return False
     return True
 
 

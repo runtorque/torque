@@ -64,7 +64,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         state.groups.setdefault(group, []).append(cell.id)
         return cell
 
-    def test_resolve_worker_owner_and_hiring_architect(self):
+    def test_resolve_worker_owner_suppresses_architect_churn_by_default(self):
         state, group = self._make_state()
         engineer = self._add_agent(
             state,
@@ -91,6 +91,44 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         state.update_agent_digest_settings(engineer.id)
         state.update_agent_digest_settings(architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": worker.id, "group": group, "kind": "task_completed"},
+        )
+
+        self.assertEqual(recipients, [engineer.id])
+
+    def test_architect_opt_in_surfaces_tunable_worker_event(self):
+        state, group = self._make_state()
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id="arch-1",
+        )
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.update_agent_digest_settings(engineer.id)
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["task_completed"],
+        )
 
         recipients = self.routing_mod.resolve_digest_recipients(
             state,
@@ -141,7 +179,10 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(task)
         state.update_agent_digest_settings(assigned.id)
         state.update_agent_digest_settings(owner.id)
-        state.update_agent_digest_settings(architect.id)
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["task_completed"],
+        )
 
         recipients = self.routing_mod.resolve_digest_recipients(
             state,
@@ -197,7 +238,10 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(ask_task)
         state.update_agent_digest_settings(assigned.id)
-        state.update_agent_digest_settings(architect.id)
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["task_completed"],
+        )
 
         recipients = self.routing_mod.resolve_digest_recipients(
             state,
@@ -211,7 +255,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [assigned.id, architect.id])
 
-    def test_workflow_breach_is_architect_coarse_event_by_default(self):
+    def test_workflow_breach_is_architect_coarse_event_but_opt_in(self):
         state, group = self._make_state()
         engineer = self._add_agent(
             state,
@@ -236,11 +280,25 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             {"cell_id": engineer.id, "group": group, "kind": "workflow_breach"},
         )
 
-        self.assertEqual(recipients, [architect.id])
+        self.assertEqual(recipients, [])
         self.assertIn(
             "workflow_breach",
             self.routing_mod.ARCHITECT_COARSE_EVENTS,
         )
+        self.assertNotIn(
+            "workflow_breach",
+            state.get_agent_digest_settings(architect.id).enabled_events,
+        )
+
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["workflow_breach"],
+        )
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": engineer.id, "group": group, "kind": "workflow_breach"},
+        )
+        self.assertEqual(recipients, [architect.id])
         self.assertIn(
             "workflow_breach",
             state.get_agent_digest_settings(architect.id).enabled_events,
@@ -275,12 +333,12 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         recipients = self.routing_mod.resolve_digest_recipients(state, event)
 
-        self.assertEqual(recipients, [architect.id])
+        self.assertEqual(recipients, [])
         self.assertIn(
             "engineer_queue_empty",
             self.routing_mod.ARCHITECT_COARSE_EVENTS,
         )
-        self.assertIn(
+        self.assertNotIn(
             "engineer_queue_empty",
             state.get_agent_digest_settings(architect.id).enabled_events,
         )
@@ -288,6 +346,13 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             "engineer_queue_empty",
             self.state_mod.ENGINEER_MANDATORY_EVENTS,
         )
+
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["engineer_queue_empty"],
+        )
+        recipients = self.routing_mod.resolve_digest_recipients(state, event)
+        self.assertEqual(recipients, [architect.id])
 
     def test_candidate_worker_recipients_exclude_worker_self(self):
         state, group = self._make_state()
@@ -358,7 +423,10 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             kind="architect",
         )
         state.update_agent_digest_settings(engineer.id)
-        state.update_agent_digest_settings(architect.id)
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["task_completed"],
+        )
 
         recipients = self.routing_mod.resolve_digest_recipients(
             state,
@@ -538,7 +606,10 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         state.update_agent_digest_settings(engineer.id)
         state.update_agent_digest_settings(architect.id)
-        state.update_agent_digest_settings(other_architect.id)
+        state.update_agent_digest_settings(
+            other_architect.id,
+            enabled_events=["task_completed"],
+        )
 
         recipients = self.routing_mod.resolve_digest_recipients(
             state,
@@ -584,6 +655,67 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id])
 
+    def test_architect_mandatory_floor_bypasses_enabled_events_filter(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.update_agent_digest_settings(engineer.id, enabled_events=[])
+        state.update_agent_digest_settings(
+            architect.id,
+            # Explicitly exclude floor events; the server floor still wins.
+            enabled_events=["task_completed"],
+        )
+
+        for event_kind in sorted(self.state_mod.ARCHITECT_MANDATORY_EVENTS):
+            recipients = self.routing_mod.resolve_digest_recipients(
+                state,
+                {"cell_id": worker.id, "group": group, "kind": event_kind},
+            )
+            self.assertIn(architect.id, recipients, event_kind)
+
+    def test_architect_floor_events_are_not_persisted_as_optional_filters(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=[
+                "task_completed",
+                "ask_created",
+                "agent_error",
+            ],
+        )
+
+        settings = state.get_agent_digest_settings(architect.id)
+        self.assertEqual(settings.enabled_events, ["task_completed"])
+
     def test_worker_boot_doa_is_mandatory_for_worker_owner_only(self):
         state, group = self._make_state()
         architect = self._add_agent(
@@ -619,7 +751,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id])
 
-    def test_perceived_empty_episode_routes_to_owner_and_architect(self):
+    def test_perceived_empty_episode_routes_to_architect_only_when_opted_in(self):
         state, group = self._make_state()
         architect = self._add_agent(
             state,
@@ -656,6 +788,20 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+        self.assertEqual(recipients, [engineer.id])
+
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["perceived_empty_episode"],
+        )
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": worker.id,
+                "group": group,
+                "kind": "perceived_empty_episode",
+            },
+        )
         self.assertEqual(recipients, [engineer.id, architect.id])
 
     def test_blank_cell_task_event_routes_to_assigned_engineer(self):

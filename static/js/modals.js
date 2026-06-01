@@ -2212,7 +2212,15 @@ function openGsEngineerNewSpecializationDialog() {
   document.getElementById('new-specialization-name').focus();
 }
 
-const _ARCHITECT_DIGEST_DEFAULT_EVENTS = [
+const _ARCHITECT_DIGEST_MANDATORY_EVENTS = [
+  'ask_created',
+  'engineer_awaiting_human_input',
+  'agent_error',
+  'agent_blocked',
+  'task_blocked',
+];
+
+const _ARCHITECT_DIGEST_EVENT_CATALOG = [
   'task_done',
   'task_blocked',
   'task_error',
@@ -2234,6 +2242,8 @@ const _ARCHITECT_DIGEST_DEFAULT_EVENTS = [
   'engineer_awaiting_human_input',
   'engineer_ask_resolved',
 ];
+
+const _ARCHITECT_DIGEST_DEFAULT_EVENTS = [];
 
 const _ARCHITECT_JOURNAL_CHECKPOINT_OPTIONS = [
   'every_5_actions',
@@ -2298,17 +2308,22 @@ function _renderArchitectEventCheckboxes(enabled) {
   const grid = document.getElementById('gs-architect-events-grid');
   if (!grid) return;
   const set = new Set((enabled || []).map((value) => String(value || '')));
+  const mandatory = new Set(_ARCHITECT_DIGEST_MANDATORY_EVENTS);
   grid.innerHTML = '';
-  _ARCHITECT_DIGEST_DEFAULT_EVENTS.forEach((kind) => {
+  _ARCHITECT_DIGEST_EVENT_CATALOG.forEach((kind) => {
     const label = document.createElement('label');
     label.className = 'gs-checkbox';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.dataset.eventKind = kind;
     input.id = `gs-architect-event-${kind.replace(/_/g, '-')}`;
-    input.checked = set.has(kind);
+    input.checked = set.has(kind) || mandatory.has(kind);
+    if (mandatory.has(kind)) {
+      input.disabled = true;
+      input.dataset.mandatory = '1';
+    }
     const text = document.createElement('span');
-    text.textContent = ' ' + kind;
+    text.textContent = ' ' + kind + (mandatory.has(kind) ? ' (always on)' : '');
     label.appendChild(input);
     label.appendChild(text);
     grid.appendChild(label);
@@ -2320,7 +2335,7 @@ function _getArchitectEnabledEvents() {
   if (!grid) return _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice();
   const out = [];
   grid.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-    if (cb.checked && cb.dataset.eventKind) {
+    if (cb.checked && cb.dataset.eventKind && cb.dataset.mandatory !== '1') {
       out.push(cb.dataset.eventKind);
     }
   });

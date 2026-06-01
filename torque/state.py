@@ -184,7 +184,7 @@ _ENGINEER_NOTIFICATION_PRESETS = {
         ],
     },
 }
-_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
+_ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS = [
     "task_done",
     "task_blocked",
     "task_error",
@@ -206,6 +206,7 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     ENGINEER_AWAITING_HUMAN_INPUT,
     ENGINEER_ASK_RESOLVED,
 ]
+_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS: list[str] = []
 _ENGINEER_MESSAGE_EXPIRY_NOTE = "Expired because parent task completed."
 _ENGINEER_ESCALATION_STYLES = {
     "ask_early",
@@ -591,6 +592,24 @@ def normalize_architect_digest_verbosity(value, *, strict: bool = False) -> str:
             + ", ".join(sorted(_ARCHITECT_DIGEST_VERBOSITIES))
         )
     return _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
+
+
+def normalize_architect_enabled_events(value) -> list[str]:
+    """Return optional architect digest events, excluding the mandatory floor."""
+    if isinstance(value, str):
+        value = [token.strip() for token in value.split(",")]
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in (value or []):
+        event_kind = str(item or "").strip()
+        if (
+                not event_kind
+                or event_kind in ARCHITECT_MANDATORY_EVENTS
+                or event_kind in seen):
+            continue
+        result.append(event_kind)
+        seen.add(event_kind)
+    return result
 
 
 def normalize_architect_journal_checkpoint_frequency(
@@ -1947,6 +1966,17 @@ ENGINEER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
     "agent_blocked", "ask_created", "task_verification_updated",
     "worker_boot_doa", "perceived_empty_episode",
+})
+
+# Mandatory architect digest floor — a per-architect filter can never suppress
+# these can't-miss safety/decision events. Keep this separate from engineer
+# mandatory events so routine worker churn can stay quiet for architects.
+ARCHITECT_MANDATORY_EVENTS = frozenset({
+    "ask_created",
+    ENGINEER_AWAITING_HUMAN_INPUT,
+    "agent_error",
+    "agent_blocked",
+    "task_blocked",
 })
 
 
@@ -6223,10 +6253,25 @@ class MatrixState:
                     filtered = {
                         k: v for k, v in raw.items() if k in ads_fields
                     }
+                    cell = self.agents.get(agent_id)
+                    is_architect = (
+                        str(getattr(cell, "kind", "") or "").strip()
+                        == "architect"
+                    )
                     if "digest_verbosity" in filtered:
                         filtered["digest_verbosity"] = (
-                            normalize_engineer_digest_verbosity(
+                            normalize_architect_digest_verbosity(
                                 filtered["digest_verbosity"]
+                            )
+                            if is_architect
+                            else normalize_engineer_digest_verbosity(
+                                filtered["digest_verbosity"]
+                            )
+                        )
+                    if is_architect and "enabled_events" in filtered:
+                        filtered["enabled_events"] = (
+                            normalize_architect_enabled_events(
+                                filtered["enabled_events"]
                             )
                         )
                     self.agent_digest_settings[agent_id] = (
@@ -6353,13 +6398,11 @@ class MatrixState:
                     parsed = min_val
                 fields[int_key] = parsed
         if "architect_enabled_events" in fields:
-            raw = fields["architect_enabled_events"]
-            if isinstance(raw, str):
-                raw = [token.strip() for token in raw.split(",")]
-            fields["architect_enabled_events"] = [
-                str(item).strip() for item in (raw or [])
-                if str(item).strip()
-            ]
+            fields["architect_enabled_events"] = (
+                normalize_architect_enabled_events(
+                    fields["architect_enabled_events"]
+                )
+            )
         for key in (
                 "architect_boot_command", "architect_provider",
                 "architect_model", "architect_reasoning_effort",
@@ -6529,9 +6572,9 @@ class MatrixState:
             arch = self.get_architect_settings(
                 getattr(cell, "group", "") or ""
             )
-            enabled = list(arch.architect_enabled_events or [])
-            if not enabled:
-                enabled = list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
+            enabled = normalize_architect_enabled_events(
+                arch.architect_enabled_events
+            )
             kwargs["enabled_events"] = enabled
             kwargs["push_interval"] = int(
                 arch.architect_push_interval
@@ -6613,32 +6656,49 @@ class MatrixState:
         return self._legacy_agent_digest_settings(agent_id)
 
     def _backfill_architect_digest_defaults(self) -> None:
-        """Add new architect-default digest events to existing settings rows."""
+        """One-time: quiet architect rows that still have the old broad default."""
+        marker_key = "architect_digest_quiet_default_backfilled"
+        if not self.db:
+            return
+        try:
+            already = self.db.load_ui_state_value(marker_key)
+        except Exception:
+            log.exception("Failed to read backfill marker %s", marker_key)
+            return
+        if already:
+            return
+        legacy_defaults = set(_ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS)
+        engineer_defaults = set(
+            _ENGINEER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
+        )
         changed = []
         for agent_id, settings in self.agent_digest_settings.items():
             cell = self.agents.get(agent_id)
             if str(getattr(cell, "kind", "") or "").strip() != "architect":
                 continue
-            enabled = list(getattr(settings, "enabled_events", []) or [])
-            backfill_event_kinds = [
-                "engineer_queue_empty",
-                ENGINEER_AWAITING_HUMAN_INPUT,
-                ENGINEER_ASK_RESOLVED,
-            ]
-            missing = [
-                event_kind for event_kind in backfill_event_kinds
-                if event_kind not in enabled
-            ]
-            if not missing:
-                continue
-            enabled.extend(missing)
-            settings.enabled_events = enabled
+            enabled = normalize_architect_enabled_events(
+                getattr(settings, "enabled_events", []) or []
+            )
             if not bool(getattr(settings, "architect_digest", False)):
                 settings.architect_digest = True
+            enabled_set = set(enabled)
+            if (
+                    enabled_set == legacy_defaults
+                    or enabled_set == (
+                        legacy_defaults - ARCHITECT_MANDATORY_EVENTS
+                    )
+                    or enabled_set == engineer_defaults):
+                settings.enabled_events = list(
+                    _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS
+                )
+            else:
+                settings.enabled_events = enabled
             changed.append((agent_id, settings))
-        if self.db:
-            for agent_id, settings in changed:
-                self.db.save_agent_digest_settings(agent_id, asdict(settings))
+        for agent_id, settings in changed:
+            self.db.save_agent_digest_settings(agent_id, asdict(settings))
+        self.db.defer_write(
+            "ui_state", "save_ui_state", marker_key, "1",
+        )
 
     def _backfill_architect_suppress_empty_once(self) -> None:
         """One-time: flip ``suppress_empty=True`` on pre-existing architect rows.
@@ -6692,8 +6752,23 @@ class MatrixState:
         for key, value in fields.items():
             if key not in valid:
                 continue
+            cell = self.agents.get(agent_id)
+            is_architect = (
+                str(getattr(cell, "kind", "") or "").strip() == "architect"
+            )
             if key == "digest_verbosity":
-                value = normalize_engineer_digest_verbosity(value)
+                value = (
+                    normalize_architect_digest_verbosity(value)
+                    if is_architect
+                    else normalize_engineer_digest_verbosity(value)
+                )
+            elif key == "enabled_events" and is_architect:
+                value = normalize_architect_enabled_events(value)
+            elif key == "enabled_events":
+                value = [
+                    str(item).strip() for item in (value or [])
+                    if str(item).strip()
+                ]
             elif key in {"paused", "architect_digest", "wake_on_digest",
                          "suppress_empty"}:
                 value = bool(value)

@@ -558,7 +558,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker.id,
         )
         self.state.update_agent_digest_settings(assigned.id, enabled_events=["task_done"])
-        self.state.update_agent_digest_settings(architect.id)
+        self.state.update_agent_digest_settings(architect.id, enabled_events=["task_done"])
         self.state.update_agent_digest_settings(owner.id)
 
         self._save_panel_event(

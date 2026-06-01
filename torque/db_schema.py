@@ -2091,9 +2091,9 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             except sqlite3.OperationalError:
                 pass
     # Migrate: add architect digest tuning columns to group_settings.
-    # ``architect_enabled_events`` defaults to '' (empty string), which is
-    # treated as "use the kind-aware defaults" by the runtime — preserving
-    # backwards-compat for groups that existed before this migration.
+    # ``architect_enabled_events`` defaults to '' (empty string), which the
+    # runtime decodes as the quiet default: only server-enforced floor events
+    # plus any per-architect opt-ins.
     for col, col_type, default in (
         ("architect_push_interval", "INTEGER", "300"),
         ("architect_max_interval", "INTEGER", "600"),

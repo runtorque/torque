@@ -144,6 +144,38 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "architect_digest_filter",
+        "description": (
+            "Read or update this architect's per-architect digest event "
+            "filter. The mandatory floor (ask_created, "
+            "engineer_awaiting_human_input, agent_error, agent_blocked, "
+            "task_blocked) is always delivered and cannot be disabled."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "set": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Replace optional enabled event kinds. Omit to keep "
+                        "the current set."
+                    ),
+                },
+                "enable": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional event kinds to add.",
+                },
+                "disable": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional event kinds to remove.",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_task_show",
         "description": (
             "Show full details for one task the architect can see, including "
