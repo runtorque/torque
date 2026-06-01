@@ -380,7 +380,7 @@ Example call: `{"requires_reply": true, "limit": 10}`
 Requires at least one task or stream reference; `context_summary` alone is
 rejected. Returns `message_id`, `thread_id`, `recipient_engineer_id`,
 `ack_required`, and delivery state. The notification is delivered to the peer
-Engineer only; the Architect receives coarse digest events
+Engineer only; the Architect can receive coarse digest events when enabled
 `engineer_peer_thread_opened` / throttled `engineer_peer_thread_active` and can
 pull details with inspect tools.
 
