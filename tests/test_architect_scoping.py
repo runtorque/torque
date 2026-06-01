@@ -1116,6 +1116,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "lane",
             "labels",
             "status",
+            "dispatch_state",
             "assigned_engineer_id",
             "created_by",
             "health_state",
@@ -1373,6 +1374,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "lane",
             "labels",
             "status",
+            "dispatch_state",
             "assigned_engineer_id",
             "created_by",
             "health_state",
@@ -1463,6 +1465,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.suggested_action, "feature/implement")
         self.assertEqual(task.action_name, "")
         self.assertEqual(task.action_vars, {"TEST_COMMAND": "python3 -m unittest"})
+        self.assertEqual(task.dispatch_state, "queued")
 
         visible_denied_text, visible_denied_error = await self._call(
             "architect_task_create",
@@ -1490,6 +1493,176 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
+
+    async def test_architect_task_create_can_atomically_dispatch_and_mark_live(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        alice.session_id = "session-alice"
+
+        text, is_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Implement task dispatch state",
+                "group": "torque",
+                "description": "Wire backend field and create dispatch.",
+                "assigned_engineer_id": alice.id,
+                "dispatch": True,
+                "dispatch_message": "Start this immediately.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        task = self.state.board_tasks[payload["task_id"]]
+        self.assertEqual(task.dispatch_state, "live")
+        self.assertEqual(payload["dispatch_state"], "live")
+        self.assertEqual(payload["dispatch"]["task_id"], task.id)
+        self.assertEqual(payload["dispatch"]["dispatch_state"], "live")
+        self.assertEqual(payload["dispatch"]["engineer_id"], alice.id)
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual(len(injects), 1)
+        self.assertIn(task.id, injects[0]["message"])
+        self.assertIn("Start this immediately.", injects[0]["message"])
+        self.assertEqual(alice.mcp_messages[0]["action"], "architect_message")
+        self.assertIn(task.id, alice.mcp_messages[0]["message"])
+        self.assertEqual(self.state._delta_ops[-1]["op"], "task_upsert")
+        self.assertEqual(self.state._delta_ops[-1]["dispatch_state"], "live")
+
+    async def test_architect_message_task_marks_existing_queued_task_live(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+
+        created_text, created_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Stage then dispatch",
+                "group": "torque",
+                "assigned_engineer_id": alice.id,
+            },
+            architect.id,
+        )
+        self.assertFalse(created_error, created_text)
+        task_id = json.loads(created_text)["task_id"]
+        self.assertEqual(self.state.board_tasks[task_id].dispatch_state, "queued")
+
+        message_text, message_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please pick up {task_id} now.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(message_error, message_text)
+        payload = json.loads(message_text)
+        self.assertEqual(payload["task_id"], task_id)
+        self.assertEqual(payload["dispatch_state"], "live")
+        self.assertEqual(self.state.board_tasks[task_id].dispatch_state, "live")
+
+    async def test_architect_message_task_id_inference_uses_exact_references(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        queued = self._add_task(
+            "TORQUE:1",
+            "Short id queued task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="queued",
+        )
+        live = self._add_task(
+            "TORQUE:10",
+            "Long id live task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="live",
+        )
+
+        status_text, status_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please check {live.id} status.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(status_error, status_text)
+        status_payload = json.loads(status_text)
+        self.assertNotIn("task_id", status_payload)
+        self.assertEqual(queued.dispatch_state, "queued")
+        self.assertEqual(live.dispatch_state, "live")
+
+        dispatch_text, dispatch_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please pick up {queued.id} now.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(dispatch_error, dispatch_text)
+        dispatch_payload = json.loads(dispatch_text)
+        self.assertEqual(dispatch_payload["task_id"], queued.id)
+        self.assertEqual(
+            self.state.board_tasks[queued.id].dispatch_state,
+            "live",
+        )
+
+    async def test_architect_message_task_slug_inference_uses_boundaries(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        queued = self._add_task(
+            "TORQUE:20",
+            "Review dashboard",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="queued",
+        )
+
+        status_text, status_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please check {queued.slug}-v2 notes first.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(status_error, status_text)
+        status_payload = json.loads(status_text)
+        self.assertNotIn("task_id", status_payload)
+        self.assertEqual(queued.dispatch_state, "queued")
+
+        dispatch_text, dispatch_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please pick up {queued.slug} now.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(dispatch_error, dispatch_text)
+        dispatch_payload = json.loads(dispatch_text)
+        self.assertEqual(dispatch_payload["task_id"], queued.id)
+        self.assertEqual(
+            self.state.board_tasks[queued.id].dispatch_state,
+            "live",
+        )
 
     async def test_architect_tools_exclude_and_reject_tombstoned_engineer(self):
         architect = self._add_architect("arch-1", "Architect")

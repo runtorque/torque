@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     external_url   TEXT NOT NULL DEFAULT '',
     board_sync     TEXT NOT NULL DEFAULT '{}',
     status         TEXT NOT NULL DEFAULT '',
+    dispatch_state TEXT NOT NULL DEFAULT 'queued',
     attachments    TEXT NOT NULL DEFAULT '[]',
     messages_thread TEXT NOT NULL DEFAULT '[]',
     health_state   TEXT NOT NULL DEFAULT 'healthy',
@@ -1599,6 +1600,17 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE board_tasks ADD COLUMN scheduled_at "
             "TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    # Migrate: add queued-vs-live task dispatch state.
+    try:
+        conn.execute("SELECT dispatch_state FROM board_tasks LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN dispatch_state "
+            "TEXT NOT NULL DEFAULT 'queued'")
+        conn.execute(
+            "UPDATE board_tasks SET dispatch_state='live' "
+            "WHERE COALESCE(agent_id, '') != '' OR lane='In Progress'")
         conn.commit()
     # Migrate: add depends_on column to board_tasks
     try:

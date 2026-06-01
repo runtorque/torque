@@ -42,6 +42,7 @@ COMPACT_CARD_FIELDS = {
     "created_at",
     "updated_at",
     "scheduled_at",
+    "dispatch_state",
     "depends_on",
     "provider",
     "external_id",
@@ -103,6 +104,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             created_at="2026-04-21T00:00:00+00:00",
             updated_at="2026-04-22T00:00:00+00:00",
             scheduled_at="2026-04-23T00:00:00+00:00",
+            dispatch_state="live",
             depends_on=["task-root"],
             provider="github",
             external_id="123",
@@ -188,6 +190,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         self.assertEqual(card["created_at"], "2026-04-21T00:00:00+00:00")
         self.assertEqual(card["updated_at"], "2026-04-22T00:00:00+00:00")
         self.assertEqual(card["scheduled_at"], "2026-04-23T00:00:00+00:00")
+        self.assertEqual(card["dispatch_state"], "live")
         self.assertEqual(card["depends_on"], ["task-root"])
         self.assertEqual(card["provider"], "github")
         self.assertEqual(card["external_id"], "123")

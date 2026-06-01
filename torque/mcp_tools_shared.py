@@ -306,6 +306,7 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
         "lane": task.lane,
         "labels": task.labels or [],
         "status": task.status,
+        "dispatch_state": getattr(task, "dispatch_state", "queued") or "queued",
         "assigned_engineer_id": _effective_assigned_engineer_id(task),
         "created_by": created_by,
         "health_state": getattr(task, "health_state", "healthy") or "healthy",
@@ -2212,6 +2213,35 @@ def _mcp_worker_provider_override_arg(args: dict) -> tuple[str, str]:
 _TASK_ID_REFERENCE_RE = re.compile(
     r"\b[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?\b"
 )
+_TASK_SLUG_REFERENCE_BOUNDARY_RE = r"[A-Za-z0-9_-]"
+
+
+def _resolve_exact_task_reference(state, task_ident: str) -> str:
+    """Resolve a message token as an exact task ID/alias, never as a prefix."""
+    ident = str(task_ident or "").strip()
+    if not ident:
+        return ""
+    resolver = getattr(state, "resolve_board_task_id", None)
+    if callable(resolver):
+        return str(resolver(ident, allow_prefix=False) or "").strip()
+    alias_resolver = getattr(state, "resolve_task_alias", None)
+    if callable(alias_resolver):
+        aliased = str(alias_resolver(ident) or "").strip()
+        if aliased != ident:
+            return aliased if aliased in getattr(state, "board_tasks", {}) else ""
+    return ident if ident in getattr(state, "board_tasks", {}) else ""
+
+
+def _message_mentions_task_slug(message_text: str, slug: str) -> bool:
+    slug = str(slug or "").strip()
+    if not slug:
+        return False
+    pattern = (
+        rf"(?<!{_TASK_SLUG_REFERENCE_BOUNDARY_RE})"
+        rf"{re.escape(slug)}"
+        rf"(?!{_TASK_SLUG_REFERENCE_BOUNDARY_RE})"
+    )
+    return bool(re.search(pattern, str(message_text or ""), re.IGNORECASE))
 
 
 def _deliverable_awareness_for_referenced_tasks(state, message_text: str) -> str:
@@ -2366,6 +2396,148 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     state._emit_agent(sender)
     state._emit_agent(recipient)
     return shared
+
+
+def _architect_dispatch_message_for_task(task, message: str) -> str:
+    message_text = str(message or "").strip()
+    task_id = str(getattr(task, "id", "") or "").strip()
+    task_title = str(getattr(task, "task", "") or "").strip()
+    header = f"Task {task_id}: {task_title}".strip()
+    if message_text:
+        if task_id and task_id not in message_text:
+            return f"{header}\n\n{message_text}"
+        return message_text
+    parts = [f"Please pick up {header}.".strip()]
+    description = str(getattr(task, "description", "") or "").strip()
+    if description:
+        parts.append(description)
+    return "\n\n".join(part for part in parts if part)
+
+
+def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
+                                     group: str, task_ident: str
+                                     ) -> tuple[object | None, str]:
+    task_id = _resolve_task(state, task_ident)
+    if not task_id:
+        return None, "Task not found"
+    task = state.board_tasks.get(task_id)
+    if not task or str(getattr(task, "group", "") or "").strip() != group:
+        return None, "Task not found"
+    caller_id_str = str(caller_id or "").strip()
+    creator_class = _task_created_by_classifier(task)
+    creator_architect_id = str(
+        getattr(task, "created_by_architect_id", "") or ""
+    ).strip()
+    if creator_class != "user" and creator_architect_id != caller_id_str:
+        return None, "Task was not created by this architect"
+    if _effective_assigned_engineer_id(task) != str(engineer_id or "").strip():
+        return None, "Task is not assigned to this engineer"
+    if board_task_is_closed(task):
+        return None, "Task is already closed"
+    return task, ""
+
+
+def _infer_architect_dispatch_task_id_from_message(
+        state,
+        caller_id: str,
+        engineer_id: str,
+        group: str,
+        message: str) -> str:
+    message_text = str(message or "")
+    if not message_text:
+        return ""
+    exact_task_refs = {
+        task_id
+        for raw in _TASK_ID_REFERENCE_RE.findall(message_text)
+        for task_id in [_resolve_exact_task_reference(state, raw)]
+        if task_id
+    }
+    matches: list[str] = []
+    for task in state.board_tasks.values():
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if not task_id:
+            continue
+        if (
+            str(getattr(task, "dispatch_state", "") or "queued").strip().lower()
+            != "queued"
+        ):
+            continue
+        if task_id not in exact_task_refs:
+            slug = str(getattr(task, "slug", "") or "").strip()
+            if not slug or not _message_mentions_task_slug(message_text, slug):
+                continue
+        valid_task, _error = _resolve_architect_dispatch_task(
+            state,
+            caller_id,
+            engineer_id,
+            group,
+            task_id,
+        )
+        if valid_task:
+            matches.append(valid_task.id)
+    return matches[0] if len(matches) == 1 else ""
+
+
+async def _send_architect_engineer_message(real_state, handle_command,
+                                           caller_id: str, args: dict, *,
+                                           dispatch_task_id: str = ""):
+    engineer_ident = str(args.get("engineer_id", "") or "").strip()
+    if not engineer_ident:
+        return None, "engineer_id is required"
+    engineer_id, engineer_error = _resolve_architect_hired_engineer(
+        real_state, caller_id, engineer_ident
+    )
+    if not engineer_id:
+        return None, engineer_error
+    engineer = real_state.agents.get(engineer_id)
+    architect = real_state.agents.get(str(caller_id or "").strip())
+    message = str(args.get("message", "") or "").strip()
+    architect_group = str(getattr(architect, "group", "") or "")
+    task_ident = str(dispatch_task_id or args.get("task", "") or "").strip()
+    if not task_ident:
+        task_ident = _infer_architect_dispatch_task_id_from_message(
+            real_state,
+            caller_id,
+            engineer_id,
+            architect_group,
+            message,
+        )
+    dispatch_task = None
+    if task_ident:
+        dispatch_task, task_error = _resolve_architect_dispatch_task(
+            real_state,
+            caller_id,
+            engineer_id,
+            architect_group,
+            task_ident,
+        )
+        if not dispatch_task:
+            return None, task_error
+    if dispatch_task:
+        message = _architect_dispatch_message_for_task(dispatch_task, message)
+    if not message:
+        return None, "message is required"
+    delivered = _deliver_architect_engineer_message(
+        real_state,
+        architect,
+        engineer,
+        action="architect_message",
+        message=message,
+    )
+    await _inject_mcp_message(
+        handle_command, real_state, architect, engineer, delivered, message
+    )
+    response = {
+        "type": "ok",
+        "message_id": delivered["id"],
+        "thread_id": delivered["thread_id"],
+        "engineer_id": engineer.id,
+    }
+    if dispatch_task:
+        real_state.board_update_task(dispatch_task.id, dispatch_state="live")
+        response["task_id"] = dispatch_task.id
+        response["dispatch_state"] = "live"
+    return response, ""
 
 
 def _load_existing_peer_message_for_idempotency(state, message_id: str) -> dict | None:
@@ -4286,6 +4458,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "action": t.action_name,
                 "agent": agent_name,
                 "status": t.status,
+                "dispatch_state": (
+                    getattr(t, "dispatch_state", "queued") or "queued"
+                ),
                 "health_state": health_state,
                 "verification_state": getattr(
                     t, "verification_state", ""
@@ -4374,6 +4549,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     "title": ct.task,
                     "lane": ct.lane,
                     "status": ct.status,
+                    "dispatch_state": (
+                        getattr(ct, "dispatch_state", "queued") or "queued"
+                    ),
                     "health_state": getattr(ct, "health_state", "healthy"),
                     "verification_state": getattr(
                         ct, "verification_state", ""
@@ -5273,6 +5451,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if not isinstance(action_vars, dict):
                 return "action_vars must be an object", True
 
+            dispatch_requested, dispatch_error = _optional_bool_arg(
+                args, "dispatch", False
+            )
+            if dispatch_error:
+                return dispatch_error, True
+            dispatch_message = str(args.get("dispatch_message", "") or "").strip()
+            dispatch_requested = dispatch_requested or bool(dispatch_message)
+
             suggested_specialization = str(
                 args.get("suggested_specialization", "") or ""
             ).strip()
@@ -5328,6 +5514,28 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 )
                 if awareness_block:
                     response["deliverable_awareness"] = awareness_block
+                if dispatch_requested:
+                    dispatch_response, dispatch_send_error = (
+                        await _send_architect_engineer_message(
+                            real_state,
+                            handle_command,
+                            caller_id,
+                            {
+                                "engineer_id": assigned_engineer_id,
+                                "message": dispatch_message,
+                            },
+                            dispatch_task_id=task_id,
+                        )
+                    )
+                    if dispatch_send_error:
+                        return dispatch_send_error, True
+                    response["dispatch_state"] = "live"
+                    response["dispatch"] = dispatch_response
+                else:
+                    response["dispatch_state"] = str(
+                        getattr(created_task, "dispatch_state", "queued")
+                        or "queued"
+                    )
             return json.dumps(response), False
 
         payload = {
@@ -6566,35 +6774,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         ), False
 
     if tool_name == "engineer_message" and caller_kind == "architect":
-        engineer_ident = str(args.get("engineer_id", "") or "").strip()
-        if not engineer_ident:
-            return "engineer_id is required", True
-        engineer_id, engineer_error = _resolve_architect_hired_engineer(
-            real_state, caller_id, engineer_ident
-        )
-        if not engineer_id:
-            return engineer_error, True
-        engineer = real_state.agents.get(engineer_id)
-        architect = real_state.agents.get(str(caller_id or "").strip())
-        message = str(args.get("message", "") or "").strip()
-        if not message:
-            return "message is required", True
-        delivered = _deliver_architect_engineer_message(
+        response, message_error = await _send_architect_engineer_message(
             real_state,
-            architect,
-            engineer,
-            action="architect_message",
-            message=message,
+            handle_command,
+            caller_id,
+            args,
         )
-        await _inject_mcp_message(
-            handle_command, real_state, architect, engineer, delivered, message
-        )
-        return json.dumps({
-            "type": "ok",
-            "message_id": delivered["id"],
-            "thread_id": delivered["thread_id"],
-            "engineer_id": engineer.id,
-        }), False
+        if message_error:
+            return message_error, True
+        return json.dumps(response), False
 
     if tool_name == "peer_message" and caller_kind == "architect":
         recipient, recipient_error = _resolve_architect_peer(

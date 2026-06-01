@@ -38,6 +38,7 @@ _BOARD_TASK_COLUMNS = (
     "pipeline_root_id",
     "status",
     "scheduled_at",
+    "dispatch_state",
     "messages",
     "messages_thread",
     "depends_on",
@@ -130,6 +131,7 @@ def _serialize_board_task(task):
         d.get("pipeline_root_id", ""),
         d.get("status", ""),
         d.get("scheduled_at", ""),
+        d.get("dispatch_state", "queued") or "queued",
         messages,
         messages_thread,
         depends_on,
@@ -178,6 +180,10 @@ def decode_board_task_row(row, cols):
     d["attachments"] = _json_loads(d.get("attachments", "[]"), [])
     d["artifacts"] = _json_loads(d.get("artifacts", "[]"), [])
     d["depends_on"] = _json_loads(d.get("depends_on", "[]"), [])
+    dispatch_state = str(d.get("dispatch_state", "") or "").strip().lower()
+    d["dispatch_state"] = (
+        dispatch_state if dispatch_state in {"queued", "live"} else "queued"
+    )
     d["health_details"] = _json_loads(d.get("health_details", "{}"), {})
     d["verification_summary"] = _json_loads(
         d.get("verification_summary", "{}"),

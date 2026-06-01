@@ -86,6 +86,33 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(gs["status_bar_visibility"]["tasks"], False)
         self.assertEqual(gs["status_bar_visibility"]["attention"], True)
 
+    def test_board_task_dispatch_state_migration_backfills_live_tasks(self):
+        self.db.save_board_task(
+            BoardTask(
+                id="TORQUE:901",
+                task="Queued task",
+                group="g",
+                lane="Backlog",
+            )
+        )
+        self.db.save_board_task(
+            BoardTask(
+                id="TORQUE:902",
+                task="Live task",
+                group="g",
+                lane="In Progress",
+                agent_id="agent-1",
+            )
+        )
+        self.db._conn.execute("ALTER TABLE board_tasks DROP COLUMN dispatch_state")
+        self.db._conn.commit()
+
+        self.db.close()
+        self.db.init()
+        tasks = self.db.load_all()["board_tasks"]
+        self.assertEqual(tasks["TORQUE:901"]["dispatch_state"], "queued")
+        self.assertEqual(tasks["TORQUE:902"]["dispatch_state"], "live")
+
     def test_global_settings_legacy_db_without_relay_keys_loads_defaults(self):
         # Upgrade path: a global_settings table populated before relay fields
         # existed must reconstruct to safe defaults (relay off, empty strings)
@@ -1688,6 +1715,7 @@ class TorqueDBTests(unittest.TestCase):
                 },
                 status="Reviewing",
                 scheduled_at="2026-04-07T10:00:00+00:00",
+                dispatch_state="live",
                 messages=[{"action": "progress", "message": "Working"}],
                 depends_on=["dep-1"],
                 attachments=[{"path": "/tmp/mock.png", "filename": "mock.png"}],
@@ -1858,6 +1886,10 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["suggested_action"],
             "feature/review",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["dispatch_state"],
+            "live",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["board_sync"]["provider"],

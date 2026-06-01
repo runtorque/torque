@@ -2819,6 +2819,8 @@ def cmd_task_show(args):
     print()
     print(f"  {'Lane:':<14} {t.get('lane', '')}")
     print(f"  {'Group:':<14} {t.get('group', '')}")
+    if t.get("dispatch_state"):
+        print(f"  {'Dispatch:':<14} {t.get('dispatch_state', '')}")
 
     if t.get("agent_id"):
         agent = st.get("agents", {}).get(t["agent_id"])
@@ -3024,6 +3026,8 @@ def cmd_task_list(args):
         for t in lane_tasks:
             tslug = _dim(t.get("slug", "") or t["id"][:6])
             parts = [f"    {tslug}  {t.get('task', '')}"]
+            if t.get("dispatch_state"):
+                parts.append(_dim(f"[{t.get('dispatch_state')}]"))
             if t.get("agent_id"):
                 a = st.get("agents", {}).get(t["agent_id"])
                 if a:

@@ -12871,7 +12871,12 @@ async def main(connection=None):
                 next_boundary_task_id = latest.id
         if task.resume_after_boundary_task_id != next_boundary_task_id:
             task.resume_after_boundary_task_id = next_boundary_task_id
-        state.board_update_task(task.id, agent_id=cell.id, lane=lane)
+        state.board_update_task(
+            task.id,
+            agent_id=cell.id,
+            lane=lane,
+            dispatch_state="live",
+        )
         state.auto_dispatch_queue_remove_task(task.id)
         cell.current_task_id = task.id
         state.mark_agent_progress(cell, emit=False)
@@ -16348,6 +16353,7 @@ async def main(connection=None):
                     external_url=ext_link["external_url"],
                     depends_on=data.get("depends_on", []),
                     scheduled_at=data.get("scheduled_at", ""),
+                    dispatch_state=data.get("dispatch_state", ""),
                     assigned_engineer_id=data.get("assigned_engineer_id", ""),
                     created_by_engineer_id=data.get("created_by_engineer_id", ""),
                     suggested_specialization=data.get(

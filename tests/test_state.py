@@ -1270,6 +1270,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             created_at="2026-04-21T00:00:00+00:00",
             updated_at="2026-04-22T00:00:00+00:00",
             scheduled_at="2026-04-23T00:00:00+00:00",
+            dispatch_state="live",
             depends_on=["task-0"],
             provider="github",
             external_id="123",
@@ -1328,6 +1329,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task["created_at"], "2026-04-21T00:00:00+00:00")
         self.assertEqual(task["updated_at"], "2026-04-22T00:00:00+00:00")
         self.assertEqual(task["scheduled_at"], "2026-04-23T00:00:00+00:00")
+        self.assertEqual(task["dispatch_state"], "live")
         self.assertEqual(task["depends_on"], ["task-0"])
         self.assertEqual(task["provider"], "github")
         self.assertEqual(task["external_id"], "123")
@@ -1425,6 +1427,38 @@ class MatrixStateCleanupTests(unittest.TestCase):
         # TORQUE:154 phase-1 measured ~98% reduction. Preserve at least 95% of
         # that win after eagerly restoring board-semantic metadata.
         self.assertGreaterEqual(reduction, 0.931)
+
+    def test_task_dispatch_state_persists_and_emits_delta(self):
+        db_mod = importlib.import_module("torque.db")
+        db_mod = importlib.reload(db_mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            try:
+                state = self.state_mod.MatrixState(db=db)
+                state.add_group("g")
+                state._delta_ops.clear()
+
+                task = state.board_add_task("Queued task", "g")
+                self.assertEqual(task.dispatch_state, "queued")
+                self.assertEqual(state._delta_ops[-1]["op"], "task_upsert")
+                self.assertEqual(state._delta_ops[-1]["dispatch_state"], "queued")
+
+                state._delta_ops.clear()
+                state.board_update_task(task.id, dispatch_state="live")
+
+                self.assertEqual(
+                    state.board_tasks[task.id].dispatch_state,
+                    "live",
+                )
+                self.assertEqual(state._delta_ops[-1]["op"], "task_upsert")
+                self.assertEqual(state._delta_ops[-1]["dispatch_state"], "live")
+                self.assertEqual(
+                    db.load_all()["board_tasks"][task.id]["dispatch_state"],
+                    "live",
+                )
+            finally:
+                db.close()
 
     def test_compact_snapshot_does_not_run_deferred_db_loaders(self):
         state = self.state_mod.MatrixState()
