@@ -19,8 +19,9 @@ than re-deriving ownership in parallel:
 4. P6's remote ask surface consumes the same stamped rows, so it answers exactly
    the asks that are genuinely user-destined -- identical to local behavior.
 
-The mirror rows themselves remain display-only: blocking ask delivery/resolution
-still flows through the existing user-facing code paths.
+The ask row itself remains a display mirror.  Ask-reply rows are also the
+durable transport record for answer delivery: if the asking agent has no live
+session, the row stays buffered and is replayed when the agent wakes.
 """
 
 from __future__ import annotations
@@ -274,7 +275,9 @@ def save_direct_ask_reply_mirror(
         question: str = "",
         source_task_id: str = "",
         source_key: str = "",
-        created_at: float | None = None) -> dict | None:
+        created_at: float | None = None,
+        delivery_state: str = "delivered",
+        delivery_reason: str = "") -> dict | None:
     """Persist or return a display-only ``message_type='ask_reply'`` row."""
     if not state or not getattr(state, "db", None) or not asking_agent:
         return None
@@ -306,6 +309,9 @@ def save_direct_ask_reply_mirror(
         name=str(ask_row.get("sender_name", "") or "").strip(),
     )
     now = float(created_at if created_at is not None else time.time())
+    delivery_state = str(delivery_state or "delivered").strip() or "delivered"
+    if delivery_state not in {"buffered", "delivered", "failed"}:
+        delivery_state = "delivered"
     row = {
         "id": reply_id,
         "thread_id": str(ask_row.get("thread_id", "") or ""),
@@ -323,9 +329,9 @@ def save_direct_ask_reply_mirror(
         "ack_required": False,
         "blocking": False,
         "source_task_id": str(ask_row.get("source_task_id", "") or ""),
-        "delivery_state": "delivered",
-        "delivery_reason": "",
-        "delivered_at": now,
+        "delivery_state": delivery_state,
+        "delivery_reason": str(delivery_reason or ""),
+        "delivered_at": now if delivery_state == "delivered" else 0,
         "read_at": 0,
     }
     try:

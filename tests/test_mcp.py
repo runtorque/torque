@@ -1367,6 +1367,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     name="Worker 1",
                     group="g",
                     cell_type="agent",
+                    session_id="sess-worker-1",
+                    status="running",
                     created_by_engineer_id=engineer.id,
                     owner_engineer_id=engineer.id,
                     current_task_id=task.id,

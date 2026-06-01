@@ -243,6 +243,61 @@ class ServerDispatchObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel_events[0][1]["task_id"], "queued")
         self.assertIn("keeping it queued", panel_events[0][0][4])
 
+    async def test_auto_dispatch_queue_drops_unavailable_target_and_surfaces(self):
+        scenarios = [
+            ("target_tombstoned", {"deleted_at": 123.0}),
+            ("target_stopped", {"status": "stopped", "session_id": ""}),
+        ]
+        for expected_reason, worker_fields in scenarios:
+            with self.subTest(expected_reason=expected_reason):
+                state = self._state()
+                worker = self.state_mod.AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="g",
+                    cell_type="agent",
+                    kind="worker",
+                    session_id="session-1",
+                )
+                for key, value in worker_fields.items():
+                    setattr(worker, key, value)
+                state.agents[worker.id] = worker
+                state.groups["g"].append(worker.id)
+                task = state.board_add_task(
+                    "Queued",
+                    "g",
+                    lane="To Do",
+                    id="queued",
+                    agent_id=worker.id,
+                )
+                state.auto_dispatch_queue_add(
+                    "g",
+                    "queued",
+                    target_agent_id=worker.id,
+                    max_concurrent=1,
+                )
+                panel_events = []
+
+                async def handle_command(payload):
+                    raise AssertionError(f"dispatch should drop: {payload}")
+
+                dispatched = await self.dispatch_mod._pump_auto_dispatch_queue(
+                    state,
+                    handle_command,
+                    lambda *args, **kwargs: panel_events.append((args, kwargs)),
+                    group="g",
+                )
+
+                self.assertEqual(dispatched, [])
+                self.assertNotIn("g", state.auto_dispatch_queues)
+                self.assertTrue(worker.needs_attention)
+                self.assertIn(expected_reason, worker.error_message)
+                self.assertIn("torque:blocked", task.labels)
+                self.assertEqual(task.status, "Dispatch target unavailable")
+                self.assertEqual(panel_events[0][0][0], "worker_boot_doa")
+                self.assertEqual(panel_events[0][1]["task_id"], "queued")
+                self.assertIn("Queued dispatch dropped", panel_events[0][0][4])
+
     async def test_auto_dispatch_queue_logs_empty_queue_with_bound_followups_once(self):
         state = self._state()
         state.board_add_task(

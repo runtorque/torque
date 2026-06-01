@@ -1837,7 +1837,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(ws.pending_note_kind, "note")
         self.assertTrue(ws.paused)
 
-    def test_cleanup_orphaned_attention_false_fallback_clears_persisted_agent_row(self):
+    def test_cleanup_orphaned_attention_false_fallback_keeps_actor_scoped_question(self):
         from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
@@ -1894,16 +1894,64 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
         self.assertTrue(db.agent_exists(engineer.id))
-        self.assertEqual(cleaned, {"asks": 1, "engineer_questions": 1})
+        self.assertEqual(cleaned, {"asks": 1, "engineer_questions": 0})
         ws = state.engineer_settings["g"]
-        self.assertEqual(ws.pending_question, "")
-        self.assertEqual(ws.pending_question_set_at, 0.0)
-        self.assertEqual(ws.pending_question_actor_id, "")
+        self.assertEqual(ws.pending_question, "Need approval")
+        self.assertEqual(ws.pending_question_actor_id, engineer.id)
         self.assertEqual(ws.pending_note, "")
         self.assertEqual(ws.pending_note_kind, "")
-        self.assertFalse(ws.paused)
+        self.assertTrue(ws.paused)
         self.assertEqual(state.board_tasks[parent.id].status, "")
         self.assertEqual(state.board_tasks[ask.id].lane, "Done")
+
+    def test_cleanup_orphaned_attention_keeps_reply_agent_ask_when_source_unavailable(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        parent = self.state_mod.BoardTask(
+            id="task-1",
+            task="Parent task",
+            group="g",
+            lane="In Progress",
+            agent_id=worker.id,
+            status="Awaiting Input",
+        )
+        ask = self.state_mod.BoardTask(
+            id="ask-1",
+            task="Review plan",
+            group="g",
+            lane="Backlog",
+            labels=["torque:human", "torque:derived"],
+            parent_task_id=parent.id,
+            reply_agent_id=worker.id,
+        )
+        db.save_group("g", 0)
+        db.save_agent(worker)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        state.board_tasks[parent.id] = parent
+        state.board_tasks[ask.id] = ask
+
+        cleaned = state.cleanup_orphaned_attention(
+            emit=False,
+            allow_persisted_agent_fallback=False,
+        )
+
+        self.assertEqual(cleaned, {"asks": 0, "engineer_questions": 0})
+        self.assertEqual(state.board_tasks[parent.id].status, "Awaiting Input")
+        self.assertEqual(state.board_tasks[ask.id].lane, "Backlog")
 
     def test_load_preserves_pending_question_for_persisted_engineer(self):
         from torque.db import TorqueDB
