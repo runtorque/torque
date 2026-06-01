@@ -12135,6 +12135,44 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .behavior-overlay-subtabs { margin-bottom: 2px; }
 .behavior-overlay-role-pane { margin-bottom: 16px; }
 .behavior-overlay-header { align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.behavior-overlay-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, rgba(255,255,255,.02));
+}
+.behavior-overlay-layer-agent-specific {
+  border-left-color: var(--green);
+  background: color-mix(in srgb, var(--green) 6%, rgba(255,255,255,.02));
+}
+.behavior-overlay-layer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.behavior-overlay-layer-title { font-weight: 700; color: var(--text); }
+.behavior-overlay-layer-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--text-dim);
+  background: rgba(0,0,0,.16);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.behavior-overlay-layer-note {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.behavior-overlay-layer-body { display: flex; flex-direction: column; gap: 10px; }
 .behavior-overlay-section { display: flex; flex-direction: column; gap: 10px; }
 .behavior-overlay-summary-grid,
 .behavior-overlay-approval-summary {
@@ -12153,6 +12191,21 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   min-height: 150px;
   resize: vertical;
   font-family: var(--font);
+}
+.behavior-overlay-readonly-text {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.18);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .behavior-overlay-editor-actions,
 .behavior-overlay-actions,
