@@ -189,8 +189,11 @@ _AGENT_PEER_MESSAGE_USER_WHERE = _AGENT_DIRECT_MESSAGE_WHERE
 _AGENT_PEER_CHAT_WHERE = (
     f"({_AGENT_PEER_MESSAGE_NON_USER_WHERE} "
     "AND sender_kind IN ('architect','engineer') "
-    "AND recipient_kind IN ('architect','engineer') "
-    "AND (sender_kind='architect' OR recipient_kind='architect'))"
+    "AND recipient_kind IN ('architect','engineer'))"
+)
+_ENGINEER_PEER_MESSAGE_WHERE = (
+    f"({_AGENT_PEER_MESSAGE_NON_USER_WHERE} "
+    "AND sender_kind='engineer' AND recipient_kind='engineer')"
 )
 
 
@@ -4620,6 +4623,84 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             include_archived=include_archived,
         )
 
+    def load_engineer_peer_messages_for_agent(
+        self,
+        engineer_id: str,
+        *,
+        limit: int = 100,
+        since: float = 0,
+        peer_id: str = "",
+        thread_id: str = "",
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent Engineer↔Engineer peer rows involving one Engineer."""
+        engineer_id = str(engineer_id or "").strip()
+        if not engineer_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        where = [
+            "(sender_id=? OR recipient_id=?)",
+            _ENGINEER_PEER_MESSAGE_WHERE,
+        ]
+        params: list = [engineer_id, engineer_id]
+        peer_id = str(peer_id or "").strip()
+        if peer_id:
+            where.append(
+                "((sender_id=? AND recipient_id=?) OR "
+                "(sender_id=? AND recipient_id=?))"
+            )
+            params.extend([engineer_id, peer_id, peer_id, engineer_id])
+        thread_id = str(thread_id or "").strip()
+        if thread_id:
+            where.append("thread_id=?")
+            params.append(thread_id)
+        since_value = _peer_float(since, 0)
+        if since_value > 0:
+            where.append("created_at>?")
+            params.append(since_value)
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_engineer_peer_messages_for_thread(
+        self,
+        thread_id: str,
+        *,
+        engineer_id: str = "",
+        limit: int = 1000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load one Engineer↔Engineer peer thread oldest first."""
+        thread_id = str(thread_id or "").strip()
+        if not thread_id:
+            return []
+        limit = max(1, min(int(limit or 1000), 5000))
+        where = ["thread_id=?", _ENGINEER_PEER_MESSAGE_WHERE]
+        params: list = [thread_id]
+        engineer_id = str(engineer_id or "").strip()
+        if engineer_id:
+            where.append("(sender_id=? OR recipient_id=?)")
+            params.extend([engineer_id, engineer_id])
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at ASC, id ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
     def load_direct_messages_for_agent(
         self,
         agent_id: str,
@@ -4722,10 +4803,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     ) -> list[dict]:
         """Load recent V1 agent↔agent chat rows, newest first.
 
-        V1 chat is the Architect-centered subset of non-user peer messages:
-        Architect↔Engineer plus Architect↔Architect only.  User/direct rows,
-        worker traffic, Engineer↔Engineer anomalies, non-message rows, and
-        blocking ask mirrors are intentionally excluded.
+        V1 chat is the non-user Architect/Engineer peer-message subset:
+        Architect↔Engineer, Architect↔Architect, and sanctioned
+        Engineer↔Engineer rows. User/direct rows, worker traffic,
+        non-message rows, and blocking ask mirrors are intentionally excluded.
         """
         limit = max(1, min(int(limit or 5000), 10000))
         where = [_AGENT_PEER_CHAT_WHERE]

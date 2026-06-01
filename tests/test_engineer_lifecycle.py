@@ -323,6 +323,23 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             engineer_prompt,
         )
 
+        engineer_peer_prompt = self.server_mod._format_injected_mcp_message_prompt(
+            message="Please inspect TORQUE:801.",
+            sender_name="Courier",
+            sender_kind="engineer",
+            recipient_kind="engineer",
+            message_id="msg-peer-engineer",
+        )
+        self.assertIn(
+            'Reply with: mcp__torque__engineer_peer_reply(message_id="msg-peer-engineer"',
+            engineer_peer_prompt,
+        )
+        self.assertIn(
+            'Inspect referenced context with: mcp__torque__engineer_peer_inspect(message_id="msg-peer-engineer"',
+            engineer_peer_prompt,
+        )
+        self.assertNotIn("mcp__torque__engineer_reply", engineer_peer_prompt)
+
     async def test_add_engineer_creates_persistent_engineer_with_binding_and_engineer_mcp_entrypoint(self):
         state = self._make_state()
         bridge = _CapturingBridge()

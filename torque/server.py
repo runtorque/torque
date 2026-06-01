@@ -6148,8 +6148,14 @@ def _format_injected_mcp_message_prompt(
         header = f"Message from {sender_name} ({sender_kind_key})"
     else:
         header = f"Message from {sender_label}"
+    engineer_peer_message = (
+        sender_kind_key == "engineer"
+        and recipient_kind_key == "engineer"
+    )
     reply_tool = (
-        f"mcp__torque__{recipient_kind_key}_reply"
+        "mcp__torque__engineer_peer_reply"
+        if engineer_peer_message
+        else f"mcp__torque__{recipient_kind_key}_reply"
         if recipient_kind_key in {"architect", "engineer"}
         else "mcp__torque__torque_reply"
     )
@@ -6176,6 +6182,11 @@ def _format_injected_mcp_message_prompt(
         blocks.append(
             f'{hint_prefix} {reply_tool}(message_id="{message_id}", '
             'message="your response")'
+        )
+    if engineer_peer_message:
+        blocks.append(
+            "Inspect referenced context with: "
+            f'mcp__torque__engineer_peer_inspect(message_id="{message_id}")'
         )
     prefix = "" if anchor else "\n"
     return prefix + "\n\n".join(blocks) + "\n---\n"
@@ -6212,15 +6223,20 @@ def _peer_message_row_replay_entry(row: dict, target_id: str) -> dict | None:
     recipient_kind = str(row.get("recipient_kind", "") or "").strip() or "architect"
     sender_kind = str(row.get("sender_kind", "") or "").strip() or "architect"
     delivery_state = str(row.get("delivery_state", "") or "").strip() or "buffered"
+    has_reply = bool(str(row.get("reply_to_id", "") or "").strip())
+    if sender_kind == "architect" and recipient_kind == "engineer":
+        action = "architect_reply" if has_reply else "architect_message"
+    elif sender_kind == "engineer" and recipient_kind == "architect":
+        action = "engineer_reply" if has_reply else "engineer_message_architect"
+    elif sender_kind == "engineer" and recipient_kind == "engineer":
+        action = "engineer_peer_reply" if has_reply else "engineer_peer_notify"
+    else:
+        action = "architect_peer_reply" if has_reply else "architect_peer_message"
     return {
         "id": str(row.get("id", "") or "").strip(),
         "thread_id": str(row.get("thread_id", "") or "").strip(),
         "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
-        "action": (
-            "architect_peer_reply"
-            if str(row.get("reply_to_id", "") or "").strip()
-            else "architect_peer_message"
-        ),
+        "action": action,
         "message": str(row.get("message", "") or ""),
         "timestamp": float(row.get("created_at", row.get("timestamp", 0)) or 0),
         "sender_id": sender_id,
@@ -6242,6 +6258,12 @@ def _is_canonical_peer_replay_entry(entry: dict) -> bool:
     return str((entry or {}).get("action", "") or "").strip() in {
         "architect_peer_message",
         "architect_peer_reply",
+        "architect_message",
+        "architect_reply",
+        "engineer_message_architect",
+        "engineer_reply",
+        "engineer_peer_notify",
+        "engineer_peer_reply",
     }
 
 

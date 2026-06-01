@@ -206,6 +206,8 @@ _ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS = [
     "workflow_breach",
     "engineer_queue_empty",
     "perceived_empty_episode",
+    "engineer_peer_thread_opened",
+    "engineer_peer_thread_active",
     ENGINEER_AWAITING_HUMAN_INPUT,
     ENGINEER_ASK_RESOLVED,
 ]
@@ -1187,6 +1189,8 @@ def _agent_peer_message_action(row: dict) -> str:
         return "architect_reply" if has_reply else "architect_message"
     if sender_kind == "engineer" and recipient_kind == "architect":
         return "engineer_reply" if has_reply else "engineer_message_architect"
+    if sender_kind == "engineer" and recipient_kind == "engineer":
+        return "engineer_peer_reply" if has_reply else "engineer_peer_notify"
     return _peer_message_action(row or {})
 
 
@@ -1200,7 +1204,6 @@ def _is_agent_peer_thread_row(row: dict) -> bool:
     return (
         sender_kind in allowed
         and recipient_kind in allowed
-        and "architect" in {sender_kind, recipient_kind}
     )
 
 
@@ -1385,8 +1388,14 @@ def _direct_message_cache_entry(row: dict, agent_id: str) -> dict | None:
 
 def _is_peer_message_cache_entry(entry: dict) -> bool:
     return str((entry or {}).get("action", "") or "").strip() in {
+        "architect_message",
+        "architect_reply",
+        "engineer_message_architect",
+        "engineer_reply",
         "architect_peer_message",
         "architect_peer_reply",
+        "engineer_peer_notify",
+        "engineer_peer_reply",
     }
 
 
@@ -5016,10 +5025,13 @@ class MatrixState:
         limit: int = PEER_MESSAGE_CACHE_LIMIT,
         emit: bool = False,
     ) -> int:
-        """Seed recent Architect peer messages after restart/load."""
+        """Seed recent Architect/Engineer peer messages after restart/load."""
         seeded = 0
         for cell in list(self.agents.values()):
-            if str(getattr(cell, "kind", "") or "").strip() != "architect":
+            if str(getattr(cell, "kind", "") or "").strip() not in {
+                "architect",
+                "engineer",
+            }:
                 continue
             entries = self.refresh_peer_message_cache_for_agent(
                 cell.id,
@@ -6730,6 +6742,13 @@ class MatrixState:
         legacy_defaults = set(normalize_architect_enabled_events(
             _ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS
         ))
+        # Existing installations may have rows written before the Engineer peer
+        # coarse events existed. Treat that previous all-events set as the same
+        # legacy broad default so :796's digest-quiet backfill still quiets it.
+        legacy_defaults_without_engineer_peer = legacy_defaults - {
+            "engineer_peer_thread_opened",
+            "engineer_peer_thread_active",
+        }
         engineer_defaults = set(
             _ENGINEER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
         )
@@ -6737,7 +6756,7 @@ class MatrixState:
         def _is_legacy_broad_default(
                 enabled_events, *, include_engineer_defaults: bool = False) -> bool:
             enabled_set = set(normalize_architect_enabled_events(enabled_events))
-            if enabled_set == legacy_defaults:
+            if enabled_set in {legacy_defaults, legacy_defaults_without_engineer_peer}:
                 return True
             return bool(
                 include_engineer_defaults and enabled_set == engineer_defaults

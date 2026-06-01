@@ -3240,6 +3240,233 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(injects, [])
 
+    async def test_engineer_peer_notify_inspect_scope_matrix(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=architect.id
+        )
+        bob.session_id = "bob-session"
+        self.state._db_save_agent(bob)
+        charlie = self._add_engineer(
+            "eng-charlie", "Charlie", hired_by_architect_id=architect.id
+        )
+        other_hire = self._add_engineer(
+            "eng-other-hire", "Other Hire", hired_by_architect_id=other_architect.id
+        )
+        user_owned = self._add_engineer("eng-user", "User Owned")
+        other_group = self._add_engineer(
+            "eng-other-group",
+            "Other Group",
+            hired_by_architect_id=architect.id,
+            group="other",
+        )
+        dismissed = self._add_engineer(
+            "eng-dismissed", "Dismissed", hired_by_architect_id=architect.id
+        )
+        dismissed.dismissed_at = 99
+        self.state._db_save_agent(dismissed)
+        tombstoned = self._add_engineer(
+            "eng-tomb", "Tomb", hired_by_architect_id=architect.id
+        )
+        tombstoned.deleted_at = 123.0
+        self.state._db_save_agent(tombstoned)
+        alice_worker = self._add_worker("worker-alice", "Alice Worker", alice.id)
+        bob_worker = self._add_worker("worker-bob", "Bob Worker", bob.id)
+        visible_task = self._add_task(
+            "TORQUE:801",
+            "Peer-visible context",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        hidden_task = self._add_task(
+            "TORQUE:802",
+            "Bob-only context",
+            assigned_engineer_id=bob.id,
+            created_by_architect_id=architect.id,
+        )
+
+        list_text, list_error = await self._call_engineer(
+            "engineer_peer_list",
+            {},
+            alice.id,
+        )
+        self.assertFalse(list_error, list_text)
+        listed = json.loads(list_text)
+        self.assertEqual(listed["type"], "engineer_peers")
+        self.assertEqual(
+            [item["id"] for item in listed["engineers"]],
+            [bob.id, charlie.id],
+        )
+        for item in listed["engineers"]:
+            self.assertNotIn("current_task_id", item)
+            self.assertNotIn("worktree_path", item)
+
+        dismissed_text, dismissed_error = await self._call_engineer(
+            "engineer_peer_list",
+            {"include_dismissed": True},
+            alice.id,
+        )
+        self.assertFalse(dismissed_error, dismissed_text)
+        self.assertEqual(
+            [item["id"] for item in json.loads(dismissed_text)["engineers"]],
+            [bob.id, charlie.id, dismissed.id],
+        )
+
+        for target in [alice.id, other_hire.id, user_owned.id, other_group.id,
+                       tombstoned.id, architect.id, bob_worker.id]:
+            text, is_error = await self._call_engineer(
+                "engineer_peer_notify",
+                {
+                    "engineer_id": target,
+                    "message": "look here",
+                    "context_task_ids": [visible_task.id],
+                },
+                alice.id,
+            )
+            self.assertTrue(is_error, target)
+
+        summary_only_text, summary_only_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": bob.id,
+                "message": "look here",
+                "context_summary": "summary alone is not enough",
+            },
+            alice.id,
+        )
+        self.assertTrue(summary_only_error)
+        self.assertIn("context_task_ids or context_stream_refs", summary_only_text)
+
+        hidden_context_text, hidden_context_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": bob.id,
+                "message": "look here",
+                "context_task_ids": [hidden_task.id],
+            },
+            alice.id,
+        )
+        self.assertTrue(hidden_context_error)
+        self.assertEqual(hidden_context_text, f"Task not found: {hidden_task.id}")
+
+        before_task_ids = set(self.state.board_tasks)
+        notify_text, notify_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": bob.id,
+                "message": "Please inspect the signed-off design scope.",
+                "context_task_ids": [visible_task.id],
+                "context_summary": "Scope/auth check requested.",
+                "ack_required": True,
+            },
+            alice.id,
+        )
+        self.assertFalse(notify_error, notify_text)
+        notify = json.loads(notify_text)
+        self.assertEqual(notify["type"], "ok")
+        self.assertEqual(notify["recipient_engineer_id"], bob.id)
+        self.assertEqual(notify["delivery"], {"state": "delivered", "reason": ""})
+        self.assertEqual(set(self.state.board_tasks), before_task_ids)
+        persisted = self.db.load_agent_peer_message(notify["message_id"])
+        self.assertEqual(persisted["sender_kind"], "engineer")
+        self.assertEqual(persisted["recipient_kind"], "engineer")
+        self.assertEqual(persisted["context_task_ids"], [visible_task.id])
+        self.assertEqual(
+            persisted["context_snapshot"]["inspect_grant"]["supervising_architect_id"],
+            architect.id,
+        )
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual([call["agent_id"] for call in injects], [bob.id])
+        self.assertEqual(injects[0]["sender_kind"], "engineer")
+        self.assertTrue(injects[0]["ack_required"])
+
+        agents_text, agents_error = await self._call_engineer(
+            "engineer_agents_list", {}, alice.id
+        )
+        self.assertFalse(agents_error, agents_text)
+        visible_agent_ids = {item["id"] for item in json.loads(agents_text)["agents"]}
+        self.assertIn(alice.id, visible_agent_ids)
+        self.assertIn(alice_worker.id, visible_agent_ids)
+        self.assertNotIn(bob.id, visible_agent_ids)
+        self.assertNotIn(bob_worker.id, visible_agent_ids)
+        for target in [bob.id, bob_worker.id]:
+            show_text, show_error = await self._call_engineer(
+                "engineer_agent_show", {"agent": target}, alice.id
+            )
+            self.assertTrue(show_error, target)
+            self.assertEqual(show_text, "agent not found in scope")
+            message_text, message_error = await self._call_engineer(
+                "engineer_agent_message",
+                {"agent": target, "message": "generic path denied"},
+                alice.id,
+            )
+            self.assertTrue(message_error, target)
+            self.assertEqual(message_text, "agent not found in scope")
+
+        for participant in [alice, bob]:
+            inspect_text, inspect_error = await self._call_engineer(
+                "engineer_peer_inspect",
+                {"message_id": notify["message_id"]},
+                participant.id,
+            )
+            self.assertFalse(inspect_error, inspect_text)
+            inspected = json.loads(inspect_text)
+            self.assertEqual(inspected["type"], "engineer_peer_inspect")
+            self.assertEqual(inspected["thread_id"], notify["thread_id"])
+            self.assertEqual(inspected["context"]["task_ids"], [visible_task.id])
+            self.assertIn(visible_task.id, [task["id"] for task in inspected["live"]["tasks"]])
+
+        outsider_text, outsider_error = await self._call_engineer(
+            "engineer_peer_inspect",
+            {"message_id": notify["message_id"]},
+            charlie.id,
+        )
+        self.assertTrue(outsider_error)
+        self.assertEqual(outsider_text, "thread not found in scope")
+
+        self.state.update_agent_digest_settings(
+            architect.id,
+            architect_digest=True,
+            enabled_events=[],
+        )
+        threads_text, threads_error = await self._call(
+            "architect_engineer_peer_threads",
+            {},
+            architect.id,
+        )
+        self.assertFalse(threads_error, threads_text)
+        threads = json.loads(threads_text)
+        self.assertEqual(threads["type"], "engineer_peer_threads")
+        self.assertEqual([thread["thread_id"] for thread in threads["threads"]], [notify["thread_id"]])
+        inspect_text, inspect_error = await self._call(
+            "architect_engineer_peer_inspect",
+            {"thread_id": notify["thread_id"]},
+            architect.id,
+        )
+        self.assertFalse(inspect_error, inspect_text)
+        self.assertEqual(json.loads(inspect_text)["context"]["task_ids"], [visible_task.id])
+        other_threads_text, other_threads_error = await self._call(
+            "architect_engineer_peer_threads",
+            {},
+            other_architect.id,
+        )
+        self.assertFalse(other_threads_error, other_threads_text)
+        self.assertEqual(json.loads(other_threads_text)["threads"], [])
+        other_inspect_text, other_inspect_error = await self._call(
+            "architect_engineer_peer_inspect",
+            {"thread_id": notify["thread_id"]},
+            other_architect.id,
+        )
+        self.assertTrue(other_inspect_error)
+        self.assertEqual(other_inspect_text, "thread not found in scope")
+
     async def test_architect_decisions_are_scoped_to_owner(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")

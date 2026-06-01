@@ -522,6 +522,8 @@ function _agentPanelMessageSenderKind(agent, message, direction) {
 function _agentPanelMessageActionLabel(action) {
   action = String(action || '').trim();
   if (!action) return 'message';
+  if (action === 'engineer_peer_notify') return 'engineer peer notify';
+  if (action === 'engineer_peer_reply') return 'engineer peer reply';
   return action.replace(/_/g, ' ');
 }
 

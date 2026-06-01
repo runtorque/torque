@@ -988,6 +988,58 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_engineer_peer_threads",
+        "description": (
+            "List Engineer↔Engineer notify-and-inspect threads where both "
+            "participants are Engineers hired by this Architect. This is an "
+            "on-demand inspect surface and is not gated by digest notification settings."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Optional hired Engineer id/slug/name filter.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": "Optional Engineer peer thread id filter.",
+                },
+                "active_since": {
+                    "type": "number",
+                    "description": "Optional lower-bound last-activity timestamp.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum threads to return (default 20, max 100).",
+                },
+            },
+        },
+    },
+    {
+        "name": "architect_engineer_peer_inspect",
+        "description": (
+            "Inspect a full Engineer↔Engineer notify-and-inspect thread and its "
+            "read-only referenced task/stream context. Requires both Engineer "
+            "participants to be hired by this Architect."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "thread_id": {"type": "string"},
+                "message_id": {"type": "string"},
+                "include_live": {
+                    "type": "boolean",
+                    "description": "Include revalidated live task context when available.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum messages to return (default 100, max 1000).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_engineer_journal_read",
         "description": (
             "Read recent journal entries from a hired engineer."

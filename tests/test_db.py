@@ -903,6 +903,73 @@ class TorqueDBTests(unittest.TestCase):
             [],
         )
 
+    def test_engineer_peer_messages_helpers_and_chat_loader(self):
+        self.db.save_agent_peer_message({
+            "id": "msg-eng-1",
+            "thread_id": "thread-eng",
+            "group_name": "g",
+            "sender_id": "eng-a",
+            "sender_kind": "engineer",
+            "recipient_id": "eng-b",
+            "recipient_kind": "engineer",
+            "message": "Look at TORQUE:801",
+            "created_at": 1.0,
+            "context_task_ids": ["TORQUE:801"],
+            "context_snapshot": {"streams": [{"stream_ref": "stream:1"}]},
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-eng-2",
+            "thread_id": "thread-eng",
+            "reply_to_id": "msg-eng-1",
+            "group_name": "g",
+            "sender_id": "eng-b",
+            "sender_kind": "engineer",
+            "recipient_id": "eng-a",
+            "recipient_kind": "engineer",
+            "message": "Inspecting now",
+            "created_at": 2.0,
+        })
+        self.db.save_direct_message({
+            "id": "direct-user-eng",
+            "thread_id": "user-agent:user:eng-a",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": "eng-a",
+            "recipient_kind": "engineer",
+            "message": "direct user note",
+            "created_at": 3.0,
+            "delivery_state": "buffered",
+        })
+        self.db.save_agent_peer_message({
+            "id": "worker-row",
+            "thread_id": "worker-row",
+            "group_name": "g",
+            "sender_id": "worker-a",
+            "sender_kind": "worker",
+            "recipient_id": "eng-a",
+            "recipient_kind": "engineer",
+            "message": "worker traffic excluded",
+            "created_at": 4.0,
+        })
+
+        self.assertEqual(
+            [row["id"] for row in self.db.load_engineer_peer_messages_for_agent("eng-a")],
+            ["msg-eng-2", "msg-eng-1"],
+        )
+        self.assertEqual(
+            [row["id"] for row in self.db.load_engineer_peer_messages_for_thread("thread-eng")],
+            ["msg-eng-1", "msg-eng-2"],
+        )
+        self.assertEqual(
+            [row["id"] for row in self.db.load_recent_agent_peer_chat_messages()],
+            ["msg-eng-2", "msg-eng-1"],
+        )
+        self.assertEqual(
+            [row["id"] for row in self.db.load_agent_peer_chat_messages_for_pair("eng-a", "eng-b")],
+            ["msg-eng-1", "msg-eng-2"],
+        )
+
     def test_agent_peer_messages_deterministic_ids_are_idempotent(self):
         row = {
             "id": "msg-deterministic",

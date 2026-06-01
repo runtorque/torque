@@ -186,6 +186,18 @@ merge mode cannot close issues this way because no PR body is written.
 | `engineer_message_user` | Non-blocking durable direct message to the user-facing conversation panel. |
 | `engineer_message_architect` | Message the Architect that hired this Engineer. |
 | `engineer_reply` | Reply to a thread in an existing message conversation. |
+| `engineer_peer_list` | List same-group Engineer peers hired by the same Architect for the explicit peer notify surface. |
+| `engineer_peer_notify` | Notify a peer Engineer to inspect a referenced task/stream; requires `context_task_ids` or `context_stream_refs`. |
+| `engineer_peer_reply` | Reply to an existing Engineer↔Engineer peer thread. |
+| `engineer_peer_inbox` | Read durable Engineer↔Engineer threads involving this Engineer. |
+| `engineer_peer_inspect` | Read-only inspect of the task/stream context attached to a peer thread. |
+
+Engineer↔Engineer peer tools are **notify-and-inspect, not
+forward-everything**. V1 peers must be in the same group and share the same
+non-empty `hired_by_architect_id`; the supervising Architect can inspect the
+threads on demand. Peer inspection does not widen generic
+`engineer_agents_list`, `engineer_agent_show`, `engineer_agent_message`,
+`engineer_merge`, board, journal, or worker-control scope.
 
 ### Specializations
 
@@ -276,6 +288,8 @@ slugs are rejected with the valid set listed in the error.
 | `architect_peer_list` | List same-group Architect peers that can receive direct messages. |
 | `architect_peer_message` | Send a durable same-group direct message to one Architect, optionally with context snapshots. |
 | `architect_peer_inbox` | Read durable Architect peer message threads, including reply-required filters. |
+| `architect_engineer_peer_threads` | List Engineer↔Engineer notify-and-inspect threads where both Engineers were hired by this Architect. |
+| `architect_engineer_peer_inspect` | Inspect a full Engineer↔Engineer thread and its referenced read-only task/stream context. |
 | `architect_reply` | Reply to an existing Architect ↔ Engineer or Architect ↔ Architect thread. |
 | `architect_message_user` | Non-blocking durable direct message to the user-facing conversation panel. |
 | `architect_ask` | Blocking question to the human. Creates a Backlog task with `human` label. |
@@ -358,6 +372,31 @@ Example call: `{"requires_reply": true, "limit": 10}`
 ```
 
 `requires_reply` is computed per thread: an incoming `ack_required=true` message requires reply until the caller sends a later message in that thread.
+
+#### Engineer peer notify-and-inspect signatures
+
+**`engineer_peer_notify(engineer_id: string, message: string, context_task_ids?: string[], context_stream_refs?: array, context_summary?: string, ack_required?: boolean = false, thread_id?: string = '')`**
+
+Requires at least one task or stream reference; `context_summary` alone is
+rejected. Returns `message_id`, `thread_id`, `recipient_engineer_id`,
+`ack_required`, and delivery state. The notification is delivered to the peer
+Engineer only; the Architect receives coarse digest events
+`engineer_peer_thread_opened` / throttled `engineer_peer_thread_active` and can
+pull details with inspect tools.
+
+**`engineer_peer_inspect(message_id?: string, thread_id?: string, include_live?: boolean = true)`**
+
+Requires the caller to be the sender or recipient in the Engineer↔Engineer
+thread. Returns the durable message tail plus the referenced task/stream
+snapshot and any currently revalidated live task context.
+
+**`architect_engineer_peer_threads(engineer_id?: string, thread_id?: string, active_since?: number = 0, limit?: integer = 20)`**
+and
+**`architect_engineer_peer_inspect(thread_id?: string, message_id?: string, include_live?: boolean = true, limit?: integer = 100)`**
+are read-only Architect inspection surfaces. They require all Engineer
+participants in the thread to have `hired_by_architect_id` equal to the caller
+Architect. These tools are not gated by digest notification settings, preserving
+Architect visibility even when coarse notifications are muted.
 
 **`architect_reply(message_id: string, message: string, ack_required?: boolean = false)`**
 

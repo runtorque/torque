@@ -122,6 +122,74 @@ ENGINEER_TOOLS = [
         },
     },
     {
+        "name": "engineer_peer_list",
+        "description": (
+            "List same-group Engineer peers hired by the same Architect. "
+            "This discovery is only for the explicit peer notify surface and "
+            "does not grant generic access to peer Engineers or their workers."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_dismissed": {
+                    "type": "boolean",
+                    "description": "Include dismissed eligible peer Engineers.",
+                },
+            },
+        },
+    },
+    {
+        "name": "engineer_peer_inbox",
+        "description": (
+            "Read durable Engineer↔Engineer peer notification threads involving "
+            "this Engineer."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "peer_engineer_id": {
+                    "type": "string",
+                    "description": "Optional peer Engineer id/slug/name filter.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": "Optional thread id filter.",
+                },
+                "requires_reply": {
+                    "type": "boolean",
+                    "description": "Only return threads with unanswered incoming ack-required messages.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Optional unix timestamp lower bound.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum threads to return (default 20, max 100).",
+                },
+            },
+        },
+    },
+    {
+        "name": "engineer_peer_inspect",
+        "description": (
+            "Inspect the read-only task/stream context granted by one "
+            "Engineer↔Engineer peer notification thread. Requires this "
+            "Engineer to be a thread participant."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string"},
+                "thread_id": {"type": "string"},
+                "include_live": {
+                    "type": "boolean",
+                    "description": "Include revalidated live task context when available.",
+                },
+            },
+        },
+    },
+    {
         "name": "engineer_board_list",
         "description": (
             "List all tasks on the board grouped by lane. "
@@ -256,6 +324,67 @@ ENGINEER_TOOLS = [
         },
     },
     # -- Write tools --------------------------------------------------------
+    {
+        "name": "engineer_peer_notify",
+        "description": (
+            "Notify a same-group, same-supervising-Architect Engineer peer to "
+            "inspect a referenced task or stream. Requires context_task_ids or "
+            "context_stream_refs; context_summary alone is rejected. This does "
+            "not create a board task and does not grant generic peer access."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Peer Engineer id/slug/name.",
+                },
+                "message": {"type": "string", "description": "Notification message."},
+                "context_task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Visible task ids/aliases to grant read-only inspect context for.",
+                },
+                "context_stream_refs": {
+                    "type": "array",
+                    "items": {},
+                    "description": "Visible stream refs (string or object with stream/branch/repo_root/task).",
+                },
+                "context_summary": {
+                    "type": "string",
+                    "description": "Optional concise summary; insufficient without task or stream refs.",
+                },
+                "ack_required": {
+                    "type": "boolean",
+                    "description": "Whether the peer should reply/ack.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": "Optional existing Engineer peer thread id to continue.",
+                },
+            },
+            "required": ["engineer_id", "message"],
+        },
+    },
+    {
+        "name": "engineer_peer_reply",
+        "description": "Reply to an existing Engineer↔Engineer peer notification thread.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "Existing Engineer peer message id.",
+                },
+                "message": {"type": "string", "description": "Reply content."},
+                "ack_required": {
+                    "type": "boolean",
+                    "description": "Whether this reply needs a peer answer.",
+                },
+            },
+            "required": ["message_id", "message"],
+        },
+    },
     {
         "name": "engineer_task_create",
         "description": (

@@ -1536,6 +1536,55 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Courier: queue empty", digest)
         self.assertNotIn("queue empty — queue empty", digest)
 
+    def test_architect_digest_formats_engineer_peer_thread_events_without_body_firehose(self):
+        state, group, _engineer = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+            persistent=True,
+        )
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Courier",
+            slug="courier",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
+        state.groups[group].extend([architect.id, engineer.id])
+        state.update_agent_digest_settings(
+            architect.id,
+            architect_digest=True,
+        )
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            [{
+                "id": 1,
+                "group": group,
+                "cell_id": engineer.id,
+                "agent_name": engineer.name,
+                "kind": "engineer_peer_thread_opened",
+                "message": "Courier ↔ Panelsmith: peer thread opened — TORQUE:801 (thread msg-123)",
+                "task_id": "TORQUE:801",
+            }],
+            "1 active task",
+            engineer=architect,
+        )
+
+        self.assertIn("Courier: peer thread opened TORQUE:801", digest)
+        self.assertIn("Courier ↔ Panelsmith: peer thread opened", digest)
+        self.assertNotIn("Please inspect the signed-off design scope", digest)
+
     def test_architect_digest_caps_lines_with_elision_footer(self):
         state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(

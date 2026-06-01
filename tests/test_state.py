@@ -555,6 +555,80 @@ class MatrixStateCleanupTests(unittest.TestCase):
             ["msg-peer-1"],
         )
 
+    def test_load_seeds_engineer_peer_message_caches_and_threads_from_db(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        eng_a = self.state_mod.AgentCell(
+            id="eng-a",
+            name="Engineer A",
+            group="g",
+            kind="engineer",
+            cell_type="agent",
+            hired_by_architect_id="arch-1",
+        )
+        eng_b = self.state_mod.AgentCell(
+            id="eng-b",
+            name="Engineer B",
+            group="g",
+            kind="engineer",
+            cell_type="agent",
+            hired_by_architect_id="arch-1",
+        )
+        db.save_groups_and_members({"g": [eng_a.id, eng_b.id]}, {"g": "g"})
+        db.save_agent(eng_a)
+        db.save_agent(eng_b)
+        db.save_agent_peer_message({
+            "id": "msg-eng-1",
+            "thread_id": "thread-eng",
+            "group_name": "g",
+            "sender_id": eng_a.id,
+            "sender_kind": "engineer",
+            "recipient_id": eng_b.id,
+            "recipient_kind": "engineer",
+            "message": "Please inspect TORQUE:801",
+            "created_at": 123.0,
+            "ack_required": True,
+            "context_task_ids": ["TORQUE:801"],
+            "context_snapshot": {"tasks": [{"id": "TORQUE:801"}]},
+        })
+        db.save_agent_peer_message({
+            "id": "msg-eng-2",
+            "thread_id": "thread-eng",
+            "reply_to_id": "msg-eng-1",
+            "group_name": "g",
+            "sender_id": eng_b.id,
+            "sender_kind": "engineer",
+            "recipient_id": eng_a.id,
+            "recipient_kind": "engineer",
+            "message": "Looking now",
+            "created_at": 124.0,
+        })
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(
+            [entry["action"] for entry in state.agents[eng_a.id].mcp_messages],
+            ["engineer_peer_reply", "engineer_peer_notify"],
+        )
+        self.assertEqual(
+            state.agents[eng_b.id].mcp_messages[-1]["action"],
+            "engineer_peer_notify",
+        )
+        pair_key = f"agent-pair:{eng_a.id}:{eng_b.id}"
+        self.assertIn(pair_key, state.agent_peer_threads)
+        thread = state.agent_peer_threads[pair_key]
+        self.assertEqual(
+            [message["action"] for message in thread["messages"]],
+            ["engineer_peer_notify", "engineer_peer_reply"],
+        )
+
     def test_save_peer_message_updates_caches_and_delivery_deltas(self):
         from torque.db import TorqueDB
 
