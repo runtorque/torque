@@ -165,6 +165,31 @@ function _healthFormatBytes(value) {
   return _healthFormatNumber(n, digits) + units[idx];
 }
 
+function _healthMetricMapSummary(value, limit) {
+  var numeric = _healthMetricFinite(value);
+  if (numeric !== null) {
+    return { total: numeric, totalText: _healthMetricFormat(numeric, 0, ''), breakdown: '' };
+  }
+  if (!value || typeof value !== 'object') {
+    return { total: null, totalText: '—', breakdown: '' };
+  }
+  var entries = Object.keys(value).map(function(key) {
+    return { key: key, value: _healthMetricFinite(value[key]) };
+  }).filter(function(entry) {
+    return entry.value !== null;
+  });
+  var total = entries.reduce(function(sum, entry) { return sum + entry.value; }, 0);
+  var shown = entries.slice(0, limit || 4).map(function(entry) {
+    return entry.key + ' ' + _healthFormatNumber(entry.value, 0);
+  });
+  if (entries.length > shown.length) shown.push('+' + (entries.length - shown.length) + ' more');
+  return {
+    total: total,
+    totalText: _healthMetricFormat(total, 0, ''),
+    breakdown: shown.join(', '),
+  };
+}
+
 function _healthMetricsStatusText() {
   var tick = healthMetricsState.tick;
   if (!tick) return 'Metrics —';
@@ -453,6 +478,12 @@ function _healthSupervisorLiveHtml() {
     : {};
   var info = _healthSupervisorStateInfo(supervisor);
   var pid = supervisor.supervisor_pid == null ? 'pid —' : 'pid ' + String(supervisor.supervisor_pid);
+  var opsSummary = _healthMetricMapSummary(metrics.ops_total, 4);
+  var errorsSummary = _healthMetricMapSummary(metrics.errors_total, 3);
+  var opsDetail = [];
+  if (opsSummary.breakdown) opsDetail.push('ops ' + opsSummary.breakdown);
+  opsDetail.push('errors ' + errorsSummary.totalText + (errorsSummary.breakdown ? ' (' + errorsSummary.breakdown + ')' : ''));
+  opsDetail.push('reconnects ' + _healthMetricFormat(supervisor.reconnect_count, 0, ''));
   var cards = [
     _healthMetricsCard(
       'Supervisor state',
@@ -473,9 +504,8 @@ function _healthSupervisorLiveHtml() {
     ),
     _healthMetricsCard(
       'Supervisor ops',
-      _healthMetricFormat(metrics.ops_total, 0, ''),
-      'errors ' + _healthMetricFormat(metrics.errors_total, 0, '')
-        + ' · reconnects ' + _healthMetricFormat(supervisor.reconnect_count, 0, ''),
+      opsSummary.totalText,
+      opsDetail.join(' · '),
       null,
       'health-card-supervisor-ops'
     ),

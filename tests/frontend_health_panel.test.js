@@ -131,8 +131,8 @@ function sampleSupervisor(overrides = {}) {
     session_count: 4,
     time_since_last_successful_op: 2,
     metrics: {
-      ops_total: 123,
-      errors_total: 2,
+      ops_total: { create: 2, write: 3, metrics: 1 },
+      errors_total: { timeout: 1 },
       bytes_written: 2048,
       bytes_read: 4096,
       sessions_current: 4,
@@ -251,7 +251,13 @@ test('supervisor runtime metrics section renders in health bottom region', () =>
   assert.ok(supervisorIndex > runtimeIndex, 'supervisor metrics render after runtime metrics in the bottom section array');
   assert.match(html, /Supervisor state/);
   assert.match(html, /Supervisor ops/);
-  assert.match(html, /123/);
+  assert.match(html, /health-card-supervisor-ops[\s\S]*<div class="health-card-value">6<\/div>/);
+  assert.match(html, /create 2/);
+  assert.match(html, /write 3/);
+  assert.match(html, /metrics 1/);
+  assert.match(html, /errors 1/);
+  assert.match(html, /timeout 1/);
+  assert.doesNotMatch(html, /errors —/);
   assert.match(html, /PTY bytes/);
   assert.match(html, /4KB/);
   assert.match(html, /Loop failures/);
@@ -264,7 +270,7 @@ test('supervisor runtime deltas update Health only when the panel is visible', (
   loadScript(context, 'static/js/health.js');
   const results = document.ensure('health-results');
   results.innerHTML = 'sentinel';
-  sandbox.state.runtime.supervisor = sampleSupervisor({ metrics: { ops_total: 1 } });
+  sandbox.state.runtime.supervisor = sampleSupervisor({ metrics: { ops_total: { create: 1 }, errors_total: { timeout: 0 } } });
 
   const hiddenResult = vm.runInContext('healthSupervisorRuntimeReceive(state.runtime.supervisor)', context);
   assert.equal(hiddenResult, false);
