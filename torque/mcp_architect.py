@@ -333,6 +333,21 @@ _ARCHITECT_TOOL_SPECS = [
                         "artifact_title": {"type": "string"},
                     },
                 },
+                "dispatch": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, atomically sends a dispatch message to "
+                        "the assigned engineer and marks the task live."
+                    ),
+                },
+                "dispatch_message": {
+                    "type": "string",
+                    "description": (
+                        "Optional message to send when dispatching. A non-empty "
+                        "value implies `dispatch: true`; otherwise a concise "
+                        "default mentioning the created task id is used."
+                    ),
+                },
             },
             "required": ["title", "group", "assigned_engineer_id"],
         },
@@ -869,6 +884,13 @@ _ARCHITECT_TOOL_SPECS = [
                 "message": {
                     "type": "string",
                     "description": "Message content.",
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "Optional task id/slug being dispatched by this "
+                        "message; when provided, the task is marked live."
+                    ),
                 },
             },
             "required": ["engineer_id", "message"],

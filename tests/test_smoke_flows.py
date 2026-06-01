@@ -193,6 +193,7 @@ class TorqueSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
                 task.id,
                 self.state.get_group_settings(task.group).dispatch_lane,
             )
+            self.state.board_update_task(task.id, dispatch_state="live")
             agent.current_task_id = task.id
             agent.tasks_dispatched += 1
             return {"type": "ok", "task_id": task.id, "agent_id": agent.id}
@@ -277,6 +278,7 @@ class TorqueSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(Path(agent.worktree_path).is_dir())
         self.assertEqual(task.lane, "In Progress")
         self.assertEqual(task.agent_id, agent.id)
+        self.assertEqual(task.dispatch_state, "live")
         self.assertEqual(agent.current_task_id, task.id)
 
         await self._complete_task(

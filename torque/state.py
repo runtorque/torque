@@ -100,6 +100,9 @@ _ENGINEER_DISPATCH_SHAPE_ORDER = ("serial", "batch", "warm_cluster")
 _ENGINEER_DISPATCH_SHAPES = set(_ENGINEER_DISPATCH_SHAPE_ORDER)
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
+TASK_DISPATCH_STATE_QUEUED = "queued"
+TASK_DISPATCH_STATE_LIVE = "live"
+TASK_DISPATCH_STATES = {TASK_DISPATCH_STATE_QUEUED, TASK_DISPATCH_STATE_LIVE}
 _ENGINEER_AUTONOMY_MODES = {
     "suggest_only",
     "dispatch_when_clear",
@@ -288,6 +291,7 @@ COMPACT_BOARD_TASK_FIELDS = (
     "created_at",
     "updated_at",
     "scheduled_at",
+    "dispatch_state",
     "depends_on",
     "provider",
     "external_id",
@@ -859,6 +863,9 @@ class BoardTask:
     status: str = ""            # pipeline status (e.g. "On Review", "Fixing")
     # Scheduling
     scheduled_at: str = ""      # ISO 8601 — auto-dispatch when this time arrives
+    # Dispatch visibility: queued = staged on the board, live = dispatched
+    # to an engineer/worker via the dispatch/message path.
+    dispatch_state: str = TASK_DISPATCH_STATE_QUEUED
     # Activity log — persisted history of agent reports on this task
     messages: list = field(default_factory=list)  # [{timestamp, action, message, agent_name}]
     # Inline engineer→agent messages that do not require a reply task.
@@ -1635,6 +1642,13 @@ def _normalize_messages_thread(messages) -> list[dict]:
         })
     out.sort(key=lambda item: _safe_float(item.get("timestamp")))
     return out
+
+
+def _normalize_task_dispatch_state(value) -> str:
+    state = str(value or "").strip().lower()
+    if state in TASK_DISPATCH_STATES:
+        return state
+    return TASK_DISPATCH_STATE_QUEUED
 
 
 def task_is_closed(task: Optional[BoardTask]) -> bool:
@@ -6024,6 +6038,16 @@ class MatrixState:
                 raw["messages_thread"] = _normalize_messages_thread(
                     raw.get("messages_thread", [])
                 )
+                if "dispatch_state" not in raw or not raw.get("dispatch_state"):
+                    raw["dispatch_state"] = (
+                        TASK_DISPATCH_STATE_LIVE
+                        if str(raw.get("agent_id", "") or "").strip()
+                        else TASK_DISPATCH_STATE_QUEUED
+                    )
+                else:
+                    raw["dispatch_state"] = _normalize_task_dispatch_state(
+                        raw.get("dispatch_state")
+                    )
                 _normalize_verification_fields(raw)
                 raw["board_sync"] = _normalize_board_sync(
                     raw.get("board_sync", {})
@@ -10063,6 +10087,14 @@ class MatrixState:
             kwargs["messages_thread"] = _normalize_messages_thread(
                 kwargs["messages_thread"]
             )
+        if "dispatch_state" in kwargs:
+            kwargs["dispatch_state"] = _normalize_task_dispatch_state(
+                kwargs.get("dispatch_state")
+            )
+        elif str(kwargs.get("agent_id", "") or "").strip():
+            kwargs["dispatch_state"] = TASK_DISPATCH_STATE_LIVE
+        else:
+            kwargs["dispatch_state"] = TASK_DISPATCH_STATE_QUEUED
         if "board_sync" in kwargs:
             kwargs["board_sync"] = _normalize_board_sync(kwargs["board_sync"])
         _normalize_verification_fields(kwargs)
@@ -10135,6 +10167,10 @@ class MatrixState:
         if "messages_thread" in fields:
             fields["messages_thread"] = _normalize_messages_thread(
                 fields["messages_thread"]
+            )
+        if "dispatch_state" in fields:
+            fields["dispatch_state"] = _normalize_task_dispatch_state(
+                fields.get("dispatch_state")
             )
         if "board_sync" in fields:
             fields["board_sync"] = _normalize_board_sync(fields["board_sync"])
