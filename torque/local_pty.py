@@ -1029,7 +1029,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self._client.on_reconnect = self._on_client_reconnect
         # Optional hook: ``(kind: str, detail: dict) -> None | awaitable``.
         # ``kind`` is one of: "connect_failed", "disconnected",
-        # "reconnected", "fresh_instance".
+        # "reconnected", "restarted", "restart_requested",
+        # "restart_worker_loss", "restart_failed_lost", "fresh_instance".
         self.on_supervisor_event = None
         # Per-session input-write circuit breaker. A hung agent that stops
         # draining its PTY makes every write to it fail (after the supervisor
@@ -1041,12 +1042,16 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self._write_breaker: dict[str, dict] = {}
         self._supervisor_metrics_cache: dict = {}
         self._supervisor_watchdog_status: dict = {}
+        self._supervisor_restart_deadline = 0.0
 
     def _prime_reconnected_input_ready(self, cell: AgentCell) -> None:
         sid = cell.session_id or ""
         if sid and cell.agent_type:
             self._input_ready_events.pop(cell.id, None)
             self.prime_input_ready(sid)
+
+    def _supervisor_restart_active(self) -> bool:
+        return self._supervisor_restart_deadline > time.time()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -1216,6 +1221,9 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         target_window_id: str = "",
         restore_focus_to_prev_tab: bool = False,
     ) -> None:
+        if self._supervisor_restart_active():
+            raise RuntimeError(
+                "PTY supervisor is restarting; try again shortly.")
         del target_session_id, target_window_id, restore_focus_to_prev_tab
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
@@ -1282,6 +1290,68 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
     def supervisor_metrics_snapshot(self) -> dict:
         return dict(self._supervisor_metrics_cache or {})
 
+    async def restart_supervisor(
+        self,
+        *,
+        timeout: float = 10.0,
+        data_dir=None,
+        ensure_running=None,
+    ) -> dict:
+        """Request an in-place supervisor re-exec and wait for adoption.
+
+        ``ensure_running`` is an optional clean-fallback respawn hook supplied
+        by the daemon. It is only used after the bounded restart window expires.
+        """
+        timeout = max(0.1, float(timeout or 0.0))
+        deadline = time.time() + timeout
+        self._supervisor_restart_deadline = deadline
+        self.set_supervisor_watchdog_status({
+            "state": "restarting",
+            "restart_deadline_at": deadline,
+            "updated_at": time.time(),
+        })
+        await self._emit_supervisor_event("restart_requested", {
+            "timeout": timeout,
+            "deadline_at": deadline,
+        })
+        try:
+            ack = await self._client.restart_supervisor()
+            if not isinstance(ack, dict) or ack.get("type") == "error":
+                raise RuntimeError(
+                    (ack or {}).get("message")
+                    or (ack or {}).get("code")
+                    or "supervisor restart failed")
+            epoch = int(ack.get("restart_epoch") or 0)
+            nonce = str(ack.get("restart_nonce") or "")
+            reconnect = await self._client.wait_for_restart(
+                restart_epoch=epoch,
+                restart_nonce=nonce,
+                timeout=timeout,
+            )
+            self._supervisor_restart_deadline = 0.0
+            self.set_supervisor_watchdog_status({
+                "state": "",
+                "last_restart_at": time.time(),
+                "updated_at": time.time(),
+            })
+            return {"ack": ack, "reconnect": reconnect}
+        except Exception as exc:
+            self._supervisor_restart_deadline = 0.0
+            self.set_supervisor_watchdog_status({
+                "state": "restarting",
+                "last_error": str(exc),
+                "updated_at": time.time(),
+            })
+            lost = await self.mark_supervisor_lost(
+                reason="supervisor_restart_failed")
+            await self._emit_supervisor_event("restart_failed_lost", {
+                "lost_sessions": lost,
+                "error": str(exc),
+            })
+            if callable(ensure_running) and data_dir is not None:
+                await asyncio.to_thread(ensure_running, data_dir)
+            raise
+
     async def terminate_supervisor_session(self, session_id: str) -> None:
         """Terminate a supervisor-owned PTY session by raw session id.
 
@@ -1292,6 +1362,9 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         session_id = str(session_id or "").strip()
         if not session_id:
             raise ValueError("session_id is required")
+        if self._supervisor_restart_active():
+            raise RuntimeError(
+                "PTY supervisor is restarting; try again shortly.")
         session = self._sessions.get(session_id)
         if session and not session.closed:
             session.closed = True
@@ -1317,6 +1390,12 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
                 break
 
     async def close_session(self, session_id: str) -> None:
+        if self._supervisor_restart_active():
+            log.warning(
+                "Ignoring close_session(%s) while supervisor restarts",
+                session_id,
+            )
+            return
         session = self._sessions.get(session_id)
         if not session or session.closed:
             return
@@ -1439,6 +1518,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         }
 
     async def write_input(self, session_id: str, data: str) -> None:
+        if self._supervisor_restart_active():
+            return
         session = self._sessions.get(session_id)
         if not session or session.closed:
             return
@@ -1466,6 +1547,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
     async def resize_session(
         self, session_id: str, cols: int, rows: int,
     ) -> None:
+        if self._supervisor_restart_active():
+            return
         session = self._sessions.get(session_id)
         if not session:
             return
@@ -1535,6 +1618,9 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         existing = self._sessions.pop(session.session_id, None)
         if existing is None:
             return
+        forget = getattr(self._client, "forget_subscription", None)
+        if callable(forget):
+            forget(session.session_id)
         if session.bootstrap_dir:
             shutil.rmtree(session.bootstrap_dir, ignore_errors=True)
         cell = self.state.agents.get(session.cell_id)
@@ -1562,6 +1648,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self,
         *,
         reason: str = "supervisor_lost",
+        session_ids: Optional[set[str]] = None,
     ) -> int:
         """Finalize every daemon-tracked session after supervisor death.
 
@@ -1570,7 +1657,10 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         instead of letting the UI silently collapse stale session ids.
         """
         lost = 0
+        ids = set(session_ids or set())
         for session in list(self._sessions.values()):
+            if ids and session.session_id not in ids:
+                continue
             await self._finalize_supervised(
                 session,
                 announce=True,
@@ -1594,6 +1684,25 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
                     announce=True,
                     exit_reason="supervisor_lost",
                 )
+        elif info.get("worker_loss"):
+            report = dict(info.get("restart_report") or {})
+            lost_ids = {
+                str(sid)
+                for sid in (info.get("lost_session_ids") or [])
+                if str(sid)
+            }
+            clean_fallback = bool(report.get("clean_fallback"))
+            lost = await self.mark_supervisor_lost(
+                reason="supervisor_restart_failed",
+                session_ids=None if clean_fallback else lost_ids,
+            )
+            await self._emit_supervisor_event("restart_worker_loss", {
+                **dict(info or {}),
+                "lost_sessions": lost or int(
+                    report.get("lost_sessions", 0) or 0),
+            })
+        elif info.get("restarted"):
+            await self._emit_supervisor_event("restarted", info)
         else:
             await self._emit_supervisor_event("reconnected", info)
 

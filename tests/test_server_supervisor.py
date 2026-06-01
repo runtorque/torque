@@ -305,6 +305,47 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
             await watchdog.check_once()
         self.assertEqual(len(attempts), 3)
 
+    async def test_restart_payload_delegates_to_bridge(self):
+        state = self.MatrixState()
+        calls = []
+
+        class Bridge:
+            async def restart_supervisor(self, **kwargs):
+                calls.append(kwargs)
+                return {
+                    "ack": {"restart_epoch": 3},
+                    "reconnect": {"restart_epoch": 3},
+                }
+
+        payload = await self.server_supervisor.build_supervisor_restart_payload(
+            Bridge(),
+            state,
+            self._runtime,
+            timeout=4.0,
+            data_dir="/tmp/sup",
+            ensure_running=lambda _path: None,
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["type"], "supervisor_restart")
+        self.assertEqual(payload["restart"]["ack"]["restart_epoch"], 3)
+        self.assertEqual(calls[0]["timeout"], 4.0)
+        self.assertEqual(calls[0]["data_dir"], "/tmp/sup")
+        self.assertTrue(callable(calls[0]["ensure_running"]))
+
+    async def test_restart_payload_profile_noop_for_non_supervisor_bridge(self):
+        state = self.MatrixState()
+        payload = await self.server_supervisor.build_supervisor_restart_payload(
+            object(),
+            state,
+            self._runtime,
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["type"], "supervisor_restart")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -216,6 +216,7 @@ from .server_dispatch import (
 from .server_supervisor import (
     SupervisorLivenessWatchdog,
     build_supervisor_health_projection,
+    build_supervisor_restart_payload,
     build_supervisor_sessions_payload,
     build_supervisor_terminate_payload,
     supervisor_health_fingerprint,
@@ -12205,6 +12206,41 @@ async def main(connection=None):
             notifier.on_system_alert(
                 "Torque — supervisor restarted",
                 "Open terminals were lost. Relaunch them from the UI.")
+        elif kind == "restart_requested":
+            banner = {
+                "kind": "supervisor_restarting",
+                "message": (
+                    "PTY supervisor is restarting in place; terminal "
+                    "operations will resume after reconnect."
+                ),
+            }
+            await _broadcast_system_banner(banner)
+        elif kind == "restarted":
+            report = dict((detail or {}).get("restart_report") or {})
+            adopted = int(report.get("adopted_sessions", 0) or 0)
+            banner = {
+                "kind": "supervisor_restarted",
+                "message": (
+                    "PTY supervisor restarted in place; live terminals "
+                    "were preserved."
+                ),
+                "detail": f"adopted_sessions={adopted}",
+            }
+            await _broadcast_system_banner(banner)
+        elif kind in {"restart_worker_loss", "restart_failed_lost"}:
+            lost = int((detail or {}).get("lost_sessions", 0) or 0)
+            banner = {
+                "kind": "supervisor_restart_lost",
+                "message": (
+                    "PTY supervisor restart could not preserve every "
+                    "terminal; affected sessions were marked lost."
+                ),
+                "detail": f"lost_sessions={lost}",
+            }
+            await _broadcast_system_banner(banner)
+            notifier.on_system_alert(
+                "Torque — supervisor restart lost terminals",
+                "Some open terminals were lost during supervisor restart.")
         elif kind == "supervisor_lost":
             lost = int((detail or {}).get("lost_sessions", 0) or 0)
             banner = {
@@ -13801,6 +13837,27 @@ async def main(connection=None):
             return await build_supervisor_terminate_payload(
                 bridge, state, _runtime_payload,
                 str(data.get("session_id") or ""),
+            )
+
+        if cmd == "supervisor_restart":
+            from . import pty_supervisor as _pty_supervisor_mod
+            try:
+                timeout = float(
+                    data.get(
+                        "timeout",
+                        _pty_supervisor_mod.DEFAULT_RESTART_TIMEOUT_SECONDS,
+                    )
+                    or _pty_supervisor_mod.DEFAULT_RESTART_TIMEOUT_SECONDS
+                )
+            except (TypeError, ValueError):
+                timeout = _pty_supervisor_mod.DEFAULT_RESTART_TIMEOUT_SECONDS
+            return await build_supervisor_restart_payload(
+                bridge,
+                state,
+                _runtime_payload,
+                timeout=timeout,
+                data_dir=DATA_DIR,
+                ensure_running=_pty_supervisor_mod.ensure_running,
             )
 
         # get_events: paginated event log query

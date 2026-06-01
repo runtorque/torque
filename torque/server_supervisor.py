@@ -689,3 +689,66 @@ async def build_supervisor_terminate_payload(
     payload["terminated_session_id"] = session_id
     payload.setdefault("message", "Supervisor session terminated.")
     return payload
+
+
+async def build_supervisor_restart_payload(
+    bridge: Any,
+    state: Any,
+    runtime_payload_func: Callable[..., dict] | None,
+    *,
+    timeout: float = 10.0,
+    data_dir: Any = None,
+    ensure_running: Callable[..., Any] | None = None,
+) -> dict:
+    """Request a safe in-place supervisor restart.
+
+    Non-supervisor/profile modes return a stable no-op/unavailable payload so
+    the frontend can call this command without special-casing profile mode.
+    """
+    runtime = _runtime_payload(runtime_payload_func, bridge, state)
+    restart = getattr(bridge, "restart_supervisor", None)
+    if not callable(restart):
+        return {
+            "type": "supervisor_restart",
+            "ok": True,
+            "available": False,
+            "message": _UNAVAILABLE_MESSAGE,
+            "runtime": runtime,
+        }
+    try:
+        result = restart(
+            timeout=timeout,
+            data_dir=data_dir,
+            ensure_running=ensure_running,
+        )
+        if asyncio.iscoroutine(result):
+            result = await result
+    except SupervisorUnavailable as exc:
+        log.warning("PTY supervisor restart unavailable: %s", exc)
+        return {
+            "type": "supervisor_restart",
+            "ok": False,
+            "available": False,
+            "message": "PTY supervisor restart did not complete.",
+            "error": str(exc),
+            "runtime": runtime,
+        }
+    except Exception as exc:
+        log.exception("PTY supervisor restart failed")
+        return {
+            "type": "supervisor_restart",
+            "ok": False,
+            "available": True,
+            "message": "PTY supervisor restart failed.",
+            "error": str(exc),
+            "runtime": runtime,
+        }
+
+    return {
+        "type": "supervisor_restart",
+        "ok": True,
+        "available": True,
+        "message": "PTY supervisor restarted in place.",
+        "restart": dict(result or {}),
+        "runtime": _runtime_payload(runtime_payload_func, bridge, state),
+    }
