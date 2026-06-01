@@ -14858,9 +14858,6 @@ async def main(connection=None):
                     persistent_prompt_filename=_persistent_prompt_filename,
                     is_designated_engineer=_is_designated_engineer,
                     send_agent_prompt=_send_agent_prompt,
-                    clear_digest_backlog_for_restart=(
-                        engineer_buffer.clear_digest_backlog_for_restart
-                    ),
                 )
 
             elif cmd == "restart_agent":
@@ -14879,6 +14876,9 @@ async def main(connection=None):
                     persistent_prompt_filename=_persistent_prompt_filename,
                     is_designated_engineer=_is_designated_engineer,
                     send_agent_prompt=_send_agent_prompt,
+                    clear_digest_backlog_for_restart=(
+                        engineer_buffer.clear_digest_backlog_for_restart
+                    ),
                 )
 
             elif cmd == "move_group":

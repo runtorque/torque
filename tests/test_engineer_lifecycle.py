@@ -106,6 +106,79 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         state.add_group("torque")
         return state
 
+    @staticmethod
+    def _closure_cell(value):
+        return (lambda x: lambda: x)(value).__closure__[0]
+
+    def _extract_local_handle_command(
+            self,
+            state,
+            *,
+            bridge=None,
+            worktree_mgr=None,
+            engineer_buffer=None):
+        main_code = self.server_mod.main.__code__
+        handle_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "handle_command"
+        )
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+
+        def noop(*_args, **_kwargs):
+            return None
+
+        bridge = bridge or _CapturingBridge()
+        worktree_mgr = worktree_mgr or _FakeWorktreeManager()
+        engineer_buffer = engineer_buffer or types.SimpleNamespace(
+            clear_digest_backlog_for_restart=noop,
+        )
+        closure_values = {
+            name: None
+            for name in handle_code.co_freevars
+        }
+        closure_values.update({
+            "_apply_persistent_prompt": noop,
+            "_broadcast_toast": noop_async,
+            "_build_cell_persistent_prompt": lambda *_a, **_k: "",
+            "_checkpoint_message": lambda _cell: "",
+            "_checkpoint_on_report": noop_async,
+            "_cleanup_after_merge": noop_async,
+            "_close_agent_session_only": noop_async,
+            "_panel_event": noop,
+            "_persistent_prompt_filename": lambda cell: f"{cell.id}.md",
+            "_record_task_boundary": noop_async,
+            "_resolve_agent_launch_config": lambda *_a, **_k: {},
+            "_resolve_architect_launch_config": lambda *_a, **_k: {},
+            "_resolve_base_dir": noop_async,
+            "_resolve_engineer_launch_config": lambda *_a, **_k: {},
+            "_resolve_worker_launch_config": lambda *_a, **_k: {},
+            "_send_agent_prompt": noop_async,
+            "bridge": bridge,
+            "db": None,
+            "engineer_buffer": engineer_buffer,
+            "handle_command": None,
+            "panel_log": types.SimpleNamespace(
+                replace_last=lambda *_a, **_k: {},
+            ),
+            "state": state,
+            "worktree_mgr": worktree_mgr,
+        })
+        closure = tuple(
+            self._closure_cell(closure_values[name])
+            for name in handle_code.co_freevars
+        )
+        return types.FunctionType(
+            handle_code,
+            self.server_mod.__dict__,
+            "handle_command",
+            None,
+            closure,
+        )
+
     def _launch_config(self, directory: str) -> dict:
         return {
             "profile": "Default",
@@ -1192,6 +1265,112 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.server_agent_mod.mcp_entrypoint_for_cell(engineer),
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
+
+    async def test_local_restart_dispatch_passes_digest_backlog_clear_helper(self):
+        state = self._make_state()
+        bridge = _CapturingBridge()
+        worktree_mgr = _FakeWorktreeManager()
+        clear_helper = lambda *_a, **_k: 0
+        engineer_buffer = types.SimpleNamespace(
+            clear_digest_backlog_for_restart=clear_helper,
+        )
+        captured = {}
+
+        async def fake_restart(data, state_arg, **kwargs):
+            captured["data"] = data
+            captured["state"] = state_arg
+            captured["kwargs"] = kwargs
+            return {"type": "ok", "command": "restart"}
+
+        original = self.server_mod._handle_restart_agent_command
+        self.server_mod._handle_restart_agent_command = fake_restart
+        self.addCleanup(
+            lambda: setattr(
+                self.server_mod,
+                "_handle_restart_agent_command",
+                original,
+            )
+        )
+
+        handle_command = self._extract_local_handle_command(
+            state,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            engineer_buffer=engineer_buffer,
+        )
+        result = await handle_command({"cmd": "restart_agent", "id": "agent-1"})
+
+        self.assertEqual(result, {"type": "ok", "command": "restart"})
+        self.assertEqual(captured["data"]["id"], "agent-1")
+        self.assertIs(captured["state"], state)
+        self.assertIs(captured["kwargs"]["bridge"], bridge)
+        self.assertIs(captured["kwargs"]["worktree_mgr"], worktree_mgr)
+        self.assertIs(
+            captured["kwargs"]["clear_digest_backlog_for_restart"],
+            clear_helper,
+        )
+
+    async def test_local_relaunch_dispatch_does_not_pass_digest_backlog_clear_helper(self):
+        state = self._make_state()
+        clear_helper = lambda *_a, **_k: 0
+        engineer_buffer = types.SimpleNamespace(
+            clear_digest_backlog_for_restart=clear_helper,
+        )
+        captured = {}
+
+        async def fake_relaunch(
+                data,
+                state_arg,
+                *,
+                bridge,
+                worktree_mgr,
+                resolve_base_dir,
+                resolve_agent_launch_config,
+                resolve_engineer_launch_config,
+                resolve_architect_launch_config,
+                resolve_worker_launch_config,
+                apply_persistent_prompt,
+                build_cell_persistent_prompt,
+                persistent_prompt_filename,
+                is_designated_engineer,
+                send_agent_prompt):
+            del (
+                bridge,
+                worktree_mgr,
+                resolve_base_dir,
+                resolve_agent_launch_config,
+                resolve_engineer_launch_config,
+                resolve_architect_launch_config,
+                resolve_worker_launch_config,
+                apply_persistent_prompt,
+                build_cell_persistent_prompt,
+                persistent_prompt_filename,
+                is_designated_engineer,
+                send_agent_prompt,
+            )
+            captured["data"] = data
+            captured["state"] = state_arg
+            return {"type": "ok", "command": "relaunch"}
+
+        original = self.server_mod._handle_relaunch_agent_command
+        self.server_mod._handle_relaunch_agent_command = fake_relaunch
+        self.addCleanup(
+            lambda: setattr(
+                self.server_mod,
+                "_handle_relaunch_agent_command",
+                original,
+            )
+        )
+
+        handle_command = self._extract_local_handle_command(
+            state,
+            engineer_buffer=engineer_buffer,
+        )
+        result = await handle_command({"cmd": "relaunch_agent", "id": "agent-1"})
+
+        self.assertEqual(result, {"type": "ok", "command": "relaunch"})
+        self.assertEqual(captured["data"]["id"], "agent-1")
+        self.assertIs(captured["state"], state)
 
     async def test_relaunch_deleted_engineer_fails(self):
         state = self._make_state()
