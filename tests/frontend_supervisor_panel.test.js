@@ -45,7 +45,12 @@ class FakeElement {
   }
 }
 
-function createSandbox({ visible = true, persistedSupervisorState = null, withUiShim = false } = {}) {
+function createSandbox({
+  visible = true,
+  persistedSupervisorState = null,
+  withUiShim = false,
+  confirmResult = true,
+} = {}) {
   const elements = new Map();
   function ensure(id) {
     if (!elements.has(id)) elements.set(id, new FakeElement(id));
@@ -58,6 +63,13 @@ function createSandbox({ visible = true, persistedSupervisorState = null, withUi
     console,
     state: {
       supervisor_panel_state: persistedSupervisorState || {},
+      runtime: {
+        supervisor: {
+          state: 'up',
+          session_count: 0,
+          last_op_latency_ms: 0,
+        },
+      },
     },
     document: {
       getElementById(id) { return ensure(id); },
@@ -93,7 +105,7 @@ function createSandbox({ visible = true, persistedSupervisorState = null, withUi
   sandbox.send = function(message) { sandbox.sendCalls.push(message); };
   sandbox.showConfirm = function(message, opts) {
     sandbox.confirmCalls.push({ message, opts });
-    return Promise.resolve(true);
+    return Promise.resolve(confirmResult);
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -202,6 +214,89 @@ test('supervisor terminate confirms with owner and sends terminate command', asy
     cmd: 'supervisor_session_terminate',
     session_id: 's-terminate',
   });
+});
+
+test('supervisor restart confirms with preserved-worker framing and sends restart command', async () => {
+  const { sandbox } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext('renderSupervisorPanel({ force: true })', context);
+  const accepted = await vm.runInContext('supervisorRestart()', context);
+
+  assert.equal(accepted, true);
+  assert.equal(sandbox.confirmCalls.length, 1);
+  assert.match(sandbox.confirmCalls[0].message, /re-exec the supervisor in place/);
+  assert.match(sandbox.confirmCalls[0].message, /live workers are preserved/);
+  assert.equal(sandbox.confirmCalls[0].opts.label, 'Restart supervisor');
+  assert.equal(sandbox.confirmCalls[0].opts.variant, 'btn-rebase');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[sandbox.sendCalls.length - 1])), {
+    cmd: 'supervisor_restart',
+  });
+});
+
+test('supervisor restart cancel does not dispatch command', async () => {
+  const { sandbox } = createSandbox({ visible: true, confirmResult: false });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext('renderSupervisorPanel({ force: true })', context);
+  const accepted = await vm.runInContext('supervisorRestart()', context);
+
+  assert.equal(accepted, false);
+  assert.equal(sandbox.confirmCalls.length, 1);
+  assert.equal(sandbox.sendCalls.some((call) => call.cmd === 'supervisor_restart'), false);
+});
+
+test('supervisor restart control disables with spinner during restarting runtime window', () => {
+  const { sandbox, ensure } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`
+    renderSupervisorPanel({ force: true });
+    state.runtime.supervisor.state = 'restarting';
+    supervisorReceiveRuntime(state.runtime.supervisor);
+  `, context);
+
+  let html = ensure('panel-supervisor').innerHTML;
+  assert.match(html, /id="supervisor-restart-btn"[^>]*disabled/);
+  assert.match(html, /supervisor-spinner/);
+  assert.match(html, /Restarting…/);
+  assert.match(html, /live worker PTYs will be adopted/);
+
+  vm.runInContext(`
+    state.runtime.supervisor.state = 'up';
+    supervisorReceiveRuntime(state.runtime.supervisor);
+  `, context);
+
+  html = ensure('panel-supervisor').innerHTML;
+  assert.doesNotMatch(html, /id="supervisor-restart-btn"[^>]*disabled/);
+  assert.doesNotMatch(html, /supervisor-spinner/);
+});
+
+test('supervisor restart failure reply is surfaced in the control', () => {
+  const { sandbox, ensure } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`
+    renderSupervisorPanel({ force: true });
+    supervisorReceiveRestart({
+      type: 'supervisor_restart',
+      ok: false,
+      available: true,
+      message: 'PTY supervisor restart failed.',
+      error: 'adopt-state lost 2 sessions',
+    });
+  `, context);
+
+  const html = ensure('panel-supervisor').innerHTML;
+  assert.match(html, /supervisor-restart-status-error/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, /PTY supervisor restart failed\./);
+  assert.match(html, /adopt-state lost 2 sessions/);
+  assert.doesNotMatch(html, /id="supervisor-restart-btn"[^>]*disabled/);
 });
 
 
@@ -465,4 +560,7 @@ test('supervisor taskbar CSS and panel-manager registration are bounded to stand
   assert.match(main, /'panel-supervisor'/);
   assert.match(render, /surface === 'supervisor'/);
   assert.match(ws, /msg\.type === 'supervisor_sessions'[\s\S]*supervisorReceiveSessions\(msg\)/);
+  assert.match(ws, /msg\.type === 'supervisor_restart'[\s\S]*supervisorReceiveRestart\(msg\)/);
+  assert.match(ws, /case 'runtime':[\s\S]*supervisorReceiveRuntime\(state\.runtime && state\.runtime\.supervisor\)/);
+  assert.match(ws, /msg\.type === 'system_banner'[\s\S]*_applySystemBanner\(msg\.banner\)/);
 });

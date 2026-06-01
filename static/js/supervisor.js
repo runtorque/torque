@@ -25,6 +25,10 @@ var supervisorState = {
   scrollPos: 0,
   tableScrollLeft: 0,
   tableScrollTop: 0,
+  restartPending: false,
+  restartSawRestarting: false,
+  restartMessage: '',
+  restartError: '',
 };
 var _supervisorUiStateRegistered = false;
 var _supervisorUiStateHydrated = false;
@@ -320,6 +324,159 @@ function _supervisorCanTerminate(session) {
     && String(session.session_id || ''));
 }
 
+function _supervisorRuntime() {
+  if (typeof state === 'undefined'
+      || !state
+      || !state.runtime
+      || !state.runtime.supervisor
+      || typeof state.runtime.supervisor !== 'object') {
+    return null;
+  }
+  return state.runtime.supervisor;
+}
+
+function _supervisorRuntimeState() {
+  var supervisor = _supervisorRuntime();
+  return supervisor ? String(supervisor.state || '').trim().toLowerCase() : '';
+}
+
+function _supervisorRestartUnavailableReason(stateName) {
+  if (stateName === 'na_profile') {
+    return 'Supervisor restart is not available for this profile.';
+  }
+  if (stateName === 'unavailable') {
+    return 'Supervisor restart is unavailable.';
+  }
+  return '';
+}
+
+function _supervisorRestartPhase() {
+  var stateName = _supervisorRuntimeState();
+  var unavailableReason = _supervisorRestartUnavailableReason(stateName);
+  var restarting = stateName === 'restarting';
+  var pending = !!supervisorState.restartPending;
+  if (restarting) {
+    return {
+      disabled: true,
+      inFlight: true,
+      label: 'Restarting…',
+      status: 'Re-exec in progress; live worker PTYs will be adopted.',
+    };
+  }
+  if (pending) {
+    return {
+      disabled: true,
+      inFlight: true,
+      label: 'Requesting restart…',
+      status: supervisorState.restartMessage || 'Restart request sent; waiting for supervisor response.',
+    };
+  }
+  if (unavailableReason) {
+    return {
+      disabled: true,
+      inFlight: false,
+      label: 'Restart unavailable',
+      status: supervisorState.restartMessage || unavailableReason,
+    };
+  }
+  return {
+    disabled: false,
+    inFlight: false,
+    label: 'Restart supervisor',
+    status: supervisorState.restartMessage || '',
+  };
+}
+
+function _supervisorRestartControlInnerHtml() {
+  var phase = _supervisorRestartPhase();
+  var buttonClass = 'supervisor-restart' + (phase.inFlight ? ' supervisor-restart-busy' : '');
+  var title = phase.disabled
+    ? (phase.status || phase.label)
+    : 'Re-exec the PTY supervisor in place and adopt live worker sessions.';
+  var html = '<button id="supervisor-restart-btn" class="' + buttonClass + '" type="button"'
+    + (phase.disabled ? ' disabled aria-disabled="true"' : '')
+    + ' title="' + _supervisorEsc(title) + '"'
+    + ' onclick="supervisorRestart(event)">'
+    + (phase.inFlight ? '<span class="supervisor-spinner" aria-hidden="true"></span>' : '')
+    + '<span>' + _supervisorEsc(phase.label) + '</span></button>';
+  var statusText = supervisorState.restartError || phase.status || '';
+  if (statusText) {
+    var statusClass = 'supervisor-restart-status'
+      + (supervisorState.restartError ? ' supervisor-restart-status-error' : '');
+    html += '<span class="' + statusClass + '" '
+      + (supervisorState.restartError ? 'role="alert"' : 'role="status" aria-live="polite"')
+      + '>' + _supervisorEsc(statusText) + '</span>';
+  }
+  return html;
+}
+
+function _supervisorRestartControlHtml() {
+  return '<div id="supervisor-restart-control" class="supervisor-restart-control">'
+    + _supervisorRestartControlInnerHtml()
+    + '</div>';
+}
+
+function _supervisorUpdateRestartControlDom() {
+  if (typeof document === 'undefined' || !document.getElementById) return false;
+  var el = document.getElementById('supervisor-restart-control');
+  if (!el || !el.parentNode) return false;
+  el.innerHTML = _supervisorRestartControlInnerHtml();
+  return true;
+}
+
+function _supervisorHandleRuntimeRestartState() {
+  var stateName = _supervisorRuntimeState();
+  if (stateName === 'restarting') {
+    supervisorState.restartSawRestarting = true;
+    return;
+  }
+  if ((stateName === 'up' || stateName === 'degraded')
+      && supervisorState.restartSawRestarting) {
+    supervisorState.restartPending = false;
+    supervisorState.restartSawRestarting = false;
+    if (!supervisorState.restartError) {
+      supervisorState.restartMessage = supervisorState.restartMessage
+        || 'Supervisor restart completed; live sessions preserved.';
+    }
+  }
+}
+
+function _supervisorRestartFailureText(msg) {
+  var bits = [];
+  if (msg && msg.message) bits.push(String(msg.message));
+  if (msg && msg.error) bits.push(String(msg.error));
+  if (!bits.length) bits.push('PTY supervisor restart failed.');
+  return bits.join(' ');
+}
+
+function supervisorReceiveRuntime(_payload) {
+  _supervisorHandleRuntimeRestartState();
+  if (!_supervisorVisible()) return false;
+  if (!_supervisorUpdateRestartControlDom()) {
+    renderSupervisorPanel({ force: true });
+  }
+  return true;
+}
+
+function supervisorReceiveRestart(msg) {
+  msg = msg || {};
+  supervisorState.restartPending = false;
+  supervisorState.restartSawRestarting = false;
+  if (msg.ok === false) {
+    supervisorState.restartMessage = '';
+    supervisorState.restartError = _supervisorRestartFailureText(msg);
+  } else {
+    supervisorState.restartError = '';
+    supervisorState.restartMessage = msg.message || (
+      msg.available === false
+        ? 'PTY supervisor restart is unavailable.'
+        : 'PTY supervisor restart requested.'
+    );
+  }
+  _supervisorHandleRuntimeRestartState();
+  if (_supervisorVisible()) renderSupervisorPanel({ force: true });
+}
+
 function _supervisorTerminateLabel(session) {
   if (!session) return 'this session';
   var owner = _supervisorOwnerLabel(session);
@@ -386,6 +543,52 @@ function supervisorTerminateSession(sessionId, event) {
       }
       return true;
     });
+}
+
+function supervisorRestart(event) {
+  if (event) {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  }
+  var phase = _supervisorRestartPhase();
+  if (phase.disabled) return Promise.resolve(false);
+  var confirmFn = _supervisorUiShim('showConfirm');
+  if (!confirmFn) {
+    supervisorState.restartError = 'Confirmation modal is unavailable.';
+    renderSupervisorPanel({ force: _supervisorVisible() });
+    return Promise.resolve(false);
+  }
+  var message = 'Restart the PTY supervisor? Torque will re-exec the supervisor in place '
+    + 'and adopt the live PTY sessions afterward, so live workers are preserved. '
+    + 'The panel may briefly show restarting while it completes.';
+  return Promise.resolve(confirmFn(message, {
+    label: 'Restart supervisor',
+    variant: 'btn-rebase',
+  })).then(function(ok) {
+    if (!ok) return false;
+    supervisorState.restartPending = true;
+    supervisorState.restartSawRestarting = _supervisorRuntimeState() === 'restarting';
+    supervisorState.restartMessage = 'Restart request sent; waiting for supervisor response.';
+    supervisorState.restartError = '';
+    renderSupervisorPanel({ force: _supervisorVisible() });
+    if (typeof send !== 'function') {
+      supervisorState.restartPending = false;
+      supervisorState.restartMessage = '';
+      supervisorState.restartError = 'WebSocket command sender is unavailable.';
+      renderSupervisorPanel({ force: _supervisorVisible() });
+      return false;
+    }
+    try {
+      send({ cmd: 'supervisor_restart' });
+    } catch (err) {
+      supervisorState.restartPending = false;
+      supervisorState.restartMessage = '';
+      supervisorState.restartError = 'WebSocket command sender failed.';
+      renderSupervisorPanel({ force: _supervisorVisible() });
+      return false;
+    }
+    return true;
+  });
 }
 
 function _supervisorUnavailableBannerText() {
@@ -612,6 +815,7 @@ function renderSupervisorPanel(opts) {
     + '<span>' + _supervisorEsc(sessionCount + ' session' + (sessionCount === 1 ? '' : 's')
       + (hasSupervisorRow ? ' + supervisor' : '')) + '</span></div></div>'
     + '<div class="supervisor-toolbar"><button type="button" onclick="supervisorRefresh()">⟳ Refresh</button>'
+    + _supervisorRestartControlHtml()
     + '<label class="supervisor-auto"><input type="checkbox" onchange="supervisorSetAutoRefresh(this.checked)"'
     + (supervisorState.autoRefresh ? ' checked' : '') + '> Auto</label>'
     + (lastUpdated ? '<span class="supervisor-updated">Updated ' + _supervisorEsc(lastUpdated) + '</span>' : '')
