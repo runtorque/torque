@@ -1565,7 +1565,23 @@ def format_doctor_report(report: dict) -> str:
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
     pty_supervisor = report.get("pty_supervisor", {}) or {}
     pty_metrics = pty_supervisor.get("metrics", {}) or {}
+    pty_health = pty_supervisor.get("health", {}) or {}
     warnings = list(report.get("warnings", []) or [])
+
+    def _pty_health_value(name: str):
+        if name in pty_supervisor:
+            return pty_supervisor.get(name)
+        return pty_health.get(name)
+
+    def _format_optional_bool(value) -> str:
+        if value is None:
+            return "—"
+        return str(bool(value)).lower()
+
+    def _format_optional_value(value) -> str:
+        if value is None:
+            return "—"
+        return str(value)
 
     engineer_line = f"  engineer:    {int(agents.get('engineer', 0) or 0)}"
     engineer_name = str(agents.get("engineer_name", "") or "").strip()
@@ -1720,6 +1736,10 @@ def format_doctor_report(report: dict) -> str:
         f"{str(bool(stage_6_cleanup.get('engineer_tool_aliases_present'))).lower()}",
         "",
         "[pty_supervisor]",
+        "  state:                          "
+        f"{_format_optional_value(_pty_health_value('state'))}",
+        "  connected:                      "
+        f"{_format_optional_bool(_pty_health_value('connected'))}",
         "  socket_present:                 "
         f"{str(bool(pty_supervisor.get('socket_present'))).lower()}",
         "  reachable:                      "
@@ -1734,6 +1754,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(pty_supervisor.get('reconnect_count', 0) or 0)}",
         "  last_op_latency_ms:             "
         f"{pty_supervisor.get('last_op_latency_ms') if pty_supervisor.get('last_op_latency_ms') is not None else '—'}",
+        "  time_since_last_successful_op:  "
+        f"{_format_optional_value(_pty_health_value('time_since_last_successful_op'))}",
         "  sessions_current:               "
         f"{int(pty_metrics.get('sessions_current', 0) or 0)}",
         "  sessions_peak:                  "

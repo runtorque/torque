@@ -139,6 +139,20 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("stuck_input_sessions:", text)
         self.assertIn("open input-write breaker", text)
 
+    def test_pty_supervisor_text_includes_live_health_fields(self):
+        report = build_doctor_report_for_db(self.db_path)
+        report["pty_supervisor"]["health"] = {
+            "state": "down",
+            "connected": False,
+            "time_since_last_successful_op": 12.5,
+        }
+
+        text = format_doctor_report(report)
+
+        self.assertIn("state:                          down", text)
+        self.assertIn("connected:                      false", text)
+        self.assertIn("time_since_last_successful_op:  12.5", text)
+
     def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
         home = self._home_dir()
         self._save_engineer()
