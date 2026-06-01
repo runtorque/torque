@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import tempfile
 import types
@@ -58,6 +59,36 @@ class _FakeWorktreeManager:
             cell.worktree_repo_root = repo_root
             return self.worktree_path
         return ""
+
+
+class _DigestQueueDB:
+    def __init__(self, recipient_id: str, events: list[dict]):
+        self.queued = {
+            recipient_id: [dict(evt) for evt in events]
+        }
+        self.saved_agents = []
+
+    def load_digest_queued_events(self):
+        return {
+            recipient_id: [dict(evt) for evt in events]
+            for recipient_id, events in self.queued.items()
+        }
+
+    def load_digest_sent_events(self, *, limit_per_recipient=200):
+        del limit_per_recipient
+        return {}
+
+    def delete_digest_queued_events(self, recipient_id):
+        events = self.queued.get(recipient_id, [])
+        count = len(events)
+        self.queued[recipient_id] = []
+        return count
+
+    def save_agent_deferred(self, cell):
+        self.saved_agents.append(cell.id)
+
+    def save_agent_digest_settings(self, agent_id, settings):
+        del agent_id, settings
 
 
 class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -1369,6 +1400,121 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             f"You are Alice (engineer, id={engineer.id}).\n\n"
             "Engineer: get started on your queue.",
             prompts,
+        )
+
+    async def test_restart_agent_clears_stale_digest_before_session_start(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        worker = self._add_worker_cell(state, engineer, "Merged Worker")
+        worker.status = "idle"
+        worker.worktree_path = "/tmp/project/.torque/worktrees/merged-worker"
+        worker.worktree_repo_root = "/tmp/project"
+        worker.worktree_branch = "torque/merged-worker"
+        worker.worktree_merged = True
+        engineer.status = "idle"
+        engineer.agent_type = "codex"
+        engineer.session_id = "active-session"
+        state.engineer_settings["torque"] = self.state_mod.EngineerSettings(
+            group="torque",
+        )
+        state.agent_digest_settings[engineer.id] = (
+            self.state_mod.AgentDigestSettings(
+                agent_id=engineer.id,
+                push_interval=0,
+                max_interval=0,
+                heartbeat_interval=0,
+            )
+        )
+        state.engineer_settings["torque"].pending_question = "Still pending?"
+        state.engineer_settings["torque"].pending_question_actor_id = engineer.id
+        state.direct_messages_by_agent[engineer.id] = [
+            {
+                "id": "msg-user",
+                "sender_kind": "user",
+                "recipient_id": engineer.id,
+                "message": "Buffered user message",
+                "delivery_state": "buffered",
+            }
+        ]
+        db = _DigestQueueDB(
+            engineer.id,
+            [
+                {
+                    "kind": "task_completed",
+                    "message": "stale restart digest",
+                    "_digest_queue_id": 11,
+                    "_digest_enqueued_at": 50.0,
+                }
+            ],
+        )
+        state.db = db
+        bridge = _CapturingBridge()
+        engineer_mod = importlib.import_module("torque.engineer")
+        engineer_mod = importlib.reload(engineer_mod)
+        buffer = engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        sent_prompts = []
+
+        original_create_session = bridge.create_session
+
+        async def create_session_and_emit_start(cell, **kwargs):
+            await original_create_session(cell, **kwargs)
+            buffer.on_agent_activity_change(cell)
+
+        bridge.create_session = create_session_and_emit_start
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Fresh boot prompt"
+            return cfg
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            result = await self.server_mod._handle_restart_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "persistent",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+                clear_digest_backlog_for_restart=(
+                    buffer.clear_digest_backlog_for_restart
+                ),
+            )
+
+        await asyncio.sleep(0.05)
+
+        self.assertIsNone(result)
+        self.assertEqual(db.queued[engineer.id], [])
+        self.assertEqual(buffer.get_buffer_stats(engineer.id)["buffered_events"], 0)
+        self.assertEqual(bridge.sent_text, [])
+        self.assertTrue(
+            any("Fresh boot prompt" in prompt for _, prompt, _ in sent_prompts),
+            sent_prompts,
+        )
+        self.assertEqual(
+            state.engineer_settings["torque"].pending_question,
+            "Still pending?",
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[engineer.id][0]["message"],
+            "Buffered user message",
         )
 
     async def test_restart_agent_rejects_terminals(self):

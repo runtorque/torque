@@ -77,6 +77,12 @@ class FakeDigestDB:
             for recipient_id, events in self.queued.items()
         }
 
+    def delete_digest_queued_events(self, recipient_id):
+        events = self.queued.get(recipient_id, [])
+        count = len(events)
+        self.queued[recipient_id] = []
+        return count
+
     def load_digest_sent_events(self, *, limit_per_recipient=200):
         result = {}
         for recipient_id, events in self.sent.items():
@@ -330,6 +336,57 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.queued[engineer.id], [])
         self.assertEqual(db.sent[engineer.id][0]["message"], "queued while paused")
         buffer.stop()
+
+    async def test_restart_clear_drops_digest_queue_but_preserves_user_state(self):
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group].pending_question = "Need human input"
+        state.engineer_settings[group].pending_question_actor_id = engineer.id
+        state.direct_messages_by_agent[engineer.id] = [
+            {
+                "id": "msg-user",
+                "sender_kind": "user",
+                "recipient_id": engineer.id,
+                "message": "Pending user DM",
+                "delivery_state": "buffered",
+            }
+        ]
+        ask_task = state.board_add_task(
+            "Human approval",
+            group,
+            lane="Backlog",
+            id="ask-1",
+            labels=["torque:human"],
+        )
+        self.assertIsNotNone(ask_task)
+        state.db = FakeDigestDB(
+            queued={
+                engineer.id: [
+                    {
+                        "kind": "task_completed",
+                        "message": "stale digest event",
+                        "_digest_queue_id": 9,
+                        "_digest_enqueued_at": 50.0,
+                    }
+                ],
+            },
+        )
+
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        cleared = buffer.clear_digest_backlog_for_restart(engineer.id)
+
+        self.assertEqual(cleared, 1)
+        self.assertEqual(buffer.get_buffer_stats(engineer.id)["buffered_events"], 0)
+        self.assertEqual(state.db.queued[engineer.id], [])
+        self.assertEqual(
+            state.engineer_settings[group].pending_question,
+            "Need human input",
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[engineer.id][0]["message"],
+            "Pending user DM",
+        )
+        self.assertIn("ask-1", state.board_tasks)
 
     async def test_simultaneous_flush_triggers_only_one_digest(self):
         state, group, engineer = self._make_state()
