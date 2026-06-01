@@ -14,6 +14,7 @@ class FakeElement {
     this.value = '';
     this.textContent = '';
     this.scrollTop = 0;
+    this.open = false;
     this.classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
   }
 
@@ -29,10 +30,31 @@ class FakeElement {
         this._hasHealthPanel = true;
       }
     }
+    if (this.id === 'health-results' && this.ownerDocument) {
+      if (this._innerHTML.includes('health-metrics-details')) {
+        const details = this.ownerDocument.ensure('health-metrics-details');
+        details.open = /id="health-metrics-details"[^>]*\sopen(?:\s|>)/.test(this._innerHTML);
+        this.ownerDocument.ensure('health-metrics-live');
+        this.ownerDocument.ensure('health-metrics-history');
+        this.ownerDocument.ensure('health-metrics-summary-status');
+      }
+      if (this._innerHTML.includes('health-supervisor-details')) {
+        const details = this.ownerDocument.ensure('health-supervisor-details');
+        details.open = /id="health-supervisor-details"[^>]*\sopen(?:\s|>)/.test(this._innerHTML);
+        this.ownerDocument.ensure('health-supervisor-live');
+        this.ownerDocument.ensure('health-supervisor-summary-status');
+      }
+    }
   }
 
   querySelector(selector) {
     if (selector === '.health-panel' && this._hasHealthPanel) return this;
+    if (this.id === 'health-supervisor-details' && selector === '.health-supervisor-summary-status') {
+      return this.ownerDocument.ensure('health-supervisor-summary-status');
+    }
+    if (this.id === 'health-metrics-details' && selector === '.health-metrics-summary-status') {
+      return this.ownerDocument.ensure('health-metrics-summary-status');
+    }
     return null;
   }
 
@@ -71,6 +93,7 @@ function createHealthSandbox({ visible = true } = {}) {
     state: {
       active_group: 'Torque',
       groups: { Torque: [], Other: [] },
+      runtime: {},
     },
     sendCalls,
     timers,
@@ -94,6 +117,31 @@ function createHealthSandbox({ visible = true } = {}) {
 function loadScript(context, relativePath) {
   const filename = path.join(repoRoot, relativePath);
   vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
+}
+
+
+function sampleSupervisor(overrides = {}) {
+  return Object.assign({
+    state: 'up',
+    supervisor_pid: 7654,
+    uptime: 3661,
+    connected: true,
+    last_op_latency_ms: 6.7,
+    reconnect_count: 1,
+    session_count: 4,
+    time_since_last_successful_op: 2,
+    metrics: {
+      ops_total: 123,
+      errors_total: 2,
+      bytes_written: 2048,
+      bytes_read: 4096,
+      sessions_current: 4,
+      sessions_peak: 6,
+      sessions_created_total: 9,
+      read_loop_failures: 1,
+      write_deadline_hits: 3,
+    },
+  }, overrides);
 }
 
 function samplePayload(group = 'Torque') {
@@ -185,6 +233,48 @@ test('runtime metrics section renders at the bottom of the health results', () =
   assert.ok(runtimeIndex > html.indexOf('Dispatch throughput'));
   assert.ok(runtimeIndex > html.indexOf('Task age by lane'));
   assert.ok(runtimeIndex > html.indexOf('Coverage and notes'));
+});
+
+test('supervisor runtime metrics section renders in health bottom region', () => {
+  const { sandbox, document } = createHealthSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/health.js');
+  sandbox.state.runtime.supervisor = sampleSupervisor();
+  vm.runInContext('renderHealthPanel()', context);
+
+  vm.runInContext(`healthReceiveMetrics(${JSON.stringify(samplePayload())})`, context);
+
+  const html = document.getElementById('health-results').innerHTML;
+  const runtimeIndex = html.indexOf('Runtime metrics');
+  const supervisorIndex = html.indexOf('Supervisor metrics');
+  assert.notEqual(supervisorIndex, -1);
+  assert.ok(supervisorIndex > runtimeIndex, 'supervisor metrics render after runtime metrics in the bottom section array');
+  assert.match(html, /Supervisor state/);
+  assert.match(html, /Supervisor ops/);
+  assert.match(html, /123/);
+  assert.match(html, /PTY bytes/);
+  assert.match(html, /4KB/);
+  assert.match(html, /Loop failures/);
+  assert.match(html, /write deadlines 3/);
+});
+
+test('supervisor runtime deltas update Health only when the panel is visible', () => {
+  const { sandbox, document } = createHealthSandbox({ visible: false });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/health.js');
+  const results = document.ensure('health-results');
+  results.innerHTML = 'sentinel';
+  sandbox.state.runtime.supervisor = sampleSupervisor({ metrics: { ops_total: 1 } });
+
+  const hiddenResult = vm.runInContext('healthSupervisorRuntimeReceive(state.runtime.supervisor)', context);
+  assert.equal(hiddenResult, false);
+  assert.equal(results.innerHTML, 'sentinel');
+
+  sandbox.__setVisible(true);
+  const visibleResult = vm.runInContext('healthSupervisorRuntimeReceive(state.runtime.supervisor)', context);
+  assert.equal(visibleResult, true);
+  assert.match(results.innerHTML, /Supervisor metrics/);
+  assert.match(results.innerHTML, /Supervisor ops/);
 });
 
 test('refreshing metrics preserves panel scroll position', () => {

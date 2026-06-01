@@ -1,5 +1,6 @@
 /* In-app Torque log viewer. */
 var _logViewerState = {
+  target: 'daemon',
   cursor: 0,
   lines: [],
   timer: 0,
@@ -7,6 +8,11 @@ var _logViewerState = {
   level: '',
   search: '',
 };
+
+function _logViewerNormalizeTarget(target) {
+  target = String(target || 'daemon').trim().toLowerCase();
+  return target === 'supervisor' ? 'supervisor' : 'daemon';
+}
 
 function _ensureLogViewerModal() {
   var existing = document.getElementById('modal-log-viewer');
@@ -24,6 +30,10 @@ function _ensureLogViewerModal() {
     + '    </div>'
     + '  </div>'
     + '  <div class="log-viewer-toolbar">'
+    + '    <div class="log-viewer-targets" role="tablist" aria-label="Log target">'
+    + '      <button id="log-viewer-target-daemon" class="log-viewer-target active" type="button" role="tab" aria-selected="true" onclick="_logViewerSetTarget(\'daemon\')">Daemon</button>'
+    + '      <button id="log-viewer-target-supervisor" class="log-viewer-target" type="button" role="tab" aria-selected="false" onclick="_logViewerSetTarget(\'supervisor\')">Supervisor</button>'
+    + '    </div>'
     + '    <label>Level <select id="log-viewer-level" onchange="_logViewerSetLevel(this.value)">'
     + '      <option value="">All</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>'
     + '    </select></label>'
@@ -36,7 +46,33 @@ function _ensureLogViewerModal() {
     if (event.target === overlay) closeLogViewer();
   });
   document.body.appendChild(overlay);
+  _logViewerSyncTargetControls();
   return overlay;
+}
+
+function _logViewerSyncTargetControls() {
+  var target = _logViewerNormalizeTarget(_logViewerState.target);
+  ['daemon', 'supervisor'].forEach(function(name) {
+    var el = document.getElementById('log-viewer-target-' + name);
+    if (!el) return;
+    var active = name === target;
+    if (el.classList) el.classList.toggle('active', active);
+    if (typeof el.setAttribute === 'function') el.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+function _logViewerSetTarget(target) {
+  var next = _logViewerNormalizeTarget(target);
+  if (_logViewerState.target === next) return;
+  _logViewerState.target = next;
+  _logViewerState.cursor = 0;
+  _logViewerState.lines = [];
+  _logViewerSyncTargetControls();
+  _renderLogViewerLines();
+  if (_logViewerState.timer && typeof clearTimeout === 'function') clearTimeout(_logViewerState.timer);
+  _logViewerState.timer = 0;
+  var modal = document.getElementById('modal-log-viewer');
+  if (modal && modal.classList && modal.classList.contains('visible')) _pollLogViewer();
 }
 
 function _logViewerSetLevel(level) {
@@ -69,9 +105,11 @@ function _logViewerMatches(line) {
 function _renderLogViewerLines() {
   var list = document.getElementById('log-viewer-list');
   if (!list) return;
+  var scrollTop = Number(list.scrollTop || 0);
   var filtered = _logViewerState.lines.filter(_logViewerMatches);
   if (!filtered.length) {
     list.innerHTML = '<div class="log-viewer-empty">No log lines match.</div>';
+    if (!_logViewerState.follow) list.scrollTop = scrollTop;
     return;
   }
   list.innerHTML = filtered.map(function(line) {
@@ -89,20 +127,27 @@ function _renderLogViewerLines() {
       + '</div>';
   }).join('');
   if (_logViewerState.follow) list.scrollTop = list.scrollHeight;
+  else list.scrollTop = scrollTop;
 }
 
 function _pollLogViewer() {
-  var url = '/logs?since=' + encodeURIComponent(String(_logViewerState.cursor || 0))
+  var target = _logViewerNormalizeTarget(_logViewerState.target);
+  var url = '/logs?target=' + encodeURIComponent(target)
+    + '&since=' + encodeURIComponent(String(_logViewerState.cursor || 0))
     + '&follow=' + (_logViewerState.follow ? '1' : '0')
     + '&limit=500';
   fetch(url)
     .then(function(response) { return response.json(); })
     .then(function(payload) {
+      if (_logViewerNormalizeTarget(_logViewerState.target) !== target) return;
+      if (payload && payload.target && _logViewerNormalizeTarget(payload.target) !== target) return;
       var lines = Array.isArray(payload.lines) ? payload.lines : [];
       if (lines.length) {
         _logViewerState.lines = _logViewerState.lines.concat(lines).slice(-2000);
       }
-      if (payload.cursor) _logViewerState.cursor = payload.cursor;
+      if (payload && Object.prototype.hasOwnProperty.call(payload, 'cursor')) {
+        _logViewerState.cursor = payload.cursor || 0;
+      }
       _renderLogViewerLines();
       _scheduleLogViewerPoll(_logViewerState.follow ? 2000 : 0);
     })
@@ -124,10 +169,18 @@ function _scheduleLogViewerPoll(delay) {
   _logViewerState.timer = setTimeout(_pollLogViewer, delay);
 }
 
-function openLogViewer() {
+function openLogViewer(target) {
   var modal = _ensureLogViewerModal();
   modal.classList.add('visible');
-  if (!_logViewerState.lines.length) _logViewerState.cursor = 0;
+  var nextTarget = _logViewerNormalizeTarget(target || _logViewerState.target);
+  if (_logViewerState.target !== nextTarget) {
+    _logViewerState.target = nextTarget;
+    _logViewerState.cursor = 0;
+    _logViewerState.lines = [];
+  } else if (!_logViewerState.lines.length) {
+    _logViewerState.cursor = 0;
+  }
+  _logViewerSyncTargetControls();
   _pollLogViewer();
 }
 
