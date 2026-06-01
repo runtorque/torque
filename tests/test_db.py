@@ -824,9 +824,10 @@ class TorqueDBTests(unittest.TestCase):
             created_at=14.0,
         )
         save(
-            "excluded-eng-eng",
+            "chat-eng-eng",
             sender_kind="engineer",
             recipient_kind="engineer",
+            thread_id="thread-engineers",
             created_at=15.0,
         )
         save(
@@ -858,7 +859,7 @@ class TorqueDBTests(unittest.TestCase):
 
         self.assertEqual(
             [row["id"] for row in recent],
-            ["chat-arch-arch", "chat-eng-arch", "chat-arch-eng"],
+            ["chat-eng-eng", "chat-arch-arch", "chat-eng-arch", "chat-arch-eng"],
         )
         self.assertTrue(recent[-1]["ack_required"])
         self.assertEqual(

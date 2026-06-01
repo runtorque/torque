@@ -6616,12 +6616,19 @@ async def _replay_buffered_cross_kind_messages(
                 target.id,
             )
             if _is_canonical_peer_replay_entry(entry):
-                state.update_peer_message_delivery(
+                updated = state.update_peer_message_delivery(
                     message_id,
                     "buffered",
                     reason="replay_failed",
                     emit=False,
                 )
+                if not updated:
+                    _mark_cross_kind_message_delivery(
+                        target,
+                        message_id,
+                        delivered=False,
+                        reason="replay_failed",
+                    )
             else:
                 _mark_cross_kind_message_delivery(
                     target,
@@ -6631,11 +6638,17 @@ async def _replay_buffered_cross_kind_messages(
                 )
             continue
         if _is_canonical_peer_replay_entry(entry):
-            state.update_peer_message_delivery(
+            updated = state.update_peer_message_delivery(
                 message_id,
                 "delivered",
                 emit=False,
             )
+            if not updated:
+                _mark_cross_kind_message_delivery(
+                    target,
+                    message_id,
+                    delivered=True,
+                )
         else:
             _mark_cross_kind_message_delivery(target, message_id, delivered=True)
         replayed += 1
