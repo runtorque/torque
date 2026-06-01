@@ -317,6 +317,14 @@ class SupervisorLivenessWatchdog:
             self.bridge, "supervisor_reconnect_failures", 0) or 0)
         return failures >= self.reconnect_failure_threshold
 
+    def _restart_window_active(self) -> bool:
+        status = _maybe_call(
+            self.bridge, "supervisor_watchdog_status", {}) or {}
+        if str(status.get("state") or "").strip() != "restarting":
+            return False
+        deadline = _safe_float(status.get("restart_deadline_at"))
+        return deadline is not None and deadline > self.time_func()
+
     def _prune_attempts(self, now_mono: float) -> None:
         cutoff = now_mono - self.retry_window_seconds
         self._failed_attempts = [
@@ -373,6 +381,10 @@ class SupervisorLivenessWatchdog:
             self._lost_marked = False
             self._set_status(state="", updated_at=self.time_func())
             await self._refresh_metrics()
+            await self._publish()
+            return
+
+        if self._restart_window_active():
             await self._publish()
             return
 
