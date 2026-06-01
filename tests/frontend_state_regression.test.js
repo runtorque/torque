@@ -5693,14 +5693,22 @@ test('runtime delta refreshes daemon status detail without panel invalidation', 
     version: '2.0.0',
     port: 18934,
     started_at: startedAt,
+    supervisor: { state: 'up', session_count: 2, last_op_latency_ms: 5.5 },
   };
   runInContext(context, `
     state.runtime = { version: '1.0.0', port: 18933, started_at: ${startedAt} };
+    healthSupervisorPayload = null;
+    healthSupervisorRuntimeReceive = function(payload) {
+      healthSupervisorPayload = payload;
+      return false;
+    };
     _setConnDotState(true);
     _handleDelta({ seq: 1, ops: [__runtimeDelta] });
   `);
   assert.match(daemon.title, /Version: 2\.0\.0/);
   assert.match(daemon.title, /Port: 18934/);
+  assert.equal(jsonValue(context, 'healthSupervisorPayload.state'), 'up');
+  assert.equal(jsonValue(context, 'healthSupervisorPayload.session_count'), 2);
   assert.equal(sandbox.lastInvalidations, undefined);
 });
 

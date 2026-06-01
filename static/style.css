@@ -11094,6 +11094,23 @@ body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-ha
   color: var(--text-dim);
   font-size: 11px;
 }
+.log-viewer-targets {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.log-viewer-target {
+  padding: 5px 9px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.log-viewer-target:last-child { border-right: 0; }
+.log-viewer-target:hover { color: var(--text); background: var(--bg-hover); }
+.log-viewer-target.active { color: #fff; background: var(--accent); }
 .log-viewer-toolbar label { margin: 0; }
 .log-viewer-toolbar input,
 .log-viewer-toolbar select,
@@ -11965,6 +11982,14 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .health-pill-warn {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+.health-pill-danger {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+.health-pill-neutral {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
 }
 .health-notes {
   margin: 8px 0 0;

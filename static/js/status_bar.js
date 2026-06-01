@@ -540,6 +540,101 @@ function _statusBarMetricsView() {
   };
 }
 
+function _statusBarSupervisorPayload(payload) {
+  if (payload && typeof payload === 'object') return payload;
+  if (typeof state !== 'undefined'
+      && state
+      && state.runtime
+      && state.runtime.supervisor
+      && typeof state.runtime.supervisor === 'object') {
+    return state.runtime.supervisor;
+  }
+  return null;
+}
+
+function _statusBarFormatSupervisorLatency(value) {
+  var n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n >= 100) return Math.round(n) + 'ms';
+  return (Math.round(n * 10) / 10).toFixed(n < 10 ? 1 : 0).replace(/\.0$/, '') + 'ms';
+}
+
+function _statusBarSupervisorStateView(payload) {
+  var supervisor = _statusBarSupervisorPayload(payload);
+  var rawState = supervisor ? String(supervisor.state || '').trim().toLowerCase() : '';
+  var states = {
+    up: { label: 'up', level: 'normal', dotColor: 'green' },
+    degraded: { label: 'degraded', level: 'warn', dotColor: 'amber' },
+    restarting: { label: 'restarting', level: 'warn', dotColor: 'amber' },
+    down: { label: 'down', level: 'danger', dotColor: 'red' },
+    unavailable: { label: 'unavailable', level: 'muted', dotColor: 'grey' },
+    na_profile: { label: 'n/a', level: 'muted', dotColor: 'grey' },
+  };
+  var info = states[rawState] || { label: '—', level: 'muted', dotColor: 'grey' };
+  var lines = ['Supervisor: ' + info.label];
+  if (rawState === 'na_profile') lines[0] = 'Supervisor: not enabled for this profile';
+  if (supervisor && typeof supervisor === 'object') {
+    if (supervisor.supervisor_pid !== null && supervisor.supervisor_pid !== undefined && supervisor.supervisor_pid !== '') {
+      lines.push('PID: ' + String(supervisor.supervisor_pid));
+    }
+    if (supervisor.uptime !== null && supervisor.uptime !== undefined && supervisor.uptime !== '') {
+      lines.push('Uptime: ' + _statusBarFormatDuration(Number(supervisor.uptime)));
+    }
+    lines.push('Latency: ' + _statusBarFormatSupervisorLatency(supervisor.last_op_latency_ms));
+    if (supervisor.session_count !== null && supervisor.session_count !== undefined && supervisor.session_count !== '') {
+      lines.push('Sessions: ' + String(supervisor.session_count));
+    }
+    if (supervisor.connected !== undefined) {
+      lines.push('Connected: ' + (supervisor.connected ? 'yes' : 'no'));
+    }
+    if (supervisor.reconnect_count !== null && supervisor.reconnect_count !== undefined && supervisor.reconnect_count !== '') {
+      lines.push('Reconnects: ' + String(supervisor.reconnect_count));
+    }
+  } else {
+    lines.push('Health projection has not arrived yet.');
+  }
+  return {
+    visible: true,
+    state: rawState || 'unknown',
+    label: 'Supervisor ' + info.label,
+    level: info.level,
+    dotColor: info.dotColor,
+    title: lines.join('\n'),
+  };
+}
+
+function _statusBarApplySupervisorDot(dot, dotColor) {
+  if (!dot || !dot.classList) return;
+  ['green', 'amber', 'red', 'grey'].forEach(function(color) {
+    dot.classList.remove('relay-status-dot--' + color);
+  });
+  dot.classList.add('relay-status-dot--' + (dotColor || 'grey'));
+}
+
+function _statusBarSetSupervisorIndicator(view) {
+  var root = _statusBarElement('supervisor-status-indicator');
+  if (!root || !view) return;
+  var label = _statusBarElement('taskbar-supervisor-label');
+  var dot = _statusBarElement('taskbar-supervisor-dot');
+  var level = _statusBarNormalizeLevel(view.level);
+  if ('hidden' in root) root.hidden = view.visible === false;
+  root.title = String(view.title || '');
+  if (typeof root.setAttribute === 'function') {
+    root.setAttribute('data-supervisor-status', view.state || 'unknown');
+    root.setAttribute('data-statusbar-level', level);
+    root.setAttribute('aria-label', String(view.title || '').replace(/\n/g, ', '));
+  }
+  if (label) label.textContent = String(view.label || 'Supervisor —');
+  if (dot) dot.title = String(view.title || '');
+  _statusBarApplySupervisorDot(dot, view.dotColor);
+}
+
+function refreshSupervisorStatusIndicator(payload) {
+  var view = _statusBarSupervisorStateView(payload);
+  view.visible = statusBarVisibilityEnabled('daemon_status');
+  _statusBarSetSupervisorIndicator(view);
+}
+
 function _statusBarNormalizeLevel(level) {
   level = String(level || '').toLowerCase();
   if (level === 'danger' || level === 'warn' || level === 'normal' || level === 'unknown') return level;
@@ -607,6 +702,7 @@ function refreshStatusBar(opts) {
     _statusBarElement('daemon-status-indicator'),
     statusBarVisibilityEnabled('daemon_status')
   );
+  refreshSupervisorStatusIndicator();
   _statusBarSetChip(_statusBarElement('statusbar-claude-usage'), Object.assign({}, claudeView, {
     visible: _statusBarViewVisible('claude_usage', claudeView.visible),
   }));

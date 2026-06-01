@@ -3282,9 +3282,9 @@ function _applyDelta(ops) {
       }
 
       case 'runtime': {
-        // Daemon-global runtime metadata (version/port/started_at/etc.). Patch
-        // in place and refresh only the small daemon status surfaces; no panel
-        // invalidation is needed for this low-frequency metadata.
+        // Daemon-global runtime metadata and supervisor health. Patch in
+        // place and refresh only targeted status surfaces; health-panel
+        // supervisor metrics update only when the Health panel is visible.
         var runtimePayload = Object.assign({}, op);
         delete runtimePayload.op;
         if (state.runtime && typeof state.runtime === 'object') {
@@ -3304,6 +3304,9 @@ function _applyDelta(ops) {
         }
         if (typeof refreshStatusBar === 'function') {
           refreshStatusBar({ runtime: true });
+        }
+        if (typeof healthSupervisorRuntimeReceive === 'function') {
+          healthSupervisorRuntimeReceive(state.runtime && state.runtime.supervisor);
         }
         break;
       }

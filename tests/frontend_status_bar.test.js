@@ -96,6 +96,9 @@ function createSandbox() {
     'daemon-status-indicator',
     'taskbar-conn-dot',
     'taskbar-daemon-label',
+    'supervisor-status-indicator',
+    'taskbar-supervisor-dot',
+    'taskbar-supervisor-label',
     'statusbar-claude-usage',
     'statusbar-codex-usage',
     'statusbar-deploy',
@@ -110,6 +113,10 @@ function createSandbox() {
   daemon.appendChild(document.getElementById('taskbar-conn-dot'));
   daemon.appendChild(document.getElementById('taskbar-daemon-label'));
   statusInfo.appendChild(daemon);
+  const supervisor = document.getElementById('supervisor-status-indicator');
+  supervisor.appendChild(document.getElementById('taskbar-supervisor-dot'));
+  supervisor.appendChild(document.getElementById('taskbar-supervisor-label'));
+  statusInfo.appendChild(supervisor);
   [
     'statusbar-claude-usage',
     'statusbar-codex-usage',
@@ -203,6 +210,7 @@ test('status chips live right-aligned inside the bottom panelbar without a right
   assert.match(css, /\.statusbar-info\s*\{[^}]*flex-direction:\s*row;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*auto;/s);
   assert.match(css, /\.taskbar-spacer\s*\{[^}]*flex:\s*1 1 auto;/s);
   assert.match(panelbarHtml, /id="daemon-status-indicator"[\s\S]*hidden/);
+  assert.match(panelbarHtml, /id="supervisor-status-indicator"[\s\S]*id="taskbar-supervisor-dot"[\s\S]*hidden/);
   assert.match(panelbarHtml, /id="statusbar-metrics"[\s\S]*hidden/);
   assert.match(panelbarHtml, /id="statusbar-tasks"[\s\S]*onclick="statusBarOpenTasks\(\)"/);
   assert.match(panelbarHtml, /id="statusbar-attention"[\s\S]*onclick="statusBarOpenAttention\(\)"/);
@@ -243,6 +251,7 @@ test('status bar visibility defaults are lean and each toggle gates its chip', (
   });`, context);
 
   assert.equal(document.getElementById('daemon-status-indicator').hidden, true);
+  assert.equal(document.getElementById('supervisor-status-indicator').hidden, true);
   assert.equal(document.getElementById('statusbar-claude-usage').hidden, true);
   assert.equal(document.getElementById('statusbar-codex-usage').hidden, true);
   assert.equal(document.getElementById('statusbar-deploy').hidden, false);
@@ -264,6 +273,7 @@ test('status bar visibility defaults are lean and each toggle gates its chip', (
   vm.runInContext('refreshStatusBar();', context);
 
   assert.equal(document.getElementById('daemon-status-indicator').hidden, false);
+  assert.equal(document.getElementById('supervisor-status-indicator').hidden, false);
   assert.equal(document.getElementById('statusbar-claude-usage').hidden, false);
   assert.equal(document.getElementById('statusbar-codex-usage').hidden, false);
   assert.equal(document.getElementById('statusbar-deploy').hidden, true);
@@ -271,6 +281,48 @@ test('status bar visibility defaults are lean and each toggle gates its chip', (
   assert.equal(document.getElementById('statusbar-workload').hidden, false);
   assert.equal(document.getElementById('statusbar-tasks').hidden, true);
   assert.equal(document.getElementById('statusbar-attention').hidden, true);
+});
+
+
+test('supervisor status indicator maps health states to neutral/warn/danger styles', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadStatusBar(context);
+  sandbox.state.global_settings.status_bar_visibility = { daemon_status: true };
+
+  const cases = [
+    ['up', 'normal', 'green', 'Supervisor up'],
+    ['degraded', 'warn', 'amber', 'Supervisor degraded'],
+    ['restarting', 'warn', 'amber', 'Supervisor restarting'],
+    ['down', 'danger', 'red', 'Supervisor down'],
+    ['unavailable', 'muted', 'grey', 'Supervisor unavailable'],
+    ['na_profile', 'muted', 'grey', 'Supervisor n/a'],
+  ];
+  for (const [stateName, level, dotColor, labelText] of cases) {
+    sandbox.state.runtime = {
+      supervisor: {
+        state: stateName,
+        supervisor_pid: 4321,
+        uptime: 3661,
+        connected: stateName === 'up',
+        last_op_latency_ms: 7.4,
+        reconnect_count: 2,
+        session_count: 3,
+      },
+    };
+    vm.runInContext('refreshStatusBar();', context);
+    const root = document.getElementById('supervisor-status-indicator');
+    const label = document.getElementById('taskbar-supervisor-label');
+    const dot = document.getElementById('taskbar-supervisor-dot');
+    assert.equal(root.hidden, false);
+    assert.equal(root.getAttribute('data-supervisor-status'), stateName);
+    assert.equal(root.getAttribute('data-statusbar-level'), level);
+    assert.equal(label.textContent, labelText);
+    assert.equal(dot.classList.contains(`relay-status-dot--${dotColor}`), true);
+    assert.match(root.title, /PID: 4321/);
+    assert.match(root.title, /Latency: 7\.4ms/);
+    assert.match(root.title, /Sessions: 3/);
+  }
 });
 
 test('status bar tasks and attention chips navigate through existing panel toggles', () => {
@@ -492,6 +544,7 @@ test('refreshStatusBar updates static nodes without wiping panel-button nodes or
   assert.equal(document.activeElement, board);
   assert.deepEqual(beforeStatusChildren.map((child) => child.id), [
     'daemon-status-indicator',
+    'supervisor-status-indicator',
     'statusbar-claude-usage',
     'statusbar-codex-usage',
     'statusbar-deploy',

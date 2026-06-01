@@ -33,6 +33,10 @@ var healthMetricsState = {
   frontendEverSampled: false,
 };
 
+var healthSupervisorState = {
+  expanded: true,
+};
+
 function _healthEsc(value) {
   if (typeof esc === 'function') return esc(value);
   return String(value == null ? '' : value)
@@ -146,6 +150,44 @@ function _healthMetricFormat(value, digits, unit) {
 function _healthMetricFormatRate(value, digits, suffix) {
   var text = _healthMetricFormat(value, digits == null ? 1 : digits, '');
   return text === '—' ? text : text + (suffix || '/s');
+}
+
+function _healthFormatBytes(value) {
+  var n = _healthMetricFinite(value);
+  if (n === null || n < 0) return '—';
+  var units = ['B', 'KB', 'MB', 'GB'];
+  var idx = 0;
+  while (n >= 1024 && idx < units.length - 1) {
+    n = n / 1024;
+    idx += 1;
+  }
+  var digits = idx === 0 || n >= 100 ? 0 : 1;
+  return _healthFormatNumber(n, digits) + units[idx];
+}
+
+function _healthMetricMapSummary(value, limit) {
+  var numeric = _healthMetricFinite(value);
+  if (numeric !== null) {
+    return { total: numeric, totalText: _healthMetricFormat(numeric, 0, ''), breakdown: '' };
+  }
+  if (!value || typeof value !== 'object') {
+    return { total: null, totalText: '—', breakdown: '' };
+  }
+  var entries = Object.keys(value).map(function(key) {
+    return { key: key, value: _healthMetricFinite(value[key]) };
+  }).filter(function(entry) {
+    return entry.value !== null;
+  });
+  var total = entries.reduce(function(sum, entry) { return sum + entry.value; }, 0);
+  var shown = entries.slice(0, limit || 4).map(function(entry) {
+    return entry.key + ' ' + _healthFormatNumber(entry.value, 0);
+  });
+  if (entries.length > shown.length) shown.push('+' + (entries.length - shown.length) + ' more');
+  return {
+    total: total,
+    totalText: _healthMetricFormat(total, 0, ''),
+    breakdown: shown.join(', '),
+  };
 }
 
 function _healthMetricsStatusText() {
@@ -393,9 +435,157 @@ function _healthMetricsSectionHtml() {
     + '</details>';
 }
 
+function _healthRuntimeSupervisor() {
+  if (typeof state === 'undefined'
+      || !state
+      || !state.runtime
+      || !state.runtime.supervisor
+      || typeof state.runtime.supervisor !== 'object') {
+    return null;
+  }
+  return state.runtime.supervisor;
+}
+
+function _healthSupervisorStateInfo(supervisor) {
+  var raw = supervisor ? String(supervisor.state || '').trim().toLowerCase() : '';
+  var states = {
+    up: { label: 'up', className: 'health-pill' },
+    degraded: { label: 'degraded', className: 'health-pill health-pill-warn' },
+    restarting: { label: 'restarting', className: 'health-pill health-pill-warn' },
+    down: { label: 'down', className: 'health-pill health-pill-danger' },
+    unavailable: { label: 'unavailable', className: 'health-pill health-pill-neutral' },
+    na_profile: { label: 'n/a profile', className: 'health-pill health-pill-neutral' },
+  };
+  return states[raw] || { label: 'unknown', className: 'health-pill health-pill-neutral' };
+}
+
+function _healthSupervisorStatusText() {
+  var supervisor = _healthRuntimeSupervisor();
+  var info = _healthSupervisorStateInfo(supervisor);
+  if (!supervisor) return 'supervisor —';
+  return 'supervisor ' + info.label
+    + ' · ' + _healthMetricFormat(supervisor.session_count, 0, ' sessions')
+    + ' · ' + _healthMetricFormat(supervisor.last_op_latency_ms, 1, 'ms');
+}
+
+function _healthSupervisorLiveHtml() {
+  var supervisor = _healthRuntimeSupervisor();
+  if (!supervisor) {
+    return '<div class="health-empty">Supervisor health projection has not arrived yet.</div>';
+  }
+  var metrics = (supervisor.metrics && typeof supervisor.metrics === 'object')
+    ? supervisor.metrics
+    : {};
+  var info = _healthSupervisorStateInfo(supervisor);
+  var pid = supervisor.supervisor_pid == null ? 'pid —' : 'pid ' + String(supervisor.supervisor_pid);
+  var opsSummary = _healthMetricMapSummary(metrics.ops_total, 4);
+  var errorsSummary = _healthMetricMapSummary(metrics.errors_total, 3);
+  var opsDetail = [];
+  if (opsSummary.breakdown) opsDetail.push('ops ' + opsSummary.breakdown);
+  opsDetail.push('errors ' + errorsSummary.totalText + (errorsSummary.breakdown ? ' (' + errorsSummary.breakdown + ')' : ''));
+  opsDetail.push('reconnects ' + _healthMetricFormat(supervisor.reconnect_count, 0, ''));
+  var cards = [
+    _healthMetricsCard(
+      'Supervisor state',
+      info.label,
+      pid + ' · uptime ' + _healthMetricFormat(supervisor.uptime, 0, 's')
+        + ' · latency ' + _healthMetricFormat(supervisor.last_op_latency_ms, 1, 'ms'),
+      null,
+      'health-card-supervisor-state'
+    ),
+    _healthMetricsCard(
+      'Sessions',
+      _healthMetricFormat(supervisor.session_count, 0, ''),
+      'current ' + _healthMetricFormat(metrics.sessions_current, 0, '')
+        + ' · peak ' + _healthMetricFormat(metrics.sessions_peak, 0, '')
+        + ' · created ' + _healthMetricFormat(metrics.sessions_created_total, 0, ''),
+      null,
+      'health-card-supervisor-sessions'
+    ),
+    _healthMetricsCard(
+      'Supervisor ops',
+      opsSummary.totalText,
+      opsDetail.join(' · '),
+      null,
+      'health-card-supervisor-ops'
+    ),
+    _healthMetricsCard(
+      'PTY bytes',
+      _healthFormatBytes(metrics.bytes_read),
+      'written ' + _healthFormatBytes(metrics.bytes_written),
+      null,
+      'health-card-supervisor-bytes'
+    ),
+    _healthMetricsCard(
+      'Loop failures',
+      _healthMetricFormat(metrics.read_loop_failures, 0, ''),
+      'write deadlines ' + _healthMetricFormat(metrics.write_deadline_hits, 0, '')
+        + ' · last ok ' + _healthMetricFormat(supervisor.time_since_last_successful_op, 0, 's') + ' ago',
+      null,
+      'health-card-supervisor-failures'
+    ),
+  ].join('');
+  return '<div class="health-metrics-overhead health-supervisor-meta">'
+    + '<span class="' + _healthEsc(info.className) + '">' + _healthEsc(info.label) + '</span>'
+    + '<span>' + _healthEsc(supervisor.connected ? 'connected' : 'disconnected') + '</span>'
+    + '<span>pid ' + _healthEsc(supervisor.supervisor_pid == null ? '—' : supervisor.supervisor_pid) + '</span>'
+    + '</div>'
+    + '<div class="health-card-grid health-metrics-grid health-supervisor-grid">' + cards + '</div>';
+}
+
+function _healthSupervisorSectionHtml() {
+  var open = healthSupervisorState.expanded ? ' open' : '';
+  return '<details id="health-supervisor-details" class="health-section health-metrics-section health-supervisor-section"'
+    + ' data-health-supervisor-section' + open + ' onchange="healthSupervisorSetExpanded(this.open)">'
+    + '<summary class="health-metrics-summary health-supervisor-summary">'
+    + '<span class="health-metrics-title">Supervisor metrics</span>'
+    + '<span class="health-metrics-summary-status health-supervisor-summary-status">'
+    + _healthEsc(_healthSupervisorStatusText()) + '</span>'
+    + '</summary>'
+    + '<div id="health-supervisor-live" class="health-metrics-live health-supervisor-live">'
+    + _healthSupervisorLiveHtml() + '</div>'
+    + '</details>';
+}
+
+function _healthSupervisorCaptureExpandedFromDom() {
+  var details = document.getElementById('health-supervisor-details');
+  if (details && typeof details.open !== 'undefined') {
+    healthSupervisorState.expanded = !!details.open;
+  }
+}
+
+function _healthSupervisorUpdateSectionDom() {
+  _healthSupervisorCaptureExpandedFromDom();
+  var details = document.getElementById('health-supervisor-details');
+  if (!details) return false;
+  var scrollParent = document.getElementById('panel-health');
+  var scrollTop = scrollParent ? scrollParent.scrollTop : 0;
+  var live = document.getElementById('health-supervisor-live');
+  var status = null;
+  if (typeof details.querySelector === 'function') {
+    status = details.querySelector('.health-supervisor-summary-status');
+  }
+  if (typeof details.open !== 'undefined') details.open = !!healthSupervisorState.expanded;
+  if (status) status.textContent = _healthSupervisorStatusText();
+  if (live) live.innerHTML = _healthSupervisorLiveHtml();
+  if (scrollParent) scrollParent.scrollTop = scrollTop;
+  return true;
+}
+
+function healthSupervisorRuntimeReceive(_payload) {
+  if (!_healthVisible()) return false;
+  if (!_healthSupervisorUpdateSectionDom()) _healthUpdateResults();
+  return true;
+}
+
+function healthSupervisorSetExpanded(open) {
+  healthSupervisorState.expanded = !!open;
+}
+
 function _healthBottomSectionsHtml() {
   var sections = [
     _healthMetricsSectionHtml(),
+    _healthSupervisorSectionHtml(),
   ];
   return sections.join('');
 }
@@ -820,6 +1010,7 @@ function _healthUpdateResults() {
   var results = document.getElementById('health-results');
   if (!results) return;
   _healthMetricsCaptureExpandedFromDom();
+  _healthSupervisorCaptureExpandedFromDom();
   var scrollTop = root ? root.scrollTop : 0;
   var surfaceState = (typeof _captureSurfaceState === 'function')
     ? _captureSurfaceState(results)
