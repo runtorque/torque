@@ -549,6 +549,8 @@ function connect() {
       if (typeof diffReceiveFull === 'function') diffReceiveFull(msg);
     } else if (msg.type === 'worktree_check_merge') {
       if (typeof diffReceiveMergeCheck === 'function') diffReceiveMergeCheck(msg);
+    } else if (msg.type === 'worktree_merge_progress') {
+      if (typeof diffReceiveMergeProgress === 'function') diffReceiveMergeProgress(msg);
     } else if (msg.type === 'worktree_merge') {
       if (typeof diffReceiveMergeResult === 'function') diffReceiveMergeResult(msg);
     } else if (msg.type === 'worktree_rebase') {
@@ -1483,6 +1485,9 @@ function _deltaSurfaceInvalidations(ops, hints) {
         // High-frequency token telemetry updates only the affected card's
         // micro-meter via `_applyContextMeterDeltaUpdates()` after state is
         // patched. Never invalidate broad surfaces for this op.
+        break;
+      case 'worktree_merge_progress':
+        // Consumed directly by the diff modal; no broad surface invalidation.
         break;
       case 'runtime':
         // Runtime metadata refreshes daemon status with a targeted DOM update
@@ -2924,6 +2929,12 @@ function _applyDelta(ops) {
         }
         break;
       }
+
+      case 'worktree_merge_progress':
+        if (typeof diffReceiveMergeProgress === 'function') {
+          diffReceiveMergeProgress(op);
+        }
+        break;
 
       case 'schedule_upsert': {
         if (!state.schedules) state.schedules = {};

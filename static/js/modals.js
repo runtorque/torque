@@ -400,8 +400,7 @@ function closeModals() {
       && typeof hideTaskHistory === 'function') {
     hideTaskHistory();
   }
-  var diffModalOpen = typeof _diffViewOpen !== 'undefined' && _diffViewOpen
-    && typeof _diffReadOnly !== 'undefined' && _diffReadOnly;
+  var diffModalOpen = typeof _diffViewOpen !== 'undefined' && _diffViewOpen;
   if (diffModalOpen) {
     var closedOverlayAboveDiff = false;
     document.querySelectorAll('.overlay').forEach(o => {

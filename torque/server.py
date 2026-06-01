@@ -2625,7 +2625,21 @@ async def _run_pr_worktree_merge(
     handle_command,
     panel_event,
     board_sync_manager=None,
+    progress=None,
 ) -> dict:
+    async def _progress(phase: str, message: str, **extra) -> None:
+        if not progress:
+            return
+        try:
+            await progress(phase, message, **extra)
+        except Exception:
+            log.exception(
+                "Failed to emit worktree merge progress for %s phase=%s",
+                aid,
+                phase,
+            )
+
+    await _progress("preflight", "Checking merge readiness\u2026")
     if not (cell and cell.worktree_path and cell.worktree_branch):
         failure = {
             "phase": "target_resolution",
@@ -3023,6 +3037,7 @@ async def _run_pr_worktree_merge(
         preserve_merge_diff=preserve_merge_diff,
     )
 
+    await _progress("push_branch", "Pushing branch to origin\u2026")
     pushed = await worktree_mgr.github_push_branch(wt, remote, branch)
     if not pushed.get("ok"):
         force_retry = getattr(
@@ -3074,6 +3089,7 @@ async def _run_pr_worktree_merge(
 
     push_metadata_result = pushed
 
+    await _progress("pr_create", "Creating pull request\u2026")
     pr_result = await worktree_mgr.github_create_or_reuse_pr(
         wt,
         branch,
@@ -3186,6 +3202,7 @@ async def _run_pr_worktree_merge(
             current_head = getattr(worktree_mgr, "current_head", None)
             if callable(current_head):
                 head_sha = await current_head(cell) or ""
+        await _progress("pr_merge", "Merging pull request\u2026")
         merge_result = await worktree_mgr.github_request_squash_merge(
             wt,
             pr_result.get("number") or pr_result.get("url", ""),
@@ -3349,6 +3366,7 @@ async def _run_pr_worktree_merge(
         )
         log.warning(post_merge_sync_warning)
 
+    await _progress("finalize", "Finalizing merge\u2026")
     try:
         if getattr(cell, "driverless", False):
             result = await _finalize_successful_driverless_worktree_merge(
@@ -15823,6 +15841,20 @@ async def main(connection=None):
                     "Group setting engineer_merge_mode='direct' forced a "
                     "direct local worktree merge; the PR workflow was bypassed."
                 )
+
+                async def _emit_worktree_merge_progress(
+                        phase: str,
+                        message: str,
+                        **extra) -> None:
+                    state._emit(
+                        "worktree_merge_progress",
+                        id=aid,
+                        phase=phase,
+                        message=message,
+                        **extra,
+                    )
+                    await state.broadcast()
+
                 if error_result:
                     failure = {
                         "phase": "target_resolution",
@@ -15941,6 +15973,10 @@ async def main(connection=None):
                         )
 
                     if force_direct:
+                        await _emit_worktree_merge_progress(
+                            "direct_merge",
+                            "Merging locally\u2026",
+                        )
                         result = await _run_direct_worktree_merge(
                             state=state,
                             cell=cell,
@@ -15995,6 +16031,7 @@ async def main(connection=None):
                             handle_command=handle_command,
                             panel_event=_panel_event,
                             board_sync_manager=board_sync_manager,
+                            progress=_emit_worktree_merge_progress,
                         )
 
             # -- Board sync commands --

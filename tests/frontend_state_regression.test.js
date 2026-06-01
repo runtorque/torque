@@ -1770,6 +1770,16 @@ function createDiffHarness() {
   return { context, document };
 }
 
+function createDiffWsHarness() {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModalScripts(context);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/diff.js');
+  document.register('diff-view-root');
+  return { context, document, sandbox };
+}
+
 function createDiffKeyHarness() {
   const { sandbox, document } = createSandbox({
     window: {
@@ -22588,27 +22598,13 @@ test('diff review surfaces stale-base warning before merge controls', () => {
   assert.match(root.innerHTML, /Rebase onto Main/);
 });
 
-test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-
-  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #panelbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
-});
-
-test('read-only diff modal tracks task modal breakpoints at twenty percent wider', () => {
-  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-
-  assert.match(css, /\.diff-view-modal\s*\{[^}]*336px/);
-  assert.match(css, /@media \(min-width:\s*600px\)\s*\{\s*\.diff-view-modal\s*\{[^}]*528px/);
-  assert.match(css, /body\[data-torque-mode="standalone"\] \.diff-view-modal,\s*body\[data-torque-mode="desktop"\] \.diff-view-modal\s*\{[^}]*504px/);
-  assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-torque-mode="standalone"\] \.diff-view-modal,\s*body\[data-torque-mode="desktop"\] \.diff-view-modal\s*\{[^}]*936px/);
-});
-
-test('Escape closes the read-only diff viewer through the shared modal key handler', () => {
-  const { context, document, diffRoot } = createDiffKeyHarness();
+test('diff merge footer shows spinner and phase text while create-and-merge is running', () => {
+  const { context, document } = createDiffHarness();
+  const root = document.getElementById('diff-view-root');
 
   runInContext(context, `
     _diffViewOpen = true;
-    _diffReadOnly = true;
+    _diffReadOnly = false;
     _diffViewAgentId = 'agent-1';
     _diffViewData = {
       agent_name: 'Worker',
@@ -22617,6 +22613,106 @@ test('Escape closes the read-only diff viewer through the shared modal key handl
       stats: { files: 1, insertions: 2, deletions: 1 },
       files: [],
     };
+    _diffMergeCheck = { clean: true, conflicts: [] };
+    _diffMerging = true;
+    _diffMergeProgress = { phase: 'pr_merge', message: 'Merging pull request…' };
+    renderDiffView();
+  `);
+
+  assert.match(root.innerHTML, /diff-merge-progress/);
+  assert.match(root.innerHTML, /role="status"/);
+  assert.match(root.innerHTML, /diff-spinner/);
+  assert.match(root.innerHTML, /Merging pull request…/);
+  assert.match(root.innerHTML, /diff-merge-button" disabled/);
+});
+
+test('worktree merge progress delta updates the open diff modal without broad rerender', () => {
+  const { context, document, sandbox } = createDiffWsHarness();
+  const root = document.getElementById('diff-view-root');
+  sandbox.renderCalls = 0;
+
+  runInContext(context, `
+    render = function() { renderCalls++; };
+    _diffViewOpen = true;
+    _diffReadOnly = false;
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'torque/worker',
+      base_branch: 'main',
+      stats: { files: 1, insertions: 2, deletions: 1 },
+      files: [],
+    };
+    _diffMergeCheck = { clean: true, conflicts: [] };
+    renderDiffView();
+    _expectedSeq = 1;
+    _handleDelta({
+      seq: 1,
+      ops: [{
+        op: 'worktree_merge_progress',
+        id: 'agent-1',
+        phase: 'pr_create',
+        message: 'Creating pull request…',
+      }],
+    });
+  `);
+
+  assert.equal(jsonValue(context, `_diffMerging`), true);
+  assert.match(root.innerHTML, /Creating pull request…/);
+  assert.equal(sandbox.renderCalls, 0);
+});
+
+test('merge diff review opens in a wide tall custom modal without hiding the workspace', () => {
+  const { context, document } = createDiffHarness();
+  const root = document.getElementById('diff-view-root');
+
+  runInContext(context, `
+    _diffViewOpen = true;
+    _diffReadOnly = false;
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'torque/worker',
+      base_branch: 'main',
+      stats: { files: 1, insertions: 2, deletions: 1 },
+      files: [],
+    };
+    _diffMergeCheck = { clean: true, conflicts: [] };
+    renderDiffView();
+  `);
+
+  assert.match(root.innerHTML, /modal modal-wide modal-tall diff-view-modal/);
+  assert.match(root.innerHTML, /Create PR &amp; Merge|Create PR & Merge/);
+  assert.equal(root.classList.contains('overlay'), true);
+  assert.equal(root.classList.contains('visible'), true);
+  assert.equal(document.body.classList.contains('diff-view-open'), false);
+});
+
+test('diff modal tracks task modal breakpoints at twenty percent wider', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.diff-view-modal\s*\{[^}]*336px/);
+  assert.match(css, /\.diff-view-modal\s*\{[^}]*90vh/);
+  assert.match(css, /@media \(min-width:\s*600px\)\s*\{\s*\.diff-view-modal\s*\{[^}]*528px/);
+  assert.match(css, /body\[data-torque-mode="standalone"\] \.diff-view-modal,\s*body\[data-torque-mode="desktop"\] \.diff-view-modal\s*\{[^}]*504px/);
+  assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-torque-mode="standalone"\] \.diff-view-modal,\s*body\[data-torque-mode="desktop"\] \.diff-view-modal\s*\{[^}]*936px/);
+});
+
+test('Escape closes the diff viewer through the shared modal key handler', () => {
+  const { context, document, diffRoot } = createDiffKeyHarness();
+
+  runInContext(context, `
+    _diffViewOpen = true;
+    _diffReadOnly = false;
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'torque/worker',
+      base_branch: 'main',
+      stats: { files: 1, insertions: 2, deletions: 1 },
+      files: [],
+    };
+    _diffMergeCheck = { clean: true, conflicts: [] };
     renderDiffView();
   `);
 
@@ -22640,12 +22736,12 @@ test('Escape closes the read-only diff viewer through the shared modal key handl
   assert.equal(document.body.classList.contains('diff-view-open'), false);
 });
 
-test('Escape prefers the active overlay over the underlying read-only diff viewer', () => {
+test('Escape prefers the active overlay over the underlying diff viewer', () => {
   const { context, document, confirmOverlay } = createDiffKeyHarness();
 
   runInContext(context, `
     _diffViewOpen = true;
-    _diffReadOnly = true;
+    _diffReadOnly = false;
     _diffViewAgentId = 'agent-1';
     _diffViewData = {
       agent_name: 'Worker',
@@ -22654,6 +22750,7 @@ test('Escape prefers the active overlay over the underlying read-only diff viewe
       stats: { files: 1, insertions: 2, deletions: 1 },
       files: [],
     };
+    _diffMergeCheck = { clean: true, conflicts: [] };
     renderDiffView();
   `);
   context.showConfirm('Close this modal first?');

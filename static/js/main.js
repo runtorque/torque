@@ -1171,10 +1171,9 @@ function _handleTorqueGlobalKeydown(e) {
     return;
   }
 
-  // Backstop for older/non-modal diff render paths. The read-only diff
-  // viewer normally participates in the shared overlay stack above.
-  if (typeof _diffViewOpen !== 'undefined' && _diffViewOpen
-      && typeof _diffReadOnly !== 'undefined' && _diffReadOnly) {
+  // Backstop for older/non-modal diff render paths. The diff viewer normally
+  // participates in the shared overlay stack above.
+  if (typeof _diffViewOpen !== 'undefined' && _diffViewOpen) {
     if (e.key === 'Escape' && typeof hideDiffView === 'function') {
       e.preventDefault();
       hideDiffView();

@@ -8,15 +8,16 @@ var _diffCollapseAllFiles = false;
 var _diffMergeCheck = null;   // null = loading, {clean, dirty, conflicts}
 var _diffCommitMsg = '';       // editable commit message
 var _diffMerging = false;      // true while merge request in flight
+var _diffMergeProgress = null; // {phase, message} while create+merge runs
 var _diffReadOnly = false;     // true when opened from "View Diff" (no merge controls)
 
 function _diffRendersInModal() {
-  return !!_diffReadOnly;
+  return true;
 }
 
 function _diffShellOpen() {
   return _diffRendersInModal()
-    ? '<div class="modal modal-tall diff-view-modal"><div class="diff-view">'
+    ? '<div class="modal modal-wide modal-tall diff-view-modal" role="dialog" aria-modal="true"><div class="diff-view">'
     : '<div class="diff-view">';
 }
 
@@ -34,6 +35,7 @@ function showDiffView(agentId, readOnly) {
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
+  _diffMergeProgress = null;
   _diffReadOnly = !!readOnly;
   renderDiffView();
   send({ cmd: 'worktree_diff_full', id: agentId });
@@ -49,6 +51,7 @@ function hideDiffView() {
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
+  _diffMergeProgress = null;
   _diffReadOnly = false;
   renderDiffView();
 }
@@ -80,12 +83,25 @@ function diffReceiveMergeCheck(msg) {
 
 function diffReceiveMergeResult(msg) {
   _diffMerging = false;
+  _diffMergeProgress = msg && msg.ok
+    ? { phase: 'done', message: msg.message || 'Done' }
+    : null;
   if (msg.ok) {
     hideDiffView();
   } else {
     _diffMergeCheck = { clean: false, error: msg.error || 'Merge failed' };
     renderDiffView();
   }
+}
+
+function diffReceiveMergeProgress(msg) {
+  if (!_diffViewOpen || !_diffViewAgentId || msg.id !== _diffViewAgentId) return;
+  _diffMerging = true;
+  _diffMergeProgress = {
+    phase: msg.phase || '',
+    message: msg.message || '',
+  };
+  renderDiffView();
 }
 
 function diffReceiveRebaseResult(msg) {
@@ -370,8 +386,27 @@ async function proceedDiffMerge() {
   var ok = await _confirmWorktreeMerge(_diffViewAgentId, _diffCommitMsg);
   if (ok) {
     _diffMerging = true;
+    _diffMergeProgress = {
+      phase: 'request',
+      message: 'Starting Create PR + Merge\u2026',
+    };
     renderDiffView();
   }
+}
+
+function _diffMergeProgressLabel() {
+  if (_diffMergeProgress && _diffMergeProgress.message) {
+    return _diffMergeProgress.message;
+  }
+  var phase = _diffMergeProgress ? String(_diffMergeProgress.phase || '') : '';
+  if (phase === 'preflight') return 'Checking merge readiness\u2026';
+  if (phase === 'push_branch') return 'Pushing branch\u2026';
+  if (phase === 'pr_create') return 'Creating PR\u2026';
+  if (phase === 'pr_merge') return 'Merging PR\u2026';
+  if (phase === 'finalize') return 'Finalizing merge\u2026';
+  if (phase === 'direct_merge') return 'Merging locally\u2026';
+  if (phase === 'done') return 'Done';
+  return 'Creating PR and merging\u2026';
 }
 
 function _renderMergeBanner() {
@@ -418,6 +453,12 @@ function _renderDiffFooter() {
   }
 
   html += '<div class="diff-footer-buttons">';
+  if (_diffMerging) {
+    html += '<span class="diff-merge-progress" role="status" aria-live="polite">'
+      + '<span class="diff-spinner" aria-hidden="true"></span>'
+      + '<span>' + esc(_diffMergeProgressLabel()) + '</span>'
+      + '</span>';
+  }
   html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
 
   if (_diffMergeCheck && _diffMergeCheck.dirty) {
@@ -429,9 +470,11 @@ function _renderDiffFooter() {
   }
 
   var canMerge = _diffMergeCheck && _diffMergeCheck.clean && !_diffMerging;
-  html += '<button class="btn-green"' + (canMerge ? '' : ' disabled')
+  var mergeLabel = _diffMerging ? _diffMergeProgressLabel() : 'Create PR & Merge';
+  html += '<button class="btn-green diff-merge-button"' + (canMerge ? '' : ' disabled')
     + ' onclick="proceedDiffMerge()">'
-    + (_diffMerging ? 'Creating PR\u2026' : 'Create PR & Merge') + '</button>';
+    + (_diffMerging ? '<span class="diff-spinner diff-spinner-inline" aria-hidden="true"></span>' : '')
+    + '<span>' + esc(mergeLabel) + '</span></button>';
   html += '</div></div>';
   return html;
 }
