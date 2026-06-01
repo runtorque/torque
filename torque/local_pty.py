@@ -1030,7 +1030,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         # Optional hook: ``(kind: str, detail: dict) -> None | awaitable``.
         # ``kind`` is one of: "connect_failed", "disconnected",
         # "reconnected", "restarted", "restart_requested",
-        # "restart_worker_loss", "restart_failed_lost", "fresh_instance".
+        # "restart_failed", "restart_worker_loss", "restart_failed_lost",
+        # "fresh_instance".
         self.on_supervisor_event = None
         # Per-session input-write circuit breaker. A hung agent that stops
         # draining its PTY makes every write to it fail (after the supervisor
@@ -1314,6 +1315,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             "timeout": timeout,
             "deadline_at": deadline,
         })
+        restart_started = False
         try:
             ack = await self._client.restart_supervisor()
             if not isinstance(ack, dict) or ack.get("type") == "error":
@@ -1321,6 +1323,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
                     (ack or {}).get("message")
                     or (ack or {}).get("code")
                     or "supervisor restart failed")
+            restart_started = True
             epoch = int(ack.get("restart_epoch") or 0)
             nonce = str(ack.get("restart_nonce") or "")
             reconnect = await self._client.wait_for_restart(
@@ -1337,6 +1340,20 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             return {"ack": ack, "reconnect": reconnect}
         except Exception as exc:
             self._supervisor_restart_deadline = 0.0
+            if not restart_started:
+                # The supervisor never acknowledged detaching/re-execing, so
+                # this is a prepare/pre-detach failure. Existing PTYs should
+                # still be live; do not synthesize a worker-loss event.
+                self.set_supervisor_watchdog_status({
+                    "state": "",
+                    "last_error": str(exc),
+                    "updated_at": time.time(),
+                })
+                await self._emit_supervisor_event("restart_failed", {
+                    "error": str(exc),
+                    "pre_detach": True,
+                })
+                raise
             self.set_supervisor_watchdog_status({
                 "state": "restarting",
                 "last_error": str(exc),

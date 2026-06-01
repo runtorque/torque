@@ -410,6 +410,56 @@ class SupervisorLifecycleTests(unittest.IsolatedAsyncioTestCase):
             writer.close()
             await writer.wait_closed()
 
+    async def test_restart_ack_disconnect_aborts_without_stuck_gate(self):
+        data_dir = Path(self.h.tmp.name)
+        callback_calls = []
+
+        async def restart_callback(*args):
+            callback_calls.append(args)
+
+        async def broken_write(_writer, _message):
+            raise BrokenPipeError("requesting client disappeared")
+
+        self.h.supervisor.data_dir = data_dir
+        self.h.supervisor.restart_callback = restart_callback
+
+        with (
+            mock.patch.object(pty_supervisor, "write_frame", broken_write),
+            self.assertLogs("torque.pty_supervisor", level="WARNING") as logs,
+        ):
+            await self.h.supervisor._op_restart({}, object())
+
+        self.assertTrue(any("rolled back" in line for line in logs.output))
+        self.assertFalse(self.h.supervisor._restarting)
+        self.assertEqual(callback_calls, [])
+        self.assertFalse(list(data_dir.glob(
+            f"{pty_supervisor.ADOPT_STATE_PREFIX}_*.json")))
+        self.assertFalse(list(data_dir.glob(
+            f".{pty_supervisor.ADOPT_STATE_PREFIX}*.tmp")))
+
+        reader, writer = await _open_client(self.h.socket_path)
+        try:
+            await write_frame(writer, {
+                "op": "create",
+                "session_id": "after-ack-fail",
+                "cell_id": "cell-after-ack-fail",
+                "shell_argv": ["/bin/sh", "-c", "sleep 2"],
+                "env": {},
+                "cwd": "",
+                "cols": 80,
+                "rows": 24,
+            })
+            ok = await read_frame(reader)
+            self.assertEqual(ok.get("type"), "ok")
+            await write_frame(writer, {
+                "op": "close",
+                "session_id": "after-ack-fail",
+            })
+            await read_frame(reader)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
     async def test_finalized_session_clears_subscribers(self):
         reader, writer = await _open_client(self.h.socket_path)
         try:

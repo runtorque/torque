@@ -608,14 +608,28 @@ class PtySupervisor:
             )
             return
         live_count = self._live_session_count()
-        await write_frame(writer, {
-            "type": "ok",
-            "op": "restart",
-            "restart_epoch": restart_epoch,
-            "restart_nonce": restart_nonce,
-            "sessions": live_count,
-            "adopt_state": str(state_path),
-        })
+        try:
+            await write_frame(writer, {
+                "type": "ok",
+                "op": "restart",
+                "restart_epoch": restart_epoch,
+                "restart_nonce": restart_nonce,
+                "sessions": live_count,
+                "adopt_state": str(state_path),
+            })
+        except Exception:
+            # The supervisor is still fully alive and has not detached or
+            # exec'd yet. Roll the prepared restart back instead of leaving the
+            # process stuck in the mutating-op rejection gate forever.
+            self._restarting = False
+            with contextlib.suppress(OSError):
+                state_path.unlink()
+            log.warning(
+                "Failed to deliver PTY supervisor restart ack; "
+                "prepared restart rolled back",
+                exc_info=True,
+            )
+            return
         log.info(
             "Prepared PTY supervisor restart epoch=%s nonce=%s sessions=%s",
             restart_epoch,

@@ -594,6 +594,71 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                       if kind == "restart_failed_lost")
         self.assertEqual(failed["lost_sessions"], 1)
 
+    async def test_restart_prepare_error_does_not_mark_live_sessions_lost(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Prepare failed still live",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        sid = "prepare-error-live-session"
+        cell.session_id = sid
+        cell.status = "running"
+        adapter._sessions[sid] = self.pty_mod._PtySession(
+            session_id=sid,
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+        )
+
+        class PrepareErrorClient:
+            async def restart_supervisor(self):
+                return {
+                    "type": "error",
+                    "code": "restart_prepare_failed",
+                    "message": "disk full",
+                }
+
+            async def wait_for_restart(self, **_kwargs):
+                raise AssertionError(
+                    "pre-detach prepare failures must not wait for restart")
+
+        adapter._client = PrepareErrorClient()
+        events: list[tuple[str, dict]] = []
+        fallbacks = []
+
+        async def on_event(kind, detail):
+            events.append((kind, dict(detail or {})))
+
+        def ensure_running(data_dir):
+            fallbacks.append(data_dir)
+
+        adapter.on_supervisor_event = on_event
+
+        with self.assertRaises(RuntimeError) as ctx:
+            await adapter.restart_supervisor(
+                timeout=0.1,
+                data_dir="/tmp/supervisor-prepare-error",
+                ensure_running=ensure_running,
+            )
+
+        self.assertIn("disk full", str(ctx.exception))
+        self.assertEqual(cell.session_id, sid)
+        self.assertEqual(cell.status, "running")
+        self.assertIn(sid, adapter._sessions)
+        self.assertEqual(fallbacks, [])
+        event_kinds = [kind for kind, _ in events]
+        self.assertIn("restart_requested", event_kinds)
+        self.assertIn("restart_failed", event_kinds)
+        self.assertNotIn("restart_failed_lost", event_kinds)
+        status = adapter.supervisor_watchdog_status()
+        self.assertEqual(status.get("state"), "")
+        self.assertEqual(status.get("last_error"), "disk full")
+
     async def test_mark_supervisor_lost_emits_explicit_exit_reason(self):
         state = self.state_mod.MatrixState()
         adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)

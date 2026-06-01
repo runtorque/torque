@@ -12215,6 +12215,16 @@ async def main(connection=None):
                 ),
             }
             await _broadcast_system_banner(banner)
+        elif kind == "restart_failed":
+            banner = {
+                "kind": "supervisor_restart_failed",
+                "message": (
+                    "PTY supervisor restart did not start; live terminals "
+                    "remain attached."
+                ),
+                "detail": str((detail or {}).get("error") or ""),
+            }
+            await _broadcast_system_banner(banner)
         elif kind == "restarted":
             report = dict((detail or {}).get("restart_report") or {})
             adopted = int(report.get("adopted_sessions", 0) or 0)
