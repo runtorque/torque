@@ -20848,6 +20848,67 @@ test('chat panel renders bubbles on the stable side for sender role', () => {
   assert.match(html, /data-chat-message-id="arch-z-msg"[^>]*data-chat-message-side="right"[^>]*data-chat-sender-kind="architect"/);
 });
 
+test('chat panel renders engineer peer threads with stable sides and no compose controls', () => {
+  const { context, document } = createChatHarness();
+  const alpha = { id: 'eng-alpha', kind: 'engineer', name: 'Engineer Alpha', group: 'alpha' };
+  const zeta = { id: 'eng-zeta', kind: 'engineer', name: 'Engineer Zeta', group: 'alpha' };
+  setChatThreads(context, {
+    'thread-engineers': makeChatThread('thread-engineers', {
+      sender: alpha,
+      recipient: zeta,
+      title: 'Engineer Alpha ↔ Engineer Zeta',
+      messages: [
+        {
+          id: 'eng-alpha-notify',
+          thread_id: 'thread-engineers',
+          action: 'engineer_peer_notify',
+          message: 'Please inspect TORQUE:801',
+          timestamp: 300,
+          sender_id: alpha.id,
+          sender_kind: alpha.kind,
+          sender_name: alpha.name,
+          recipient_id: zeta.id,
+          recipient_kind: zeta.kind,
+          recipient_name: zeta.name,
+          delivery_state: 'delivered',
+        },
+        {
+          id: 'eng-zeta-reply',
+          thread_id: 'thread-engineers',
+          action: 'engineer_peer_reply',
+          message: 'Looking now',
+          timestamp: 320,
+          sender_id: zeta.id,
+          sender_kind: zeta.kind,
+          sender_name: zeta.name,
+          recipient_id: alpha.id,
+          recipient_kind: alpha.kind,
+          recipient_name: alpha.name,
+          delivery_state: 'delivered',
+        },
+      ],
+      messageCount: 2,
+    }),
+  });
+
+  context.renderChatPanel();
+
+  const parts = document.getElementById('panel-chat')._chatShell._chatParts;
+  assert.match(parts.messageHeader.innerHTML, /chat-participant-kind">Engineer<\/span>Engineer Alpha/);
+  assert.match(parts.messageHeader.innerHTML, /chat-participant-kind">Engineer<\/span>Engineer Zeta/);
+  assert.match(parts.messages.innerHTML, /data-chat-message-id="eng-alpha-notify"[^>]*data-chat-message-side="left"[^>]*data-chat-sender-kind="engineer"/);
+  assert.match(parts.messages.innerHTML, /data-chat-message-id="eng-zeta-reply"[^>]*data-chat-message-side="right"[^>]*data-chat-sender-kind="engineer"/);
+  assert.match(parts.messages.innerHTML, /chat-message-action">engineer peer notify<\/span>/);
+  assert.match(parts.messages.innerHTML, /chat-message-action">engineer peer reply<\/span>/);
+  const html = [
+    parts.listHeader.innerHTML,
+    parts.list.innerHTML,
+    parts.messageHeader.innerHTML,
+    parts.messages.innerHTML,
+  ].join('\n');
+  assert.doesNotMatch(html, /<(?:form|textarea|input|button)\b/i);
+});
+
 test('chat panel stacks panes from the panel width, not the viewport width', () => {
   const { context, document, sandbox } = createChatHarness({
     window: { innerWidth: 1600, open() {} },
@@ -21238,6 +21299,56 @@ test('chat thread delta upsert sorts newest first and invalidates only chat surf
     engineer: 0,
     templates: 0,
     chat: 1,
+  });
+});
+
+test('engineer peer chat thread deltas do not broadly invalidate the engineer panel', () => {
+  const { context } = createChatHarness();
+  runInContext(context, `
+    focusedItemId = 'eng-alpha';
+    selectedAgentId = 'eng-alpha';
+    state.agents = {
+      'eng-alpha': { id: 'eng-alpha', name: 'Engineer Alpha', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+      'eng-zeta': { id: 'eng-zeta', name: 'Engineer Zeta', kind: 'engineer', group: 'alpha', cell_type: 'agent' }
+    };
+  `);
+
+  const flags = runInContext(context, `_deltaSurfaceInvalidations([
+    {
+      op: 'agent_peer_thread_upsert',
+      thread_id: 'agent-pair:eng-alpha:eng-zeta',
+      group: 'alpha',
+      thread: {
+        thread_id: 'agent-pair:eng-alpha:eng-zeta',
+        participants: [
+          { id: 'eng-alpha', kind: 'engineer', name: 'Engineer Alpha', group: 'alpha' },
+          { id: 'eng-zeta', kind: 'engineer', name: 'Engineer Zeta', group: 'alpha' }
+        ],
+        messages: [
+          {
+            id: 'eng-alpha-notify',
+            action: 'engineer_peer_notify',
+            message: 'Please inspect TORQUE:801',
+            timestamp: 300,
+            sender_id: 'eng-alpha',
+            sender_kind: 'engineer',
+            recipient_id: 'eng-zeta',
+            recipient_kind: 'engineer'
+          }
+        ]
+      }
+    }
+  ], [{}])`);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(flags)), {
+    main: false,
+    board: false,
+    context: false,
+    events: false,
+    engineer: false,
+    templates: false,
+    health: false,
+    chat: true,
   });
 });
 

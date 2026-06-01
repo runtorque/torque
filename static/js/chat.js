@@ -689,6 +689,8 @@ function _chatMessageMetaHtml(message) {
 function _chatMessageActionLabel(action) {
   action = String(action || 'message').trim();
   if (!action) return 'message';
+  if (action === 'engineer_peer_notify') return 'engineer peer notify';
+  if (action === 'engineer_peer_reply') return 'engineer peer reply';
   if (typeof _agentPanelMessageActionLabel === 'function') {
     return _agentPanelMessageActionLabel(action);
   }
@@ -728,12 +730,13 @@ function _chatMessageSide(message, thread) {
   var senderKind = String(message.sender_kind || '').trim().toLowerCase();
   var recipientKind = String(message.recipient_kind || '').trim().toLowerCase();
   var senderId = String(message.sender_id || '').trim();
-  if (senderKind === 'architect' && recipientKind === 'architect') {
+  if ((senderKind === 'architect' && recipientKind === 'architect')
+      || (senderKind === 'engineer' && recipientKind === 'engineer')) {
     var pairIds = _chatStablePairIds(thread, message);
     if (pairIds.length >= 2 && senderId) {
       return senderId === pairIds[0] ? 'left' : 'right';
     }
-    return 'right';
+    return senderKind === 'architect' ? 'right' : 'left';
   }
   if (senderKind === 'architect') return 'right';
   if (senderKind === 'engineer' || senderKind === 'worker') return 'left';
