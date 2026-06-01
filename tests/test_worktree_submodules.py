@@ -224,6 +224,32 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         return cell, Path(wt_path)
 
+    async def _add_extra_submodule(self, path: str) -> Path:
+        slug = path.replace("/", "-")
+        origin = self.root / f"{slug}-origin.git"
+        seed = self.root / f"{slug}-seed"
+        await self._git("init", "--bare", str(origin), cwd=self.root)
+        seed.mkdir()
+        await self._git("init", "-b", "main", cwd=seed)
+        await self._configure_user(seed)
+        (seed / "lib.txt").write_text(f"{path} line one\n")
+        await self._git("add", "lib.txt", cwd=seed)
+        await self._git("commit", "-m", f"Initial {path}", cwd=seed)
+        await self._git("remote", "add", "origin", str(origin), cwd=seed)
+        await self._git("push", "-u", "origin", "main", cwd=seed)
+        await self._git(
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            str(origin),
+            path,
+            cwd=self.repo_root,
+        )
+        await self._configure_user(self.repo_root / path)
+        await self._git("commit", "-m", f"Add {path} submodule", cwd=self.repo_root)
+        return origin
+
     async def _show_ref_exists(self, repo: Path, branch: str) -> bool:
         code, _out, _err = await self._git(
             "show-ref",
@@ -231,6 +257,18 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
             "--quiet",
             f"refs/heads/{branch}",
             cwd=repo,
+            check=False,
+        )
+        return code == 0
+
+    async def _bare_branch_exists(self, repo: Path, branch: str) -> bool:
+        code, _out, _err = await self._git(
+            "--git-dir",
+            str(repo),
+            "rev-parse",
+            "--verify",
+            f"refs/heads/{branch}",
+            cwd=self.root,
             check=False,
         )
         return code == 0
@@ -348,6 +386,129 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         # One superproject gitlink commit plus one nested submodule commit.
         self.assertEqual(cell.worktree_ahead, 2)
         self.assertEqual(cell.worktree_checkpoints, 2)
+
+    async def test_zero_ee_delta_merge_check_skips_missing_nested_branch(self):
+        ee_origin = await self._add_extra_submodule("ee")
+        cell = self._make_cell(agent_id="agent-zero-ee", name="Zero EE")
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_submodules=["ee"],
+        )
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        ee_wt = wt / "ee"
+        ee_branch = await self._sub_branch(ee_wt)
+        self.assertFalse(
+            await self._bare_branch_exists(ee_origin, ee_branch),
+            ee_branch,
+        )
+
+        (wt / "README.md").write_text("super line one\nzero ee delta\n")
+        await self._git("add", "README.md", cwd=wt)
+        await self._git("commit", "-m", "Superproject-only change", cwd=wt)
+
+        preflight = await self.mgr.nested_submodule_merge_preflight(
+            cell,
+            ["ee"],
+        )
+        self.assertTrue(preflight["ok"], preflight)
+        self.assertEqual(
+            preflight["submodules"][0]["skip_reason"],
+            "zero_gitlink_delta",
+        )
+        self.assertFalse(
+            await self._bare_branch_exists(ee_origin, ee_branch),
+            "zero-delta merge preflight must not publish a nested ee branch",
+        )
+
+        check = await self.mgr.check_merge_conflicts(
+            cell,
+            worktree_submodules=["ee"],
+        )
+        self.assertTrue(check["clean"], check)
+        self.assertFalse(
+            await self._bare_branch_exists(ee_origin, ee_branch),
+            "zero-delta merge check must not reconcile a nested ee branch",
+        )
+
+    async def test_real_ee_delta_still_uses_nested_pr_first_flow(self):
+        await self._add_extra_submodule("ee")
+        cell = self._make_cell(agent_id="agent-real-ee", name="Real EE")
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_submodules=["ee"],
+        )
+        self.assertIsNotNone(wt_path)
+        wt = Path(wt_path)
+        ee_wt = wt / "ee"
+        (ee_wt / "lib.txt").write_text("ee line one\nreal ee delta\n")
+        self.assertTrue(
+            await self.mgr.checkpoint(
+                cell,
+                message="Real ee delta",
+                worktree_submodules=["ee"],
+            )
+        )
+        ee_head = await self._git_out("rev-parse", "HEAD", cwd=ee_wt)
+        calls = []
+
+        async def fake_create_or_reuse_pr(worktree_path, branch, base_branch,
+                                          title="", body=""):
+            calls.append(("create_pr", worktree_path, branch, base_branch))
+            return {
+                "ok": True,
+                "phase": "nested_submodule_pr_create",
+                "url": "https://github.com/acme/ee/pull/7",
+                "number": 7,
+                "head_sha": ee_head,
+                "state": "OPEN",
+            }
+
+        async def fake_merge_commit(worktree_path, pr_number, head_sha,
+                                    **_kwargs):
+            calls.append(("merge_pr", worktree_path, pr_number, head_sha))
+            return {
+                "ok": True,
+                "phase": "nested_submodule_pr_merge",
+                "merge_commit_sha": head_sha,
+            }
+
+        async def fake_sync(entry, merged_sha):
+            calls.append(("sync_main", entry.get("path", ""), merged_sha))
+            return {
+                "ok": True,
+                "phase": "nested_submodule_pr_sync",
+                "remote_base_sha": merged_sha,
+            }
+
+        old_create = self.mgr.github_create_or_reuse_pr
+        old_merge = self.mgr.github_request_merge_commit_merge
+        old_sync = self.mgr._sync_nested_submodule_main_after_pr
+        self.mgr.github_create_or_reuse_pr = fake_create_or_reuse_pr
+        self.mgr.github_request_merge_commit_merge = fake_merge_commit
+        self.mgr._sync_nested_submodule_main_after_pr = fake_sync
+        try:
+            result = await self.mgr.merge_nested_submodules_via_pr_for_merge(
+                cell,
+                ["ee"],
+                title="Merge ee",
+                body="Body",
+                merge=True,
+            )
+        finally:
+            self.mgr.github_create_or_reuse_pr = old_create
+            self.mgr.github_request_merge_commit_merge = old_merge
+            self.mgr._sync_nested_submodule_main_after_pr = old_sync
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["real_delta"], result)
+        self.assertFalse(result["submodules"][0].get("skipped", False), result)
+        self.assertIn("create_pr", [call[0] for call in calls])
+        self.assertIn("merge_pr", [call[0] for call in calls])
 
     async def test_stale_base_info_detects_submodule_base_advance(self):
         cell, _wt = await self._create_nested()
@@ -1791,11 +1952,10 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HEAD_MISMATCH", check["error"])
         self.assertIn(self.sub_path, check["error"])
 
-    async def test_merge_preflight_auto_publishes_zero_delta_submodule_branch(self):
+    async def test_merge_preflight_skips_zero_delta_submodule_branch_publish(self):
         cell, wt = await self._create_nested()
         sub_wt = wt / self.sub_path
         sub_branch = await self._sub_branch(sub_wt)
-        head = await self._git_out("rev-parse", "HEAD", cwd=sub_wt)
         code, _out, _err = await self._git(
             "--git-dir",
             str(self.sub_origin),
@@ -1813,14 +1973,20 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(check["clean"], check)
-        remote_branch = await self._git_out(
+        code, _out, _err = await self._git(
             "--git-dir",
             str(self.sub_origin),
             "rev-parse",
+            "--verify",
             sub_branch,
             cwd=self.root,
+            check=False,
         )
-        self.assertEqual(remote_branch, head)
+        self.assertNotEqual(
+            0,
+            code,
+            "zero-delta merge preflight must not publish a nested branch",
+        )
 
     async def test_merge_preflight_auto_publishes_reachable_real_submodule_branch(self):
         cell, wt = await self._create_nested()

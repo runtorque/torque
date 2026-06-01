@@ -2783,6 +2783,14 @@ class WorktreeManager:
                     "Commit or checkpoint nested submodule changes first.",
                 )
 
+            if zero_gitlink_delta:
+                checked.append({
+                    **entry,
+                    "skipped": True,
+                    "skip_reason": "zero_gitlink_delta",
+                })
+                continue
+
             if head and new_gitlink and head != new_gitlink:
                 return self._nested_preflight_error(
                     entry,
@@ -3280,6 +3288,18 @@ class WorktreeManager:
                 error["phase"] = "nested_submodule_publish"
                 return error
 
+            if zero_gitlink_delta:
+                published.append({
+                    **entry,
+                    "skipped": True,
+                    "skip_reason": (
+                        "zero_gitlink_delta"
+                        if entry["branch"]
+                        else "no_gitlink_change_detached_head"
+                    ),
+                })
+                continue
+
             if head and new_gitlink and head != new_gitlink:
                 error = self._nested_preflight_error(
                     entry,
@@ -3406,6 +3426,9 @@ class WorktreeManager:
             )
             error["phase"] = "nested_submodule_pr_preflight"
             return error
+
+        if entry.get("zero_gitlink_delta"):
+            return {"ok": True}
 
         head = entry.get("head_sha", "")
         new_gitlink = entry.get("new_gitlink_sha", "")
@@ -3915,6 +3938,17 @@ class WorktreeManager:
             head = entry.get("head_sha", "")
             old_gitlink = entry.get("old_gitlink_sha", "")
             new_gitlink = entry.get("new_gitlink_sha", "")
+            if entry.get("zero_gitlink_delta"):
+                merged.append({
+                    **entry,
+                    "skipped": True,
+                    "skip_reason": (
+                        "zero_gitlink_delta"
+                        if branch
+                        else "no_gitlink_change_detached_head"
+                    ),
+                })
+                continue
             if not branch:
                 if old_gitlink and old_gitlink == new_gitlink == head:
                     merged.append({
