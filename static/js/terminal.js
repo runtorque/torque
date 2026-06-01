@@ -21,6 +21,13 @@ let _terminalComposeTaskDropdownResults = [];
 let _terminalDirectMessageSelectedByAgent = Object.create(null);
 let _terminalDirectMessageReplyToByAgent = Object.create(null);
 let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
+// Sticky "follow the bottom" intent per agent. Set true when the user is at the
+// tail, false when they deliberately scroll up. Restore consults this rather
+// than recomputing at-tail from the DOM every render: an instantaneous-only
+// measure drops the tail whenever a render catches the viewport a few px off
+// the bottom (worker activity / streamed messages / composing), which made the
+// DM panel appear to "scroll up" and forced constant manual scroll-down.
+let _terminalDirectMessagePinnedToTailByAgent = Object.create(null);
 let _terminalDirectMessageIdempotencyCounter = 0;
 let _terminalDirectMessagesResizeDrag = null;
 let _terminalDirectMessagePointerDown = null;
@@ -28,6 +35,10 @@ let _lastAppliedXtermScrollback = null;
 
 var TERMINAL_DIRECT_MESSAGES_WINDOW_SIZE = 20;
 var TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD = 36;
+// How close to the bottom still counts as "at the tail". Generous enough that a
+// render landing a hair off the bottom (sub-pixel rounding, a freshly appended
+// message, a window-slide) is still treated as tailing rather than detaching.
+var TERMINAL_DIRECT_MESSAGES_TAIL_THRESHOLD_PX = 24;
 var TERMINAL_DIRECT_MESSAGES_MIN_HEIGHT = 112;
 var TERMINAL_DIRECT_MESSAGES_DEFAULT_HEIGHT = 190;
 var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
@@ -379,6 +390,8 @@ function _renderTerminalDirectMessages(root, cell) {
     const list = _terminalDirectMessagesList(root);
     if (list && typeof list.scrollTop === 'number') {
       list.scrollTop = Math.max(0, (Number(list.scrollHeight) || 0) - (Number(list.clientHeight) || 0));
+      // Opening / switching into an agent lands at the bottom: start following.
+      _terminalDirectMessagesSetPinned(String(agent.id || ''), true);
     }
   }
 }
@@ -781,7 +794,24 @@ function _terminalDirectMessagesAtTail(list) {
   const scrollTop = Number(list.scrollTop) || 0;
   const clientHeight = Number(list.clientHeight) || 0;
   const scrollHeight = Number(list.scrollHeight) || 0;
-  return scrollHeight <= clientHeight || (scrollHeight - scrollTop - clientHeight) <= 4;
+  return scrollHeight <= clientHeight
+    || (scrollHeight - scrollTop - clientHeight) <= TERMINAL_DIRECT_MESSAGES_TAIL_THRESHOLD_PX;
+}
+
+// Returns the sticky follow-tail intent for an agent, or null when the user has
+// not interacted yet (caller falls back to a live at-tail measurement).
+function _terminalDirectMessagesStoredPinned(agentId) {
+  const id = String(agentId || '');
+  if (id && Object.prototype.hasOwnProperty.call(_terminalDirectMessagePinnedToTailByAgent, id)) {
+    return !!_terminalDirectMessagePinnedToTailByAgent[id];
+  }
+  return null;
+}
+
+function _terminalDirectMessagesSetPinned(agentId, pinned) {
+  const id = String(agentId || '');
+  if (!id) return;
+  _terminalDirectMessagePinnedToTailByAgent[id] = !!pinned;
 }
 
 function _terminalDirectMessagesLoadOlder(root) {
@@ -817,6 +847,12 @@ function _terminalDirectMessagesLoadOlder(root) {
 function terminalDirectMessagesScroll(event) {
   const list = event && (event.currentTarget || event.target);
   if (!list || typeof list.scrollTop !== 'number') return;
+  // Track follow-tail intent on every scroll (user wheel or programmatic). A
+  // deliberate scroll-up past the tail threshold detaches; scrolling back to the
+  // bottom re-attaches. Re-pins after a render leave us at the bottom, so the
+  // flag stays true and the panel keeps following new messages.
+  const agentId = String((list.dataset && list.dataset.agentId) || '');
+  if (agentId) _terminalDirectMessagesSetPinned(agentId, _terminalDirectMessagesAtTail(list));
   if (Number(list.scrollTop || 0) > TERMINAL_DIRECT_MESSAGES_SCROLL_TOP_THRESHOLD) return;
   const root = list._terminalDirectMessagesRoot
     || (typeof list.closest === 'function' ? list.closest('.terminal-direct-messages-slot') : null);
@@ -851,9 +887,16 @@ function _captureTerminalDirectMessagesState(root) {
       break;
     }
   }
+  const agentId = String((list.dataset && list.dataset.agentId) || '');
+  // Prefer the sticky follow-tail intent. Recomputing at-tail from the DOM here
+  // is fragile: a render that catches the viewport a few px off the bottom would
+  // flip to anchor-freeze and never re-pin, so the latest messages keep landing
+  // below view. Fall back to a live measurement only before the user has scrolled.
+  const storedPinned = _terminalDirectMessagesStoredPinned(agentId);
+  const atTail = storedPinned === null ? _terminalDirectMessagesAtTail(list) : storedPinned;
   return {
-    agentId: String((list.dataset && list.dataset.agentId) || ''),
-    atTail: _terminalDirectMessagesAtTail(list),
+    agentId: agentId,
+    atTail: atTail,
     scrollTop: scrollTop,
     anchorId: anchorId,
     anchorOffset: anchorOffset,
@@ -868,6 +911,7 @@ function _restoreTerminalDirectMessagesState(root, snapshot) {
   if (saved.agentId && list.dataset && String(list.dataset.agentId || '') !== saved.agentId) return;
   if (saved.atTail) {
     list.scrollTop = Math.max(0, (Number(list.scrollHeight) || 0) - (Number(list.clientHeight) || 0));
+    _terminalDirectMessagesSetPinned(saved.agentId || (list.dataset && list.dataset.agentId), true);
     return;
   }
   const items = _terminalDirectMessageAnchorItems(list);

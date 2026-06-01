@@ -11697,6 +11697,134 @@ test('embedded terminal direct-message window stays tail-pinned as new messages 
   assert.equal(list.scrollTop, 920);
 });
 
+test('embedded terminal direct-message panel keeps following the tail through a transient off-bottom render', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1', name: 'Builder', group: 'alpha', cell_type: 'agent',
+      kind: 'worker', session_id: 'sess-1', status: 'running',
+    },
+  };
+  function makeRows(count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      rows.push({
+        message_id: `dm-flw-${String(i).padStart(2, '0')}`,
+        message_type: 'message', message: `Follow ${String(i).padStart(2, '0')}`,
+        sender_id: 'agent-1', sender_kind: 'worker',
+        recipient_id: 'user', recipient_kind: 'user', created_at: 100 + i,
+      });
+    }
+    return rows;
+  }
+  sandbox.state.direct_messages_by_agent = { 'agent-1': makeRows(25) };
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const list = new FakeElement('dm-flw-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  list.scrollTop = 780;
+  list.clientHeight = 120;
+  list.scrollHeight = 900;
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  context.__dmSlot = dom.directMessages;
+  context.__dmList = list;
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML; },
+    set(value) { this._innerHTML = String(value); list.scrollHeight = 1040; },
+  });
+
+  // User is at the bottom -> a scroll event records the sticky follow-tail intent.
+  runInContext(context, `terminalDirectMessagesScroll({ currentTarget: __dmList });`);
+  // A later render catches the viewport well off the bottom (e.g. content grew
+  // before the pin). With only an instantaneous at-tail check this detaches and
+  // freezes; the sticky flag must keep it following.
+  list.scrollTop = 600; // dist = 900 - 600 - 120 = 180px off bottom, no scroll event
+  sandbox.state.direct_messages_by_agent['agent-1'] = makeRows(26);
+  runInContext(context, `_renderTerminalDirectMessages(__dmSlot, state.agents['agent-1']);`);
+
+  assert.equal(list.scrollTop, 920); // re-pinned to the new bottom (1040 - 120)
+});
+
+test('embedded terminal direct-message panel does not yank a deliberately scrolled-up reader to the bottom', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1', name: 'Builder', group: 'alpha', cell_type: 'agent',
+      kind: 'worker', session_id: 'sess-1', status: 'running',
+    },
+  };
+  function makeRows(count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      rows.push({
+        message_id: `dm-read-${String(i).padStart(2, '0')}`,
+        message_type: 'message', message: `Read ${String(i).padStart(2, '0')}`,
+        sender_id: 'agent-1', sender_kind: 'worker',
+        recipient_id: 'user', recipient_kind: 'user', created_at: 100 + i,
+      });
+    }
+    return rows;
+  }
+  sandbox.state.direct_messages_by_agent = { 'agent-1': makeRows(25) };
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const list = new FakeElement('dm-read-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  list.scrollTop = 300;
+  list.clientHeight = 120;
+  list.scrollHeight = 900;
+  const anchorItem = new FakeElement('dm-read-anchor');
+  anchorItem.dataset.terminalDmAnchor = 'dm-read-12';
+  anchorItem.offsetTop = 300;
+  anchorItem.offsetHeight = 40;
+  list.setQuerySelectorAll('[data-terminal-dm-anchor]', [anchorItem]);
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  context.__dmSlot = dom.directMessages;
+  context.__dmList = list;
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML; },
+    set(value) { this._innerHTML = String(value); list.scrollHeight = 1040; },
+  });
+
+  // User deliberately scrolled up -> sticky intent records "not following".
+  runInContext(context, `terminalDirectMessagesScroll({ currentTarget: __dmList });`);
+  sandbox.state.direct_messages_by_agent['agent-1'] = makeRows(26);
+  runInContext(context, `_renderTerminalDirectMessages(__dmSlot, state.agents['agent-1']);`);
+
+  // Anchor preserved (offsetTop 300 - anchorOffset 0), not yanked to bottom.
+  assert.equal(list.scrollTop, 300);
+});
+
 test('embedded terminal direct-message list pins to bottom when switching focused agents', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
