@@ -6756,7 +6756,9 @@ class MatrixState:
         def _is_legacy_broad_default(
                 enabled_events, *, include_engineer_defaults: bool = False) -> bool:
             enabled_set = set(normalize_architect_enabled_events(enabled_events))
-            if enabled_set in {legacy_defaults, legacy_defaults_without_engineer_peer}:
+            if (
+                    enabled_set == legacy_defaults
+                    or enabled_set == legacy_defaults_without_engineer_peer):
                 return True
             return bool(
                 include_engineer_defaults and enabled_set == engineer_defaults
