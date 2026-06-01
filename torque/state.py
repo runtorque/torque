@@ -218,6 +218,7 @@ _WORKTREE_MERGE_CLEANUP_MODES = {
     "close",
     "remove",
     "close_remove",
+    "auto_sweep",
 }
 _DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
 _BOARD_SYNC_PROVIDERS = {"none", "github"}
@@ -692,7 +693,7 @@ def merge_cleanup_flags(mode: str) -> tuple[bool, bool]:
         return (True, False)
     if mode == "remove":
         return (False, True)
-    if mode == "close_remove":
+    if mode in {"close_remove", "auto_sweep"}:
         return (True, True)
     return (False, False)
 
@@ -1783,7 +1784,7 @@ class GroupSettings:
     checkpoint_on_progress: bool = False  # auto-checkpoint on torque ai progress/done
     worktree_merge_squash: bool = False  # squash commits when merging to main
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
-    worktree_merge_cleanup: str = "keep"  # keep | close | remove | close_remove
+    worktree_merge_cleanup: str = "keep"  # keep | close | remove | close_remove | auto_sweep
     worktree_merge_preserve_diff: bool = False  # save the pre-merge patch on the latest boundary task
     engineer_merge_mode: str = "pr"  # pr | direct | engineer-choice
     worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root

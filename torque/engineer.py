@@ -478,6 +478,7 @@ def _merge_cleanup_label(mode: str) -> str:
         "close": "Close agent session only",
         "remove": "Remove worktree only",
         "close_remove": "Close agent session and remove worktree",
+        "auto_sweep": "Auto-sweep merged branch/worktree and close agent session",
     }
     return labels.get(mode, "Keep agent session and worktree")
 

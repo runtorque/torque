@@ -21,7 +21,7 @@ function createSandbox() {
       },
       group_settings: {
         alpha: {
-          worktree_merge_cleanup: 'close_remove',
+          worktree_merge_cleanup: 'auto_sweep',
           worktree_merge_preserve_diff: true,
         },
       },

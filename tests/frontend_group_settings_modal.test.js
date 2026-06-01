@@ -293,6 +293,15 @@ test('group settings renders engineer merge mode selector', () => {
   assert.match(html, /workflow-breach audit events/);
 });
 
+test('group settings renders opt-in auto-sweep cleanup mode', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+
+  assert.match(html, /<label>Default post-merge cleanup[\s\S]*<select id="gs-wt-merge-cleanup">/);
+  assert.match(html, /<option value="keep">Keep worker and worktree \(default \/ warm\)<\/option>/);
+  assert.match(html, /<option value="auto_sweep">Auto-sweep merged branch and worktree<\/option>/);
+  assert.match(html, /Auto-sweep is opt-in and runs only after the branch is actually merged/);
+});
+
 test('system prompt preview popup sends unsaved form state and closes as nested modal', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);

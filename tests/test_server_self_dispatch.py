@@ -3516,6 +3516,182 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.agent_id, "")
         self.assertEqual(worktree_mgr.sync_calls, 2)
 
+    async def test_worktree_merge_pr_default_keep_warm_preserves_cleanup(self):
+        state, worker, task = self._make_pr_merge_state()
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            cleanup_calls.append((close_agent, remove_worktree))
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["cleanup"]["close_agent"], False)
+        self.assertEqual(result["cleanup"]["remove_worktree"], False)
+        self.assertEqual(cleanup_calls, [])
+        self.assertEqual(task.worktree_boundary["status"], "merged")
+        self.assertEqual(task.worktree_boundary["pr"]["requested_cleanup"], {
+            "close_agent_on_merge": False,
+            "remove_worktree_on_merge": False,
+            "auto_move_to_done": True,
+            "preserve_merge_diff": False,
+        })
+        self.assertEqual(task.lane, "In Progress")
+        self.assertEqual(task.agent_id, worker.id)
+
+    async def test_worktree_merge_pr_auto_sweep_setting_cleans_after_confirmed_merge(self):
+        state, worker, task = self._make_pr_merge_state()
+        state.update_group_settings("g", worktree_merge_cleanup="auto_sweep")
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            cleanup_calls.append((close_agent, remove_worktree))
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(cleanup_calls, [(True, True)])
+        self.assertEqual(result["cleanup"]["close_agent"], True)
+        self.assertEqual(result["cleanup"]["remove_worktree"], True)
+        self.assertEqual(task.worktree_boundary["status"], "merged")
+        self.assertEqual(task.worktree_boundary["pr"]["requested_cleanup"], {
+            "close_agent_on_merge": True,
+            "remove_worktree_on_merge": True,
+            "auto_move_to_done": True,
+            "preserve_merge_diff": False,
+        })
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(task.agent_id, "")
+
+    async def test_worktree_merge_pr_auto_sweep_setting_waits_for_actual_merge(self):
+        state, worker, task = self._make_pr_merge_state()
+        state.update_group_settings("g", worktree_merge_cleanup="auto_sweep")
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "",
+            "merge_state": "BLOCKED",
+            "pending": True,
+            "pr_status": {"ok": True, "state": "OPEN", "merge_state": "BLOCKED"},
+        })
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            cleanup_calls.append((close_agent, remove_worktree))
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["pending"])
+        self.assertFalse(result["merged"])
+        self.assertEqual(cleanup_calls, [])
+        self.assertEqual(task.worktree_boundary["status"], "open")
+        self.assertEqual(task.worktree_boundary["pr"]["requested_cleanup"], {
+            "close_agent_on_merge": True,
+            "remove_worktree_on_merge": True,
+            "auto_move_to_done": True,
+            "preserve_merge_diff": False,
+        })
+        self.assertEqual(task.lane, "In Progress")
+        self.assertEqual(task.agent_id, worker.id)
+
     async def test_worktree_merge_pr_post_merge_sync_failure_is_warning(self):
         state, worker, task = self._make_pr_merge_state()
         cleanup_calls = []

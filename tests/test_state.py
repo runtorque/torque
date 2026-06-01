@@ -2745,6 +2745,13 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.update_group_settings("g", guidance_hint_cadence="not-an-int")
         self.assertEqual(state.group_settings["g"].guidance_hint_cadence, 4)
 
+        state.update_group_settings("g", worktree_merge_cleanup="auto_sweep")
+        self.assertEqual(gs.worktree_merge_cleanup, "auto_sweep")
+        self.assertEqual(
+            self.state_mod.merge_cleanup_flags(gs.worktree_merge_cleanup),
+            (True, True),
+        )
+
     def test_group_settings_engineer_merge_mode_defaults_and_snapshots(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
