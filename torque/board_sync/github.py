@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Sequence
 from urllib.parse import urlparse
 
+from ..config import log
+
 _TORQUE_MARKER_RE = re.compile(
     r"<!--\s*torque-sync:v(?P<version>\d+)\s+task_id=(?P<task_id>[^\s>]+)"
     r"(?:\s+group=(?P<group>[^>]+?))?\s*-->",
@@ -36,6 +38,8 @@ _CLOSING_KEYWORDS_RE = re.compile(
     r"(?P<ref>[\w.-]+/[\w.-]+#\d+|#\d+)",
     re.IGNORECASE,
 )
+_ARCHIVED_LANE = "Archived"
+
 _GITHUB_ISSUE_VIEW_FIELDS = ",".join([
     "id",
     "number",
@@ -301,6 +305,20 @@ def _assignees(task, settings: GitHubSyncSettings) -> list[str]:
     return []
 
 
+def _mapped_status_name(name: str, settings: GitHubSyncSettings) -> str:
+    status = str(name or "").strip()
+    if not status:
+        return ""
+    mapped = settings.lane_status_map.get(status)
+    if mapped is None:
+        folded = {
+            str(key or "").strip().casefold(): value
+            for key, value in settings.lane_status_map.items()
+        }
+        mapped = folded.get(status.casefold())
+    return str(mapped if mapped is not None else status or "").strip()
+
+
 def _lane_status(task, settings: GitHubSyncSettings) -> str:
     status = str(getattr(task, "status", "") or "").strip()
     if status:
@@ -314,20 +332,43 @@ def _lane_status(task, settings: GitHubSyncSettings) -> str:
         if mapped:
             return str(mapped or "").strip()
     lane = str(getattr(task, "lane", "") or "").strip()
-    return str(settings.lane_status_map.get(lane, lane) or "").strip()
+    return _mapped_status_name(lane, settings)
 
 
-def compute_outbound_hash(task, settings: GitHubSyncSettings | None = None) -> str:
-    settings = settings or GitHubSyncSettings()
-    payload = {
+def _outbound_payload(
+    task,
+    settings: GitHubSyncSettings,
+    *,
+    lane_status: str | None = None,
+) -> dict:
+    return {
         "title": str(getattr(task, "task", "") or ""),
         "body": render_issue_body(task),
         "labels": _user_labels(task),
         "assignees": _assignees(task, settings),
-        "lane_status": _lane_status(task, settings),
+        "lane_status": _lane_status(task, settings)
+        if lane_status is None else str(lane_status or "").strip(),
     }
+
+
+def _hash_outbound_payload(payload: dict) -> str:
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _outbound_hash_with_lane_status(
+    task,
+    settings: GitHubSyncSettings,
+    lane_status: str,
+) -> str:
+    return _hash_outbound_payload(
+        _outbound_payload(task, settings, lane_status=lane_status)
+    )
+
+
+def compute_outbound_hash(task, settings: GitHubSyncSettings | None = None) -> str:
+    settings = settings or GitHubSyncSettings()
+    return _hash_outbound_payload(_outbound_payload(task, settings))
 
 
 def issue_ref_for_closing(issue: dict, *, default_repo: str = "") -> str:
@@ -411,6 +452,7 @@ class GitHubBoardSyncProvider:
         self.cwd = cwd
         self._label_cache: dict[str, tuple[float, set[str]]] = {}
         self._project_cache: dict[tuple[str, int, str], tuple[float, dict]] = {}
+        self._missing_status_options_warned: set[tuple[str, int, str, str]] = set()
         self._label_cache_ttl_seconds = 60.0
         self._project_cache_ttl_seconds = 300.0
 
@@ -684,6 +726,115 @@ class GitHubBoardSyncProvider:
             })
         return projects
 
+    @staticmethod
+    def _project_status_option(
+        project: dict,
+        settings: GitHubSyncSettings,
+        task,
+    ) -> tuple[str, str]:
+        status_name = _lane_status(task, settings)
+        options = project.get("status_options") or {}
+        if not isinstance(options, dict):
+            options = {}
+        option_id = str(options.get(status_name) or "").strip()
+        return status_name, option_id
+
+    def _warn_missing_status_option_once(
+        self,
+        settings: GitHubSyncSettings,
+        task,
+        project: dict,
+        status_name: str,
+    ) -> None:
+        key = (
+            str(settings.project_owner or "").casefold(),
+            int(settings.project_number or 0),
+            str(project.get("status_field_id") or settings.status_field_name or ""),
+            str(status_name or "").casefold(),
+        )
+        if key in self._missing_status_options_warned:
+            return
+        self._missing_status_options_warned.add(key)
+        options = project.get("status_options") or {}
+        available = sorted(str(name or "") for name in options.keys()) \
+            if isinstance(options, dict) else []
+        task_id = str(getattr(task, "id", "") or "").strip()
+        lane = str(getattr(task, "lane", "") or "").strip()
+        log.warning(
+            "Skipping GitHub Project status update for Torque task %s "
+            "in lane %r: status option %r was not found in Project %s/%s "
+            "field %r. GitHub issue/project item left as-is. Available "
+            "options: %s",
+            task_id or "(unknown)",
+            lane,
+            status_name,
+            settings.project_owner,
+            settings.project_number,
+            project.get("status_field_name") or settings.status_field_name,
+            ", ".join(available) if available else "(none)",
+        )
+
+    def _archived_status_only_change_from_previous_sync(
+        self,
+        task,
+        settings: GitHubSyncSettings,
+        existing_sync: dict,
+        github_sync: dict,
+        project: dict,
+    ) -> bool:
+        if str(getattr(task, "lane", "") or "").strip() != _ARCHIVED_LANE:
+            return False
+        last_hash = str(existing_sync.get("last_synced_hash") or "").strip()
+        if not last_hash:
+            return False
+        candidates: list[str] = []
+
+        def add(value: object) -> None:
+            status = str(value or "").strip()
+            if status and status not in candidates:
+                candidates.append(status)
+
+        archived_from = str(getattr(task, "archived_from_lane", "") or "").strip()
+        if archived_from:
+            add(_mapped_status_name(archived_from, settings))
+
+        options = project.get("status_options") or {}
+        if isinstance(options, dict):
+            old_option_id = str(github_sync.get("status_option_id") or "").strip()
+            if old_option_id:
+                for name, option_id in options.items():
+                    if str(option_id or "").strip() == old_option_id:
+                        add(name)
+            for name in options.keys():
+                add(name)
+
+        assignee_candidates: list[list[str]] = []
+
+        def add_assignees(value: object) -> None:
+            if isinstance(value, (list, tuple)):
+                assignees = [
+                    str(item or "").strip()
+                    for item in value
+                    if str(item or "").strip()
+                ]
+            else:
+                assignee = str(value or "").strip()
+                assignees = [assignee] if assignee else []
+            if assignees not in assignee_candidates:
+                assignee_candidates.append(assignees)
+
+        add_assignees(_assignees(task, settings))
+        for login in settings.assignee_map.values():
+            add_assignees(login)
+
+        for candidate in candidates:
+            payload = _outbound_payload(task, settings, lane_status=candidate)
+            for assignees in assignee_candidates:
+                payload["assignees"] = assignees
+                if _hash_outbound_payload(payload) == last_hash:
+                    return True
+        return False
+
     async def push_task(self, task, group_settings) -> dict:
         settings = github_settings(group_settings)
         existing = dict(getattr(task, "board_sync", {}) or {})
@@ -710,6 +861,41 @@ class GitHubBoardSyncProvider:
             skipped = dict(existing)
             skipped.update({"sync_state": "idle", "last_error": "", "skipped": True})
             return skipped
+
+        if issue_number and settings.project_owner and settings.project_number \
+                and str(getattr(task, "lane", "") or "").strip() == _ARCHIVED_LANE:
+            project = await self._resolve_project(settings)
+            if project.get("ok"):
+                status_name, option_id = self._project_status_option(
+                    project,
+                    settings,
+                    task,
+                )
+                if status_name and not option_id:
+                    self._warn_missing_status_option_once(
+                        settings,
+                        task,
+                        project,
+                        status_name,
+                    )
+                    if self._archived_status_only_change_from_previous_sync(
+                        task,
+                        settings,
+                        existing,
+                        github_sync,
+                        project,
+                    ):
+                        skipped = dict(existing)
+                        skipped.update({
+                            "version": 1,
+                            "provider": self.name,
+                            "enabled": True,
+                            "sync_state": "idle",
+                            "last_error": "",
+                            "last_synced_hash": outbound_hash,
+                            "skipped": True,
+                        })
+                        return skipped
 
         labels = _user_labels(task)
         label_check = await self._ensure_labels(repo, labels, settings)
@@ -956,13 +1142,29 @@ class GitHubBoardSyncProvider:
         project = await self._resolve_project(settings)
         if not project.get("ok"):
             return project
-        status_name = _lane_status(task, settings)
-        options = project.get("status_options") or {}
-        option_id = str(options.get(status_name) or "").strip()
+        status_name, option_id = self._project_status_option(
+            project,
+            settings,
+            task,
+        )
         if status_name and not option_id:
-            return _error(
-                "project_status_option",
-                f"GitHub Project Status option '{status_name}' was not found.",
+            self._warn_missing_status_option_once(
+                settings,
+                task,
+                project,
+                status_name,
+            )
+            return _ok(
+                "project_status_update",
+                project_owner=settings.project_owner,
+                project_number=settings.project_number,
+                project_id=project["project_id"],
+                project_item_id=str(github_sync.get("project_item_id") or "").strip(),
+                status_field_id=project["status_field_id"],
+                status_option_id="",
+                status_name=status_name,
+                status_update_skipped=True,
+                status_skip_reason="missing_status_option",
             )
         item_id = str(github_sync.get("project_item_id") or "").strip()
         if not item_id:
