@@ -4269,7 +4269,7 @@ test('_renderBoardCard shows overdue and due-soon chips with distinct classes', 
   assert.match(dueSoonHtml, /Due Apr 8 08:00/);
 });
 
-test('_boardTaskDispatchEligibility only surfaces non-default dispatch states on cards', () => {
+test('_boardTaskDispatchEligibility only surfaces backlog dispatch blockers and warnings', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
@@ -4360,14 +4360,11 @@ test('_boardTaskDispatchEligibility only surfaces non-default dispatch states on
         id: 'queued',
         lane: 'To Do',
         group: 'alpha',
-        agent_id: 'agent-1'
+        agent_id: 'agent-1',
+        dispatch_state: 'live'
       }))`,
     ),
-    JSON.stringify({
-      className: 'board-card-dispatch board-card-dispatch-queued',
-      label: 'Queued',
-      title: 'Already queued for dispatch',
-    }),
+    'null',
   );
 });
 

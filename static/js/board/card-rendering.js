@@ -365,13 +365,6 @@ function _boardTaskIsDispatchBlocked(task) {
 
 function _boardTaskDispatchEligibility(task) {
   if (!task) return null;
-  if (task.lane === 'To Do' && task.agent_id) {
-    return {
-      className: 'board-card-dispatch board-card-dispatch-queued',
-      label: 'Queued',
-      title: 'Already queued for dispatch',
-    };
-  }
   if (task.lane !== 'Backlog') return null;
   if (_boardTaskNeedsEligibilityRefs(task)) {
     return {
@@ -599,6 +592,173 @@ function _boardAssignedEngineerBadgeHtml(task) {
       + esc(status) + '" aria-hidden="true">' + esc(initial) + '</span>'
     + '<span class="board-card-assigned-engineer-name">' + esc(displayName) + '</span>'
     + '</span>';
+}
+
+function _boardTaskDispatchStateValue(task) {
+  var value = String((task && task.dispatch_state) || '').trim().toLowerCase();
+  return (value === 'queued' || value === 'live') ? value : '';
+}
+
+function _boardTaskDispatchStateBadge(task) {
+  var dispatchState = _boardTaskDispatchStateValue(task);
+  if (!dispatchState) return null;
+  // `dispatch_state` defaults to queued for persisted tasks, so suppress the
+  // badge on unassigned backlog cards. The label itself still comes solely
+  // from task.dispatch_state; assignment only decides whether the default is
+  // meaningful enough to show.
+  if (dispatchState === 'queued'
+      && !String((task && task.agent_id) || '').trim()
+      && !String((task && task.assigned_engineer_id) || '').trim()) {
+    return null;
+  }
+  var live = dispatchState === 'live';
+  return {
+    state: dispatchState,
+    label: live ? 'LIVE' : 'QUEUED',
+    title: live
+      ? 'Dispatch state: live — task has been dispatched'
+      : 'Dispatch state: queued — assigned but not yet dispatched',
+    className: 'board-card-dispatch-state board-card-dispatch-state-' + dispatchState,
+  };
+}
+
+function _boardTaskDispatchStateBadgeHtml(task) {
+  var badge = _boardTaskDispatchStateBadge(task);
+  if (!badge) return '';
+  return '<span class="board-card-label ' + esc(badge.className) + '"'
+    + ' data-dispatch-state-badge="1"'
+    + ' data-dispatch-state="' + esc(badge.state) + '"'
+    + ' title="' + esc(badge.title) + '">' + esc(badge.label) + '</span>';
+}
+
+function _boardTaskDispatchDeltaChangedFields(change) {
+  var fields = {};
+  var previous = (change && change.previous) || null;
+  var next = (change && change.next) || null;
+  var keys = {};
+  function stable(value) {
+    if (value === undefined) return '__torque_undefined__';
+    if (value === null) return null;
+    if (value && typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch (_err) {
+        return String(value);
+      }
+    }
+    return value;
+  }
+  for (var prevKey in (previous || {})) keys[prevKey] = true;
+  for (var nextKey in (next || {})) keys[nextKey] = true;
+  for (var key in keys) {
+    var a = previous ? previous[key] : undefined;
+    var b = next ? next[key] : undefined;
+    if (stable(a) !== stable(b)) fields[key] = true;
+  }
+  return fields;
+}
+
+function _boardTaskDeltaIsDispatchStateOnly(change) {
+  if (!change || change.op !== 'task_upsert' || !change.previous || !change.next) return false;
+  var changed = _boardTaskDispatchDeltaChangedFields(change);
+  var sawDispatchState = false;
+  for (var key in changed) {
+    if (key === 'dispatch_state') {
+      sawDispatchState = true;
+    } else if (key !== 'updated_at') {
+      return false;
+    }
+  }
+  return sawDispatchState;
+}
+
+function _boardTaskCardSelector(taskId) {
+  var value = String(taskId || '');
+  if (!value) return '';
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+    return '.board-card[data-task-id="' + CSS.escape(value) + '"]';
+  }
+  return '.board-card[data-task-id="' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+}
+
+function _boardPatchDispatchStateBadgeElement(el, task) {
+  if (!el) return false;
+  var badge = _boardTaskDispatchStateBadge(task);
+  if (!badge) {
+    if (el.parentNode && typeof el.parentNode.removeChild === 'function') {
+      el.parentNode.removeChild(el);
+    } else if (typeof el.remove === 'function') {
+      el.remove();
+    }
+    return true;
+  }
+  el.className = 'board-card-label ' + badge.className;
+  if (el.dataset) {
+    el.dataset.dispatchStateBadge = '1';
+    el.dataset.dispatchState = badge.state;
+  }
+  if (typeof el.setAttribute === 'function') {
+    el.setAttribute('data-dispatch-state-badge', '1');
+    el.setAttribute('data-dispatch-state', badge.state);
+    el.setAttribute('title', badge.title);
+  } else {
+    el.title = badge.title;
+  }
+  el.textContent = badge.label;
+  return true;
+}
+
+function _boardInsertDispatchStateBadge(card, task) {
+  if (!card || typeof card.querySelector !== 'function') return false;
+  var badgeHtml = _boardTaskDispatchStateBadgeHtml(task);
+  if (!badgeHtml) return false;
+  var meta = card.querySelector('.board-card-meta');
+  if (!meta) return false;
+  if (typeof document === 'undefined' || !document.createElement) return false;
+  var wrapper = document.createElement('span');
+  wrapper.innerHTML = badgeHtml;
+  var badgeEl = wrapper.firstElementChild;
+  if (!badgeEl) return false;
+  var assigned = meta.querySelector
+    ? meta.querySelector('.board-card-assigned-engineer')
+    : null;
+  if (assigned && typeof meta.insertBefore === 'function') {
+    meta.insertBefore(badgeEl, assigned.nextSibling || null);
+  } else if (assigned && typeof assigned.after === 'function') {
+    assigned.after(badgeEl);
+  } else if (meta.firstChild && typeof meta.insertBefore === 'function') {
+    meta.insertBefore(badgeEl, meta.firstChild);
+  } else if (typeof meta.appendChild === 'function') {
+    meta.appendChild(badgeEl);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+function _boardPatchDispatchStateTaskDeltas(changes) {
+  if (!changes || !changes.length || typeof document === 'undefined') return false;
+  var patched = false;
+  for (var i = 0; i < changes.length; i++) {
+    var change = changes[i] || {};
+    if (!_boardTaskDeltaIsDispatchStateOnly(change)) continue;
+    var task = change.next || null;
+    var taskId = change.id || (task && task.id) || '';
+    var selector = _boardTaskCardSelector(taskId);
+    if (!task || !selector || typeof document.querySelectorAll !== 'function') continue;
+    var cards = document.querySelectorAll(selector);
+    for (var ci = 0; ci < cards.length; ci++) {
+      var card = cards[ci];
+      if (!card || typeof card.querySelector !== 'function') continue;
+      var badgeEl = card.querySelector('[data-dispatch-state-badge]');
+      if (badgeEl) {
+        if (_boardPatchDispatchStateBadgeElement(badgeEl, task)) patched = true;
+      } else if (_boardInsertDispatchStateBadge(card, task)) {
+        patched = true;
+      }
+    }
+  }
+  return patched;
 }
 
 function _boardDepsBlocked(t) {
@@ -917,6 +1077,7 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     meta += _taskCreatedByBadgeHtml(t);
   }
   meta += _boardAssignedEngineerBadgeHtml(t);
+  meta += _boardTaskDispatchStateBadgeHtml(t);
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
   if (dispatchEligibility && dispatchEligibility.label !== dependencyBlockedLabel) {
     meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)
