@@ -30,6 +30,7 @@ ARCHITECT_COARSE_EVENTS = frozenset({
     "engineer_rehired",
     "workflow_breach",
     "engineer_queue_empty",
+    "perceived_empty_episode",
     ENGINEER_AWAITING_HUMAN_INPUT,
     ENGINEER_ASK_RESOLVED,
 })

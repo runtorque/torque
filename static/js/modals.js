@@ -2239,6 +2239,7 @@ const _ARCHITECT_DIGEST_DEFAULT_EVENTS = [
   'engineer_rehired',
   'workflow_breach',
   'engineer_queue_empty',
+  'perceived_empty_episode',
   'engineer_awaiting_human_input',
   'engineer_ask_resolved',
 ];

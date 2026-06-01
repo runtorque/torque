@@ -68,6 +68,10 @@ from .task_ids import (
     parse_task_id,
 )
 from .worktree_boundaries import clear_stale_successor_references
+from .perceived_empty import (
+    coerce_perceived_empty_threshold,
+    coerce_perceived_empty_window_seconds,
+)
 
 ARCHIVED_LANE = "Archived"
 _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
@@ -198,6 +202,7 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     "engineer_rehired",
     "workflow_breach",
     "engineer_queue_empty",
+    "perceived_empty_episode",
     ENGINEER_AWAITING_HUMAN_INPUT,
     ENGINEER_ASK_RESOLVED,
 ]
@@ -1940,7 +1945,7 @@ class AgentDigestSettings:
 ENGINEER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
     "agent_blocked", "ask_created", "task_verification_updated",
-    "worker_boot_doa",
+    "worker_boot_doa", "perceived_empty_episode",
 })
 
 
@@ -1966,6 +1971,8 @@ class GlobalSettings:
     event_ingest_max_days: int = 14
     mcp_call_log_args_capture: str = "metadata"  # off | metadata | full
     mcp_call_log_full_capture_tools: list[str] = field(default_factory=list)
+    perceived_empty_probe_threshold: int = 5
+    perceived_empty_window_seconds: int = 120
     # Status bar chip visibility — show/hide only, keyed by the frontend's
     # stable status-bar item ids. Missing/legacy keys merge with defaults.
     status_bar_visibility: dict[str, bool] = field(
@@ -2004,6 +2011,16 @@ class GlobalSettings:
         self.mcp_call_log_full_capture_tools = (
             normalize_mcp_call_log_full_capture_tools(
                 self.mcp_call_log_full_capture_tools
+            )
+        )
+        self.perceived_empty_probe_threshold = (
+            coerce_perceived_empty_threshold(
+                self.perceived_empty_probe_threshold
+            )
+        )
+        self.perceived_empty_window_seconds = (
+            coerce_perceived_empty_window_seconds(
+                self.perceived_empty_window_seconds
             )
         )
         self.status_bar_visibility = normalize_status_bar_visibility(
@@ -3264,6 +3281,35 @@ class MatrixState:
         if coalesce_ephemeral and self._coalesce_pending_agent_upsert(payload):
             return
         self._emit("agent_upsert", **payload)
+
+    def flag_perceived_empty_episode(
+        self,
+        aid: str,
+        *,
+        detail: str = "",
+    ) -> bool:
+        """Surface a perceived-empty tool-result episode on an agent.
+
+        This is intentionally surface-only: it sets ``needs_attention`` and
+        emits/saves the agent row, but it does not pause, stop, or otherwise
+        change the worker's execution state.
+        """
+
+        cell = self.agents.get(str(aid or "").strip())
+        if not cell:
+            return False
+        message = str(detail or "Perceived-empty tool-result episode detected")
+        cell.needs_attention = True
+        cell.last_event_at = time.time()
+        cell.last_event_text = message[:300]
+        # Keep the current process/status intact.  Only fill activity_detail
+        # when it is blank so this guardrail does not erase a more specific
+        # worker-reported blocker/error.
+        if not str(getattr(cell, "activity_detail", "") or "").strip():
+            cell.activity_detail = message[:500]
+        self._emit_agent(cell)
+        self._db_save_agent(cell)
+        return True
 
     def _coalesce_pending_agent_upsert(self, payload: dict) -> bool:
         """Replace the latest pending upsert for this agent with ``payload``.
@@ -8700,6 +8746,10 @@ class MatrixState:
                     value = normalize_mcp_call_log_args_capture(value)
                 elif key == "mcp_call_log_full_capture_tools":
                     value = normalize_mcp_call_log_full_capture_tools(value)
+                elif key == "perceived_empty_probe_threshold":
+                    value = coerce_perceived_empty_threshold(value)
+                elif key == "perceived_empty_window_seconds":
+                    value = coerce_perceived_empty_window_seconds(value)
                 elif key == "status_bar_visibility":
                     value = normalize_status_bar_visibility(value)
                 elif key == "relay_enabled":

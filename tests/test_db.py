@@ -142,6 +142,35 @@ class TorqueDBTests(unittest.TestCase):
         }
         self.assertIn("xterm_scrollback", columns)
 
+    def test_perceived_empty_episode_round_trips(self):
+        episode_id = self.db.record_perceived_empty_episode(
+            timestamp=123.0,
+            cell_id="worker-1",
+            group_name="g",
+            agent_name="Worker",
+            session_id="sess-1",
+            transcript_path="/tmp/transcript.jsonl",
+            trigger_reason="5 redundant non-empty toolsearch probes",
+            confidence="high",
+            threshold_n=5,
+            window_seconds=120,
+            tool_calls_json=json.dumps([{
+                "tool_name": "ToolSearch",
+                "input_hash": "abc",
+                "result_len": 42,
+                "result_content_type": "tool_reference",
+            }]),
+        )
+
+        rows = self.db.load_perceived_empty_episodes(cell_id="worker-1")
+
+        self.assertGreater(episode_id, 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["cell_id"], "worker-1")
+        self.assertEqual(rows[0]["confidence"], "high")
+        self.assertEqual(rows[0]["tool_calls"][0]["result_content_type"],
+                         "tool_reference")
+
     def test_board_task_messages_thread_round_trips(self):
         task = BoardTask(
             id="task-1",

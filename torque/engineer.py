@@ -125,6 +125,7 @@ _ARCHITECT_EVENT_LABELS = {
     "architect_rehired": "architect rehired",
     "workflow_breach": "workflow breach",
     "engineer_queue_empty": "queue empty",
+    "perceived_empty_episode": "perceived-empty episode",
     "engineer_awaiting_human_input": "awaiting human input",
     "engineer_ask_resolved": "ask resolved",
     "agent_progress": "progress",
