@@ -6681,7 +6681,9 @@ class MatrixState:
             enabled_set = set(normalize_architect_enabled_events(enabled_events))
             if enabled_set == legacy_defaults:
                 return True
-            return bool(include_engineer_defaults and enabled_set == engineer_defaults)
+            return bool(
+                include_engineer_defaults and enabled_set == engineer_defaults
+            )
 
         if not already:
             changed = []
@@ -6718,8 +6720,10 @@ class MatrixState:
                 )
                 if _is_legacy_broad_default(enabled):
                     enabled = list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
-                if list(getattr(
-                        settings, "architect_enabled_events", []) or []) == enabled:
+                current = list(
+                    getattr(settings, "architect_enabled_events", []) or []
+                )
+                if current == enabled:
                     continue
                 settings.architect_enabled_events = enabled
                 changed_groups.append((group_name, settings))
