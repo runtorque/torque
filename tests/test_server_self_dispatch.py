@@ -5347,6 +5347,8 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
                     name="worker",
                     group="g",
                     cell_type="agent",
+                    session_id="sess-agent-1",
+                    status="running",
                     current_task_id=task.id,
                 )
                 state.agents[agent.id] = agent

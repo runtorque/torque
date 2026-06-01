@@ -100,10 +100,11 @@ def _targeted_dispatch_drop_reason(state: MatrixState, target) -> str:
     if str(getattr(target, "cell_type", "") or "") != "agent":
         return "target_not_agent"
     status = str(getattr(target, "status", "") or "").strip()
-    if status in {"stopped", "error"}:
+    session_id = str(getattr(target, "session_id", "") or "").strip()
+    if status == "error":
         return f"target_{status}"
-    if not str(getattr(target, "session_id", "") or "").strip():
-        return "target_no_session"
+    if status == "stopped" and not session_id:
+        return "target_stopped"
     return ""
 
 
