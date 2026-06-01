@@ -17836,8 +17836,6 @@ async def main(connection=None):
                         _send_agent_prompt,
                         panel_event=_panel_event,
                     )
-                            result = {"type": "ok",
-                                      "task_id": tid}
 
             elif cmd == "preview_prompt":
                 # Preview rendered prompt for a task or inline params

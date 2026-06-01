@@ -1859,7 +1859,14 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_deliver_engineer_reply_buffers_when_session_is_absent(self):
-        state = self._make_state()
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / 'torque.db')
+        db.init()
+        self.addCleanup(db.close)
+        state = self.state_mod.MatrixState(db=db)
         state.add_group('g')
         engineer = self.state_mod.AgentCell(
             id='engineer-1',
@@ -1903,7 +1910,7 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(buffer.resumed, ['g'])
         ws = state.get_engineer_settings('g')
         self.assertEqual(ws.pending_question, '')
-        direct_rows = self.db.load_direct_messages_for_agent(engineer.id)
+        direct_rows = db.load_direct_messages_for_agent(engineer.id)
         direct_by_type = {row['message_type']: row for row in direct_rows}
         self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
         self.assertEqual(
@@ -1938,7 +1945,7 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('## Human Reply', sent[0][1])
         self.assertIn('Need approval', sent[0][1])
         self.assertIn('Ship it', sent[0][1])
-        replayed_row = self.db.load_direct_message(
+        replayed_row = db.load_direct_message(
             direct_by_type['ask_reply']['id']
         )
         self.assertEqual(replayed_row['delivery_state'], 'delivered')
