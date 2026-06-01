@@ -1975,6 +1975,7 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
     'verification_state',
     'verification_notes',
     'verification_summary',
+    'completion_evidence',
     'attachments',
     'artifacts',
     'board_sync',

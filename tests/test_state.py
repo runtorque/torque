@@ -1283,6 +1283,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
             verification_state="pending",
             verification_notes="needs smoke",
             verification_summary={"tests_run": "targeted"},
+            completion_evidence={
+                "status": "evidence_attached",
+                "sources": ["verification"],
+            },
             lane_entered_at="2026-04-22T00:00:00+00:00",
             worktree_boundary={"base": "main"},
             resume_after_boundary_task_id="task-boundary",
@@ -1342,6 +1346,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task["verification_notes"], "needs smoke")
         self.assertEqual(
             task["verification_summary"], {"tests_run": "targeted"})
+        self.assertEqual(
+            task["completion_evidence"]["sources"], ["verification"])
         self.assertEqual(
             task["messages"],
             [{"count": 1, "action": "progress", "message": "progress"}],

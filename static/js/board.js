@@ -364,6 +364,18 @@ function _boardVisibleTasksFromScoped(scopedTasks) {
       var verificationSummary = t.verification_summary || {};
       parts.push(verificationSummary.tests_run || '');
       parts.push(verificationSummary.human_validation_pending || '');
+      var completionEvidence = t.completion_evidence || {};
+      parts.push(completionEvidence.status || '');
+      if (completionEvidence.sources && completionEvidence.sources.length) {
+        parts.push(completionEvidence.sources.join(' '));
+      }
+      var completionMerge = completionEvidence.merge || {};
+      parts.push(completionMerge.sha || '');
+      parts.push(completionMerge.origin_summary || '');
+      parts.push(completionMerge.pr_url || '');
+      var completionVerification = completionEvidence.verification || {};
+      var completionSummary = completionVerification.summary || {};
+      parts.push(completionSummary.tests_run || '');
       if (t.labels && t.labels.length) {
         for (var li = 0; li < t.labels.length; li++) {
           parts.push(t.labels[li]);

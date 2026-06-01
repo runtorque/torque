@@ -4911,6 +4911,46 @@ test('renderBoardCard shows verification badges and preview text', () => {
   assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
 });
 
+test('renderBoardCard shows completion evidence badge', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardScripts(context);
+
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Merged billing changes',
+      lane: 'Done',
+      position: 1,
+      completion_evidence: {
+        status: 'verified',
+        verified: true,
+        sources: ['merge', 'verification'],
+        merge: {
+          sha: 'squash789',
+          origin_summary: 'origin/main == squash789',
+        },
+        verification: {
+          summary: { tests_run: 'make test' },
+        },
+      },
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      {},
+      0
+    )
+  `);
+
+  assert.match(html, /board-card-completion-evidence-verified/);
+  assert.match(html, />Verified</);
+  assert.match(html, /origin\/main == squash789/);
+});
+
 test('renderBoardCard shows branch boundary review notes', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

@@ -1397,6 +1397,35 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.verification_updated_by, "engineer-1")
         self.assertTrue(task.verification_updated_at)
 
+    async def test_board_verify_done_task_refreshes_completion_evidence(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        task = state.board_add_task(
+            "Verify completed deploy",
+            "g",
+            lane="Done",
+            id="TORQUE:161",
+        )
+        self.assertIsNotNone(task)
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "board_verify_task",
+            "id": "TORQUE:161",
+            "actor_name": "engineer-1",
+            "verification_state": "passed",
+            "tests_run": "make test",
+        })
+
+        task = state.board_tasks["TORQUE:161"]
+        self.assertEqual(result["type"], "verification_updated")
+        self.assertEqual(task.completion_evidence["status"], "verified")
+        self.assertEqual(task.completion_evidence["sources"], ["verification"])
+        self.assertEqual(
+            task.completion_evidence["verification"]["summary"]["tests_run"],
+            "make test",
+        )
+
     async def test_board_verify_task_handler_accepts_smoke_and_notes_payload(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -1464,6 +1493,49 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "Smoke failed on login redirect",
         )
         self.assertTrue(root_task.verification_summary["manual_smoke_done"])
+
+    def test_completion_evidence_snapshot_includes_verification_and_artifacts(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        task = state.board_add_task(
+            "Complete with proof",
+            "g",
+            id="TORQUE:162",
+            verification_state="passed",
+            verification_summary={"tests_run": "pytest tests/test_done.py"},
+            artifacts=[{
+                "type": "test_report",
+                "title": "pytest",
+                "filename": "pytest.log",
+                "summary": "3 passed",
+            }],
+        )
+
+        changed = self.server_mod._record_task_completion_evidence_snapshot(
+            state,
+            task,
+            cell=cell,
+            action="done",
+            message="Implemented and tested.",
+        )
+
+        self.assertTrue(changed)
+        evidence = task.completion_evidence
+        self.assertEqual(evidence["status"], "verified")
+        self.assertEqual(evidence["sources"], ["verification", "artifacts"])
+        self.assertEqual(evidence["completion"]["action"], "done")
+        self.assertEqual(
+            evidence["verification"]["summary"]["tests_run"],
+            "pytest tests/test_done.py",
+        )
+        self.assertEqual(evidence["artifacts"]["count"], 1)
 
     async def test_board_move_task_handler_can_clear_status(self):
         state = self.state_mod.MatrixState()
@@ -3759,6 +3831,84 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result["post_success_warnings"][-1]["phase"],
             "remote_base_sync",
+        )
+
+    async def test_worktree_merge_pr_records_completion_evidence(self):
+        state, worker, task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            sync_results=[
+                {
+                    "ok": True,
+                    "phase": "remote_base_sync",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "base_sha": "base-before",
+                    "remote_sha": "base-before",
+                    "synced": False,
+                },
+                {
+                    "ok": True,
+                    "phase": "remote_base_sync",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "base_sha": "squash789",
+                    "remote_sha": "squash789",
+                    "synced": True,
+                },
+            ],
+        )
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertTrue(result["origin_verification"]["verified"])
+        self.assertEqual(task.lane, "Done")
+        evidence = task.completion_evidence
+        self.assertEqual(evidence["status"], "verified")
+        self.assertEqual(evidence["sources"], ["merge"])
+        self.assertEqual(evidence["merge"]["sha"], "squash789")
+        self.assertEqual(
+            evidence["merge"]["origin_summary"],
+            "origin/main == squash789",
         )
 
     async def test_worktree_merge_pr_post_merge_sync_ref_lock_uses_remote_ground_truth(self):

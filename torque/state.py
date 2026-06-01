@@ -304,6 +304,7 @@ COMPACT_BOARD_TASK_FIELDS = (
     "verification_mode",
     "verification_notes",
     "verification_summary",
+    "completion_evidence",
     "messages",
     "messages_thread",
     "lane_entered_at",
@@ -888,6 +889,9 @@ class BoardTask:
     verification_updated_at: str = ""
     verification_updated_by: str = ""
     verification_summary: dict = field(default_factory=dict)
+    # Completion evidence captured from existing verification/merge/artifact
+    # primitives. This is advisory surfacing, not a completion gate.
+    completion_evidence: dict = field(default_factory=dict)
     # Task-scoped shared-worktree merge boundary metadata.
     worktree_boundary: dict = field(default_factory=dict)
     resume_after_boundary_task_id: str = ""
@@ -1456,6 +1460,32 @@ def _normalize_verification_summary(summary) -> dict:
     return out
 
 
+def _normalize_completion_evidence(evidence) -> dict:
+    if not isinstance(evidence, dict):
+        return {}
+    source = _json_safe_copy(evidence, {})
+    if not isinstance(source, dict):
+        return {}
+    status = str(source.get("status", "") or "").strip()
+    if status and status not in {"verified", "evidence_attached"}:
+        source.pop("status", None)
+    sources = source.get("sources")
+    if isinstance(sources, list):
+        normalized_sources = []
+        seen = set()
+        for item in sources:
+            value = str(item or "").strip()
+            if value and value not in seen:
+                normalized_sources.append(value)
+                seen.add(value)
+        source["sources"] = normalized_sources
+    elif "sources" in source:
+        source.pop("sources", None)
+    if "verified" in source:
+        source["verified"] = bool(source.get("verified"))
+    return source
+
+
 def _json_safe_copy(value, default):
     """Return a JSON-compatible deep copy, falling back to ``default``."""
     try:
@@ -1694,6 +1724,10 @@ def _normalize_verification_fields(fields: dict) -> None:
     if "verification_summary" in fields:
         fields["verification_summary"] = _normalize_verification_summary(
             fields.get("verification_summary")
+        )
+    if "completion_evidence" in fields:
+        fields["completion_evidence"] = _normalize_completion_evidence(
+            fields.get("completion_evidence")
         )
 
 
