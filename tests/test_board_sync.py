@@ -639,6 +639,115 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fallback_sync["github"]["status_option_id"], "opt-doing")
         self.assertEqual(fallback_runner.calls[-1][0][-1], "opt-doing")
 
+    async def test_archived_missing_project_status_option_skips_without_touching_github_once(self):
+        settings_obj = github_settings(board_sync_github={
+            "github_lane_status_map": {
+                "Done": "Done",
+                "In Progress": "Doing",
+            },
+            "github_assignee_map": {
+                "worker-1": "octocat",
+            },
+        })
+        settings = extract_github_settings(settings_obj)
+
+        def archived_task(task_id, number):
+            task = BoardTask(
+                id=task_id,
+                task="Already synced",
+                description="Body",
+                lane="Archived",
+                archived_from_lane="Done",
+                agent_id="",
+                board_sync={
+                    "version": 1,
+                    "provider": "github",
+                    "enabled": True,
+                    "github": {
+                        "issue_repo": "owner/repo",
+                        "issue_number": number,
+                        "project_item_id": f"PVTI_{number}",
+                        "status_option_id": "opt-done",
+                    },
+                    "sync_state": "idle",
+                },
+            )
+            previously_synced = BoardTask(
+                id=task_id,
+                task=task.task,
+                description=task.description,
+                lane="Done",
+                agent_id="worker-1",
+            )
+            task.board_sync["last_synced_hash"] = compute_outbound_hash(
+                previously_synced,
+                settings,
+            )
+            return task
+
+        first = archived_task("T:archived-1", 123)
+        second = archived_task("T:archived-2", 124)
+        runner = FakeGhRunner([
+            gh_ok(project_view()),
+            gh_ok(field_list()),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        with self.assertLogs("torque", level="WARNING") as captured:
+            first_sync = await provider.push_task(first, settings_obj)
+            second_sync = await provider.push_task(second, settings_obj)
+
+        self.assertEqual(first_sync["sync_state"], "idle")
+        self.assertEqual(second_sync["sync_state"], "idle")
+        self.assertEqual(first_sync["last_error"], "")
+        self.assertEqual(second_sync["last_error"], "")
+        self.assertEqual(first_sync["last_synced_hash"], compute_outbound_hash(first, settings))
+        self.assertEqual(second_sync["last_synced_hash"], compute_outbound_hash(second, settings))
+        commands = [call[0] for call in runner.calls]
+        self.assertNotIn(["issue", "edit"], [cmd[:2] for cmd in commands])
+        self.assertNotIn(["project", "item-edit"], [cmd[:2] for cmd in commands])
+        warnings = [
+            line for line in captured.output
+            if "Skipping GitHub Project status update" in line
+        ]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Archived", warnings[0])
+
+    async def test_missing_project_status_option_skips_status_update_without_error(self):
+        task = BoardTask(
+            id="T:unknown-lane",
+            task="Unknown lane",
+            description="Body",
+            lane="Needs Triage",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {
+                    "issue_repo": "owner/repo",
+                    "issue_number": 125,
+                    "project_item_id": "PVTI_125",
+                },
+            },
+        )
+        runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(number=125, title="Unknown lane", body=render_issue_body(task))),
+            gh_ok(project_view()),
+            gh_ok(field_list()),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        with self.assertLogs("torque", level="WARNING") as captured:
+            sync = await provider.push_task(task, github_settings())
+
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["last_error"], "")
+        commands = [call[0] for call in runner.calls]
+        self.assertIn(["issue", "edit"], [cmd[:2] for cmd in commands])
+        self.assertNotIn(["project", "item-edit"], [cmd[:2] for cmd in commands])
+        self.assertIn("Needs Triage", "\n".join(captured.output))
+
     async def test_provider_reuses_project_and_label_caches_across_batch_instance(self):
         settings = github_settings(board_sync_github={
             "github_project_owner": "owner",
