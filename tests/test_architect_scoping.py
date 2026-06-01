@@ -1568,6 +1568,102 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["dispatch_state"], "live")
         self.assertEqual(self.state.board_tasks[task_id].dispatch_state, "live")
 
+    async def test_architect_message_task_id_inference_uses_exact_references(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        queued = self._add_task(
+            "TORQUE:1",
+            "Short id queued task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="queued",
+        )
+        live = self._add_task(
+            "TORQUE:10",
+            "Long id live task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="live",
+        )
+
+        status_text, status_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please check {live.id} status.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(status_error, status_text)
+        status_payload = json.loads(status_text)
+        self.assertNotIn("task_id", status_payload)
+        self.assertEqual(queued.dispatch_state, "queued")
+        self.assertEqual(live.dispatch_state, "live")
+
+        dispatch_text, dispatch_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please pick up {queued.id} now.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(dispatch_error, dispatch_text)
+        dispatch_payload = json.loads(dispatch_text)
+        self.assertEqual(dispatch_payload["task_id"], queued.id)
+        self.assertEqual(
+            self.state.board_tasks[queued.id].dispatch_state,
+            "live",
+        )
+
+    async def test_architect_message_task_slug_inference_uses_boundaries(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        queued = self._add_task(
+            "TORQUE:20",
+            "Review dashboard",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            dispatch_state="queued",
+        )
+
+        status_text, status_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please check {queued.slug}-v2 notes first.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(status_error, status_text)
+        status_payload = json.loads(status_text)
+        self.assertNotIn("task_id", status_payload)
+        self.assertEqual(queued.dispatch_state, "queued")
+
+        dispatch_text, dispatch_error = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": alice.id,
+                "message": f"Please pick up {queued.slug} now.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(dispatch_error, dispatch_text)
+        dispatch_payload = json.loads(dispatch_text)
+        self.assertEqual(dispatch_payload["task_id"], queued.id)
+        self.assertEqual(
+            self.state.board_tasks[queued.id].dispatch_state,
+            "live",
+        )
+
     async def test_architect_tools_exclude_and_reject_tombstoned_engineer(self):
         architect = self._add_architect("arch-1", "Architect")
         engineer = self._add_engineer(

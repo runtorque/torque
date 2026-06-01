@@ -2213,6 +2213,35 @@ def _mcp_worker_provider_override_arg(args: dict) -> tuple[str, str]:
 _TASK_ID_REFERENCE_RE = re.compile(
     r"\b[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?\b"
 )
+_TASK_SLUG_REFERENCE_BOUNDARY_RE = r"[A-Za-z0-9_-]"
+
+
+def _resolve_exact_task_reference(state, task_ident: str) -> str:
+    """Resolve a message token as an exact task ID/alias, never as a prefix."""
+    ident = str(task_ident or "").strip()
+    if not ident:
+        return ""
+    resolver = getattr(state, "resolve_board_task_id", None)
+    if callable(resolver):
+        return str(resolver(ident, allow_prefix=False) or "").strip()
+    alias_resolver = getattr(state, "resolve_task_alias", None)
+    if callable(alias_resolver):
+        aliased = str(alias_resolver(ident) or "").strip()
+        if aliased != ident:
+            return aliased if aliased in getattr(state, "board_tasks", {}) else ""
+    return ident if ident in getattr(state, "board_tasks", {}) else ""
+
+
+def _message_mentions_task_slug(message_text: str, slug: str) -> bool:
+    slug = str(slug or "").strip()
+    if not slug:
+        return False
+    pattern = (
+        rf"(?<!{_TASK_SLUG_REFERENCE_BOUNDARY_RE})"
+        rf"{re.escape(slug)}"
+        rf"(?!{_TASK_SLUG_REFERENCE_BOUNDARY_RE})"
+    )
+    return bool(re.search(pattern, str(message_text or ""), re.IGNORECASE))
 
 
 def _deliverable_awareness_for_referenced_tasks(state, message_text: str) -> str:
@@ -2417,6 +2446,12 @@ def _infer_architect_dispatch_task_id_from_message(
     message_text = str(message or "")
     if not message_text:
         return ""
+    exact_task_refs = {
+        task_id
+        for raw in _TASK_ID_REFERENCE_RE.findall(message_text)
+        for task_id in [_resolve_exact_task_reference(state, raw)]
+        if task_id
+    }
     matches: list[str] = []
     for task in state.board_tasks.values():
         task_id = str(getattr(task, "id", "") or "").strip()
@@ -2427,9 +2462,9 @@ def _infer_architect_dispatch_task_id_from_message(
             != "queued"
         ):
             continue
-        if task_id not in message_text:
+        if task_id not in exact_task_refs:
             slug = str(getattr(task, "slug", "") or "").strip()
-            if not slug or slug not in message_text:
+            if not slug or not _message_mentions_task_slug(message_text, slug):
                 continue
         valid_task, _error = _resolve_architect_dispatch_task(
             state,
