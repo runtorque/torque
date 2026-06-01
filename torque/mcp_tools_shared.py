@@ -3797,6 +3797,8 @@ def _worktree_merge_success_payload(result: dict | None, cell, *,
         payload["url"] = str(result.get("url") or "").strip()
     if isinstance(result.get("pr"), dict):
         payload["pr"] = result["pr"]
+    if isinstance(result.get("origin_verification"), dict):
+        payload["origin_verification"] = result["origin_verification"]
     if isinstance(result.get("nested_submodules"), dict):
         payload["nested_submodules"] = result["nested_submodules"]
     if result.get("auto_force_push"):

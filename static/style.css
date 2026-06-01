@@ -6072,6 +6072,17 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 12%, transparent);
 }
+.board-card-completion-evidence {
+  font-weight: 600;
+}
+.board-card-completion-evidence-verified {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+}
+.board-card-completion-evidence-evidence_attached {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
 .board-card-priority {
   font-weight: 600;
 }
@@ -8692,6 +8703,34 @@ body[data-torque-mode="desktop"] .diff-view-modal {
   border-radius: 8px;
   background: var(--bg-hover);
   padding: 10px;
+}
+.task-completion-evidence-preview {
+  margin-top: 10px;
+}
+.task-completion-evidence-preview details {
+  border: 1px solid color-mix(in srgb, var(--green) 22%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+  padding: 8px 10px;
+}
+.task-completion-evidence-preview summary {
+  cursor: pointer;
+  color: var(--green);
+  font-weight: 600;
+}
+.task-completion-evidence-lines {
+  margin: 8px 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.task-completion-evidence-raw {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 10px;
 }
 .task-artifact-editor-title {
   font-size: 11px;

@@ -448,6 +448,46 @@ function _boardVerificationSummary(task) {
   return (task && task.verification_summary) || {};
 }
 
+function _boardCompletionEvidence(task) {
+  return (task && task.completion_evidence) || {};
+}
+
+function _boardCompletionEvidenceStatus(task) {
+  var evidence = _boardCompletionEvidence(task);
+  if (!evidence || !Object.keys(evidence).length) return '';
+  return evidence.status || (evidence.verified ? 'verified' : 'evidence_attached');
+}
+
+function _boardCompletionEvidenceLabel(task) {
+  var status = _boardCompletionEvidenceStatus(task);
+  if (!status) return '';
+  return status === 'verified' ? 'Verified' : 'Evidence';
+}
+
+function _boardCompletionEvidenceTitle(task) {
+  var evidence = _boardCompletionEvidence(task);
+  if (!evidence || !Object.keys(evidence).length) return '';
+  var parts = [];
+  if (evidence.sources && evidence.sources.length) {
+    parts.push('Sources: ' + evidence.sources.join(', '));
+  }
+  var merge = evidence.merge || {};
+  if (merge.sha) parts.push('Merge SHA: ' + merge.sha);
+  if (merge.origin_summary) parts.push('Origin: ' + merge.origin_summary);
+  else if (merge.origin_ref && merge.origin_sha) {
+    parts.push('Origin: ' + merge.origin_ref + ' == ' + merge.origin_sha);
+  }
+  var verification = evidence.verification || {};
+  var summary = verification.summary || {};
+  if (summary.tests_run) parts.push('Tests: ' + summary.tests_run);
+  var artifacts = evidence.artifacts || {};
+  if (artifacts.count) {
+    parts.push(artifacts.count + ' artifact' + (artifacts.count === 1 ? '' : 's'));
+  }
+  if (evidence.updated_by) parts.push('Updated by: ' + evidence.updated_by);
+  return parts.join(' · ') || 'Completion evidence attached';
+}
+
 function _boardVerificationLabel(task) {
   var stateName = _boardVerificationState(task);
   if (!stateName) return '';
@@ -897,6 +937,12 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   }
   if (_boardVerificationMode(t)) {
     meta += '<span class="board-card-label board-card-verification-mode">' + esc(_boardVerificationMode(t)) + '</span>';
+  }
+  if (_boardCompletionEvidenceStatus(t)) {
+    var evidenceStatus = _boardCompletionEvidenceStatus(t);
+    meta += '<span class="board-card-label board-card-completion-evidence board-card-completion-evidence-' + esc(evidenceStatus)
+      + '" title="' + esc(_boardCompletionEvidenceTitle(t)) + '">'
+      + esc(_boardCompletionEvidenceLabel(t)) + '</span>';
   }
   if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';

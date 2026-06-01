@@ -460,6 +460,47 @@ function _taskVerificationSummaryValue(summary, key) {
   return summary[key];
 }
 
+function _renderTaskCompletionEvidencePreview(evidence) {
+  evidence = evidence || {};
+  if (!evidence || !Object.keys(evidence).length) return '';
+  var lines = [];
+  var status = evidence.status || (evidence.verified ? 'verified' : 'evidence');
+  lines.push('Status: ' + status);
+  if (evidence.sources && evidence.sources.length) {
+    lines.push('Sources: ' + evidence.sources.join(', '));
+  }
+  var merge = evidence.merge || {};
+  if (merge.sha) lines.push('Merge SHA: ' + merge.sha);
+  if (merge.origin_summary) lines.push('Origin: ' + merge.origin_summary);
+  else if (merge.origin_ref && merge.origin_sha) {
+    lines.push('Origin: ' + merge.origin_ref + ' == ' + merge.origin_sha);
+  }
+  if (merge.pr_url) lines.push('PR: ' + merge.pr_url);
+  var verification = evidence.verification || {};
+  var summary = verification.summary || {};
+  if (summary.tests_run) lines.push('Tests: ' + summary.tests_run);
+  if (verification.notes) lines.push('Notes: ' + verification.notes);
+  var artifacts = evidence.artifacts || {};
+  if (artifacts.count) {
+    lines.push('Artifacts: ' + artifacts.count);
+  }
+  if (evidence.updated_by) lines.push('Updated by: ' + evidence.updated_by);
+  if (evidence.updated_at) lines.push('Updated at: ' + evidence.updated_at);
+  var raw = '';
+  try {
+    raw = JSON.stringify(evidence, null, 2);
+  } catch (_e) {
+    raw = String(evidence);
+  }
+  return '<details>'
+    + '<summary>Completion evidence</summary>'
+    + '<div class="task-completion-evidence-lines">'
+    + lines.map(function(line) { return '<div>' + esc(line) + '</div>'; }).join('')
+    + '</div>'
+    + '<pre class="task-completion-evidence-raw">' + esc(raw) + '</pre>'
+    + '</details>';
+}
+
 function _taskCloneBoardSync(sync) {
   if (!sync || typeof sync !== 'object') return {};
   try {
@@ -730,6 +771,7 @@ function _taskOpenModal(config) {
   var verificationDeployAttemptedEl = document.getElementById('task-verification-deploy-attempted-input');
   var verificationHumanEl = document.getElementById('task-verification-human-input');
   var verificationNotesEl = document.getElementById('task-verification-notes-input');
+  var completionEvidenceEl = document.getElementById('task-completion-evidence-preview');
   var modal = document.getElementById('modal-task');
   var attributionEl = document.getElementById('task-created-by-attribution');
 
@@ -833,6 +875,11 @@ function _taskOpenModal(config) {
       && draft.verification_notes !== undefined
       ? draft.verification_notes
       : (config.verificationNotes || '');
+  }
+  if (completionEvidenceEl) {
+    completionEvidenceEl.innerHTML = _renderTaskCompletionEvidencePreview(
+      config.completionEvidence || {}
+    );
   }
   _renderTaskAttachments();
   _renderTaskArtifacts();
@@ -1183,6 +1230,7 @@ function openEditTask(taskId) {
     verificationState: t.verification_state || '',
     verificationNotes: t.verification_notes || '',
     verificationSummary: t.verification_summary || {},
+    completionEvidence: t.completion_evidence || {},
     createdByTask: t,
     selectTask: true,
   });

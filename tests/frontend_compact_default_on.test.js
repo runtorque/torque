@@ -124,6 +124,7 @@ function createEngineerSummaryHarness() {
           verification_mode: 'deploy',
           verification_notes: 'needs smoke',
           verification_summary: { tests_run: 'targeted' },
+          completion_evidence: { status: 'evidence_attached', sources: ['verification'] },
         },
         b: {
           id: 'b', group: 'alpha', task: 'Beta', lane: 'To Do',
@@ -329,6 +330,7 @@ function createBoardSearchHarness(opts) {
       verification_state: 'pending', verification_mode: 'deploy',
       verification_notes: 'smoke checks',
       verification_summary: { tests_run: 'targeted' },
+      completion_evidence: { status: 'evidence_attached', sources: ['verification'] },
     },
     't-desc': {
       id: 't-desc', task: 'plain card',
@@ -468,6 +470,7 @@ test('compact cards expose eager v2 fields for deps / external / sync / boundary
           health_details: { reason: 'idle' },
           verification_state: 'pending',
           verification_summary: { tests_run: 'targeted' },
+          completion_evidence: { status: 'evidence_attached', sources: ['verification'] },
         },
       },
     },
@@ -487,4 +490,5 @@ test('compact cards expose eager v2 fields for deps / external / sync / boundary
   assert.equal(card.health_state, 'stalled');
   assert.equal(card.verification_state, 'pending');
   assert.equal(card.verification_summary.tests_run, 'targeted');
+  assert.deepEqual(card.completion_evidence.sources, ['verification']);
 });

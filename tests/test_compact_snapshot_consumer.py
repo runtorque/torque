@@ -55,6 +55,7 @@ COMPACT_CARD_FIELDS = {
     "verification_mode",
     "verification_notes",
     "verification_summary",
+    "completion_evidence",
     "messages",
     "messages_thread",
     "lane_entered_at",
@@ -118,6 +119,10 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             verification_state="pending",
             verification_notes="needs smoke",
             verification_summary={"tests_run": "targeted"},
+            completion_evidence={
+                "status": "evidence_attached",
+                "sources": ["verification"],
+            },
             worktree_boundary={"repo_root": "/tmp/repo", "branch": "main"},
             resume_after_boundary_task_id="task-boundary",
             description="full description with lots of detail",
@@ -203,6 +208,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         self.assertEqual(card["verification_notes"], "needs smoke")
         self.assertEqual(
             card["verification_summary"], {"tests_run": "targeted"})
+        self.assertEqual(card["completion_evidence"]["sources"], ["verification"])
         self.assertEqual(
             card["messages"],
             [{"count": 1, "action": "progress", "message": "progress"}],

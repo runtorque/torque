@@ -2060,6 +2060,14 @@ async def _recover_authoritative_post_success_from_boundary(
         "pr": pr,
         "authoritative_post_success_guard": confirmation,
     }
+    origin_verification = _origin_verification_evidence(
+        merge_sha=merge_sha,
+        remote=boundary_remote,
+        base_branch=boundary_base,
+        authoritative_guard=confirmation,
+    )
+    if origin_verification:
+        result["origin_verification"] = origin_verification
     _attach_stale_base(result, stale_base)
     phase = str(failure.get("phase") or "post_success_check").strip()
     warning = _post_success_guard_warning(
@@ -2077,6 +2085,16 @@ async def _recover_authoritative_post_success_from_boundary(
             "confirmation": confirmation,
             "boundary_task_id": str(getattr(task, "id", "") or ""),
         },
+    )
+    _record_merge_completion_evidence(
+        state,
+        result=result,
+        cell=cell,
+        repo_root=boundary_repo_root or confirm_repo_root,
+        branch=boundary_branch or branch,
+        base_branch=boundary_base,
+        remote=boundary_remote,
+        origin_verification=origin_verification,
     )
     return result
 
@@ -2623,6 +2641,16 @@ async def _run_direct_worktree_merge(
         result["workflow_breach"] = gates["workflow_breach"]
     if nested_merge_result and isinstance(result, dict):
         result["nested_submodules"] = nested_merge_result
+    if isinstance(result, dict) and result.get("ok") and result.get("sha"):
+        _record_merge_completion_evidence(
+            state,
+            result=result,
+            cell=getattr(cell, "cell", None) or cell,
+            repo_root=str(getattr(cell, "worktree_repo_root", "")
+                          or getattr(cell, "git_root", "") or ""),
+            branch=str(getattr(cell, "worktree_branch", "") or ""),
+            base_branch=str(getattr(cell, "worktree_base_branch", "") or ""),
+        )
     return result
 
 
@@ -3493,9 +3521,28 @@ async def _run_pr_worktree_merge(
             phase=post_merge_sync.get("phase", "remote_base_sync"),
             detail=post_merge_sync,
         )
+    origin_verification = _origin_verification_evidence(
+        merge_sha=merge_sha,
+        remote=remote,
+        base_branch=base_branch,
+        post_merge_sync=post_merge_sync,
+        authoritative_guard=authoritative_guard,
+    )
+    if origin_verification:
+        result["origin_verification"] = origin_verification
     _attach_auto_force_push_metadata(result, push_metadata_result)
     if gates.get("workflow_breach"):
         result["workflow_breach"] = gates["workflow_breach"]
+    _record_merge_completion_evidence(
+        state,
+        result=result,
+        cell=cell,
+        repo_root=repo_root or wt,
+        branch=branch,
+        base_branch=base_branch,
+        remote=remote,
+        origin_verification=origin_verification,
+    )
     return result
 
 
@@ -8664,6 +8711,7 @@ def _build_torque_context(state: MatrixState, cell, task) -> dict:
         "verification_updated_by": getattr(
             task, "verification_updated_by", ""),
         "verification_summary": getattr(task, "verification_summary", {}) or {},
+        "completion_evidence": getattr(task, "completion_evidence", {}) or {},
         "worktree_boundary": getattr(task, "worktree_boundary", {}) or {},
         "resume_after_boundary_task_id": getattr(
             task, "resume_after_boundary_task_id", "") or "",
@@ -8907,6 +8955,374 @@ def _apply_verification_report(task, payload, actor_name, save_task,
         save_task(root_task)
 
     return msg, root_task
+
+
+_COMPLETION_EVIDENCE_VERSION = 1
+
+
+def _completion_evidence_text(value, *, limit: int = 2000) -> str:
+    text = str(value or "").strip()
+    if limit > 0 and len(text) > limit:
+        return text[: max(limit - 1, 0)].rstrip() + "…"
+    return text
+
+
+def _task_verification_evidence(task) -> dict:
+    if not task:
+        return {}
+    summary = getattr(task, "verification_summary", {}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    evidence = {}
+    state_value = _completion_evidence_text(
+        getattr(task, "verification_state", ""))
+    mode_value = _completion_evidence_text(
+        getattr(task, "verification_mode", ""))
+    notes_value = _completion_evidence_text(
+        getattr(task, "verification_notes", ""))
+    if state_value:
+        evidence["state"] = state_value
+    if mode_value:
+        evidence["mode"] = mode_value
+    normalized_summary = {}
+    for key in ("tests_run", "human_validation_pending"):
+        value = _completion_evidence_text(summary.get(key, ""))
+        if value:
+            normalized_summary[key] = value
+    for key in ("manual_smoke_done", "deploy_needed", "deploy_attempted"):
+        if key in summary:
+            normalized_summary[key] = bool(summary.get(key))
+    if normalized_summary:
+        evidence["summary"] = normalized_summary
+    if notes_value:
+        evidence["notes"] = notes_value
+    updated_at = _completion_evidence_text(
+        getattr(task, "verification_updated_at", ""))
+    updated_by = _completion_evidence_text(
+        getattr(task, "verification_updated_by", ""))
+    if updated_at:
+        evidence["updated_at"] = updated_at
+    if updated_by:
+        evidence["updated_by"] = updated_by
+    return evidence
+
+
+def _task_artifact_evidence(task, *, limit: int = 12) -> dict:
+    if not task:
+        return {}
+    candidates = []
+    for artifact in normalize_artifacts(getattr(task, "artifacts", []) or []):
+        candidates.append({
+            "type": _completion_evidence_text(
+                artifact.get("type", "artifact"), limit=80),
+            "title": _completion_evidence_text(
+                artifact.get("title")
+                or artifact.get("filename")
+                or artifact.get("type", "artifact"),
+                limit=160,
+            ),
+            "filename": _completion_evidence_text(
+                artifact.get("filename", ""), limit=160),
+            "path": _completion_evidence_text(
+                artifact.get("path", ""), limit=400),
+            "summary": _completion_evidence_text(
+                artifact.get("summary", ""), limit=500),
+        })
+    for attachment in getattr(task, "attachments", []) or []:
+        if isinstance(attachment, dict):
+            filename = attachment.get("filename") or attachment.get("path") or ""
+            path = attachment.get("path", "")
+        else:
+            filename = str(attachment or "")
+            path = filename
+        if not filename and not path:
+            continue
+        candidates.append({
+            "type": "attachment",
+            "title": _completion_evidence_text(filename or path, limit=160),
+            "filename": _completion_evidence_text(filename, limit=160),
+            "path": _completion_evidence_text(path, limit=400),
+            "summary": "",
+        })
+    if not candidates:
+        return {}
+    return {
+        "count": len(candidates),
+        "items": candidates[:limit],
+    }
+
+
+def _completion_evidence_status(*, verification=None, merge=None) -> str:
+    verification = verification or {}
+    merge = merge or {}
+    verified = (
+        str(verification.get("state") or "").strip() == "passed"
+        or bool(merge.get("origin_verified"))
+    )
+    return "verified" if verified else "evidence_attached"
+
+
+def _merge_completion_evidence(existing, update: dict) -> dict:
+    evidence = dict(existing or {}) if isinstance(existing, dict) else {}
+    sources = []
+    for source in evidence.get("sources") or []:
+        source = str(source or "").strip()
+        if source and source not in sources:
+            sources.append(source)
+    for source in update.get("sources") or []:
+        source = str(source or "").strip()
+        if source and source not in sources:
+            sources.append(source)
+
+    for key in ("completion", "verification", "artifacts", "merge"):
+        if key in update:
+            evidence[key] = update[key]
+    evidence["version"] = _COMPLETION_EVIDENCE_VERSION
+    evidence["sources"] = sources
+    evidence["updated_at"] = update.get("updated_at") \
+        or datetime.now(timezone.utc).isoformat()
+    if update.get("updated_by"):
+        evidence["updated_by"] = update["updated_by"]
+
+    status = _completion_evidence_status(
+        verification=evidence.get("verification"),
+        merge=evidence.get("merge"),
+    )
+    evidence["status"] = status
+    evidence["verified"] = status == "verified"
+    return evidence if sources else {}
+
+
+def _save_completion_evidence_task(state: MatrixState, task) -> None:
+    task.updated_at = datetime.now(timezone.utc).isoformat()
+    state._emit("task_upsert", **asdict(task))
+    state._db_save_task(task)
+
+
+def _record_task_completion_evidence_snapshot(
+        state: MatrixState,
+        task,
+        *,
+        cell=None,
+        action: str = "",
+        message: str = "",
+        actor_name: str = "",
+        timestamp: str = "",
+) -> bool:
+    """Snapshot verification/artifact evidence when a task is completed.
+
+    This intentionally never gates completion: it records evidence already
+    supplied through ``torque_verify`` / task artifacts so a Done claim has a
+    durable breadcrumb trail.
+    """
+    if not state or not task:
+        return False
+
+    verification = _task_verification_evidence(task)
+    artifacts = _task_artifact_evidence(task)
+    sources = []
+    update = {
+        "updated_at": timestamp or datetime.now(timezone.utc).isoformat(),
+        "updated_by": actor_name
+        or _completion_evidence_text(getattr(cell, "name", ""))
+        or "torque",
+    }
+    if action:
+        update["completion"] = {
+            "action": _completion_evidence_text(action, limit=80),
+            "message": _completion_evidence_text(message, limit=2000),
+            "agent_id": _completion_evidence_text(
+                getattr(cell, "id", ""), limit=80),
+            "agent_name": _completion_evidence_text(
+                getattr(cell, "name", ""), limit=160),
+            "recorded_at": update["updated_at"],
+        }
+    if verification:
+        update["verification"] = verification
+        sources.append("verification")
+    if artifacts:
+        update["artifacts"] = artifacts
+        sources.append("artifacts")
+    if not sources:
+        return False
+    update["sources"] = sources
+    task.completion_evidence = _merge_completion_evidence(
+        getattr(task, "completion_evidence", {}) or {},
+        update,
+    )
+    _save_completion_evidence_task(state, task)
+    return True
+
+
+def _origin_verification_evidence(
+        *,
+        merge_sha: str,
+        remote: str = "",
+        base_branch: str = "",
+        post_merge_sync: dict | None = None,
+        authoritative_guard: dict | None = None,
+) -> dict:
+    merge_sha = str(merge_sha or "").strip()
+    remote = str(remote or "").strip()
+    base_branch = str(base_branch or "").strip()
+    source = ""
+    matched_sha = ""
+    result = None
+
+    guard = authoritative_guard if isinstance(authoritative_guard, dict) else {}
+    if guard.get("ok"):
+        match = guard.get("base_match")
+        if isinstance(match, dict):
+            matched_sha = str(match.get("sha") or "").strip()
+            source = str(match.get("source") or "authoritative_guard").strip()
+            result = match.get("result") if isinstance(
+                match.get("result"), dict) else None
+            remote = str(match.get("remote") or remote or "").strip()
+            base_branch = str(
+                match.get("base_branch")
+                or match.get("ref")
+                or base_branch
+                or ""
+            ).strip()
+
+    if not matched_sha and isinstance(post_merge_sync, dict):
+        match = _base_match_from_result(post_merge_sync, merge_sha)
+        if match:
+            matched_sha = str(match.get("sha") or "").strip()
+            source = str(match.get("source") or "remote_base_sync").strip()
+            result = post_merge_sync
+        else:
+            matched_sha = str(
+                post_merge_sync.get("remote_sha")
+                or post_merge_sync.get("base_sha")
+                or ""
+            ).strip()
+            result = post_merge_sync
+        remote = str(post_merge_sync.get("remote") or remote or "").strip()
+        base_branch = str(
+            post_merge_sync.get("base_branch") or base_branch or ""
+        ).strip()
+        if not source:
+            source = str(post_merge_sync.get("phase") or "remote_base_sync")
+
+    verified = bool(merge_sha and matched_sha and _sha_equal(matched_sha, merge_sha))
+    origin_ref = ""
+    if remote and base_branch:
+        origin_ref = f"{remote}/{base_branch}"
+    elif base_branch:
+        origin_ref = base_branch
+    evidence = {
+        "verified": verified,
+        "sha": matched_sha,
+        "expected_sha": merge_sha,
+        "ref": origin_ref,
+        "source": source,
+    }
+    if result:
+        for key in ("phase", "remote", "base_branch", "base_sha",
+                    "remote_sha", "synced"):
+            if key in result:
+                evidence[key] = result[key]
+    if verified and origin_ref and merge_sha:
+        evidence["summary"] = f"{origin_ref} == {merge_sha}"
+    return {k: v for k, v in evidence.items() if v not in ("", None)}
+
+
+def _merge_evidence_matches_boundary(boundary: dict, *,
+                                     repo_root: str,
+                                     branch: str,
+                                     merge_sha: str) -> bool:
+    if not isinstance(boundary, dict):
+        return False
+    if str(boundary.get("status") or "").strip() != "merged":
+        return False
+    if merge_sha and str(boundary.get("merge_commit_sha") or "").strip() != merge_sha:
+        return False
+    boundary_branch = str(boundary.get("branch") or "").strip()
+    if branch and boundary_branch and boundary_branch != branch:
+        return False
+    boundary_repo = str(boundary.get("repo_root") or "").strip()
+    if repo_root and boundary_repo and boundary_repo != repo_root:
+        return False
+    return True
+
+
+def _record_merge_completion_evidence(
+        state: MatrixState,
+        *,
+        result: dict,
+        cell=None,
+        repo_root: str = "",
+        branch: str = "",
+        base_branch: str = "",
+        remote: str = "",
+        origin_verification: dict | None = None,
+) -> list[str]:
+    if not state or not isinstance(result, dict) or not result.get("ok"):
+        return []
+    merge_sha = str(
+        result.get("sha") or result.get("merge_commit_sha") or ""
+    ).strip()
+    if not merge_sha or bool(result.get("pending")):
+        return []
+
+    branch = str(branch or result.get("branch") or "").strip()
+    base_branch = str(base_branch or result.get("base_branch") or "").strip()
+    repo_root = str(repo_root or getattr(cell, "worktree_repo_root", "")
+                    or getattr(cell, "git_root", "") or "").strip()
+    remote = str(remote or "").strip()
+    origin = origin_verification if isinstance(origin_verification, dict) else {}
+    merge = {
+        "sha": merge_sha,
+        "mode": _completion_evidence_text(result.get("mode", "direct"), limit=80),
+        "branch": _completion_evidence_text(branch, limit=240),
+        "base_branch": _completion_evidence_text(base_branch, limit=120),
+        "remote": _completion_evidence_text(remote, limit=120),
+        "pr_url": _completion_evidence_text(
+            result.get("pr_url") or result.get("url") or "", limit=500),
+        "origin_verified": bool(origin.get("verified")),
+    }
+    if origin:
+        merge["origin"] = origin
+        if origin.get("ref"):
+            merge["origin_ref"] = origin["ref"]
+        if origin.get("sha"):
+            merge["origin_sha"] = origin["sha"]
+        if origin.get("summary"):
+            merge["origin_summary"] = origin["summary"]
+    if isinstance(result.get("pr"), dict):
+        pr = result["pr"]
+        for key in ("number", "url", "state", "merge_commit_sha"):
+            if pr.get(key) not in (None, ""):
+                merge.setdefault("pr", {})[key] = pr[key]
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    actor_name = _completion_evidence_text(getattr(cell, "name", "")) \
+        or _completion_evidence_text(result.get("agent_name", "")) \
+        or "torque"
+    update = {
+        "sources": ["merge"],
+        "merge": merge,
+        "updated_at": timestamp,
+        "updated_by": actor_name,
+    }
+    updated_ids = []
+    for task in list(state.board_tasks.values()):
+        boundary = getattr(task, "worktree_boundary", {}) or {}
+        if not _merge_evidence_matches_boundary(
+                boundary,
+                repo_root=repo_root,
+                branch=branch,
+                merge_sha=merge_sha,
+        ):
+            continue
+        task.completion_evidence = _merge_completion_evidence(
+            getattr(task, "completion_evidence", {}) or {},
+            update,
+        )
+        _save_completion_evidence_task(state, task)
+        updated_ids.append(task.id)
+    return updated_ids
 
 
 def _launch_resolver_for_cell(
@@ -16579,6 +16995,8 @@ async def main(connection=None):
                         "verification_updated_by", ""),
                     verification_summary=data.get(
                         "verification_summary", {}),
+                    completion_evidence=data.get(
+                        "completion_evidence", {}),
                 )
                 assigned_cell = state.agents.get(
                     str(add_kwargs.get("assigned_engineer_id", "") or "").strip()
@@ -16795,6 +17213,24 @@ async def main(connection=None):
                         _save_verified_task,
                         root_task=root_task,
                     )
+                    if task_counts_as_done(task):
+                        _record_task_completion_evidence_snapshot(
+                            state,
+                            task,
+                            action="verify",
+                            message=verify_msg,
+                            actor_name=actor_name,
+                        )
+                    if (
+                            _updated_root
+                            and task_counts_as_done(_updated_root)):
+                        _record_task_completion_evidence_snapshot(
+                            state,
+                            _updated_root,
+                            action="verify",
+                            message=verify_msg,
+                            actor_name=actor_name,
+                        )
                     _panel_event(
                         "task_verification_updated",
                         "",
@@ -17915,6 +18351,7 @@ async def main(connection=None):
                     verification_updated_at="",
                     verification_updated_by="",
                     verification_summary={},
+                    completion_evidence={},
                     worktree_boundary={},
                     resume_after_boundary_task_id="",
                     attachments=attachments or [],
@@ -19079,6 +19516,13 @@ async def main(connection=None):
                             await _record_task_boundary(
                                 task, cell, message or "Done"
                             )
+                            _record_task_completion_evidence_snapshot(
+                                state,
+                                task,
+                                cell=cell,
+                                action="done",
+                                message=message or "Done",
+                            )
                         state._emit_agent(cell)
                         # Auto-checkpoint on done. The session_end hook
                         # callback (_on_agent_session_end, wired at
@@ -19273,6 +19717,24 @@ async def main(connection=None):
                                 _save_task,
                                 root_task=root_task,
                             )
+                            if task_counts_as_done(task):
+                                _record_task_completion_evidence_snapshot(
+                                    state,
+                                    task,
+                                    cell=cell,
+                                    action="verify",
+                                    message=verify_msg,
+                                )
+                            if (
+                                    _root_task
+                                    and task_counts_as_done(_root_task)):
+                                _record_task_completion_evidence_snapshot(
+                                    state,
+                                    _root_task,
+                                    cell=cell,
+                                    action="verify",
+                                    message=verify_msg,
+                                )
                             _append_mcp(cell, "verify", verify_msg)
                             _append_task_msg(task, "verify",
                                              verify_msg, cell.name)
@@ -19328,6 +19790,13 @@ async def main(connection=None):
                                     cell.id, task.id, "ready")
                                 await _record_task_boundary(
                                     task, cell, message or "Ready"
+                                )
+                                _record_task_completion_evidence_snapshot(
+                                    state,
+                                    task,
+                                    cell=cell,
+                                    action="ready",
+                                    message=message or "Ready",
                                 )
                             state._emit_agent(cell)
                             if task:

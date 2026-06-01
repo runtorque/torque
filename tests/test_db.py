@@ -1733,6 +1733,15 @@ class TorqueDBTests(unittest.TestCase):
                     "deploy_needed": True,
                     "human_validation_pending": "Confirm dashboard loads",
                 },
+                completion_evidence={
+                    "status": "evidence_attached",
+                    "sources": ["verification"],
+                    "verification": {
+                        "summary": {
+                            "tests_run": "python3 -m unittest",
+                        },
+                    },
+                },
                 worktree_boundary={
                     "version": "1",
                     "branch": "torque/worker",
@@ -1936,6 +1945,10 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["verification_summary"]["tests_run"],
             "python3 -m unittest",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["completion_evidence"]["sources"],
+            ["verification"],
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["worktree_boundary"]["status"],
@@ -2647,6 +2660,7 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(loaded["board_tasks"]["TORQUE:1:1"]["parent_task_id"], "TORQUE:1")
         self.assertEqual(loaded["board_tasks"]["TORQUE:1:1"]["pipeline_root_id"], "TORQUE:1")
         self.assertEqual(loaded["board_tasks"]["TORQUE:1:1"]["depends_on"], ["TORQUE:1"])
+        self.assertEqual(loaded["board_tasks"]["TORQUE:1"]["completion_evidence"], {})
         self.assertEqual(loaded["board_tasks"]["TORQUE:1"]["reply_agent_id"], "")
         self.assertEqual(loaded["auto_dispatch_queues"]["Torque"][0]["task_id"], "TORQUE:1:1")
         self.assertEqual(

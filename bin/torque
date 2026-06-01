@@ -326,6 +326,11 @@ def db_read_board_tasks():
             except (json.JSONDecodeError, TypeError):
                 d["verification_summary"] = {}
             try:
+                d["completion_evidence"] = json.loads(
+                    d.get("completion_evidence", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["completion_evidence"] = {}
+            try:
                 d["worktree_boundary"] = json.loads(
                     d.get("worktree_boundary", "{}"))
             except (json.JSONDecodeError, TypeError):
@@ -520,6 +525,11 @@ def db_read_state():
                         d.get("verification_summary", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["verification_summary"] = {}
+                try:
+                    d["completion_evidence"] = json.loads(
+                        d.get("completion_evidence", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["completion_evidence"] = {}
                 try:
                     d["worktree_boundary"] = json.loads(
                         d.get("worktree_boundary", "{}"))
@@ -2933,6 +2943,47 @@ def cmd_task_show(args):
             print(f"  {'Updated by:':<14} {t['verification_updated_by']}")
         if t.get("verification_updated_at"):
             print(f"  {'Updated at:':<14} {t['verification_updated_at']}")
+
+    evidence = t.get("completion_evidence") or {}
+    if isinstance(evidence, str):
+        try:
+            evidence = json.loads(evidence)
+        except (json.JSONDecodeError, TypeError):
+            evidence = {}
+    if isinstance(evidence, dict) and evidence:
+        print()
+        label = "Completion evidence"
+        status = evidence.get("status") or "evidence_attached"
+        print(f"  {_bold(label + ':')}")
+        print(f"  {'Status:':<14} {status}")
+        sources = evidence.get("sources") or []
+        if sources:
+            print(f"  {'Sources:':<14} {', '.join(str(s) for s in sources)}")
+        merge = evidence.get("merge") if isinstance(
+            evidence.get("merge"), dict) else {}
+        if merge:
+            if merge.get("sha"):
+                print(f"  {'Merge SHA:':<14} {merge['sha']}")
+            if merge.get("origin_summary"):
+                print(f"  {'Origin:':<14} {merge['origin_summary']}")
+            elif merge.get("origin_ref") and merge.get("origin_sha"):
+                print(f"  {'Origin:':<14} {merge['origin_ref']}={merge['origin_sha']}")
+            if merge.get("pr_url"):
+                print(f"  {'PR:':<14} {merge['pr_url']}")
+        verification = evidence.get("verification") if isinstance(
+            evidence.get("verification"), dict) else {}
+        verification_summary = verification.get("summary") if isinstance(
+            verification.get("summary"), dict) else {}
+        if verification_summary.get("tests_run"):
+            print(f"  {'Tests run:':<14} {verification_summary['tests_run']}")
+        artifacts = evidence.get("artifacts") if isinstance(
+            evidence.get("artifacts"), dict) else {}
+        if artifacts.get("count"):
+            print(f"  {'Artifacts:':<14} {artifacts['count']}")
+        if evidence.get("updated_by"):
+            print(f"  {'Updated by:':<14} {evidence['updated_by']}")
+        if evidence.get("updated_at"):
+            print(f"  {'Updated at:':<14} {evidence['updated_at']}")
 
     # Backward compat: show legacy fields if present on old tasks
     for field, label in [("instructions", "Instructions"),

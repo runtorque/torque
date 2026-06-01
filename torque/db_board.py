@@ -53,6 +53,7 @@ _BOARD_TASK_COLUMNS = (
     "verification_updated_at",
     "verification_updated_by",
     "verification_summary",
+    "completion_evidence",
     "worktree_boundary",
     "resume_after_boundary_task_id",
     "archived_at",
@@ -90,6 +91,7 @@ def _serialize_board_task(task):
     health_details = json.dumps(d.pop("health_details", {}))
     artifacts = json.dumps(d.pop("artifacts", []))
     verification_summary = json.dumps(d.pop("verification_summary", {}))
+    completion_evidence = json.dumps(d.pop("completion_evidence", {}))
     worktree_boundary = json.dumps(d.pop("worktree_boundary", {}))
     board_sync = json.dumps(d.pop("board_sync", {}))
     group_name = d.pop("group", d.pop("group_name", ""))
@@ -146,6 +148,7 @@ def _serialize_board_task(task):
         d.get("verification_updated_at", ""),
         d.get("verification_updated_by", ""),
         verification_summary,
+        completion_evidence,
         worktree_boundary,
         d.get("resume_after_boundary_task_id", ""),
         d.get("archived_at", ""),
@@ -187,6 +190,10 @@ def decode_board_task_row(row, cols):
     d["health_details"] = _json_loads(d.get("health_details", "{}"), {})
     d["verification_summary"] = _json_loads(
         d.get("verification_summary", "{}"),
+        {},
+    )
+    d["completion_evidence"] = _json_loads(
+        d.get("completion_evidence", "{}"),
         {},
     )
     d["worktree_boundary"] = _json_loads(d.get("worktree_boundary", "{}"), {})
