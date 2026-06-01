@@ -393,6 +393,13 @@ function _healthMetricsSectionHtml() {
     + '</details>';
 }
 
+function _healthBottomSectionsHtml() {
+  var sections = [
+    _healthMetricsSectionHtml(),
+  ];
+  return sections.join('');
+}
+
 function _healthMetricsCaptureExpandedFromDom() {
   var details = document.getElementById('health-metrics-details');
   if (details && typeof details.open !== 'undefined') {
@@ -693,15 +700,18 @@ function _healthCoverageHtml(payload) {
 }
 
 function _healthResultsHtml(payload) {
-  var metricsHtml = _healthMetricsSectionHtml();
+  var bottomSectionsHtml = _healthBottomSectionsHtml();
   if (healthState.error) {
-    return metricsHtml + '<div class="health-error">' + _healthEsc(healthState.error) + '</div>';
+    return '<div class="health-error">' + _healthEsc(healthState.error) + '</div>'
+      + bottomSectionsHtml;
   }
   if (healthState.loading && !payload) {
-    return metricsHtml + '<div class="health-loading">Loading health metrics…</div>';
+    return '<div class="health-loading">Loading health metrics…</div>'
+      + bottomSectionsHtml;
   }
   if (!payload) {
-    return metricsHtml + '<div class="health-empty">Open the panel to load health metrics.</div>';
+    return '<div class="health-empty">Open the panel to load health metrics.</div>'
+      + bottomSectionsHtml;
   }
   var summary = payload.summary || {};
   var series = payload.series || {};
@@ -756,8 +766,7 @@ function _healthResultsHtml(payload) {
     ),
   ].join('');
   var bucketLabel = (payload.bucket_seconds || 0) < 86400 ? 'hourly' : 'daily';
-  return metricsHtml
-    + '<div class="health-meta">'
+  return '<div class="health-meta">'
     + '<span>' + _healthEsc(payload.window || '') + ' · ' + _healthEsc(bucketLabel) + ' buckets</span>'
     + '<span>' + _healthEsc(payload.group || 'All groups') + '</span>'
     + '</div>'
@@ -765,7 +774,8 @@ function _healthResultsHtml(payload) {
     + '<section class="health-section"><h3>Task age by lane</h3>'
     + _healthAgeTable(payload) + '</section>'
     + '<section class="health-section"><h3>Coverage and notes</h3>'
-    + _healthCoverageHtml(payload) + '</section>';
+    + _healthCoverageHtml(payload) + '</section>'
+    + bottomSectionsHtml;
 }
 
 function _healthSyncControls() {

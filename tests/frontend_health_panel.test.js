@@ -171,6 +171,22 @@ test('metrics response renders summary cards, sparklines, and age rows', () => {
   assert.match(html, /Partial dispatch-shape coverage/);
 });
 
+test('runtime metrics section renders at the bottom of the health results', () => {
+  const { sandbox, document } = createHealthSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/health.js');
+  vm.runInContext('renderHealthPanel()', context);
+
+  vm.runInContext(`healthReceiveMetrics(${JSON.stringify(samplePayload())})`, context);
+
+  const html = document.getElementById('health-results').innerHTML;
+  const runtimeIndex = html.indexOf('Runtime metrics');
+  assert.notEqual(runtimeIndex, -1);
+  assert.ok(runtimeIndex > html.indexOf('Dispatch throughput'));
+  assert.ok(runtimeIndex > html.indexOf('Task age by lane'));
+  assert.ok(runtimeIndex > html.indexOf('Coverage and notes'));
+});
+
 test('refreshing metrics preserves panel scroll position', () => {
   const { sandbox, document } = createHealthSandbox({ visible: true });
   const context = vm.createContext(sandbox);
