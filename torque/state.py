@@ -7326,7 +7326,17 @@ class MatrixState:
                 live_agents,
                 allow_persisted_agent_fallback=allow_persisted_agent_fallback,
             )
-            if ws.pending_question and not question_source_available:
+            # Actor-scoped asks are durable: a pending human question should
+            # survive the asking agent's live session ending (or a temporary
+            # tombstone) so the eventual answer can be queued for its next
+            # session.  Legacy rows without an actor still use the old
+            # orphan cleanup behavior.
+            if (
+                    ws.pending_question
+                    and not question_source_available
+                    and not str(
+                        getattr(ws, "pending_question_actor_id", "") or ""
+                    ).strip()):
                 stale_question = ws.pending_question
                 stale_actor_id = (
                     str(getattr(ws, "pending_question_actor_id", "") or "").strip()
@@ -7360,7 +7370,7 @@ class MatrixState:
                         engineer_id=stale_actor_id,
                     )
                 cleaned["engineer_questions"] += 1
-            elif ws.pending_note and not engineer_available:
+            if ws.pending_note and not engineer_available:
                 ws.pending_note = ""
                 ws.pending_note_kind = ""
                 self._save_engineer_settings(group, emit=emit)
@@ -7370,13 +7380,20 @@ class MatrixState:
             if "torque:human" not in (task.labels or []) or board_task_is_closed(task):
                 continue
             parent = self.board_tasks.get(task.parent_task_id)
+            reply_agent_id = str(
+                getattr(task, "reply_agent_id", "") or ""
+            ).strip()
             parent_agent_id = parent.agent_id if parent else ""
             parent_agent_available = self._attention_source_agent_available(
-                parent_agent_id,
+                reply_agent_id or parent_agent_id,
                 live_agents,
                 allow_persisted_agent_fallback=allow_persisted_agent_fallback,
             )
-            if not parent or not parent_agent_available:
+            # New ask tasks stamp reply_agent_id with the logical asking
+            # agent.  That decouples the ask from the parent task's current
+            # live session/assignment, so do not expire it merely because the
+            # source agent is currently unavailable.
+            if not parent or (not reply_agent_id and not parent_agent_available):
                 if self._expire_orphaned_ask(task, reason, emit=emit):
                     cleaned["asks"] += 1
 

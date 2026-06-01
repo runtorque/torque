@@ -6254,9 +6254,12 @@ def _format_user_direct_message_prompt(
         row: dict,
         recipient_kind: str,
         *,
-        include_free_text_reply_hint: bool = True) -> str:
+        include_free_text_reply_hint: bool = True,
+        state: MatrixState | None = None) -> str:
     """Format a durable user→agent message as an injected agent prompt."""
     row = row or {}
+    if str(row.get("message_type", "") or "").strip() == "ask_reply":
+        return _format_ask_reply_direct_message_prompt(state, row)
     thread_id = str(row.get("thread_id", "") or "").strip()
     message = str(row.get("message", "") or "").strip("\n")
     tool_name = _user_direct_message_reply_tool(recipient_kind)
@@ -6277,6 +6280,52 @@ def _format_user_direct_message_prompt(
             "Do not rely on free-text terminal output for the user-facing reply."
         )
     parts.append("---")
+    return "\n".join(parts) + "\n"
+
+
+def _ask_reply_question_from_direct_row(
+        state: MatrixState | None,
+        row: dict) -> str:
+    """Recover the original ask question for a durable ask-reply row."""
+    row = row or {}
+    reply_to_id = str(row.get("reply_to_id", "") or "").strip()
+    db = getattr(state, "db", None) if state else None
+    loader = getattr(db, "load_direct_message", None) if db else None
+    if reply_to_id and callable(loader):
+        try:
+            ask_row = loader(reply_to_id)
+        except Exception:
+            log.exception("Failed to load direct ask row %s", reply_to_id)
+            ask_row = None
+        question = str((ask_row or {}).get("message", "") or "").strip()
+        if question:
+            return question
+    source_task_id = str(row.get("source_task_id", "") or "").strip()
+    task = (
+        getattr(state, "board_tasks", {}).get(source_task_id)
+        if state and source_task_id else None
+    )
+    return str(getattr(task, "task", "") or "").strip()
+
+
+def _format_ask_reply_direct_message_prompt(
+        state: MatrixState | None,
+        row: dict) -> str:
+    """Format a durable ask answer for delivery/replay to the asking agent."""
+    answer = str((row or {}).get("message", "") or "").strip()
+    question = _ask_reply_question_from_direct_row(state, row)
+    parts = ["## Human Reply", ""]
+    if question:
+        parts.extend([
+            "Answer to your question:",
+            "",
+            f"Question:\n{question}",
+            "",
+            f"Answer:\n{answer}",
+        ])
+    else:
+        parts.append(answer)
+    parts.extend(["", "---"])
     return "\n".join(parts) + "\n"
 
 
@@ -6332,6 +6381,13 @@ async def _queue_user_direct_message_to_agent(
     message_id = str((row or {}).get("id", "") or "").strip()
     if not message_id:
         return row
+    if target and state.agent_is_tombstoned(target):
+        return state.update_direct_message_delivery(
+            message_id,
+            "buffered",
+            reason="agent_tombstoned",
+            emit=emit,
+        ) or row
     if not target or _agent_dismissed_at(target):
         return state.update_direct_message_delivery(
             message_id,
@@ -6361,6 +6417,7 @@ async def _queue_user_direct_message_to_agent(
             target,
             GUIDANCE_HINT_USER_DIRECT_REPLY,
         ),
+        state=state,
     )
     try:
         queued = await _queue_cell_prompt_send(
@@ -6863,7 +6920,7 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
 
 
 def _handle_engineer_reply(state: MatrixState, cell, *, message: str,
-                         task_id: str = "", panel_event=None) -> dict:
+                           task_id: str = "", panel_event=None) -> dict:
     if not message:
         return {"type": "error", "message": "Reply message is required"}
     reply_task, pending, error = _resolve_pending_engineer_reply_task(
@@ -6912,6 +6969,131 @@ def _handle_engineer_reply(state: MatrixState, cell, *, message: str,
             task_id=reply_task.id,
         )
     return {"type": "ok", "task_id": reply_task.id}
+
+
+def _ask_reply_target_for_task(state: MatrixState, task) -> tuple[object | None, str]:
+    """Return the logical agent that should receive an ask answer."""
+    target_id = str(getattr(task, "reply_agent_id", "") or "").strip()
+    parent = None
+    if not target_id:
+        parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+        parent = state.board_tasks.get(parent_id) if parent_id else None
+        target_id = str(getattr(parent, "agent_id", "") or "").strip()
+    target = state.agents.get(target_id) if target_id else None
+    return target, target_id
+
+
+async def _resolve_human_ask_task(
+        state: MatrixState,
+        task,
+        answer: str,
+        send_prompt,
+        *,
+        panel_event=None) -> dict:
+    """Resolve a worker/engineer blocking ask with durable answer delivery."""
+    answer = str(answer or "").strip()
+    if not task:
+        return {"type": "error", "message": "Task not found"}
+    if "torque:human" not in (getattr(task, "labels", []) or []):
+        return {"type": "error", "message": "Not an ask task"}
+    if not answer:
+        return {"type": "error", "message": "Answer is required"}
+    parent = state.board_tasks.get(str(getattr(task, "parent_task_id", "") or ""))
+    if not parent:
+        return {"type": "error", "message": "Parent task not found"}
+
+    agent, target_id = _ask_reply_target_for_task(state, task)
+    if not agent or str(getattr(agent, "cell_type", "") or "") != "agent":
+        return {
+            "type": "error",
+            "message": (
+                "Ask target agent not found"
+                + (f": {target_id}" if target_id else "")
+            ),
+        }
+
+    question = str(getattr(task, "task", "") or "")
+    reply_row = save_direct_ask_reply_mirror(
+        state,
+        agent,
+        answer,
+        question=question,
+        source_task_id=str(getattr(task, "id", "") or ""),
+        created_at=time.time(),
+        delivery_state="buffered",
+    )
+    delivery = None
+    if reply_row:
+        delivery = await _queue_user_direct_message_to_agent(
+            state,
+            agent,
+            reply_row,
+            send_prompt,
+            emit=True,
+        )
+    else:
+        prompt = _format_ask_reply_direct_message_prompt(
+            state,
+            {
+                "message": answer,
+                "message_type": "ask_reply",
+                "source_task_id": str(getattr(task, "id", "") or ""),
+            },
+        )
+        queued = await _queue_cell_prompt_send(
+            agent,
+            prompt,
+            send_prompt,
+            prime_input_ready=True,
+            settled_submit=True,
+            wait_for_delivery=True,
+        )
+        if not queued:
+            return {
+                "type": "error",
+                "message": (
+                    "Ask answer delivery unavailable: target agent has no "
+                    "session and the direct message store is unavailable"
+                ),
+            }
+
+    if not task_is_closed(task):
+        state.board_move_task(task.id, "Done")
+    messages = list(getattr(task, "messages", []) or [])
+    messages.append({
+        "timestamp": time.time(),
+        "action": "ask_reply",
+        "message": answer,
+        "agent_name": "Human",
+    })
+    state.board_update_task(task.id, status="", messages=messages)
+    state._clear_parent_awaiting_input(parent, exclude_task_id=task.id)
+
+    q = question
+    if len(q) > 120:
+        q = q[:120] + "…"
+    if panel_event:
+        panel_event(
+            "ask_resolved",
+            agent.id,
+            agent.name,
+            agent.group,
+            "Resolved: " + (q or task.id),
+            task_id=task.id,
+        )
+    current = delivery or reply_row or {}
+    return {
+        "type": "ok",
+        "task_id": task.id,
+        "agent_id": agent.id,
+        "message_id": str(current.get("id", "") or ""),
+        "delivery_state": str(
+            current.get("delivery_state", "") or (
+                "delivered" if not reply_row else "buffered"
+            )
+        ),
+        "delivery_reason": str(current.get("delivery_reason", "") or ""),
+    }
 
 
 def _is_architect_ask_task(task) -> bool:
@@ -7728,13 +7910,39 @@ async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
         f"{answer}\n"
         "---\n"
     )
-    await _queue_cell_prompt_send(
-        engineer,
-        formatted,
-        send_prompt,
-        prime_input_ready=True,
-        wait_for_delivery=True,
-    )
+    reply_row = None
+    if question:
+        source_key = direct_ask_mirror_source_key(
+            group=group,
+            agent_id=author_cell_id or str(getattr(engineer, "id", "") or ""),
+            timestamp=question_timestamp,
+            question=question,
+        )
+        reply_row = save_direct_ask_reply_mirror(
+            state,
+            engineer,
+            answer,
+            question=question,
+            source_key=source_key,
+            created_at=time.time(),
+            delivery_state="buffered",
+        )
+    if reply_row:
+        await _queue_user_direct_message_to_agent(
+            state,
+            engineer,
+            reply_row,
+            send_prompt,
+            emit=True,
+        )
+    else:
+        await _queue_cell_prompt_send(
+            engineer,
+            formatted,
+            send_prompt,
+            prime_input_ready=True,
+            wait_for_delivery=True,
+        )
     await state.update_engineer_settings_async(
         group,
         pending_question="",
@@ -7757,21 +7965,25 @@ async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
                 question,
             ),
         )
-        asking_agent = state.agents.get(author_cell_id) or engineer
-        source_key = direct_ask_mirror_source_key(
-            group=group,
-            agent_id=author_cell_id or str(getattr(engineer, "id", "") or ""),
-            timestamp=question_timestamp,
-            question=question,
-        )
-        save_direct_ask_reply_mirror(
-            state,
-            asking_agent,
-            answer,
-            question=question,
-            source_key=source_key,
-            created_at=time.time(),
-        )
+        if not reply_row:
+            asking_agent = state.agents.get(author_cell_id) or engineer
+            source_key = direct_ask_mirror_source_key(
+                group=group,
+                agent_id=(
+                    author_cell_id
+                    or str(getattr(engineer, "id", "") or "")
+                ),
+                timestamp=question_timestamp,
+                question=question,
+            )
+            save_direct_ask_reply_mirror(
+                state,
+                asking_agent,
+                answer,
+                question=question,
+                source_key=source_key,
+                created_at=time.time(),
+            )
     state.journal_append(
         group,
         "observation",
@@ -17616,84 +17828,14 @@ async def main(connection=None):
                         answer,
                         panel_event=_panel_event,
                     )
-                elif not task.parent_task_id:
-                    result = {"type": "error",
-                              "message": "Ask task has no parent"}
                 else:
-                    parent = state.board_tasks.get(
-                        task.parent_task_id)
-                    if not parent:
-                        result = {"type": "error",
-                                  "message": "Parent task not found"}
-                    elif not parent.agent_id:
-                        result = {"type": "error",
-                                  "message": "Parent task has no "
-                                             "linked agent"}
-                    else:
-                        agent = state.agents.get(parent.agent_id)
-                        if not agent or not agent.session_id:
-                            result = {
-                                "type": "error",
-                                "message": "Parent agent not "
-                                           "available"}
-                        else:
-                            # Send answer to the parent's agent
-                            q = task.task
-                            if len(q) > 120:
-                                q = q[:120] + "…"
-                            msg = (f"Answer to your question "
-                                   f"\"{q}\":\n{answer}")
-                            await bridge.send_text(
-                                agent.session_id,
-                                msg + "\r")
-                            agent.status = "running"
-                            state._emit_agent(agent)
-
-                            # Move ask task to Done (no cascade)
-                            if not task_is_closed(task):
-                                state.board_move_task(
-                                    task.id, "Done")
-                            task.status = ""
-                            task.updated_at = datetime.now(
-                                timezone.utc).isoformat()
-                            state._emit("task_upsert",
-                                        **asdict(task))
-                            state._db_save_task(task)
-
-                            # Clear parent "Awaiting Input" status
-                            parent.status = ""
-                            parent.updated_at = datetime.now(
-                                timezone.utc).isoformat()
-                            state._emit("task_upsert",
-                                        **asdict(parent))
-                            state._db_save_task(parent)
-
-                            # Clear root task status too
-                            root_id = parent.pipeline_root_id \
-                                or parent.id
-                            if root_id != parent.id:
-                                root = state.board_tasks.get(
-                                    root_id)
-                                if root and root.status:
-                                    root.status = ""
-                                    root.updated_at = datetime.now(
-                                        timezone.utc).isoformat()
-                                    state._emit("task_upsert",
-                                                **asdict(root))
-                                    state._db_save_task(root)
-
-                            save_direct_ask_reply_mirror(
-                                state,
-                                agent,
-                                answer,
-                                question=str(getattr(task, "task", "") or ""),
-                                source_task_id=str(getattr(task, "id", "") or ""),
-                            )
-                            _panel_event(
-                                "ask_resolved", agent.id,
-                                agent.name, agent.group,
-                                "Resolved: " + q,
-                                task_id=tid)
+                    result = await _resolve_human_ask_task(
+                        state,
+                        task,
+                        answer,
+                        _send_agent_prompt,
+                        panel_event=_panel_event,
+                    )
                             result = {"type": "ok",
                                       "task_id": tid}
 
@@ -19829,6 +19971,7 @@ async def main(connection=None):
                                     task.pipeline_depth + 1,
                                 pipeline_root_id=root_id,
                                 description=ask_desc,
+                                reply_agent_id=cell.id,
                             )
                             if new_task:
                                 result = {
@@ -20488,9 +20631,9 @@ async def main(connection=None):
                         state,
                         group,
                     )
-                    if not reply_target or not reply_target.session_id:
+                    if not reply_target:
                         result = {"type": "error",
-                                  "message": f"{target_label} is not running"}
+                                  "message": f"{target_label} not found"}
                     else:
                         result = await _deliver_engineer_reply_and_resume(
                             state,

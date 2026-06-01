@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from .config import log
+from .events import WORKER_BOOT_DOA_EVENT
 from .state import ARCHIVED_LANE, MatrixState, task_is_closed
 from .worktree_streams import (
     compute_worktree_stream,
@@ -88,6 +89,82 @@ def _agent_blocking_active_task(state: MatrixState, agent_id: str, *,
             continue
         return task
     return None
+
+
+def _targeted_dispatch_drop_reason(state: MatrixState, target) -> str:
+    """Return a terminal reason for dropping a targeted queued dispatch."""
+    if not target:
+        return ""
+    if state.agent_is_tombstoned(target):
+        return "target_tombstoned"
+    if str(getattr(target, "cell_type", "") or "") != "agent":
+        return "target_not_agent"
+    status = str(getattr(target, "status", "") or "").strip()
+    if status in {"stopped", "error"}:
+        return f"target_{status}"
+    if not str(getattr(target, "session_id", "") or "").strip():
+        return "target_no_session"
+    return ""
+
+
+def _surface_targeted_dispatch_drop(
+        state: MatrixState,
+        panel_event,
+        *,
+        group_name: str,
+        task,
+        target,
+        reason: str) -> None:
+    """Drop and surface a queued dispatch pinned to a dead/tombstoned worker."""
+    target_id = str(getattr(target, "id", "") or "").strip()
+    target_name = str(getattr(target, "name", "") or "").strip()
+    message = (
+        "Queued dispatch dropped: target worker "
+        f"{target_name or target_id or '<unknown>'} is unavailable "
+        f"({reason}). Re-dispatch or relaunch deliberately if this work "
+        "should continue."
+    )
+    log.warning(
+        "auto-dispatch dropped queued task for unavailable target: "
+        "group=%s task=%s target=%s reason=%s",
+        group_name,
+        getattr(task, "id", ""),
+        target_id or "<unknown>",
+        reason,
+    )
+    state.auto_dispatch_queue_remove_task(task.id)
+
+    labels = list(getattr(task, "labels", []) or [])
+    if "torque:blocked" not in labels:
+        labels.append("torque:blocked")
+    messages = list(getattr(task, "messages", []) or [])
+    messages.append({
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "action": "system",
+        "agent_name": "Torque",
+        "message": message,
+    })
+    state.board_update_task(
+        task.id,
+        labels=labels,
+        status="Dispatch target unavailable",
+        messages=messages,
+    )
+    if target:
+        target.needs_attention = True
+        target.error_message = message
+        target.last_event_text = WORKER_BOOT_DOA_EVENT
+        state._emit_agent(target)
+        state._db_save_agent(target)
+    panel_event(
+        WORKER_BOOT_DOA_EVENT,
+        target_id,
+        target_name,
+        group_name,
+        message,
+        task_id=task.id,
+    )
+    state.recompute_task_health()
 
 
 def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
@@ -475,6 +552,21 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                     entry.target_agent_id = ""
                     state._db_save_auto_dispatch_queue(group_name)
                     target_agent_id = ""
+                else:
+                    drop_reason = _targeted_dispatch_drop_reason(
+                        state,
+                        target,
+                    )
+                    if drop_reason:
+                        _surface_targeted_dispatch_drop(
+                            state,
+                            panel_event,
+                            group_name=group_name,
+                            task=task,
+                            target=target,
+                            reason=drop_reason,
+                        )
+                        continue
             active_agents = _active_worker_ids(state, group_name)
             capacity_active_agents = active_agents
             if target_agent_id:

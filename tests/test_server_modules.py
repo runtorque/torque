@@ -1858,6 +1858,91 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
             direct_by_type['ask']['id'],
         )
 
+    async def test_deliver_engineer_reply_buffers_when_session_is_absent(self):
+        state = self._make_state()
+        state.add_group('g')
+        engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Engineer',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+            session_id='',
+        )
+        state.agents[engineer.id] = engineer
+        state.groups['g'] = [engineer.id]
+        state.update_engineer_settings(
+            'g',
+            pending_question='Need approval',
+            pending_question_set_at=456.0,
+            pending_question_actor_id=engineer.id,
+            paused=True,
+        )
+
+        async def fake_send_prompt(*_args, **_kwargs):
+            self.fail('offline engineer reply should buffer, not inject')
+
+        class FakeBuffer:
+            def __init__(self):
+                self.resumed = []
+
+            def on_delivery_resumed(self, group):
+                self.resumed.append(group)
+
+        buffer = FakeBuffer()
+        result = await self.server_mod._deliver_engineer_reply_and_resume(
+            state,
+            engineer,
+            group='g',
+            answer='Ship it',
+            send_prompt=fake_send_prompt,
+            engineer_buffer=buffer,
+        )
+
+        self.assertEqual(result, {'type': 'ok'})
+        self.assertEqual(buffer.resumed, ['g'])
+        ws = state.get_engineer_settings('g')
+        self.assertEqual(ws.pending_question, '')
+        direct_rows = self.db.load_direct_messages_for_agent(engineer.id)
+        direct_by_type = {row['message_type']: row for row in direct_rows}
+        self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
+        self.assertEqual(
+            direct_by_type['ask_reply']['delivery_state'],
+            'buffered',
+        )
+        self.assertEqual(
+            direct_by_type['ask_reply']['delivery_reason'],
+            'no_session',
+        )
+
+        sent = []
+
+        async def replay_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        engineer.session_id = 'session-1'
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            bridge=None,
+            target=engineer,
+            send_prompt=replay_send_prompt,
+        )
+
+        self.assertEqual(replayed, 1)
+        self.assertEqual(sent[0][0], engineer.id)
+        self.assertIn('## Human Reply', sent[0][1])
+        self.assertIn('Need approval', sent[0][1])
+        self.assertIn('Ship it', sent[0][1])
+        replayed_row = self.db.load_direct_message(
+            direct_by_type['ask_reply']['id']
+        )
+        self.assertEqual(replayed_row['delivery_state'], 'delivered')
+
     def test_pending_question_reply_target_prefers_actor_owner(self):
         state = self.state_mod.MatrixState()
         state.add_group('g')
@@ -3661,6 +3746,89 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[first.id].lane, 'Done')
         self.assertEqual(state.board_tasks[second.id].lane, 'Backlog')
         self.assertTrue(worker.pending_engineer_message)
+
+    async def test_resolve_human_ask_buffers_answer_for_offline_reply_agent(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        parent = state.board_add_task(
+            'Implement feature',
+            'g',
+            lane='In Progress',
+            id='task-parent',
+            agent_id=worker.id,
+            status='Awaiting Input',
+        )
+        ask = state.board_add_task(
+            'Can I use the fallback API?',
+            'g',
+            lane='Backlog',
+            id='ask-1',
+            labels=['torque:human', 'torque:derived'],
+            parent_task_id=parent.id,
+            reply_agent_id=worker.id,
+        )
+        self.assertIsNotNone(ask)
+
+        async def fake_send_prompt(*_args, **_kwargs):
+            self.fail('offline ask reply should buffer, not inject')
+
+        events = []
+        result = await self.server_mod._resolve_human_ask_task(
+            state,
+            ask,
+            'Use the minimal fallback.',
+            fake_send_prompt,
+            panel_event=lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['delivery_state'], 'buffered')
+        self.assertEqual(result['delivery_reason'], 'no_session')
+        self.assertEqual(state.board_tasks[ask.id].lane, 'Done')
+        self.assertEqual(state.board_tasks[parent.id].status, '')
+        self.assertEqual(events[0][0][0], 'ask_resolved')
+        direct_rows = self.db.load_direct_messages_for_agent(worker.id)
+        direct_by_type = {row['message_type']: row for row in direct_rows}
+        self.assertEqual(set(direct_by_type), {'ask', 'ask_reply'})
+        self.assertEqual(
+            direct_by_type['ask_reply']['delivery_state'],
+            'buffered',
+        )
+        self.assertEqual(
+            direct_by_type['ask_reply']['source_task_id'],
+            ask.id,
+        )
+
+        sent = []
+
+        async def replay_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        worker.session_id = 'session-1'
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            bridge=None,
+            target=worker,
+            send_prompt=replay_send_prompt,
+        )
+
+        self.assertEqual(replayed, 1)
+        self.assertIn('Can I use the fallback API?', sent[0][1])
+        self.assertIn('Use the minimal fallback.', sent[0][1])
 
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
         state = self._make_state()
