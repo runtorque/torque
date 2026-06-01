@@ -1125,6 +1125,10 @@ function _handleDelta(msg) {
       && typeof _agentPanelInvalidateWorkerTaskCacheForDeltas === 'function') {
     _agentPanelInvalidateWorkerTaskCacheForDeltas(taskDeltaChanges);
   }
+  if (taskDeltaChanges.length
+      && typeof _boardPatchDispatchStateTaskDeltas === 'function') {
+    _boardPatchDispatchStateTaskDeltas(taskDeltaChanges);
+  }
   if (invalidations.board && typeof _boardQueueTaskDeltas === 'function') {
     _boardQueueTaskDeltas(
       taskDeltaChanges,
@@ -1820,6 +1824,18 @@ function _deltaHasChangedField(changed, fields) {
   return false;
 }
 
+function _deltaIsDispatchStateOnly(changed) {
+  let sawDispatchState = false;
+  for (const key in (changed || {})) {
+    if (key === 'dispatch_state') {
+      sawDispatchState = true;
+    } else if (key !== 'updated_at') {
+      return false;
+    }
+  }
+  return sawDispatchState;
+}
+
 function _taskTouchesGroup(previous, next, group) {
   if (!group) return true;
   const prevGroup = previous ? (previous.group || '') : '';
@@ -1922,11 +1938,11 @@ function _taskDeltaInvalidatesMain(previous, next, op) {
   const nextAgent = next ? String(next.agent_id || '') : '';
   if (prevAgent || nextAgent) {
     if (prevAgent !== nextAgent) return true;
+    if (_deltaIsDispatchStateOnly(changed)) return false;
     return _deltaHasChangedField(changed, [
       'task',
       'lane',
       'status',
-      'dispatch_state',
       'action_name',
       'description',
       'messages',
@@ -1953,6 +1969,7 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
   if (!_taskTouchesGroup(previous, next, group)) return false;
   if (!previous || !next) return true;
   const changed = _taskDeltaChangedFields(previous, next, op);
+  if (_deltaIsDispatchStateOnly(changed)) return false;
   const alwaysFields = [
     'id',
     'group',
@@ -1967,7 +1984,6 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
     'agent_template',
     'agent_id',
     'status',
-    'dispatch_state',
     'health_state',
     'health_details',
     'health_since',
@@ -2204,6 +2220,8 @@ function _taskDeltaInvalidatesEngineer(previous, next, op) {
   if (!_standaloneDeltaOptimizationsEnabled()) return true;
   const group = _currentSurfaceGroup();
   if (!_taskTouchesGroup(previous, next, group)) return false;
+  const changed = _taskDeltaChangedFields(previous, next, op);
+  if (_deltaIsDispatchStateOnly(changed)) return false;
   const focused = _focusedEngineerAgent();
   if (!focused) return false;
   const kind = _focusedEngineerAgentKind(focused);
