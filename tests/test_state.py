@@ -2519,6 +2519,115 @@ class MatrixStateCleanupTests(unittest.TestCase):
             [],
         )
 
+    def test_load_backfills_legacy_broad_group_architect_filters_to_quiet(self):
+        """Legacy group-level architect defaults should not keep future architects noisy."""
+        from torque.db import TorqueDB
+
+        routing_mod = importlib.import_module("torque.digest_routing")
+        routing_mod = importlib.reload(routing_mod)
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1", "eng-1", "worker-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1", "eng-1", "worker-1"])
+        db.save_group_settings(
+            "g",
+            self.state_mod.GroupSettings(
+                architect_enabled_events=list(
+                    self.state_mod._ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS
+                ),
+            ),
+        )
+        # Simulate a partial run of the earlier per-agent-only backfill. The
+        # group-level backfill must still run so legacy group rows get quieted.
+        db.save_ui_state("architect_digest_quiet_default_backfilled", "1")
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="eng-1",
+                name="Engineer",
+                group="g",
+                cell_type="agent",
+                kind="engineer",
+                hired_by_architect_id="arch-1",
+                persistent=True,
+            )
+        )
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="worker-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+                owner_engineer_id="eng-1",
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(
+            state.get_architect_settings("g").architect_enabled_events,
+            [],
+        )
+        self.assertEqual(
+            db.load_all()["group_settings"]["g"]["architect_enabled_events"],
+            [],
+        )
+        self.assertEqual(
+            db.load_ui_state_value(
+                "architect_digest_group_quiet_default_backfilled"
+            ),
+            "1",
+        )
+        recipients = routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": "worker-1", "group": "g", "kind": "task_completed"},
+        )
+        self.assertEqual(recipients, ["eng-1"])
+
+    def test_load_preserves_custom_group_architect_filter(self):
+        """Custom group-level architect opt-ins are not mistaken for legacy defaults."""
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_group_settings(
+            "g",
+            self.state_mod.GroupSettings(
+                architect_enabled_events=["task_done", "pipeline_complete"],
+            ),
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(
+            state.get_architect_settings("g").architect_enabled_events,
+            ["task_done", "pipeline_complete"],
+        )
+        self.assertEqual(
+            db.load_all()["group_settings"]["g"]["architect_enabled_events"],
+            ["task_done", "pipeline_complete"],
+        )
+
     def test_backfill_runs_only_once_respects_user_override(self):
         """Once the marker is set, a user-set False is preserved across reloads."""
         from torque.db import TorqueDB

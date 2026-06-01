@@ -6656,49 +6656,78 @@ class MatrixState:
         return self._legacy_agent_digest_settings(agent_id)
 
     def _backfill_architect_digest_defaults(self) -> None:
-        """One-time: quiet architect rows that still have the old broad default."""
+        """One-time: quiet architect rows/groups with the old broad default."""
         marker_key = "architect_digest_quiet_default_backfilled"
+        group_marker_key = "architect_digest_group_quiet_default_backfilled"
         if not self.db:
             return
         try:
             already = self.db.load_ui_state_value(marker_key)
+            group_already = self.db.load_ui_state_value(group_marker_key)
         except Exception:
             log.exception("Failed to read backfill marker %s", marker_key)
             return
-        if already:
+        if already and group_already:
             return
-        legacy_defaults = set(_ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS)
+        legacy_defaults = set(normalize_architect_enabled_events(
+            _ARCHITECT_DIGEST_LEGACY_DEFAULT_ENABLED_EVENTS
+        ))
         engineer_defaults = set(
             _ENGINEER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
         )
-        changed = []
-        for agent_id, settings in self.agent_digest_settings.items():
-            cell = self.agents.get(agent_id)
-            if str(getattr(cell, "kind", "") or "").strip() != "architect":
-                continue
-            enabled = normalize_architect_enabled_events(
-                getattr(settings, "enabled_events", []) or []
-            )
-            if not bool(getattr(settings, "architect_digest", False)):
-                settings.architect_digest = True
-            enabled_set = set(enabled)
-            if (
-                    enabled_set == legacy_defaults
-                    or enabled_set == (
-                        legacy_defaults - ARCHITECT_MANDATORY_EVENTS
-                    )
-                    or enabled_set == engineer_defaults):
-                settings.enabled_events = list(
-                    _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS
+
+        def _is_legacy_broad_default(
+                enabled_events, *, include_engineer_defaults: bool = False) -> bool:
+            enabled_set = set(normalize_architect_enabled_events(enabled_events))
+            if enabled_set == legacy_defaults:
+                return True
+            return bool(include_engineer_defaults and enabled_set == engineer_defaults)
+
+        if not already:
+            changed = []
+            for agent_id, settings in self.agent_digest_settings.items():
+                cell = self.agents.get(agent_id)
+                if str(getattr(cell, "kind", "") or "").strip() != "architect":
+                    continue
+                enabled = normalize_architect_enabled_events(
+                    getattr(settings, "enabled_events", []) or []
                 )
-            else:
-                settings.enabled_events = enabled
-            changed.append((agent_id, settings))
-        for agent_id, settings in changed:
-            self.db.save_agent_digest_settings(agent_id, asdict(settings))
-        self.db.defer_write(
-            "ui_state", "save_ui_state", marker_key, "1",
-        )
+                if not bool(getattr(settings, "architect_digest", False)):
+                    settings.architect_digest = True
+                if _is_legacy_broad_default(
+                        enabled,
+                        include_engineer_defaults=True,
+                ):
+                    settings.enabled_events = list(
+                        _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS
+                    )
+                else:
+                    settings.enabled_events = enabled
+                changed.append((agent_id, settings))
+            for agent_id, settings in changed:
+                self.db.save_agent_digest_settings(agent_id, asdict(settings))
+            self.db.defer_write(
+                "ui_state", "save_ui_state", marker_key, "1",
+            )
+
+        if not group_already:
+            changed_groups = []
+            for group_name, settings in self.group_settings.items():
+                enabled = normalize_architect_enabled_events(
+                    getattr(settings, "architect_enabled_events", []) or []
+                )
+                if _is_legacy_broad_default(enabled):
+                    enabled = list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
+                if list(getattr(
+                        settings, "architect_enabled_events", []) or []) == enabled:
+                    continue
+                settings.architect_enabled_events = enabled
+                changed_groups.append((group_name, settings))
+            for group_name, settings in changed_groups:
+                self.db.save_group_settings(group_name, settings)
+            self.db.defer_write(
+                "ui_state", "save_ui_state", group_marker_key, "1",
+            )
 
     def _backfill_architect_suppress_empty_once(self) -> None:
         """One-time: flip ``suppress_empty=True`` on pre-existing architect rows.
