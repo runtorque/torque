@@ -8232,7 +8232,7 @@ body.diff-view-open #ctx-menu {
   flex-direction: column;
   width: min(calc(100vw - 32px), 336px);
   max-width: min(calc(100vw - 32px), 336px);
-  height: min(85vh, 760px);
+  height: min(90vh, 840px);
   padding: 0;
   overflow: hidden;
 }
@@ -8433,7 +8433,48 @@ body[data-torque-mode="desktop"] .diff-view-modal {
   background: var(--bg-hover);
   flex-shrink: 0;
 }
-.diff-footer-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.diff-footer-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.diff-merge-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+.diff-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: diff-spin .8s linear infinite;
+  flex: 0 0 auto;
+}
+.diff-spinner-inline {
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+}
+.diff-merge-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-green.diff-merge-button[disabled] {
+  opacity: 0.85;
+  pointer-events: none;
+}
+@keyframes diff-spin {
+  to { transform: rotate(360deg); }
+}
 .btn-rebase {
   padding: 4px 12px;
   border-radius: var(--radius);

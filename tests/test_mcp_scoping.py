@@ -1669,7 +1669,13 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
         }
         return state, worker, product, review
 
-    async def _run_pr_merge(self, state, worker, worktree_mgr, data=None):
+    async def _run_pr_merge(
+            self,
+            state,
+            worker,
+            worktree_mgr,
+            data=None,
+            progress=None):
         async def latest_boundary_state(_cell):
             return {
                 "latest": {"task_id": "TORQUE:1:1"},
@@ -1694,6 +1700,7 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
             bridge=None,
             handle_command=noop_async,
             panel_event=None,
+            progress=progress,
         )
 
     async def test_generated_pr_body_includes_same_repo_closing_ref(self):
@@ -1710,6 +1717,29 @@ class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("- Closes #12", mgr.merge_calls[0]["body"])
         self.assertIn("PR: https://github.com/acme/repo/pull/7",
                       mgr.merge_calls[0]["body"])
+
+    async def test_pr_merge_emits_create_and_merge_progress_phases(self):
+        state, worker, _product, _review = self._make_state()
+        mgr = self._FakePrWorktreeManager()
+        phases = []
+
+        async def progress(phase, message, **_extra):
+            phases.append((phase, message))
+
+        result = await self._run_pr_merge(
+            state,
+            worker,
+            mgr,
+            progress=progress,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            [phase for phase, _message in phases],
+            ["preflight", "push_branch", "pr_create", "pr_merge"],
+        )
+        self.assertIn("Creating pull request", phases[2][1])
+        self.assertIn("Merging pull request", phases[3][1])
 
     async def test_user_supplied_pr_body_gets_closing_refs_appended(self):
         state, worker, _product, _review = self._make_state()
