@@ -3288,6 +3288,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=bob.id,
             created_by_architect_id=architect.id,
         )
+        hidden_branch = "torque/bob/hidden"
+        bob_worker.worktree_path = "/repo/.torque/worktrees/worker-bob"
+        bob_worker.worktree_repo_root = "/repo"
+        bob_worker.worktree_branch = hidden_branch
+        bob_worker.git_root = "/repo"
+        bob_worker.current_task_id = hidden_task.id
+        hidden_task.agent_id = bob_worker.id
+        self.state._db_save_agent(bob_worker)
+        self.state._db_save_task(hidden_task)
 
         list_text, list_error = await self._call_engineer(
             "engineer_peer_list",
@@ -3353,6 +3362,33 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(hidden_context_error)
         self.assertEqual(hidden_context_text, f"Task not found: {hidden_task.id}")
 
+        streams_text, streams_error = await self._call_engineer(
+            "engineer_streams_list",
+            {"include_orphaned": True},
+            alice.id,
+        )
+        self.assertFalse(streams_error, streams_text)
+        self.assertEqual(json.loads(streams_text)["count"], 0)
+        hidden_stream_show_text, hidden_stream_show_error = await self._call_engineer(
+            "engineer_stream_show",
+            {"repo_root": "/repo", "branch": hidden_branch},
+            alice.id,
+        )
+        self.assertTrue(hidden_stream_show_error)
+        hidden_stream_context_text, hidden_stream_context_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": charlie.id,
+                "message": "hidden stream should not leak",
+                "context_stream_refs": [
+                    {"repo_root": "/repo", "branch": hidden_branch},
+                ],
+            },
+            alice.id,
+        )
+        self.assertTrue(hidden_stream_context_error)
+        self.assertEqual(hidden_stream_context_text, hidden_stream_show_text)
+
         before_task_ids = set(self.state.board_tasks)
         notify_text, notify_error = await self._call_engineer(
             "engineer_peer_notify",
@@ -3386,6 +3422,65 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call["agent_id"] for call in injects], [bob.id])
         self.assertEqual(injects[0]["sender_kind"], "engineer")
         self.assertTrue(injects[0]["ack_required"])
+
+        same_pair_continue_text, same_pair_continue_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": bob.id,
+                "message": "same pair follow-up",
+                "thread_id": notify["thread_id"],
+                "context_task_ids": [visible_task.id],
+            },
+            alice.id,
+        )
+        self.assertFalse(same_pair_continue_error, same_pair_continue_text)
+        self.assertEqual(
+            json.loads(same_pair_continue_text)["thread_id"],
+            notify["thread_id"],
+        )
+
+        dave = self._add_engineer(
+            "eng-dave", "Dave", hired_by_architect_id=architect.id
+        )
+        charlie_task = self._add_task(
+            "TORQUE:803",
+            "Charlie-visible context",
+            assigned_engineer_id=charlie.id,
+            created_by_architect_id=architect.id,
+        )
+        charlie_notify_text, charlie_notify_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": dave.id,
+                "message": "charlie/dave thread",
+                "context_task_ids": [charlie_task.id],
+            },
+            charlie.id,
+        )
+        self.assertFalse(charlie_notify_error, charlie_notify_text)
+        charlie_notify = json.loads(charlie_notify_text)
+        collision_text, collision_error = await self._call_engineer(
+            "engineer_peer_notify",
+            {
+                "engineer_id": bob.id,
+                "message": "must not collide with another pair",
+                "thread_id": charlie_notify["thread_id"],
+                "context_task_ids": [visible_task.id],
+            },
+            alice.id,
+        )
+        self.assertTrue(collision_error)
+        self.assertEqual(collision_text, "thread not found in scope")
+        charlie_inspect_text, charlie_inspect_error = await self._call(
+            "architect_engineer_peer_inspect",
+            {"thread_id": charlie_notify["thread_id"]},
+            architect.id,
+        )
+        self.assertFalse(charlie_inspect_error, charlie_inspect_text)
+        self.assertEqual(
+            json.loads(charlie_inspect_text)["context"]["task_ids"],
+            [charlie_task.id],
+        )
 
         agents_text, agents_error = await self._call_engineer(
             "engineer_agents_list", {}, alice.id
@@ -3438,7 +3533,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         threads_text, threads_error = await self._call(
             "architect_engineer_peer_threads",
-            {},
+            {"engineer_id": alice.id},
             architect.id,
         )
         self.assertFalse(threads_error, threads_text)

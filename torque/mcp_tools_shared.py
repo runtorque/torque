@@ -2656,6 +2656,57 @@ def _engineer_peer_thread_rows_for_inspect(
     return rows, ""
 
 
+def _engineer_peer_thread_belongs_to_pair(
+        state,
+        thread_id: str,
+        sender_id: str,
+        recipient_id: str) -> tuple[bool, str]:
+    thread_id = str(thread_id or "").strip()
+    if not thread_id:
+        return True, ""
+    expected = {
+        str(sender_id or "").strip(),
+        str(recipient_id or "").strip(),
+    }
+    if len(expected) != 2 or not all(expected):
+        return False, "thread not found in scope"
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_engineer_peer_messages_for_thread", None)
+    if not callable(loader):
+        return False, "thread not found in scope"
+    rows = loader(thread_id, limit=5000)
+    if not rows:
+        return False, "thread not found in scope"
+    participants = _engineer_peer_thread_ids(rows)
+    if participants != expected:
+        return False, "thread not found in scope"
+    return True, ""
+
+
+def _engineer_peer_existing_message_matches_pair(
+        row: dict,
+        sender_id: str,
+        recipient_id: str,
+        requested_thread_id: str = "") -> bool:
+    if not _is_engineer_peer_row(row):
+        return False
+    participants = {
+        str((row or {}).get("sender_id", "") or "").strip(),
+        str((row or {}).get("recipient_id", "") or "").strip(),
+    }
+    expected = {
+        str(sender_id or "").strip(),
+        str(recipient_id or "").strip(),
+    }
+    if participants != expected:
+        return False
+    requested_thread_id = str(requested_thread_id or "").strip()
+    existing_thread_id = str((row or {}).get("thread_id", "") or "").strip()
+    if requested_thread_id and existing_thread_id != requested_thread_id:
+        return False
+    return True
+
+
 def _engineer_peer_inspect_json(
         state,
         caller_id: str,
@@ -3583,13 +3634,29 @@ def _save_engineer_peer_message(state, sender, recipient, *,
     if not message_id:
         message_id = "msg-" + uuid.uuid4().hex[:12]
         created = True
+    requested_thread_id = str(thread_id or "").strip()
     existing = _load_existing_peer_message_for_idempotency(state, message_id)
     if existing:
+        if not _engineer_peer_existing_message_matches_pair(
+                existing,
+                sender.id,
+                recipient.id,
+                requested_thread_id):
+            raise ValueError("idempotency key conflicts with existing peer message")
         state.append_peer_message_to_caches(existing)
         return existing, False
     if not created:
         created = True
-    conversation_id = str(thread_id or "").strip() or message_id
+    if requested_thread_id:
+        ok, error = _engineer_peer_thread_belongs_to_pair(
+            state,
+            requested_thread_id,
+            sender.id,
+            recipient.id,
+        )
+        if not ok:
+            raise ValueError(error)
+    conversation_id = requested_thread_id or message_id
     context = dict(context or {})
     context_task_ids = list(context.get("context_task_ids", []) or [])
     row = {
@@ -7792,7 +7859,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if ack_error:
             return ack_error, True
         context, context_error = _normalize_engineer_peer_context(
-            real_state,
+            state,
             caller_id,
             _engineer_group,
             recipient,
