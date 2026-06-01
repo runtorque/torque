@@ -13,6 +13,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from torque import pty_supervisor
 from torque.pty_supervisor import PtySupervisor, read_frame, write_frame
@@ -210,6 +211,67 @@ class SupervisorLifecycleTests(unittest.IsolatedAsyncioTestCase):
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(read_frame(reader), timeout=2.0)
         finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def test_metrics_counts_ops_errors_bytes_and_backpressure(self):
+        reader, writer = await _open_client(self.h.socket_path)
+        try:
+            await write_frame(writer, {
+                "op": "create",
+                "session_id": "s-metrics",
+                "cell_id": "c-metrics",
+                "shell_argv": ["/bin/sh", "-c", "cat"],
+                "env": {},
+                "cwd": "",
+                "cols": 80,
+                "rows": 24,
+            })
+            self.assertEqual((await read_frame(reader)).get("type"), "ok")
+
+            await write_frame(writer, {"op": "not_a_real_op"})
+            err = await read_frame(reader)
+            self.assertEqual(err.get("type"), "error")
+            self.assertEqual(err.get("code"), "protocol_error")
+
+            with mock.patch.object(
+                    pty_supervisor, "_bounded_pty_write",
+                    return_value=0):
+                await write_frame(writer, {
+                    "op": "write",
+                    "session_id": "s-metrics",
+                    "data": base64.b64encode(b"blocked").decode("ascii"),
+                })
+                backpressure = await read_frame(reader)
+            self.assertEqual(backpressure.get("type"), "error")
+            self.assertEqual(backpressure.get("code"), "write_backpressure")
+
+            await write_frame(writer, {"op": "metrics"})
+            payload = await read_frame(reader)
+            self.assertEqual(payload.get("type"), "metrics")
+            metrics = payload.get("metrics") or {}
+            self.assertGreaterEqual(
+                metrics.get("ops_total", {}).get("create", 0), 1)
+            self.assertGreaterEqual(
+                metrics.get("ops_total", {}).get("write", 0), 1)
+            self.assertGreaterEqual(
+                metrics.get("ops_total", {}).get("metrics", 0), 1)
+            self.assertGreaterEqual(
+                metrics.get("errors_total", {}).get("protocol_error", 0), 1)
+            self.assertEqual(
+                metrics.get("errors_total", {}).get("write_backpressure", 0),
+                1,
+            )
+            self.assertEqual(metrics.get("write_deadline_hits"), 1)
+            self.assertEqual(metrics.get("bytes_written"), 0)
+            self.assertEqual(metrics.get("sessions_current"), 1)
+            self.assertEqual(metrics.get("sessions_peak"), 1)
+            self.assertEqual(metrics.get("sessions_created_total"), 1)
+        finally:
+            with contextlib.suppress(Exception):
+                await write_frame(
+                    writer, {"op": "close", "session_id": "s-metrics"})
+                await read_frame(reader)
             writer.close()
             await writer.wait_closed()
 

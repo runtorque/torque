@@ -1337,15 +1337,18 @@ def _collect_pty_supervisor_section(db_path: Path) -> dict:
     supervisor — the "supervisor disconnected / can't send messages" class of
     incident — and this surfaces it without log spelunking.
     """
-    from .pty_supervisor import DEFAULT_SOCKET_NAME, _ping_socket
+    from .pty_supervisor import DEFAULT_SOCKET_NAME, _metrics_socket, _ping_socket
     socket_path = Path(db_path).parent / DEFAULT_SOCKET_NAME
     section = {
         "socket_path": str(socket_path),
         "socket_present": socket_path.exists(),
         "reachable": False,
         "pid": None,
+        "started_at": None,
+        "uptime": None,
         "protocol_version": None,
         "ping_ms": None,
+        "metrics": {},
     }
     if not section["socket_present"]:
         return section
@@ -1354,8 +1357,19 @@ def _collect_pty_supervisor_section(db_path: Path) -> dict:
     if isinstance(pong, dict) and pong.get("type") == "pong":
         section["reachable"] = True
         section["pid"] = pong.get("pid")
+        section["started_at"] = pong.get("started_at")
+        try:
+            section["uptime"] = round(
+                max(0.0, time.time() - float(pong.get("started_at") or 0.0)),
+                1,
+            )
+        except (TypeError, ValueError):
+            section["uptime"] = None
         section["protocol_version"] = pong.get("version")
         section["ping_ms"] = round((time.monotonic() - started) * 1000, 1)
+        metrics = _metrics_socket(socket_path, timeout=2.0)
+        if isinstance(metrics, dict) and metrics.get("type") == "metrics":
+            section["metrics"] = dict(metrics.get("metrics") or {})
     return section
 
 
@@ -1550,6 +1564,7 @@ def format_doctor_report(report: dict) -> str:
     roles = report.get("roles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
     pty_supervisor = report.get("pty_supervisor", {}) or {}
+    pty_metrics = pty_supervisor.get("metrics", {}) or {}
     warnings = list(report.get("warnings", []) or [])
 
     engineer_line = f"  engineer:    {int(agents.get('engineer', 0) or 0)}"
@@ -1711,8 +1726,28 @@ def format_doctor_report(report: dict) -> str:
         f"{str(bool(pty_supervisor.get('reachable'))).lower()}",
         "  pid:                            "
         f"{pty_supervisor.get('pid') if pty_supervisor.get('pid') is not None else '—'}",
+        "  uptime_seconds:                 "
+        f"{pty_supervisor.get('uptime') if pty_supervisor.get('uptime') is not None else '—'}",
         "  ping_ms:                        "
         f"{pty_supervisor.get('ping_ms') if pty_supervisor.get('ping_ms') is not None else '—'}",
+        "  reconnect_count:                "
+        f"{int(pty_supervisor.get('reconnect_count', 0) or 0)}",
+        "  last_op_latency_ms:             "
+        f"{pty_supervisor.get('last_op_latency_ms') if pty_supervisor.get('last_op_latency_ms') is not None else '—'}",
+        "  sessions_current:               "
+        f"{int(pty_metrics.get('sessions_current', 0) or 0)}",
+        "  sessions_peak:                  "
+        f"{int(pty_metrics.get('sessions_peak', 0) or 0)}",
+        "  sessions_created_total:         "
+        f"{int(pty_metrics.get('sessions_created_total', 0) or 0)}",
+        "  bytes_read:                     "
+        f"{int(pty_metrics.get('bytes_read', 0) or 0)}",
+        "  bytes_written:                  "
+        f"{int(pty_metrics.get('bytes_written', 0) or 0)}",
+        "  read_loop_failures:             "
+        f"{int(pty_metrics.get('read_loop_failures', 0) or 0)}",
+        "  write_deadline_hits:            "
+        f"{int(pty_metrics.get('write_deadline_hits', 0) or 0)}",
         "  stuck_input_sessions:           "
         f"{pty_supervisor.get('stuck_sessions') if 'stuck_sessions' in pty_supervisor else '— (daemon offline)'}",
         "",

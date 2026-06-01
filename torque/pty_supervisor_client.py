@@ -15,6 +15,7 @@ import asyncio
 import base64
 import contextlib
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -27,7 +28,7 @@ from .pty_supervisor import (
 
 log = logging.getLogger("torque.pty_supervisor_client")
 
-_RESPONSE_TYPES = {"ok", "error", "pong", "list"}
+_RESPONSE_TYPES = {"ok", "error", "pong", "list", "metrics"}
 
 # Upper bound for a single request/response round-trip. Supervisor ops
 # (list/write/create/resize/close) are sub-second in practice; this only
@@ -92,6 +93,7 @@ class PtySupervisorClient:
         self.on_reconnect: Optional[
             Callable[[dict], Optional[Awaitable[None]]]] = None
         self._last_supervisor_pid: Optional[int] = None
+        self._last_supervisor_started_at: Optional[float] = None
         # Monotonic id for the live connection. Bumped on every connect and on
         # every disconnect so a stale ``_read_loop`` task (left over from a
         # prior connection) can't tear down the connection that replaced it —
@@ -100,6 +102,10 @@ class PtySupervisorClient:
         # Latency (ms) of the most recent successful request round-trip, for
         # the daemon↔supervisor health surface. None until the first call.
         self._last_op_latency_ms: Optional[float] = None
+        self._last_successful_op_at: Optional[float] = None
+        self._last_reconnect_at: Optional[float] = None
+        self._reconnect_count: int = 0
+        self._reconnect_failures: int = 0
 
     def is_connected(self) -> bool:
         return (
@@ -112,6 +118,30 @@ class PtySupervisorClient:
     @property
     def last_op_latency_ms(self) -> Optional[float]:
         return self._last_op_latency_ms
+
+    @property
+    def last_successful_op_at(self) -> Optional[float]:
+        return self._last_successful_op_at
+
+    @property
+    def last_supervisor_pid(self) -> Optional[int]:
+        return self._last_supervisor_pid
+
+    @property
+    def last_supervisor_started_at(self) -> Optional[float]:
+        return self._last_supervisor_started_at
+
+    @property
+    def last_reconnect_at(self) -> Optional[float]:
+        return self._last_reconnect_at
+
+    @property
+    def reconnect_count(self) -> int:
+        return int(self._reconnect_count)
+
+    @property
+    def reconnect_failures(self) -> int:
+        return int(self._reconnect_failures)
 
     # -- connect / close ---------------------------------------------------
 
@@ -137,6 +167,11 @@ class PtySupervisorClient:
                 f"version mismatch: client={PROTOCOL_VERSION} "
                 f"supervisor={pong.get('version')!r}")
         self._last_supervisor_pid = pong.get("pid")
+        try:
+            self._last_supervisor_started_at = float(
+                pong.get("started_at") or 0.0) or None
+        except (TypeError, ValueError):
+            self._last_supervisor_started_at = None
         return pong
 
     async def aclose(self) -> None:
@@ -220,6 +255,10 @@ class PtySupervisorClient:
         result = await self.list_state()
         return list(result.get("sessions") or [])
 
+    async def metrics(self) -> dict:
+        result = await self.call("metrics")
+        return dict(result.get("metrics") or {})
+
     async def subscribe(
         self,
         session_id: str,
@@ -260,6 +299,8 @@ class PtySupervisorClient:
                 result = await asyncio.wait_for(
                     fut, timeout=_CALL_TIMEOUT_SECONDS)
                 self._last_op_latency_ms = (loop.time() - started) * 1000.0
+                if result.get("type") != "error":
+                    self._last_successful_op_at = time.time()
                 return result
             except asyncio.TimeoutError as exc:
                 # Response was lost or never dispatched while the socket stayed
@@ -359,18 +400,22 @@ class PtySupervisorClient:
     async def _reconnect_loop(self) -> None:
         while not self._closed:
             await asyncio.sleep(self._reconnect_delay)
+            prev_pid = self._last_supervisor_pid
             try:
                 pong = await self.connect()
             except Exception as exc:
+                self._reconnect_failures += 1
                 log.warning("Supervisor reconnect failed: %s", exc)
                 continue
-            prev_pid = self._last_supervisor_pid
             new_pid = pong.get("pid")
             if new_pid != prev_pid:
                 log.info(
                     "Supervisor pid changed: %s -> %s (fresh instance)",
                     prev_pid, new_pid)
             self._last_supervisor_pid = new_pid
+            self._reconnect_count += 1
+            self._reconnect_failures = 0
+            self._last_reconnect_at = time.time()
             await self._resubscribe_all()
             if self.on_reconnect:
                 await _maybe_await(self.on_reconnect({
