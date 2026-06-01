@@ -47,7 +47,7 @@ from .direct_message_mirrors import (
     save_direct_ask_mirror,
     save_direct_ask_reply_mirror,
 )
-from .doctor import build_doctor_report
+from .doctor import build_doctor_report_for_db
 from dataclasses import asdict, dataclass
 from .state import (
     ARCHIVED_LANE,
@@ -7881,8 +7881,25 @@ def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | No
     return None
 
 
-def _handle_doctor_command(db: TorqueDB) -> dict:
-    return build_doctor_report(db._conn, db.db_path, runtime_python=sys.executable)
+async def _handle_doctor_command(db: TorqueDB, bridge=None) -> dict:
+    # build_doctor_report probes the PTY supervisor socket (a bounded but
+    # blocking call), so run it off the event loop on a fresh read-only
+    # connection rather than stalling the daemon — and never reuse db._conn
+    # across the worker thread.
+    report = await asyncio.to_thread(
+        build_doctor_report_for_db, db.db_path, runtime_python=sys.executable)
+    # Inject live runtime state the offline DB can't know: sessions whose
+    # input-write circuit breaker is open (agents that stopped draining stdin).
+    snapshot = getattr(bridge, "supervisor_write_breaker_snapshot", None)
+    if callable(snapshot):
+        try:
+            breakers = dict(snapshot() or {})
+        except Exception:
+            breakers = {}
+        sup = report.setdefault("pty_supervisor", {})
+        sup["open_write_breakers"] = breakers
+        sup["stuck_sessions"] = len(breakers)
+    return report
 
 
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"
@@ -12199,7 +12216,7 @@ async def main(connection=None):
     def _metrics_live_sampler() -> dict:
         active = list(state.iter_active_agents())
         prompt_tails = getattr(agent_launch, "_prompt_queue_tails", {}) or {}
-        return {
+        sample = {
             "agents": sum(
                 1 for cell in active
                 if getattr(cell, "cell_type", "") == "agent"
@@ -12210,6 +12227,19 @@ async def main(connection=None):
             ),
             "prompt_queue_depth": len(prompt_tails),
         }
+        # daemon↔supervisor hop health (when the supervised adapter is active).
+        connected_fn = getattr(bridge, "supervisor_connected", None)
+        if callable(connected_fn):
+            try:
+                sample["supervisor_connected"] = bool(connected_fn())
+                sample["supervisor_latency_ms"] = bridge.supervisor_last_latency_ms()
+                snapshot = getattr(
+                    bridge, "supervisor_write_breaker_snapshot", None)
+                sample["stuck_sessions"] = (
+                    len(snapshot()) if callable(snapshot) else 0)
+            except Exception:
+                pass
+        return sample
 
     def _schedule_daemon_stop() -> None:
         nonlocal daemon_stop_task
@@ -13562,7 +13592,7 @@ async def main(connection=None):
             return response
 
         if cmd == "doctor":
-            return _handle_doctor_command(db)
+            return await _handle_doctor_command(db, bridge)
 
         if cmd == "get_metrics_history":
             try:
@@ -20517,9 +20547,19 @@ async def main(connection=None):
             )
         raise ValueError(f"Unsupported failed-write endpoint: {endpoint}")
 
-    replay_summary = await replay_failed_writes(db, _replay_failed_write)
-    if replay_summary.get("attempted"):
-        log.info("Failed-write replay summary: %s", replay_summary)
+    async def _run_failed_write_replay() -> None:
+        # Run off the startup critical path: a queued write whose replay blocks
+        # (e.g. one that triggers an auto-dispatch that hangs) must never hold
+        # up the HTTP/WS bind below, or the daemon never becomes reachable and
+        # the launcher times out. Replay still happens, just concurrently.
+        try:
+            replay_summary = await replay_failed_writes(db, _replay_failed_write)
+            if replay_summary.get("attempted"):
+                log.info("Failed-write replay summary: %s", replay_summary)
+        except Exception:
+            log.exception("Failed-write replay on startup errored")
+
+    asyncio.create_task(_run_failed_write_replay())
 
     # -- Scheduler ----------------------------------------------------------
 
@@ -20551,7 +20591,10 @@ async def main(connection=None):
         return web.FileResponse(WEBVIEW_FILE)
 
     async def handle_ws(request):
-        ws = web.WebSocketResponse()
+        # heartbeat: aiohttp sends a WS ping every 30s and closes the
+        # connection if no pong is returned, so the daemon detects and prunes
+        # dead/half-open UI clients instead of holding zombie sockets open.
+        ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         compact_snapshot = _request_wants_compact_snapshot(request)
         ui_client_id = _ui_client_id_from_request(request)

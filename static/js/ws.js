@@ -389,6 +389,40 @@ function _setConnDotState(connected) {
   refreshDaemonStatusIndicator(connected);
 }
 
+// WebSocket liveness watchdog. The daemon broadcasts a metrics tick to every
+// client every ~2s, so a healthy socket always receives inbound traffic. If the
+// socket still reports OPEN but no message has arrived for a while, it has gone
+// half-open ("zombie") — the browser never fired onclose, so reconnect never
+// ran and send() was silently dropping everything. Force-close it here so the
+// existing onclose → reconnect path takes over.
+var _lastWsInboundAt = 0;
+var _wsLivenessTimer = null;
+var WS_LIVENESS_CHECK_MS = 10000;
+var WS_LIVENESS_STALE_MS = 30000;
+
+function _noteWsInbound() {
+  _lastWsInboundAt = (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0;
+}
+
+function _stopWsLivenessWatchdog() {
+  if (_wsLivenessTimer !== null && typeof clearInterval === 'function') {
+    clearInterval(_wsLivenessTimer);
+  }
+  _wsLivenessTimer = null;
+}
+
+function _startWsLivenessWatchdog() {
+  _stopWsLivenessWatchdog();
+  if (typeof setInterval !== 'function') return;
+  _wsLivenessTimer = setInterval(function() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!_lastWsInboundAt) return;
+    if (Date.now() - _lastWsInboundAt <= WS_LIVENESS_STALE_MS) return;
+    // Stale OPEN socket: tear it down so onclose schedules a reconnect.
+    try { ws.close(); } catch (e) { /* onclose/reconnect handles recovery */ }
+  }, WS_LIVENESS_CHECK_MS);
+}
+
 function connect() {
   _firstStateReceived = false;
   _resyncPending = false;
@@ -398,6 +432,8 @@ function connect() {
     : WS_URL;
   ws = new WebSocket(url);
   ws.onopen = () => {
+    _noteWsInbound();
+    _startWsLivenessWatchdog();
     _setConnDotState(true);
     if (typeof _clearDaemonStoppedBanner === 'function'
         && typeof _daemonStopRequestedByUser !== 'undefined'
@@ -411,6 +447,7 @@ function connect() {
     }
   };
   ws.onclose = () => {
+    _stopWsLivenessWatchdog();
     _resyncPending = false;
     _awaitingFullState = false;
     if (typeof _engineerResetSessionMapMeta === 'function') {
@@ -428,6 +465,7 @@ function connect() {
   };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => {
+    _noteWsInbound();
     const msg = JSON.parse(e.data);
     if (typeof _compactHandleLazyResponse === 'function'
         && _compactHandleLazyResponse(msg)) {

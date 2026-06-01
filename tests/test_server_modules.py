@@ -1228,7 +1228,7 @@ prompt: |
                 )
             )
 
-            result = self.server_mod._handle_doctor_command(db)
+            result = asyncio.run(self.server_mod._handle_doctor_command(db))
 
         self.assertEqual(result['schema_version'], 3)
         self.assertEqual(result['result'], 'pass')

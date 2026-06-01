@@ -83,6 +83,62 @@ class TorqueDoctorTests(unittest.TestCase):
             "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
 
+    def test_pty_supervisor_check_status_matrix(self):
+        from torque.doctor import _check_pty_supervisor_reachable
+        # Present + unreachable = down/wedged => fail.
+        self.assertEqual(
+            _check_pty_supervisor_reachable(
+                {"pty_supervisor": {"socket_present": True, "reachable": False}}
+            )["status"],
+            "fail",
+        )
+        # Present + reachable => pass.
+        self.assertEqual(
+            _check_pty_supervisor_reachable(
+                {"pty_supervisor": {"socket_present": True, "reachable": True}}
+            )["status"],
+            "pass",
+        )
+        # No socket (supervisor not running) is not a failure.
+        self.assertEqual(
+            _check_pty_supervisor_reachable(
+                {"pty_supervisor": {"socket_present": False, "reachable": False}}
+            )["status"],
+            "pass",
+        )
+
+    def test_pty_supervisor_section_absent_socket(self):
+        from torque.doctor import _collect_pty_supervisor_section
+        with tempfile.TemporaryDirectory() as d:
+            sec = _collect_pty_supervisor_section(Path(d) / "torque.db")
+            self.assertFalse(sec["socket_present"])
+            self.assertFalse(sec["reachable"])
+            self.assertIsNone(sec["pid"])
+
+    def test_stuck_input_sessions_warning_and_render(self):
+        from torque.doctor import (
+            _warn_stuck_input_sessions,
+            build_doctor_report_for_db,
+            format_doctor_report,
+        )
+        # No open breakers => no warning.
+        self.assertIsNone(_warn_stuck_input_sessions({"pty_supervisor": {}}))
+        # Open breakers => warning carrying count + session ids.
+        warning = _warn_stuck_input_sessions(
+            {"pty_supervisor": {"open_write_breakers": {"sess-aaaa1111": 12.0}}}
+        )
+        self.assertEqual(warning["name"], "stuck_input_sessions")
+        self.assertEqual(warning["details"]["count"], 1)
+
+        # Render: inject the runtime fields the daemon adds, then format.
+        report = build_doctor_report_for_db(self.db_path)
+        report["pty_supervisor"]["open_write_breakers"] = {"sess-aaaa1111": 12.0}
+        report["pty_supervisor"]["stuck_sessions"] = 1
+        report.setdefault("warnings", []).append(warning)
+        text = format_doctor_report(report)
+        self.assertIn("stuck_input_sessions:", text)
+        self.assertIn("open input-write breaker", text)
+
     def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
         home = self._home_dir()
         self._save_engineer()

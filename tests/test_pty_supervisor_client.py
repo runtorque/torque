@@ -59,6 +59,20 @@ class PtySupervisorClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(pong.get("version"), 1)
         await client.aclose()
 
+    async def test_connected_state_and_latency_tracking(self):
+        client = PtySupervisorClient(self.h.socket_path)
+        self.assertFalse(client.is_connected())
+        self.assertIsNone(client.last_op_latency_ms)
+        await client.connect()
+        try:
+            self.assertTrue(client.is_connected())
+            # connect() issued a ping, so a latency sample exists and is sane.
+            self.assertIsNotNone(client.last_op_latency_ms)
+            self.assertGreaterEqual(client.last_op_latency_ms, 0.0)
+        finally:
+            await client.aclose()
+        self.assertFalse(client.is_connected())
+
     async def test_create_write_list_close_cycle(self):
         client = PtySupervisorClient(self.h.socket_path)
         await client.connect()
