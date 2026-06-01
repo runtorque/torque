@@ -672,7 +672,7 @@ function _behaviorOverlayProposalCard(proposal, viewer, opts) {
   var targetKey = _behaviorOverlayProposalScopeKey(proposal);
   var viewerKind = _behaviorOverlayKind(viewer);
   var viewerId = String((viewer && viewer.id) || '');
-  var canArchitectAct = viewerKind === 'architect'
+  var canArchitectAct = !opts.readOnly && viewerKind === 'architect'
     && String(proposal.next_actor_kind || '') === 'architect';
   var html = '<div class="behavior-overlay-proposal-card" data-agent-panel-anchor="behavior-proposal-'
     + _behaviorOverlayAttr(proposalId) + '">';
@@ -715,7 +715,8 @@ function _behaviorOverlayProposalCard(proposal, viewer, opts) {
   return html;
 }
 
-function _behaviorOverlayProposalsSection(agent, proposals, title) {
+function _behaviorOverlayProposalsSection(agent, proposals, title, opts) {
+  opts = opts || {};
   var html = '<section class="detail-section-card behavior-overlay-section">';
   html += '<div class="detail-section-card-head"><span class="detail-section-primary">'
     + _behaviorOverlayEsc(title || 'Open proposals') + '</span><span class="detail-task-status">'
@@ -724,14 +725,15 @@ function _behaviorOverlayProposalsSection(agent, proposals, title) {
     html += '<div class="agent-panel-empty">No open behavior proposals.</div>';
   } else {
     for (var i = 0; i < proposals.length; i++) {
-      html += _behaviorOverlayProposalCard(proposals[i], agent);
+      html += _behaviorOverlayProposalCard(proposals[i], agent, opts);
     }
   }
   html += '</section>';
   return html;
 }
 
-function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, directEdit) {
+function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, directEdit, opts) {
+  opts = opts || {};
   var activeId = _behaviorOverlayBaseVersionId(targetAgentId);
   var versions = _behaviorOverlayVersionList(targetAgentId);
   var html = '<section class="detail-section-card behavior-overlay-section">';
@@ -759,7 +761,7 @@ function _behaviorOverlayTimeline(agent, targetAgentId, viewerId, viewerKind, di
       html += '<div class="behavior-overlay-version-sub">'
         + _behaviorOverlayEsc(version.rationale || 'No rationale') + '</div>';
       html += '<div class="behavior-overlay-version-actions">';
-      if (!isActive && activeId) {
+      if (!opts.readOnly && !isActive && activeId) {
         html += '<button type="button" class="btn-secondary btn-sm" onclick="behaviorOverlayDiffVersions('
           + _behaviorOverlayJs(targetAgentId) + ',' + _behaviorOverlayJs(activeId) + ',' + _behaviorOverlayJs(vid) + ')">Diff active</button>';
         html += '<button type="button" class="btn-secondary btn-sm" onclick="behaviorOverlayRequestRollback('
@@ -931,18 +933,111 @@ function _behaviorOverlayRolePaneForAgent(group, roleKind) {
     return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
   }
   var title = _behaviorOverlayRoleScopeTitle(roleKind);
-  return _behaviorOverlayRolePaneHtml(group, roleKind, {
-    title: title,
-    note: title + ' applies group-wide and is layered before each individual ' + roleKind + ' overlay.',
-    embedded: true,
-  });
+  var target = _behaviorOverlayRoleTarget(group, roleKind);
+  var targetKey = target ? target.id : '';
+  if (!target || !targetKey) {
+    return '<div class="agent-panel-empty">Role behavior overlays require a group and role kind.</div>';
+  }
+  _behaviorOverlayRequestRead(targetKey, true, false);
+  _behaviorOverlayRequestVersions(targetKey, false);
+  _behaviorOverlayRequestProposals(false);
+
+  var active = _behaviorOverlayActive(targetKey);
+  var version = _behaviorOverlayActiveVersion(targetKey);
+  var read = _behaviorOverlayReadByAgent[targetKey] || {};
+  var readFresh = _behaviorOverlayReadIsFresh(targetKey);
+  var loading = (!!_behaviorOverlayReadLoadingByAgent[targetKey] && !read.version) || !readFresh;
+  var text = readFresh ? String(read.text || '') : '';
+  var proposals = _behaviorOverlayOpenProposalsForScope(targetKey);
+  var viewer = { id: 'user', name: 'User', kind: 'user' };
+
+  var html = '<div class="behavior-overlay-tab behavior-overlay-role-tab behavior-overlay-role-readonly" data-behavior-overlay-role="'
+    + _behaviorOverlayAttr(roleKind) + '" data-behavior-overlay-scope="'
+    + _behaviorOverlayAttr(targetKey) + '">';
+  html += '<section class="detail-section-card behavior-overlay-section">';
+  html += '<div class="detail-section-card-head"><span class="detail-section-primary">'
+    + _behaviorOverlayEsc(title) + '</span>'
+    + '<span class="detail-task-status">read-only inherited</span></div>';
+  html += '<div class="behavior-overlay-route-note">'
+    + _behaviorOverlayEsc(title + ' applies group-wide and is layered before each individual ' + roleKind + ' overlay.')
+    + '</div>';
+  html += '<div class="behavior-overlay-summary-grid">';
+  html += '<div><span class="detail-label">Group</span><span class="detail-val">'
+    + _behaviorOverlayEsc(group) + '</span></div>';
+  html += '<div><span class="detail-label">Role kind</span><span class="detail-val">'
+    + _behaviorOverlayEsc(roleKind) + '</span></div>';
+  html += '<div><span class="detail-label">Active version</span><span class="detail-val">'
+    + _behaviorOverlayEsc(active.active_version_id || version.id || '—') + '</span></div>';
+  html += '<div><span class="detail-label">Text</span><span class="detail-val">'
+    + _behaviorOverlayEsc((version.text_bytes != null ? version.text_bytes : text.length) + ' bytes') + '</span></div>';
+  html += '<div><span class="detail-label">Hash</span><span class="detail-val">'
+    + _behaviorOverlayEsc(_behaviorOverlayShortHash(version.text_sha256)) + '</span></div>';
+  html += '</div>';
+  html += '<label>Current inherited role text</label>';
+  if (loading) {
+    html += '<div class="agent-panel-empty">Refreshing inherited role overlay text…</div>';
+  } else if (!text) {
+    html += '<div class="agent-panel-empty">No inherited role overlay text is active.</div>';
+  } else {
+    html += '<pre class="behavior-overlay-readonly-text">' + _behaviorOverlayEsc(text) + '</pre>';
+  }
+  html += '</section>';
+  html += _behaviorOverlayDiffSection(targetKey);
+  html += _behaviorOverlayProposalsSection(viewer, proposals, 'Open proposals for this inherited role', { readOnly: true });
+  html += _behaviorOverlayTimeline(viewer, targetKey, 'user', 'user', false, { readOnly: true });
+  html += '</div>';
+  return html;
+}
+
+function _behaviorOverlayLayerSection(layerKey, title, badge, note, bodyHtml) {
+  layerKey = String(layerKey || 'section').replace(/[^A-Za-z0-9_-]/g, '-');
+  var html = '<section class="behavior-overlay-layer behavior-overlay-layer-'
+    + _behaviorOverlayAttr(layerKey) + '" data-behavior-overlay-layer="'
+    + _behaviorOverlayAttr(layerKey) + '">';
+  html += '<div class="behavior-overlay-layer-head">';
+  html += '<span class="behavior-overlay-layer-title">' + _behaviorOverlayEsc(title) + '</span>';
+  if (badge) {
+    html += '<span class="behavior-overlay-layer-badge">' + _behaviorOverlayEsc(badge) + '</span>';
+  }
+  html += '</div>';
+  if (note) {
+    html += '<div class="behavior-overlay-layer-note">' + _behaviorOverlayEsc(note) + '</div>';
+  }
+  html += '<div class="behavior-overlay-layer-body">' + (bodyHtml || '') + '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _behaviorOverlayInheritedLayer(group, roleKind) {
+  var roleLabel = _behaviorOverlayPluralRoleLabel(roleKind);
+  return _behaviorOverlayLayerSection(
+    'inherited',
+    'Inherited role overlay',
+    'group-wide · ' + roleLabel,
+    'Read-only guidance inherited from the group role scope. It is applied before the agent-specific overlay below.',
+    _behaviorOverlayRolePaneForAgent(group, roleKind)
+  );
+}
+
+function _behaviorOverlayAgentLayer(title, note, bodyHtml) {
+  return _behaviorOverlayLayerSection(
+    'agent-specific',
+    title || 'Agent-specific overlay',
+    'agent-specific · editable',
+    note || 'Guidance in this section applies only to the selected agent and layers after inherited role guidance.',
+    bodyHtml
+  );
 }
 
 function _behaviorOverlayArchitectScope(agent) {
   var group = String((agent && agent.group) || '');
   var html = '';
-  html += _behaviorOverlayRolePaneForAgent(group, 'architect');
-  html += _behaviorOverlayOwn(agent);
+  html += _behaviorOverlayInheritedLayer(group, 'architect');
+  html += _behaviorOverlayAgentLayer(
+    'Agent-specific architect overlay',
+    'Guidance in this section applies only to this architect and layers after the inherited architect role overlay.',
+    _behaviorOverlayOwn(agent)
+  );
   return html;
 }
 
@@ -950,9 +1045,20 @@ function _behaviorOverlayEngineerScope(agent) {
   var kind = _behaviorOverlayKind(agent);
   var group = String((agent && agent.group) || '');
   var html = '';
-  html += _behaviorOverlayRolePaneForAgent(group, 'engineer');
-  if (kind === 'architect') html += _behaviorOverlayHiredGovernance(agent);
-  else html += _behaviorOverlayOwn(agent);
+  html += _behaviorOverlayInheritedLayer(group, 'engineer');
+  if (kind === 'architect') {
+    html += _behaviorOverlayAgentLayer(
+      'Hired engineer-specific overlay',
+      "Select a hired engineer to inspect or edit that engineer's per-agent overlay. It layers after the inherited engineer role overlay above.",
+      _behaviorOverlayHiredGovernance(agent)
+    );
+  } else {
+    html += _behaviorOverlayAgentLayer(
+      'Agent-specific engineer overlay',
+      'Guidance in this section applies only to this engineer and layers after the inherited engineer role overlay.',
+      _behaviorOverlayOwn(agent)
+    );
+  }
   return html;
 }
 

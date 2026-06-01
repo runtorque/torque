@@ -1684,14 +1684,6 @@ function switchGsSubTab(pane, btn) {
     : pane;
   if (paneName && target) _gsActiveSubTabs[paneName] = target;
   if (target === 'group-sync') _gsBoardSyncMaybeLoadProjects();
-  if (target === 'worker-behavior'
-      || target === 'engineer-behavior'
-      || target === 'architect-behavior') {
-    const roleKind = target.split('-')[0];
-    if (typeof renderBehaviorOverlayRolePane === 'function') {
-      renderBehaviorOverlayRolePane(_settingsGroup || '', roleKind);
-    }
-  }
 }
 
 function openGroupSettings(group, initialTab, initialSubtab) {

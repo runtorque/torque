@@ -353,6 +353,13 @@ test('Behavior tab renders overlay editor, proposals, and version timeline', () 
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /Behavior overlays/);
+  assert.match(panel.innerHTML, /data-behavior-overlay-layer="inherited"/);
+  assert.match(panel.innerHTML, /Inherited role overlay/);
+  assert.match(panel.innerHTML, /group-wide · engineers/);
+  assert.match(panel.innerHTML, /read-only inherited/);
+  assert.match(panel.innerHTML, /data-behavior-overlay-layer="agent-specific"/);
+  assert.match(panel.innerHTML, /Agent-specific engineer overlay/);
+  assert.match(panel.innerHTML, /agent-specific · editable/);
   assert.match(panel.innerHTML, /All engineers \(role\)/);
   assert.match(panel.innerHTML, /Proposed behavior text/);
   assert.match(panel.innerHTML, /Open proposals for this agent/);
@@ -366,6 +373,49 @@ test('Behavior tab renders overlay editor, proposals, and version timeline', () 
     { cmd: 'behavior_overlay_read', agent_id: 'eng-1', seed: true },
     { cmd: 'behavior_overlay_versions', agent_id: 'eng-1', limit: 50 },
   ]);
+});
+
+test('Behavior tab visually separates read-only inherited role text from agent-specific editor', () => {
+  const { context, panel } = createHarness();
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'behavior';`, context);
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    scope_kind: 'role',
+    scope_group: 'alpha',
+    scope_key: 'engineer',
+    scope_id: 'role:alpha:engineer',
+    active: { scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', active_version_id: 'bov-role' },
+    version: { id: 'bov-role', scope_kind: 'role', scope_group: 'alpha', scope_key: 'engineer', version_number: 3, text_sha256: 'rolehash', text_bytes: 20 },
+    text: 'shared role guidance',
+  });
+  context.behaviorOverlayReceiveMessage({
+    type: 'behavior_overlay',
+    agent_id: 'eng-1',
+    active: { agent_id: 'eng-1', active_version_id: 'bov-agent' },
+    version: { id: 'bov-agent', agent_id: 'eng-1', version_number: 2, text_sha256: 'agenthash', text_bytes: 19 },
+    text: 'agent-only guidance',
+  });
+
+  context.renderAgentPanel();
+
+  const inheritedStart = panel.innerHTML.indexOf('data-behavior-overlay-layer="inherited"');
+  const agentSpecificStart = panel.innerHTML.indexOf('data-behavior-overlay-layer="agent-specific"');
+  assert.notEqual(inheritedStart, -1);
+  assert.notEqual(agentSpecificStart, -1);
+  assert.ok(inheritedStart < agentSpecificStart);
+  assert.match(panel.innerHTML, /Current inherited role text/);
+  assert.match(panel.innerHTML, /shared role guidance/);
+  assert.match(panel.innerHTML, /Agent-specific engineer overlay/);
+  assert.match(panel.innerHTML, /agent-only guidance/);
+  assert.doesNotMatch(panel.innerHTML, /behaviorOverlaySubmitDraft\('role'/);
+  assert.ok(panel.innerHTML.includes("behaviorOverlaySubmitDraft('own','eng-1','eng-1','engineer',false)"));
 });
 
 test('Behavior timeline renders initial overlay version zero as v0', () => {
@@ -726,7 +776,7 @@ test('behavior approval modal renders diff before enabling user actions', () => 
   });
 });
 
-test('Group Settings role Behavior panes render for engineer, architect, and worker scopes', () => {
+test('role behavior overlay renderer still supports engineer, architect, and worker scopes', () => {
   const { context, sendCalls } = createHarness();
   const elements = {};
   function ensure(id) {
@@ -949,7 +999,7 @@ test('focused Behavior role view refetches instead of showing stale role text af
   context.renderAgentPanel();
 
   assert.doesNotMatch(panel.innerHTML, /stale role text/);
-  assert.match(panel.innerHTML, /Refreshing current full overlay text before edits can be submitted/);
+  assert.match(panel.innerHTML, /Refreshing inherited role overlay text/);
   assert.ok(sendCalls.some((call) => call.cmd === 'behavior_overlay_read'
     && call.scope_kind === 'role'
     && call.scope_group === 'alpha'
