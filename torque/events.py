@@ -846,6 +846,13 @@ class EventBus:
         # Auto-unlink agent from parent task when idle after derive
         if prev_activity and not cell.activity and cell.current_task_id:
             self._maybe_unlink_post_derive(cell)
+        # A session_end is the authoritative "turn is no longer running"
+        # edge.  Flush that agent_upsert before running follow-up hooks such
+        # as worktree auto-checkpointing: those hooks can perform git/submodule
+        # work and must not hold the UI on the previous optimistic "running"
+        # state after the provider has already reported completion.
+        if event.event_type == "session_end" and self._loop:
+            await self._broadcast_now()
         # Notify on agent turn completion (for auto-checkpoint, etc.)
         if event.event_type == "session_end" and self.on_session_end:
             try:
@@ -1111,6 +1118,13 @@ class EventBus:
             return
         handle = self._loop.call_later(1.0, self._fire_broadcast)
         self._timers["_global"] = handle
+
+    async def _broadcast_now(self):
+        """Flush pending deltas immediately, cancelling the trailing timer."""
+        handle = self._timers.pop("_global", None)
+        if handle:
+            handle.cancel()
+        await self._do_broadcast()
 
     def _fire_broadcast(self):
         """Timer callback — create a task for the async broadcast."""

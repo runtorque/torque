@@ -1065,6 +1065,76 @@ asyncio.run(main())
         self.assertEqual(cell.last_summary, "All done")
         self.assertEqual(cell.session_id, "pty-session-1")
         self.assertEqual(saved, [("agent-1", "idle")])
+        upserts = [op for op in state._delta_ops if op["op"] == "agent_upsert"]
+        self.assertEqual(upserts[-1]["status"], "idle")
+        self.assertEqual(upserts[-1]["last_event_text"], "Session ended")
+
+    async def test_session_end_broadcasts_idle_before_completion_callback(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+            activity="thinking",
+            activity_detail="Running tests",
+            session_id="pty-session-1",
+        )
+        state.agents[cell.id] = cell
+
+        events = []
+
+        async def fake_broadcast():
+            events.append((
+                "broadcast",
+                [
+                    {
+                        "op": op.get("op"),
+                        "id": op.get("id"),
+                        "status": op.get("status"),
+                        "last_event_text": op.get("last_event_text"),
+                    }
+                    for op in state._delta_ops
+                ],
+            ))
+            state._delta_ops.clear()
+
+        async def on_session_end(ended_cell):
+            events.append(("callback", ended_cell.status, len(state._delta_ops)))
+
+        state.broadcast = fake_broadcast
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+        bus.start()
+        bus.on_session_end = on_session_end
+
+        def cleanup_timers():
+            for handle in list(bus._timers.values()):
+                handle.cancel()
+            bus._timers.clear()
+
+        self.addCleanup(cleanup_timers)
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="session_end",
+                data={"summary": "All done"},
+            )
+        )
+
+        self.assertGreaterEqual(len(events), 2)
+        self.assertEqual(events[0][0], "broadcast")
+        upserts = [
+            op for op in events[0][1]
+            if op["op"] == "agent_upsert" and op["id"] == cell.id
+        ]
+        self.assertTrue(upserts)
+        self.assertEqual(upserts[-1]["status"], "idle")
+        self.assertEqual(upserts[-1]["last_event_text"], "Session ended")
+        self.assertEqual(events[1], ("callback", "idle", 0))
 
     async def test_session_end_ignores_trailing_passive_activity_change(self):
         state = self._make_state()
