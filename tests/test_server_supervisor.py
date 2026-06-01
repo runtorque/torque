@@ -315,6 +315,8 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.status = {
                     "state": "restarting",
+                    "watchdog_paused": True,
+                    "watchdog_pause_until": 1010.0,
                     "restart_deadline_at": 1010.0,
                     "updated_at": 999.0,
                 }
@@ -369,6 +371,8 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [])
         self.assertEqual(len(publishes), 1)
         self.assertEqual(bridge.status["state"], "restarting")
+        self.assertTrue(bridge.status["watchdog_paused"])
+        self.assertEqual(bridge.status["watchdog_pause_until"], 1010.0)
         self.assertEqual(bridge.status["restart_deadline_at"], 1010.0)
 
     async def test_watchdog_preserves_restart_window_while_connected(self):
@@ -380,6 +384,8 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.status = {
                     "state": "restarting",
+                    "watchdog_paused": True,
+                    "watchdog_pause_until": 1010.0,
                     "restart_deadline_at": 1010.0,
                     "updated_at": 999.0,
                 }
@@ -416,8 +422,90 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metrics_calls, ["metrics"])
         self.assertEqual(len(publishes), 1)
         self.assertEqual(bridge.status["state"], "restarting")
+        self.assertTrue(bridge.status["watchdog_paused"])
+        self.assertEqual(bridge.status["watchdog_pause_until"], 1010.0)
         self.assertEqual(bridge.status["restart_deadline_at"], 1010.0)
         self.assertEqual(bridge.status["updated_at"], 999.0)
+
+    async def test_watchdog_pause_self_expires_if_restart_path_vanishes(self):
+        events = []
+        publishes = []
+        attempts = []
+        clock = {"wall": 1011.0}
+
+        class Bridge:
+            def __init__(self):
+                self.status = {
+                    "state": "restarting",
+                    "watchdog_paused": True,
+                    "watchdog_pause_until": 1010.0,
+                    "restart_deadline_at": 1010.0,
+                    "updated_at": 999.0,
+                }
+                self.status_history = []
+                self.lost_calls = 0
+                self.lost_reason = ""
+
+            def supervisor_connected(self):
+                return False
+
+            def supervisor_pid(self):
+                return 424242
+
+            def supervisor_reconnect_failures(self):
+                return 99
+
+            def supervisor_watchdog_status(self):
+                return dict(self.status)
+
+            def set_supervisor_watchdog_status(self, status):
+                self.status = dict(status or {})
+                self.status_history.append(dict(self.status))
+
+            async def mark_supervisor_lost(self, *, reason=""):
+                self.lost_calls += 1
+                self.lost_reason = reason
+                return 1
+
+        bridge = Bridge()
+
+        def ensure_running(_data_dir):
+            attempts.append(clock["wall"])
+
+        async def emit_event(kind, detail):
+            events.append((kind, dict(detail or {})))
+
+        async def publish():
+            publishes.append(dict(bridge.status))
+
+        watchdog = self.server_supervisor.SupervisorLivenessWatchdog(
+            bridge=bridge,
+            data_dir="/tmp/fake",
+            ensure_running=ensure_running,
+            pid_alive=lambda _pid: True,
+            publish_state=publish,
+            emit_event=emit_event,
+            reconnect_failure_threshold=3,
+            time_func=lambda: clock["wall"],
+            monotonic_func=lambda: clock["wall"],
+        )
+
+        await watchdog.check_once()
+
+        self.assertEqual(attempts, [1011.0])
+        self.assertEqual(bridge.lost_calls, 1)
+        self.assertEqual(bridge.lost_reason, "supervisor_lost")
+        self.assertFalse(bridge.status.get("watchdog_paused"))
+        self.assertNotIn("watchdog_pause_until", bridge.status)
+        self.assertTrue(any(
+            status.get("restart_deadline_expired_at") == 1011.0
+            and not status.get("watchdog_paused")
+            for status in bridge.status_history
+        ))
+        event_kinds = [kind for kind, _ in events]
+        self.assertIn("supervisor_lost", event_kinds)
+        self.assertIn("respawned", event_kinds)
+        self.assertGreaterEqual(len(publishes), 1)
 
     async def test_restart_payload_delegates_to_bridge(self):
         state = self.MatrixState()

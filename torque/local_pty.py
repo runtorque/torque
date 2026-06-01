@@ -1308,6 +1308,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self._supervisor_restart_deadline = deadline
         self.set_supervisor_watchdog_status({
             "state": "restarting",
+            "watchdog_paused": True,
+            "watchdog_pause_until": deadline,
             "restart_deadline_at": deadline,
             "updated_at": time.time(),
         })

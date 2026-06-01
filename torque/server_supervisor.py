@@ -317,13 +317,18 @@ class SupervisorLivenessWatchdog:
             self.bridge, "supervisor_reconnect_failures", 0) or 0)
         return failures >= self.reconnect_failure_threshold
 
-    def _restart_window_active(self) -> bool:
+    def _watchdog_pause_deadline(self) -> float | None:
         status = _maybe_call(
             self.bridge, "supervisor_watchdog_status", {}) or {}
-        if str(status.get("state") or "").strip() != "restarting":
-            return False
-        deadline = _safe_float(status.get("restart_deadline_at"))
-        return deadline is not None and deadline > self.time_func()
+        if not bool(status.get("watchdog_paused")):
+            return None
+        deadline = _safe_float(status.get("watchdog_pause_until"))
+        if deadline is None:
+            deadline = _safe_float(status.get("restart_deadline_at"))
+        # A pause without a valid deadline must not permanently disable the
+        # watchdog; treat it as already expired so normal liveness handling
+        # resumes on this tick.
+        return deadline if deadline is not None else 0.0
 
     def _prune_attempts(self, now_mono: float) -> None:
         cutoff = now_mono - self.retry_window_seconds
@@ -375,15 +380,23 @@ class SupervisorLivenessWatchdog:
         if not callable(getattr(self.bridge, "supervisor_connected", None)):
             return
         connected = self._connected()
-        if self._restart_window_active():
-            if connected:
-                self._failed_attempts.clear()
-                self._next_attempt_at = 0.0
-                self._circuit_open = False
-                self._lost_marked = False
-                await self._refresh_metrics()
-            await self._publish()
-            return
+        pause_deadline = self._watchdog_pause_deadline()
+        if pause_deadline is not None:
+            now = self.time_func()
+            if pause_deadline > now:
+                if connected:
+                    self._failed_attempts.clear()
+                    self._next_attempt_at = 0.0
+                    self._circuit_open = False
+                    self._lost_marked = False
+                    await self._refresh_metrics()
+                await self._publish()
+                return
+            self._set_status(
+                state="",
+                restart_deadline_expired_at=now,
+                updated_at=now,
+            )
 
         if connected:
             self._failed_attempts.clear()

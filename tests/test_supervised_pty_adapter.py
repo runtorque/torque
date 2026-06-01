@@ -554,8 +554,12 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             shell_path="",
         )
 
+        status_before_restart_op = []
+
         class HangingRestartClient:
             async def restart_supervisor(self):
+                status_before_restart_op.append(
+                    adapter.supervisor_watchdog_status())
                 return {
                     "type": "ok",
                     "op": "restart",
@@ -587,6 +591,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(cell.session_id)
         self.assertEqual(cell.status, "stopped")
+        self.assertTrue(status_before_restart_op[0].get("watchdog_paused"))
+        self.assertIn("restart_deadline_at", status_before_restart_op[0])
+        self.assertFalse(adapter.supervisor_watchdog_status().get(
+            "watchdog_paused"))
         self.assertEqual(fallbacks, ["/tmp/supervisor-timeout"])
         self.assertIn("restart_requested", [kind for kind, _ in events])
         self.assertIn("restart_failed_lost", [kind for kind, _ in events])
