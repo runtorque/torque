@@ -317,6 +317,19 @@ class SupervisorLivenessWatchdog:
             self.bridge, "supervisor_reconnect_failures", 0) or 0)
         return failures >= self.reconnect_failure_threshold
 
+    def _watchdog_pause_deadline(self) -> float | None:
+        status = _maybe_call(
+            self.bridge, "supervisor_watchdog_status", {}) or {}
+        if not bool(status.get("watchdog_paused")):
+            return None
+        deadline = _safe_float(status.get("watchdog_pause_until"))
+        if deadline is None:
+            deadline = _safe_float(status.get("restart_deadline_at"))
+        # A pause without a valid deadline must not permanently disable the
+        # watchdog; treat it as already expired so normal liveness handling
+        # resumes on this tick.
+        return deadline if deadline is not None else 0.0
+
     def _prune_attempts(self, now_mono: float) -> None:
         cutoff = now_mono - self.retry_window_seconds
         self._failed_attempts = [
@@ -366,7 +379,26 @@ class SupervisorLivenessWatchdog:
     async def check_once(self) -> None:
         if not callable(getattr(self.bridge, "supervisor_connected", None)):
             return
-        if self._connected():
+        connected = self._connected()
+        pause_deadline = self._watchdog_pause_deadline()
+        if pause_deadline is not None:
+            now = self.time_func()
+            if pause_deadline > now:
+                if connected:
+                    self._failed_attempts.clear()
+                    self._next_attempt_at = 0.0
+                    self._circuit_open = False
+                    self._lost_marked = False
+                    await self._refresh_metrics()
+                await self._publish()
+                return
+            self._set_status(
+                state="",
+                restart_deadline_expired_at=now,
+                updated_at=now,
+            )
+
+        if connected:
             self._failed_attempts.clear()
             self._next_attempt_at = 0.0
             self._circuit_open = False
@@ -689,3 +721,66 @@ async def build_supervisor_terminate_payload(
     payload["terminated_session_id"] = session_id
     payload.setdefault("message", "Supervisor session terminated.")
     return payload
+
+
+async def build_supervisor_restart_payload(
+    bridge: Any,
+    state: Any,
+    runtime_payload_func: Callable[..., dict] | None,
+    *,
+    timeout: float = 10.0,
+    data_dir: Any = None,
+    ensure_running: Callable[..., Any] | None = None,
+) -> dict:
+    """Request a safe in-place supervisor restart.
+
+    Non-supervisor/profile modes return a stable no-op/unavailable payload so
+    the frontend can call this command without special-casing profile mode.
+    """
+    runtime = _runtime_payload(runtime_payload_func, bridge, state)
+    restart = getattr(bridge, "restart_supervisor", None)
+    if not callable(restart):
+        return {
+            "type": "supervisor_restart",
+            "ok": True,
+            "available": False,
+            "message": _UNAVAILABLE_MESSAGE,
+            "runtime": runtime,
+        }
+    try:
+        result = restart(
+            timeout=timeout,
+            data_dir=data_dir,
+            ensure_running=ensure_running,
+        )
+        if asyncio.iscoroutine(result):
+            result = await result
+    except SupervisorUnavailable as exc:
+        log.warning("PTY supervisor restart unavailable: %s", exc)
+        return {
+            "type": "supervisor_restart",
+            "ok": False,
+            "available": False,
+            "message": "PTY supervisor restart did not complete.",
+            "error": str(exc),
+            "runtime": runtime,
+        }
+    except Exception as exc:
+        log.exception("PTY supervisor restart failed")
+        return {
+            "type": "supervisor_restart",
+            "ok": False,
+            "available": True,
+            "message": "PTY supervisor restart failed.",
+            "error": str(exc),
+            "runtime": runtime,
+        }
+
+    return {
+        "type": "supervisor_restart",
+        "ok": True,
+        "available": True,
+        "message": "PTY supervisor restarted in place.",
+        "restart": dict(result or {}),
+        "runtime": _runtime_payload(runtime_payload_func, bridge, state),
+    }

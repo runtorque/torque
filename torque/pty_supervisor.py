@@ -23,6 +23,7 @@ import asyncio
 import base64
 import contextlib
 import errno
+import fcntl
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ import struct
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -49,6 +51,9 @@ PROTOCOL_VERSION = 1  # started_at/list-supervisor metadata is additive.
 DEFAULT_SOCKET_NAME = "pty_supervisor.sock"
 DEFAULT_PID_FILE_NAME = "pty_supervisor.pid"
 DEFAULT_LOG_FILE_NAME = "pty_supervisor.log"
+ADOPT_STATE_VERSION = 1
+ADOPT_STATE_PREFIX = "pty_supervisor_adopt"
+DEFAULT_RESTART_TIMEOUT_SECONDS = 10.0
 
 # Max JSON frame size to accept before rejecting as protocol error.
 # Snapshot replay can be large (up to BUFFER_LIMIT bytes base64-encoded).
@@ -122,6 +127,124 @@ def _bounded_pty_write(fd: int, data: bytes, deadline: float) -> int:
     return written
 
 
+def _set_fd_cloexec(fd: int, cloexec: bool) -> None:
+    """Set/clear FD_CLOEXEC on ``fd`` explicitly.
+
+    Python usually creates new descriptors non-inheritable by default, but the
+    restart path relies on very specific inheritance semantics: PTY masters
+    must survive ``execv`` while supervisor listener/state-file descriptors
+    must not. Keep that policy visible and testable instead of relying on
+    platform defaults.
+    """
+    flags = fcntl.fcntl(fd, fcntl.F_GETFD)
+    if cloexec:
+        flags |= fcntl.FD_CLOEXEC
+    else:
+        flags &= ~fcntl.FD_CLOEXEC
+    fcntl.fcntl(fd, fcntl.F_SETFD, flags)
+
+
+def _fd_cloexec(fd: int) -> bool:
+    flags = fcntl.fcntl(fd, fcntl.F_GETFD)
+    return bool(flags & fcntl.FD_CLOEXEC)
+
+
+def _fd_alive(fd: int) -> bool:
+    try:
+        fcntl.fcntl(fd, fcntl.F_GETFD)
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+def _fd_child_matches(fd: int, pid: int) -> bool:
+    """Best-effort PTY foreground-pgrp validation.
+
+    Some platforms do not expose a meaningful foreground process group on the
+    PTY master side; unsupported probes are treated as "unknown but not a
+    failure". When the kernel does answer, require it to match the child pgid.
+    """
+    try:
+        child_pgid = os.getpgid(pid)
+        tty_pgrp = os.tcgetpgrp(fd)
+    except (AttributeError, OSError, ProcessLookupError):
+        return True
+    return tty_pgrp <= 0 or child_pgid <= 0 or tty_pgrp == child_pgid
+
+
+def _set_server_sockets_cloexec(server: asyncio.AbstractServer) -> None:
+    for sock in list(server.sockets or []):
+        try:
+            _set_fd_cloexec(sock.fileno(), True)
+        except OSError:
+            log.debug("Failed to set FD_CLOEXEC on listener", exc_info=True)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    fd = os.open(tmp, flags, 0o600)
+    try:
+        # Explicit even when O_CLOEXEC exists; this is a guardrail, not an
+        # optimization.
+        _set_fd_cloexec(fd, True)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = -1
+            json.dump(payload, fh, separators=(",", ":"), sort_keys=True)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        with contextlib.suppress(OSError):
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    except Exception:
+        if fd >= 0:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
+        raise
+    return path
+
+
+def _close_inherited_pty_fds(except_fds: set[int] | None = None) -> int:
+    """Close inherited PTY-like descriptors not adopted into a session.
+
+    This is a clean-fallback safety net for corrupt/missing adopt state. It
+    deliberately targets only tty descriptors so the fresh event loop/listener
+    descriptors are not disturbed.
+    """
+    keep = set(except_fds or set())
+    try:
+        limit = int(os.sysconf("SC_OPEN_MAX"))
+    except (OSError, ValueError, AttributeError):
+        limit = 1024
+    limit = max(3, min(limit, 4096))
+    closed = 0
+    for fd in range(3, limit):
+        if fd in keep:
+            continue
+        try:
+            is_tty = os.isatty(fd)
+        except OSError:
+            continue
+        if not is_tty:
+            continue
+        with contextlib.suppress(OSError):
+            os.close(fd)
+            closed += 1
+    return closed
+
+
 # -- Wire framing ----------------------------------------------------------
 
 
@@ -174,6 +297,7 @@ class SupervisorSession:
     process: Optional[asyncio.subprocess.Process] = None
     closed: bool = False
     exit_status: Optional[int] = None
+    detaching_for_exec: bool = False
 
     def snapshot(self) -> dict:
         return {
@@ -240,16 +364,34 @@ class SupervisorMetrics:
 class PtySupervisor:
     """In-process supervisor. Also used directly by tests."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        data_dir: Optional[Path] = None,
+        restart_callback=None,
+        restart_epoch: int = 0,
+        restart_nonce: str = "",
+        last_restart: Optional[dict] = None,
+    ):
         self.sessions: dict[str, SupervisorSession] = {}
         self.started_at = time.time()
         self._lock = asyncio.Lock()
         self.metrics = SupervisorMetrics()
+        self.data_dir = Path(data_dir) if data_dir is not None else None
+        self.restart_callback = restart_callback
+        self.restart_epoch = int(restart_epoch or 0)
+        self.restart_nonce = str(restart_nonce or "")
+        self.last_restart = dict(last_restart or {})
+        self._restarting = False
+        self._client_writers: set[asyncio.StreamWriter] = set()
 
     def supervisor_snapshot(self) -> dict:
         return {
             "pid": os.getpid(),
             "started_at": float(self.started_at or 0.0),
+            "restart_epoch": int(self.restart_epoch or 0),
+            "restart_nonce": self.restart_nonce,
+            "last_restart": dict(self.last_restart or {}),
         }
 
     def _live_session_count(self) -> int:
@@ -281,6 +423,7 @@ class PtySupervisor:
     ) -> None:
         subs: set[str] = set()
         peer = writer.get_extra_info("peername") or writer.get_extra_info("sockname")
+        self._client_writers.add(writer)
         log.info("Client connected: %s", peer)
         try:
             while True:
@@ -314,6 +457,7 @@ class PtySupervisor:
                         "message": str(exc),
                     })
         finally:
+            self._client_writers.discard(writer)
             for sid in list(subs):
                 sess = self.sessions.get(sid)
                 if sess:
@@ -331,12 +475,22 @@ class PtySupervisor:
     ) -> None:
         op = str(msg.get("op", "") or "")
         self.metrics.record_op(op)
+        if self._restarting and op not in {"ping", "list", "metrics"}:
+            await self._write_error(
+                writer,
+                "restarting",
+                "PTY supervisor is restarting; retry after reconnect.",
+            )
+            return
         if op == "ping":
             await write_frame(writer, {
                 "type": "pong",
                 "version": PROTOCOL_VERSION,
                 "pid": os.getpid(),
                 "started_at": float(self.started_at or 0.0),
+                "restart_epoch": int(self.restart_epoch or 0),
+                "restart_nonce": self.restart_nonce,
+                "last_restart": dict(self.last_restart or {}),
             })
         elif op == "metrics":
             self._record_sessions_current()
@@ -344,6 +498,8 @@ class PtySupervisor:
                 "type": "metrics",
                 "metrics": self.metrics.snapshot(),
             })
+        elif op == "restart":
+            await self._op_restart(msg, writer)
         elif op == "create":
             await self._op_create(msg, writer)
         elif op == "write":
@@ -367,6 +523,125 @@ class PtySupervisor:
                 writer, "protocol_error", f"unknown op: {op!r}")
 
     # -- ops ---------------------------------------------------------------
+
+    def _restart_state_path(self, restart_nonce: str) -> Path:
+        if self.data_dir is None:
+            raise RuntimeError("restart requires supervisor data_dir")
+        safe_nonce = "".join(
+            ch for ch in str(restart_nonce or "") if ch.isalnum() or ch in "-_"
+        ) or uuid.uuid4().hex
+        return (
+            Path(self.data_dir)
+            / f"{ADOPT_STATE_PREFIX}_{os.getpid()}_{safe_nonce}.json"
+        )
+
+    def _write_adopt_state(
+        self,
+        *,
+        restart_epoch: int,
+        restart_nonce: str,
+    ) -> Path:
+        path = self._restart_state_path(restart_nonce)
+        sessions = []
+        for session in self.sessions.values():
+            if session.closed:
+                continue
+            _set_fd_cloexec(session.master_fd, False)
+            sessions.append({
+                "session_id": session.session_id,
+                "cell_id": session.cell_id,
+                "master_fd": int(session.master_fd),
+                "pid": int(session.pid),
+                "cols": int(session.cols),
+                "rows": int(session.rows),
+                "cwd": session.cwd,
+                "shell_argv": list(session.shell_argv),
+                "bootstrap_dir": session.bootstrap_dir,
+                "started_at": float(session.started_at or 0.0),
+                "total_bytes": int(session.total_bytes or 0),
+            })
+        payload = {
+            "version": ADOPT_STATE_VERSION,
+            "created_at": time.time(),
+            "supervisor_pid": os.getpid(),
+            "restart_epoch": int(restart_epoch or 0),
+            "restart_nonce": str(restart_nonce or ""),
+            "sessions": sessions,
+        }
+        return _atomic_write_json(path, payload)
+
+    async def _op_restart(
+        self,
+        msg: dict,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        del msg
+        if self.restart_callback is None or self.data_dir is None:
+            await self._write_error(
+                writer,
+                "restart_unavailable",
+                "PTY supervisor restart is unavailable in this harness.",
+            )
+            return
+        if self._restarting:
+            await self._write_error(
+                writer,
+                "restart_in_progress",
+                "PTY supervisor restart is already in progress.",
+            )
+            return
+        restart_epoch = int(self.restart_epoch or 0) + 1
+        restart_nonce = uuid.uuid4().hex
+        self._restarting = True
+        try:
+            state_path = self._write_adopt_state(
+                restart_epoch=restart_epoch,
+                restart_nonce=restart_nonce,
+            )
+        except Exception as exc:
+            self._restarting = False
+            log.exception("Failed to prepare PTY supervisor restart")
+            await self._write_error(
+                writer,
+                "restart_prepare_failed",
+                str(exc),
+            )
+            return
+        live_count = self._live_session_count()
+        try:
+            await write_frame(writer, {
+                "type": "ok",
+                "op": "restart",
+                "restart_epoch": restart_epoch,
+                "restart_nonce": restart_nonce,
+                "sessions": live_count,
+                "adopt_state": str(state_path),
+            })
+        except Exception:
+            # The supervisor is still fully alive and has not detached or
+            # exec'd yet. Roll the prepared restart back instead of leaving the
+            # process stuck in the mutating-op rejection gate forever.
+            self._restarting = False
+            with contextlib.suppress(OSError):
+                state_path.unlink()
+            log.warning(
+                "Failed to deliver PTY supervisor restart ack; "
+                "prepared restart rolled back",
+                exc_info=True,
+            )
+            return
+        log.info(
+            "Prepared PTY supervisor restart epoch=%s nonce=%s sessions=%s",
+            restart_epoch,
+            restart_nonce,
+            live_count,
+        )
+        asyncio.create_task(self.restart_callback(
+            state_path,
+            restart_epoch,
+            restart_nonce,
+            live_count,
+        ))
 
     async def _op_create(self, msg: dict, writer: asyncio.StreamWriter) -> None:
         session_id = str(msg.get("session_id") or "").strip()
@@ -588,7 +863,7 @@ class PtySupervisor:
                     chunk = await asyncio.to_thread(
                         _select_read_chunk,
                         session.master_fd,
-                        lambda: session.closed,
+                        lambda: session.closed or session.detaching_for_exec,
                     )
                 except OSError as exc:
                     if exc.errno in (errno.EIO, errno.EBADF):
@@ -608,7 +883,8 @@ class PtySupervisor:
             self.metrics.read_loop_failures += 1
             log.exception("Read loop failed for %s", session.session_id)
         finally:
-            await self._finalize_session(session)
+            if not session.detaching_for_exec:
+                await self._finalize_session(session)
 
     async def _broadcast(
         self,
@@ -683,6 +959,7 @@ class PtySupervisor:
         for sub in list(session.subscribers):
             with contextlib.suppress(Exception):
                 await write_frame(sub, exit_msg)
+        session.subscribers.clear()
         # Keep the session in the registry briefly so late `list`/
         # `subscribe` calls see the exit. Drop it after a short delay.
         asyncio.create_task(self._drop_after(session.session_id, 5.0))
@@ -717,6 +994,229 @@ class PtySupervisor:
     async def shutdown(self) -> None:
         for session in list(self.sessions.values()):
             await self._terminate_session(session)
+
+    async def detach_for_exec(self) -> None:
+        """Stop supervisor asyncio work without terminating PTY children.
+
+        This is the critical restart path: do not call ``shutdown`` or
+        ``_terminate_session``. Children and master fds must remain alive until
+        ``os.execv`` replaces this process image and adopts the inherited fds.
+        """
+        for session in list(self.sessions.values()):
+            if session.closed:
+                continue
+            session.detaching_for_exec = True
+            session.subscribers.clear()
+            if session.read_task and not session.read_task.done():
+                session.read_task.cancel()
+        for session in list(self.sessions.values()):
+            task = session.read_task
+            if task and not task.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+            session.read_task = None
+        for writer in list(self._client_writers):
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
+        self._client_writers.clear()
+
+    def _adopt_report(
+        self,
+        *,
+        restart_epoch: int,
+        restart_nonce: str,
+        expected_sessions: int,
+    ) -> dict:
+        return {
+            "attempted": True,
+            "version": ADOPT_STATE_VERSION,
+            "restart_epoch": int(restart_epoch or 0),
+            "restart_nonce": str(restart_nonce or ""),
+            "expected_sessions": max(0, int(expected_sessions or 0)),
+            "adopted_sessions": 0,
+            "lost_sessions": 0,
+            "lost_session_ids": [],
+            "failed_sessions": [],
+            "errors": [],
+            "clean_fallback": False,
+        }
+
+    def _validate_adopt_entry(
+        self,
+        raw: dict,
+        *,
+        seen_session_ids: set[str],
+        seen_fds: set[int],
+    ) -> tuple[SupervisorSession | None, str]:
+        try:
+            session_id = str(raw.get("session_id") or "").strip()
+            cell_id = str(raw.get("cell_id") or "").strip()
+            master_fd = int(raw.get("master_fd"))
+            pid = int(raw.get("pid"))
+            cols = max(1, int(raw.get("cols") or 120))
+            rows = max(1, int(raw.get("rows") or 32))
+        except Exception as exc:
+            return None, f"bad entry shape: {exc}"
+        if not session_id:
+            return None, "missing session_id"
+        if session_id in seen_session_ids:
+            return None, f"duplicate session_id {session_id}"
+        if master_fd < 0:
+            return None, f"invalid master_fd {master_fd}"
+        if master_fd in seen_fds:
+            return None, f"duplicate master_fd {master_fd}"
+        if pid <= 0:
+            return None, f"invalid child pid {pid}"
+        if not _fd_alive(master_fd):
+            return None, f"master_fd {master_fd} is not open"
+        if not _pid_alive(pid):
+            return None, f"child pid {pid} is not alive"
+        if not _fd_child_matches(master_fd, pid):
+            return None, (
+                f"master_fd {master_fd} foreground process group does "
+                f"not match child pid {pid}"
+            )
+        try:
+            os.set_blocking(master_fd, False)
+            _set_fd_cloexec(master_fd, False)
+        except OSError as exc:
+            return None, f"failed to prepare master_fd {master_fd}: {exc}"
+        session = SupervisorSession(
+            session_id=session_id,
+            cell_id=cell_id,
+            pid=pid,
+            master_fd=master_fd,
+            shell_argv=list(raw.get("shell_argv") or []),
+            cwd=str(raw.get("cwd") or ""),
+            cols=cols,
+            rows=rows,
+            bootstrap_dir=str(raw.get("bootstrap_dir") or ""),
+            started_at=float(raw.get("started_at") or 0.0),
+            total_bytes=max(0, int(raw.get("total_bytes") or 0)),
+            process=None,
+        )
+        return session, ""
+
+    async def adopt_from_state(
+        self,
+        adopt_state: Path,
+        *,
+        restart_epoch: int = 0,
+        restart_nonce: str = "",
+        expected_sessions: int = 0,
+    ) -> dict:
+        """Rebuild sessions around inherited PTY master fds.
+
+        Invalid/corrupt state never prevents the supervisor from serving: this
+        method records a loud report and falls back to a clean supervisor.
+        """
+        report = self._adopt_report(
+            restart_epoch=restart_epoch,
+            restart_nonce=restart_nonce,
+            expected_sessions=expected_sessions,
+        )
+        path = Path(adopt_state)
+        payload = None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            report["errors"].append(f"failed to read adopt state: {exc}")
+            report["clean_fallback"] = True
+            report["lost_sessions"] = report["expected_sessions"]
+            closed = _close_inherited_pty_fds()
+            if closed:
+                report["closed_unadopted_fds"] = closed
+            self.last_restart = report
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+            log.error(
+                "PTY supervisor adopt failed; clean fallback. report=%s",
+                report,
+            )
+            return report
+
+        if not isinstance(payload, dict):
+            report["errors"].append("adopt state root is not an object")
+            report["clean_fallback"] = True
+        elif int(payload.get("version") or 0) != ADOPT_STATE_VERSION:
+            report["errors"].append(
+                f"unsupported adopt state version {payload.get('version')!r}")
+            report["clean_fallback"] = True
+
+        if report["clean_fallback"]:
+            report["lost_sessions"] = report["expected_sessions"]
+            closed = _close_inherited_pty_fds()
+            if closed:
+                report["closed_unadopted_fds"] = closed
+            self.last_restart = report
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+            log.error(
+                "PTY supervisor adopt rejected state; clean fallback. "
+                "report=%s",
+                report,
+            )
+            return report
+
+        state_epoch = int(payload.get("restart_epoch") or restart_epoch or 0)
+        state_nonce = str(payload.get("restart_nonce") or restart_nonce or "")
+        self.restart_epoch = state_epoch
+        self.restart_nonce = state_nonce
+        report["restart_epoch"] = state_epoch
+        report["restart_nonce"] = state_nonce
+        raw_sessions = list(payload.get("sessions") or [])
+        if not report["expected_sessions"]:
+            report["expected_sessions"] = len(raw_sessions)
+
+        seen_ids: set[str] = set()
+        seen_fds: set[int] = set()
+        adopted_fds: set[int] = set()
+        for raw in raw_sessions:
+            if not isinstance(raw, dict):
+                report["errors"].append("session entry is not an object")
+                report["failed_sessions"].append({
+                    "session_id": "",
+                    "reason": "entry is not an object",
+                })
+                continue
+            session, error = self._validate_adopt_entry(
+                raw,
+                seen_session_ids=seen_ids,
+                seen_fds=seen_fds,
+            )
+            sid = str(raw.get("session_id") or "")
+            if error or session is None:
+                report["failed_sessions"].append({
+                    "session_id": sid,
+                    "reason": error or "validation failed",
+                })
+                if sid:
+                    report["lost_session_ids"].append(sid)
+                with contextlib.suppress(Exception):
+                    fd = int(raw.get("master_fd"))
+                    if fd >= 3 and _fd_alive(fd):
+                        os.close(fd)
+                continue
+            seen_ids.add(session.session_id)
+            seen_fds.add(session.master_fd)
+            adopted_fds.add(session.master_fd)
+            self.sessions[session.session_id] = session
+
+        report["adopted_sessions"] = len(self.sessions)
+        lost = max(0, report["expected_sessions"] - report["adopted_sessions"])
+        report["lost_sessions"] = max(lost, len(report["lost_session_ids"]))
+        if report["lost_sessions"]:
+            log.error("PTY supervisor restart lost sessions: %s", report)
+        else:
+            log.info("PTY supervisor restart adopted sessions: %s", report)
+        self._record_sessions_current()
+        for session in list(self.sessions.values()):
+            session.read_task = asyncio.create_task(self._read_loop(session))
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        self.last_restart = report
+        return report
 
 
 async def _safe_write(writer: asyncio.StreamWriter, message: dict) -> None:
@@ -918,16 +1418,103 @@ def ensure_running(data_dir: Path, *, timeout: float = 3.0) -> Path:
 # -- Entry point for ``python -m torque.pty_supervisor`` ---------------------
 
 
-async def _serve(data_dir: Path) -> None:
+async def _exec_restart(
+    server: asyncio.AbstractServer,
+    supervisor: PtySupervisor,
+    paths: dict,
+    data_dir: Path,
+    state_path: Path,
+    restart_epoch: int,
+    restart_nonce: str,
+    expected_sessions: int,
+) -> None:
+    """Stop serving and replace this supervisor image in-place."""
+    try:
+        log.info(
+            "PTY supervisor re-exec starting epoch=%s nonce=%s sessions=%s",
+            restart_epoch,
+            restart_nonce,
+            expected_sessions,
+        )
+        server.close()
+        await supervisor.detach_for_exec()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(server.wait_closed(), timeout=1.0)
+        with contextlib.suppress(FileNotFoundError):
+            paths["socket"].unlink()
+        argv = [
+            sys.executable,
+            "-m",
+            "torque.pty_supervisor",
+            "--data-dir",
+            str(data_dir),
+            "--adopt-state",
+            str(state_path),
+            "--restart-epoch",
+            str(int(restart_epoch or 0)),
+            "--restart-nonce",
+            str(restart_nonce or ""),
+            "--expected-sessions",
+            str(int(expected_sessions or 0)),
+        ]
+        os.execv(sys.executable, argv)
+    except BaseException:
+        log.exception("PTY supervisor re-exec failed; exiting for watchdog")
+        os._exit(70)
+
+
+async def _serve(
+    data_dir: Path,
+    *,
+    adopt_state: Optional[Path] = None,
+    restart_epoch: int = 0,
+    restart_nonce: str = "",
+    expected_sessions: int = 0,
+) -> None:
     paths = _paths(data_dir)
-    supervisor = PtySupervisor()
+    supervisor: PtySupervisor | None = None
+
+    async def restart_callback(
+        state_path: Path,
+        epoch: int,
+        nonce: str,
+        session_count: int,
+    ) -> None:
+        assert supervisor is not None
+        await _exec_restart(
+            server,
+            supervisor,
+            paths,
+            data_dir,
+            state_path,
+            epoch,
+            nonce,
+            session_count,
+        )
+
+    supervisor = PtySupervisor(
+        data_dir=data_dir,
+        restart_callback=restart_callback,
+        restart_epoch=restart_epoch,
+        restart_nonce=restart_nonce,
+    )
+
+    if adopt_state is not None:
+        await supervisor.adopt_from_state(
+            adopt_state,
+            restart_epoch=restart_epoch,
+            restart_nonce=restart_nonce,
+            expected_sessions=expected_sessions,
+        )
 
     async def handler(reader, writer):
+        assert supervisor is not None
         await supervisor.handle_client(reader, writer)
 
     with contextlib.suppress(FileNotFoundError):
         paths["socket"].unlink()
     server = await asyncio.start_unix_server(handler, path=str(paths["socket"]))
+    _set_server_sockets_cloexec(server)
     os.chmod(paths["socket"], 0o600)
     paths["pid"].write_text(str(os.getpid()), encoding="utf-8")
     os.chmod(paths["pid"], 0o600)
@@ -940,8 +1527,12 @@ async def _serve(data_dir: Path) -> None:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, _signal_shutdown)
 
-    log.info("PTY supervisor listening on %s (pid=%s)",
-             paths["socket"], os.getpid())
+    log.info(
+        "PTY supervisor listening on %s (pid=%s restart_epoch=%s)",
+        paths["socket"],
+        os.getpid(),
+        supervisor.restart_epoch,
+    )
     async with server:
         try:
             await server.serve_forever()
@@ -972,10 +1563,20 @@ def _configure_logging(log_path: Optional[Path]) -> None:
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", required=True, type=Path)
+    parser.add_argument("--adopt-state", type=Path, default=None)
+    parser.add_argument("--restart-epoch", type=int, default=0)
+    parser.add_argument("--restart-nonce", default="")
+    parser.add_argument("--expected-sessions", type=int, default=0)
     args = parser.parse_args(argv)
     _configure_logging(None)  # stdout/stderr already redirected by spawn
     try:
-        asyncio.run(_serve(args.data_dir))
+        asyncio.run(_serve(
+            args.data_dir,
+            adopt_state=args.adopt_state,
+            restart_epoch=args.restart_epoch,
+            restart_nonce=args.restart_nonce,
+            expected_sessions=args.expected_sessions,
+        ))
     except KeyboardInterrupt:
         pass
     return 0

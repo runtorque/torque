@@ -94,6 +94,9 @@ class PtySupervisorClient:
             Callable[[dict], Optional[Awaitable[None]]]] = None
         self._last_supervisor_pid: Optional[int] = None
         self._last_supervisor_started_at: Optional[float] = None
+        self._last_supervisor_restart_epoch: int = 0
+        self._last_supervisor_restart_nonce: str = ""
+        self._last_restart_report: dict = {}
         # Monotonic id for the live connection. Bumped on every connect and on
         # every disconnect so a stale ``_read_loop`` task (left over from a
         # prior connection) can't tear down the connection that replaced it —
@@ -132,6 +135,18 @@ class PtySupervisorClient:
         return self._last_supervisor_started_at
 
     @property
+    def last_supervisor_restart_epoch(self) -> int:
+        return int(self._last_supervisor_restart_epoch or 0)
+
+    @property
+    def last_supervisor_restart_nonce(self) -> str:
+        return str(self._last_supervisor_restart_nonce or "")
+
+    @property
+    def last_restart_report(self) -> dict:
+        return dict(self._last_restart_report or {})
+
+    @property
     def last_reconnect_at(self) -> Optional[float]:
         return self._last_reconnect_at
 
@@ -166,13 +181,24 @@ class PtySupervisorClient:
             raise SupervisorProtocolError(
                 f"version mismatch: client={PROTOCOL_VERSION} "
                 f"supervisor={pong.get('version')!r}")
+        self._apply_supervisor_identity(pong)
+        return pong
+
+    def _apply_supervisor_identity(self, pong: dict) -> None:
         self._last_supervisor_pid = pong.get("pid")
         try:
             self._last_supervisor_started_at = float(
                 pong.get("started_at") or 0.0) or None
         except (TypeError, ValueError):
             self._last_supervisor_started_at = None
-        return pong
+        try:
+            self._last_supervisor_restart_epoch = int(
+                pong.get("restart_epoch") or 0)
+        except (TypeError, ValueError):
+            self._last_supervisor_restart_epoch = 0
+        self._last_supervisor_restart_nonce = str(
+            pong.get("restart_nonce") or "")
+        self._last_restart_report = dict(pong.get("last_restart") or {})
 
     async def aclose(self) -> None:
         self._closed = True
@@ -237,6 +263,9 @@ class PtySupervisorClient:
     async def close_session(self, session_id: str) -> dict:
         return await self.call("close", session_id=session_id)
 
+    async def restart_supervisor(self) -> dict:
+        return await self.call("restart")
+
     async def list_state(self) -> dict:
         """Return the raw list-state payload from the supervisor.
 
@@ -259,6 +288,40 @@ class PtySupervisorClient:
         result = await self.call("metrics")
         return dict(result.get("metrics") or {})
 
+    async def wait_for_restart(
+        self,
+        *,
+        restart_epoch: int = 0,
+        restart_nonce: str = "",
+        timeout: float = 10.0,
+    ) -> dict:
+        """Wait until the reconnect loop observes the requested re-exec."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.1, float(timeout or 0.0))
+        expected_epoch = int(restart_epoch or 0)
+        expected_nonce = str(restart_nonce or "")
+        while loop.time() < deadline:
+            if self.is_connected():
+                epoch_ok = (
+                    expected_epoch <= 0
+                    or self.last_supervisor_restart_epoch >= expected_epoch
+                )
+                nonce_ok = (
+                    not expected_nonce
+                    or self.last_supervisor_restart_nonce == expected_nonce
+                )
+                if epoch_ok and nonce_ok:
+                    return {
+                        "supervisor_pid": self.last_supervisor_pid,
+                        "restart_epoch": self.last_supervisor_restart_epoch,
+                        "restart_nonce": self.last_supervisor_restart_nonce,
+                        "last_restart": self.last_restart_report,
+                    }
+            await asyncio.sleep(0.05)
+        raise SupervisorUnavailable(
+            "supervisor restart did not complete within "
+            f"{float(timeout or 0.0):.1f}s")
+
     async def subscribe(
         self,
         session_id: str,
@@ -276,6 +339,15 @@ class PtySupervisorClient:
     async def unsubscribe(self, session_id: str) -> dict:
         self._subscriptions.pop(session_id, None)
         return await self.call("unsubscribe", session_id=session_id)
+
+    def forget_subscription(self, session_id: str) -> None:
+        """Drop a local subscription without a supervisor round-trip.
+
+        Used when a session finalizes (or is marked lost while the supervisor
+        is unavailable) so reconnect resubscribe does not keep chasing stale
+        session ids.
+        """
+        self._subscriptions.pop(str(session_id or ""), None)
 
     # -- core request/response --------------------------------------------
 
@@ -366,9 +438,11 @@ class PtySupervisorClient:
                 await _maybe_await(sub.on_output(msg))
             return
         if mtype == "exit":
-            sub = self._subscriptions.get(msg.get("session_id", ""))
+            session_id = str(msg.get("session_id", "") or "")
+            sub = self._subscriptions.get(session_id)
             if sub and sub.on_exit:
                 await _maybe_await(sub.on_exit(msg))
+            self._subscriptions.pop(session_id, None)
             return
         log.warning("Unknown frame type from supervisor: %s", mtype)
 
@@ -401,6 +475,8 @@ class PtySupervisorClient:
         while not self._closed:
             await asyncio.sleep(self._reconnect_delay)
             prev_pid = self._last_supervisor_pid
+            prev_epoch = self._last_supervisor_restart_epoch
+            prev_nonce = self._last_supervisor_restart_nonce
             try:
                 pong = await self.connect()
             except Exception as exc:
@@ -408,10 +484,28 @@ class PtySupervisorClient:
                 log.warning("Supervisor reconnect failed: %s", exc)
                 continue
             new_pid = pong.get("pid")
+            new_epoch = self._last_supervisor_restart_epoch
+            new_nonce = self._last_supervisor_restart_nonce
+            restarted = (
+                (new_epoch > int(prev_epoch or 0))
+                or (bool(new_nonce) and new_nonce != (prev_nonce or ""))
+            )
+            restart_report = dict(self._last_restart_report or {})
+            worker_loss = bool(
+                restart_report.get("clean_fallback")
+                or int(restart_report.get("lost_sessions", 0) or 0) > 0
+                or restart_report.get("failed_sessions")
+            )
             if new_pid != prev_pid:
                 log.info(
                     "Supervisor pid changed: %s -> %s (fresh instance)",
                     prev_pid, new_pid)
+            elif restarted:
+                log.info(
+                    "Supervisor restart epoch changed: %s -> %s",
+                    prev_epoch,
+                    new_epoch,
+                )
             self._last_supervisor_pid = new_pid
             self._reconnect_count += 1
             self._reconnect_failures = 0
@@ -422,6 +516,15 @@ class PtySupervisorClient:
                     "previous_pid": prev_pid,
                     "supervisor_pid": new_pid,
                     "fresh": new_pid != prev_pid,
+                    "previous_restart_epoch": prev_epoch,
+                    "restart_epoch": new_epoch,
+                    "previous_restart_nonce": prev_nonce,
+                    "restart_nonce": new_nonce,
+                    "restarted": restarted,
+                    "restart_report": restart_report,
+                    "worker_loss": worker_loss,
+                    "lost_session_ids": list(
+                        restart_report.get("lost_session_ids") or []),
                 }))
             return
 

@@ -10,13 +10,18 @@ import asyncio
 import base64
 import contextlib
 import os
+import signal
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from torque import pty_supervisor
 from torque.pty_supervisor import PtySupervisor, read_frame, write_frame
+from torque.pty_supervisor_client import PtySupervisorClient
 
 
 async def _open_client(path: Path):
@@ -362,6 +367,158 @@ class SupervisorLifecycleTests(unittest.IsolatedAsyncioTestCase):
             writer.close()
             await writer.wait_closed()
 
+    async def test_restart_prepare_clears_master_cloexec_and_writes_atomic_state(self):
+        reader, writer = await _open_client(self.h.socket_path)
+        try:
+            await write_frame(writer, {
+                "op": "create",
+                "session_id": "snap",
+                "cell_id": "cell-snap",
+                "shell_argv": ["/bin/sh", "-c", "sleep 5"],
+                "env": {},
+                "cwd": "",
+                "cols": 80,
+                "rows": 24,
+            })
+            ok = await read_frame(reader)
+            self.assertEqual(ok.get("type"), "ok")
+            session = self.h.supervisor.sessions["snap"]
+            pty_supervisor._set_fd_cloexec(session.master_fd, True)
+            self.assertTrue(pty_supervisor._fd_cloexec(session.master_fd))
+
+            data_dir = Path(self.h.tmp.name)
+            self.h.supervisor.data_dir = data_dir
+            state_path = self.h.supervisor._write_adopt_state(
+                restart_epoch=1,
+                restart_nonce="unit",
+            )
+
+            self.assertFalse(pty_supervisor._fd_cloexec(session.master_fd))
+            self.assertTrue(state_path.exists())
+            self.assertFalse(list(data_dir.glob(".pty_supervisor_adopt*.tmp")))
+            import json
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"],
+                             pty_supervisor.ADOPT_STATE_VERSION)
+            self.assertEqual(payload["sessions"][0]["session_id"], "snap")
+            self.assertEqual(payload["sessions"][0]["master_fd"],
+                             session.master_fd)
+
+            await write_frame(writer, {"op": "close", "session_id": "snap"})
+            await read_frame(reader)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def test_restart_ack_disconnect_aborts_without_stuck_gate(self):
+        data_dir = Path(self.h.tmp.name)
+        callback_calls = []
+
+        async def restart_callback(*args):
+            callback_calls.append(args)
+
+        async def broken_write(_writer, _message):
+            raise BrokenPipeError("requesting client disappeared")
+
+        self.h.supervisor.data_dir = data_dir
+        self.h.supervisor.restart_callback = restart_callback
+
+        with (
+            mock.patch.object(pty_supervisor, "write_frame", broken_write),
+            self.assertLogs("torque.pty_supervisor", level="WARNING") as logs,
+        ):
+            await self.h.supervisor._op_restart({}, object())
+
+        self.assertTrue(any("rolled back" in line for line in logs.output))
+        self.assertFalse(self.h.supervisor._restarting)
+        self.assertEqual(callback_calls, [])
+        self.assertFalse(list(data_dir.glob(
+            f"{pty_supervisor.ADOPT_STATE_PREFIX}_*.json")))
+        self.assertFalse(list(data_dir.glob(
+            f".{pty_supervisor.ADOPT_STATE_PREFIX}*.tmp")))
+
+        reader, writer = await _open_client(self.h.socket_path)
+        try:
+            await write_frame(writer, {
+                "op": "create",
+                "session_id": "after-ack-fail",
+                "cell_id": "cell-after-ack-fail",
+                "shell_argv": ["/bin/sh", "-c", "sleep 2"],
+                "env": {},
+                "cwd": "",
+                "cols": 80,
+                "rows": 24,
+            })
+            ok = await read_frame(reader)
+            self.assertEqual(ok.get("type"), "ok")
+            await write_frame(writer, {
+                "op": "close",
+                "session_id": "after-ack-fail",
+            })
+            await read_frame(reader)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def test_finalized_session_clears_subscribers(self):
+        reader, writer = await _open_client(self.h.socket_path)
+        try:
+            await write_frame(writer, {
+                "op": "create",
+                "session_id": "sub-clear",
+                "cell_id": "cell-sub-clear",
+                "shell_argv": ["/bin/sh", "-c", "sleep 5"],
+                "env": {},
+                "cwd": "",
+                "cols": 80,
+                "rows": 24,
+            })
+            await read_frame(reader)
+            await write_frame(writer, {
+                "op": "subscribe",
+                "session_id": "sub-clear",
+            })
+            await read_frame(reader)  # subscribe ok
+            await read_frame(reader)  # snapshot
+            session = self.h.supervisor.sessions["sub-clear"]
+            self.assertTrue(session.subscribers)
+
+            await write_frame(writer, {
+                "op": "close",
+                "session_id": "sub-clear",
+            })
+            deadline = asyncio.get_running_loop().time() + 3.0
+            while (asyncio.get_running_loop().time() < deadline
+                   and not session.closed):
+                await asyncio.sleep(0.05)
+            self.assertTrue(session.closed)
+            self.assertFalse(session.subscribers)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def test_restarting_rejects_mutating_ops(self):
+        self.h.supervisor._restarting = True
+        reader, writer = await _open_client(self.h.socket_path)
+        try:
+            await write_frame(writer, {
+                "op": "create",
+                "session_id": "during-restart",
+                "cell_id": "cell",
+                "shell_argv": ["/bin/sh", "-c", "sleep 1"],
+                "env": {},
+                "cwd": "",
+                "cols": 80,
+                "rows": 24,
+            })
+            msg = await read_frame(reader)
+            self.assertEqual(msg.get("type"), "error")
+            self.assertEqual(msg.get("code"), "restarting")
+        finally:
+            self.h.supervisor._restarting = False
+            writer.close()
+            await writer.wait_closed()
+
 
 class EnsureRunningTests(unittest.IsolatedAsyncioTestCase):
     async def test_ping_socket_returns_none_when_path_missing(self):
@@ -374,6 +531,9 @@ class EnsureRunningTests(unittest.IsolatedAsyncioTestCase):
         h = _Harness()
         await h.start()
         try:
+            pty_supervisor._set_server_sockets_cloexec(h.server)
+            for sock in h.server.sockets or []:
+                self.assertTrue(pty_supervisor._fd_cloexec(sock.fileno()))
             # _ping_socket is blocking — run in a thread so it doesn't
             # starve the event loop.
             pong = await asyncio.to_thread(
@@ -402,6 +562,208 @@ class EnsureRunningTests(unittest.IsolatedAsyncioTestCase):
     async def test_pid_alive_false_for_nonexistent(self):
         # A pid we can be reasonably sure doesn't exist.
         self.assertFalse(pty_supervisor._pid_alive(2_000_000_000))
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _supervisor_env() -> dict:
+    env = os.environ.copy()
+    root = str(_repo_root())
+    existing = env.get("PYTHONPATH", "")
+    if root not in existing.split(os.pathsep):
+        env["PYTHONPATH"] = root + (os.pathsep + existing if existing else "")
+    return env
+
+
+def _wait_for_supervisor(data_dir: Path, timeout: float = 5.0) -> dict:
+    socket_path = data_dir / pty_supervisor.DEFAULT_SOCKET_NAME
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pong = pty_supervisor._ping_socket(socket_path, timeout=0.2)
+        if pong and pong.get("version") == pty_supervisor.PROTOCOL_VERSION:
+            return pong
+        time.sleep(0.05)
+    raise AssertionError(
+        "supervisor did not become ready; "
+        f"log={data_dir / pty_supervisor.DEFAULT_LOG_FILE_NAME}")
+
+
+def _terminate_process(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=3)
+
+
+class SupervisorReexecProcessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reexec_adopts_dummy_child_and_output_continues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            log_fh = open(
+                data_dir / pty_supervisor.DEFAULT_LOG_FILE_NAME,
+                "ab",
+                buffering=0,
+            )
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "torque.pty_supervisor",
+                    "--data-dir",
+                    str(data_dir),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=log_fh,
+                start_new_session=True,
+                close_fds=True,
+                env=_supervisor_env(),
+            )
+            try:
+                _wait_for_supervisor(data_dir)
+                client = PtySupervisorClient(
+                    data_dir / pty_supervisor.DEFAULT_SOCKET_NAME,
+                    reconnect_delay=0.05,
+                    connect_timeout=1.0,
+                )
+                await client.connect()
+                try:
+                    supervisor_pid = client.last_supervisor_pid
+                    before = asyncio.Event()
+                    after = asyncio.Event()
+                    after_restart = {"value": False}
+
+                    async def on_output(msg):
+                        data = base64.b64decode(msg.get("data") or "")
+                        if b"tick-" not in data:
+                            return
+                        if after_restart["value"]:
+                            after.set()
+                        else:
+                            before.set()
+
+                    create = await client.create(
+                        session_id="survivor",
+                        cell_id="cell-survivor",
+                        shell_argv=[
+                            "/bin/sh",
+                            "-c",
+                            "i=0; while true; do "
+                            "printf 'tick-%d\\n' $i; "
+                            "i=$((i+1)); sleep 0.1; done",
+                        ],
+                        env={},
+                        cwd="",
+                        cols=80,
+                        rows=24,
+                    )
+                    child_pid = create.get("pid")
+                    await client.subscribe("survivor", on_output=on_output)
+                    await asyncio.wait_for(before.wait(), timeout=4.0)
+
+                    ack = await client.restart_supervisor()
+                    self.assertEqual(ack.get("type"), "ok")
+                    self.assertEqual(ack.get("op"), "restart")
+                    await client.wait_for_restart(
+                        restart_epoch=int(ack.get("restart_epoch") or 0),
+                        restart_nonce=str(ack.get("restart_nonce") or ""),
+                        timeout=5.0,
+                    )
+                    after_restart["value"] = True
+                    await asyncio.wait_for(after.wait(), timeout=5.0)
+
+                    self.assertEqual(client.last_supervisor_pid,
+                                     supervisor_pid)
+                    self.assertGreaterEqual(
+                        client.last_supervisor_restart_epoch,
+                        int(ack.get("restart_epoch") or 0),
+                    )
+                    sessions = await client.list_sessions()
+                    survivor = next(
+                        s for s in sessions
+                        if s.get("session_id") == "survivor")
+                    self.assertTrue(survivor.get("alive"))
+                    self.assertEqual(survivor.get("pid"), child_pid)
+                    self.assertTrue(pty_supervisor._pid_alive(child_pid))
+
+                    await client.close_session("survivor")
+                finally:
+                    await client.aclose()
+            finally:
+                _terminate_process(proc)
+                log_fh.close()
+
+    async def test_corrupt_adopt_state_falls_back_clean_and_reports_loss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            bad_state = data_dir / "bad-adopt.json"
+            bad_state.write_text("{not-json", encoding="utf-8")
+            log_fh = open(
+                data_dir / pty_supervisor.DEFAULT_LOG_FILE_NAME,
+                "ab",
+                buffering=0,
+            )
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "torque.pty_supervisor",
+                    "--data-dir",
+                    str(data_dir),
+                    "--adopt-state",
+                    str(bad_state),
+                    "--restart-epoch",
+                    "7",
+                    "--restart-nonce",
+                    "corrupt",
+                    "--expected-sessions",
+                    "2",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=log_fh,
+                start_new_session=True,
+                close_fds=True,
+                env=_supervisor_env(),
+            )
+            try:
+                pong = _wait_for_supervisor(data_dir)
+                report = pong.get("last_restart") or {}
+                self.assertTrue(report.get("attempted"))
+                self.assertTrue(report.get("clean_fallback"))
+                self.assertEqual(report.get("lost_sessions"), 2)
+                self.assertTrue(report.get("errors"))
+                self.assertFalse(bad_state.exists())
+
+                client = PtySupervisorClient(
+                    data_dir / pty_supervisor.DEFAULT_SOCKET_NAME)
+                await client.connect()
+                try:
+                    sessions = await client.list_sessions()
+                    self.assertEqual(sessions, [])
+                    ok = await client.create(
+                        session_id="clean",
+                        cell_id="cell-clean",
+                        shell_argv=["/bin/sh", "-c", "printf clean\\n"],
+                        env={},
+                        cwd="",
+                        cols=80,
+                        rows=24,
+                    )
+                    self.assertEqual(ok.get("type"), "ok")
+                finally:
+                    await client.aclose()
+            finally:
+                _terminate_process(proc)
+                log_fh.close()
 
 
 if __name__ == "__main__":

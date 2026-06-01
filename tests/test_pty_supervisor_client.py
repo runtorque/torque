@@ -144,6 +144,31 @@ class PtySupervisorClientTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await client.aclose()
 
+    async def test_exit_frame_drops_local_subscription(self):
+        client = PtySupervisorClient(self.h.socket_path)
+        await client.connect()
+        try:
+            exited = asyncio.Event()
+
+            async def on_exit(_msg):
+                exited.set()
+
+            await client.create(
+                session_id="c-exit",
+                cell_id="cell-exit",
+                shell_argv=["/bin/sh", "-c", "printf done\\n"],
+                env={},
+                cwd="",
+                cols=80,
+                rows=24,
+            )
+            await client.subscribe("c-exit", on_exit=on_exit)
+            self.assertIn("c-exit", client._subscriptions)
+            await asyncio.wait_for(exited.wait(), timeout=3.0)
+            self.assertNotIn("c-exit", client._subscriptions)
+        finally:
+            await client.aclose()
+
     async def test_reconnect_resubscribes_and_resumes_session(self):
         """Drop the client; reconnect; session still live + output streams.
 

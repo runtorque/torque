@@ -431,6 +431,242 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter.shutdown()
 
+    async def test_restart_epoch_event_keeps_sessions_and_emits_restarted(self):
+        state, adapter = await self._make_adapter()
+        kinds: list[str] = []
+
+        async def on_event(kind, detail):
+            kinds.append(kind)
+
+        adapter.on_supervisor_event = on_event
+        try:
+            state.add_group("Torque")
+            cell = state.add_terminal(
+                name="Restarted",
+                group="Torque",
+                terminal_backend="pty",
+                command="sleep 30",
+            )
+            await adapter.create_session(cell)
+            session_id_before = cell.session_id
+
+            await adapter._on_client_reconnect({
+                "previous_pid": 99,
+                "supervisor_pid": 99,
+                "fresh": False,
+                "restarted": True,
+                "restart_epoch": 2,
+                "restart_report": {
+                    "adopted_sessions": 1,
+                    "lost_sessions": 0,
+                },
+            })
+
+            self.assertIn("restarted", kinds)
+            self.assertEqual(cell.session_id, session_id_before)
+            self.assertNotEqual(cell.status, "stopped")
+        finally:
+            await adapter.shutdown()
+
+    async def test_restart_worker_loss_finalizes_only_reported_sessions(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        state.add_group("Torque")
+        cell_lost = state.add_terminal(
+            name="Lost restart",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        cell_kept = state.add_terminal(
+            name="Kept restart",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        lost_sid = "lost-restart-session"
+        kept_sid = "kept-restart-session"
+        cell_lost.session_id = lost_sid
+        cell_lost.status = "running"
+        cell_kept.session_id = kept_sid
+        cell_kept.status = "running"
+        adapter._sessions[lost_sid] = self.pty_mod._PtySession(
+            session_id=lost_sid,
+            cell_id=cell_lost.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+        )
+        adapter._sessions[kept_sid] = self.pty_mod._PtySession(
+            session_id=kept_sid,
+            cell_id=cell_kept.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+        )
+        kinds: list[tuple[str, dict]] = []
+
+        async def on_event(kind, detail):
+            kinds.append((kind, detail))
+
+        adapter.on_supervisor_event = on_event
+
+        await adapter._on_client_reconnect({
+            "previous_pid": 99,
+            "supervisor_pid": 99,
+            "fresh": False,
+            "restarted": True,
+            "worker_loss": True,
+            "lost_session_ids": [lost_sid],
+            "restart_report": {
+                "lost_sessions": 1,
+                "lost_session_ids": [lost_sid],
+                "clean_fallback": False,
+            },
+        })
+
+        self.assertIsNone(cell_lost.session_id)
+        self.assertEqual(cell_lost.status, "stopped")
+        self.assertEqual(cell_kept.session_id, kept_sid)
+        self.assertNotEqual(cell_kept.status, "stopped")
+        self.assertIn(kept_sid, adapter._sessions)
+        self.assertEqual(kinds[0][0], "restart_worker_loss")
+        self.assertEqual(kinds[0][1]["lost_sessions"], 1)
+
+    async def test_restart_timeout_marks_lost_and_invokes_clean_fallback(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Timeout lost",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        sid = "timeout-lost-session"
+        cell.session_id = sid
+        cell.status = "running"
+        adapter._sessions[sid] = self.pty_mod._PtySession(
+            session_id=sid,
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+        )
+
+        status_before_restart_op = []
+
+        class HangingRestartClient:
+            async def restart_supervisor(self):
+                status_before_restart_op.append(
+                    adapter.supervisor_watchdog_status())
+                return {
+                    "type": "ok",
+                    "op": "restart",
+                    "restart_epoch": 5,
+                    "restart_nonce": "hang",
+                }
+
+            async def wait_for_restart(self, **_kwargs):
+                raise RuntimeError("restart timed out")
+
+        adapter._client = HangingRestartClient()
+        events: list[tuple[str, dict]] = []
+        fallbacks = []
+
+        async def on_event(kind, detail):
+            events.append((kind, dict(detail or {})))
+
+        def ensure_running(data_dir):
+            fallbacks.append(data_dir)
+
+        adapter.on_supervisor_event = on_event
+
+        with self.assertRaises(RuntimeError):
+            await adapter.restart_supervisor(
+                timeout=0.1,
+                data_dir="/tmp/supervisor-timeout",
+                ensure_running=ensure_running,
+            )
+
+        self.assertIsNone(cell.session_id)
+        self.assertEqual(cell.status, "stopped")
+        self.assertTrue(status_before_restart_op[0].get("watchdog_paused"))
+        self.assertIn("restart_deadline_at", status_before_restart_op[0])
+        self.assertFalse(adapter.supervisor_watchdog_status().get(
+            "watchdog_paused"))
+        self.assertEqual(fallbacks, ["/tmp/supervisor-timeout"])
+        self.assertIn("restart_requested", [kind for kind, _ in events])
+        self.assertIn("restart_failed_lost", [kind for kind, _ in events])
+        failed = next(detail for kind, detail in events
+                      if kind == "restart_failed_lost")
+        self.assertEqual(failed["lost_sessions"], 1)
+
+    async def test_restart_prepare_error_does_not_mark_live_sessions_lost(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Prepare failed still live",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        sid = "prepare-error-live-session"
+        cell.session_id = sid
+        cell.status = "running"
+        adapter._sessions[sid] = self.pty_mod._PtySession(
+            session_id=sid,
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+        )
+
+        class PrepareErrorClient:
+            async def restart_supervisor(self):
+                return {
+                    "type": "error",
+                    "code": "restart_prepare_failed",
+                    "message": "disk full",
+                }
+
+            async def wait_for_restart(self, **_kwargs):
+                raise AssertionError(
+                    "pre-detach prepare failures must not wait for restart")
+
+        adapter._client = PrepareErrorClient()
+        events: list[tuple[str, dict]] = []
+        fallbacks = []
+
+        async def on_event(kind, detail):
+            events.append((kind, dict(detail or {})))
+
+        def ensure_running(data_dir):
+            fallbacks.append(data_dir)
+
+        adapter.on_supervisor_event = on_event
+
+        with self.assertRaises(RuntimeError) as ctx:
+            await adapter.restart_supervisor(
+                timeout=0.1,
+                data_dir="/tmp/supervisor-prepare-error",
+                ensure_running=ensure_running,
+            )
+
+        self.assertIn("disk full", str(ctx.exception))
+        self.assertEqual(cell.session_id, sid)
+        self.assertEqual(cell.status, "running")
+        self.assertIn(sid, adapter._sessions)
+        self.assertEqual(fallbacks, [])
+        event_kinds = [kind for kind, _ in events]
+        self.assertIn("restart_requested", event_kinds)
+        self.assertIn("restart_failed", event_kinds)
+        self.assertNotIn("restart_failed_lost", event_kinds)
+        status = adapter.supervisor_watchdog_status()
+        self.assertEqual(status.get("state"), "")
+        self.assertEqual(status.get("last_error"), "disk full")
+
     async def test_mark_supervisor_lost_emits_explicit_exit_reason(self):
         state = self.state_mod.MatrixState()
         adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
