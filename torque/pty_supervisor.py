@@ -191,6 +191,49 @@ class SupervisorSession:
         }
 
 
+@dataclass
+class SupervisorMetrics:
+    ops_total: dict[str, int] = field(default_factory=dict)
+    errors_total: dict[str, int] = field(default_factory=dict)
+    bytes_written: int = 0
+    bytes_read: int = 0
+    sessions_current: int = 0
+    sessions_peak: int = 0
+    sessions_created_total: int = 0
+    read_loop_failures: int = 0
+    write_deadline_hits: int = 0
+
+    def record_op(self, op: str) -> None:
+        key = str(op or "<missing>")
+        self.ops_total[key] = int(self.ops_total.get(key, 0) or 0) + 1
+
+    def record_error(self, code: str) -> None:
+        key = str(code or "unknown")
+        self.errors_total[key] = int(self.errors_total.get(key, 0) or 0) + 1
+
+    def record_session_created(self, current: int) -> None:
+        self.sessions_created_total += 1
+        self.record_sessions_current(current)
+
+    def record_sessions_current(self, current: int) -> None:
+        current = max(0, int(current or 0))
+        self.sessions_current = current
+        self.sessions_peak = max(self.sessions_peak, current)
+
+    def snapshot(self) -> dict:
+        return {
+            "ops_total": dict(self.ops_total),
+            "errors_total": dict(self.errors_total),
+            "bytes_written": int(self.bytes_written),
+            "bytes_read": int(self.bytes_read),
+            "sessions_current": int(self.sessions_current),
+            "sessions_peak": int(self.sessions_peak),
+            "sessions_created_total": int(self.sessions_created_total),
+            "read_loop_failures": int(self.read_loop_failures),
+            "write_deadline_hits": int(self.write_deadline_hits),
+        }
+
+
 # -- Supervisor ------------------------------------------------------------
 
 
@@ -201,12 +244,33 @@ class PtySupervisor:
         self.sessions: dict[str, SupervisorSession] = {}
         self.started_at = time.time()
         self._lock = asyncio.Lock()
+        self.metrics = SupervisorMetrics()
 
     def supervisor_snapshot(self) -> dict:
         return {
             "pid": os.getpid(),
             "started_at": float(self.started_at or 0.0),
         }
+
+    def _live_session_count(self) -> int:
+        return sum(1 for session in self.sessions.values()
+                   if not session.closed)
+
+    def _record_sessions_current(self) -> None:
+        self.metrics.record_sessions_current(self._live_session_count())
+
+    async def _write_error(
+        self,
+        writer: asyncio.StreamWriter,
+        code: str,
+        message: str,
+    ) -> None:
+        self.metrics.record_error(code)
+        await write_frame(writer, {
+            "type": "error",
+            "code": code,
+            "message": message,
+        })
 
     # -- client connections ------------------------------------------------
 
@@ -223,6 +287,7 @@ class PtySupervisor:
                 try:
                     msg = await read_frame(reader)
                 except ValueError as exc:
+                    self.metrics.record_error("protocol_error")
                     await _safe_write(writer, {
                         "type": "error",
                         "code": "protocol_error",
@@ -242,6 +307,7 @@ class PtySupervisor:
                     break
                 except Exception as exc:
                     log.exception("Dispatch failed for op=%s", msg.get("op"))
+                    self.metrics.record_error("internal_error")
                     await _safe_write(writer, {
                         "type": "error",
                         "code": "internal_error",
@@ -263,13 +329,20 @@ class PtySupervisor:
         writer: asyncio.StreamWriter,
         subs: set,
     ) -> None:
-        op = msg.get("op", "")
+        op = str(msg.get("op", "") or "")
+        self.metrics.record_op(op)
         if op == "ping":
             await write_frame(writer, {
                 "type": "pong",
                 "version": PROTOCOL_VERSION,
                 "pid": os.getpid(),
                 "started_at": float(self.started_at or 0.0),
+            })
+        elif op == "metrics":
+            self._record_sessions_current()
+            await write_frame(writer, {
+                "type": "metrics",
+                "metrics": self.metrics.snapshot(),
             })
         elif op == "create":
             await self._op_create(msg, writer)
@@ -290,11 +363,8 @@ class PtySupervisor:
         elif op == "unsubscribe":
             await self._op_unsubscribe(msg, writer, subs)
         else:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "protocol_error",
-                "message": f"unknown op: {op!r}",
-            })
+            await self._write_error(
+                writer, "protocol_error", f"unknown op: {op!r}")
 
     # -- ops ---------------------------------------------------------------
 
@@ -308,18 +378,15 @@ class PtySupervisor:
         rows = int(msg.get("rows") or 32)
         bootstrap_dir = str(msg.get("bootstrap_dir") or "")
         if not session_id or not shell_argv:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "protocol_error",
-                "message": "create requires session_id and shell_argv",
-            })
+            await self._write_error(
+                writer,
+                "protocol_error",
+                "create requires session_id and shell_argv",
+            )
             return
         if session_id in self.sessions:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "session_exists",
-                "message": session_id,
-            })
+            await self._write_error(
+                writer, "session_exists", session_id)
             return
         try:
             session = await self._spawn(
@@ -334,13 +401,11 @@ class PtySupervisor:
             )
         except Exception as exc:
             log.exception("Failed to spawn session %s", session_id)
-            await write_frame(writer, {
-                "type": "error",
-                "code": "shell_spawn_failed",
-                "message": str(exc),
-            })
+            await self._write_error(
+                writer, "shell_spawn_failed", str(exc))
             return
         self.sessions[session_id] = session
+        self.metrics.record_session_created(self._live_session_count())
         session.read_task = asyncio.create_task(self._read_loop(session))
         await write_frame(writer, {
             "type": "ok",
@@ -355,20 +420,14 @@ class PtySupervisor:
         data_b64 = msg.get("data") or ""
         sess = self.sessions.get(session_id)
         if not sess or sess.closed:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "unknown_session",
-                "message": session_id,
-            })
+            await self._write_error(
+                writer, "unknown_session", session_id)
             return
         try:
             payload = base64.b64decode(data_b64) if data_b64 else b""
         except Exception as exc:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "protocol_error",
-                "message": f"bad base64: {exc}",
-            })
+            await self._write_error(
+                writer, "protocol_error", f"bad base64: {exc}")
             return
         if payload:
             deadline = time.monotonic() + WRITE_DEADLINE_SECONDS
@@ -376,25 +435,24 @@ class PtySupervisor:
                 written = await asyncio.to_thread(
                     _bounded_pty_write, sess.master_fd, payload, deadline)
             except OSError as exc:
-                await write_frame(writer, {
-                    "type": "error",
-                    "code": "write_failed",
-                    "message": str(exc),
-                })
+                await self._write_error(
+                    writer, "write_failed", str(exc))
                 return
+            self.metrics.bytes_written += int(written or 0)
             if written < len(payload):
                 # The child stopped draining stdin and its PTY input buffer
                 # stayed full past the deadline. Report backpressure rather
                 # than blocking this connection (and thus every other
                 # session's ops) on a single wedged agent.
-                await write_frame(writer, {
-                    "type": "error",
-                    "code": "write_backpressure",
-                    "message": (
+                self.metrics.write_deadline_hits += 1
+                await self._write_error(
+                    writer,
+                    "write_backpressure",
+                    (
                         f"wrote {written}/{len(payload)} bytes before "
                         f"{WRITE_DEADLINE_SECONDS:.0f}s deadline"
                     ),
-                })
+                )
                 return
         await write_frame(writer, {"type": "ok", "op": "write"})
 
@@ -404,11 +462,8 @@ class PtySupervisor:
         rows = max(1, int(msg.get("rows") or 0))
         sess = self.sessions.get(session_id)
         if not sess or sess.closed:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "unknown_session",
-                "message": session_id,
-            })
+            await self._write_error(
+                writer, "unknown_session", session_id)
             return
         sess.cols = cols
         sess.rows = rows
@@ -419,11 +474,8 @@ class PtySupervisor:
         session_id = str(msg.get("session_id") or "")
         sess = self.sessions.get(session_id)
         if not sess:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "unknown_session",
-                "message": session_id,
-            })
+            await self._write_error(
+                writer, "unknown_session", session_id)
             return
         await self._terminate_session(sess)
         await write_frame(writer, {"type": "ok", "op": "close"})
@@ -437,11 +489,8 @@ class PtySupervisor:
         session_id = str(msg.get("session_id") or "")
         sess = self.sessions.get(session_id)
         if not sess:
-            await write_frame(writer, {
-                "type": "error",
-                "code": "unknown_session",
-                "message": session_id,
-            })
+            await self._write_error(
+                writer, "unknown_session", session_id)
             return
         sess.subscribers.add(writer)
         subs.add(session_id)
@@ -548,6 +597,7 @@ class PtySupervisor:
                 if not chunk:
                     break
                 session.total_bytes += len(chunk)
+                self.metrics.bytes_read += len(chunk)
                 session.buffer.extend(chunk)
                 if len(session.buffer) > BUFFER_LIMIT:
                     del session.buffer[:len(session.buffer) - BUFFER_LIMIT]
@@ -555,6 +605,7 @@ class PtySupervisor:
         except asyncio.CancelledError:
             raise
         except Exception:
+            self.metrics.read_loop_failures += 1
             log.exception("Read loop failed for %s", session.session_id)
         finally:
             await self._finalize_session(session)
@@ -585,6 +636,7 @@ class PtySupervisor:
         if session.closed:
             return
         session.closed = True
+        self._record_sessions_current()
         exit_status: Optional[int] = None
         if session.process is not None:
             try:
@@ -687,8 +739,13 @@ def _paths(data_dir: Path) -> dict:
     }
 
 
-def _ping_socket(socket_path: Path, timeout: float = 1.0) -> Optional[dict]:
-    """Blocking unix-socket ping. Returns pong payload on success."""
+def _request_socket(
+    socket_path: Path,
+    op: str,
+    *,
+    timeout: float = 1.0,
+) -> Optional[dict]:
+    """Blocking unix-socket request. Returns one response payload on success."""
     if not socket_path.exists():
         return None
     try:
@@ -698,7 +755,7 @@ def _ping_socket(socket_path: Path, timeout: float = 1.0) -> Optional[dict]:
     except OSError:
         return None
     try:
-        body = json.dumps({"op": "ping"}).encode("utf-8")
+        body = json.dumps({"op": str(op or "")}).encode("utf-8")
         sock.sendall(struct.pack(">I", len(body)) + body)
         header = _recv_exact(sock, 4, timeout)
         if not header:
@@ -715,6 +772,16 @@ def _ping_socket(socket_path: Path, timeout: float = 1.0) -> Optional[dict]:
     finally:
         with contextlib.suppress(Exception):
             sock.close()
+
+
+def _ping_socket(socket_path: Path, timeout: float = 1.0) -> Optional[dict]:
+    """Blocking unix-socket ping. Returns pong payload on success."""
+    return _request_socket(socket_path, "ping", timeout=timeout)
+
+
+def _metrics_socket(socket_path: Path, timeout: float = 1.0) -> Optional[dict]:
+    """Blocking unix-socket metrics request. Returns metrics payload."""
+    return _request_socket(socket_path, "metrics", timeout=timeout)
 
 
 def _recv_exact(sock: socket.socket, n: int, timeout: float) -> Optional[bytes]:

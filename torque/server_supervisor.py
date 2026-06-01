@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import shlex
@@ -17,6 +18,14 @@ _UNAVAILABLE_MESSAGE = (
     "PTY supervisor is only available in standalone embedded-terminal mode."
 )
 _SUPERVISOR_ROW_ID = "__supervisor__"
+SUPERVISOR_HEALTH_STATES = {
+    "up",
+    "degraded",
+    "restarting",
+    "down",
+    "unavailable",
+    "na_profile",
+}
 
 
 def _runtime_payload(runtime_payload_func: Callable[..., dict] | None,
@@ -47,6 +56,409 @@ def _safe_float(value: Any) -> float | None:
     if not math.isfinite(number) or number <= 0:
         return None
     return number
+
+
+def _maybe_call(obj: Any, name: str, default: Any = None) -> Any:
+    fn = getattr(obj, name, None)
+    if not callable(fn):
+        return default
+    try:
+        return fn()
+    except Exception:
+        log.debug("Supervisor health accessor failed: %s", name,
+                  exc_info=True)
+        return default
+
+
+def _safe_optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _duration_since(started_at: Any, *, now: float) -> float | None:
+    started = _safe_float(started_at)
+    if started is None:
+        return None
+    return round(max(0.0, now - started), 1)
+
+
+def build_supervisor_health_projection(
+    bridge: Any,
+    *,
+    profile_skip_pty: bool = False,
+    now: float | None = None,
+) -> dict:
+    """Return daemon-side PTY supervisor health for the runtime snapshot.
+
+    This is deliberately synchronous and duck-typed so it can be called from
+    the hot /app state payload builder. Potentially blocking supervisor ops
+    (metrics wire reads) are cached by the adapter/watchdog and only the cache
+    is read here.
+    """
+    now = float(now if now is not None else time.time())
+    if profile_skip_pty:
+        return {
+            "state": "na_profile",
+            "supervisor_pid": None,
+            "uptime": None,
+            "connected": False,
+            "last_op_latency_ms": None,
+            "last_reconnect_at": None,
+            "reconnect_count": 0,
+            "session_count": 0,
+            "metrics": {},
+            "time_since_last_successful_op": None,
+        }
+
+    connected_fn = getattr(bridge, "supervisor_connected", None)
+    if not callable(connected_fn):
+        return {
+            "state": "unavailable",
+            "supervisor_pid": None,
+            "uptime": None,
+            "connected": False,
+            "last_op_latency_ms": None,
+            "last_reconnect_at": None,
+            "reconnect_count": 0,
+            "session_count": 0,
+            "metrics": {},
+            "time_since_last_successful_op": None,
+        }
+
+    connected = bool(_maybe_call(bridge, "supervisor_connected", False))
+    watchdog = _maybe_call(bridge, "supervisor_watchdog_status", {}) or {}
+    override_state = str((watchdog or {}).get("state") or "").strip()
+    if override_state in {"restarting", "down", "unavailable"}:
+        state = override_state
+    else:
+        state = "up" if connected else "degraded"
+
+    metrics = _maybe_call(bridge, "supervisor_metrics_snapshot", {}) or {}
+    session_count = _safe_optional_int(metrics.get("sessions_current"))
+    if session_count is None:
+        session_count = _safe_optional_int(
+            _maybe_call(bridge, "supervisor_session_count", 0)) or 0
+
+    last_success = _maybe_call(bridge, "supervisor_last_successful_op_at", None)
+    latency = _maybe_call(bridge, "supervisor_last_latency_ms", None)
+    try:
+        latency = None if latency is None else round(float(latency), 1)
+    except (TypeError, ValueError):
+        latency = None
+
+    return {
+        "state": state,
+        "supervisor_pid": _safe_optional_int(
+            _maybe_call(bridge, "supervisor_pid", None)),
+        "uptime": _duration_since(
+            _maybe_call(bridge, "supervisor_started_at", None),
+            now=now,
+        ),
+        "connected": connected,
+        "last_op_latency_ms": latency,
+        "last_reconnect_at": _maybe_call(
+            bridge, "supervisor_last_reconnect_at", None),
+        "reconnect_count": int(
+            _maybe_call(bridge, "supervisor_reconnect_count", 0) or 0),
+        "session_count": int(session_count),
+        "metrics": dict(metrics or {}),
+        "time_since_last_successful_op": _duration_since(
+            last_success,
+            now=now,
+        ),
+    }
+
+
+def supervisor_health_fingerprint(projection: dict | None) -> tuple:
+    """Stable key for deciding whether to emit a supervisor-health delta.
+
+    Continuously increasing durations (uptime/time_since_last_successful_op)
+    are intentionally excluded so the watchdog does not create an idle delta
+    stream just because time passed.
+    """
+    payload = dict(projection or {})
+    payload.pop("uptime", None)
+    payload.pop("time_since_last_successful_op", None)
+    metrics = payload.get("metrics") or {}
+    if isinstance(metrics, dict):
+        ops_total = dict(metrics.get("ops_total") or {})
+        # Polling the metrics op increments its own counter. Ignore that
+        # self-observation in the change key so an otherwise idle supervisor
+        # does not emit a runtime delta every watchdog tick.
+        ops_total.pop("metrics", None)
+        payload["metrics"] = (
+            tuple(sorted(ops_total.items())),
+            tuple(sorted((metrics.get("errors_total") or {}).items())),
+            int(metrics.get("bytes_written", 0) or 0),
+            int(metrics.get("bytes_read", 0) or 0),
+            int(metrics.get("sessions_current", 0) or 0),
+            int(metrics.get("sessions_peak", 0) or 0),
+            int(metrics.get("sessions_created_total", 0) or 0),
+            int(metrics.get("read_loop_failures", 0) or 0),
+            int(metrics.get("write_deadline_hits", 0) or 0),
+        )
+    return tuple(sorted(payload.items()))
+
+
+class SupervisorLivenessWatchdog:
+    """Daemon-side bounded supervisor liveness/respawn guard.
+
+    The watchdog never kills a healthy supervisor. It only calls
+    ``ensure_running`` after the process is already judged dead (pid not alive
+    or repeated reconnect failures). Failed respawns are bounded by a retry
+    window and circuit breaker to avoid infinite respawn storms.
+    """
+
+    def __init__(
+        self,
+        *,
+        bridge: Any,
+        data_dir: Any,
+        ensure_running: Callable[..., Any],
+        pid_alive: Callable[[int], bool],
+        publish_state: Callable[[], Any] | None = None,
+        emit_event: Callable[[str, dict], Any] | None = None,
+        interval_seconds: float = 5.0,
+        reconnect_failure_threshold: int = 3,
+        max_retries: int = 3,
+        retry_window_seconds: float = 60.0,
+        base_backoff_seconds: float = 1.0,
+        max_backoff_seconds: float = 30.0,
+        time_func: Callable[[], float] = time.time,
+        monotonic_func: Callable[[], float] = time.monotonic,
+    ):
+        self.bridge = bridge
+        self.data_dir = data_dir
+        self.ensure_running = ensure_running
+        self.pid_alive = pid_alive
+        self.publish_state = publish_state
+        self.emit_event = emit_event
+        self.interval_seconds = max(0.1, float(interval_seconds or 5.0))
+        self.reconnect_failure_threshold = max(
+            1, int(reconnect_failure_threshold or 1))
+        self.max_retries = max(1, int(max_retries or 1))
+        self.retry_window_seconds = max(1.0, float(retry_window_seconds or 1.0))
+        self.base_backoff_seconds = max(0.0, float(base_backoff_seconds or 0.0))
+        self.max_backoff_seconds = max(
+            self.base_backoff_seconds,
+            float(max_backoff_seconds or self.base_backoff_seconds),
+        )
+        self.time_func = time_func
+        self.monotonic_func = monotonic_func
+        self._task: asyncio.Task | None = None
+        self._closed = False
+        self._failed_attempts: list[float] = []
+        self._next_attempt_at = 0.0
+        self._circuit_open = False
+        self._lost_marked = False
+
+    def start(self) -> None:
+        if self._task and not self._task.done():
+            return
+        self._closed = False
+        self._task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        self._closed = True
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self._task = None
+
+    async def _run(self) -> None:
+        while not self._closed:
+            try:
+                await self.check_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Supervisor liveness watchdog tick failed")
+            await asyncio.sleep(self.interval_seconds)
+
+    async def _maybe_await(self, result: Any) -> None:
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _publish(self) -> None:
+        if self.publish_state:
+            await self._maybe_await(self.publish_state())
+
+    async def _emit_event(self, kind: str, detail: dict) -> None:
+        if self.emit_event:
+            await self._maybe_await(self.emit_event(kind, detail))
+
+    def _set_status(self, **status: Any) -> None:
+        setter = getattr(self.bridge, "set_supervisor_watchdog_status", None)
+        if callable(setter):
+            setter(status)
+
+    def _connected(self) -> bool:
+        return bool(_maybe_call(self.bridge, "supervisor_connected", False))
+
+    def _pid_dead(self) -> bool:
+        pid = _safe_optional_int(_maybe_call(self.bridge, "supervisor_pid", None))
+        if not pid:
+            return False
+        try:
+            return not bool(self.pid_alive(pid))
+        except Exception:
+            log.debug("Supervisor pid_alive probe failed", exc_info=True)
+            return False
+
+    def _reconnect_failures_exceeded(self) -> bool:
+        failures = int(_maybe_call(
+            self.bridge, "supervisor_reconnect_failures", 0) or 0)
+        return failures >= self.reconnect_failure_threshold
+
+    def _prune_attempts(self, now_mono: float) -> None:
+        cutoff = now_mono - self.retry_window_seconds
+        self._failed_attempts = [
+            ts for ts in self._failed_attempts if ts >= cutoff
+        ]
+
+    def _open_circuit(self, *, error: str = "") -> None:
+        self._circuit_open = True
+        self._set_status(
+            state="down",
+            circuit_open=True,
+            failed_respawns=len(self._failed_attempts),
+            max_retries=self.max_retries,
+            last_error=error,
+            updated_at=self.time_func(),
+        )
+
+    async def _mark_sessions_lost_once(self) -> int:
+        if self._lost_marked:
+            return 0
+        self._lost_marked = True
+        marker = getattr(self.bridge, "mark_supervisor_lost", None)
+        if not callable(marker):
+            return 0
+        try:
+            lost = marker(reason="supervisor_lost")
+            if asyncio.iscoroutine(lost):
+                lost = await lost
+            lost = int(lost or 0)
+        except Exception:
+            log.exception("Failed to mark supervisor-lost sessions")
+            lost = 0
+        if lost:
+            await self._emit_event("supervisor_lost", {"lost_sessions": lost})
+        return lost
+
+    async def _refresh_metrics(self) -> None:
+        metrics = getattr(self.bridge, "supervisor_metrics", None)
+        if callable(metrics):
+            try:
+                result = metrics()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                log.debug("Supervisor metrics refresh failed", exc_info=True)
+
+    async def check_once(self) -> None:
+        if not callable(getattr(self.bridge, "supervisor_connected", None)):
+            return
+        if self._connected():
+            self._failed_attempts.clear()
+            self._next_attempt_at = 0.0
+            self._circuit_open = False
+            self._lost_marked = False
+            self._set_status(state="", updated_at=self.time_func())
+            await self._refresh_metrics()
+            await self._publish()
+            return
+
+        dead = self._pid_dead() or self._reconnect_failures_exceeded()
+        if not dead:
+            await self._publish()
+            return
+
+        await self._mark_sessions_lost_once()
+        now_mono = self.monotonic_func()
+        self._prune_attempts(now_mono)
+        if self._circuit_open or len(self._failed_attempts) >= self.max_retries:
+            self._open_circuit()
+            await self._emit_event("down", {
+                "failed_respawns": len(self._failed_attempts),
+                "max_retries": self.max_retries,
+            })
+            await self._publish()
+            return
+        if now_mono < self._next_attempt_at:
+            self._set_status(
+                state="restarting",
+                next_attempt_at=self.time_func()
+                + max(0.0, self._next_attempt_at - now_mono),
+                failed_respawns=len(self._failed_attempts),
+                max_retries=self.max_retries,
+                updated_at=self.time_func(),
+            )
+            await self._publish()
+            return
+
+        self._set_status(
+            state="restarting",
+            failed_respawns=len(self._failed_attempts),
+            max_retries=self.max_retries,
+            updated_at=self.time_func(),
+        )
+        await self._publish()
+        try:
+            await asyncio.to_thread(self.ensure_running, self.data_dir)
+        except Exception as exc:
+            error = str(exc)
+            self._failed_attempts.append(now_mono)
+            self._prune_attempts(now_mono)
+            if len(self._failed_attempts) >= self.max_retries:
+                self._open_circuit(error=error)
+                await self._emit_event("down", {
+                    "failed_respawns": len(self._failed_attempts),
+                    "max_retries": self.max_retries,
+                    "error": error,
+                })
+            else:
+                backoff = min(
+                    self.max_backoff_seconds,
+                    self.base_backoff_seconds
+                    * (2 ** max(0, len(self._failed_attempts) - 1)),
+                )
+                self._next_attempt_at = now_mono + backoff
+                self._set_status(
+                    state="restarting",
+                    failed_respawns=len(self._failed_attempts),
+                    max_retries=self.max_retries,
+                    next_attempt_at=self.time_func() + backoff,
+                    last_error=error,
+                    updated_at=self.time_func(),
+                )
+                await self._emit_event("respawn_failed", {
+                    "failed_respawns": len(self._failed_attempts),
+                    "max_retries": self.max_retries,
+                    "backoff_seconds": backoff,
+                    "error": error,
+                })
+            await self._publish()
+            return
+
+        self._failed_attempts.clear()
+        self._next_attempt_at = 0.0
+        self._set_status(
+            state="restarting",
+            failed_respawns=0,
+            max_retries=self.max_retries,
+            last_respawn_at=self.time_func(),
+            updated_at=self.time_func(),
+        )
+        await self._emit_event("respawned", {})
+        await self._publish()
 
 
 def _normalize_shell_argv(value: Any) -> list[str]:

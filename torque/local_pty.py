@@ -726,6 +726,7 @@ class LocalPtyAdapter:
         session_id: str,
         *,
         announce: bool = True,
+        exit_reason: str = "",
     ) -> None:
         if cell.session_id != session_id:
             return
@@ -742,6 +743,8 @@ class LocalPtyAdapter:
         cell.activity_detail = ""
         cell.error_message = ""
         cell.needs_attention = False
+        if exit_reason:
+            cell.last_event_text = str(exit_reason)
         self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
@@ -1036,6 +1039,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         # for that session and drop input fast (no supervisor round-trip) until
         # the cooldown lets a single probe through. session_id -> state dict.
         self._write_breaker: dict[str, dict] = {}
+        self._supervisor_metrics_cache: dict = {}
+        self._supervisor_watchdog_status: dict = {}
 
     def _prime_reconnected_input_ready(self, cell: AgentCell) -> None:
         sid = cell.session_id or ""
@@ -1269,6 +1274,14 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
     async def list_supervisor_state(self) -> dict:
         return await self._client.list_state()
 
+    async def supervisor_metrics(self) -> dict:
+        metrics = await self._client.metrics()
+        self._supervisor_metrics_cache = dict(metrics or {})
+        return dict(self._supervisor_metrics_cache)
+
+    def supervisor_metrics_snapshot(self) -> dict:
+        return dict(self._supervisor_metrics_cache or {})
+
     async def terminate_supervisor_session(self, session_id: str) -> None:
         """Terminate a supervisor-owned PTY session by raw session id.
 
@@ -1384,6 +1397,34 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         fn = getattr(self._client, "is_connected", None)
         return bool(fn()) if callable(fn) else False
 
+    def supervisor_pid(self):
+        return getattr(self._client, "last_supervisor_pid", None)
+
+    def supervisor_started_at(self):
+        return getattr(self._client, "last_supervisor_started_at", None)
+
+    def supervisor_last_reconnect_at(self):
+        return getattr(self._client, "last_reconnect_at", None)
+
+    def supervisor_reconnect_count(self) -> int:
+        return int(getattr(self._client, "reconnect_count", 0) or 0)
+
+    def supervisor_reconnect_failures(self) -> int:
+        return int(getattr(self._client, "reconnect_failures", 0) or 0)
+
+    def supervisor_last_successful_op_at(self):
+        return getattr(self._client, "last_successful_op_at", None)
+
+    def supervisor_session_count(self) -> int:
+        return sum(1 for session in self._sessions.values()
+                   if not getattr(session, "closed", False))
+
+    def set_supervisor_watchdog_status(self, status: dict | None) -> None:
+        self._supervisor_watchdog_status = dict(status or {})
+
+    def supervisor_watchdog_status(self) -> dict:
+        return dict(self._supervisor_watchdog_status or {})
+
     def supervisor_last_latency_ms(self):
         """Latency of the last successful supervisor round-trip (ms), or None."""
         return getattr(self._client, "last_op_latency_ms", None)
@@ -1408,7 +1449,12 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             return
         payload = data.encode("utf-8", errors="ignore")
         try:
-            await self._client.write_input(session_id, payload)
+            result = await self._client.write_input(session_id, payload)
+            if isinstance(result, dict) and result.get("type") == "error":
+                raise RuntimeError(
+                    result.get("message")
+                    or result.get("code")
+                    or "supervisor write failed")
         except Exception:
             self._write_breaker_record_failure(session_id)
             log.warning(
@@ -1474,11 +1520,17 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
     async def _handle_exit_frame(
         self, session: _PtySession, msg: dict,
     ) -> None:
-        del msg
-        await self._finalize_supervised(session)
+        await self._finalize_supervised(
+            session,
+            exit_reason=str((msg or {}).get("exit_reason") or ""),
+        )
 
     async def _finalize_supervised(
-        self, session: _PtySession, *, announce: bool = True,
+        self,
+        session: _PtySession,
+        *,
+        announce: bool = True,
+        exit_reason: str = "",
     ) -> None:
         existing = self._sessions.pop(session.session_id, None)
         if existing is None:
@@ -1487,11 +1539,45 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             shutil.rmtree(session.bootstrap_dir, ignore_errors=True)
         cell = self.state.agents.get(session.cell_id)
         if cell:
-            exit_note = "\r\n[process exited]\r\n"
+            reason = str(exit_reason or "").strip()
+            if reason == "supervisor_lost":
+                exit_note = (
+                    "\r\n[supervisor_lost: PTY supervisor died; "
+                    "session was lost]\r\n"
+                )
+            elif reason:
+                exit_note = f"\r\n[process exited: {reason}]\r\n"
+            else:
+                exit_note = "\r\n[process exited]\r\n"
             self._record_terminal_output(session, exit_note)
             await self._emit_terminal_output(session, exit_note)
             await self._mark_session_stopped(
-                cell, session.session_id, announce=announce)
+                cell,
+                session.session_id,
+                announce=announce,
+                exit_reason=reason,
+            )
+
+    async def mark_supervisor_lost(
+        self,
+        *,
+        reason: str = "supervisor_lost",
+    ) -> int:
+        """Finalize every daemon-tracked session after supervisor death.
+
+        The supervisor process owns the PTY masters, so once that process dies
+        the child sessions are gone too. Synthesize an explicit exit reason
+        instead of letting the UI silently collapse stale session ids.
+        """
+        lost = 0
+        for session in list(self._sessions.values()):
+            await self._finalize_supervised(
+                session,
+                announce=True,
+                exit_reason=reason,
+            )
+            lost += 1
+        return lost
 
     # -- supervisor event wiring ------------------------------------------
 
@@ -1503,7 +1589,11 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             await self._emit_supervisor_event("fresh_instance", info)
             # Every tracked session is now dead. Finalize them.
             for session in list(self._sessions.values()):
-                await self._finalize_supervised(session, announce=True)
+                await self._finalize_supervised(
+                    session,
+                    announce=True,
+                    exit_reason="supervisor_lost",
+                )
         else:
             await self._emit_supervisor_event("reconnected", info)
 

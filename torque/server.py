@@ -214,8 +214,11 @@ from .server_dispatch import (
     _should_queue_existing_agent_dispatch,
 )
 from .server_supervisor import (
+    SupervisorLivenessWatchdog,
+    build_supervisor_health_projection,
     build_supervisor_sessions_payload,
     build_supervisor_terminate_payload,
+    supervisor_health_fingerprint,
 )
 from .server_worktrees import (
     _append_pr_url_to_squash_body,
@@ -285,6 +288,10 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         default_command = state.get_default_command()
     else:
         default_command = torque_config.DEFAULT_COMMAND
+    supervisor_health = build_supervisor_health_projection(
+        bridge,
+        profile_skip_pty=bool(getattr(torque_config, "PROFILE_SKIP_PTY", False)),
+    )
     return {
         "mode": runtime_mode,
         "standalone": STANDALONE,
@@ -300,6 +307,8 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "pid": os.getpid(),
         "started_at": _STARTED_AT,
         "log_path": str(DATA_DIR / "torque.log"),
+        "supervisor_log_path": str(DATA_DIR / "pty_supervisor.log"),
+        "supervisor": supervisor_health,
     }
 
 
@@ -375,6 +384,13 @@ def _tail_log_entries(
         "inode": inode,
         "path": str(log_path),
     }
+
+
+def _log_path_for_target(target: str) -> tuple[str, Path]:
+    normalized = str(target or "daemon").strip().lower()
+    if normalized == "supervisor":
+        return "supervisor", DATA_DIR / "pty_supervisor.log"
+    return "daemon", DATA_DIR / "torque.log"
 
 
 def _resolve_pending_engineer_specializations(
@@ -7918,6 +7934,27 @@ async def _handle_doctor_command(db: TorqueDB, bridge=None) -> dict:
         sup = report.setdefault("pty_supervisor", {})
         sup["open_write_breakers"] = breakers
         sup["stuck_sessions"] = len(breakers)
+    sup = report.setdefault("pty_supervisor", {})
+    projection = build_supervisor_health_projection(
+        bridge,
+        profile_skip_pty=bool(getattr(torque_config, "PROFILE_SKIP_PTY", False)),
+    )
+    sup["health"] = projection
+    sup["state"] = projection.get("state")
+    sup["connected"] = projection.get("connected")
+    sup["reconnect_count"] = projection.get("reconnect_count", 0)
+    sup["last_reconnect_at"] = projection.get("last_reconnect_at")
+    sup["last_op_latency_ms"] = projection.get("last_op_latency_ms")
+    sup["time_since_last_successful_op"] = projection.get(
+        "time_since_last_successful_op")
+    live_metrics = getattr(bridge, "supervisor_metrics", None)
+    if callable(live_metrics):
+        try:
+            metrics = await live_metrics()
+            if isinstance(metrics, dict):
+                sup["metrics"] = dict(metrics)
+        except Exception:
+            log.debug("Doctor supervisor metrics refresh failed", exc_info=True)
     return report
 
 
@@ -12109,6 +12146,20 @@ async def main(connection=None):
     # mode when the supervisor is unavailable / restarted. Latest state
     # is replayed to each newly connected WS client.
     supervisor_banner_state: dict = {"banner": supervisor_banner}
+    supervisor_runtime_fingerprint: dict = {"value": None}
+
+    async def _publish_supervisor_runtime(force: bool = False) -> None:
+        projection = build_supervisor_health_projection(
+            bridge,
+            profile_skip_pty=bool(
+                getattr(torque_config, "PROFILE_SKIP_PTY", False)),
+        )
+        fp = supervisor_health_fingerprint(projection)
+        if not force and supervisor_runtime_fingerprint.get("value") == fp:
+            return
+        supervisor_runtime_fingerprint["value"] = fp
+        state._emit("runtime", **_runtime_payload(bridge=bridge, state=state))
+        await state.broadcast()
 
     async def _broadcast_system_banner(banner):
         supervisor_banner_state["banner"] = banner
@@ -12139,9 +12190,57 @@ async def main(connection=None):
             notifier.on_system_alert(
                 "Torque — supervisor restarted",
                 "Open terminals were lost. Relaunch them from the UI.")
+        elif kind == "supervisor_lost":
+            lost = int((detail or {}).get("lost_sessions", 0) or 0)
+            banner = {
+                "kind": "supervisor_lost",
+                "message": (
+                    "PTY supervisor died — open terminals were lost. "
+                    "Torque is attempting a bounded respawn."
+                ),
+                "detail": f"lost_sessions={lost}",
+            }
+            await _broadcast_system_banner(banner)
         elif kind == "reconnected":
             # Routine reconnect to the same instance — clear banner.
             await _broadcast_system_banner(None)
+        elif kind == "respawned":
+            banner = {
+                "kind": "supervisor_respawned",
+                "message": (
+                    "PTY supervisor was respawned; reconnecting terminal "
+                    "control."
+                ),
+            }
+            await _broadcast_system_banner(banner)
+        elif kind == "respawn_failed":
+            failed = int((detail or {}).get("failed_respawns", 0) or 0)
+            max_retries = int((detail or {}).get("max_retries", 0) or 0)
+            banner = {
+                "kind": "supervisor_respawn_failed",
+                "message": (
+                    "PTY supervisor respawn failed; retrying with bounded "
+                    "backoff."
+                ),
+                "detail": f"{failed}/{max_retries}",
+            }
+            await _broadcast_system_banner(banner)
+        elif kind == "down":
+            failed = int((detail or {}).get("failed_respawns", 0) or 0)
+            max_retries = int((detail or {}).get("max_retries", 0) or 0)
+            banner = {
+                "kind": "supervisor_down",
+                "message": (
+                    "PTY supervisor is down — auto-respawn stopped after "
+                    "bounded failures. Relaunch Torque from a non-worker "
+                    "shell to restore embedded terminals."
+                ),
+                "detail": f"{failed}/{max_retries} failed respawns",
+            }
+            await _broadcast_system_banner(banner)
+            notifier.on_system_alert(
+                "Torque — supervisor down",
+                "PTY supervisor auto-respawn stopped after repeated failures.")
         elif kind == "connect_failed":
             banner = {
                 "kind": "supervisor_unavailable",
@@ -12151,10 +12250,23 @@ async def main(connection=None):
                 ),
             }
             await _broadcast_system_banner(banner)
+        await _publish_supervisor_runtime(force=True)
 
     # Duck-type: only SupervisedPtyAdapter has this attribute.
     if hasattr(bridge, "on_supervisor_event"):
         bridge.on_supervisor_event = _on_supervisor_event
+
+    supervisor_watchdog = None
+    if hasattr(bridge, "supervisor_connected"):
+        from . import pty_supervisor as _pty_supervisor_mod
+        supervisor_watchdog = SupervisorLivenessWatchdog(
+            bridge=bridge,
+            data_dir=DATA_DIR,
+            ensure_running=_pty_supervisor_mod.ensure_running,
+            pid_alive=_pty_supervisor_mod._pid_alive,
+            publish_state=_publish_supervisor_runtime,
+            emit_event=_on_supervisor_event,
+        )
 
     async def _on_agent_session_end_detected(cell, data=None):
         """Convert bridge-detected turn completion into a normal AgentEvent."""
@@ -12306,6 +12418,9 @@ async def main(connection=None):
     await bridge.start()
     log.info("Startup checkpoint: bridge started")
     await bridge.reconnect_orphans()
+    if supervisor_watchdog is not None:
+        supervisor_watchdog.start()
+        log.info("Startup checkpoint: supervisor liveness watchdog scheduled")
     try:
         report = refresh_codex_provider_usage_for_agents(state)
         if report.changed:
@@ -21200,7 +21315,7 @@ async def main(connection=None):
         return web.json_response({"ok": True, "data": saved})
 
     async def handle_logs(request):
-        """GET /logs — cursor-tail Torque's profile log for the in-app viewer."""
+        """GET /logs — bounded tail for daemon or supervisor profile logs."""
         try:
             since = float(request.query.get("since", "0") or 0)
         except (TypeError, ValueError):
@@ -21209,7 +21324,10 @@ async def main(connection=None):
             limit = int(request.query.get("limit", _LOG_MAX_LINES) or _LOG_MAX_LINES)
         except (TypeError, ValueError):
             limit = _LOG_MAX_LINES
-        payload = _tail_log_entries(DATA_DIR / "torque.log", since=since, limit=limit)
+        target, log_path = _log_path_for_target(
+            request.query.get("target", "daemon"))
+        payload = _tail_log_entries(log_path, since=since, limit=limit)
+        payload["target"] = target
         payload["follow"] = request.query.get("follow", "0") in {"1", "true", "yes"}
         return web.json_response(payload)
 
@@ -21299,6 +21417,11 @@ async def main(connection=None):
 
         await daemon_stop_event.wait()
     finally:
+        if supervisor_watchdog is not None:
+            try:
+                await supervisor_watchdog.stop()
+            except Exception:
+                log.exception("Supervisor liveness watchdog shutdown failed")
         try:
             await metrics_daemon.stop()
         except Exception:

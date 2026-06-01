@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -38,6 +39,12 @@ class RuntimePayloadExtensionTests(unittest.TestCase):
         self.assertLessEqual(payload["started_at"], time.time() + 1)
         self.assertEqual(payload["log_path"], str(server.DATA_DIR / "torque.log"))
         self.assertIsInstance(payload["log_path"], str)
+        self.assertEqual(
+            payload["supervisor_log_path"],
+            str(server.DATA_DIR / "pty_supervisor.log"),
+        )
+        self.assertIn("supervisor", payload)
+        self.assertEqual(payload["supervisor"]["state"], "unavailable")
 
     def test_log_tail_parser_paginates_recent_entries(self):
         install_aiohttp_stub()
@@ -63,6 +70,23 @@ class RuntimePayloadExtensionTests(unittest.TestCase):
             "12:00:02 ERROR   failed thing\n"
         )
         self.assertEqual(payload["size"], len(raw.encode("utf-8")))
+
+    def test_log_target_paths_select_daemon_or_supervisor(self):
+        install_aiohttp_stub()
+        from torque import server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            with mock.patch.object(server, "DATA_DIR", data_dir):
+                target, path = server._log_path_for_target("daemon")
+                self.assertEqual(target, "daemon")
+                self.assertEqual(path, data_dir / "torque.log")
+                target, path = server._log_path_for_target("supervisor")
+                self.assertEqual(target, "supervisor")
+                self.assertEqual(path, data_dir / "pty_supervisor.log")
+                target, path = server._log_path_for_target("unknown")
+                self.assertEqual(target, "daemon")
+                self.assertEqual(path, data_dir / "torque.log")
 
 
 if __name__ == "__main__":

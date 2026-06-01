@@ -431,6 +431,41 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter.shutdown()
 
+    async def test_mark_supervisor_lost_emits_explicit_exit_reason(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Lost",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        session_id = "lost-session"
+        cell.session_id = session_id
+        cell.status = "running"
+        adapter._sessions[session_id] = self.pty_mod._PtySession(
+            session_id=session_id,
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+        )
+        output = []
+
+        async def on_output(_cell_id, _session_id, text):
+            output.append(text)
+
+        adapter.on_terminal_output = on_output
+
+        lost = await adapter.mark_supervisor_lost(reason="supervisor_lost")
+
+        self.assertEqual(lost, 1)
+        self.assertIsNone(cell.session_id)
+        self.assertEqual(cell.status, "stopped")
+        self.assertIn("supervisor_lost", "".join(output))
+        self.assertEqual(cell.last_event_text, "supervisor_lost")
+
 
 if __name__ == "__main__":
     unittest.main()
