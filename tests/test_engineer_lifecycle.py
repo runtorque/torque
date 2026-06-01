@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import tempfile
 import types
@@ -60,6 +61,36 @@ class _FakeWorktreeManager:
         return ""
 
 
+class _DigestQueueDB:
+    def __init__(self, recipient_id: str, events: list[dict]):
+        self.queued = {
+            recipient_id: [dict(evt) for evt in events]
+        }
+        self.saved_agents = []
+
+    def load_digest_queued_events(self):
+        return {
+            recipient_id: [dict(evt) for evt in events]
+            for recipient_id, events in self.queued.items()
+        }
+
+    def load_digest_sent_events(self, *, limit_per_recipient=200):
+        del limit_per_recipient
+        return {}
+
+    def delete_digest_queued_events(self, recipient_id):
+        events = self.queued.get(recipient_id, [])
+        count = len(events)
+        self.queued[recipient_id] = []
+        return count
+
+    def save_agent_deferred(self, cell):
+        self.saved_agents.append(cell.id)
+
+    def save_agent_digest_settings(self, agent_id, settings):
+        del agent_id, settings
+
+
 class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
@@ -74,6 +105,79 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("torque")
         return state
+
+    @staticmethod
+    def _closure_cell(value):
+        return (lambda x: lambda: x)(value).__closure__[0]
+
+    def _extract_local_handle_command(
+            self,
+            state,
+            *,
+            bridge=None,
+            worktree_mgr=None,
+            engineer_buffer=None):
+        main_code = self.server_mod.main.__code__
+        handle_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "handle_command"
+        )
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+
+        def noop(*_args, **_kwargs):
+            return None
+
+        bridge = bridge or _CapturingBridge()
+        worktree_mgr = worktree_mgr or _FakeWorktreeManager()
+        engineer_buffer = engineer_buffer or types.SimpleNamespace(
+            clear_digest_backlog_for_restart=noop,
+        )
+        closure_values = {
+            name: None
+            for name in handle_code.co_freevars
+        }
+        closure_values.update({
+            "_apply_persistent_prompt": noop,
+            "_broadcast_toast": noop_async,
+            "_build_cell_persistent_prompt": lambda *_a, **_k: "",
+            "_checkpoint_message": lambda _cell: "",
+            "_checkpoint_on_report": noop_async,
+            "_cleanup_after_merge": noop_async,
+            "_close_agent_session_only": noop_async,
+            "_panel_event": noop,
+            "_persistent_prompt_filename": lambda cell: f"{cell.id}.md",
+            "_record_task_boundary": noop_async,
+            "_resolve_agent_launch_config": lambda *_a, **_k: {},
+            "_resolve_architect_launch_config": lambda *_a, **_k: {},
+            "_resolve_base_dir": noop_async,
+            "_resolve_engineer_launch_config": lambda *_a, **_k: {},
+            "_resolve_worker_launch_config": lambda *_a, **_k: {},
+            "_send_agent_prompt": noop_async,
+            "bridge": bridge,
+            "db": None,
+            "engineer_buffer": engineer_buffer,
+            "handle_command": None,
+            "panel_log": types.SimpleNamespace(
+                replace_last=lambda *_a, **_k: {},
+            ),
+            "state": state,
+            "worktree_mgr": worktree_mgr,
+        })
+        closure = tuple(
+            self._closure_cell(closure_values[name])
+            for name in handle_code.co_freevars
+        )
+        return types.FunctionType(
+            handle_code,
+            self.server_mod.__dict__,
+            "handle_command",
+            None,
+            closure,
+        )
 
     def _launch_config(self, directory: str) -> dict:
         return {
@@ -1162,6 +1266,112 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
 
+    async def test_local_restart_dispatch_passes_digest_backlog_clear_helper(self):
+        state = self._make_state()
+        bridge = _CapturingBridge()
+        worktree_mgr = _FakeWorktreeManager()
+        clear_helper = lambda *_a, **_k: 0
+        engineer_buffer = types.SimpleNamespace(
+            clear_digest_backlog_for_restart=clear_helper,
+        )
+        captured = {}
+
+        async def fake_restart(data, state_arg, **kwargs):
+            captured["data"] = data
+            captured["state"] = state_arg
+            captured["kwargs"] = kwargs
+            return {"type": "ok", "command": "restart"}
+
+        original = self.server_mod._handle_restart_agent_command
+        self.server_mod._handle_restart_agent_command = fake_restart
+        self.addCleanup(
+            lambda: setattr(
+                self.server_mod,
+                "_handle_restart_agent_command",
+                original,
+            )
+        )
+
+        handle_command = self._extract_local_handle_command(
+            state,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            engineer_buffer=engineer_buffer,
+        )
+        result = await handle_command({"cmd": "restart_agent", "id": "agent-1"})
+
+        self.assertEqual(result, {"type": "ok", "command": "restart"})
+        self.assertEqual(captured["data"]["id"], "agent-1")
+        self.assertIs(captured["state"], state)
+        self.assertIs(captured["kwargs"]["bridge"], bridge)
+        self.assertIs(captured["kwargs"]["worktree_mgr"], worktree_mgr)
+        self.assertIs(
+            captured["kwargs"]["clear_digest_backlog_for_restart"],
+            clear_helper,
+        )
+
+    async def test_local_relaunch_dispatch_does_not_pass_digest_backlog_clear_helper(self):
+        state = self._make_state()
+        clear_helper = lambda *_a, **_k: 0
+        engineer_buffer = types.SimpleNamespace(
+            clear_digest_backlog_for_restart=clear_helper,
+        )
+        captured = {}
+
+        async def fake_relaunch(
+                data,
+                state_arg,
+                *,
+                bridge,
+                worktree_mgr,
+                resolve_base_dir,
+                resolve_agent_launch_config,
+                resolve_engineer_launch_config,
+                resolve_architect_launch_config,
+                resolve_worker_launch_config,
+                apply_persistent_prompt,
+                build_cell_persistent_prompt,
+                persistent_prompt_filename,
+                is_designated_engineer,
+                send_agent_prompt):
+            del (
+                bridge,
+                worktree_mgr,
+                resolve_base_dir,
+                resolve_agent_launch_config,
+                resolve_engineer_launch_config,
+                resolve_architect_launch_config,
+                resolve_worker_launch_config,
+                apply_persistent_prompt,
+                build_cell_persistent_prompt,
+                persistent_prompt_filename,
+                is_designated_engineer,
+                send_agent_prompt,
+            )
+            captured["data"] = data
+            captured["state"] = state_arg
+            return {"type": "ok", "command": "relaunch"}
+
+        original = self.server_mod._handle_relaunch_agent_command
+        self.server_mod._handle_relaunch_agent_command = fake_relaunch
+        self.addCleanup(
+            lambda: setattr(
+                self.server_mod,
+                "_handle_relaunch_agent_command",
+                original,
+            )
+        )
+
+        handle_command = self._extract_local_handle_command(
+            state,
+            engineer_buffer=engineer_buffer,
+        )
+        result = await handle_command({"cmd": "relaunch_agent", "id": "agent-1"})
+
+        self.assertEqual(result, {"type": "ok", "command": "relaunch"})
+        self.assertEqual(captured["data"]["id"], "agent-1")
+        self.assertIs(captured["state"], state)
+
     async def test_relaunch_deleted_engineer_fails(self):
         state = self._make_state()
 
@@ -1369,6 +1579,121 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             f"You are Alice (engineer, id={engineer.id}).\n\n"
             "Engineer: get started on your queue.",
             prompts,
+        )
+
+    async def test_restart_agent_clears_stale_digest_before_session_start(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        worker = self._add_worker_cell(state, engineer, "Merged Worker")
+        worker.status = "idle"
+        worker.worktree_path = "/tmp/project/.torque/worktrees/merged-worker"
+        worker.worktree_repo_root = "/tmp/project"
+        worker.worktree_branch = "torque/merged-worker"
+        worker.worktree_merged = True
+        engineer.status = "idle"
+        engineer.agent_type = "codex"
+        engineer.session_id = "active-session"
+        state.engineer_settings["torque"] = self.state_mod.EngineerSettings(
+            group="torque",
+        )
+        state.agent_digest_settings[engineer.id] = (
+            self.state_mod.AgentDigestSettings(
+                agent_id=engineer.id,
+                push_interval=0,
+                max_interval=0,
+                heartbeat_interval=0,
+            )
+        )
+        state.engineer_settings["torque"].pending_question = "Still pending?"
+        state.engineer_settings["torque"].pending_question_actor_id = engineer.id
+        state.direct_messages_by_agent[engineer.id] = [
+            {
+                "id": "msg-user",
+                "sender_kind": "user",
+                "recipient_id": engineer.id,
+                "message": "Buffered user message",
+                "delivery_state": "buffered",
+            }
+        ]
+        db = _DigestQueueDB(
+            engineer.id,
+            [
+                {
+                    "kind": "task_completed",
+                    "message": "stale restart digest",
+                    "_digest_queue_id": 11,
+                    "_digest_enqueued_at": 50.0,
+                }
+            ],
+        )
+        state.db = db
+        bridge = _CapturingBridge()
+        engineer_mod = importlib.import_module("torque.engineer")
+        engineer_mod = importlib.reload(engineer_mod)
+        buffer = engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        sent_prompts = []
+
+        original_create_session = bridge.create_session
+
+        async def create_session_and_emit_start(cell, **kwargs):
+            await original_create_session(cell, **kwargs)
+            buffer.on_agent_activity_change(cell)
+
+        bridge.create_session = create_session_and_emit_start
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Fresh boot prompt"
+            return cfg
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            result = await self.server_mod._handle_restart_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "persistent",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+                clear_digest_backlog_for_restart=(
+                    buffer.clear_digest_backlog_for_restart
+                ),
+            )
+
+        await asyncio.sleep(0.05)
+
+        self.assertIsNone(result)
+        self.assertEqual(db.queued[engineer.id], [])
+        self.assertEqual(buffer.get_buffer_stats(engineer.id)["buffered_events"], 0)
+        self.assertEqual(bridge.sent_text, [])
+        self.assertTrue(
+            any("Fresh boot prompt" in prompt for _, prompt, _ in sent_prompts),
+            sent_prompts,
+        )
+        self.assertEqual(
+            state.engineer_settings["torque"].pending_question,
+            "Still pending?",
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[engineer.id][0]["message"],
+            "Buffered user message",
         )
 
     async def test_restart_agent_rejects_terminals(self):

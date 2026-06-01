@@ -2986,6 +2986,29 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             result.setdefault(recipient_id, []).append(event)
         return result
 
+    def delete_digest_queued_events(self, recipient_id: str) -> int:
+        """Delete all queued digest events for one recipient."""
+        recipient_id = str(recipient_id or "")
+        if not recipient_id:
+            return 0
+
+        def _operation():
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM digest_queued_events WHERE recipient_id=?",
+                    (recipient_id,),
+                )
+                self._conn.commit()
+                return int(cur.rowcount or 0)
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        return self._run_sqlite_write_with_lock_retry(
+            _operation,
+            surface="digest",
+        )
+
     def load_digest_sent_events(
         self,
         *,

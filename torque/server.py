@@ -11440,7 +11440,8 @@ async def _handle_restart_agent_command(
         build_cell_persistent_prompt,
         persistent_prompt_filename,
         is_designated_engineer,
-        send_agent_prompt) -> dict | None:
+        send_agent_prompt,
+        clear_digest_backlog_for_restart=None) -> dict | None:
     """Restart an agent from scratch using its original launch parameters.
 
     Unlike ``relaunch`` (which resumes the prior provider session via
@@ -11482,6 +11483,20 @@ async def _handle_restart_agent_command(
     cell.mcp_messages = []
     if str(getattr(cell, "kind", "") or "").strip() == "architect":
         state.refresh_peer_message_cache_for_agent(cell.id, emit=False)
+    if clear_digest_backlog_for_restart:
+        try:
+            cleared = clear_digest_backlog_for_restart(cell.id)
+            if cleared:
+                log.info(
+                    "Cleared %d queued digest event(s) before restarting '%s'",
+                    cleared,
+                    cell.name,
+                )
+        except Exception:
+            log.exception(
+                "Failed to clear queued digest backlog for '%s' during restart",
+                cell.name,
+            )
 
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
@@ -12629,6 +12644,9 @@ async def main(connection=None):
                 persistent_prompt_filename=_persistent_prompt_filename,
                 is_designated_engineer=_is_designated_engineer,
                 send_agent_prompt=_send_agent_prompt,
+                clear_digest_backlog_for_restart=(
+                    engineer_buffer.clear_digest_backlog_for_restart
+                ),
             )
 
         result = await ingest_remote_command_request(
@@ -14858,6 +14876,9 @@ async def main(connection=None):
                     persistent_prompt_filename=_persistent_prompt_filename,
                     is_designated_engineer=_is_designated_engineer,
                     send_agent_prompt=_send_agent_prompt,
+                    clear_digest_backlog_for_restart=(
+                        engineer_buffer.clear_digest_backlog_for_restart
+                    ),
                 )
 
             elif cmd == "move_group":

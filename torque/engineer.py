@@ -785,6 +785,7 @@ class EngineerEventBuffer:
         self._due_checks: dict[str, asyncio.TimerHandle] = {}  # agent_id → next regular-digest deadline callback
         self._due_check_deadlines: dict[str, float] = {}  # agent_id → wall-clock deadline for due check
         self._pending_flush: dict[str, bool] = {}    # agent_id → flush task scheduled/running
+        self._flush_tasks: dict[str, asyncio.Task] = {}  # agent_id → scheduled/running flush task
         self._manual_flush_requested: dict[str, bool] = {}  # agent_id → operator requested immediate flush
         self._was_idle_with_question: set[str] = set()  # groups where engineer went idle with pending_question
         self._hint_delivery: dict[str, dict[str, float]] = {}  # group → fingerprint → last sent at
@@ -1308,7 +1309,76 @@ class EngineerEventBuffer:
             return
         self._cancel_due_check(agent_id)
         self._pending_flush[agent_id] = True
-        self._loop.create_task(self._flush(agent_id))
+        task = self._loop.create_task(self._flush(agent_id))
+        self._flush_tasks[agent_id] = task
+
+    def clear_digest_backlog_for_restart(self, recipient_or_group: str) -> int:
+        """Drop queued digest/ephemeral backlog before a fresh agent restart.
+
+        Direct user messages and unresolved asks are persisted outside the
+        digest queue; this only clears the per-recipient digest buffer and its
+        durable ``digest_queued_events`` rows so a session_start hook cannot
+        inject a stale Torque digest ahead of the restart boot prompts.
+        """
+        agent_id = self._resolve_recipient_id(recipient_or_group)
+        target = self._digest_recipient(agent_id)
+        if not target:
+            return 0
+
+        buffered_events = self._buffers.pop(agent_id, [])
+        dropped = len(buffered_events)
+        self._buffer_started.pop(agent_id, None)
+        self._manual_flush_requested.pop(agent_id, None)
+        self._cancel_due_check(agent_id)
+
+        flush_task = self._flush_tasks.pop(agent_id, None)
+        if flush_task and not flush_task.done():
+            flush_task.cancel()
+        self._pending_flush.pop(agent_id, None)
+
+        # Reset the heartbeat/hint clocks so a freshly booting agent is not
+        # greeted by an immediate idle digest after the queued backlog is gone.
+        now = time.time()
+        self._last_push[agent_id] = now
+        self._record_sent_hints(
+            target.group,
+            self._due_hints(target.group, engineer=target, now=now),
+            sent_at=now,
+        )
+
+        db = getattr(self._state, "db", None)
+        if db:
+            try:
+                if hasattr(db, "delete_digest_queued_events"):
+                    deleted = _call_digest_db_with_lock_retry(
+                        db,
+                        lambda: db.delete_digest_queued_events(agent_id),
+                    )
+                    dropped = max(dropped, int(deleted or 0))
+                else:
+                    queue_ids = [
+                        row_id
+                        for evt in buffered_events
+                        if (row_id := self._event_queue_id(evt)) > 0
+                    ]
+                    if queue_ids and hasattr(db, "complete_digest_delivery"):
+                        _call_digest_db_with_lock_retry(
+                            db,
+                            lambda: db.complete_digest_delivery(
+                                agent_id,
+                                [],
+                                queue_ids,
+                                sent_cap=200,
+                            ),
+                        )
+            except Exception:
+                log.exception(
+                    "Failed to delete queued digest events for '%s' during restart",
+                    agent_id,
+                )
+
+        self._emit_buffer_stats(agent_id)
+        return dropped
 
     def _is_heartbeat_due(self, agent_id: str, settings) -> bool:
         """Check if the idle heartbeat interval has elapsed since last push."""
@@ -1418,6 +1488,9 @@ class EngineerEventBuffer:
                         )
         finally:
             self._pending_flush.pop(agent_id, None)
+            current_task = asyncio.current_task()
+            if self._flush_tasks.get(agent_id) is current_task:
+                self._flush_tasks.pop(agent_id, None)
 
             # If new events arrived during the send, or the idle digest is
             # already overdue again, queue the next flush.
