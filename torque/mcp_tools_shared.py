@@ -566,6 +566,8 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "decision_list",
     "deploy_state",
     "diff",
+    "engineer_peer_inspect",
+    "engineer_peer_threads",
     "engineer_journal_read",
     "engineer_list",
     "engineer_pending_question",
@@ -1777,6 +1779,263 @@ def _architect_peer_list_json(
     }), False
 
 
+def _engineer_peer_hiring_architect_id(cell) -> str:
+    return str(getattr(cell, "hired_by_architect_id", "") or "").strip()
+
+
+def _engineer_peer_item(cell) -> dict:
+    item = {
+        "id": str(getattr(cell, "id", "") or ""),
+        "slug": str(getattr(cell, "slug", "") or ""),
+        "name": str(getattr(cell, "name", "") or ""),
+        "group": str(getattr(cell, "group", "") or ""),
+        "status": str(getattr(cell, "status", "") or ""),
+        "hired_by_architect_id": _engineer_peer_hiring_architect_id(cell),
+    }
+    dismissed_at = _agent_dismissed_at(cell)
+    if dismissed_at:
+        item["dismissed_at"] = dismissed_at
+    return item
+
+
+def _engineer_peer_eligibility_error(
+        state,
+        caller_id: str,
+        peer,
+        *,
+        include_dismissed: bool = False) -> str:
+    caller = state.agents.get(str(caller_id or "").strip())
+    if not caller or not _is_engineer_like_cell(state, caller):
+        return "engineer not found in scope"
+    if not peer or not _is_engineer_like_cell(state, peer):
+        return "engineer not found in scope"
+    if str(getattr(peer, "id", "") or "").strip() == str(caller_id or "").strip():
+        return "cannot message self"
+    if _agent_is_tombstoned(state, peer):
+        return "engineer is tombstoned"
+    if _agent_dismissed_at(peer) and not include_dismissed:
+        return "engineer is dismissed"
+    caller_group = str(getattr(caller, "group", "") or "").strip()
+    peer_group = str(getattr(peer, "group", "") or "").strip()
+    if not caller_group or peer_group != caller_group:
+        return "engineer not found in scope"
+    caller_architect_id = _engineer_peer_hiring_architect_id(caller)
+    peer_architect_id = _engineer_peer_hiring_architect_id(peer)
+    if not caller_architect_id or peer_architect_id != caller_architect_id:
+        return "engineer not found in scope"
+    architect = state.agents.get(caller_architect_id)
+    if not _is_architect_cell(architect, state) or _agent_is_tombstoned(state, architect):
+        return "engineer not found in scope"
+    return ""
+
+
+def _resolve_engineer_peer(
+        state,
+        caller_id: str,
+        engineer_ident: str,
+        *,
+        include_dismissed: bool = False) -> tuple[object | None, str]:
+    engineer_ident = str(engineer_ident or "").strip()
+    if not engineer_ident:
+        return None, "engineer_id is required"
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
+    if not engineer_id:
+        return None, f"Engineer not found: {engineer_ident}"
+    peer = state.agents.get(engineer_id)
+    error = _engineer_peer_eligibility_error(
+        state,
+        caller_id,
+        peer,
+        include_dismissed=include_dismissed,
+    )
+    if error:
+        return None, error
+    return peer, ""
+
+
+def _resolve_engineer_peer_filter(
+        state,
+        caller_id: str,
+        engineer_ident: str) -> tuple[str, str]:
+    engineer_ident = str(engineer_ident or "").strip()
+    if not engineer_ident:
+        return "", ""
+    peer, error = _resolve_engineer_peer(
+        state,
+        caller_id,
+        engineer_ident,
+        include_dismissed=True,
+    )
+    if not peer:
+        return "", error
+    return str(getattr(peer, "id", "") or "").strip(), ""
+
+
+def _engineer_peer_list_json(
+        state,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[str, bool]:
+    include_dismissed, bool_error = _optional_bool_arg(
+        args,
+        "include_dismissed",
+        False,
+    )
+    if bool_error:
+        return bool_error, True
+    caller = state.agents.get(str(caller_id or "").strip())
+    caller_architect_id = _engineer_peer_hiring_architect_id(caller)
+    engineers = []
+    if caller_architect_id and caller_group:
+        for cell in state.iter_agents(include_tombstoned=False):
+            if str(getattr(cell, "id", "") or "").strip() == str(caller_id or "").strip():
+                continue
+            if (
+                    getattr(cell, "cell_type", "") != "agent"
+                    or str(getattr(cell, "kind", "") or "").strip() != "engineer"
+                    or str(getattr(cell, "group", "") or "").strip() != caller_group
+                    or _engineer_peer_hiring_architect_id(cell) != caller_architect_id):
+                continue
+            if _agent_dismissed_at(cell) and not include_dismissed:
+                continue
+            engineers.append(_engineer_peer_item(cell))
+    engineers.sort(key=lambda item: (
+        str(item.get("name", "") or "").lower(),
+        str(item.get("id", "") or ""),
+    ))
+    return _compact_json({
+        "type": "engineer_peers",
+        "engineer_id": caller_id,
+        "engineers": engineers,
+    }), False
+
+
+def _engineer_peer_stream_ref_items(raw_refs) -> list[dict]:
+    if isinstance(raw_refs, (str, dict)):
+        raw_refs = [raw_refs]
+    if not isinstance(raw_refs, list):
+        return []
+    refs: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for raw in raw_refs:
+        if isinstance(raw, dict):
+            item = {
+                "stream": str(raw.get("stream", "") or raw.get("stream_id", "") or "").strip(),
+                "repo_root": str(raw.get("repo_root", "") or "").strip(),
+                "branch": str(raw.get("branch", "") or "").strip(),
+                "task": str(raw.get("task", "") or raw.get("task_id", "") or "").strip(),
+            }
+        else:
+            item = {
+                "stream": str(raw or "").strip(),
+                "repo_root": "",
+                "branch": "",
+                "task": "",
+            }
+        key = (
+            item["stream"],
+            item["repo_root"],
+            item["branch"],
+            item["task"],
+        )
+        if not any(key) or key in seen:
+            continue
+        seen.add(key)
+        refs.append(item)
+    return refs
+
+
+def _engineer_peer_stream_snapshot(stream: dict, ref: dict) -> dict:
+    member_ids = []
+    try:
+        member_ids = list(member_task_ids_for_stream(stream))
+    except Exception:
+        member_ids = []
+    return {
+        "stream_ref": str(ref.get("stream") or ref.get("branch") or ref.get("task") or ""),
+        "stream_id": str((stream or {}).get("stream_id", "") or ""),
+        "repo_root": str((stream or {}).get("repo_root", "") or ""),
+        "branch": str((stream or {}).get("branch", "") or ""),
+        "state": str((stream or {}).get("state", "") or ""),
+        "agent_id": str((stream or {}).get("agent_id", "") or ""),
+        "agent_name": str((stream or {}).get("agent_name", "") or ""),
+        "agent_slug": str((stream or {}).get("agent_slug", "") or ""),
+        "task_ids": member_ids,
+        "captured_at": time.time(),
+    }
+
+
+def _normalize_engineer_peer_context(
+        state,
+        caller_id: str,
+        caller_group: str,
+        peer,
+        args: dict) -> tuple[dict, str]:
+    task_ids = []
+    task_snapshots = []
+    visible_tasks = _filter_tasks_for_caller(state, "engineer", caller_id)
+    for task_ident in _dedupe_strings(args.get("context_task_ids", [])):
+        task_id = _resolve_task(state, task_ident)
+        if not task_id or task_id not in visible_tasks:
+            return {}, f"Task not found: {task_ident}"
+        task = state.board_tasks.get(task_id)
+        if not task or str(getattr(task, "group", "") or "").strip() != caller_group:
+            return {}, f"Task not found: {task_ident}"
+        task_ids.append(task_id)
+        task_snapshots.append(_peer_context_task_snapshot(task))
+
+    stream_refs = _engineer_peer_stream_ref_items(args.get("context_stream_refs", []))
+    stream_snapshots = []
+    if stream_refs:
+        caller = state.agents.get(str(caller_id or "").strip())
+        streams = _engineer_streams(
+            state,
+            caller,
+            caller_group,
+            include_merged=True,
+            include_orphaned=True,
+        )
+        for ref in stream_refs:
+            task_ref = str(ref.get("task", "") or "").strip()
+            task_id = _resolve_task(state, task_ref) if task_ref else ""
+            stream, stream_error = _resolve_stream_payload(
+                streams,
+                stream_ident=str(ref.get("stream", "") or ""),
+                repo_root=str(ref.get("repo_root", "") or ""),
+                branch=str(ref.get("branch", "") or ""),
+                task_id=task_id,
+            )
+            if not stream:
+                return {}, stream_error
+            stream_snapshots.append(_engineer_peer_stream_snapshot(stream, ref))
+
+    if not task_ids and not stream_snapshots:
+        return {}, "context_task_ids or context_stream_refs is required"
+
+    caller = state.agents.get(str(caller_id or "").strip())
+    supervising_architect_id = _engineer_peer_hiring_architect_id(caller)
+    context_summary = str(args.get("context_summary", "") or "").strip()
+    return {
+        "context_task_ids": task_ids,
+        "context_engineer_ids": [
+            str(getattr(caller, "id", "") or "").strip(),
+            str(getattr(peer, "id", "") or "").strip(),
+        ],
+        "context_decision_ids": [],
+        "context_summary": context_summary,
+        "context_snapshot": {
+            "tasks": task_snapshots,
+            "streams": stream_snapshots,
+            "inspect_grant": {
+                "scope": "thread_context",
+                "source_engineer_id": str(getattr(caller, "id", "") or "").strip(),
+                "recipient_engineer_id": str(getattr(peer, "id", "") or "").strip(),
+                "supervising_architect_id": supervising_architect_id,
+            },
+        },
+    }, ""
+
+
 def _peer_context_task_snapshot(task) -> dict:
     return {
         "id": str(getattr(task, "id", "") or ""),
@@ -1980,6 +2239,8 @@ def _agent_peer_message_row_to_entry(row: dict, agent_id: str) -> dict:
         action = "architect_reply" if has_reply else "architect_message"
     elif sender_kind == "engineer" and recipient_kind == "architect":
         action = "engineer_reply" if has_reply else "engineer_message_architect"
+    elif sender_kind == "engineer" and recipient_kind == "engineer":
+        action = "engineer_peer_reply" if has_reply else "engineer_peer_notify"
     else:
         action = "architect_peer_reply" if has_reply else "architect_peer_message"
     context = {
@@ -2108,6 +2369,521 @@ def _architect_peer_inbox_json(
     return _compact_json({
         "type": "architect_peer_inbox",
         "threads": threads[:limit],
+    }), False
+
+
+def _is_engineer_peer_row(row: dict) -> bool:
+    return (
+        str((row or {}).get("sender_kind", "") or "").strip() == "engineer"
+        and str((row or {}).get("recipient_kind", "") or "").strip() == "engineer"
+    )
+
+
+def _engineer_peer_thread_ids(rows: list[dict]) -> set[str]:
+    ids: set[str] = set()
+    for row in rows or []:
+        if not _is_engineer_peer_row(row):
+            continue
+        for field in ("sender_id", "recipient_id"):
+            value = str((row or {}).get(field, "") or "").strip()
+            if value:
+                ids.add(value)
+    return ids
+
+
+def _thread_pair_key_for_rows(rows: list[dict]) -> str:
+    ids = sorted(_engineer_peer_thread_ids(rows))
+    if len(ids) != 2:
+        return ""
+    return f"agent-pair:{ids[0]}:{ids[1]}"
+
+
+def _thread_context_from_rows(rows: list[dict]) -> dict:
+    task_ids: list[str] = []
+    engineer_ids: list[str] = []
+    decision_ids: list[str] = []
+    summaries: list[str] = []
+    snapshots: list[dict] = []
+    for row in rows or []:
+        for source, target in (
+                (row.get("context_task_ids", []) or [], task_ids),
+                (row.get("context_engineer_ids", []) or [], engineer_ids),
+                (row.get("context_decision_ids", []) or [], decision_ids)):
+            for value in source:
+                text = str(value or "").strip()
+                if text and text not in target:
+                    target.append(text)
+        summary = str(row.get("context_summary", "") or "").strip()
+        if summary and summary not in summaries:
+            summaries.append(summary)
+        snapshot = dict(row.get("context_snapshot", {}) or {})
+        if snapshot:
+            snapshots.append(snapshot)
+    merged_snapshot: dict = {"tasks": [], "streams": []}
+    inspect_grant = {}
+    seen_task_ids: set[str] = set()
+    seen_stream_keys: set[str] = set()
+    for snapshot in snapshots:
+        if not inspect_grant and isinstance(snapshot.get("inspect_grant"), dict):
+            inspect_grant = dict(snapshot.get("inspect_grant") or {})
+        for task in snapshot.get("tasks", []) or []:
+            if not isinstance(task, dict):
+                continue
+            task_id = str(task.get("id", "") or "").strip()
+            key = task_id or json.dumps(task, sort_keys=True)
+            if key in seen_task_ids:
+                continue
+            seen_task_ids.add(key)
+            merged_snapshot["tasks"].append(dict(task))
+        for stream in snapshot.get("streams", []) or []:
+            if not isinstance(stream, dict):
+                continue
+            key = (
+                str(stream.get("stream_id", "") or ""),
+                str(stream.get("repo_root", "") or ""),
+                str(stream.get("branch", "") or ""),
+            )
+            if key in seen_stream_keys:
+                continue
+            seen_stream_keys.add(key)
+            merged_snapshot["streams"].append(dict(stream))
+    if inspect_grant:
+        merged_snapshot["inspect_grant"] = inspect_grant
+    return {
+        "task_ids": task_ids,
+        "engineer_ids": engineer_ids,
+        "decision_ids": decision_ids,
+        "summary": "\n".join(summaries),
+        "snapshot": merged_snapshot,
+    }
+
+
+def _engineer_peer_live_context(state, rows: list[dict], *,
+                                include_live: bool = True) -> dict:
+    context = _thread_context_from_rows(rows)
+    if not include_live:
+        return {"tasks": [], "streams": [], "live_unavailable_reason": "disabled"}
+    group = ""
+    for row in rows or []:
+        group = str(row.get("group_name", row.get("group", "")) or "").strip()
+        if group:
+            break
+    live_tasks = []
+    unavailable: list[str] = []
+    for task_id in context.get("task_ids", []) or []:
+        task = state.board_tasks.get(str(task_id or "").strip())
+        if not task or (group and str(getattr(task, "group", "") or "").strip() != group):
+            unavailable.append(str(task_id or "").strip())
+            continue
+        live_tasks.append(serialize_task_for_mcp(task, tasks_by_id=state.board_tasks))
+    live = {
+        "tasks": live_tasks,
+        "streams": list((context.get("snapshot", {}) or {}).get("streams", []) or []),
+    }
+    if unavailable:
+        live["live_unavailable_reason"] = "tasks unavailable: " + ", ".join(unavailable)
+    return live
+
+
+def _thread_requires_engineer_reply(messages: list[dict], caller_id: str) -> bool:
+    return _thread_requires_architect_reply(messages, caller_id)
+
+
+def _engineer_peer_thread_summary(state, messages: list[dict], caller_id: str = "") -> dict:
+    messages = sorted(
+        [dict(row) for row in messages if _is_engineer_peer_row(row)],
+        key=lambda row: (
+            float(row.get("created_at", 0) or 0),
+            str(row.get("id", "") or ""),
+        ),
+    )
+    if not messages:
+        return {}
+    last = messages[-1]
+    participant_ids = sorted(_engineer_peer_thread_ids(messages))
+    participants = []
+    for participant_id in participant_ids:
+        cell = state.agents.get(participant_id)
+        participants.append({
+            "id": participant_id,
+            "name": str(getattr(cell, "name", "") or participant_id),
+            "slug": str(getattr(cell, "slug", "") or ""),
+            "kind": str(getattr(cell, "kind", "") or "engineer"),
+            "hired_by_architect_id": _engineer_peer_hiring_architect_id(cell),
+        })
+    context = _thread_context_from_rows(messages)
+    thread_id = str(last.get("thread_id", "") or "").strip()
+    return {
+        "thread_id": thread_id,
+        "pair_thread_id": _thread_pair_key_for_rows(messages),
+        "participants": participants,
+        "participant_ids": participant_ids,
+        "last_message_at": float(last.get("created_at", 0) or 0),
+        "last_message_id": str(last.get("id", "") or ""),
+        "last_message": _agent_peer_message_row_to_entry(
+            last,
+            caller_id or str(last.get("recipient_id", "") or ""),
+        ),
+        "message_count": len(messages),
+        "requires_reply": (
+            _thread_requires_engineer_reply(messages, caller_id)
+            if caller_id else False
+        ),
+        "ack_required_count": sum(
+            1 for row in messages if bool(row.get("ack_required", False))
+        ),
+        "delivery": {
+            "buffered": sum(
+                1 for row in messages
+                if str(row.get("delivery_state", "") or "buffered") == "buffered"
+            ),
+            "failed": sum(
+                1 for row in messages
+                if str(row.get("delivery_state", "") or "") == "failed"
+            ),
+        },
+        "context": context,
+    }
+
+
+def _engineer_peer_inbox_json(
+        state,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    try:
+        limit = int(args.get("limit", _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+                    or _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        limit = _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT
+    limit = max(1, min(limit, _ARCHITECT_PEER_INBOX_MAX_LIMIT))
+    try:
+        since_value = float(args.get("since", 0) or 0)
+    except (TypeError, ValueError):
+        return "since must be a number", True
+    requires_reply, requires_reply_error = _optional_bool_arg(
+        args,
+        "requires_reply",
+        False,
+    )
+    if requires_reply_error:
+        return requires_reply_error, True
+    peer_id, peer_error = _resolve_engineer_peer_filter(
+        state,
+        caller_id,
+        str(args.get("peer_engineer_id", "") or "").strip(),
+    )
+    if peer_error:
+        return peer_error, True
+    db = getattr(state, "db", None)
+    if not db:
+        return _compact_json({"type": "engineer_peer_inbox", "threads": []}), False
+    row_limit = min(max(limit * 20, limit), 1000)
+    loader = getattr(db, "load_engineer_peer_messages_for_agent", None)
+    rows = (
+        loader(
+            caller_id,
+            limit=row_limit,
+            since=since_value,
+            peer_id=peer_id,
+            thread_id=str(args.get("thread_id", "") or "").strip(),
+        )
+        if callable(loader)
+        else []
+    )
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    threads = []
+    for messages in grouped.values():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        requires = _thread_requires_engineer_reply(messages, caller_id)
+        if requires_reply and not requires:
+            continue
+        summary = _engineer_peer_thread_summary(state, messages, caller_id)
+        if summary:
+            summary["messages"] = [
+                _agent_peer_message_row_to_entry(row, caller_id)
+                for row in messages
+            ]
+            threads.append(summary)
+    threads.sort(
+        key=lambda item: (
+            float(item.get("last_message_at", 0) or 0),
+            str(item.get("thread_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return _compact_json({
+        "type": "engineer_peer_inbox",
+        "threads": threads[:limit],
+    }), False
+
+
+def _engineer_peer_thread_rows_for_inspect(
+        state,
+        caller_kind: str,
+        caller_id: str,
+        args: dict,
+        *,
+        limit: int = 1000) -> tuple[list[dict], str]:
+    db = getattr(state, "db", None)
+    if not db:
+        return [], "thread not found in scope"
+    message_id = str(args.get("message_id", "") or "").strip()
+    thread_id = str(args.get("thread_id", "") or "").strip()
+    if not message_id and not thread_id:
+        return [], "message_id or thread_id is required"
+    if message_id:
+        row = db.load_agent_peer_message(message_id)
+        if not row or not _is_engineer_peer_row(row):
+            return [], "thread not found in scope"
+        thread_id = str(row.get("thread_id", "") or "").strip()
+    loader = getattr(db, "load_engineer_peer_messages_for_thread", None)
+    if not callable(loader):
+        return [], "thread not found in scope"
+    if caller_kind == "engineer":
+        rows = loader(thread_id, engineer_id=caller_id, limit=limit)
+    else:
+        rows = loader(thread_id, limit=limit)
+    rows = [row for row in rows if _is_engineer_peer_row(row)]
+    if not rows:
+        return [], "thread not found in scope"
+    return rows, ""
+
+
+def _engineer_peer_thread_belongs_to_pair(
+        state,
+        thread_id: str,
+        sender_id: str,
+        recipient_id: str) -> tuple[bool, str]:
+    thread_id = str(thread_id or "").strip()
+    if not thread_id:
+        return True, ""
+    expected = {
+        str(sender_id or "").strip(),
+        str(recipient_id or "").strip(),
+    }
+    if len(expected) != 2 or not all(expected):
+        return False, "thread not found in scope"
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_engineer_peer_messages_for_thread", None)
+    if not callable(loader):
+        return False, "thread not found in scope"
+    rows = loader(thread_id, limit=5000)
+    if not rows:
+        return False, "thread not found in scope"
+    participants = _engineer_peer_thread_ids(rows)
+    if participants != expected:
+        return False, "thread not found in scope"
+    return True, ""
+
+
+def _engineer_peer_existing_message_matches_pair(
+        row: dict,
+        sender_id: str,
+        recipient_id: str,
+        requested_thread_id: str = "") -> bool:
+    if not _is_engineer_peer_row(row):
+        return False
+    participants = {
+        str((row or {}).get("sender_id", "") or "").strip(),
+        str((row or {}).get("recipient_id", "") or "").strip(),
+    }
+    expected = {
+        str(sender_id or "").strip(),
+        str(recipient_id or "").strip(),
+    }
+    if participants != expected:
+        return False
+    requested_thread_id = str(requested_thread_id or "").strip()
+    existing_thread_id = str((row or {}).get("thread_id", "") or "").strip()
+    if requested_thread_id and existing_thread_id != requested_thread_id:
+        return False
+    return True
+
+
+def _engineer_peer_inspect_json(
+        state,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    include_live, live_error = _optional_bool_arg(args, "include_live", True)
+    if live_error:
+        return live_error, True
+    rows, error = _engineer_peer_thread_rows_for_inspect(
+        state,
+        "engineer",
+        caller_id,
+        args,
+        limit=1000,
+    )
+    if error:
+        return error, True
+    messages = [
+        _agent_peer_message_row_to_entry(row, caller_id)
+        for row in sorted(rows, key=lambda row: (
+            float(row.get("created_at", 0) or 0),
+            str(row.get("id", "") or ""),
+        ))
+    ]
+    summary = _engineer_peer_thread_summary(state, rows, caller_id)
+    return _compact_json({
+        "type": "engineer_peer_inspect",
+        "thread_id": summary.get("thread_id", ""),
+        "pair_thread_id": summary.get("pair_thread_id", ""),
+        "participants": summary.get("participants", []),
+        "messages": messages,
+        "context": _thread_context_from_rows(rows),
+        "live": _engineer_peer_live_context(
+            state,
+            rows,
+            include_live=include_live,
+        ),
+    }), False
+
+
+def _architect_can_inspect_engineer_peer_thread(
+        state,
+        architect_id: str,
+        rows: list[dict]) -> bool:
+    architect_id = str(architect_id or "").strip()
+    participant_ids = _engineer_peer_thread_ids(rows)
+    if len(participant_ids) != 2:
+        return False
+    for engineer_id in participant_ids:
+        engineer = state.agents.get(engineer_id)
+        if (
+                not engineer
+                or _agent_is_tombstoned(state, engineer)
+                or not _is_engineer_like_cell(state, engineer)
+                or _engineer_peer_hiring_architect_id(engineer) != architect_id):
+            return False
+    return True
+
+
+def _architect_engineer_peer_threads_json(
+        state,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    try:
+        limit = int(args.get("limit", _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+                    or _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        limit = _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT
+    limit = max(1, min(limit, _ARCHITECT_PEER_INBOX_MAX_LIMIT))
+    try:
+        active_since = float(args.get("active_since", 0) or 0)
+    except (TypeError, ValueError):
+        return "active_since must be a number", True
+    engineer_filter = ""
+    if str(args.get("engineer_id", "") or "").strip():
+        engineer_filter, engineer_error = _resolve_architect_hired_engineer(
+            state,
+            caller_id,
+            str(args.get("engineer_id", "") or "").strip(),
+            include_tombstoned=True,
+        )
+        if not engineer_filter:
+            return engineer_error, True
+    db = getattr(state, "db", None)
+    if not db:
+        return _compact_json({"type": "engineer_peer_threads", "threads": []}), False
+    thread_filter = str(args.get("thread_id", "") or "").strip()
+    if thread_filter:
+        rows = db.load_engineer_peer_messages_for_thread(thread_filter, limit=1000)
+    else:
+        caller = state.agents.get(str(caller_id or "").strip())
+        group = str(getattr(caller, "group", "") or "").strip()
+        rows = [
+            row for row in db.load_recent_agent_peer_messages_for_group(
+                group,
+                limit=1000,
+            )
+            if _is_engineer_peer_row(row)
+        ]
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    threads = []
+    for messages in grouped.values():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        if not _architect_can_inspect_engineer_peer_thread(
+                state,
+                caller_id,
+                messages):
+            continue
+        if engineer_filter and engineer_filter not in _engineer_peer_thread_ids(messages):
+            continue
+        summary = _engineer_peer_thread_summary(state, messages)
+        if active_since and float(summary.get("last_message_at", 0) or 0) <= active_since:
+            continue
+        threads.append(summary)
+    threads.sort(
+        key=lambda item: (
+            float(item.get("last_message_at", 0) or 0),
+            str(item.get("thread_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return _compact_json({
+        "type": "engineer_peer_threads",
+        "threads": threads[:limit],
+    }), False
+
+
+def _architect_engineer_peer_inspect_json(
+        state,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    include_live, live_error = _optional_bool_arg(args, "include_live", True)
+    if live_error:
+        return live_error, True
+    try:
+        limit = int(args.get("limit", 100) or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 1000))
+    rows, error = _engineer_peer_thread_rows_for_inspect(
+        state,
+        "architect",
+        caller_id,
+        args,
+        limit=1000,
+    )
+    if error or not _architect_can_inspect_engineer_peer_thread(
+            state,
+            caller_id,
+            rows):
+        return "thread not found in scope", True
+    rows = sorted(rows, key=lambda row: (
+        float(row.get("created_at", 0) or 0),
+        str(row.get("id", "") or ""),
+    ))
+    summary = _engineer_peer_thread_summary(state, rows)
+    return _compact_json({
+        "type": "engineer_peer_inspect",
+        "thread_id": summary.get("thread_id", ""),
+        "pair_thread_id": summary.get("pair_thread_id", ""),
+        "participants": summary.get("participants", []),
+        "messages": [
+            _agent_peer_message_row_to_entry(row, caller_id)
+            for row in rows[-limit:]
+        ],
+        "context": _thread_context_from_rows(rows),
+        "live": _engineer_peer_live_context(
+            state,
+            rows,
+            include_live=include_live,
+        ),
     }), False
 
 
@@ -2841,10 +3617,169 @@ def _save_architect_peer_message(state, sender, recipient, *,
     return saved, created
 
 
+def _save_engineer_peer_message(state, sender, recipient, *,
+                                action: str,
+                                message: str,
+                                reply_to_id: str = "",
+                                thread_id: str = "",
+                                ack_required: bool = False,
+                                context: dict | None = None,
+                                idempotency_key: str = "") -> tuple[dict, bool]:
+    """Persist a canonical Engineer↔Engineer peer notification/reply."""
+    message_text = str(message or "").strip()
+    if not message_text:
+        raise ValueError("message is required")
+    message_id = _peer_message_id_from_idempotency_key(idempotency_key)
+    created = False
+    if not message_id:
+        message_id = "msg-" + uuid.uuid4().hex[:12]
+        created = True
+    requested_thread_id = str(thread_id or "").strip()
+    existing = _load_existing_peer_message_for_idempotency(state, message_id)
+    if existing:
+        if not _engineer_peer_existing_message_matches_pair(
+                existing,
+                sender.id,
+                recipient.id,
+                requested_thread_id):
+            raise ValueError("idempotency key conflicts with existing peer message")
+        state.append_peer_message_to_caches(existing)
+        return existing, False
+    if not created:
+        created = True
+    if requested_thread_id:
+        ok, error = _engineer_peer_thread_belongs_to_pair(
+            state,
+            requested_thread_id,
+            sender.id,
+            recipient.id,
+        )
+        if not ok:
+            raise ValueError(error)
+    conversation_id = requested_thread_id or message_id
+    context = dict(context or {})
+    context_task_ids = list(context.get("context_task_ids", []) or [])
+    row = {
+        "id": message_id,
+        "thread_id": conversation_id,
+        "reply_to_id": str(reply_to_id or "").strip(),
+        "group_name": str(getattr(sender, "group", "") or "").strip(),
+        "sender_id": sender.id,
+        "sender_kind": "engineer",
+        "sender_name": str(getattr(sender, "name", "") or "").strip(),
+        "recipient_id": recipient.id,
+        "recipient_kind": "engineer",
+        "recipient_name": str(getattr(recipient, "name", "") or "").strip(),
+        "message": message_text,
+        "created_at": time.time(),
+        "ack_required": bool(ack_required),
+        "source_task_id": context_task_ids[0] if context_task_ids else "",
+        "context_task_ids": context_task_ids,
+        "context_engineer_ids": list(context.get("context_engineer_ids", []) or []),
+        "context_decision_ids": list(context.get("context_decision_ids", []) or []),
+        "context_summary": str(context.get("context_summary", "") or ""),
+        "context_snapshot": dict(context.get("context_snapshot", {}) or {}),
+        "delivery_state": "buffered",
+        "delivery_reason": "",
+    }
+    saved = state.save_peer_message(row) if getattr(state, "db", None) else None
+    if not saved:
+        raise ValueError("failed to save peer message")
+    state.history_record_message(
+        sender.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
+    state.history_record_message(
+        recipient.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
+    return saved, created
+
+
+def _engineer_peer_digest_message(sender, recipient, row: dict, *,
+                                  opened: bool) -> str:
+    sender_name = str(getattr(sender, "name", "") or getattr(sender, "id", "") or "")
+    recipient_name = str(
+        getattr(recipient, "name", "") or getattr(recipient, "id", "") or ""
+    )
+    label = "peer thread opened" if opened else "peer thread active"
+    parts = [f"{sender_name} ↔ {recipient_name}: {label}"]
+    context_bits = []
+    for task_id in list((row or {}).get("context_task_ids", []) or [])[:2]:
+        text = str(task_id or "").strip()
+        if text:
+            context_bits.append(text)
+    snapshot = dict((row or {}).get("context_snapshot", {}) or {})
+    for stream in list(snapshot.get("streams", []) or [])[:2]:
+        if not isinstance(stream, dict):
+            continue
+        branch = str(stream.get("branch", "") or "").strip()
+        stream_id = str(stream.get("stream_id", "") or "").strip()
+        if branch:
+            context_bits.append(f"stream {branch}")
+        elif stream_id:
+            context_bits.append(stream_id)
+    if context_bits:
+        parts.append(" — " + " / ".join(context_bits[:3]))
+    thread_id = str((row or {}).get("thread_id", "") or "").strip()
+    if thread_id:
+        parts.append(f" (thread {thread_id})")
+    message = "".join(parts)
+    return message[:240].rstrip()
+
+
+def _emit_engineer_peer_architect_event(state, sender, recipient, row: dict, *,
+                                        opened: bool) -> bool:
+    architect_id = _engineer_peer_hiring_architect_id(sender)
+    if not architect_id or architect_id != _engineer_peer_hiring_architect_id(recipient):
+        return False
+    architect = state.agents.get(architect_id)
+    if not _is_architect_cell(architect, state) or _agent_is_tombstoned(state, architect):
+        return False
+    kind = "engineer_peer_thread_opened" if opened else "engineer_peer_thread_active"
+    now = time.time()
+    thread_id = str((row or {}).get("thread_id", "") or "").strip()
+    if not opened:
+        settings = state.get_agent_digest_settings(architect_id)
+        quiet_floor = max(
+            int(getattr(settings, "push_interval", 0) or 0),
+            int(getattr(settings, "max_interval", 0) or 0),
+            300,
+        )
+        cache = getattr(state, "_engineer_peer_thread_active_notified_at", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(state, "_engineer_peer_thread_active_notified_at", cache)
+        key = (architect_id, thread_id)
+        if now - float(cache.get(key, 0) or 0) < quiet_floor:
+            return False
+        cache[key] = now
+    panel_log = getattr(state, "panel_log", None)
+    append = getattr(panel_log, "append", None)
+    if not callable(append):
+        return False
+    event = append(
+        kind=kind,
+        cell_id=str(getattr(sender, "id", "") or "").strip(),
+        agent_name=str(getattr(sender, "name", "") or "").strip(),
+        group=str(getattr(sender, "group", "") or "").strip(),
+        message=_engineer_peer_digest_message(sender, recipient, row, opened=opened),
+        task_id=str((row or {}).get("source_task_id", "") or "").strip(),
+    )
+    emitter = getattr(state, "_emit", None)
+    if callable(emitter):
+        emitter("event_append", **event)
+    return True
+
+
 async def _inject_architect_peer_message(handle_command, state, sender,
                                          recipient, row: dict,
                                          message: str) -> dict:
-    """Inject an Architect peer message and persist delivery state."""
+    """Inject a durable peer message and persist delivery state."""
     message_id = str((row or {}).get("id", "") or "").strip()
     if _agent_dismissed_at(recipient):
         updated = state.update_peer_message_delivery(
@@ -2872,13 +3807,13 @@ async def _inject_architect_peer_message(handle_command, state, sender,
             "agent_id": getattr(recipient, "id", ""),
             "message": message,
             "sender_name": str(getattr(sender, "name", "") or "").strip(),
-            "sender_kind": "architect",
+            "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
             "message_id": message_id,
             "ack_required": bool((row or {}).get("ack_required", False)),
         })
     except Exception:
         log.exception(
-            "Failed to inject Architect peer message into %s",
+            "Failed to inject peer message into %s",
             getattr(recipient, "id", ""),
         )
         updated = state.update_peer_message_delivery(
@@ -3897,8 +4832,28 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args,
         )
 
+    if tool_name == "peer_list" and caller_kind == "engineer":
+        return _engineer_peer_list_json(
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+
     if tool_name == "peer_inbox" and caller_kind == "architect":
         return _architect_peer_inbox_json(real_state, caller_id, args)
+
+    if tool_name == "peer_inbox" and caller_kind == "engineer":
+        return _engineer_peer_inbox_json(real_state, caller_id, args)
+
+    if tool_name == "peer_inspect" and caller_kind == "engineer":
+        return _engineer_peer_inspect_json(real_state, caller_id, args)
+
+    if tool_name == "engineer_peer_threads" and caller_kind == "architect":
+        return _architect_engineer_peer_threads_json(real_state, caller_id, args)
+
+    if tool_name == "engineer_peer_inspect" and caller_kind == "architect":
+        return _architect_engineer_peer_inspect_json(real_state, caller_id, args)
 
     if tool_name == "mcp_calls":
         target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()
@@ -6886,6 +7841,162 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "message_id": delivered["id"],
             "thread_id": delivered["thread_id"],
             "architect_id": architect.id,
+        }), False
+
+    if tool_name == "peer_notify" and caller_kind == "engineer":
+        recipient, recipient_error = _resolve_engineer_peer(
+            real_state,
+            caller_id,
+            str(args.get("engineer_id", "") or "").strip(),
+        )
+        if not recipient:
+            return recipient_error, True
+        sender = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+        if ack_error:
+            return ack_error, True
+        context, context_error = _normalize_engineer_peer_context(
+            state,
+            caller_id,
+            _engineer_group,
+            recipient,
+            args,
+        )
+        if context_error:
+            return context_error, True
+        length_error = _validate_architect_peer_message_length(
+            message,
+            context.get("context_summary", ""),
+        )
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = _save_engineer_peer_message(
+                real_state,
+                sender,
+                recipient,
+                action="engineer_peer_notify",
+                message=message,
+                thread_id=str(args.get("thread_id", "") or "").strip(),
+                ack_required=ack_required,
+                context=context,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as exc:
+            return str(exc), True
+        if created:
+            delivery = await _inject_architect_peer_message(
+                handle_command,
+                real_state,
+                sender,
+                recipient,
+                saved,
+                message,
+            )
+            current = real_state.db.load_agent_peer_message(saved["id"])
+            if current:
+                saved = current
+            _emit_engineer_peer_architect_event(
+                real_state,
+                sender,
+                recipient,
+                saved,
+                opened=not bool(str(args.get("thread_id", "") or "").strip()),
+            )
+        else:
+            delivery = {
+                "state": str(saved.get("delivery_state", "buffered") or "buffered"),
+                "reason": str(saved.get("delivery_reason", "") or ""),
+            }
+        return json.dumps({
+            "type": "ok",
+            "message_id": saved["id"],
+            "thread_id": saved["thread_id"],
+            "recipient_engineer_id": recipient.id,
+            "ack_required": bool(saved.get("ack_required", False)),
+            "delivery": delivery,
+        }), False
+
+    if tool_name == "peer_reply" and caller_kind == "engineer":
+        message_id = str(args.get("message_id", "") or "").strip()
+        if not message_id:
+            return "message_id is required", True
+        db = getattr(real_state, "db", None)
+        row = db.load_agent_peer_message(message_id) if db else None
+        if not row or not _is_engineer_peer_row(row):
+            return "thread not found in scope", True
+        caller_id_text = str(caller_id or "").strip()
+        participants = {
+            str(row.get("sender_id", "") or "").strip(),
+            str(row.get("recipient_id", "") or "").strip(),
+        }
+        if caller_id_text not in participants:
+            return "thread not found in scope", True
+        peer_id = next((pid for pid in participants if pid != caller_id_text), "")
+        peer, peer_error = _resolve_engineer_peer(
+            real_state,
+            caller_id,
+            peer_id,
+            include_dismissed=True,
+        )
+        if not peer:
+            return peer_error, True
+        sender = real_state.agents.get(caller_id_text)
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+        if ack_error:
+            return ack_error, True
+        length_error = _validate_architect_peer_message_length(message)
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = _save_engineer_peer_message(
+                real_state,
+                sender,
+                peer,
+                action="engineer_peer_reply",
+                message=message,
+                reply_to_id=message_id,
+                thread_id=str(row.get("thread_id", "") or "").strip(),
+                ack_required=ack_required,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as exc:
+            return str(exc), True
+        if created:
+            delivery = await _inject_architect_peer_message(
+                handle_command,
+                real_state,
+                sender,
+                peer,
+                saved,
+                message,
+            )
+            current = real_state.db.load_agent_peer_message(saved["id"])
+            if current:
+                saved = current
+            _emit_engineer_peer_architect_event(
+                real_state,
+                sender,
+                peer,
+                saved,
+                opened=False,
+            )
+        else:
+            delivery = {
+                "state": str(saved.get("delivery_state", "buffered") or "buffered"),
+                "reason": str(saved.get("delivery_reason", "") or ""),
+            }
+        return json.dumps({
+            "type": "ok",
+            "message_id": saved["id"],
+            "thread_id": saved["thread_id"],
+            "delivery": delivery,
         }), False
 
     if tool_name == "reply" and caller_kind in {"architect", "engineer"}:

@@ -67,10 +67,19 @@ Visibility filtering applies not just to the tool list but to **the data each to
 | `architect_engineer_journal_read` | not visible | not visible | only journals of Engineers this Architect hired |
 | `architect_peer_inbox` | not visible | not visible | only same-group Architect peer threads involving this Architect |
 | `architect_peer_message` | not visible | not visible | only one non-self, non-tombstoned Architect in the same group |
+| `engineer_peer_notify` / `engineer_peer_inspect` | not visible | same-group Engineer peers with the same non-empty supervising Architect; read-only context grants only | not visible |
+| `architect_engineer_peer_threads` / `architect_engineer_peer_inspect` | not visible | not visible | Engineer↔Engineer threads where both participants were hired by this Architect |
 
 The pattern: every tool builds a **scoped state view** before it does any reading. The scoped view filters by group for the role-prefixed tools, and further by ownership/creation for the per-actor stores like decisions and journals.
 
 You can't escape the scoped view. There's no `include_other_groups: true` parameter. There's no admin override. The scope is the contract.
+
+Engineer↔Engineer notify-and-inspect is intentionally separate from generic
+Engineer visibility. `agent_is_visible_to_engineer()` still denies peer
+Engineers and peer workers. The peer tools use their own resolver requiring the
+same group and the same non-empty `hired_by_architect_id`, and the grant is
+limited to the referenced task/stream context in that thread. Architect inspect
+tools are read-only and are not gated by digest notification settings.
 
 ## What happens when scope is violated
 

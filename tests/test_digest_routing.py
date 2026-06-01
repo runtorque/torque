@@ -354,6 +354,73 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         recipients = self.routing_mod.resolve_digest_recipients(state, event)
         self.assertEqual(recipients, [architect.id])
 
+    def test_engineer_peer_thread_events_route_only_to_hiring_architect(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Courier",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        state.update_agent_digest_settings(engineer.id)
+        state.update_agent_digest_settings(architect.id)
+
+        event = {
+            "cell_id": engineer.id,
+            "agent_name": engineer.name,
+            "group": group,
+            "kind": "engineer_peer_thread_opened",
+            "message": "Courier ↔ Panelsmith: peer thread opened — TORQUE:801",
+            "task_id": "TORQUE:801",
+        }
+
+        recipients = self.routing_mod.resolve_digest_recipients(state, event)
+
+        self.assertEqual(recipients, [])
+        self.assertIn(
+            "engineer_peer_thread_opened",
+            self.routing_mod.ARCHITECT_COARSE_EVENTS,
+        )
+        self.assertIn(
+            "engineer_peer_thread_active",
+            self.routing_mod.ARCHITECT_COARSE_EVENTS,
+        )
+        self.assertNotIn(
+            "engineer_peer_thread_opened",
+            state.get_agent_digest_settings(architect.id).enabled_events,
+        )
+        self.assertNotIn(
+            "engineer_peer_thread_opened",
+            self.state_mod.ENGINEER_MANDATORY_EVENTS,
+        )
+        state.update_agent_digest_settings(
+            architect.id,
+            architect_digest=True,
+            enabled_events=["engineer_peer_thread_opened"],
+        )
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [architect.id],
+        )
+        state.update_agent_digest_settings(
+            architect.id,
+            architect_digest=True,
+            enabled_events=[],
+        )
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [],
+        )
+
     def test_candidate_worker_recipients_exclude_worker_self(self):
         state, group = self._make_state()
         architect = self._add_agent(

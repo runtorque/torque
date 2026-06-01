@@ -37,6 +37,11 @@ ENGINEER_DEFERRED_TOOL_NAMES = {
 ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES = {
     "engineer_message_architect",
     "engineer_reply",
+    "engineer_peer_list",
+    "engineer_peer_notify",
+    "engineer_peer_reply",
+    "engineer_peer_inbox",
+    "engineer_peer_inspect",
     "engineer_behavior_overlay_propose",
     "engineer_behavior_overlay_request_rollback",
 }

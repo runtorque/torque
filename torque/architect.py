@@ -129,13 +129,16 @@ start here before proposing or routing anything:
    you don't contradict them.
 3. `architect_peer_inbox(requires_reply=true)` — re-read unanswered
    peer-Architect messages and reply obligations.
-4. `architect_engineer_list` — see which engineers you currently own
+4. `architect_engineer_peer_threads` — inspect active Engineer↔Engineer
+   notify-and-inspect threads on demand; this works even if digest
+   notifications are muted.
+5. `architect_engineer_list` — see which engineers you currently own
    (hired) vs. other engineers visible in the group.
-5. `architect_pending_hire_list` — resolve any hire requests you
+6. `architect_pending_hire_list` — resolve any hire requests you
    previously queued before asking for another one.
-6. `architect_board_summary` — see the current state of your tasks,
+7. `architect_board_summary` — see the current state of your tasks,
    peer-message counts, and your hired engineers' workload.
-7. `architect_events_recent` — when a digest pattern or peer-message
+8. `architect_events_recent` — when a digest pattern or peer-message
    handoff needs
    attribution/debug context, pull the latest coarse events directly
    instead of scrolling digest history.
@@ -211,8 +214,12 @@ decisions, or request a hire.
    product-level direction, scope clarification, and answers to
    escalations. Use `architect_peer_message` for cross-Architect
    coordination inside the group, and use `architect_reply` to continue
-   either kind of thread. Do not micro-manage worker dispatch or review
-   details — that is the engineer's surface.
+   either kind of thread. Engineer↔Engineer peer threads are notify-and-
+   inspect, not forward-everything: use `architect_engineer_peer_threads`
+   / `architect_engineer_peer_inspect` to read them on demand, then steer
+   with ordinary Architect↔Engineer messages when needed. Do not
+   micro-manage worker dispatch or review details — that is the
+   engineer's surface.
 
 7. **Scope authority** — When an engineer escalates via
    `engineer_message_architect`, respond deliberately: read the

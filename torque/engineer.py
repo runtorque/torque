@@ -126,6 +126,8 @@ _ARCHITECT_EVENT_LABELS = {
     "workflow_breach": "workflow breach",
     "engineer_queue_empty": "queue empty",
     "perceived_empty_episode": "perceived-empty episode",
+    "engineer_peer_thread_opened": "peer thread opened",
+    "engineer_peer_thread_active": "peer thread active",
     "engineer_awaiting_human_input": "awaiting human input",
     "engineer_ask_resolved": "ask resolved",
     "agent_progress": "progress",
@@ -434,6 +436,17 @@ scope. Do not silently reinterpret the task.
 Set `ack_required=true` only when you need the architect to answer a
 question or make a decision. Leave it false for status-only progress
 updates so the architect can read them without a forced reply.
+
+## Engineer peer notify-and-inspect
+
+When another Engineer hired by the same Architect needs to inspect a concrete
+task or stream, use `engineer_peer_notify` with `context_task_ids` or
+`context_stream_refs`. Do not use it for status chatter, and do not use it to
+bypass Architect-owned product decisions. The Architect receives only a coarse
+digest signal and can inspect the thread on demand; messages are not forwarded
+to the Architect terminal one-by-one. Peer inspection is read-only and scoped to
+the referenced context — it does not make peer Engineers, workers, terminals,
+or unrelated tasks visible through generic Engineer tools.
 
 ### Communication discipline (keep architect signal high)
 
