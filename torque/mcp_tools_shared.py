@@ -49,9 +49,11 @@ from .server_artifacts import serialize_task_for_mcp
 from .server_prompts import build_engineer_deliverable_awareness
 from .identity import prepend_agent_identity_anchor
 from .state import (
+    ARCHITECT_MANDATORY_EVENTS,
     ARCHIVED_LANE,
     board_task_is_closed,
     get_engineer_notification_preset,
+    normalize_architect_enabled_events,
     normalize_default_worker_concurrency,
     normalize_engineer_digest_verbosity,
     task_counts_as_done,
@@ -3819,6 +3821,37 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "settings": asdict(
                 real_state.get_architect_settings(_engineer_group)
             ),
+        }), False
+
+    if tool_name == "digest_filter" and caller_kind == "architect":
+        settings = real_state.get_agent_digest_settings(caller_id)
+        if "set" in args:
+            current = normalize_architect_enabled_events(args.get("set", []))
+        else:
+            current = normalize_architect_enabled_events(
+                getattr(settings, "enabled_events", []) or []
+            )
+        current_set = set(current)
+        for event_kind in normalize_architect_enabled_events(
+                args.get("enable", []) or []):
+            current_set.add(event_kind)
+        for event_kind in normalize_architect_enabled_events(
+                args.get("disable", []) or []):
+            current_set.discard(event_kind)
+        enabled_events = sorted(current_set)
+        real_state.update_agent_digest_settings(
+            caller_id,
+            architect_digest=True,
+            enabled_events=enabled_events,
+        )
+        updated = real_state.get_agent_digest_settings(caller_id)
+        return json.dumps({
+            "type": "ok",
+            "agent_id": caller_id,
+            "group": _engineer_group,
+            "enabled_events": list(getattr(updated, "enabled_events", []) or []),
+            "mandatory_events": sorted(ARCHITECT_MANDATORY_EVENTS),
+            "settings": asdict(updated),
         }), False
 
     if tool_name == "task_chain" and caller_kind == "architect":

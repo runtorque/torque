@@ -179,6 +179,40 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             "codex",
         )
 
+    def test_architect_digest_filter_updates_per_architect_optional_events(self):
+        state = self._make_state()
+        architect = self._add_agent(
+            state,
+            "arch-1",
+            "Architect",
+            kind="architect",
+        )
+
+        async def handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = asyncio.run(self.shared_mod.dispatch_scoped_tool(
+            "architect_digest_filter",
+            {
+                "set": ["task_completed", "ask_created"],
+                "enable": ["pipeline_complete"],
+                "disable": ["task_completed", "agent_error"],
+            },
+            handle_command,
+            state,
+            tool_prefix="architect_",
+            caller_kind="architect",
+            caller_id=architect.id,
+        ))
+
+        self.assertFalse(is_error)
+        payload = json.loads(text)
+        self.assertEqual(payload["enabled_events"], ["pipeline_complete"])
+        self.assertIn("ask_created", payload["mandatory_events"])
+        settings = state.get_agent_digest_settings(architect.id)
+        self.assertTrue(settings.architect_digest)
+        self.assertEqual(settings.enabled_events, ["pipeline_complete"])
+
     def test_removed_architect_settings_update_tool_is_unknown(self):
         state = self._make_state()
         architect = self._add_agent(

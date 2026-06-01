@@ -895,6 +895,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
             architect.id,
             push_interval=0,
             max_interval=0,
+            enabled_events=["task_completed"],
         )
 
         injected = []
@@ -1151,6 +1152,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
             architect.id,
             push_interval=0,
             max_interval=0,
+            enabled_events=["task_completed"],
         )
         injected = []
 
@@ -2002,6 +2004,10 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[architect.id] = architect
         engineer.hired_by_architect_id = architect.id
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["engineer_ask_resolved"],
+        )
         state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             pending_question="Need approval",
@@ -2072,6 +2078,10 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[architect.id] = architect
         engineer.hired_by_architect_id = architect.id
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["engineer_ask_resolved"],
+        )
         state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             pending_question="Need approval",
