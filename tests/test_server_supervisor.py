@@ -371,6 +371,54 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.status["state"], "restarting")
         self.assertEqual(bridge.status["restart_deadline_at"], 1010.0)
 
+    async def test_watchdog_preserves_restart_window_while_connected(self):
+        publishes = []
+        metrics_calls = []
+        clock = {"wall": 1000.0}
+
+        class Bridge:
+            def __init__(self):
+                self.status = {
+                    "state": "restarting",
+                    "restart_deadline_at": 1010.0,
+                    "updated_at": 999.0,
+                }
+
+            def supervisor_connected(self):
+                return True
+
+            def supervisor_watchdog_status(self):
+                return dict(self.status)
+
+            def set_supervisor_watchdog_status(self, status):
+                self.status = dict(status or {})
+
+            async def supervisor_metrics(self):
+                metrics_calls.append("metrics")
+
+        bridge = Bridge()
+
+        async def publish():
+            publishes.append(dict(bridge.status))
+
+        watchdog = self.server_supervisor.SupervisorLivenessWatchdog(
+            bridge=bridge,
+            data_dir="/tmp/fake",
+            ensure_running=lambda _path: None,
+            pid_alive=lambda _pid: True,
+            publish_state=publish,
+            time_func=lambda: clock["wall"],
+            monotonic_func=lambda: clock["wall"],
+        )
+
+        await watchdog.check_once()
+
+        self.assertEqual(metrics_calls, ["metrics"])
+        self.assertEqual(len(publishes), 1)
+        self.assertEqual(bridge.status["state"], "restarting")
+        self.assertEqual(bridge.status["restart_deadline_at"], 1010.0)
+        self.assertEqual(bridge.status["updated_at"], 999.0)
+
     async def test_restart_payload_delegates_to_bridge(self):
         state = self.MatrixState()
         calls = []

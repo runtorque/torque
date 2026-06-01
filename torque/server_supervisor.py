@@ -374,17 +374,24 @@ class SupervisorLivenessWatchdog:
     async def check_once(self) -> None:
         if not callable(getattr(self.bridge, "supervisor_connected", None)):
             return
-        if self._connected():
+        connected = self._connected()
+        if self._restart_window_active():
+            if connected:
+                self._failed_attempts.clear()
+                self._next_attempt_at = 0.0
+                self._circuit_open = False
+                self._lost_marked = False
+                await self._refresh_metrics()
+            await self._publish()
+            return
+
+        if connected:
             self._failed_attempts.clear()
             self._next_attempt_at = 0.0
             self._circuit_open = False
             self._lost_marked = False
             self._set_status(state="", updated_at=self.time_func())
             await self._refresh_metrics()
-            await self._publish()
-            return
-
-        if self._restart_window_active():
             await self._publish()
             return
 
