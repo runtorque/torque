@@ -305,6 +305,68 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
             await watchdog.check_once()
         self.assertEqual(len(attempts), 3)
 
+    async def test_watchdog_emits_down_once_per_open_circuit_window(self):
+        events = []
+        clock = {"mono": 0.0, "wall": 1000.0}
+
+        class Bridge:
+            def __init__(self):
+                self.connected = False
+                self.status = {}
+
+            def supervisor_connected(self):
+                return self.connected
+
+            def supervisor_pid(self):
+                return 424242
+
+            def supervisor_reconnect_failures(self):
+                return 99
+
+            def set_supervisor_watchdog_status(self, status):
+                self.status = dict(status or {})
+
+        bridge = Bridge()
+
+        def ensure_running(_data_dir):
+            raise RuntimeError("spawn failed")
+
+        async def emit_event(kind, detail):
+            events.append((kind, dict(detail or {})))
+
+        watchdog = self.server_supervisor.SupervisorLivenessWatchdog(
+            bridge=bridge,
+            data_dir="/tmp/fake",
+            ensure_running=ensure_running,
+            pid_alive=lambda _pid: False,
+            emit_event=emit_event,
+            max_retries=1,
+            retry_window_seconds=60,
+            base_backoff_seconds=0,
+            max_backoff_seconds=0,
+            time_func=lambda: clock["wall"],
+            monotonic_func=lambda: clock["mono"],
+        )
+
+        await watchdog.check_once()
+        for _ in range(3):
+            clock["mono"] += 100
+            clock["wall"] += 100
+            await watchdog.check_once()
+
+        kinds = [kind for kind, _ in events]
+        self.assertEqual(kinds.count("down"), 1)
+
+        # Recovery closes the circuit and allows the next open window to emit
+        # one fresh down event.
+        bridge.connected = True
+        await watchdog.check_once()
+        bridge.connected = False
+        await watchdog.check_once()
+
+        kinds = [kind for kind, _ in events]
+        self.assertEqual(kinds.count("down"), 2)
+
     async def test_watchdog_defers_respawn_during_restart_window(self):
         events = []
         publishes = []

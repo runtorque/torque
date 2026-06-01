@@ -254,6 +254,7 @@ class SupervisorLivenessWatchdog:
         self._failed_attempts: list[float] = []
         self._next_attempt_at = 0.0
         self._circuit_open = False
+        self._down_emitted_for_open_circuit = False
         self._lost_marked = False
 
     def start(self) -> None:
@@ -293,6 +294,12 @@ class SupervisorLivenessWatchdog:
     async def _emit_event(self, kind: str, detail: dict) -> None:
         if self.emit_event:
             await self._maybe_await(self.emit_event(kind, detail))
+
+    async def _emit_down_once(self, detail: dict) -> None:
+        if self._down_emitted_for_open_circuit:
+            return
+        await self._emit_event("down", detail)
+        self._down_emitted_for_open_circuit = True
 
     def _set_status(self, **status: Any) -> None:
         setter = getattr(self.bridge, "set_supervisor_watchdog_status", None)
@@ -388,6 +395,7 @@ class SupervisorLivenessWatchdog:
                     self._failed_attempts.clear()
                     self._next_attempt_at = 0.0
                     self._circuit_open = False
+                    self._down_emitted_for_open_circuit = False
                     self._lost_marked = False
                     await self._refresh_metrics()
                 await self._publish()
@@ -402,6 +410,7 @@ class SupervisorLivenessWatchdog:
             self._failed_attempts.clear()
             self._next_attempt_at = 0.0
             self._circuit_open = False
+            self._down_emitted_for_open_circuit = False
             self._lost_marked = False
             self._set_status(state="", updated_at=self.time_func())
             await self._refresh_metrics()
@@ -418,7 +427,7 @@ class SupervisorLivenessWatchdog:
         self._prune_attempts(now_mono)
         if self._circuit_open or len(self._failed_attempts) >= self.max_retries:
             self._open_circuit()
-            await self._emit_event("down", {
+            await self._emit_down_once({
                 "failed_respawns": len(self._failed_attempts),
                 "max_retries": self.max_retries,
             })
@@ -451,7 +460,7 @@ class SupervisorLivenessWatchdog:
             self._prune_attempts(now_mono)
             if len(self._failed_attempts) >= self.max_retries:
                 self._open_circuit(error=error)
-                await self._emit_event("down", {
+                await self._emit_down_once({
                     "failed_respawns": len(self._failed_attempts),
                     "max_retries": self.max_retries,
                     "error": error,
