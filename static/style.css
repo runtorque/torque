@@ -11303,6 +11303,39 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   color: var(--text-dim);
   opacity: .7;
 }
+.supervisor-restart-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.supervisor-restart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--amber, #d29922);
+}
+.supervisor-restart:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+  opacity: .75;
+}
+.supervisor-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255,255,255,.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: diff-spin .8s linear infinite;
+  flex: 0 0 auto;
+}
+.supervisor-restart-status {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-restart-status-error {
+  color: var(--red);
+}
 .supervisor-sort {
   border: 0;
   background: transparent;

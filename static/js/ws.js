@@ -519,6 +519,23 @@ function connect() {
       if (typeof supervisorReceiveSessions === 'function') {
         supervisorReceiveSessions(msg);
       }
+    } else if (msg.type === 'supervisor_restart') {
+      if (msg.runtime) {
+        state.runtime = msg.runtime;
+        if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+        if (typeof refreshDaemonStatusIndicator === 'function') {
+          refreshDaemonStatusIndicator();
+        }
+        if (typeof refreshStatusBar === 'function') {
+          refreshStatusBar({ runtime: true });
+        }
+        if (typeof healthSupervisorRuntimeReceive === 'function') {
+          healthSupervisorRuntimeReceive(state.runtime && state.runtime.supervisor);
+        }
+      }
+      if (typeof supervisorReceiveRestart === 'function') {
+        supervisorReceiveRestart(msg);
+      }
     } else if (msg.type === 'system_health_metrics') {
       if (typeof healthReceiveMetrics === 'function') {
         healthReceiveMetrics(msg);
@@ -3307,6 +3324,9 @@ function _applyDelta(ops) {
         }
         if (typeof healthSupervisorRuntimeReceive === 'function') {
           healthSupervisorRuntimeReceive(state.runtime && state.runtime.supervisor);
+        }
+        if (typeof supervisorReceiveRuntime === 'function') {
+          supervisorReceiveRuntime(state.runtime && state.runtime.supervisor);
         }
         break;
       }
