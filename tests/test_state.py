@@ -1621,6 +1621,73 @@ class MatrixStateCleanupTests(unittest.TestCase):
             finally:
                 db.close()
 
+    def test_dispatch_state_live_from_backlog_auto_advances_to_active_lane(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        task = state.board_add_task("Stage work", "g", lane="Backlog")
+        self.assertIsNotNone(task)
+        state._delta_ops.clear()
+
+        state.board_update_task(task.id, dispatch_state="live")
+
+        updated = state.board_tasks[task.id]
+        self.assertEqual(updated.dispatch_state, "live")
+        self.assertEqual(updated.lane, "To Do")
+        self.assertEqual(state._delta_ops[-1]["op"], "task_upsert")
+        self.assertEqual(state._delta_ops[-1]["dispatch_state"], "live")
+        self.assertEqual(state._delta_ops[-1]["lane"], "To Do")
+
+    def test_board_add_task_live_from_backlog_defaults_to_active_lane(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+
+        task = state.board_add_task(
+            "Create already live",
+            "g",
+            dispatch_state="live",
+        )
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.dispatch_state, "live")
+        self.assertEqual(task.lane, "To Do")
+        self.assertEqual(state._delta_ops[-1]["lane"], "To Do")
+
+    def test_dispatch_state_live_backlog_auto_advance_guardrails(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+
+        queued = state.board_add_task("Queued backlog", "g", lane="Backlog")
+        self.assertIsNotNone(queued)
+        state.board_update_task(queued.id, description="Still queued")
+        self.assertEqual(state.board_tasks[queued.id].dispatch_state, "queued")
+        self.assertEqual(state.board_tasks[queued.id].lane, "Backlog")
+
+        done = state.board_add_task("Done task", "g", lane="Done")
+        self.assertIsNotNone(done)
+        state.board_update_task(done.id, dispatch_state="live")
+        self.assertEqual(state.board_tasks[done.id].dispatch_state, "live")
+        self.assertEqual(state.board_tasks[done.id].lane, "Done")
+
+        archived = state.board_add_task("Archived task", "g", lane="To Do")
+        self.assertIsNotNone(archived)
+        state.board_archive_task(archived.id)
+        state.board_update_task(archived.id, dispatch_state="live")
+        self.assertEqual(state.board_tasks[archived.id].dispatch_state, "live")
+        self.assertEqual(state.board_tasks[archived.id].lane, "Archived")
+
+        manual = state.board_add_task("Manual live backlog", "g", lane="Backlog")
+        self.assertIsNotNone(manual)
+        state.board_update_task(manual.id, dispatch_state="live")
+        self.assertEqual(state.board_tasks[manual.id].lane, "To Do")
+        state.board_move_task(manual.id, "Backlog")
+        state.board_update_task(
+            manual.id,
+            dispatch_state="live",
+            description="Operator intentionally moved this live task back.",
+        )
+        self.assertEqual(state.board_tasks[manual.id].dispatch_state, "live")
+        self.assertEqual(state.board_tasks[manual.id].lane, "Backlog")
+
     def test_compact_snapshot_does_not_run_deferred_db_loaders(self):
         state = self.state_mod.MatrixState()
 

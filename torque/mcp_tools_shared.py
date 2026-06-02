@@ -6419,13 +6419,22 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             suggested_specialization = str(
                 args.get("suggested_specialization", "") or ""
             ).strip()
+            requested_lane = str(args.get("lane", "") or "").strip()
+            if dispatch_requested and not requested_lane:
+                live_lane_for_create = getattr(
+                    real_state,
+                    "_board_live_transition_lane",
+                    None,
+                )
+                if callable(live_lane_for_create):
+                    requested_lane = live_lane_for_create(_engineer_group)
 
             architect_create_payload = {
                 "cmd": "board_add_task",
                 "task": title,
                 "description": args.get("description", ""),
                 "group": _engineer_group,
-                "lane": args.get("lane", ""),
+                "lane": requested_lane,
                 "labels": args.get("labels", []),
                 "assigned_engineer_id": assigned_engineer_id,
             }
