@@ -12837,6 +12837,8 @@ async def main(connection=None):
         data_dir=DATA_DIR,
         broadcast_callback=state.broadcast,
     )
+    state.ai_embedding_service = embedding_service
+    state.ai_index_service = ai_index_service
     if bool(getattr(state.global_settings, "ai_enabled", False)):
         try:
             asyncio.get_running_loop().call_later(

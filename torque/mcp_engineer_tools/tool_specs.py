@@ -35,6 +35,29 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "engineer_semantic_recall",
+        "description": (
+            "Search the local AI semantic index for snippets visible to this "
+            "Engineer. Results are over-fetched then filtered through the "
+            "same Engineer task, journal, and peer-inspection visibility "
+            "rules before any text is returned."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language recall query.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum visible snippets to return (default 5, max 20).",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "engineer_streams_list",
         "description": (
             "List computed branch/worktree streams for the engineer's group. "
