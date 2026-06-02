@@ -453,10 +453,10 @@ best-effort helpers: callers must keep deterministic raw reads such as
 `engineer_semantic_recall` and `architect_semantic_recall` search the local
 embedding index and return only snippets that pass the caller's normal
 server-side visibility checks. Engineer recall uses the same group/task,
-journal, and same-supervising-Architect peer-inspection scope as the existing
-Engineer read tools. Architect recall is scoped to the calling Architect's
-decisions, journal, visible tasks, hired-Engineer journals, and
-Engineer-peer-thread inspection grants.
+journal, decision-participant, and same-supervising-Architect peer-inspection
+scope as the existing Engineer read tools. Architect recall is scoped to the
+calling Architect's decisions, journal, visible tasks, hired-Engineer journals,
+and Engineer-peer-thread inspection grants.
 
 Inputs:
 
@@ -464,7 +464,10 @@ Inputs:
 |---|---|
 | `query` | Required natural-language search query. |
 | `limit` | Optional maximum visible snippets to return. Defaults to 5 and caps at 20. |
-| `corpus` | Optional corpus hint/narrowing value (for example `tasks`, `decisions`, `architect_journals`, `engineer_journals`, or `engineer_peer_threads`). The configured Settings → AI corpus and caller visibility are still authoritative; a corpus hint can never expand scope. |
+
+Per-call corpus narrowing is not part of the v1 MCP schema. Corpus selection is
+configured in Settings → AI for the local index as a whole; caller visibility
+is still enforced again at read time.
 
 Successful results have `type: "semantic_recall"`, `status: "ok"`, and a
 ranked `results` list of text snippets:
@@ -519,12 +522,13 @@ Readiness statuses are:
 | `ready` | Cached summary is current for the recorded source hash/provider/model. |
 | `stale` | A previous summary exists but raw journal/decision/session-map tools are authoritative. |
 | `empty` | No usable cached summary exists yet. |
-| `disabled` | AI or cached boot summaries are disabled; use raw recovery tools. |
+| `refreshing` | An out-of-band refresh is in progress; use raw recovery tools. |
 | `error` | Last refresh failed; use raw recovery tools. |
 
-If a caller observes a transient `refreshing` row while an out-of-band refresh
-is in progress, treat it the same as `stale`: continue with raw deterministic
-tools and never block boot, dispatch, review, or merge on the summary.
+When AI or cached boot summaries are disabled, the MCP read returns
+`status: "empty"` with a disabled/fallback message. Treat `empty` and
+`refreshing` the same as `stale`: continue with raw deterministic tools and
+never block boot, dispatch, review, or merge on the summary.
 
 ## See also
 

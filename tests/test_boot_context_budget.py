@@ -82,6 +82,30 @@ class BootContextBudgetDocsTest(unittest.TestCase):
     def test_completed_root_plan_docs_removed(self):
         self.assertEqual([], sorted(path.name for path in ROOT.glob("*_PLAN.md")))
 
+    def test_ai_mcp_docs_match_v1_read_tool_contract(self):
+        mcp_docs = (ROOT / "docs/reference/mcp-tools.md").read_text()
+        ai_docs = (ROOT / "docs/operate/ai.md").read_text()
+
+        self.assertNotIn("| `corpus` |", mcp_docs)
+        self.assertIn(
+            "Per-call corpus narrowing is not part of the v1 MCP schema",
+            mcp_docs,
+        )
+        self.assertIn(
+            "Per-call corpus filtering is not part of the v1 MCP schema",
+            ai_docs,
+        )
+
+        boot_section = mcp_docs.split("### Cached boot summaries", 1)[1]
+        boot_status_section = boot_section.split("When AI or cached boot summaries", 1)[0]
+        for status in ("ready", "stale", "empty", "refreshing", "error"):
+            self.assertIn(f"| `{status}` |", boot_status_section)
+        self.assertNotIn("| `disabled` |", boot_status_section)
+        self.assertIn(
+            '`status: "empty"` with a disabled/fallback message',
+            boot_section,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

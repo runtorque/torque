@@ -45,7 +45,8 @@ Open Global Settings and choose the **AI** tab.
 
 The master toggle controls the subsystem. Leave it off when you want a strictly
 raw/deterministic Torque session. When off, semantic recall returns disabled or
-empty results and cached boot-summary reads fall back to raw recovery tools.
+empty results. Cached boot-summary reads return `status: "empty"` with a
+disabled/fallback message and fall back to raw recovery tools.
 
 ### Generation provider and model
 
@@ -107,9 +108,10 @@ Engineers and Architects get read-only AI tools documented in
 - `engineer_semantic_recall` / `architect_semantic_recall` — ranked text
   snippets from the local vector index. Degraded statuses include `disabled`,
   `not_ready`, `dependency_missing`, `rebuild_pending`, and `model_mismatch`.
+  Per-call corpus filtering is not part of the v1 MCP schema; use Settings →
+  AI corpus toggles to choose what the local index harvests.
 - `engineer_boot_summary` / `architect_boot_summary` — cached summary payloads
-  with readiness statuses such as `ready`, `stale`, `empty`, `disabled`, and
-  `error`.
+  with readiness statuses `ready`, `stale`, `empty`, `refreshing`, and `error`.
 
 There are no Worker AI recall/summary tools in v1.
 
@@ -117,10 +119,10 @@ There are no Worker AI recall/summary tools in v1.
 
 Boot summaries are generated out of band after AI is enabled. Reading
 `engineer_boot_summary` or `architect_boot_summary` never performs a live
-provider call. If the cache is absent, stale, disabled, refreshing, or errored,
-operators and agents should fall back to raw tools (`engineer_session_map`,
-`engineer_journal_read`, `architect_journal_read`, `architect_decision_list`,
-and scoped task reads).
+provider call. If the cache is absent, stale, empty because summaries are
+disabled, refreshing, or errored, operators and agents should fall back to raw
+tools (`engineer_session_map`, `engineer_journal_read`,
+`architect_journal_read`, `architect_decision_list`, and scoped task reads).
 
 The boot-summary toggle in Settings → AI can disable this cache independently
 of the master AI toggle.
