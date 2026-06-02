@@ -469,6 +469,47 @@ asyncio.run(main())
             "agent-session-from-live-hook",
         )
 
+    async def test_codex_permission_request_marks_agent_waiting_for_approval(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+        )
+        state.agents[cell.id] = cell
+
+        codex_mod = importlib.import_module("torque.adapters.codex")
+        codex_mod = importlib.reload(codex_mod)
+        event = codex_mod.CodexAdapter().parse_event(
+            {
+                "hook_event_name": "PermissionRequest",
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch\n"},
+            },
+            cell,
+        )
+        self.assertIsNotNone(event)
+
+        panel_log = self.events_mod.PanelEventLog()
+        bus = self.events_mod.EventBus(
+            state,
+            self.events_mod.EventLog(),
+            panel_log=panel_log,
+        )
+        await bus.emit(event)
+
+        self.assertEqual(cell.activity, "waiting")
+        self.assertTrue(cell.needs_attention)
+        self.assertEqual(
+            cell.activity_detail,
+            "Waiting for approval: Applying patch",
+        )
+        self.assertEqual(cell.last_event_text, cell.activity_detail)
+        self.assertEqual(panel_log.get_recent()[-1]["kind"], "agent_waiting")
+
     async def test_context_window_updates_do_not_mutate_session_tokens(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

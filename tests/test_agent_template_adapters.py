@@ -1084,6 +1084,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "echo user-stop",
             )
             self.assertEqual(len(installed["hooks"]["PreToolUse"]), 1)
+            self.assertEqual(len(installed["hooks"]["PermissionRequest"]), 1)
             session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
             self.assertIn("http://localhost:18933/events", session_start_hook["command"])
             self.assertIn("--fail", session_start_hook["command"])
@@ -1091,6 +1092,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("event_id", session_start_hook["command"])
             self.assertNotIn("> /dev/null", session_start_hook["command"])
             self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
+            permission_hook = installed["hooks"]["PermissionRequest"][0]["hooks"][0]
+            self.assertIn("--output /dev/null", permission_hook["command"])
+            self.assertNotIn("decision", permission_hook["command"])
 
             with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
                 adapter.uninstall_hooks(tmp)
@@ -1261,10 +1265,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             )
             self.assertIn(f'[hooks.state."{source}:session_start:0:0"]', trust_config)
             self.assertIn(f'[hooks.state."{source}:pre_tool_use:0:0"]', trust_config)
+            self.assertIn(
+                f'[hooks.state."{source}:permission_request:0:0"]',
+                trust_config,
+            )
             self.assertIn(f'[hooks.state."{source}:stop:1:0"]', trust_config)
             self.assertEqual(
                 len(re.findall(r'trusted_hash = "sha256:[0-9a-f]{64}"', trust_config)),
-                3 * len(source_paths),
+                4 * len(source_paths),
             )
 
             with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
@@ -1514,6 +1522,56 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         self.assertEqual(
             event.data["provider_usage"]["five_hour"]["used_percentage"],
             64,
+        )
+
+    def test_codex_pre_tool_use_labels_apply_patch_and_mcp_tools(self):
+        adapter = CodexAdapter()
+
+        patch_event = adapter.parse_event(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "apply_patch",
+                "tool_input": {"patch": "*** Begin Patch\n*** End Patch\n"},
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+        self.assertIsNotNone(patch_event)
+        self.assertEqual(patch_event.event_type, "tool_start")
+        self.assertEqual(patch_event.data["detail"], "Applying patch")
+
+        mcp_event = adapter.parse_event(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "mcp__torque__torque_progress",
+                "tool_input": {"message": "Working"},
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+        self.assertIsNotNone(mcp_event)
+        self.assertEqual(mcp_event.event_type, "tool_start")
+        self.assertEqual(
+            mcp_event.data["detail"],
+            "mcp__torque__torque_progress",
+        )
+
+    def test_codex_permission_request_parse_returns_waiting_event(self):
+        event = CodexAdapter().parse_event(
+            {
+                "hook_event_name": "PermissionRequest",
+                "session_id": "codex-session-1",
+                "tool_name": "Bash",
+                "tool_input": {"command": "git push origin main"},
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "waiting")
+        self.assertEqual(event.data["session_id"], "codex-session-1")
+        self.assertEqual(event.data["tool"], "Bash")
+        self.assertEqual(
+            event.data["reason"],
+            "Waiting for approval: Running: git push origin main",
         )
 
     def test_codex_rate_limits_with_null_window_marks_that_window_unavailable(self):

@@ -22,6 +22,7 @@ DEFAULT_MAX_AGE_DAYS = 14
 DEFAULT_ARGS_CAPTURE = "metadata"
 VALID_ARGS_CAPTURE_MODES = {"off", "metadata", "full"}
 _NORMALIZED_COLUMNS_BACKFILL_KEY = "normalized_columns_backfilled_v1"
+_TOOL_RESULT_KEYS = ("tool_output", "tool_response")
 
 
 def normalize_args_capture_mode(value: Any) -> str:
@@ -95,13 +96,22 @@ def redact_event_for_mcp_call_log(
         return redacted
     if mode == "off":
         raw.pop("tool_input", None)
-        raw.pop("tool_output", None)
+        for key in _TOOL_RESULT_KEYS:
+            raw.pop(key, None)
         return redacted
     if "tool_input" in raw:
         raw["tool_input"] = _redaction_summary(raw.get("tool_input"), include_arg_keys=True)
-    if "tool_output" in raw:
-        raw["tool_output"] = _redaction_summary(raw.get("tool_output"))
+    for key in _TOOL_RESULT_KEYS:
+        if key in raw:
+            raw[key] = _redaction_summary(raw.get(key))
     return redacted
+
+
+def _first_present(source: dict[str, Any], *keys: str) -> tuple[str, Any]:
+    for key in keys:
+        if key in source:
+            return key, source.get(key)
+    return "", None
 
 
 def event_call_row_from_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +149,7 @@ def event_call_row_from_record(record: dict[str, Any]) -> dict[str, Any]:
         success = hook_event_name not in {"PostToolUseFailure", "ToolUseFailure"}
         if error:
             success = False
+    result_key, result = _first_present(raw, *_TOOL_RESULT_KEYS)
     return {
         "cursor": int(record.get("cursor") or 0),
         "idempotency_key": str(record.get("idempotency_key") or ""),
@@ -156,10 +167,10 @@ def event_call_row_from_record(record: dict[str, Any]) -> dict[str, Any]:
             isinstance(raw.get("tool_input"), dict)
             and raw.get("tool_input", {}).get("redacted")
         ),
-        "result": raw.get("tool_output") if "tool_output" in raw else None,
-        "result_redacted": "tool_output" not in raw or bool(
-            isinstance(raw.get("tool_output"), dict)
-            and raw.get("tool_output", {}).get("redacted")
+        "result": result if result_key else None,
+        "result_redacted": not result_key or bool(
+            isinstance(result, dict)
+            and result.get("redacted")
         ),
         "raw": raw,
     }
