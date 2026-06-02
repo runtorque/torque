@@ -344,6 +344,14 @@ def _build_ai_settings_response(
             },
             "boot_summary": {
                 "enabled": boot_summary_enabled,
+                "min_interval_seconds": int(
+                    getattr(gs, "ai_boot_summary_min_interval_seconds", 600)
+                    or 0
+                ),
+                "max_refreshes_per_hour": int(
+                    getattr(gs, "ai_boot_summary_max_refreshes_per_hour", 20)
+                    or 0
+                ),
                 "status": (
                     "disabled"
                     if (not enabled or not boot_summary_enabled)
@@ -393,6 +401,8 @@ def _ai_settings_updates_from_payload(payload: dict | None) -> dict:
         "ai_embedding_runtime",
         "ai_index_corpus",
         "ai_boot_summary_enabled",
+        "ai_boot_summary_min_interval_seconds",
+        "ai_boot_summary_max_refreshes_per_hour",
     }
     for key in direct_keys:
         if key in settings:
@@ -426,8 +436,17 @@ def _ai_settings_updates_from_payload(payload: dict | None) -> dict:
         updates["ai_index_corpus"] = index["corpus"]
 
     boot_summary = settings.get("boot_summary")
-    if isinstance(boot_summary, dict) and "enabled" in boot_summary:
-        updates["ai_boot_summary_enabled"] = boot_summary["enabled"]
+    if isinstance(boot_summary, dict):
+        if "enabled" in boot_summary:
+            updates["ai_boot_summary_enabled"] = boot_summary["enabled"]
+        if "min_interval_seconds" in boot_summary:
+            updates["ai_boot_summary_min_interval_seconds"] = (
+                boot_summary["min_interval_seconds"]
+            )
+        if "max_refreshes_per_hour" in boot_summary:
+            updates["ai_boot_summary_max_refreshes_per_hour"] = (
+                boot_summary["max_refreshes_per_hour"]
+            )
     return updates
 
 
@@ -606,6 +625,8 @@ def _apply_ai_settings_update_command(
             "ai_generation_provider",
             "ai_anthropic_model",
             "ai_openai_compatible_model",
+            "ai_boot_summary_min_interval_seconds",
+            "ai_boot_summary_max_refreshes_per_hour",
         )
     ):
         ai_summary_service.schedule_all_boot_summaries("ai_settings_change")

@@ -92,6 +92,8 @@ _DEFAULT_STATUS_BAR_VISIBILITY = {
 AI_GENERATION_PROVIDERS = ("anthropic", "openai_compatible")
 AI_EMBEDDING_RUNTIMES = ("sentence_transformers",)
 AI_DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
+AI_BOOT_SUMMARY_DEFAULT_MIN_INTERVAL_SECONDS = 600
+AI_BOOT_SUMMARY_DEFAULT_MAX_REFRESHES_PER_HOUR = 20
 AI_INDEX_CORPUS_KEYS = (
     "architect_journals",
     "engineer_journals",
@@ -541,6 +543,22 @@ def normalize_ai_index_corpus(value) -> dict[str, bool]:
         if key in value:
             normalized[key] = normalize_relay_enabled(value.get(key))
     return normalized
+
+
+def normalize_ai_boot_summary_min_interval_seconds(value) -> int:
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        return AI_BOOT_SUMMARY_DEFAULT_MIN_INTERVAL_SECONDS
+    return max(0, parsed)
+
+
+def normalize_ai_boot_summary_max_refreshes_per_hour(value) -> int:
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        return AI_BOOT_SUMMARY_DEFAULT_MAX_REFRESHES_PER_HOUR
+    return max(0, parsed)
 
 
 def default_status_bar_visibility() -> dict[str, bool]:
@@ -2148,6 +2166,12 @@ class GlobalSettings:
         default_factory=default_ai_index_corpus
     )
     ai_boot_summary_enabled: bool = True
+    ai_boot_summary_min_interval_seconds: int = (
+        AI_BOOT_SUMMARY_DEFAULT_MIN_INTERVAL_SECONDS
+    )
+    ai_boot_summary_max_refreshes_per_hour: int = (
+        AI_BOOT_SUMMARY_DEFAULT_MAX_REFRESHES_PER_HOUR
+    )
 
     def __post_init__(self):
         self.xterm_scrollback = normalize_xterm_scrollback(
@@ -2213,6 +2237,16 @@ class GlobalSettings:
         )
         self.ai_boot_summary_enabled = normalize_relay_enabled(
             self.ai_boot_summary_enabled
+        )
+        self.ai_boot_summary_min_interval_seconds = (
+            normalize_ai_boot_summary_min_interval_seconds(
+                self.ai_boot_summary_min_interval_seconds
+            )
+        )
+        self.ai_boot_summary_max_refreshes_per_hour = (
+            normalize_ai_boot_summary_max_refreshes_per_hour(
+                self.ai_boot_summary_max_refreshes_per_hour
+            )
         )
 
 
@@ -9108,6 +9142,10 @@ class MatrixState:
                     value = normalize_ai_index_corpus(value)
                 elif key == "ai_boot_summary_enabled":
                     value = normalize_relay_enabled(value)
+                elif key == "ai_boot_summary_min_interval_seconds":
+                    value = normalize_ai_boot_summary_min_interval_seconds(value)
+                elif key == "ai_boot_summary_max_refreshes_per_hour":
+                    value = normalize_ai_boot_summary_max_refreshes_per_hour(value)
                 updates[key] = value
         return updates
 

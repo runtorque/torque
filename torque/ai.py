@@ -75,6 +75,7 @@ class LLMFailure:
     model: str = ""
     retriable: bool = False
     status_code: int | None = None
+    retry_after_seconds: float | None = None
 
 
 LLMResponse = LLMResult | LLMFailure

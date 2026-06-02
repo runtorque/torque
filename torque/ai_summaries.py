@@ -27,6 +27,11 @@ ENGINEER_BOOT_TYPE = "engineer_boot"
 SUMMARY_STATUSES = {"empty", "ready", "stale", "refreshing", "error"}
 
 DEFAULT_DEBOUNCE_SECONDS = 3.0
+DEFAULT_MIN_INTERVAL_SECONDS = 600
+DEFAULT_MAX_REFRESHES_PER_HOUR = 20
+REFRESH_CAP_WINDOW_SECONDS = 3600.0
+RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 60.0
+RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600.0
 MAX_SOURCE_ROWS = 240
 MAX_FULL_SOURCE_CHARS = 36_000
 MAX_DELTA_SOURCE_CHARS = 8_000
@@ -78,39 +83,111 @@ class AISummaryService:
         self.summarize_func = summarize_func or ai.summarize
         self.debounce_seconds = max(0.05, float(debounce_seconds))
         self._tasks: dict[str, asyncio.Task] = {}
+        self._read_tasks: dict[str, asyncio.Task] = {}
         self._refreshing: set[str] = set()
+        self._last_attempt: dict[str, float] = {}
+        self._hour_window_started_at = time.monotonic()
+        self._hour_attempts = 0
+        self._scope_cooldown_until: dict[str, float] = {}
+        self._scope_backoff_seconds: dict[str, float] = {}
+        self._global_cooldown_until = 0.0
+        self._global_backoff_seconds = 0.0
         self._closed = False
 
     def cached_summary(self, summary_key: str) -> dict:
         """Return the persisted cache row or an empty synthetic row."""
 
         summary_key = str(summary_key or "").strip()
-        row = None
-        if summary_key and self.db is not None:
+        row = self._load_summary(summary_key) if summary_key else None
+        return _public_summary_row(row or _synthetic_summary_row(summary_key))
+
+    def cached_summary_for_read(self, summary_key: str) -> dict:
+        """Return a cached row and maybe schedule one lazy background refresh.
+
+        This method is intentionally synchronous and never calls an LLM inline.
+        When the row is stale (or empty with known source material), it schedules
+        a gated out-of-band refresh for a later read.
+        """
+
+        summary_key = str(summary_key or "").strip()
+        raw = self._load_summary(summary_key) if summary_key else None
+        row = raw or _synthetic_summary_row(summary_key)
+        status = str(row.get("status", "") or "empty").strip()
+        if status == "refreshing" and not self._has_live_refresh_task(summary_key):
+            row = self._downgrade_stranded_refreshing_row(row)
+            status = str(row.get("status", "") or "empty").strip()
+        if status == "empty" and not _row_has_sources(row):
             with contextlib.suppress(Exception):
-                row = self.db.ai_load_summary(summary_key)
-        if row:
-            return _public_summary_row(row)
-        summary_type, scope_kind, scope_ref = parse_summary_key(summary_key)
-        return _public_summary_row({
-            "summary_key": summary_key,
-            "summary_type": summary_type,
-            "scope_kind": scope_kind,
-            "scope_ref": scope_ref,
-            "provider": "",
-            "model": "",
-            "prompt_version": PROMPT_VERSION,
-            "source_hash": "",
-            "source_counts": {},
-            "summary_text": "",
-            "status": "empty",
-            "generated_at": 0,
-            "updated_at": 0,
-            "error": "",
-        })
+                row = self.mark_stale_if_needed(summary_key)
+                status = str(row.get("status", "") or "empty").strip()
+        should_refresh = status == "stale" or (
+            status == "empty" and _row_has_sources(row)
+        )
+        gate_message = ""
+        if should_refresh:
+            gate_message = self.schedule_read_refresh(summary_key)
+        if gate_message:
+            row = {**row, "error": gate_message}
+        return _public_summary_row(row)
+
+    def schedule_read_refresh(self, summary_key: str) -> str:
+        """Schedule one read-triggered refresh if gates allow it.
+
+        Returns a public-facing degradation message when a cap/cooldown prevents
+        scheduling; otherwise returns an empty string.
+        """
+
+        summary_key = str(summary_key or "").strip()
+        if not summary_key or self._closed:
+            return ""
+        if not self._boot_summary_generation_enabled():
+            return ""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return ""
+        now = time.monotonic()
+        cooldown_message = self._cooldown_message(summary_key, now=now)
+        if cooldown_message:
+            self._record_gate_message(summary_key, cooldown_message)
+            return cooldown_message
+        if self._hourly_cap_exhausted(now=now):
+            message = self._cap_message(now=now)
+            self._record_gate_message(summary_key, message)
+            return message
+        min_interval = self._min_interval_seconds()
+        last = float(self._last_attempt.get(summary_key, 0.0) or 0.0)
+        if min_interval > 0 and last and now - last < min_interval:
+            return ""
+        if summary_key in self._refreshing:
+            return ""
+        prior = self._read_tasks.get(summary_key)
+        if prior is not None and not prior.done():
+            return ""
+        if not self._consume_hourly_attempt(now=now):
+            message = self._cap_message(now=now)
+            self._record_gate_message(summary_key, message)
+            return message
+
+        # Stamp before task creation so concurrent reads cannot double-fire.
+        self._last_attempt[summary_key] = now
+        self._read_tasks[summary_key] = loop.create_task(
+            self._read_refresh_task(summary_key)
+        )
+        return ""
+
+    def _has_live_refresh_task(self, summary_key: str) -> bool:
+        if summary_key in self._refreshing:
+            return True
+        task = self._read_tasks.get(summary_key)
+        return bool(task is not None and not task.done())
 
     def schedule_for_delta(self, delta: dict) -> None:
-        """Schedule stale-check + refresh for a state mutation delta."""
+        """Schedule a stale-check for a state mutation delta.
+
+        Mutation paths never call the provider.  Reads are responsible for
+        scheduling any out-of-band refresh once they observe stale cached rows.
+        """
 
         if self._closed:
             return
@@ -124,19 +201,21 @@ class AISummaryService:
             self.schedule_refresh(summary_key, reason=reason)
 
     def schedule_refresh(self, summary_key: str, *, reason: str = "source_mutation") -> None:
-        """Debounce a refresh; generation remains dormant when AI is disabled."""
+        """Debounce a provider-free stale mark for source mutations/settings."""
 
         summary_key = str(summary_key or "").strip()
         if not summary_key or self._closed:
             return
         with contextlib.suppress(Exception):
             loop = asyncio.get_running_loop()
-            stale_task = loop.create_task(self._mark_stale_task(summary_key))
             prior = self._tasks.get(summary_key)
             if prior is not None and not prior.done():
                 prior.cancel()
             self._tasks[summary_key] = loop.create_task(
-                self._debounced_refresh(summary_key, str(reason or "source_mutation"), stale_task)
+                self._debounced_mark_stale(
+                    summary_key,
+                    str(reason or "source_mutation"),
+                )
             )
 
     async def refresh(self, summary_key: str) -> dict:
@@ -155,35 +234,194 @@ class AISummaryService:
 
     async def shutdown(self) -> None:
         self._closed = True
-        tasks = [task for task in self._tasks.values() if task is not None]
+        tasks = [
+            task
+            for task in [*self._tasks.values(), *self._read_tasks.values()]
+            if task is not None
+        ]
         for task in tasks:
             if not task.done():
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
+        self._read_tasks.clear()
 
     async def _mark_stale_task(self, summary_key: str) -> None:
         with contextlib.suppress(Exception):
             self.mark_stale_if_needed(summary_key)
 
-    async def _debounced_refresh(
+    def _downgrade_stranded_refreshing_row(self, row: dict) -> dict:
+        summary_key = str((row or {}).get("summary_key", "") or "").strip()
+        summary_text = str((row or {}).get("summary_text", "") or "")
+        status = "stale" if summary_text.strip() else "empty"
+        updated = {
+            **dict(row or {}),
+            "status": status,
+            "error": (
+                "Previous AI boot-summary refresh was interrupted; refresh "
+                "will retry lazily on the next read."
+            ),
+        }
+        if summary_key:
+            with contextlib.suppress(Exception):
+                return self._upsert_summary(updated)
+        return updated
+
+    async def _debounced_mark_stale(
         self,
         summary_key: str,
         reason: str,
-        stale_task: asyncio.Task | None,
     ) -> None:
         try:
-            if stale_task is not None:
-                await stale_task
             await asyncio.sleep(self.debounce_seconds)
+            if self._closed:
+                return
+            await self._mark_stale_task(summary_key)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("AI boot-summary stale mark failed (%s, %s)", summary_key, reason)
+
+    async def _read_refresh_task(self, summary_key: str) -> None:
+        try:
             if self._closed:
                 return
             await self.refresh(summary_key)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("AI boot-summary refresh failed (%s, %s)", summary_key, reason)
+            log.exception("AI boot-summary read refresh failed (%s)", summary_key)
+        finally:
+            task = self._read_tasks.get(summary_key)
+            if task is asyncio.current_task():
+                self._read_tasks.pop(summary_key, None)
+
+    def _min_interval_seconds(self) -> float:
+        settings = getattr(self.state, "global_settings", None)
+        return max(
+            0.0,
+            _float(
+                getattr(
+                    settings,
+                    "ai_boot_summary_min_interval_seconds",
+                    DEFAULT_MIN_INTERVAL_SECONDS,
+                )
+            ),
+        )
+
+    def _max_refreshes_per_hour(self) -> int:
+        settings = getattr(self.state, "global_settings", None)
+        try:
+            value = int(
+                getattr(
+                    settings,
+                    "ai_boot_summary_max_refreshes_per_hour",
+                    DEFAULT_MAX_REFRESHES_PER_HOUR,
+                )
+            )
+        except (TypeError, ValueError):
+            value = DEFAULT_MAX_REFRESHES_PER_HOUR
+        return max(0, value)
+
+    def _reset_hourly_window_if_needed(self, *, now: float) -> None:
+        if now - self._hour_window_started_at >= REFRESH_CAP_WINDOW_SECONDS:
+            self._hour_window_started_at = now
+            self._hour_attempts = 0
+
+    def _consume_hourly_attempt(self, *, now: float) -> bool:
+        self._reset_hourly_window_if_needed(now=now)
+        maximum = self._max_refreshes_per_hour()
+        if self._hour_attempts >= maximum:
+            return False
+        self._hour_attempts += 1
+        return True
+
+    def _hourly_cap_exhausted(self, *, now: float) -> bool:
+        self._reset_hourly_window_if_needed(now=now)
+        return self._hour_attempts >= self._max_refreshes_per_hour()
+
+    def _cap_message(self, *, now: float) -> str:
+        self._reset_hourly_window_if_needed(now=now)
+        remaining = max(
+            1.0,
+            REFRESH_CAP_WINDOW_SECONDS - (now - self._hour_window_started_at),
+        )
+        return (
+            "AI boot-summary refresh is cost-capped for this daemon; returning "
+            f"cached context and backing off for about {int(remaining)}s."
+        )
+
+    def _cooldown_message(self, summary_key: str, *, now: float) -> str:
+        until = max(
+            float(self._global_cooldown_until or 0.0),
+            float(self._scope_cooldown_until.get(summary_key, 0.0) or 0.0),
+        )
+        if until <= now:
+            return ""
+        remaining = max(1, int(until - now))
+        return (
+            "AI boot-summary refresh is rate-limited; returning cached "
+            f"context while backing off for about {remaining}s."
+        )
+
+    def _record_gate_message(self, summary_key: str, message: str) -> None:
+        summary_key = str(summary_key or "").strip()
+        message = str(message or "").strip()
+        if not summary_key or not message:
+            return
+        with contextlib.suppress(Exception):
+            row = self._load_summary(summary_key)
+            if not row:
+                return
+            status = str(row.get("status", "") or "empty").strip()
+            if status not in {"stale", "empty"}:
+                return
+            self._upsert_summary({**row, "status": status, "error": message})
+
+    def _record_rate_limit_failure(
+        self,
+        summary_key: str,
+        failure: LLMFailure,
+    ) -> str:
+        now = time.monotonic()
+        retry_after = getattr(failure, "retry_after_seconds", None)
+        try:
+            retry_after_seconds = float(retry_after)
+        except (TypeError, ValueError):
+            retry_after_seconds = 0.0
+        if retry_after_seconds <= 0:
+            prior = float(self._scope_backoff_seconds.get(summary_key, 0.0) or 0.0)
+            retry_after_seconds = (
+                min(RATE_LIMIT_MAX_BACKOFF_SECONDS, prior * 2.0)
+                if prior
+                else RATE_LIMIT_INITIAL_BACKOFF_SECONDS
+            )
+        retry_after_seconds = max(
+            1.0,
+            min(RATE_LIMIT_MAX_BACKOFF_SECONDS, retry_after_seconds),
+        )
+        self._scope_backoff_seconds[summary_key] = retry_after_seconds
+        self._scope_cooldown_until[summary_key] = max(
+            float(self._scope_cooldown_until.get(summary_key, 0.0) or 0.0),
+            now + retry_after_seconds,
+        )
+        self._global_backoff_seconds = max(
+            float(self._global_backoff_seconds or 0.0),
+            retry_after_seconds,
+        )
+        self._global_cooldown_until = max(
+            float(self._global_cooldown_until or 0.0),
+            now + retry_after_seconds,
+        )
+        return (
+            "AI boot-summary refresh is rate-limited; returning cached "
+            f"context while backing off for about {int(retry_after_seconds)}s."
+        )
+
+    def _clear_rate_limit_state(self, summary_key: str) -> None:
+        self._scope_cooldown_until.pop(summary_key, None)
+        self._scope_backoff_seconds.pop(summary_key, None)
 
     def mark_stale_if_needed(self, summary_key: str) -> dict:
         """Compute current source hash and mark cached rows stale/empty.
@@ -211,6 +449,8 @@ class AISummaryService:
                 "generated_at": 0,
                 "error": "",
             })
+        if str(prev.get("status", "") or "").strip() == "refreshing":
+            prev = self._downgrade_stranded_refreshing_row(prev)
         changed = (
             str(prev.get("source_hash", "") or "") != bundle.source_hash
             or str(prev.get("provider", "") or "") != bundle.provider
@@ -307,7 +547,10 @@ class AISummaryService:
             incremental=use_delta,
         )
         if isinstance(result, LLMFailure):
-            return self._failure_row(bundle, refreshing, result.message)
+            message = str(result.message or "AI summary generation failed.")
+            if int(result.status_code or 0) == 429:
+                message = self._record_rate_limit_failure(bundle.summary_key, result)
+            return self._failure_row(bundle, refreshing, message)
         if not isinstance(result, LLMResult):
             return self._failure_row(
                 bundle,
@@ -322,7 +565,17 @@ class AISummaryService:
                 "AI summary generation returned empty text.",
             )
 
+        current_bundle = self._build_bundle(summary_key)
+        if current_bundle is None:
+            return self.cached_summary(summary_key)
+        if not _same_bundle_version(bundle, current_bundle):
+            return self._source_changed_during_refresh_row(
+                current_bundle,
+                self._load_summary(summary_key) or refreshing,
+            )
+
         now = time.time()
+        self._clear_rate_limit_state(bundle.summary_key)
         return self._upsert_summary({
             "summary_key": bundle.summary_key,
             "summary_type": bundle.summary_type,
@@ -338,6 +591,37 @@ class AISummaryService:
             "generated_at": now,
             "updated_at": now,
             "error": "",
+        })
+
+    def _source_changed_during_refresh_row(
+        self,
+        bundle: SummarySourceBundle,
+        prev: dict | None,
+    ) -> dict:
+        summary_text = str((prev or {}).get("summary_text", "") or "")
+        if not bundle.sources:
+            summary_text = ""
+        status = "stale" if summary_text.strip() else "empty"
+        error = (
+            "Source material changed during AI boot-summary refresh; "
+            "refresh will retry lazily on the next read."
+        )
+        if not bundle.sources:
+            error = "No source material is available."
+        return self._upsert_summary({
+            **(prev or {}),
+            "summary_key": bundle.summary_key,
+            "summary_type": bundle.summary_type,
+            "scope_kind": bundle.scope_kind,
+            "scope_ref": bundle.scope_ref,
+            "provider": bundle.provider,
+            "model": bundle.model,
+            "prompt_version": bundle.prompt_version,
+            "source_hash": bundle.source_hash,
+            "source_counts": bundle.source_counts,
+            "summary_text": summary_text,
+            "status": status,
+            "error": error,
         })
 
     async def _summarize_source(
@@ -651,7 +935,8 @@ def parse_summary_key(summary_key: str) -> tuple[str, str, str]:
 def cached_boot_summary_payload(state, caller_kind: str, caller_id: str) -> dict:
     """Return the cached boot summary payload for an MCP read tool.
 
-    This helper never schedules or performs a live provider call.
+    This helper never performs a live provider call inline.  A stale cached row
+    may schedule one gated out-of-band refresh for a later read.
     """
 
     caller_kind = str(caller_kind or "").strip()
@@ -664,7 +949,9 @@ def cached_boot_summary_payload(state, caller_kind: str, caller_id: str) -> dict
         expected_type = ENGINEER_BOOT_TYPE
 
     service = getattr(state, "ai_summary_service", None)
-    if service is not None and callable(getattr(service, "cached_summary", None)):
+    if service is not None and callable(getattr(service, "cached_summary_for_read", None)):
+        row = service.cached_summary_for_read(summary_key)
+    elif service is not None and callable(getattr(service, "cached_summary", None)):
         row = service.cached_summary(summary_key)
     else:
         db = getattr(state, "db", None)
@@ -706,6 +993,60 @@ def _is_fresh_ready(prev: dict | None, bundle: SummarySourceBundle) -> bool:
         and str(prev.get("prompt_version", "") or "") == bundle.prompt_version
         and str(prev.get("summary_text", "") or "").strip()
     )
+
+
+def _same_bundle_version(
+    left: SummarySourceBundle,
+    right: SummarySourceBundle,
+) -> bool:
+    return bool(
+        left.summary_key == right.summary_key
+        and left.summary_type == right.summary_type
+        and left.scope_kind == right.scope_kind
+        and left.scope_ref == right.scope_ref
+        and left.provider == right.provider
+        and left.model == right.model
+        and left.prompt_version == right.prompt_version
+        and left.source_hash == right.source_hash
+    )
+
+
+def _synthetic_summary_row(summary_key: str) -> dict:
+    summary_type, scope_kind, scope_ref = parse_summary_key(summary_key)
+    return {
+        "summary_key": summary_key,
+        "summary_type": summary_type,
+        "scope_kind": scope_kind,
+        "scope_ref": scope_ref,
+        "provider": "",
+        "model": "",
+        "prompt_version": PROMPT_VERSION,
+        "source_hash": "",
+        "source_counts": {},
+        "summary_text": "",
+        "status": "empty",
+        "generated_at": 0,
+        "updated_at": 0,
+        "error": "",
+    }
+
+
+def _row_has_sources(row: dict | None) -> bool:
+    counts = (row or {}).get("source_counts", {})
+    if not isinstance(counts, dict):
+        return False
+    try:
+        if int(counts.get("total", 0) or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    by_type = counts.get("by_type", {})
+    if isinstance(by_type, dict):
+        for value in by_type.values():
+            with contextlib.suppress(TypeError, ValueError):
+                if int(value or 0) > 0:
+                    return True
+    return False
 
 
 def _build_delta_text(
@@ -931,6 +1272,12 @@ def _status_message(status: str, has_summary: bool, error: str) -> str:
             "Cached boot summary has an error; use raw journal/decision "
             "recovery tools."
             + (f" Error: {error}" if error else "")
+        )
+    if error:
+        return (
+            "No cached boot summary is available; use raw journal/decision "
+            "recovery tools. Last refresh error: "
+            + error
         )
     if has_summary:
         return (

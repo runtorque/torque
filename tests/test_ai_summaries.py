@@ -33,6 +33,22 @@ class FakeSummarizer:
         return self.response
 
 
+class BlockingSummarizer:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.finished = asyncio.Event()
+
+    async def __call__(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        self.started.set()
+        await self.release.wait()
+        self.finished.set()
+        return self.response
+
+
 class AISummaryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -270,6 +286,12 @@ class AISummaryMCPToolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        self.data_dir = Path(self.tmp.name) / "data"
+        self.data_dir.mkdir()
+        self.state_mod = importlib.import_module("torque.state")
+        self._old_data_dir = self.state_mod.DATA_DIR
+        self.state_mod.DATA_DIR = self.data_dir
+        self.addCleanup(self._restore_data_dir)
         self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
@@ -306,6 +328,378 @@ class AISummaryMCPToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_engineer = importlib.reload(
             importlib.import_module("torque.mcp_engineer")
         )
+
+    def _restore_data_dir(self):
+        self.state_mod.DATA_DIR = self._old_data_dir
+
+    def _seed_architect_stale_summary(self, service, *, summary_text="Old summary"):
+        key = architect_boot_summary_key(self.architect.id)
+        if not self.state.architect_journal_read(self.architect.id, limit=1):
+            self.state.architect_journal_append(
+                self.architect.id,
+                "checkpoint",
+                "Checkpoint: source material exists.",
+            )
+        row = service.mark_stale_if_needed(key)
+        return self.db.ai_upsert_summary({
+            **row,
+            "summary_text": summary_text,
+            "status": "stale",
+            "generated_at": 100,
+            "error": "",
+        })
+
+    async def _drain_read_tasks(self, service, timeout=1.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while service._read_tasks and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
+        self.assertFalse(service._read_tasks)
+
+    async def test_mutation_burst_marks_stale_without_summarize_call(self):
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="must not be generated from mutation path",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+
+        for index in range(10):
+            self.state.architect_journal_append(
+                self.architect.id,
+                "checkpoint",
+                f"Mutation burst checkpoint {index}.",
+            )
+            service.schedule_for_delta({
+                "op": "architect_journal_append",
+                "architect_id": self.architect.id,
+            })
+
+        await asyncio.sleep(0.08)
+        key = architect_boot_summary_key(self.architect.id)
+        saved = self.db.ai_load_summary(key)
+
+        self.assertEqual(fake.calls, [])
+        self.assertIsNotNone(saved)
+        self.assertIn(saved["status"], {"empty", "stale"})
+
+    async def test_stale_read_schedules_one_background_refresh_and_returns(self):
+        fake = BlockingSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Generated later",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        self._seed_architect_stale_summary(service)
+
+        payload = cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["summary"], "Old summary")
+        self.assertEqual(fake.calls, [])
+
+        await asyncio.wait_for(fake.started.wait(), timeout=1)
+        self.assertEqual(len(fake.calls), 1)
+        second = cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+        self.assertIn(second["status"], {"stale", "refreshing"})
+        self.assertEqual(len(fake.calls), 1)
+
+        fake.release.set()
+        await asyncio.wait_for(fake.finished.wait(), timeout=1)
+        await self._drain_read_tasks(service)
+        saved = self.db.ai_load_summary(architect_boot_summary_key(self.architect.id))
+        self.assertEqual(saved["status"], "ready")
+        self.assertEqual(saved["summary_text"], "Generated later")
+
+    async def test_inflight_mutation_keeps_summary_stale_after_provider_returns(self):
+        fake = BlockingSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Generated from old source material",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        key = architect_boot_summary_key(self.architect.id)
+        self._seed_architect_stale_summary(
+            service,
+            summary_text="Previous summary",
+        )
+
+        cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+        await asyncio.wait_for(fake.started.wait(), timeout=1)
+        refreshing = self.db.ai_load_summary(key)
+        self.assertEqual(refreshing["status"], "refreshing")
+        self.assertEqual(refreshing["source_counts"]["total"], 1)
+
+        self.state.architect_journal_append(
+            self.architect.id,
+            "checkpoint",
+            "Checkpoint landed while provider refresh was in flight.",
+        )
+        stale = service.mark_stale_if_needed(key)
+        self.assertEqual(stale["status"], "stale")
+        self.assertEqual(stale["summary_text"], "Previous summary")
+        self.assertEqual(stale["source_counts"]["total"], 2)
+
+        fake.release.set()
+        await asyncio.wait_for(fake.finished.wait(), timeout=1)
+        await self._drain_read_tasks(service)
+        saved = self.db.ai_load_summary(key)
+
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(saved["status"], "stale")
+        self.assertEqual(saved["summary_text"], "Previous summary")
+        self.assertEqual(saved["source_counts"]["total"], 2)
+        self.assertNotEqual(saved["source_hash"], refreshing["source_hash"])
+        self.assertIn("changed during", saved["error"])
+
+    async def test_stranded_refreshing_read_downgrades_and_schedules_refresh(self):
+        self.state.global_settings.ai_boot_summary_min_interval_seconds = 0
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Recovered from stranded refreshing row",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        key = architect_boot_summary_key(self.architect.id)
+        stale = self._seed_architect_stale_summary(
+            service,
+            summary_text="Interrupted summary",
+        )
+        self.db.ai_upsert_summary({
+            **stale,
+            "status": "refreshing",
+            "summary_text": "Interrupted summary",
+            "error": "",
+        })
+
+        payload = cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["summary"], "Interrupted summary")
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(self.db.ai_load_summary(key)["status"], "stale")
+
+        await self._drain_read_tasks(service)
+        saved = self.db.ai_load_summary(key)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(saved["status"], "ready")
+        self.assertEqual(
+            saved["summary_text"],
+            "Recovered from stranded refreshing row",
+        )
+
+    async def test_mark_stale_converts_stranded_refreshing_without_provider(self):
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="should not be called by stale mark",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        key = architect_boot_summary_key(self.architect.id)
+        stale = self._seed_architect_stale_summary(
+            service,
+            summary_text="Interrupted summary",
+        )
+        self.db.ai_upsert_summary({
+            **stale,
+            "status": "refreshing",
+            "summary_text": "Interrupted summary",
+            "error": "",
+        })
+
+        marked = service.mark_stale_if_needed(key)
+
+        self.assertEqual(marked["status"], "stale")
+        self.assertEqual(marked["summary_text"], "Interrupted summary")
+        self.assertIn("interrupted", marked["error"])
+        self.assertEqual(fake.calls, [])
+
+    async def test_two_stale_reads_inside_min_interval_make_one_provider_call(self):
+        self.state.global_settings.ai_boot_summary_min_interval_seconds = 600
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Generated once",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        self._seed_architect_stale_summary(service)
+
+        cached_boot_summary_payload(self.state, "architect", self.architect.id)
+        await self._drain_read_tasks(service)
+        self.assertEqual(len(fake.calls), 1)
+
+        key = architect_boot_summary_key(self.architect.id)
+        saved = self.db.ai_load_summary(key)
+        self.db.ai_upsert_summary({
+            **saved,
+            "status": "stale",
+            "summary_text": "Generated once",
+            "error": "",
+        })
+        cached_boot_summary_payload(self.state, "architect", self.architect.id)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(fake.calls), 1)
+
+    async def test_hourly_cap_stops_provider_calls_and_returns_calm_message(self):
+        self.state.global_settings.ai_boot_summary_min_interval_seconds = 0
+        self.state.global_settings.ai_boot_summary_max_refreshes_per_hour = 1
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Generated within cap",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        self._seed_architect_stale_summary(service)
+
+        cached_boot_summary_payload(self.state, "architect", self.architect.id)
+        await self._drain_read_tasks(service)
+        self.assertEqual(len(fake.calls), 1)
+
+        key = architect_boot_summary_key(self.architect.id)
+        saved = self.db.ai_load_summary(key)
+        self.db.ai_upsert_summary({
+            **saved,
+            "status": "stale",
+            "summary_text": "Generated within cap",
+            "error": "",
+        })
+
+        capped = cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(capped["status"], "stale")
+        self.assertIn("cost-capped", capped["message"])
+        self.assertEqual(len(fake.calls), 1)
+
+    async def test_429_cooldown_returns_stale_note_without_hammering(self):
+        self.state.global_settings.ai_boot_summary_min_interval_seconds = 0
+        fake = FakeSummarizer(LLMFailure(
+            kind="http_error",
+            message="Provider request failed with HTTP 429.",
+            provider="anthropic",
+            model="claude-summary-test",
+            retriable=True,
+            status_code=429,
+            retry_after_seconds=2,
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        self._seed_architect_stale_summary(service)
+
+        cached_boot_summary_payload(self.state, "architect", self.architect.id)
+        await self._drain_read_tasks(service)
+        self.assertEqual(len(fake.calls), 1)
+
+        cooled = cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(cooled["status"], "stale")
+        self.assertIn("rate-limited", cooled["message"])
+        self.assertEqual(len(fake.calls), 1)
+
+    async def test_ai_index_and_recall_service_references_are_untouched(self):
+        fake_index_service = object()
+        self.state.ai_index_service = fake_index_service
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=FakeSummarizer(LLMResult(
+                provider="anthropic",
+                model="claude-summary-test",
+                text="summary",
+                usage=LLMUsage(),
+            )),
+            debounce_seconds=0.01,
+        )
+
+        self.state.architect_journal_append(
+            self.architect.id,
+            "checkpoint",
+            "Index/recall services are separate from boot summaries.",
+        )
+        service.schedule_for_delta({
+            "op": "architect_journal_append",
+            "architect_id": self.architect.id,
+        })
+        await asyncio.sleep(0.05)
+
+        self.assertIs(self.state.ai_index_service, fake_index_service)
 
     async def test_boot_summary_tools_return_cached_rows_without_live_call(self):
         self.db.ai_upsert_summary({

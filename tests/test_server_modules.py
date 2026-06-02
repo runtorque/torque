@@ -219,6 +219,8 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertFalse(settings["index"]["corpus"]["tasks"])
         self.assertEqual(settings["index"]["counts"]["chunks"], 0)
         self.assertEqual(settings["boot_summary"]["status"], "empty")
+        self.assertEqual(settings["boot_summary"]["min_interval_seconds"], 600)
+        self.assertEqual(settings["boot_summary"]["max_refreshes_per_hour"], 20)
         self.assertEqual(settings["metering"]["calls_24h"], 0)
         self.assertNotIn(
             "sk-ant-secret-1234",
@@ -251,7 +253,11 @@ class ServerModuleExtractionTests(unittest.TestCase):
                         },
                         "embeddings": {"model_id": "custom/model"},
                         "index": {"corpus": {"tasks": False}},
-                        "boot_summary": {"enabled": False},
+                        "boot_summary": {
+                            "enabled": False,
+                            "min_interval_seconds": 45,
+                            "max_refreshes_per_hour": 7,
+                        },
                     },
                     "secrets": {
                         "anthropic": {"api_key": raw_key},
@@ -297,6 +303,14 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(state.global_settings.ai_embedding_model, "custom/model")
         self.assertFalse(state.global_settings.ai_index_corpus["tasks"])
         self.assertFalse(state.global_settings.ai_boot_summary_enabled)
+        self.assertEqual(
+            state.global_settings.ai_boot_summary_min_interval_seconds,
+            45,
+        )
+        self.assertEqual(
+            state.global_settings.ai_boot_summary_max_refreshes_per_hour,
+            7,
+        )
 
     def test_update_ai_settings_clear_secret_returns_unconfigured_metadata(self):
         from torque.db import TorqueDB
