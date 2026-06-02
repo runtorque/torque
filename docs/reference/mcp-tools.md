@@ -78,6 +78,8 @@ Visible only to agents with `kind: engineer`. All operations are scoped to the c
 | Tool | What it does |
 |---|---|
 | `engineer_board_summary` | Compact overview of lanes, pending asks, blocked tasks, agent state, hints, tracked `board_sync` state, and the caller's recent `dispatch_shapes`. The first call in any orchestration loop. |
+| `engineer_boot_summary` | Read this Engineer's cached AI boot-recovery summary. Never performs a live provider call on read. |
+| `engineer_semantic_recall` | Read-only semantic search over indexed AI text snippets visible to this Engineer. |
 | `engineer_board_list` | Full lane-grouped task list with optional filters; includes compact `board_sync` state when present. |
 | `engineer_session_map` | Deterministic structured snapshot of streams, asks, queued follow-ups, NEXT/PRODUCT/WORKFLOW context per stream, hints, and the caller's recent `dispatch_shapes`. The orientation surface for recovery. |
 | `engineer_task_show` | Full details for one task, including pipeline chain, compact `board_sync` state, and artifact metadata. |
@@ -230,6 +232,8 @@ Visible only to agents with `kind: architect`. Group-scoped, with further per-Ar
 | Tool | What it does |
 |---|---|
 | `architect_board_summary` | Compact board overview with task excerpts, `created_by` attribution, compact `board_sync` state, and peer-message counts. |
+| `architect_boot_summary` | Read this Architect's cached AI boot-recovery summary. Never performs a live provider call on read. |
+| `architect_semantic_recall` | Read-only semantic search over indexed AI text snippets visible to this Architect. |
 | `architect_task_list` | Tasks with label/lane/engineer/creator/archived filters and compact `board_sync` state when present. AND semantics on labels. |
 | `architect_task_show` | Full details for one task, including compact `board_sync` state when present. |
 | `architect_task_chain` | Full derived-task tree for a pipeline with summary stats. |
@@ -435,6 +439,96 @@ The architect's durable product log. Decisions can be updated and archived but t
 | Tool | What it does |
 |---|---|
 | `architect_tool_search` | Search the deferred Architect tool catalog and return schemas on demand. |
+
+## AI read tools
+
+AI read tools are available only to Engineers and Architects. There is no
+Worker `torque_semantic_recall` or `torque_boot_summary` surface. They are
+best-effort helpers: callers must keep deterministic raw reads such as
+`engineer_session_map`, `engineer_journal_read`, `architect_journal_read`, and
+`architect_decision_list` as the load-bearing recovery path.
+
+### Semantic recall
+
+`engineer_semantic_recall` and `architect_semantic_recall` search the local
+embedding index and return only snippets that pass the caller's normal
+server-side visibility checks. Engineer recall uses the same group/task,
+journal, decision-participant, and same-supervising-Architect peer-inspection
+scope as the existing Engineer read tools. Architect recall is scoped to the
+calling Architect's decisions, journal, visible tasks, hired-Engineer journals,
+and Engineer-peer-thread inspection grants.
+
+Inputs:
+
+| Field | Meaning |
+|---|---|
+| `query` | Required natural-language search query. |
+| `limit` | Optional maximum visible snippets to return. Defaults to 5 and caps at 20. |
+
+Per-call corpus narrowing is not part of the v1 MCP schema. Corpus selection is
+configured in Settings → AI for the local index as a whole; caller visibility
+is still enforced again at read time.
+
+Successful results have `type: "semantic_recall"`, `status: "ok"`, and a
+ranked `results` list of text snippets:
+
+```json
+{
+  "rank": 1,
+  "score": 0.87,
+  "source_type": "task",
+  "source_id": "TORQUE:123",
+  "title": "Short title",
+  "group": "Torque",
+  "snippet": "Relevant indexed text...",
+  "updated_at": "2026-06-02T15:42:10+00:00"
+}
+```
+
+Non-ready states are returned as non-error payloads with `results: []` and a
+human-readable `message` so agents do not retry storm or block orchestration:
+
+| Status | Meaning |
+|---|---|
+| `disabled` | AI is off. |
+| `not_ready` | The index is absent, not built, or temporarily unavailable. |
+| `dependency_missing` | Optional embedding/index dependencies such as `sentence-transformers` or `sqlite-vec` are missing; run `make ai-deps` from a non-worker shell. |
+| `rebuild_pending` | The configured embedding model/index state requires a rebuild. |
+| `model_mismatch` | Query embedding dimensions or model metadata do not match the active index. |
+
+### Cached boot summaries
+
+`engineer_boot_summary` and `architect_boot_summary` return a cached
+boot-recovery summary payload. Reads never schedule or perform a live provider
+call; generation and refresh happen out of band after AI is explicitly enabled.
+
+Payload fields include:
+
+| Field | Meaning |
+|---|---|
+| `type` | `engineer_boot` or `architect_boot`. |
+| `summary_key` | Stable cache key for the caller scope. |
+| `status` | Summary readiness. Treat anything except `ready` as a raw-tool fallback. |
+| `summary` | Cached text summary, empty when unavailable. |
+| `source_counts` | Redacted source counts used to build the cache row. |
+| `generated_at` | Unix timestamp for the cached row. |
+| `source_hash` | Content hash for freshness comparison. |
+| `message` | Human-readable fallback guidance or error text. |
+
+Readiness statuses are:
+
+| Status | Meaning |
+|---|---|
+| `ready` | Cached summary is current for the recorded source hash/provider/model. |
+| `stale` | A previous summary exists but raw journal/decision/session-map tools are authoritative. |
+| `empty` | No usable cached summary exists yet. |
+| `refreshing` | An out-of-band refresh is in progress; use raw recovery tools. |
+| `error` | Last refresh failed; use raw recovery tools. |
+
+When AI or cached boot summaries are disabled, the MCP read returns
+`status: "empty"` with a disabled/fallback message. Treat `empty` and
+`refreshing` the same as `stale`: continue with raw deterministic tools and
+never block boot, dispatch, review, or merge on the summary.
 
 ## See also
 

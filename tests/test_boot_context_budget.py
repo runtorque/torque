@@ -25,6 +25,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "docs/reference/architecture.md",
             "docs/reference/hooks-gotchas.md",
             "docs/reference/install-locations.md",
+            "docs/operate/ai.md",
             "docs/operate/manual-testing.md",
         ):
             self.assertIn(reference, claude)
@@ -36,6 +37,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "reference/architecture.md",
             "reference/hooks-gotchas.md",
             "reference/install-locations.md",
+            "operate/ai.md",
             "operate/manual-testing.md",
         ):
             self.assertIn(reference, nav)
@@ -54,6 +56,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "## Architecture map",
             "## Persistence and state",
             "### Kinds refactor invariants",
+            "### AI subsystem invariants",
             "### Torque context namespace",
             "## Worker dispatch and reporting",
             "## Code conventions",
@@ -69,6 +72,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "docs/reference/hooks-gotchas.md",
             "docs/reference/install-locations.md",
             "docs/reference/specializations.md",
+            "docs/operate/ai.md",
             "docs/operate/manual-testing.md",
         ):
             with self.subTest(reference=reference):
@@ -77,6 +81,30 @@ class BootContextBudgetDocsTest(unittest.TestCase):
 
     def test_completed_root_plan_docs_removed(self):
         self.assertEqual([], sorted(path.name for path in ROOT.glob("*_PLAN.md")))
+
+    def test_ai_mcp_docs_match_v1_read_tool_contract(self):
+        mcp_docs = (ROOT / "docs/reference/mcp-tools.md").read_text()
+        ai_docs = (ROOT / "docs/operate/ai.md").read_text()
+
+        self.assertNotIn("| `corpus` |", mcp_docs)
+        self.assertIn(
+            "Per-call corpus narrowing is not part of the v1 MCP schema",
+            mcp_docs,
+        )
+        self.assertIn(
+            "Per-call corpus filtering is not part of the v1 MCP schema",
+            ai_docs,
+        )
+
+        boot_section = mcp_docs.split("### Cached boot summaries", 1)[1]
+        boot_status_section = boot_section.split("When AI or cached boot summaries", 1)[0]
+        for status in ("ready", "stale", "empty", "refreshing", "error"):
+            self.assertIn(f"| `{status}` |", boot_status_section)
+        self.assertNotIn("| `disabled` |", boot_status_section)
+        self.assertIn(
+            '`status: "empty"` with a disabled/fallback message',
+            boot_section,
+        )
 
 
 if __name__ == "__main__":

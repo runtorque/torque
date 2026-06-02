@@ -79,6 +79,13 @@ See [docs/reference/architecture.md](docs/reference/architecture.md) for the det
 - Review-cycle fixes stay on the implementer's branch. A `feature/review` → `feature/implement` fix is parented to the review's parent so worktree inheritance skips the reviewer. Merge refuses sibling review/implement branches with unmerged commits unless `force=true` is explicit after diffing.
 - `torque doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership/scope invariants.
 
+### AI subsystem invariants
+
+- AI is off by default and best-effort only: failures degrade to raw deterministic tools and must never break boot, dispatch, review, merge, or daemon startup.
+- Raw provider keys live only in `ai_provider_secrets`; never put them in `GlobalSettings`, snapshots, exports, or logs.
+- Embeddings run off the event loop. Semantic recall is read-only and reuses the TORQUE:801 same-architect peer-inspection authorization path.
+- Optional AI embedding deps are installed with `make ai-deps`; they are not part of base deploy.
+
 ### Torque context namespace
 
 Action templates can reference the injected `torque` dict: `torque.agent.*`, `torque.context.*`, `torque.worktree.*`, `torque.task.*`, and `torque.terminals`. `torque` is a reserved variable name and is rejected on action save. Preview renders use safe `TORQUE_CONTEXT_STUB` defaults.
@@ -122,4 +129,5 @@ Moved reference material lives here to keep boot context small:
 - [Detailed architecture reference](docs/reference/architecture.md)
 - [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
 - [Install locations](docs/reference/install-locations.md)
+- [AI operator guide](docs/operate/ai.md)
 - [Manual testing](docs/operate/manual-testing.md)
