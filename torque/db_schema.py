@@ -5,6 +5,155 @@ import sqlite3
 
 SCHEMA_VERSION = "1"
 
+AI_INDEX_STATE_COLUMNS = {
+    "id": "TEXT PRIMARY KEY DEFAULT 'default'",
+    "desired_model_id": "TEXT NOT NULL DEFAULT 'BAAI/bge-m3'",
+    "active_model_id": "TEXT NOT NULL DEFAULT ''",
+    "active_dims": "INTEGER NOT NULL DEFAULT 0",
+    "status": "TEXT NOT NULL DEFAULT 'not_built'",
+    "rebuild_required": "INTEGER NOT NULL DEFAULT 0",
+    "rebuild_reason": "TEXT NOT NULL DEFAULT ''",
+    "corpus_config": "TEXT NOT NULL DEFAULT '{}'",
+    "last_scan_at": "REAL NOT NULL DEFAULT 0",
+    "last_built_at": "REAL NOT NULL DEFAULT 0",
+    "last_error": "TEXT NOT NULL DEFAULT ''",
+}
+
+AI_EMBEDDING_SOURCE_COLUMNS = {
+    "source_key": "TEXT PRIMARY KEY",
+    "source_type": "TEXT NOT NULL DEFAULT ''",
+    "source_id": "TEXT NOT NULL DEFAULT ''",
+    "source_sub_id": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "owner_kind": "TEXT NOT NULL DEFAULT ''",
+    "owner_id": "TEXT NOT NULL DEFAULT ''",
+    "participant_ids": "TEXT NOT NULL DEFAULT '[]'",
+    "participant_kinds": "TEXT NOT NULL DEFAULT '{}'",
+    "visibility_json": "TEXT NOT NULL DEFAULT '{}'",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "source_updated_at": "TEXT NOT NULL DEFAULT ''",
+    "content_hash": "TEXT NOT NULL DEFAULT ''",
+    "indexed_content_hash": "TEXT NOT NULL DEFAULT ''",
+    "state": "TEXT NOT NULL DEFAULT 'pending'",
+    "discovered_at": "REAL NOT NULL DEFAULT 0",
+    "last_seen_at": "REAL NOT NULL DEFAULT 0",
+    "indexed_at": "REAL NOT NULL DEFAULT 0",
+    "error": "TEXT NOT NULL DEFAULT ''",
+}
+
+AI_EMBEDDING_CHUNK_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "source_key": "TEXT NOT NULL DEFAULT ''",
+    "chunk_index": "INTEGER NOT NULL DEFAULT 0",
+    "text": "TEXT NOT NULL DEFAULT ''",
+    "chunk_hash": "TEXT NOT NULL DEFAULT ''",
+    "embedding_model_id": "TEXT NOT NULL DEFAULT ''",
+    "embedding_dims": "INTEGER NOT NULL DEFAULT 0",
+    "indexed_at": "REAL NOT NULL DEFAULT 0",
+    "distance_metric": "TEXT NOT NULL DEFAULT 'cosine'",
+    "error": "TEXT NOT NULL DEFAULT ''",
+}
+
+AI_INDEX_JOB_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "mode": "TEXT NOT NULL DEFAULT 'incremental'",
+    "status": "TEXT NOT NULL DEFAULT 'queued'",
+    "reason": "TEXT NOT NULL DEFAULT ''",
+    "started_at": "REAL NOT NULL DEFAULT 0",
+    "updated_at": "REAL NOT NULL DEFAULT 0",
+    "completed_at": "REAL NOT NULL DEFAULT 0",
+    "totals": "TEXT NOT NULL DEFAULT '{}'",
+    "error": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def create_ai_embedding_vec_table(
+    conn: sqlite3.Connection,
+    dims: int,
+    *,
+    recreate: bool = False,
+) -> None:
+    """Create the sqlite-vec table once an embedding dimension is known.
+
+    sqlite-vec virtual tables have a fixed vector dimension, so base schema
+    migrations must not create this table unconditionally.  AI index code calls
+    this helper on a fresh connection after loading the sqlite-vec extension.
+    """
+
+    try:
+        dims_value = int(dims)
+    except (TypeError, ValueError):
+        raise ValueError("embedding dims must be a positive integer") from None
+    if dims_value <= 0:
+        raise ValueError("embedding dims must be a positive integer")
+    if recreate:
+        conn.execute("DROP TABLE IF EXISTS ai_embedding_vec")
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS ai_embedding_vec "
+        f"USING vec0(embedding float[{dims_value}])"
+    )
+
+
+def drop_ai_embedding_vec_table(conn: sqlite3.Connection) -> None:
+    """Drop the dynamic sqlite-vec table if it exists."""
+
+    conn.execute("DROP TABLE IF EXISTS ai_embedding_vec")
+
+
+def _ensure_columns(
+    conn: sqlite3.Connection,
+    table: str,
+    columns: dict[str, str],
+) -> None:
+    existing = {
+        str(row[1] or "")
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    for name, definition in columns.items():
+        if name in existing:
+            continue
+        # SQLite cannot add PRIMARY KEY columns to an existing table.  Existing
+        # installs should only need additive non-key columns; new installs get
+        # the primary keys from the CREATE TABLE DDL above.
+        add_definition = str(definition)
+        if "PRIMARY KEY" in add_definition.upper():
+            continue
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN {name} {add_definition}"
+        )
+
+
+def _ensure_ai_index_schema(conn: sqlite3.Connection) -> None:
+    """Keep AI index tables additive/idempotent across partial migrations."""
+
+    for table, columns in (
+        ("ai_index_state", AI_INDEX_STATE_COLUMNS),
+        ("ai_embedding_sources", AI_EMBEDDING_SOURCE_COLUMNS),
+        ("ai_embedding_chunks", AI_EMBEDDING_CHUNK_COLUMNS),
+        ("ai_index_jobs", AI_INDEX_JOB_COLUMNS),
+    ):
+        _ensure_columns(conn, table, columns)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_embedding_sources_state "
+        "ON ai_embedding_sources(state)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_embedding_sources_scope "
+        "ON ai_embedding_sources(group_name, source_type, owner_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_embedding_chunks_source "
+        "ON ai_embedding_chunks(source_key)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_embedding_chunks_model "
+        "ON ai_embedding_chunks(embedding_model_id, embedding_dims)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_index_jobs_status "
+        "ON ai_index_jobs(status, updated_at DESC)"
+    )
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -267,6 +416,80 @@ CREATE TABLE IF NOT EXISTS ai_call_metrics (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_call_metrics_created
     ON ai_call_metrics(created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS ai_index_state (
+    id                  TEXT PRIMARY KEY DEFAULT 'default',
+    desired_model_id    TEXT NOT NULL DEFAULT 'BAAI/bge-m3',
+    active_model_id     TEXT NOT NULL DEFAULT '',
+    active_dims         INTEGER NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL DEFAULT 'not_built',
+    rebuild_required    INTEGER NOT NULL DEFAULT 0,
+    rebuild_reason      TEXT NOT NULL DEFAULT '',
+    corpus_config       TEXT NOT NULL DEFAULT '{}',
+    last_scan_at        REAL NOT NULL DEFAULT 0,
+    last_built_at       REAL NOT NULL DEFAULT 0,
+    last_error          TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS ai_embedding_sources (
+    source_key           TEXT PRIMARY KEY,
+    source_type          TEXT NOT NULL,
+    source_id            TEXT NOT NULL,
+    source_sub_id        TEXT NOT NULL DEFAULT '',
+    group_name           TEXT NOT NULL DEFAULT '',
+    owner_kind           TEXT NOT NULL DEFAULT '',
+    owner_id             TEXT NOT NULL DEFAULT '',
+    participant_ids      TEXT NOT NULL DEFAULT '[]',
+    participant_kinds    TEXT NOT NULL DEFAULT '{}',
+    visibility_json      TEXT NOT NULL DEFAULT '{}',
+    title                TEXT NOT NULL DEFAULT '',
+    source_updated_at    TEXT NOT NULL DEFAULT '',
+    content_hash         TEXT NOT NULL,
+    indexed_content_hash TEXT NOT NULL DEFAULT '',
+    state                TEXT NOT NULL DEFAULT 'pending',
+    discovered_at        REAL NOT NULL DEFAULT 0,
+    last_seen_at         REAL NOT NULL DEFAULT 0,
+    indexed_at           REAL NOT NULL DEFAULT 0,
+    error                TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_embedding_sources_state
+    ON ai_embedding_sources(state);
+CREATE INDEX IF NOT EXISTS idx_ai_embedding_sources_scope
+    ON ai_embedding_sources(group_name, source_type, owner_id);
+
+CREATE TABLE IF NOT EXISTS ai_embedding_chunks (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_key          TEXT NOT NULL,
+    chunk_index         INTEGER NOT NULL DEFAULT 0,
+    text                TEXT NOT NULL,
+    chunk_hash          TEXT NOT NULL,
+    embedding_model_id  TEXT NOT NULL,
+    embedding_dims      INTEGER NOT NULL,
+    indexed_at          REAL NOT NULL DEFAULT 0,
+    distance_metric     TEXT NOT NULL DEFAULT 'cosine',
+    error               TEXT NOT NULL DEFAULT '',
+    UNIQUE(source_key, chunk_index),
+    FOREIGN KEY(source_key) REFERENCES ai_embedding_sources(source_key)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ai_embedding_chunks_source
+    ON ai_embedding_chunks(source_key);
+CREATE INDEX IF NOT EXISTS idx_ai_embedding_chunks_model
+    ON ai_embedding_chunks(embedding_model_id, embedding_dims);
+
+CREATE TABLE IF NOT EXISTS ai_index_jobs (
+    id           TEXT PRIMARY KEY,
+    mode         TEXT NOT NULL DEFAULT 'incremental',
+    status       TEXT NOT NULL DEFAULT 'queued',
+    reason       TEXT NOT NULL DEFAULT '',
+    started_at   REAL NOT NULL DEFAULT 0,
+    updated_at   REAL NOT NULL DEFAULT 0,
+    completed_at REAL NOT NULL DEFAULT 0,
+    totals       TEXT NOT NULL DEFAULT '{}',
+    error        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_index_jobs_status
+    ON ai_index_jobs(status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS panel_events (
     id         INTEGER PRIMARY KEY,
@@ -1447,6 +1670,8 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _migrate_legacy_engineer_schema_names(conn)
     _migrate_behavior_overlay_scope_schema(conn)
     conn.executescript(_SCHEMA_SQL)
+    _ensure_ai_index_schema(conn)
+    conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads
     try:

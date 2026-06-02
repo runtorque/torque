@@ -182,6 +182,61 @@ class TorqueDoctorTests(unittest.TestCase):
             rendered,
         )
 
+    def test_build_doctor_report_warns_for_ai_index_rebuild_and_mismatch(self):
+        home = self._home_dir()
+        self.db.save_global_settings(GlobalSettings(
+            ai_enabled=True,
+            ai_embedding_model="model-b",
+        ))
+        self.db.ai_update_index_state(
+            desired_model_id="model-b",
+            active_model_id="model-a",
+            active_dims=3,
+            status="rebuild_pending",
+            rebuild_required=True,
+            rebuild_reason="embedding_model_change",
+        )
+        conn = self.db.open_ai_index_connection()
+        try:
+            with conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS ai_embedding_vec "
+                    "(rowid INTEGER PRIMARY KEY, embedding TEXT NOT NULL)"
+                )
+                self.db.ai_upsert_embedding_source({
+                    "source_key": "task:TORQUE:1",
+                    "source_type": "task",
+                    "source_id": "TORQUE:1",
+                    "content_hash": "hash-a",
+                }, conn=conn, commit=False)
+                self.db.ai_replace_source_chunks(
+                    "task:TORQUE:1",
+                    [{
+                        "chunk_index": 0,
+                        "text": "hello",
+                        "chunk_hash": "chunk-a",
+                        "vector": [1, 2, 3, 4],
+                    }],
+                    conn=conn,
+                    model_id="model-old",
+                    dims=4,
+                    content_hash="hash-a",
+                )
+        finally:
+            conn.close()
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        warning_names = [warning["name"] for warning in report["warnings"]]
+        self.assertEqual(report["result"], "pass")
+        self.assertIn("ai_index_rebuild_pending", warning_names)
+        self.assertIn("ai_index_chunk_model_mismatch", warning_names)
+        self.assertEqual(report["ai"]["index_counts"]["model_mismatch_chunks"], 1)
+        self.assertIn("index_model_mismatch_chunks:    1", rendered)
+        self.assertIn("AI vector index rebuild pending", rendered)
+
     def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
         home = self._home_dir()
         self._save_engineer()

@@ -21,6 +21,8 @@ from typing import Optional
 import aiohttp
 from aiohttp import web
 from . import ai_deps
+from .ai_embeddings import LocalEmbeddingService
+from .ai_index import AIIndexService
 from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
@@ -238,6 +240,24 @@ def _build_ai_settings_response(
         str(getattr(gs, "ai_embedding_model", "") or "").strip()
         or AI_DEFAULT_EMBEDDING_MODEL
     )
+    index_payload = {}
+    if db:
+        try:
+            getter = getattr(db, "ai_get_index_status_payload", None)
+            if callable(getter):
+                index_payload = getter() or {}
+        except Exception:
+            log.exception("Failed to load AI index status payload")
+            index_payload = {}
+    index_state = dict(index_payload.get("state", {}) or {})
+    index_counts = dict(index_payload.get("counts", {}) or {})
+    current_job = index_payload.get("current_job")
+    rebuild_warning = dict(index_payload.get("rebuild_warning", {}) or {})
+    index_status = (
+        "disabled"
+        if not enabled
+        else str(index_state.get("status", "") or "not_built")
+    )
     return {
         "type": "ai_settings",
         "schema_version": 1,
@@ -281,28 +301,34 @@ def _build_ai_settings_response(
                     "packages": list(ai_deps.AI_DEPENDENCY_PACKAGES),
                     "install_hint": ai_deps.AI_DEPS_INSTALL_HINT,
                 },
-                "active_model_id": "",
-                "active_dims": 0,
-                "desired_model_id": embedding_model,
+                "active_model_id": str(
+                    index_state.get("active_model_id", "") or ""
+                ),
+                "active_dims": int(index_state.get("active_dims", 0) or 0),
+                "desired_model_id": str(
+                    index_state.get("desired_model_id", "") or embedding_model
+                ),
             },
             "index": {
-                "status": "disabled" if not enabled else "not_built",
+                "status": index_status,
                 "corpus": corpus,
                 "counts": {
-                    "sources": 0,
-                    "chunks": 0,
-                    "indexed": 0,
-                    "pending": 0,
-                    "stale": 0,
-                    "errors": 0,
+                    "sources": int(index_counts.get("sources", 0) or 0),
+                    "chunks": int(index_counts.get("chunks", 0) or 0),
+                    "indexed": int(index_counts.get("indexed", 0) or 0),
+                    "pending": int(index_counts.get("pending", 0) or 0),
+                    "stale": int(index_counts.get("stale", 0) or 0),
+                    "errors": int(index_counts.get("errors", 0) or 0),
                 },
-                "last_built_at": 0,
-                "last_error": "",
-                "current_job": None,
+                "last_built_at": float(index_state.get("last_built_at", 0) or 0),
+                "last_error": str(index_state.get("last_error", "") or ""),
+                "current_job": current_job,
                 "rebuild_warning": {
-                    "required": False,
-                    "reason": "",
-                    "estimated_entries": 0,
+                    "required": bool(rebuild_warning.get("required", False)),
+                    "reason": str(rebuild_warning.get("reason", "") or ""),
+                    "estimated_entries": int(
+                        rebuild_warning.get("estimated_entries", 0) or 0
+                    ),
                 },
             },
             "boot_summary": {
@@ -442,16 +468,71 @@ def _emit_ai_settings_update_delta(
     )
 
 
+def _ai_embedding_rebuild_confirmation_response(
+    state: MatrixState,
+    db: TorqueDB | None,
+    updates: dict,
+    confirm: bool,
+) -> dict | None:
+    if "ai_embedding_model" not in updates or not db:
+        return None
+    requested_model = str(updates.get("ai_embedding_model", "") or "").strip()
+    current_model = str(
+        getattr(state.global_settings, "ai_embedding_model", "") or ""
+    ).strip()
+    if not requested_model or requested_model == current_model:
+        return None
+    try:
+        status = db.ai_get_index_status_payload()
+    except Exception:
+        log.exception("Failed to evaluate AI embedding rebuild confirmation")
+        return None
+    counts = dict(status.get("counts", {}) or {})
+    state_payload = dict(status.get("state", {}) or {})
+    indexed_rows = int(counts.get("chunks", 0) or 0)
+    active_model = str(state_payload.get("active_model_id", "") or "")
+    if indexed_rows <= 0 or not active_model:
+        return None
+    if confirm:
+        return None
+    return {
+        "type": "ai_settings_requires_confirmation",
+        "reason": "embedding_model_change",
+        "message": (
+            "Changing the embedding model rebuilds the entire vector index "
+            f"({indexed_rows} entries). Continue?"
+        ),
+        "estimated_entries": indexed_rows,
+        "current_model_id": active_model,
+        "requested_model_id": requested_model,
+    }
+
+
 def _apply_ai_settings_update_command(
     state: MatrixState,
     db: TorqueDB | None,
     data: dict,
+    *,
+    ai_index_service: AIIndexService | None = None,
 ) -> dict:
     """Apply update_ai_settings and return the redacted settings response."""
     updates = _ai_settings_updates_from_payload(data.get("settings"))
     # Validate before touching the secret table so a bad non-secret setting
     # cannot partially commit a new raw key.
-    state._normalize_global_settings_updates(updates)
+    updates = state._normalize_global_settings_updates(updates)
+    confirmation = _ai_embedding_rebuild_confirmation_response(
+        state,
+        db,
+        updates,
+        bool(data.get("confirm_embedding_rebuild")),
+    )
+    if confirmation:
+        return confirmation
+    embedding_model_changed = (
+        "ai_embedding_model" in updates
+        and str(updates.get("ai_embedding_model", "") or "").strip()
+        != str(getattr(state.global_settings, "ai_embedding_model", "") or "").strip()
+    )
     _save_ai_secret_updates(
         db,
         secrets=data.get("secrets"),
@@ -459,6 +540,38 @@ def _apply_ai_settings_update_command(
     )
     if updates:
         state.update_global_settings(**updates)
+    if db and embedding_model_changed:
+        try:
+            db.ai_update_index_state(
+                desired_model_id=str(updates.get("ai_embedding_model") or ""),
+            )
+        except Exception:
+            log.exception("Failed to update desired AI embedding model")
+        if bool(data.get("confirm_embedding_rebuild")):
+            job = None
+            try:
+                db.ai_update_index_state(
+                    desired_model_id=str(updates.get("ai_embedding_model") or ""),
+                    status="rebuild_pending",
+                    rebuild_required=True,
+                    rebuild_reason="embedding_model_change",
+                    last_error="",
+                )
+                job = db.ai_create_index_job(
+                    mode="rebuild",
+                    reason="embedding_model_change",
+                )
+            except Exception:
+                log.exception("Failed to queue AI embedding rebuild")
+            if job and ai_index_service is not None:
+                ai_index_service.schedule_rebuild(
+                    job_id=str(job.get("id", "") or ""),
+                    reason="embedding_model_change",
+                )
+    if ai_index_service is not None and (
+        "ai_enabled" in updates or "ai_index_corpus" in updates
+    ):
+        ai_index_service.schedule_incremental("ai_settings_change")
     response = _build_ai_settings_response(state, db)
     _emit_ai_settings_update_delta(state, response)
     return response
@@ -7953,6 +8066,7 @@ async def _shutdown_daemon_runtime(
     event_ingest_drainer,
     event_ingest_client,
     cloud_connector_runtime=None,
+    ai_index_service=None,
     bridge,
     runner,
     state,
@@ -7994,6 +8108,11 @@ async def _shutdown_daemon_runtime(
         await cloud_hooks.stop_cloud_connector(cloud_connector_runtime)
     except Exception:
         log.exception("Cloud connector shutdown drain failed")
+    if ai_index_service is not None:
+        try:
+            await ai_index_service.shutdown()
+        except Exception:
+            log.exception("AI index service shutdown failed")
     try:
         await bridge.shutdown()
     except Exception:
@@ -12572,6 +12691,38 @@ async def main(connection=None):
     state = MatrixState(db=db)
     state.load()
     db.enable_async_writes(True)
+    embedding_service = LocalEmbeddingService(data_dir=DATA_DIR)
+    ai_index_service = AIIndexService(
+        db=db,
+        state=state,
+        embedding_service=embedding_service,
+        data_dir=DATA_DIR,
+        broadcast_callback=state.broadcast,
+    )
+    if bool(getattr(state.global_settings, "ai_enabled", False)):
+        try:
+            asyncio.get_running_loop().call_later(
+                3.0,
+                ai_index_service.schedule_incremental,
+                "startup",
+            )
+        except Exception:
+            log.exception("Failed to schedule startup AI index scan")
+    def _schedule_ai_index_from_delta(delta: dict) -> None:
+        op = str((delta or {}).get("op", "") or "")
+        if op in {
+            "architect_journal_append",
+            "journal_append",
+            "decision_upsert",
+            "decision_remove",
+            "task_upsert",
+            "task_remove",
+            "agent_peer_thread_upsert",
+            "agent_peer_thread_remove",
+        }:
+            ai_index_service.schedule_incremental(op)
+
+    state.register_delta_observer(_schedule_ai_index_from_delta)
     capture_deploy_boot_state(state, torque_config.SCRIPT_DIR)
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))
@@ -15393,7 +15544,21 @@ async def main(connection=None):
                     state,
                     db or state.db,
                     data,
+                    ai_index_service=ai_index_service,
                 )
+
+            elif cmd == "ai_index_start":
+                index_result = await ai_index_service.start(
+                    mode=str(data.get("mode", "incremental") or "incremental"),
+                    confirm=bool(data.get("confirm")),
+                    reason="manual",
+                )
+                if index_result.get("type") == "ai_index_job":
+                    index_result["settings"] = _build_ai_settings_response(
+                        state,
+                        db or state.db,
+                    ).get("settings", {})
+                result = index_result
 
             elif cmd == "remove_group":
                 removed = state.remove_group(data["group"])
@@ -22486,6 +22651,7 @@ async def main(connection=None):
             event_ingest_drainer=event_ingest_drainer,
             event_ingest_client=event_ingest_client,
             cloud_connector_runtime=cloud_connector_runtime_holder[0],
+            ai_index_service=ai_index_service,
             bridge=bridge,
             runner=runner,
             state=state,
