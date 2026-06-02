@@ -19097,6 +19097,30 @@ test('renderAgentCell status dot follows running/idle/error status for awareness
   assert.match(errorHtml, /class="cell-status disconnected"/);
 });
 
+test('renderAgentCell clears green dot for idle Session ended awareness agent', () => {
+  const { context } = createMainRenderHarness();
+  context.state.children = {};
+  context.state.board_tasks = {};
+
+  const html = context.renderAgentCell({
+    id: 'worker-session-ended',
+    name: 'Worker Session Ended',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+    agent_type: 'codex',
+    activity: '',
+    activity_detail: '',
+    status: 'idle',
+    last_event_at: Math.floor(Date.now() / 1000),
+    last_event_text: 'Session ended',
+  });
+
+  assert.match(html, /class="cell-status idle"/);
+  assert.doesNotMatch(html, /class="cell-status working"/);
+  assert.match(html, /Session ended/);
+});
+
 test('renderAgentCell shows context-window meter only when usage is available with thresholds', () => {
   const { context } = createMainRenderHarness();
   context.state.children = {};
