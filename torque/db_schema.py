@@ -244,6 +244,13 @@ CREATE TABLE IF NOT EXISTS global_settings (
     xterm_scrollback  INTEGER NOT NULL DEFAULT 2000
 );
 
+CREATE TABLE IF NOT EXISTS ai_provider_secrets (
+    provider   TEXT PRIMARY KEY,
+    api_key    TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS panel_events (
     id         INTEGER PRIMARY KEY,
     timestamp  REAL    NOT NULL,

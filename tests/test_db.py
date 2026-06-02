@@ -86,6 +86,85 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(gs["status_bar_visibility"]["tasks"], False)
         self.assertEqual(gs["status_bar_visibility"]["attention"], True)
 
+    def test_ai_provider_secrets_round_trip_mask_and_clear(self):
+        raw_key = "sk-ant-secret-value-1234"
+
+        metadata = self.db.save_ai_provider_secret("anthropic", raw_key)
+
+        self.assertEqual(self.db.read_ai_provider_secret("anthropic"), raw_key)
+        self.assertTrue(metadata["configured"])
+        self.assertEqual(metadata["last4"], "1234")
+        self.assertGreater(metadata["updated_at"], 0)
+
+        refreshed = self.db.get_ai_provider_secret_metadata("anthropic")
+        self.assertEqual(refreshed, metadata)
+        self.assertNotIn(raw_key, json.dumps(refreshed, sort_keys=True))
+
+        self.db.clear_ai_provider_secret("anthropic")
+
+        self.assertEqual(self.db.read_ai_provider_secret("anthropic"), "")
+        self.assertEqual(
+            self.db.get_ai_provider_secret_metadata("anthropic"),
+            {"configured": False, "last4": "", "updated_at": 0},
+        )
+
+    def test_ai_provider_secrets_are_absent_from_snapshot_paths(self):
+        raw_key = "sk-openai-compatible-secret-5678"
+        self.db.save_ai_provider_secret("openai_compatible", raw_key)
+        self.db.save_global_settings(GlobalSettings(
+            ai_enabled=True,
+            ai_generation_provider="openai_compatible",
+            ai_openai_compatible_model="local-model",
+        ))
+        self.db.save_board_task(BoardTask(
+            id="TORQUE:AI1",
+            task="Synced task",
+            group="g",
+            board_sync={
+                "provider": "github",
+                "github": {"issue_number": 1},
+            },
+        ))
+
+        snapshot = self.db.load_all()
+        snapshot_json = json.dumps(snapshot, sort_keys=True)
+
+        self.assertNotIn(raw_key, snapshot_json)
+        self.assertNotIn("ai_provider_secrets", snapshot)
+        self.assertNotIn("api_key", snapshot_json)
+        self.assertIn("board_sync", snapshot_json)
+        self.assertEqual(
+            snapshot["global_settings"]["ai_generation_provider"],
+            "openai_compatible",
+        )
+
+    def test_ai_provider_secrets_table_migrates_additively(self):
+        legacy_path = Path(self.tmp.name) / "legacy-ai-secrets.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.commit()
+        conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(ai_provider_secrets)"
+            )
+        }
+        self.assertEqual(
+            columns,
+            {"provider", "api_key", "created_at", "updated_at"},
+        )
+        migrated.save_ai_provider_secret("anthropic", "sk-ant-migrated-9999")
+        self.assertEqual(
+            migrated.get_ai_provider_secret_metadata("anthropic")["last4"],
+            "9999",
+        )
+
     def test_board_task_dispatch_state_migration_backfills_live_tasks(self):
         self.db.save_board_task(
             BoardTask(

@@ -228,6 +228,78 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.update_global_settings(relay_enabled="false")
         self.assertIs(state.global_settings.relay_enabled, False)
 
+    def test_ai_global_settings_defaults_are_non_secret(self):
+        state = self.state_mod.MatrixState()
+        gs = state.global_settings
+
+        self.assertFalse(gs.ai_enabled)
+        self.assertEqual(gs.ai_generation_provider, "anthropic")
+        self.assertEqual(gs.ai_anthropic_model, "")
+        self.assertEqual(gs.ai_openai_compatible_base_url, "")
+        self.assertEqual(gs.ai_openai_compatible_model, "")
+        self.assertEqual(gs.ai_embedding_model, "BAAI/bge-m3")
+        self.assertEqual(gs.ai_embedding_runtime, "sentence_transformers")
+        self.assertEqual(
+            gs.ai_index_corpus,
+            {
+                "architect_journals": True,
+                "engineer_journals": True,
+                "decisions": True,
+                "tasks": True,
+                "engineer_peer_threads": True,
+            },
+        )
+        self.assertTrue(gs.ai_boot_summary_enabled)
+
+        serialized = json.dumps(state.to_dict(), sort_keys=True)
+        compact = json.dumps(state.to_dict_compact(), sort_keys=True)
+        for secretish in ("api_key", "anthropic_api_key", "openai_api_key"):
+            self.assertNotIn(secretish, serialized)
+            self.assertNotIn(secretish, compact)
+
+    def test_update_global_settings_normalizes_ai_fields(self):
+        state = self.state_mod.MatrixState()
+
+        state.update_global_settings(
+            ai_enabled="yes",
+            ai_generation_provider=" openai_compatible ",
+            ai_anthropic_model="  claude-test  ",
+            ai_openai_compatible_base_url=" http://localhost:11434/v1 ",
+            ai_openai_compatible_model=" local-model ",
+            ai_embedding_model=" custom/model ",
+            ai_embedding_runtime=" sentence_transformers ",
+            ai_index_corpus={"tasks": "false", "decisions": True, "bogus": True},
+            ai_boot_summary_enabled="0",
+        )
+
+        gs = state.global_settings
+        self.assertIs(gs.ai_enabled, True)
+        self.assertEqual(gs.ai_generation_provider, "openai_compatible")
+        self.assertEqual(gs.ai_anthropic_model, "claude-test")
+        self.assertEqual(
+            gs.ai_openai_compatible_base_url,
+            "http://localhost:11434/v1",
+        )
+        self.assertEqual(gs.ai_openai_compatible_model, "local-model")
+        self.assertEqual(gs.ai_embedding_model, "custom/model")
+        self.assertEqual(gs.ai_embedding_runtime, "sentence_transformers")
+        self.assertEqual(
+            gs.ai_index_corpus,
+            {
+                "architect_journals": True,
+                "engineer_journals": True,
+                "decisions": True,
+                "tasks": False,
+                "engineer_peer_threads": True,
+            },
+        )
+        self.assertIs(gs.ai_boot_summary_enabled, False)
+
+        with self.assertRaises(ValueError):
+            state.update_global_settings(ai_generation_provider="bad-provider")
+        with self.assertRaises(ValueError):
+            state.update_global_settings(ai_embedding_runtime="torch")
+
     def test_update_global_settings_normalizes_status_bar_visibility(self):
         state = self.state_mod.MatrixState()
         self.assertEqual(
