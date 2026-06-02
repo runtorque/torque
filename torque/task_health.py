@@ -44,6 +44,9 @@ _BASELINE_PROCESS_NAMES = {
 
 _PROGRESS_ACTIONS = {"progress", "derive", "ask"}
 _BLOCKED_ACTIONS = {"blocked", "error"}
+IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON = "implemented_no_review_boundary"
+_REVIEW_ACTION_NAME = "feature/review"
+_OPEN_BOUNDARY_STATUSES = {"open"}
 
 
 @dataclass(frozen=True)
@@ -259,15 +262,103 @@ def _stale_in_progress_reasons(task: Any, tasks_by_id: dict[str, Any],
         return []
 
     reasons = []
+    branch_ahead = getattr(agent, "worktree_ahead", 0) > 0
+    if branch_ahead and _has_no_open_review_boundary(task, tasks_by_id, agent):
+        reasons.append(IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON)
     if getattr(agent, "worktree_checkpoints", 0) > 0:
         reasons.append("checkpointed_worktree")
-    if getattr(agent, "worktree_ahead", 0) > 0:
+    if branch_ahead:
         reasons.append("branch_ahead_of_base")
     if (not getattr(agent, "worktree_dirty", False)
             and getattr(agent, "worktree_path", "")
             and getattr(agent, "worktree_checkpoints", 0) > 0):
         reasons.append("clean_checkpointed_branch")
     return reasons
+
+
+def _has_no_open_review_boundary(task: Any, tasks_by_id: dict[str, Any],
+                                 agent: Any | None) -> bool:
+    """Return true when an ahead branch lacks review/boundary progress.
+
+    This is intentionally read-only and advisory: an open worktree boundary or
+    any still-open ``feature/review`` task in the same stream means review has
+    at least been handed off, so the implemented-but-not-reviewed reason should
+    not fire.
+    """
+    if _task_has_open_worktree_boundary(task):
+        return False
+    if _branch_has_open_worktree_boundary(task, tasks_by_id, agent):
+        return False
+    if _stream_has_open_review_task(task, tasks_by_id):
+        return False
+    return True
+
+
+def _task_has_open_worktree_boundary(task: Any) -> bool:
+    boundary = getattr(task, "worktree_boundary", {}) or {}
+    if not isinstance(boundary, dict):
+        return False
+    status = str(boundary.get("status", "") or "").strip().lower()
+    return status in _OPEN_BOUNDARY_STATUSES
+
+
+def _branch_has_open_worktree_boundary(task: Any, tasks_by_id: dict[str, Any],
+                                       agent: Any | None) -> bool:
+    branch = str(getattr(agent, "worktree_branch", "") or "").strip()
+    repo_root = str(
+        getattr(agent, "worktree_repo_root", "")
+        or getattr(agent, "git_root", "")
+        or ""
+    ).strip()
+    if not branch or not repo_root:
+        return False
+
+    for other in tasks_by_id.values():
+        boundary = getattr(other, "worktree_boundary", {}) or {}
+        if not isinstance(boundary, dict):
+            continue
+        status = str(boundary.get("status", "") or "").strip().lower()
+        if status not in _OPEN_BOUNDARY_STATUSES:
+            continue
+        if str(boundary.get("branch", "") or "").strip() != branch:
+            continue
+        if str(boundary.get("repo_root", "") or "").strip() != repo_root:
+            continue
+        return True
+    return False
+
+
+def _stream_has_open_review_task(task: Any,
+                                 tasks_by_id: dict[str, Any]) -> bool:
+    for other in tasks_by_id.values():
+        if getattr(other, "id", "") == getattr(task, "id", ""):
+            continue
+        action_name = str(getattr(other, "action_name", "") or "").strip().lower()
+        if action_name != _REVIEW_ACTION_NAME:
+            continue
+        if getattr(other, "lane", "") in {"Done", ARCHIVED_LANE}:
+            continue
+        if _tasks_share_stream(task, other):
+            return True
+    return False
+
+
+def _tasks_share_stream(left: Any, right: Any) -> bool:
+    left_root = str(getattr(left, "pipeline_root_id", "") or "").strip()
+    right_root = str(getattr(right, "pipeline_root_id", "") or "").strip()
+    if not left_root:
+        left_root = str(getattr(left, "id", "") or "").strip()
+    if not right_root:
+        right_root = str(getattr(right, "id", "") or "").strip()
+    if left_root and right_root and left_root == right_root:
+        return True
+
+    left_id = str(getattr(left, "id", "") or "").strip()
+    right_id = str(getattr(right, "id", "") or "").strip()
+    return (
+        bool(left_id and getattr(right, "parent_task_id", "") == left_id)
+        or bool(right_id and getattr(left, "parent_task_id", "") == right_id)
+    )
 
 
 def _has_live_work_signal(agent: Any | None, now_ts: float) -> bool:
