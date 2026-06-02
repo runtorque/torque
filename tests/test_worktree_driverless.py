@@ -99,3 +99,187 @@ class DriverlessWorktreeGateParityTests(unittest.IsolatedAsyncioTestCase):
         for result in (live_result, driverless_result):
             result.pop("boundary_state", None)
         self.assertEqual(live_result, driverless_result)
+
+
+class BoundaryTipGateTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+
+    def _cell(self):
+        return SimpleNamespace(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            worktree_path="/wt",
+            worktree_branch="torque/worker",
+            worktree_repo_root="/repo",
+            git_root="/repo",
+            worktree_base_branch="main",
+            worktree_merge_squash=True,
+            current_task_id="task-1",
+            owner_engineer_id="eng-1",
+            created_by_engineer_id="eng-1",
+            kind="worker",
+            cell_type="agent",
+        )
+
+    async def _preflight(self, *, boundary_state, data=None, mismatch=None):
+        from torque import server
+        from torque.state import MatrixState
+
+        state = MatrixState()
+        state.groups["g"] = []
+        cell = self._cell()
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+        task = state.board_add_task(
+            "Implement worker change",
+            "g",
+            id="task-1",
+            lane="In Progress",
+            agent_id=cell.id,
+        )
+        task.assigned_engineer_id = "eng-1"
+
+        class FakeWorktreeManager:
+            def __init__(self):
+                self.check_calls = 0
+
+            async def has_uncommitted_changes(self, _cell, worktree_submodules=None):
+                return False
+
+            async def stale_base_info(self, _cell, worktree_submodules=None):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell, worktree_submodules=None):
+                self.check_calls += 1
+                return {"clean": True, "tree_sha": "tree", "conflicts": []}
+
+            async def merge_untracked_overwrite_paths(self, *_args):
+                return []
+
+            async def boundary_tip_mismatch_info(self, _cell, boundary_sha, tip_sha):
+                info = dict(mismatch or {})
+                info.setdefault("boundary_sha", boundary_sha)
+                info.setdefault("tip_sha", tip_sha)
+                return info
+
+        mgr = FakeWorktreeManager()
+
+        async def latest_boundary(_cell):
+            return boundary_state
+
+        panel_events = []
+
+        def panel_event(*args, **kwargs):
+            panel_events.append((args, kwargs))
+
+        def boundary_reason_message(reason, boundary=None):
+            if reason == "branch_tip_moved":
+                return server._boundary_tip_mismatch_message(boundary)
+            return reason or "Latest task boundary is not mergeable."
+
+        result = await server._preflight_worktree_merge_gates(
+            state=state,
+            cell=cell,
+            worktree_mgr=mgr,
+            aid=cell.id,
+            data=data or {},
+            latest_boundary_state_for_cell=latest_boundary,
+            boundary_reason_message=boundary_reason_message,
+            panel_event=panel_event,
+        )
+        return result, mgr, panel_events
+
+    def _mismatched_boundary_state(self):
+        return {
+            "latest": {
+                "task_id": "review-task",
+                "task_title": "Reviewed boundary",
+                "boundary": {"commit_sha": "abcdef1234567890"},
+                "head_sha": "fedcba9876543210",
+                "clean_mergeable": False,
+            },
+            "clean": None,
+            "reason": "branch_tip_moved",
+        }
+
+    async def test_boundary_tip_ahead_refuses_with_ancestor_count(self):
+        result, mgr, _events = await self._preflight(
+            boundary_state=self._mismatched_boundary_state(),
+            mismatch={"classification": "ahead", "commit_count": 2},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(mgr.check_calls, 0)
+        error = result["result"]["error"]
+        self.assertIn("Branch advanced 2 commit(s)", error)
+        self.assertIn("last reviewed boundary abcdef123456", error)
+        self.assertIn("re-review the new commits", error)
+        self.assertNotIn("no file details", error.lower())
+        self.assertNotIn("conflict", error.lower())
+
+    async def test_boundary_tip_rewrite_refuses_with_diverged_message(self):
+        result, mgr, _events = await self._preflight(
+            boundary_state=self._mismatched_boundary_state(),
+            mismatch={"classification": "diverged"},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(mgr.check_calls, 0)
+        error = result["result"]["error"]
+        self.assertIn("Branch diverged from the last recorded boundary", error)
+        self.assertIn("history rewritten", error)
+        self.assertIn("re-review required", error)
+
+    async def test_stale_base_force_does_not_bypass_boundary_tip_gate(self):
+        result, mgr, _events = await self._preflight(
+            boundary_state=self._mismatched_boundary_state(),
+            data={"force_stale_base": True},
+            mismatch={"classification": "ahead", "commit_count": 3},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(mgr.check_calls, 0)
+        self.assertIn("Branch advanced 3 commit(s)", result["result"]["error"])
+
+    async def test_force_boundary_mismatch_allows_and_writes_audit_event(self):
+        result, mgr, panel_events = await self._preflight(
+            boundary_state=self._mismatched_boundary_state(),
+            data={
+                "force_boundary_mismatch": True,
+                "actor_agent_id": "eng-1",
+                "boundary_mismatch_reason": "verified with git log",
+            },
+            mismatch={"classification": "ahead", "commit_count": 1},
+        )
+
+        self.assertTrue(result["ok"], result.get("result"))
+        self.assertEqual(mgr.check_calls, 1)
+        audit = result.get("workflow_breach")
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit["subkind"], "boundary_mismatch_override")
+        self.assertEqual(audit["actor_agent_id"], "eng-1")
+        self.assertEqual(audit["reason"], "verified with git log")
+        self.assertEqual(audit["boundary_sha"], "abcdef1234567890")
+        self.assertEqual(audit["tip_sha"], "fedcba9876543210")
+        self.assertIn("force_boundary_mismatch=true", audit["context"])
+        self.assertTrue(panel_events)
+        self.assertIn("boundary_mismatch_override", panel_events[0][0][4])
+
+    async def test_matching_boundary_tip_passes_without_override(self):
+        state = {
+            "latest": {
+                "boundary": {"commit_sha": "abcdef1234567890"},
+                "head_sha": "abcdef1234567890",
+                "clean_mergeable": True,
+            },
+            "clean": {"boundary": {"commit_sha": "abcdef1234567890"}},
+            "reason": "",
+        }
+        result, mgr, _events = await self._preflight(boundary_state=state)
+
+        self.assertTrue(result["ok"], result.get("result"))
+        self.assertEqual(mgr.check_calls, 1)
+        self.assertIsNone(result.get("workflow_breach"))

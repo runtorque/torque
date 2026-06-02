@@ -1302,8 +1302,8 @@ ENGINEER_TOOLS = [
             "force_direct=true or force the direct path. force_direct does "
             "not bypass the nested PR-first sequence for real ee deltas. "
             "Direct merges still "
-            "honor the normal safety gates unless force/force_stale_base are "
-            "also supplied. "
+            "honor the normal safety gates unless their explicit audited "
+            "override flags are also supplied. "
             "Targets must be owned when ownership restriction is on."
         ),
         "inputSchema": {
@@ -1390,7 +1390,8 @@ ENGINEER_TOOLS = [
                         "the nested ee/submodule PR-first flow for real "
                         "submodule deltas, and it never direct-pushes nested "
                         "main as an emergency override. It does not bypass "
-                        "stale-base or sibling-divergence safety gates; "
+                        "stale-base, reviewed-boundary, or "
+                        "sibling-divergence safety gates; "
                         "combine with force or "
                         "force_stale_base only when intentionally accepting "
                         "those risks."
@@ -1404,6 +1405,25 @@ ENGINEER_TOOLS = [
                         "before the current base and re-running review is not "
                         "desired. `force=true` is the preferred override and "
                         "also bypasses this gate."
+                    ),
+                },
+                "force_boundary_mismatch": {
+                    "type": "boolean",
+                    "description": (
+                        "Bypass only the reviewed-boundary tip mismatch gate. "
+                        "Use only after an Engineer verifies the branch tip "
+                        "against the last reviewed boundary; Torque records "
+                        "a workflow-breach audit with actor, reason, "
+                        "boundary SHA, and tip SHA. This is separate from "
+                        "force_stale_base/force and does not bypass stale-base "
+                        "or sibling-divergence gates."
+                    ),
+                },
+                "boundary_mismatch_reason": {
+                    "type": "string",
+                    "description": (
+                        "Audit reason to record when "
+                        "force_boundary_mismatch=true."
                     ),
                 },
                 "force": {

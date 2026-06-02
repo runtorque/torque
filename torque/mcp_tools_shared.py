@@ -8537,6 +8537,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         force_stale_base = bool(
             args.get("force_stale_base") or args.get("force")
         )
+        force_boundary_mismatch = bool(args.get("force_boundary_mismatch"))
+        boundary_mismatch_reason = str(
+            args.get("boundary_mismatch_reason")
+            or args.get("force_boundary_mismatch_reason")
+            or ""
+        ).strip()
 
         async def _try_post_success_agent_recovery(agent_ident: str):
             recovered_agent_id = _resolve_agent_including_tombstoned(
@@ -8569,6 +8575,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 recovery_payload["force_stale_base"] = True
             if force_sibling_divergence:
                 recovery_payload["force"] = True
+            if force_boundary_mismatch:
+                recovery_payload["force_boundary_mismatch"] = True
+                if boundary_mismatch_reason:
+                    recovery_payload["boundary_mismatch_reason"] = (
+                        boundary_mismatch_reason
+                    )
+            if caller_id:
+                recovery_payload["actor_agent_id"] = str(caller_id)
             recovered = await handle_command(recovery_payload)
             if recovered and recovered.get("ok"):
                 recovered_cell = state.agents.get(recovered_agent_id)
@@ -8625,20 +8639,36 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 **path_payload,
                 "allow_stale_base": force_stale_base,
             }
+            if force_boundary_mismatch:
+                check_payload["allow_boundary_mismatch"] = True
             if force_sibling_divergence:
                 check_payload["force"] = True
             result = await handle_command(check_payload)
             error_text = (result or {}).get("error", "")
-            blocked = bool(result and result.get("type") == "error")
+            blocked = bool(
+                result
+                and (
+                    result.get("type") == "error"
+                    or (
+                        result.get("error")
+                        and not result.get("clean", True)
+                        and not result.get("conflicts")
+                    )
+                )
+            )
         else:
             result, error_text, blocked = await _run_worktree_merge_check_with_options(
                 handle_command,
                 agent_id,
                 allow_stale_base=force_stale_base,
+                allow_boundary_mismatch=force_boundary_mismatch,
             )
         if blocked:
             return error_text, True
         if result and not result.get("clean", True):
+            error_text = str(result.get("error") or "").strip()
+            if error_text and not result.get("conflicts"):
+                return error_text, True
             conflict_list = _format_worktree_conflicts(
                 result.get("conflicts", [])
             )
@@ -8689,14 +8719,24 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["force_stale_base"] = True
         if force_sibling_divergence:
             payload["force"] = True
+        if force_boundary_mismatch:
+            payload["force_boundary_mismatch"] = True
+            if boundary_mismatch_reason:
+                payload["boundary_mismatch_reason"] = boundary_mismatch_reason
+        if caller_id:
+            payload["actor_agent_id"] = str(caller_id)
         result = await handle_command(payload)
         if result and result.get("ok") is False:
             error, cacheable = _format_worktree_pr_error(result, "Merge failed")
             if "conflict" in error.lower():
                 fresh_check = None
                 if not driverless:
-                    fresh_check, _, _ = await _run_worktree_merge_check(
-                        handle_command, agent_id
+                    fresh_check, _, _ = await (
+                        _run_worktree_merge_check_with_options(
+                            handle_command,
+                            agent_id,
+                            allow_boundary_mismatch=force_boundary_mismatch,
+                        )
                     )
                 conflict_text = ""
                 if fresh_check and not fresh_check.get("clean", True):

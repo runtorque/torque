@@ -2557,6 +2557,55 @@ class WorktreeManager:
             out.append({"commit_sha": commit, "paths": paths})
         return out
 
+    async def boundary_tip_mismatch_info(self, cell, boundary_sha: str,
+                                         tip_sha: str) -> dict:
+        """Classify a reviewed-boundary SHA versus the current branch tip."""
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        if not repo_root and getattr(cell, "worktree_path", ""):
+            repo_root = await self.get_repo_root(cell.worktree_path) or ""
+        boundary_sha = str(boundary_sha or "").strip()
+        tip_sha = str(tip_sha or "").strip()
+        info = {
+            "boundary_sha": boundary_sha,
+            "tip_sha": tip_sha,
+            "classification": "unknown",
+            "commit_count": 0,
+        }
+        if not repo_root or not boundary_sha or not tip_sha:
+            info["reason"] = "missing_ref"
+            return info
+        if boundary_sha == tip_sha:
+            info["classification"] = "same"
+            info["ancestor"] = True
+            return info
+
+        code, _out = await self._git_stdout(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            boundary_sha,
+            tip_sha,
+        )
+        if code == 0:
+            info["classification"] = "ahead"
+            info["ancestor"] = True
+            count_code, count_out = await self._git_stdout(
+                repo_root,
+                "rev-list",
+                "--count",
+                f"{boundary_sha}..{tip_sha}",
+            )
+            if count_code == 0:
+                try:
+                    info["commit_count"] = int(count_out.strip() or "0")
+                except ValueError:
+                    info["commit_count"] = 0
+            return info
+
+        info["classification"] = "diverged"
+        info["ancestor"] = False
+        return info
+
     async def _commit_is_ancestor(self, repo_root: str, ancestor: str,
                                   descendant: str) -> bool:
         if not repo_root or not ancestor or not descendant:
@@ -6966,7 +7015,8 @@ class WorktreeManager:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
-            output = stdout.decode()
+            output = stdout.decode(errors="replace")
+            stderr_text = stderr.decode(errors="replace").strip()
             if proc.returncode == 0:
                 tree_sha = output.strip().split("\n")[0]
                 return {"clean": True, "tree_sha": tree_sha,
@@ -6994,6 +7044,20 @@ class WorktreeManager:
                     f"{branch} into {base}: {paths}. Rebase the worktree "
                     "or merge the nested submodule branch pair first."
                 )
+            elif not conflicts:
+                raw_status = stderr_text or output.strip()
+                if raw_status:
+                    raw_status = " ".join(
+                        line.strip()
+                        for line in raw_status.splitlines()
+                        if line.strip()
+                    )[:500]
+                    result["error"] = (
+                        "Merge conflict (unparsed paths): "
+                        f"{raw_status}"
+                    )
+                else:
+                    result["error"] = "Merge conflict (unparsed paths)."
             return result
         except Exception:
             log.exception("check_merge_conflicts failed for '%s'",

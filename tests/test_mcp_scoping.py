@@ -484,6 +484,101 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
 
+    async def test_engineer_merge_driverless_boundary_error_not_phantom_conflict(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        calls = []
+        boundary_error = (
+            "Branch advanced 2 commit(s) past the last reviewed boundary "
+            "abcdef123456 — re-review the new commits or record a reviewed "
+            "boundary at the tip."
+        )
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "worktree_check_merge")
+            return {
+                "type": "worktree_check_merge",
+                "id": "driverless:torque/alice/worker-a",
+                "clean": False,
+                "dirty": False,
+                "conflicts": [],
+                "error": boundary_error,
+            }
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {
+                "worktree_path": "/tmp/worker-a",
+                "branch": "torque/alice/worker-a",
+                "base_branch": "main",
+            },
+            handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("Branch advanced 2 commit(s)", text)
+        self.assertNotIn("Merge has conflicts", text)
+        self.assertNotIn("no file details", text.lower())
+        self.assertEqual([call["cmd"] for call in calls], ["worktree_check_merge"])
+
+    async def test_engineer_merge_passes_boundary_mismatch_override_and_actor(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                self.assertTrue(payload.get("allow_boundary_mismatch"))
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                    "boundary_mismatch_override": True,
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertTrue(payload.get("force_boundary_mismatch"))
+                self.assertEqual(
+                    payload.get("boundary_mismatch_reason"),
+                    "reviewer verified ground truth",
+                )
+                self.assertEqual(payload.get("actor_agent_id"), alice.id)
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "sha": "abc123",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {
+                "agent": worker.id,
+                "force_boundary_mismatch": True,
+                "boundary_mismatch_reason": "reviewer verified ground truth",
+            },
+            handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["sha"], "abc123")
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
     async def test_engineer_merge_returns_pr_pending_success_shape(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")
