@@ -121,7 +121,7 @@ def format_worktree_conflicts(conflicts) -> str:
         if conflict:
             lines.append(f"  - {conflict}")
     if not lines:
-        lines.append("  - (no file details reported)")
+        lines.append("  - merge conflict (unparsed paths)")
     return "\n".join(lines)
 
 
@@ -135,13 +135,16 @@ async def run_worktree_merge_check(handle_command, agent_id: str):
 
 async def run_worktree_merge_check_with_options(handle_command, agent_id: str, *,
                                                 allow_dirty: bool = False,
-                                                allow_stale_base: bool = False):
+                                                allow_stale_base: bool = False,
+                                                allow_boundary_mismatch: bool = False):
     payload = {
         "cmd": "worktree_check_merge",
         "id": agent_id,
     }
     if allow_stale_base:
         payload["allow_stale_base"] = True
+    if allow_boundary_mismatch:
+        payload["allow_boundary_mismatch"] = True
     result = await handle_command(payload)
     if result and result.get("type") == "error":
         return result, result.get("message", "Unknown error"), True

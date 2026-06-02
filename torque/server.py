@@ -1677,18 +1677,35 @@ async def _preflight_worktree_merge_gates(
             ),
         }
 
+    boundary_override_event = None
     if boundary_state.get("latest") and not boundary_state.get("clean"):
-        return {
-            "ok": False,
-            "boundary_state": boundary_state,
-            "result": _worktree_merge_error(
-                aid,
-                boundary_reason_message(
-                    boundary_state.get("reason", ""),
-                    boundary_state.get("latest"),
-                ),
-            ),
-        }
+        boundary_reason = boundary_state.get("reason", "")
+        boundary_latest = boundary_state.get("latest")
+        boundary_message = await _boundary_gate_message(
+            worktree_mgr,
+            cell,
+            boundary_reason,
+            boundary_latest,
+            boundary_reason_message,
+        )
+        if (
+                boundary_reason == "branch_tip_moved"
+                and _boundary_mismatch_force_enabled(data)):
+            boundary_override_event = (
+                _emit_boundary_mismatch_override_workflow_breach(
+                    state,
+                    panel_event,
+                    cell,
+                    boundary_latest,
+                    data,
+                )
+            )
+        else:
+            return {
+                "ok": False,
+                "boundary_state": boundary_state,
+                "result": _worktree_merge_error(aid, boundary_message),
+            }
 
     sibling_gate = await _sibling_branch_divergence_gate_for_merge(
         state,
@@ -1761,7 +1778,9 @@ async def _preflight_worktree_merge_gates(
                 "boundary_state": boundary_state,
                 "stale_base": stale_base,
                 "precheck": precheck,
-                "workflow_breach": stale_base_override_event,
+                "workflow_breach": (
+                    boundary_override_event or stale_base_override_event
+                ),
                 "result": result,
             }
 
@@ -1789,7 +1808,9 @@ async def _preflight_worktree_merge_gates(
                 "boundary_state": boundary_state,
                 "stale_base": stale_base,
                 "precheck": precheck,
-                "workflow_breach": stale_base_override_event,
+                "workflow_breach": (
+                    boundary_override_event or stale_base_override_event
+                ),
                 "result": result,
             }
 
@@ -1810,7 +1831,9 @@ async def _preflight_worktree_merge_gates(
                 "ok": False,
                 "boundary_state": boundary_state,
                 "stale_base": stale_base,
-                "workflow_breach": stale_base_override_event,
+                "workflow_breach": (
+                    boundary_override_event or stale_base_override_event
+                ),
                 "result": result,
             }
         published = await publish_nested(cell, worktree_submodules)
@@ -1829,7 +1852,9 @@ async def _preflight_worktree_merge_gates(
                 "ok": False,
                 "boundary_state": boundary_state,
                 "stale_base": stale_base,
-                "workflow_breach": stale_base_override_event,
+                "workflow_breach": (
+                    boundary_override_event or stale_base_override_event
+                ),
                 "result": result,
             }
 
@@ -1838,7 +1863,9 @@ async def _preflight_worktree_merge_gates(
         "boundary_state": boundary_state,
         "stale_base": stale_base,
         "precheck": precheck,
-        "workflow_breach": stale_base_override_event,
+        "workflow_breach": (
+            boundary_override_event or stale_base_override_event
+        ),
     }
 
 
@@ -4239,6 +4266,173 @@ def _stale_base_force_enabled(data: dict | None) -> bool:
     return bool(data.get("force") or data.get("force_stale_base"))
 
 
+def _boundary_mismatch_force_enabled(data: dict | None) -> bool:
+    data = data or {}
+    return bool(data.get("force_boundary_mismatch"))
+
+
+def _boundary_mismatch_check_allowed(data: dict | None) -> bool:
+    data = data or {}
+    return bool(
+        data.get("allow_boundary_mismatch")
+        or data.get("force_boundary_mismatch")
+    )
+
+
+def _short_boundary_sha(sha: str) -> str:
+    sha = str(sha or "").strip()
+    if not sha:
+        return "unknown"
+    return sha[:12]
+
+
+def _boundary_recorded_sha(boundary: dict | None) -> str:
+    boundary = boundary if isinstance(boundary, dict) else {}
+    recorded = boundary.get("boundary")
+    if isinstance(recorded, dict):
+        sha = str(
+            recorded.get("commit_sha")
+            or recorded.get("head_sha")
+            or ""
+        ).strip()
+        if sha:
+            return sha
+    return str(
+        boundary.get("boundary_sha")
+        or boundary.get("commit_sha")
+        or ""
+    ).strip()
+
+
+def _boundary_tip_sha(boundary: dict | None) -> str:
+    boundary = boundary if isinstance(boundary, dict) else {}
+    return str(
+        boundary.get("tip_sha")
+        or boundary.get("head_sha")
+        or boundary.get("current_head_sha")
+        or ""
+    ).strip()
+
+
+def _normalize_boundary_tip_mismatch_info(
+        info: dict | None,
+        *,
+        boundary_sha: str,
+        tip_sha: str) -> dict:
+    info = dict(info or {})
+    if boundary_sha and not info.get("boundary_sha"):
+        info["boundary_sha"] = boundary_sha
+    if tip_sha and not info.get("tip_sha"):
+        info["tip_sha"] = tip_sha
+    classification = str(
+        info.get("classification")
+        or info.get("state")
+        or ""
+    ).strip().lower()
+    if not classification:
+        if info.get("ancestor") is True:
+            classification = "ahead"
+        elif info.get("ancestor") is False:
+            classification = "diverged"
+        else:
+            classification = "unknown"
+    if classification in {"ancestor", "advanced"}:
+        classification = "ahead"
+    if classification in {"not_ancestor", "rewritten", "rewrite"}:
+        classification = "diverged"
+    info["classification"] = classification
+    if "commit_count" not in info:
+        count = info.get("ahead_count", info.get("commits", 0))
+        try:
+            info["commit_count"] = int(count)
+        except (TypeError, ValueError):
+            info["commit_count"] = 0
+    return info
+
+
+async def _ensure_boundary_tip_mismatch_info(
+        worktree_mgr,
+        cell,
+        boundary: dict | None) -> dict:
+    if not isinstance(boundary, dict):
+        return {}
+    existing = boundary.get("boundary_tip_mismatch")
+    boundary_sha = _boundary_recorded_sha(boundary)
+    tip_sha = _boundary_tip_sha(boundary)
+    if isinstance(existing, dict) and existing:
+        info = _normalize_boundary_tip_mismatch_info(
+            existing,
+            boundary_sha=boundary_sha,
+            tip_sha=tip_sha,
+        )
+        boundary["boundary_tip_mismatch"] = info
+        return info
+    if not boundary_sha or not tip_sha:
+        return {}
+    classifier = getattr(worktree_mgr, "boundary_tip_mismatch_info", None)
+    if not callable(classifier):
+        return {}
+    try:
+        info = await classifier(cell, boundary_sha, tip_sha)
+    except Exception:
+        log.exception(
+            "Failed to classify boundary-tip mismatch for '%s'",
+            getattr(cell, "name", "") or getattr(cell, "id", ""),
+        )
+        return {}
+    info = _normalize_boundary_tip_mismatch_info(
+        info,
+        boundary_sha=boundary_sha,
+        tip_sha=tip_sha,
+    )
+    boundary["boundary_tip_mismatch"] = info
+    return info
+
+
+def _boundary_tip_mismatch_message(boundary: dict | None) -> str:
+    boundary = boundary if isinstance(boundary, dict) else {}
+    info = boundary.get("boundary_tip_mismatch")
+    if not isinstance(info, dict):
+        info = {}
+    boundary_sha = str(
+        info.get("boundary_sha")
+        or _boundary_recorded_sha(boundary)
+        or ""
+    ).strip()
+    classification = str(info.get("classification") or "").strip().lower()
+    if classification == "ahead":
+        try:
+            count = int(info.get("commit_count", 0))
+        except (TypeError, ValueError):
+            count = 0
+        return (
+            f"Branch advanced {count} commit(s) past the last reviewed "
+            f"boundary {_short_boundary_sha(boundary_sha)} — re-review "
+            "the new commits or record a reviewed boundary at the tip."
+        )
+    if classification == "diverged":
+        return (
+            "Branch diverged from the last recorded boundary "
+            f"{_short_boundary_sha(boundary_sha)} (history rewritten) — "
+            "re-review required."
+        )
+    return (
+        "Latest task boundary no longer matches the branch tip. "
+        "A newer commit or external rewrite moved the branch."
+    )
+
+
+async def _boundary_gate_message(
+        worktree_mgr,
+        cell,
+        reason: str,
+        boundary: dict | None,
+        boundary_reason_message) -> str:
+    if reason == "branch_tip_moved":
+        await _ensure_boundary_tip_mismatch_info(worktree_mgr, cell, boundary)
+    return boundary_reason_message(reason, boundary)
+
+
 async def _maybe_reject_stale_base_review_derive(
     worktree_mgr,
     cell,
@@ -4567,6 +4761,7 @@ async def _sibling_branch_divergence_gate_for_merge(
 
 
 _WORKFLOW_BREACH_SUBKINDS = frozenset({
+    "boundary_mismatch_override",
     "escape_clause_skip",
     "force_direct_merge",
     "merge_mode_locked",
@@ -4831,6 +5026,86 @@ def _emit_stale_base_override_workflow_breach(state: MatrixState, panel_event,
             f"{warning}"
         ),
     )
+
+
+def _boundary_mismatch_override_actor(state: MatrixState, cell,
+                                      data: dict | None) -> str:
+    data = data or {}
+    for key in (
+            "actor_agent_id",
+            "_engineer_dispatch_id",
+            "actor_id",
+            "actor",
+            "actor_name",
+    ):
+        value = str(data.get(key, "") or "").strip()
+        if value:
+            return value
+    for attr in (
+            "owner_engineer_id",
+            "created_by_engineer_id",
+            "id",
+    ):
+        value = str(getattr(cell, attr, "") or "").strip()
+        if value:
+            return value
+    return "operator"
+
+
+def _boundary_mismatch_override_reason(data: dict | None) -> str:
+    data = data or {}
+    for key in (
+            "boundary_mismatch_reason",
+            "force_boundary_mismatch_reason",
+            "override_reason",
+    ):
+        value = str(data.get(key, "") or "").strip()
+        if value:
+            return value
+    return "operator verified the branch tip against the reviewed boundary"
+
+
+def _emit_boundary_mismatch_override_workflow_breach(
+        state: MatrixState,
+        panel_event,
+        cell,
+        boundary: dict | None,
+        data: dict | None):
+    boundary = boundary if isinstance(boundary, dict) else {}
+    info = _normalize_boundary_tip_mismatch_info(
+        boundary.get("boundary_tip_mismatch")
+        if isinstance(boundary.get("boundary_tip_mismatch"), dict)
+        else {},
+        boundary_sha=_boundary_recorded_sha(boundary),
+        tip_sha=_boundary_tip_sha(boundary),
+    )
+    boundary_sha = str(info.get("boundary_sha") or "").strip()
+    tip_sha = str(info.get("tip_sha") or "").strip()
+    actor = _boundary_mismatch_override_actor(state, cell, data)
+    reason = _boundary_mismatch_override_reason(data)
+    classification = str(info.get("classification") or "unknown").strip()
+    breach_task = _workflow_breach_active_task_for_worker(state, cell)
+    event = _emit_workflow_breach_event(
+        state,
+        panel_event,
+        subkind="boundary_mismatch_override",
+        source="operator",
+        task=breach_task,
+        worker=cell,
+        context=(
+            "Boundary-tip merge gate was bypassed with "
+            "force_boundary_mismatch=true: "
+            f"actor={actor} reason={reason} "
+            f"boundary_sha={boundary_sha} tip_sha={tip_sha} "
+            f"classification={classification}"
+        ),
+    )
+    event["actor_agent_id"] = actor
+    event["reason"] = reason
+    event["boundary_sha"] = boundary_sha
+    event["tip_sha"] = tip_sha
+    event["boundary_mismatch"] = info
+    return event
 
 
 def _persist_preserved_merge_diff_warning_only(
@@ -14483,6 +14758,11 @@ async def main(connection=None):
                     summary["gitlink_reconciliation"] = reconciliation
                     return {"latest": summary, "clean": summary, "reason": ""}
             summary["reason"] = "branch_tip_moved"
+            await _ensure_boundary_tip_mismatch_info(
+                worktree_mgr,
+                cell,
+                summary,
+            )
             return {
                 "latest": summary,
                 "clean": None,
@@ -14532,10 +14812,7 @@ async def main(connection=None):
                 "because a follow-up task has already started."
             )
         if reason == "branch_tip_moved":
-            return (
-                "Latest task boundary no longer matches the branch tip. "
-                "A newer commit or external rewrite moved the branch."
-            )
+            return _boundary_tip_mismatch_message(boundary)
         if reason == "submodule_branch_tip_moved":
             return (
                 "Latest task boundary no longer matches the nested submodule "
@@ -16782,6 +17059,25 @@ async def main(connection=None):
                         cell
                     )
                     submodules = _worktree_submodules_for_cell(cell)
+                    boundary_blocks = bool(
+                        boundary_state.get("latest")
+                        and not boundary_state.get("clean")
+                    )
+                    boundary_allowed = False
+                    boundary_error = ""
+                    if boundary_blocks:
+                        boundary_reason = boundary_state.get("reason", "")
+                        boundary_error = await _boundary_gate_message(
+                            worktree_mgr,
+                            cell,
+                            boundary_reason,
+                            boundary_state.get("latest"),
+                            _boundary_reason_message,
+                        )
+                        boundary_allowed = bool(
+                            boundary_reason == "branch_tip_moved"
+                            and _boundary_mismatch_check_allowed(data)
+                        )
                     dirty = (
                         await worktree_mgr.has_uncommitted_changes(
                             cell,
@@ -16798,8 +17094,7 @@ async def main(connection=None):
                             "boundary": boundary_state.get("latest"),
                             "clean_boundary": boundary_state.get("clean"),
                         }
-                    elif boundary_state.get("latest") \
-                            and not boundary_state.get("clean"):
+                    elif boundary_blocks and not boundary_allowed:
                         result = {
                             "type": "worktree_check_merge",
                             "id": aid,
@@ -16808,10 +17103,7 @@ async def main(connection=None):
                             "conflicts": [],
                             "boundary": boundary_state.get("latest"),
                             "clean_boundary": None,
-                            "error": _boundary_reason_message(
-                                boundary_state.get("reason", ""),
-                                boundary_state.get("latest"),
-                            ),
+                            "error": boundary_error,
                         }
                     else:
                         stale_base = (
@@ -16893,6 +17185,8 @@ async def main(connection=None):
                         check["id"] = aid
                         check["boundary"] = boundary_state.get("latest")
                         check["clean_boundary"] = boundary_state.get("clean")
+                        if boundary_allowed:
+                            check["boundary_mismatch_override"] = True
                         _attach_stale_base(check, stale_base)
                         if check.get("clean"):
                             squash = cell.worktree_merge_squash

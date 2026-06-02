@@ -413,6 +413,14 @@ class MCPToolsSharedMergePayloadTests(unittest.TestCase):
             worktree_base_branch="main",
         )
 
+    def test_format_worktree_conflicts_empty_uses_unparsed_paths(self):
+        from torque.mcp_engineer_tools.shared import format_worktree_conflicts
+
+        self.assertEqual(
+            format_worktree_conflicts([]),
+            "  - merge conflict (unparsed paths)",
+        )
+
     def test_merge_payload_surfaces_cleanup_override_warning(self):
         # Part A (TORQUE:381 / :393): the silent cleanup override must reach the
         # MCP caller both as structured fields and as a human-readable WARNING.
