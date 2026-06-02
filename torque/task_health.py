@@ -331,8 +331,6 @@ def _branch_has_open_worktree_boundary(task: Any, tasks_by_id: dict[str, Any],
 def _stream_has_open_review_task(task: Any,
                                  tasks_by_id: dict[str, Any]) -> bool:
     for other in tasks_by_id.values():
-        if getattr(other, "id", "") == getattr(task, "id", ""):
-            continue
         action_name = str(getattr(other, "action_name", "") or "").strip().lower()
         if action_name != _REVIEW_ACTION_NAME:
             continue

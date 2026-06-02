@@ -387,6 +387,57 @@ class TaskHealthTests(unittest.TestCase):
             snapshots["task-parent"].details["reasons"],
         )
 
+    def test_current_review_task_suppresses_no_review_boundary_reason(self):
+        implement = self.state_mod.BoardTask(
+            id="task-impl",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(26_000),
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            parent_task_id="task-impl",
+            pipeline_root_id="task-impl",
+            action_name="feature/review",
+            agent_id="agent-2",
+            updated_at=_iso(26_000),
+        )
+        agents = {
+            "agent-2": self.state_mod.AgentCell(
+                id="agent-2",
+                name="Reviewer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.torque/worktrees/agent-2",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-impl": implement, "task-review": review},
+            agents,
+            now_ts=26_120,
+        )
+
+        self.assertEqual(snapshots["task-review"].state, "stale-in-progress")
+        self.assertIn(
+            "branch_ahead_of_base",
+            snapshots["task-review"].details["reasons"],
+        )
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-review"].details["reasons"],
+        )
+
     def test_no_review_boundary_reason_requires_branch_ahead(self):
         task = self.state_mod.BoardTask(
             id="task-1",
