@@ -165,6 +165,86 @@ class TorqueDBTests(unittest.TestCase):
             "9999",
         )
 
+    def test_ai_call_metrics_round_trip_without_sensitive_columns(self):
+        metric = self.db.record_ai_call_metric(
+            purpose="boot_summary",
+            provider="anthropic",
+            model="claude-test",
+            status="ok",
+            latency_ms=123,
+            input_tokens=10,
+            output_tokens=4,
+            cache_creation_input_tokens=2,
+            cache_read_input_tokens=3,
+        )
+
+        rows = self.db.list_ai_call_metrics()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0], metric)
+        self.assertEqual(rows[0]["purpose"], "boot_summary")
+        self.assertEqual(rows[0]["provider"], "anthropic")
+        self.assertEqual(rows[0]["model"], "claude-test")
+        self.assertEqual(rows[0]["status"], "ok")
+        self.assertEqual(rows[0]["failure_kind"], "")
+        self.assertEqual(rows[0]["latency_ms"], 123)
+        self.assertEqual(rows[0]["input_tokens"], 10)
+        self.assertEqual(rows[0]["output_tokens"], 4)
+        self.assertEqual(rows[0]["cache_creation_input_tokens"], 2)
+        self.assertEqual(rows[0]["cache_read_input_tokens"], 3)
+
+        columns = {
+            row[1]
+            for row in self.db._conn.execute(
+                "PRAGMA table_info(ai_call_metrics)"
+            )
+        }
+        self.assertEqual(
+            columns,
+            {
+                "id",
+                "created_at",
+                "purpose",
+                "provider",
+                "model",
+                "status",
+                "failure_kind",
+                "latency_ms",
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            },
+        )
+        lowered = " ".join(sorted(columns)).lower()
+        self.assertNotIn("api_key", lowered)
+        self.assertNotIn("secret", lowered)
+        self.assertNotIn("prompt", lowered)
+        self.assertNotIn("response", lowered)
+
+    def test_ai_call_metrics_table_migrates_additively(self):
+        legacy_path = Path(self.tmp.name) / "legacy-ai-metrics.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.commit()
+        conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        migrated.record_ai_call_metric(
+            purpose="summary_refresh",
+            provider="openai_compatible",
+            model="local-model",
+            status="failure",
+            failure_kind="timeout",
+            latency_ms=50,
+        )
+        rows = migrated.list_ai_call_metrics()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["failure_kind"], "timeout")
+
     def test_board_task_dispatch_state_migration_backfills_live_tasks(self):
         self.db.save_board_task(
             BoardTask(

@@ -11,6 +11,7 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
+from torque import __version__
 from torque.db import TorqueDB
 
 install_aiohttp_stub()
@@ -184,7 +185,8 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         self.assertNotEqual(exc.exception.code, 0)
         expected = (
             "ERROR: this version requires a prior kinds-refactor migration.\n"
-            "Install Torque 1.x first, boot once so the kinds-refactor migration runs, then upgrade to Torque 2.0.0.\n"
+            "Install Torque 1.x first, boot once so the kinds-refactor migration runs, then upgrade to "
+            f"Torque {__version__}.\n"
             "Current DB has unmigrated rows with legacy columns populated."
         )
         self.assertEqual(stderr.getvalue().strip(), expected)

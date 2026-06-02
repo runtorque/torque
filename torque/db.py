@@ -21,6 +21,7 @@ import sqlite3
 import sys
 import threading
 import time
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -594,6 +595,14 @@ def _json_loads_default(value, default):
     if isinstance(default, dict) and not isinstance(parsed, dict):
         return copy.deepcopy(default)
     return parsed
+
+
+def _nonnegative_int(value, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default or 0)
+    return max(0, parsed)
 
 
 def _decode_behavior_overlay_version_row(row, cols) -> dict:
@@ -2245,6 +2254,102 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "last4": key[-4:],
             "updated_at": float(row[1] or 0),
         }
+
+    def record_ai_call_metric(
+        self,
+        *,
+        purpose: str,
+        provider: str,
+        model: str,
+        status: str,
+        failure_kind: str = "",
+        latency_ms: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
+        cache_read_input_tokens: int = 0,
+        metric_id: str | None = None,
+        created_at: float | None = None,
+    ) -> dict:
+        """Persist non-sensitive AI call metadata only.
+
+        Prompts, response text, and raw provider keys are intentionally not
+        accepted by this helper or represented in ``ai_call_metrics``.
+        """
+        metric = {
+            "id": str(metric_id or f"ai-call-{uuid.uuid4().hex}"),
+            "created_at": float(time.time() if created_at is None else created_at),
+            "purpose": str(purpose or ""),
+            "provider": str(provider or ""),
+            "model": str(model or ""),
+            "status": str(status or ""),
+            "failure_kind": str(failure_kind or ""),
+            "latency_ms": _nonnegative_int(latency_ms),
+            "input_tokens": _nonnegative_int(input_tokens),
+            "output_tokens": _nonnegative_int(output_tokens),
+            "cache_creation_input_tokens": _nonnegative_int(
+                cache_creation_input_tokens
+            ),
+            "cache_read_input_tokens": _nonnegative_int(
+                cache_read_input_tokens
+            ),
+        }
+        self._conn.execute(
+            """
+            INSERT INTO ai_call_metrics
+                (id, created_at, purpose, provider, model, status,
+                 failure_kind, latency_ms, input_tokens, output_tokens,
+                 cache_creation_input_tokens, cache_read_input_tokens)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                metric["id"],
+                metric["created_at"],
+                metric["purpose"],
+                metric["provider"],
+                metric["model"],
+                metric["status"],
+                metric["failure_kind"],
+                metric["latency_ms"],
+                metric["input_tokens"],
+                metric["output_tokens"],
+                metric["cache_creation_input_tokens"],
+                metric["cache_read_input_tokens"],
+            ),
+        )
+        self._conn.commit()
+        return metric
+
+    def list_ai_call_metrics(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        """Return recent AI call metrics without prompts, keys, or text."""
+        limit = max(0, min(_nonnegative_int(limit), 1000))
+        offset = _nonnegative_int(offset)
+        rows = self._conn.execute(
+            """
+            SELECT id, created_at, purpose, provider, model, status,
+                   failure_kind, latency_ms, input_tokens, output_tokens,
+                   cache_creation_input_tokens, cache_read_input_tokens
+            FROM ai_call_metrics
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+        cols = [
+            "id",
+            "created_at",
+            "purpose",
+            "provider",
+            "model",
+            "status",
+            "failure_kind",
+            "latency_ms",
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        ]
+        return [dict(zip(cols, row)) for row in rows]
 
     def save_auto_dispatch_queue(self, group_name: str, entries: list):
         """Replace one group's auto-dispatch queue."""

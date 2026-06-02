@@ -251,6 +251,23 @@ CREATE TABLE IF NOT EXISTS ai_provider_secrets (
     updated_at REAL NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS ai_call_metrics (
+    id          TEXT PRIMARY KEY,
+    created_at  REAL NOT NULL,
+    purpose     TEXT NOT NULL DEFAULT '',
+    provider    TEXT NOT NULL DEFAULT '',
+    model       TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT '',
+    failure_kind TEXT NOT NULL DEFAULT '',
+    latency_ms  INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_input_tokens INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ai_call_metrics_created
+    ON ai_call_metrics(created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS panel_events (
     id         INTEGER PRIMARY KEY,
     timestamp  REAL    NOT NULL,
