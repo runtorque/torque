@@ -252,6 +252,265 @@ class TaskHealthTests(unittest.TestCase):
             snapshots["task-1"].details["reasons"],
         )
 
+    def test_idle_agent_with_branch_ahead_and_no_review_boundary_is_flagged(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(25_000),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.torque/worktrees/agent-1",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=25_120,
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "stale-in-progress")
+        self.assertIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-1"].details["reasons"],
+        )
+        self.assertIn(
+            "branch_ahead_of_base",
+            snapshots["task-1"].details["reasons"],
+        )
+
+    def test_open_review_boundary_suppresses_no_review_boundary_reason(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(25_000),
+            worktree_boundary={
+                "status": "open",
+                "branch": "torque/worker",
+                "repo_root": "/repo",
+            },
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.torque/worktrees/agent-1",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=25_120,
+        )
+
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-1"].details["reasons"],
+        )
+
+    def test_live_review_handoff_suppresses_no_review_boundary_reason(self):
+        parent = self.state_mod.BoardTask(
+            id="task-parent",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(26_000),
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            parent_task_id="task-parent",
+            pipeline_root_id="task-parent",
+            action_name="feature/review",
+            agent_id="agent-2",
+            updated_at=_iso(26_000),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Implementer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.torque/worktrees/agent-1",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=2,
+                worktree_dirty=False,
+            ),
+            "agent-2": self.state_mod.AgentCell(
+                id="agent-2",
+                name="Reviewer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                activity_detail="Reviewing diff",
+            ),
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-parent": parent, "task-review": review},
+            agents,
+            now_ts=26_060,
+        )
+
+        self.assertEqual(snapshots["task-parent"].state, "healthy")
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-parent"].details["reasons"],
+        )
+
+    def test_current_review_task_suppresses_no_review_boundary_reason(self):
+        implement = self.state_mod.BoardTask(
+            id="task-impl",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(26_000),
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            parent_task_id="task-impl",
+            pipeline_root_id="task-impl",
+            action_name="feature/review",
+            agent_id="agent-2",
+            updated_at=_iso(26_000),
+        )
+        agents = {
+            "agent-2": self.state_mod.AgentCell(
+                id="agent-2",
+                name="Reviewer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.torque/worktrees/agent-2",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-impl": implement, "task-review": review},
+            agents,
+            now_ts=26_120,
+        )
+
+        self.assertEqual(snapshots["task-review"].state, "stale-in-progress")
+        self.assertIn(
+            "branch_ahead_of_base",
+            snapshots["task-review"].details["reasons"],
+        )
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-review"].details["reasons"],
+        )
+
+    def test_no_review_boundary_reason_requires_branch_ahead(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(27_000),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.torque/worktrees/agent-1",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=0,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=27_060,
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "healthy")
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-1"].details["reasons"],
+        )
+
+    def test_live_work_signal_suppresses_no_review_boundary_reason(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(28_000),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                activity_detail="Running tests",
+                worktree_path="/repo/.torque/worktrees/agent-1",
+                worktree_branch="torque/worker",
+                worktree_repo_root="/repo",
+                worktree_ahead=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=28_060,
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "healthy")
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["task-1"].details["reasons"],
+        )
+
     def test_live_work_signals_suppress_stale_and_idle_risk(self):
         base = 80_000
         now = base + (11 * 60)
