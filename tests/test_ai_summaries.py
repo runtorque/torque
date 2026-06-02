@@ -431,6 +431,85 @@ class AISummaryMCPToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["status"], "ready")
         self.assertEqual(saved["summary_text"], "Generated later")
 
+    async def test_stranded_refreshing_read_downgrades_and_schedules_refresh(self):
+        self.state.global_settings.ai_boot_summary_min_interval_seconds = 0
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Recovered from stranded refreshing row",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        key = architect_boot_summary_key(self.architect.id)
+        stale = self._seed_architect_stale_summary(
+            service,
+            summary_text="Interrupted summary",
+        )
+        self.db.ai_upsert_summary({
+            **stale,
+            "status": "refreshing",
+            "summary_text": "Interrupted summary",
+            "error": "",
+        })
+
+        payload = cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["summary"], "Interrupted summary")
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(self.db.ai_load_summary(key)["status"], "stale")
+
+        await self._drain_read_tasks(service)
+        saved = self.db.ai_load_summary(key)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(saved["status"], "ready")
+        self.assertEqual(
+            saved["summary_text"],
+            "Recovered from stranded refreshing row",
+        )
+
+    async def test_mark_stale_converts_stranded_refreshing_without_provider(self):
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="should not be called by stale mark",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        key = architect_boot_summary_key(self.architect.id)
+        stale = self._seed_architect_stale_summary(
+            service,
+            summary_text="Interrupted summary",
+        )
+        self.db.ai_upsert_summary({
+            **stale,
+            "status": "refreshing",
+            "summary_text": "Interrupted summary",
+            "error": "",
+        })
+
+        marked = service.mark_stale_if_needed(key)
+
+        self.assertEqual(marked["status"], "stale")
+        self.assertEqual(marked["summary_text"], "Interrupted summary")
+        self.assertIn("interrupted", marked["error"])
+        self.assertEqual(fake.calls, [])
+
     async def test_two_stale_reads_inside_min_interval_make_one_provider_call(self):
         self.state.global_settings.ai_boot_summary_min_interval_seconds = 600
         fake = FakeSummarizer(LLMResult(

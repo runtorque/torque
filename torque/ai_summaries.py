@@ -113,6 +113,9 @@ class AISummaryService:
         raw = self._load_summary(summary_key) if summary_key else None
         row = raw or _synthetic_summary_row(summary_key)
         status = str(row.get("status", "") or "empty").strip()
+        if status == "refreshing" and not self._has_live_refresh_task(summary_key):
+            row = self._downgrade_stranded_refreshing_row(row)
+            status = str(row.get("status", "") or "empty").strip()
         if status == "empty" and not _row_has_sources(row):
             with contextlib.suppress(Exception):
                 row = self.mark_stale_if_needed(summary_key)
@@ -172,6 +175,12 @@ class AISummaryService:
             self._read_refresh_task(summary_key)
         )
         return ""
+
+    def _has_live_refresh_task(self, summary_key: str) -> bool:
+        if summary_key in self._refreshing:
+            return True
+        task = self._read_tasks.get(summary_key)
+        return bool(task is not None and not task.done())
 
     def schedule_for_delta(self, delta: dict) -> None:
         """Schedule a stale-check for a state mutation delta.
@@ -241,6 +250,23 @@ class AISummaryService:
     async def _mark_stale_task(self, summary_key: str) -> None:
         with contextlib.suppress(Exception):
             self.mark_stale_if_needed(summary_key)
+
+    def _downgrade_stranded_refreshing_row(self, row: dict) -> dict:
+        summary_key = str((row or {}).get("summary_key", "") or "").strip()
+        summary_text = str((row or {}).get("summary_text", "") or "")
+        status = "stale" if summary_text.strip() else "empty"
+        updated = {
+            **dict(row or {}),
+            "status": status,
+            "error": (
+                "Previous AI boot-summary refresh was interrupted; refresh "
+                "will retry lazily on the next read."
+            ),
+        }
+        if summary_key:
+            with contextlib.suppress(Exception):
+                return self._upsert_summary(updated)
+        return updated
 
     async def _debounced_mark_stale(
         self,
@@ -423,6 +449,8 @@ class AISummaryService:
                 "generated_at": 0,
                 "error": "",
             })
+        if str(prev.get("status", "") or "").strip() == "refreshing":
+            prev = self._downgrade_stranded_refreshing_row(prev)
         changed = (
             str(prev.get("source_hash", "") or "") != bundle.source_hash
             or str(prev.get("provider", "") or "") != bundle.provider
@@ -867,7 +895,8 @@ def parse_summary_key(summary_key: str) -> tuple[str, str, str]:
 def cached_boot_summary_payload(state, caller_kind: str, caller_id: str) -> dict:
     """Return the cached boot summary payload for an MCP read tool.
 
-    This helper never schedules or performs a live provider call.
+    This helper never performs a live provider call inline.  A stale cached row
+    may schedule one gated out-of-band refresh for a later read.
     """
 
     caller_kind = str(caller_kind or "").strip()
