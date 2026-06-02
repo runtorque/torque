@@ -29,6 +29,7 @@ from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
 from .direct_message_mirrors import save_direct_ask_mirror
+from .ai_recall import normalize_recall_limit, semantic_recall_payload
 from .mcp_retry import (
     derive_idempotency_key,
     is_mcp_pr_phase,
@@ -580,6 +581,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "pending_hire_status",
     "peer_inbox",
     "peer_list",
+    "semantic_recall",
     "session_map",
     "specialization_show",
     "specializations_list",
@@ -2887,6 +2889,257 @@ def _architect_engineer_peer_inspect_json(
     }), False
 
 
+def _candidate_participants(candidate) -> set[str]:
+    return {
+        str(value or "").strip()
+        for value in getattr(candidate, "participant_ids", ()) or ()
+        if str(value or "").strip()
+    }
+
+
+def _candidate_visibility(candidate) -> dict:
+    value = getattr(candidate, "visibility_json", {}) or {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _candidate_group(candidate) -> str:
+    return str(getattr(candidate, "group_name", "") or "").strip()
+
+
+def _candidate_source_type(candidate) -> str:
+    return str(getattr(candidate, "source_type", "") or "").strip()
+
+
+def _candidate_source_id(candidate) -> str:
+    return str(getattr(candidate, "source_id", "") or "").strip()
+
+
+def _candidate_owner_id(candidate) -> str:
+    return str(getattr(candidate, "owner_id", "") or "").strip()
+
+
+def _engineer_peer_thread_rows_for_recall(state, thread_id: str) -> list[dict]:
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_engineer_peer_messages_for_thread", None)
+    if not callable(loader):
+        return []
+    rows = loader(str(thread_id or "").strip(), limit=1000)
+    return [row for row in rows if _is_engineer_peer_row(row)]
+
+
+def _engineer_can_recall_peer_thread(state, caller_id: str, candidate) -> bool:
+    thread_id = _candidate_source_id(candidate)
+    if not thread_id:
+        return False
+
+    # Participant access goes through the same participant-scoped inspect
+    # loader used by engineer_peer_inspect.
+    rows, error = _engineer_peer_thread_rows_for_inspect(
+        state,
+        "engineer",
+        caller_id,
+        {"thread_id": thread_id},
+        limit=1000,
+    )
+    if not error and rows:
+        return True
+
+    # Non-participant access is limited to the inspect-granted context path:
+    # the caller must be hired by the same Architect as both thread
+    # participants, the persisted inspect_grant must name that Architect, and
+    # the thread context must involve the caller via the existing helper.
+    rows = _engineer_peer_thread_rows_for_recall(state, thread_id)
+    if not rows:
+        return False
+    caller = state.agents.get(str(caller_id or "").strip())
+    caller_architect_id = _engineer_peer_hiring_architect_id(caller)
+    if not caller_architect_id:
+        return False
+    metadata_architect_ids = {
+        str(value or "").strip()
+        for value in (
+            _candidate_visibility(candidate).get(
+                "participant_hired_by_architect_ids",
+                [],
+            )
+            or []
+        )
+        if str(value or "").strip()
+    }
+    if metadata_architect_ids and caller_architect_id not in metadata_architect_ids:
+        return False
+    context = _thread_context_from_rows(rows)
+    inspect_grant = dict(
+        ((context.get("snapshot", {}) or {}).get("inspect_grant", {}) or {})
+    )
+    if (
+        str(inspect_grant.get("supervising_architect_id", "") or "").strip()
+        != caller_architect_id
+    ):
+        return False
+    if not any(_peer_row_involves_engineer(state, row, caller_id) for row in rows):
+        return False
+    participant_ids = _engineer_peer_thread_ids(rows)
+    if len(participant_ids) != 2 or str(caller_id or "").strip() in participant_ids:
+        return False
+    for participant_id in participant_ids:
+        resolved_id, filter_error = _resolve_engineer_peer_filter(
+            state,
+            caller_id,
+            participant_id,
+        )
+        if filter_error or resolved_id != participant_id:
+            return False
+        peer, peer_error = _resolve_engineer_peer(
+            state,
+            caller_id,
+            participant_id,
+            include_dismissed=True,
+        )
+        if peer_error or not peer:
+            return False
+    return True
+
+
+def _engineer_recall_candidate_visible(
+        state,
+        caller_id: str,
+        caller_group: str,
+        candidate) -> bool:
+    source_type = _candidate_source_type(candidate)
+    source_group = _candidate_group(candidate)
+    if source_group and source_group != caller_group:
+        return False
+    if source_type == "task":
+        return _candidate_source_id(candidate) in _filter_tasks_for_caller(
+            state,
+            "engineer",
+            caller_id,
+        )
+    if source_type == "engineer_journal":
+        owner_id = _candidate_owner_id(candidate)
+        return (
+            owner_id == str(caller_id or "").strip()
+            or (
+                str(getattr(candidate, "owner_kind", "") or "").strip() == "group"
+                and bool(source_group)
+                and source_group == caller_group
+                and not owner_id
+            )
+        )
+    if source_type == "engineer_peer_thread":
+        return _engineer_can_recall_peer_thread(state, caller_id, candidate)
+    if source_type == "decision":
+        return str(caller_id or "").strip() in _candidate_participants(candidate)
+    return False
+
+
+def _architect_can_recall_peer_thread(state, caller_id: str, candidate) -> bool:
+    thread_id = _candidate_source_id(candidate)
+    if not thread_id:
+        return False
+    caller_architect_id = str(caller_id or "").strip()
+    metadata_architect_ids = {
+        str(value or "").strip()
+        for value in (
+            _candidate_visibility(candidate).get(
+                "participant_hired_by_architect_ids",
+                [],
+            )
+            or []
+        )
+        if str(value or "").strip()
+    }
+    if metadata_architect_ids and caller_architect_id not in metadata_architect_ids:
+        return False
+    _text, is_error = _architect_engineer_peer_inspect_json(
+        state,
+        caller_id,
+        {"thread_id": thread_id, "include_live": False},
+    )
+    return not is_error
+
+
+def _architect_recall_candidate_visible(
+        state,
+        caller_id: str,
+        caller_group: str,
+        candidate) -> bool:
+    source_type = _candidate_source_type(candidate)
+    source_group = _candidate_group(candidate)
+    if source_group and source_group != caller_group:
+        return False
+    if source_type == "architect_journal":
+        return _candidate_owner_id(candidate) == str(caller_id or "").strip()
+    if source_type == "decision":
+        return _candidate_owner_id(candidate) == str(caller_id or "").strip()
+    if source_type == "task":
+        return _candidate_source_id(candidate) in _filter_tasks_for_caller(
+            state,
+            "architect",
+            caller_id,
+        )
+    if source_type == "engineer_journal":
+        owner_id = _candidate_owner_id(candidate)
+        if not owner_id:
+            return False
+        engineer_id, _error = _resolve_architect_hired_engineer(
+            state,
+            caller_id,
+            owner_id,
+            include_tombstoned=True,
+        )
+        return engineer_id == owner_id
+    if source_type == "engineer_peer_thread":
+        return _architect_can_recall_peer_thread(state, caller_id, candidate)
+    return False
+
+
+async def _semantic_recall_json(
+        state,
+        caller_kind: str,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    _cell, caller_group, _kind, auth_error, auth_structured = authorize_caller(
+        state,
+        caller_kind=caller_kind,
+        caller_id=caller_id,
+    )
+    if auth_error:
+        return auth_error, auth_structured
+    query = str(args.get("query", "") or "").strip()
+    if not query:
+        return "query is required", True
+    limit, limit_error = normalize_recall_limit(args.get("limit"))
+    if limit_error:
+        return limit_error, True
+    if caller_kind == "architect":
+        visible = lambda candidate: _architect_recall_candidate_visible(
+            state,
+            caller_id,
+            caller_group,
+            candidate,
+        )
+    else:
+        visible = lambda candidate: _engineer_recall_candidate_visible(
+            state,
+            caller_id,
+            caller_group,
+            candidate,
+        )
+    try:
+        payload = await semantic_recall_payload(
+            state=state,
+            query=query,
+            limit=limit,
+            visibility_filter=visible,
+        )
+    except ValueError as exc:
+        return str(exc), True
+    payload["caller_kind"] = caller_kind
+    return _compact_json(payload), False
+
+
 def _append_cross_kind_message(cell, entry: dict) -> None:
     if not cell:
         return
@@ -4854,6 +5107,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "engineer_peer_inspect" and caller_kind == "architect":
         return _architect_engineer_peer_inspect_json(real_state, caller_id, args)
+
+    if tool_name == "semantic_recall":
+        return await _semantic_recall_json(
+            real_state,
+            caller_kind,
+            caller_id,
+            args,
+        )
 
     if tool_name == "mcp_calls":
         target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()

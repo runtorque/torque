@@ -55,6 +55,30 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_semantic_recall",
+        "description": (
+            "Search the local AI semantic index for snippets visible to this "
+            "Architect. Results are over-fetched then filtered through the "
+            "same Architect decision, journal, task, hired-engineer journal, "
+            "and engineer-peer-thread inspect visibility rules before any "
+            "text is returned."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language recall query.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum visible snippets to return (default 5, max 20).",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "architect_events_recent",
         "description": (
             "Return recent architect-scoped coarse panel events with task, "
