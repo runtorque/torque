@@ -98,6 +98,233 @@ class ServerModuleExtractionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize("ui-ux", valid_names={"ui-ux"})
 
+    def test_command_log_redactor_masks_nested_secret_fields(self):
+        raw_values = [
+            "sk-ant-raw-secret",
+            "Bearer raw-token",
+            "nested-password",
+            "private-key-material",
+            "top-token",
+        ]
+        redacted = self.server_mod._redact_command_log_payload({
+            "cmd": "update_ai_settings",
+            "settings": {"enabled": True},
+            "secrets": {
+                "anthropic": {"api_key": raw_values[0]},
+                "nested": [
+                    {"Authorization": raw_values[1]},
+                    {"password": raw_values[2]},
+                ],
+            },
+            "private_key": raw_values[3],
+            "token": raw_values[4],
+            "safe": {"value": "visible"},
+        })
+
+        dumped = json.dumps(redacted, sort_keys=True)
+        for raw in raw_values:
+            self.assertNotIn(raw, dumped)
+        self.assertNotIn("cmd", redacted)
+        self.assertEqual(redacted["safe"]["value"], "visible")
+        self.assertEqual(redacted["secrets"], "[REDACTED]")
+        self.assertEqual(redacted["private_key"], "[REDACTED]")
+        self.assertEqual(redacted["token"], "[REDACTED]")
+
+        nested = self.server_mod._redact_command_log_payload({
+            "cmd": "other",
+            "payload": {
+                "items": [
+                    {"api_key": raw_values[0]},
+                    {"Authorization": raw_values[1]},
+                    {"password": raw_values[2]},
+                ]
+            },
+        })
+        self.assertEqual(
+            nested["payload"]["items"][0]["api_key"],
+            "[REDACTED]",
+        )
+        self.assertEqual(
+            nested["payload"]["items"][1]["Authorization"],
+            "[REDACTED]",
+        )
+        self.assertEqual(
+            nested["payload"]["items"][2]["password"],
+            "[REDACTED]",
+        )
+
+    def test_get_ai_settings_returns_redacted_contract_shape(self):
+        from torque.db import TorqueDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            db.save_ai_provider_secret("anthropic", "sk-ant-secret-1234")
+            state = self.state_mod.MatrixState(db=db)
+            state.update_global_settings(
+                ai_enabled=True,
+                ai_generation_provider="anthropic",
+                ai_anthropic_model="claude-test",
+                ai_index_corpus={"tasks": False},
+            )
+
+            response = self.server_mod._build_ai_settings_response(state, db)
+            db.close()
+
+        self.assertEqual(response["type"], "ai_settings")
+        self.assertEqual(response["schema_version"], 1)
+        settings = response["settings"]
+        self.assertEqual(
+            set(settings),
+            {
+                "enabled",
+                "generation",
+                "embeddings",
+                "index",
+                "boot_summary",
+                "metering",
+            },
+        )
+        self.assertTrue(settings["enabled"])
+        generation = settings["generation"]
+        self.assertEqual(generation["provider"], "anthropic")
+        self.assertEqual(
+            generation["providers"],
+            ["anthropic", "openai_compatible"],
+        )
+        self.assertEqual(generation["anthropic"]["model"], "claude-test")
+        self.assertEqual(
+            generation["anthropic"]["key"],
+            {"configured": True, "last4": "1234",
+             "updated_at": generation["anthropic"]["key"]["updated_at"]},
+        )
+        self.assertGreater(generation["anthropic"]["key"]["updated_at"], 0)
+        self.assertEqual(
+            set(generation["openai_compatible"]),
+            {"base_url", "model", "key"},
+        )
+        self.assertEqual(
+            generation["openai_compatible"]["key"],
+            {"configured": False, "last4": "", "updated_at": 0},
+        )
+        self.assertEqual(settings["embeddings"]["model_id"], "BAAI/bge-m3")
+        self.assertEqual(settings["embeddings"]["desired_model_id"], "BAAI/bge-m3")
+        self.assertEqual(settings["embeddings"]["dependency"]["status"], "unknown")
+        self.assertEqual(settings["index"]["status"], "not_built")
+        self.assertFalse(settings["index"]["corpus"]["tasks"])
+        self.assertEqual(settings["index"]["counts"]["chunks"], 0)
+        self.assertEqual(settings["boot_summary"]["status"], "empty")
+        self.assertEqual(settings["metering"]["calls_24h"], 0)
+        self.assertNotIn(
+            "sk-ant-secret-1234",
+            json.dumps(response, sort_keys=True),
+        )
+
+    def test_update_ai_settings_stores_secret_without_echo_or_snapshot_leak(self):
+        from torque.db import TorqueDB
+
+        raw_key = "sk-ant-super-secret-4242"
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+
+            response = self.server_mod._apply_ai_settings_update_command(
+                state,
+                db,
+                {
+                    "cmd": "update_ai_settings",
+                    "settings": {
+                        "enabled": True,
+                        "generation": {
+                            "provider": "anthropic",
+                            "anthropic": {"model": "claude-test"},
+                            "openai_compatible": {
+                                "base_url": "http://localhost:11434/v1",
+                                "model": "local-model",
+                            },
+                        },
+                        "embeddings": {"model_id": "custom/model"},
+                        "index": {"corpus": {"tasks": False}},
+                        "boot_summary": {"enabled": False},
+                    },
+                    "secrets": {
+                        "anthropic": {"api_key": raw_key},
+                        "openai_compatible": {"api_key": ""},
+                    },
+                },
+            )
+
+            self.assertEqual(db.read_ai_provider_secret("anthropic"), raw_key)
+            self.assertEqual(db.read_ai_provider_secret("openai_compatible"), "")
+            serialized = json.dumps(response, sort_keys=True)
+            deltas = json.dumps(state._delta_ops, sort_keys=True)
+            state_snapshot = json.dumps(state.to_dict(), sort_keys=True)
+            compact_snapshot = json.dumps(state.to_dict_compact(), sort_keys=True)
+            offline_snapshot = json.dumps(db.load_all(), sort_keys=True)
+            db.close()
+
+        for surface in (
+            serialized,
+            deltas,
+            state_snapshot,
+            compact_snapshot,
+            offline_snapshot,
+        ):
+            self.assertNotIn(raw_key, surface)
+            self.assertNotIn("api_key", surface)
+        self.assertEqual(
+            response["settings"]["generation"]["anthropic"]["key"]["last4"],
+            "4242",
+        )
+        self.assertTrue(
+            response["settings"]["generation"]["anthropic"]["key"]["configured"]
+        )
+        ai_deltas = [
+            op for op in state._delta_ops
+            if op.get("op") == "ai_settings_update"
+        ]
+        self.assertEqual(len(ai_deltas), 1)
+        self.assertEqual(
+            ai_deltas[0]["settings"]["generation"]["anthropic"]["key"]["last4"],
+            "4242",
+        )
+        self.assertEqual(state.global_settings.ai_embedding_model, "custom/model")
+        self.assertFalse(state.global_settings.ai_index_corpus["tasks"])
+        self.assertFalse(state.global_settings.ai_boot_summary_enabled)
+
+    def test_update_ai_settings_clear_secret_returns_unconfigured_metadata(self):
+        from torque.db import TorqueDB
+
+        raw_key = "sk-ant-clear-me-3131"
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            db.save_ai_provider_secret("anthropic", raw_key)
+            state = self.state_mod.MatrixState(db=db)
+
+            response = self.server_mod._apply_ai_settings_update_command(
+                state,
+                db,
+                {
+                    "cmd": "update_ai_settings",
+                    "clear_secrets": ["anthropic"],
+                    "secrets": {"anthropic": {"api_key": ""}},
+                },
+            )
+
+            self.assertEqual(db.read_ai_provider_secret("anthropic"), "")
+            serialized = json.dumps(response, sort_keys=True)
+            deltas = json.dumps(state._delta_ops, sort_keys=True)
+            db.close()
+
+        self.assertNotIn(raw_key, serialized)
+        self.assertNotIn(raw_key, deltas)
+        self.assertEqual(
+            response["settings"]["generation"]["anthropic"]["key"],
+            {"configured": False, "last4": "", "updated_at": 0},
+        )
+
     def test_pr_task_ref_rewrite_uses_same_repo_short_ref(self):
         state = self._rewrite_state()
         self._task_with_github_sync(

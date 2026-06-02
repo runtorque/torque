@@ -51,11 +51,15 @@ from .doctor import build_doctor_report_for_db
 from dataclasses import asdict, dataclass
 from .state import (
     ARCHIVED_LANE,
+    AI_DEFAULT_EMBEDDING_MODEL,
+    AI_EMBEDDING_RUNTIMES,
+    AI_GENERATION_PROVIDERS,
     ArchitectSettings,
     BoardTask,
     EngineerSettings,
     COMPACT_SNAPSHOT_PROTOCOL,
     MatrixState,
+    default_ai_index_corpus,
     hot_json_dumps_async,
     hot_json_dumps_bytes_async,
     merge_cleanup_flags,
@@ -158,6 +162,305 @@ from .identity import (
 
 
 AUTO_CLOSE_SPAWNED_LABEL = "torque:auto-close-spawned-agent"
+
+_SECRET_COMMAND_LOG_KEY_RE = re.compile(
+    r"(api_key|secret|token|password|private_key|authorization)",
+    re.IGNORECASE,
+)
+_REDACTED_SECRET_VALUE = "[REDACTED]"
+
+
+def _redact_command_log_value(value, *, key: str = ""):
+    """Recursively redact secret-shaped command payload fields for logging."""
+    if _SECRET_COMMAND_LOG_KEY_RE.search(str(key or "")):
+        return _REDACTED_SECRET_VALUE
+    if isinstance(value, dict):
+        return {
+            str(item_key): _redact_command_log_value(
+                item_value,
+                key=str(item_key),
+            )
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _redact_command_log_value(item)
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return tuple(_redact_command_log_value(item) for item in value)
+    return value
+
+
+def _redact_command_log_payload(data: dict | None) -> dict:
+    """Return a command log payload with cmd omitted and secrets masked."""
+    return {
+        str(key): _redact_command_log_value(value, key=str(key))
+        for key, value in dict(data or {}).items()
+        if key != "cmd"
+    }
+
+
+def _empty_ai_secret_metadata() -> dict:
+    return {"configured": False, "last4": "", "updated_at": 0}
+
+
+def _ai_secret_metadata(db: TorqueDB | None, provider: str) -> dict:
+    if not db:
+        return _empty_ai_secret_metadata()
+    try:
+        getter = getattr(db, "get_ai_provider_secret_metadata", None)
+        if callable(getter):
+            return getter(provider)
+    except Exception:
+        log.exception("Failed to load AI provider secret metadata")
+    return _empty_ai_secret_metadata()
+
+
+def _build_ai_settings_response(
+    state: MatrixState,
+    db: TorqueDB | None = None,
+) -> dict:
+    """Build the redacted AI settings payload consumed by the Settings AI tab."""
+    gs = state.global_settings
+    enabled = bool(getattr(gs, "ai_enabled", False))
+    boot_summary_enabled = bool(
+        getattr(gs, "ai_boot_summary_enabled", True)
+    )
+    corpus = dict(default_ai_index_corpus())
+    persisted_corpus = getattr(gs, "ai_index_corpus", {}) or {}
+    if isinstance(persisted_corpus, dict):
+        for key in corpus:
+            if key in persisted_corpus:
+                corpus[key] = bool(persisted_corpus.get(key))
+    embedding_model = (
+        str(getattr(gs, "ai_embedding_model", "") or "").strip()
+        or AI_DEFAULT_EMBEDDING_MODEL
+    )
+    return {
+        "type": "ai_settings",
+        "schema_version": 1,
+        "settings": {
+            "enabled": enabled,
+            "generation": {
+                "provider": getattr(
+                    gs,
+                    "ai_generation_provider",
+                    "anthropic",
+                ),
+                "providers": list(AI_GENERATION_PROVIDERS),
+                "anthropic": {
+                    "model": getattr(gs, "ai_anthropic_model", ""),
+                    "key": _ai_secret_metadata(db, "anthropic"),
+                },
+                "openai_compatible": {
+                    "base_url": getattr(
+                        gs,
+                        "ai_openai_compatible_base_url",
+                        "",
+                    ),
+                    "model": getattr(
+                        gs,
+                        "ai_openai_compatible_model",
+                        "",
+                    ),
+                    "key": _ai_secret_metadata(db, "openai_compatible"),
+                },
+            },
+            "embeddings": {
+                "runtime": getattr(
+                    gs,
+                    "ai_embedding_runtime",
+                    AI_EMBEDDING_RUNTIMES[0],
+                ),
+                "model_id": embedding_model,
+                "default_model_id": AI_DEFAULT_EMBEDDING_MODEL,
+                "dependency": {
+                    "status": "unknown",
+                    "packages": ["sentence-transformers", "sqlite-vec"],
+                    "install_hint": "make ai-deps",
+                },
+                "active_model_id": "",
+                "active_dims": 0,
+                "desired_model_id": embedding_model,
+            },
+            "index": {
+                "status": "disabled" if not enabled else "not_built",
+                "corpus": corpus,
+                "counts": {
+                    "sources": 0,
+                    "chunks": 0,
+                    "indexed": 0,
+                    "pending": 0,
+                    "stale": 0,
+                    "errors": 0,
+                },
+                "last_built_at": 0,
+                "last_error": "",
+                "current_job": None,
+                "rebuild_warning": {
+                    "required": False,
+                    "reason": "",
+                    "estimated_entries": 0,
+                },
+            },
+            "boot_summary": {
+                "enabled": boot_summary_enabled,
+                "status": (
+                    "disabled"
+                    if (not enabled or not boot_summary_enabled)
+                    else "empty"
+                ),
+                "counts": {"ready": 0, "stale": 0, "errors": 0},
+                "last_refreshed_at": 0,
+                "last_error": "",
+            },
+            "metering": {
+                "last_call_at": 0,
+                "calls_24h": 0,
+                "input_tokens_24h": 0,
+                "output_tokens_24h": 0,
+                "cache_read_input_tokens_24h": 0,
+            },
+        },
+    }
+
+
+def _ai_settings_updates_from_payload(payload: dict | None) -> dict:
+    settings = dict(payload or {})
+    updates: dict[str, object] = {}
+    direct_keys = {
+        "ai_enabled",
+        "ai_generation_provider",
+        "ai_anthropic_model",
+        "ai_openai_compatible_base_url",
+        "ai_openai_compatible_model",
+        "ai_embedding_model",
+        "ai_embedding_runtime",
+        "ai_index_corpus",
+        "ai_boot_summary_enabled",
+    }
+    for key in direct_keys:
+        if key in settings:
+            updates[key] = settings[key]
+    if "enabled" in settings:
+        updates["ai_enabled"] = settings["enabled"]
+
+    generation = settings.get("generation")
+    if isinstance(generation, dict):
+        if "provider" in generation:
+            updates["ai_generation_provider"] = generation["provider"]
+        anthropic = generation.get("anthropic")
+        if isinstance(anthropic, dict) and "model" in anthropic:
+            updates["ai_anthropic_model"] = anthropic["model"]
+        openai = generation.get("openai_compatible")
+        if isinstance(openai, dict):
+            if "base_url" in openai:
+                updates["ai_openai_compatible_base_url"] = openai["base_url"]
+            if "model" in openai:
+                updates["ai_openai_compatible_model"] = openai["model"]
+
+    embeddings = settings.get("embeddings")
+    if isinstance(embeddings, dict):
+        if "model_id" in embeddings:
+            updates["ai_embedding_model"] = embeddings["model_id"]
+            # TODO(Slice 5): enforce confirm_embedding_rebuild and mark the
+            # vector index rebuild-pending once the index exists.
+        if "runtime" in embeddings:
+            updates["ai_embedding_runtime"] = embeddings["runtime"]
+
+    index = settings.get("index")
+    if isinstance(index, dict) and isinstance(index.get("corpus"), dict):
+        updates["ai_index_corpus"] = index["corpus"]
+
+    boot_summary = settings.get("boot_summary")
+    if isinstance(boot_summary, dict) and "enabled" in boot_summary:
+        updates["ai_boot_summary_enabled"] = boot_summary["enabled"]
+    return updates
+
+
+def _iter_clear_ai_secret_providers(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        candidates = [
+            key for key, should_clear in value.items() if bool(should_clear)
+        ]
+    elif isinstance(value, (list, tuple, set)):
+        candidates = list(value)
+    else:
+        candidates = [value]
+    providers: list[str] = []
+    for candidate in candidates:
+        provider = str(candidate or "").strip().lower()
+        if provider in AI_GENERATION_PROVIDERS and provider not in providers:
+            providers.append(provider)
+    return providers
+
+
+def _save_ai_secret_updates(
+    db: TorqueDB | None,
+    *,
+    secrets: dict | None,
+    clear_secrets,
+) -> None:
+    clear_providers = _iter_clear_ai_secret_providers(clear_secrets)
+    raw_secrets = secrets if isinstance(secrets, dict) else {}
+    has_secret_updates = bool(clear_providers or raw_secrets)
+    if has_secret_updates and not db:
+        raise RuntimeError("AI secret storage is unavailable")
+    if not db:
+        return
+    for provider in clear_providers:
+        db.clear_ai_provider_secret(provider)
+    for provider in AI_GENERATION_PROVIDERS:
+        item = raw_secrets.get(provider)
+        if item is None:
+            continue
+        if isinstance(item, dict):
+            if "api_key" not in item:
+                continue
+            api_key = item.get("api_key")
+        else:
+            api_key = item
+        api_key = str(api_key or "").strip()
+        if not api_key:
+            # Secret fields are write-only in the UI: blank means unchanged.
+            continue
+        db.save_ai_provider_secret(provider, api_key)
+
+
+def _emit_ai_settings_update_delta(
+    state: MatrixState,
+    response: dict,
+) -> None:
+    state._emit(
+        "ai_settings_update",
+        schema_version=int(response.get("schema_version", 1) or 1),
+        settings=dict(response.get("settings", {}) or {}),
+    )
+
+
+def _apply_ai_settings_update_command(
+    state: MatrixState,
+    db: TorqueDB | None,
+    data: dict,
+) -> dict:
+    """Apply update_ai_settings and return the redacted settings response."""
+    updates = _ai_settings_updates_from_payload(data.get("settings"))
+    # Validate before touching the secret table so a bad non-secret setting
+    # cannot partially commit a new raw key.
+    state._normalize_global_settings_updates(updates)
+    _save_ai_secret_updates(
+        db,
+        secrets=data.get("secrets"),
+        clear_secrets=data.get("clear_secrets"),
+    )
+    if updates:
+        state.update_global_settings(**updates)
+    response = _build_ai_settings_response(state, db)
+    _emit_ai_settings_update_delta(state, response)
+    return response
 
 
 @dataclass
@@ -14147,8 +14450,7 @@ async def main(connection=None):
         surfaces enforce architect/engineer/worker communication scope.
         """
         cmd = data.get("cmd")
-        log.info("CMD %s %s", cmd,
-                 {k: v for k, v in data.items() if k != "cmd"})
+        log.info("CMD %s %s", cmd, _redact_command_log_payload(data))
         critical_command_name = _critical_command_name(data)
         critical_idempotency_key = str(
             (data or {}).get("idempotency_key", "") or ""
@@ -14342,6 +14644,9 @@ async def main(connection=None):
                     state.global_settings, data_dir=str(DATA_DIR)
                 ),
             }
+
+        if cmd == "get_ai_settings":
+            return _build_ai_settings_response(state, db or state.db)
 
         # test_relay_connection: daemon-side connectivity probe for the Settings
         # "Relay" section "Test connection" button. Bounded + defensive; rides the
@@ -15081,6 +15386,13 @@ async def main(connection=None):
                 except Exception:
                     event_ingest_configured[0] = False
                     log.exception("Failed to reconfigure event ingest daemon")
+
+            elif cmd == "update_ai_settings":
+                result = _apply_ai_settings_update_command(
+                    state,
+                    db or state.db,
+                    data,
+                )
 
             elif cmd == "remove_group":
                 removed = state.remove_group(data["group"])

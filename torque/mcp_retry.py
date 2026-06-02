@@ -201,6 +201,7 @@ _API_READ_COMMANDS = {
     "get_config",
     "get_group_settings",
     "get_global_settings",
+    "get_ai_settings",
     "doctor",
     "get_events",
     "get_cell_events",

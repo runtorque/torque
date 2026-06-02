@@ -54,6 +54,18 @@ from torque.task_ids import (
 
 log = logging.getLogger("torque")
 
+AI_SECRET_PROVIDERS = {"anthropic", "openai_compatible"}
+
+
+def _normalize_ai_secret_provider(provider: str) -> str:
+    provider = str(provider or "").strip().lower()
+    if provider not in AI_SECRET_PROVIDERS:
+        raise ValueError(
+            "provider must be one of "
+            f"{', '.join(sorted(AI_SECRET_PROVIDERS))}"
+        )
+    return provider
+
 
 def _is_sqlite_lock_error(exc: BaseException) -> bool:
     if not isinstance(exc, sqlite3.OperationalError):
@@ -2173,6 +2185,66 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     xterm_scrollback,
                 ))
         self._conn.commit()
+
+    def save_ai_provider_secret(self, provider: str, api_key: str) -> dict:
+        """Store one raw provider API key and return masked metadata only."""
+        provider = _normalize_ai_secret_provider(provider)
+        api_key = str(api_key or "")
+        if not api_key:
+            raise ValueError("api_key must not be blank")
+        now = time.time()
+        existing = self._conn.execute(
+            "SELECT created_at FROM ai_provider_secrets WHERE provider=?",
+            (provider,),
+        ).fetchone()
+        created_at = float(existing[0]) if existing else now
+        self._conn.execute(
+            """
+            INSERT INTO ai_provider_secrets
+                (provider, api_key, created_at, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(provider) DO UPDATE SET
+                api_key=excluded.api_key,
+                updated_at=excluded.updated_at
+            """,
+            (provider, api_key, created_at, now),
+        )
+        self._conn.commit()
+        return self.get_ai_provider_secret_metadata(provider)
+
+    def read_ai_provider_secret(self, provider: str) -> str:
+        """Return one raw provider key for future AI call sites only."""
+        provider = _normalize_ai_secret_provider(provider)
+        row = self._conn.execute(
+            "SELECT api_key FROM ai_provider_secrets WHERE provider=?",
+            (provider,),
+        ).fetchone()
+        return str(row[0] or "") if row else ""
+
+    def clear_ai_provider_secret(self, provider: str) -> None:
+        provider = _normalize_ai_secret_provider(provider)
+        self._conn.execute(
+            "DELETE FROM ai_provider_secrets WHERE provider=?",
+            (provider,),
+        )
+        self._conn.commit()
+
+    def get_ai_provider_secret_metadata(self, provider: str) -> dict:
+        """Return redacted provider key metadata safe for UI/snapshots."""
+        provider = _normalize_ai_secret_provider(provider)
+        row = self._conn.execute(
+            "SELECT api_key, updated_at FROM ai_provider_secrets "
+            "WHERE provider=?",
+            (provider,),
+        ).fetchone()
+        if not row or not str(row[0] or ""):
+            return {"configured": False, "last4": "", "updated_at": 0}
+        key = str(row[0] or "")
+        return {
+            "configured": True,
+            "last4": key[-4:],
+            "updated_at": float(row[1] or 0),
+        }
 
     def save_auto_dispatch_queue(self, group_name: str, entries: list):
         """Replace one group's auto-dispatch queue."""
