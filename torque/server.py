@@ -20,6 +20,7 @@ from typing import Optional
 
 import aiohttp
 from aiohttp import web
+from . import ai_deps
 from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
@@ -276,9 +277,9 @@ def _build_ai_settings_response(
                 "model_id": embedding_model,
                 "default_model_id": AI_DEFAULT_EMBEDDING_MODEL,
                 "dependency": {
-                    "status": "unknown",
-                    "packages": ["sentence-transformers", "sqlite-vec"],
-                    "install_hint": "make ai-deps",
+                    "status": ai_deps.embeddings_dependency_status(),
+                    "packages": list(ai_deps.AI_DEPENDENCY_PACKAGES),
+                    "install_hint": ai_deps.AI_DEPS_INSTALL_HINT,
                 },
                 "active_model_id": "",
                 "active_dims": 0,

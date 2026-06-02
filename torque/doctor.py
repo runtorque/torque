@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import yaml
 
+from . import ai_deps
 from . import install_locations
 
 DOCTOR_SCHEMA_VERSION = 3
@@ -69,6 +71,22 @@ def _fetch_meta(conn: sqlite3.Connection, key: str) -> str:
         default="",
     )
     return str(value or "")
+
+
+def _fetch_global_setting(conn: sqlite3.Connection, key: str, default=None):
+    try:
+        row = conn.execute(
+            "SELECT value FROM global_settings WHERE key=?",
+            (key,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return default
+    if not row:
+        return default
+    try:
+        return json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return row[0]
 
 
 def _format_timestamp_display(value: str) -> str:
@@ -1330,6 +1348,46 @@ def _warn_primary_runtime_missing(report: dict) -> dict | None:
     }
 
 
+def _collect_ai_section(conn: sqlite3.Connection) -> dict:
+    dependency_status = ai_deps.embeddings_dependency_status()
+    return {
+        "enabled": bool(_fetch_global_setting(conn, "ai_enabled", False)),
+        "embeddings_dependency": {
+            "status": dependency_status,
+            "packages": list(ai_deps.AI_DEPENDENCY_PACKAGES),
+            "missing_packages": ai_deps.missing_ai_dependency_packages(),
+            "install_hint": ai_deps.AI_DEPS_INSTALL_HINT,
+        },
+    }
+
+
+def _warn_ai_optional_deps_missing(report: dict) -> dict | None:
+    ai = report.get("ai", {}) or {}
+    dependency = ai.get("embeddings_dependency", {}) or {}
+    if not bool(ai.get("enabled")):
+        return None
+    if dependency.get("status") != "missing":
+        return None
+    packages = list(dependency.get("missing_packages", []) or [])
+    if not packages:
+        packages = list(dependency.get("packages", []) or [])
+    return {
+        "name": "ai_optional_deps_missing",
+        "status": "warn",
+        "details": {
+            "packages": packages,
+            "install_hint": dependency.get(
+                "install_hint",
+                ai_deps.AI_DEPS_INSTALL_HINT,
+            ),
+            "hint": (
+                "AI is enabled but optional embedding dependencies are missing; "
+                f"run {dependency.get('install_hint', ai_deps.AI_DEPS_INSTALL_HINT)}"
+            ),
+        },
+    }
+
+
 def _collect_pty_supervisor_section(db_path: Path) -> dict:
     """Probe the PTY supervisor socket directly (no daemon required).
 
@@ -1431,6 +1489,7 @@ _DOCTOR_WARNINGS = [
     _warn_legacy_toolbelt_data_dir,
     _warn_legacy_appsupport_python_runtime,
     _warn_primary_runtime_missing,
+    _warn_ai_optional_deps_missing,
     _warn_stuck_input_sessions,
 ]
 
@@ -1471,6 +1530,7 @@ def build_doctor_report(
             architect_names=architect_names,
         ),
         "worktrees": _collect_worktrees_section(conn),
+        "ai": _collect_ai_section(conn),
         "pty_supervisor": _collect_pty_supervisor_section(db_path),
     }
     report["roles_templates"] = {
@@ -1563,6 +1623,8 @@ def format_doctor_report(report: dict) -> str:
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
+    ai = report.get("ai", {}) or {}
+    ai_dependency = ai.get("embeddings_dependency", {}) or {}
     pty_supervisor = report.get("pty_supervisor", {}) or {}
     pty_metrics = pty_supervisor.get("metrics", {}) or {}
     pty_health = pty_supervisor.get("health", {}) or {}
@@ -1734,6 +1796,16 @@ def format_doctor_report(report: dict) -> str:
         f"{str(bool(stage_6_cleanup.get('legacy_columns_present'))).lower()}",
         "  engineer_tool_aliases_present:    "
         f"{str(bool(stage_6_cleanup.get('engineer_tool_aliases_present'))).lower()}",
+        "",
+        "[ai]",
+        "  enabled:                        "
+        f"{str(bool(ai.get('enabled'))).lower()}",
+        "  embeddings_dependency_status:   "
+        f"{ai_dependency.get('status', '')}",
+        "  embeddings_dependency_packages: "
+        f"{', '.join(list(ai_dependency.get('packages', []) or []))}",
+        "  install_hint:                   "
+        f"{ai_dependency.get('install_hint', ai_deps.AI_DEPS_INSTALL_HINT)}",
         "",
         "[pty_supervisor]",
         "  state:                          "
@@ -1907,6 +1979,20 @@ def format_doctor_report(report: dict) -> str:
                 line = "  - Torque-owned runtime is missing; run make deps"
                 if primary_python:
                     line += f": {primary_python}"
+                lines.append(line)
+            elif name == "ai_optional_deps_missing":
+                packages = ", ".join(details.get("packages", []) or [])
+                hint = str(
+                    details.get("install_hint", ai_deps.AI_DEPS_INSTALL_HINT) or ""
+                )
+                line = (
+                    "  - AI is enabled but optional embedding dependencies are "
+                    "missing"
+                )
+                if packages:
+                    line += f": {packages}"
+                if hint:
+                    line += f" (run {hint})"
                 lines.append(line)
             else:
                 lines.append(f"  - {name}")

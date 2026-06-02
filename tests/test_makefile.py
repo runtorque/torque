@@ -44,6 +44,32 @@ class MakefileInstallTests(unittest.TestCase):
         self.assertIn("--requirements \"requirements/desktop.txt\"", proc.stdout)
         self.assertNotIn("iTerm2 Python not found", proc.stdout)
 
+    def test_ai_deps_dry_run_installs_optional_requirements_only_on_ai_target(self):
+        proc = self._run_make_dry(
+            "ai-deps",
+            "TORQUE_BASE_PYTHON=/usr/bin/python3",
+            "TORQUE_RUNTIME_VENV=/tmp/torque-runtime-test/venv",
+        )
+
+        self.assertIn("--requirements \"requirements/desktop.txt\"", proc.stdout)
+        self.assertIn("-m pip install -r \"requirements/ai.txt\"", proc.stdout)
+
+        deploy = self._run_make_dry(
+            "deploy",
+            "TORQUE_BASE_PYTHON=/usr/bin/python3",
+            "TORQUE_RUNTIME_VENV=/tmp/torque-runtime-test/venv",
+        )
+        self.assertNotIn("requirements/ai.txt", deploy.stdout)
+
+        self.assertNotIn(
+            "requirements/ai.txt",
+            (ROOT / "requirements" / "daemon.txt").read_text(encoding="utf-8"),
+        )
+        self.assertNotIn(
+            "requirements/ai.txt",
+            (ROOT / "requirements" / "desktop.txt").read_text(encoding="utf-8"),
+        )
+
     def test_toolbelt_deploy_install_run_surface_removed(self):
         text = (ROOT / "Makefile").read_text(encoding="utf-8")
 

@@ -15,7 +15,7 @@ from torque.db import TorqueDB
 from torque.doctor import build_doctor_report_for_db, format_doctor_report
 
 install_aiohttp_stub()
-from torque.state import AgentCell, BoardTask, GroupSettings
+from torque.state import AgentCell, BoardTask, GlobalSettings, GroupSettings
 
 
 class TorqueDoctorTests(unittest.TestCase):
@@ -152,6 +152,35 @@ class TorqueDoctorTests(unittest.TestCase):
         self.assertIn("state:                          down", text)
         self.assertIn("connected:                      false", text)
         self.assertIn("time_since_last_successful_op:  12.5", text)
+
+    def test_build_doctor_report_warns_for_ai_enabled_missing_optional_deps(self):
+        home = self._home_dir()
+        self.db.save_global_settings(GlobalSettings(ai_enabled=True))
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+             mock.patch(
+                 "torque.doctor.ai_deps.embeddings_dependency_status",
+                 return_value="missing",
+             ), \
+             mock.patch(
+                 "torque.doctor.ai_deps.missing_ai_dependency_packages",
+                 return_value=["sentence-transformers", "sqlite-vec"],
+             ):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        warning_names = [warning["name"] for warning in report["warnings"]]
+        self.assertEqual(report["result"], "pass")
+        self.assertNotIn("ai_optional_deps_missing", report["failed_checks"])
+        self.assertIn("ai_optional_deps_missing", warning_names)
+        self.assertEqual(report["ai"]["embeddings_dependency"]["status"], "missing")
+        self.assertIn("[ai]", rendered)
+        self.assertIn("embeddings_dependency_status:   missing", rendered)
+        self.assertIn(
+            "AI is enabled but optional embedding dependencies are missing: "
+            "sentence-transformers, sqlite-vec (run make ai-deps)",
+            rendered,
+        )
 
     def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
         home = self._home_dir()

@@ -5,6 +5,7 @@ TORQUE_RUNTIME_VENV ?= $(TORQUE_RUNTIME_ROOT)/venv
 TORQUE_RUNTIME_PYTHON ?= $(TORQUE_RUNTIME_VENV)/bin/python
 TORQUE_BASE_PYTHON ?= python3
 TORQUE_RUNTIME_REQUIREMENTS ?= requirements/desktop.txt
+TORQUE_AI_REQUIREMENTS ?= requirements/ai.txt
 PRIMARY_PORT    ?= 18933
 TORQUE_MIN_PYTHON := 3.10
 TORQUE_PYTHON  := $(TORQUE_RUNTIME_PYTHON)
@@ -18,7 +19,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install-standalone uninstall run bootstrap deps desktop-deps check stop deploy cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
+.PHONY: install-standalone uninstall run bootstrap deps desktop-deps ai-deps check stop deploy cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
 
 ## install-standalone: Copy the primary standalone/desktop app files to ~/.torque/app
 install-standalone:
@@ -72,6 +73,11 @@ deps: bootstrap
 ## desktop-deps: Compatibility alias; pywebview is included in the primary runtime
 desktop-deps: deps
 	@echo "pywebview is included in $(TORQUE_RUNTIME_REQUIREMENTS) and installed in: $(TORQUE_RUNTIME_PYTHON)"
+
+## ai-deps: Install optional AI embeddings/indexing dependencies into the runtime venv
+ai-deps: deps
+	@"$(TORQUE_RUNTIME_PYTHON)" -m pip install -r "$(TORQUE_AI_REQUIREMENTS)"
+	@echo "Optional AI dependencies installed in: $(TORQUE_RUNTIME_PYTHON)"
 
 ## run: Launch the primary desktop app (native shell backed by standalone daemon)
 run: desktop
