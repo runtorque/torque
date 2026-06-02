@@ -25,6 +25,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "docs/reference/architecture.md",
             "docs/reference/hooks-gotchas.md",
             "docs/reference/install-locations.md",
+            "docs/operate/ai.md",
             "docs/operate/manual-testing.md",
         ):
             self.assertIn(reference, claude)
@@ -36,6 +37,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "reference/architecture.md",
             "reference/hooks-gotchas.md",
             "reference/install-locations.md",
+            "operate/ai.md",
             "operate/manual-testing.md",
         ):
             self.assertIn(reference, nav)
@@ -54,6 +56,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "## Architecture map",
             "## Persistence and state",
             "### Kinds refactor invariants",
+            "### AI subsystem invariants",
             "### Torque context namespace",
             "## Worker dispatch and reporting",
             "## Code conventions",
@@ -69,6 +72,7 @@ class BootContextBudgetDocsTest(unittest.TestCase):
             "docs/reference/hooks-gotchas.md",
             "docs/reference/install-locations.md",
             "docs/reference/specializations.md",
+            "docs/operate/ai.md",
             "docs/operate/manual-testing.md",
         ):
             with self.subTest(reference=reference):

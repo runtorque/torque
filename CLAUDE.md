@@ -75,7 +75,14 @@ See [docs/reference/architecture.md](docs/reference/architecture.md) for the det
 - Architect ↔ engineer messaging is the only architect cross-kind channel. Engineers may message only their hiring architect. Workers report only through `torque_*` status / derive / ask flows.
 - Worker worktrees use `torque/<engineer-slug>/<worker-slug>-<shortid>` or `torque/user/<worker-slug>-<shortid>`; engineer/architect worktrees stay flat; grandfathered flat worker branches remain valid.
 - Review-cycle fixes stay on the implementer's branch. A `feature/review` → `feature/implement` fix is parented to the review's parent so worktree inheritance skips the reviewer. Merge refuses sibling review/implement branches with unmerged commits unless `force=true` is explicit after diffing.
-- `torque doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership/scope invariants. Full design record: [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
+- `torque doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership/scope invariants.
+
+### AI subsystem invariants
+
+- AI is off by default and best-effort only: failures degrade to raw deterministic tools and must never break boot, dispatch, review, merge, or daemon startup.
+- Raw provider keys live only in `ai_provider_secrets`; never put them in `GlobalSettings`, snapshots, exports, or logs.
+- Embeddings run off the event loop. Semantic recall is read-only and reuses the TORQUE:801 same-architect peer-inspection authorization path.
+- Optional AI embedding deps are installed with `make ai-deps`; they are not part of base deploy.
 
 ### Torque context namespace
 
@@ -120,5 +127,6 @@ Moved reference material lives here to keep boot context small:
 - [Detailed architecture reference](docs/reference/architecture.md)
 - [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
 - [Install locations](docs/reference/install-locations.md)
+- [AI operator guide](docs/operate/ai.md)
 - [Manual testing](docs/operate/manual-testing.md)
 - [Releasing](docs/operate/releasing.md) — dispatch-to-release flow (`gh workflow run release-macos.yml -f version=X.Y.Z`)

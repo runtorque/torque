@@ -418,8 +418,6 @@ def _ai_settings_updates_from_payload(payload: dict | None) -> dict:
     if isinstance(embeddings, dict):
         if "model_id" in embeddings:
             updates["ai_embedding_model"] = embeddings["model_id"]
-            # TODO(Slice 5): enforce confirm_embedding_rebuild and mark the
-            # vector index rebuild-pending once the index exists.
         if "runtime" in embeddings:
             updates["ai_embedding_runtime"] = embeddings["runtime"]
 
