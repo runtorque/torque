@@ -5083,6 +5083,144 @@ def _promote_task_for_active_report(state: MatrixState, cell, task) -> None:
         state._db_save_agent(cell)
 
 
+async def _worktree_branch_has_commits_ahead(cell, worktree_mgr) -> bool:
+    """Return whether ``cell``'s worktree branch is ahead of its base branch."""
+    if not cell:
+        return False
+    try:
+        if int(getattr(cell, "worktree_ahead", 0) or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    if not (
+        getattr(cell, "worktree_path", "")
+        and getattr(cell, "worktree_base_branch", "")
+    ):
+        return False
+    ahead_behind = getattr(worktree_mgr, "_ahead_behind", None)
+    if not callable(ahead_behind):
+        return False
+    try:
+        result = ahead_behind(cell)
+        if asyncio.iscoroutine(result):
+            result = await result
+        ahead = result[0] if result else 0
+        return int(ahead or 0) > 0
+    except Exception:
+        log.exception(
+            "Failed to probe worktree ahead state for '%s'",
+            getattr(cell, "name", "") or getattr(cell, "id", ""),
+        )
+        return False
+
+
+def _stream_review_derive_parent_task(state: MatrixState, stream: dict):
+    """Return the implementation parent implied by a computed worktree stream."""
+    if not state or not stream:
+        return None
+    candidate_ids = []
+    for key in ("foreground_task_id", "latest_boundary_task_id"):
+        task_id = str(stream.get(key, "") or "").strip()
+        if task_id:
+            candidate_ids.append(task_id)
+    for task_id in reversed(stream.get("product_task_ids", []) or []):
+        task_id = str(task_id or "").strip()
+        if task_id:
+            candidate_ids.append(task_id)
+
+    seen = set()
+    for task_id in candidate_ids:
+        if task_id in seen:
+            continue
+        seen.add(task_id)
+        task = state.board_tasks.get(task_id)
+        if not task:
+            continue
+        if _looks_like_review_task(task):
+            continue
+        return task
+    return None
+
+
+def _stream_has_open_feature_review_boundary(
+    state: MatrixState,
+    *,
+    repo_root: str,
+    branch: str,
+) -> bool:
+    """Return whether a feature/review boundary is already open on a stream."""
+    if not state or not repo_root or not branch:
+        return False
+    for task in branch_boundary_tasks(
+        state.board_tasks.values(),
+        repo_root=repo_root,
+        branch=branch,
+        statuses={"open"},
+    ):
+        if _is_feature_review_task(task):
+            return True
+    return False
+
+
+async def _resolve_feature_review_derive_stream_backstop_task(
+    state: MatrixState,
+    cell,
+    worktree_mgr,
+):
+    """Resolve a feature/review derive parent from worktree stream state.
+
+    This intentionally does not rehydrate ``cell.current_task_id``.  It is only
+    a narrow backstop for resumed/non-linked workers that still have branch work
+    to review and no review already in flight for the same worktree stream.
+    """
+    if not state or not cell:
+        return None
+    if str(getattr(cell, "current_task_id", "") or "").strip():
+        return None
+
+    repo_root = str(
+        getattr(cell, "worktree_repo_root", "")
+        or getattr(cell, "git_root", "")
+        or ""
+    ).strip()
+    branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+    if not repo_root or not branch:
+        return None
+    if not await _worktree_branch_has_commits_ahead(cell, worktree_mgr):
+        return None
+
+    try:
+        stream = compute_worktree_stream(
+            state,
+            repo_root=repo_root,
+            branch=branch,
+            group=getattr(cell, "group", "") or "",
+            stream_agent_ids={getattr(cell, "id", "")},
+            branch_exists_cache={
+                (os.path.realpath(os.path.expanduser(repo_root)), branch):
+                True
+            },
+        ) or {}
+    except Exception:
+        log.exception(
+            "Failed to compute worktree stream for feature/review derive "
+            "backstop on branch '%s'",
+            branch,
+        )
+        return None
+
+    if str(stream.get("active_review_task_id", "") or "").strip():
+        return None
+    if _stream_has_open_feature_review_boundary(
+        state,
+        repo_root=repo_root,
+        branch=branch,
+    ):
+        return None
+    return _stream_review_derive_parent_task(state, stream)
+
+
 def _reject_completion_with_open_descendants(state: MatrixState, task,
                                              action_name: str) -> dict | None:
     if not task:
@@ -19780,6 +19918,21 @@ async def main(connection=None):
                         cell,
                         task_id=task_id,
                     )
+                    derive_stream_backstop = False
+                    if (
+                        not task
+                        and not str(task_id or "").strip()
+                        and action == "derive"
+                        and str(
+                            data.get("action_name", "") or ""
+                        ).strip().lower() == _REVIEW_GATE_ACTION
+                    ):
+                        task = await _resolve_feature_review_derive_stream_backstop_task(
+                            state,
+                            cell,
+                            worktree_mgr,
+                        )
+                        derive_stream_backstop = bool(task)
                     resume_targets = _capture_auto_resume_targets(
                         state,
                         task=task,
@@ -19900,7 +20053,8 @@ async def main(connection=None):
 
                     elif action in {"progress", "blocked", "error",
                                      "verify", "derive", "ask"}:
-                        _promote_task_for_active_report(state, cell, task)
+                        if not derive_stream_backstop:
+                            _promote_task_for_active_report(state, cell, task)
 
                     if (
                         not (result and result.get("type") == "error")

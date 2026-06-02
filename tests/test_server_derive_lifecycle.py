@@ -263,6 +263,9 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         def list_actions(self, _base_dir):
             return []
 
+        def get_auto_close_on_done(self, _action_name, *, base_dir=""):
+            return False
+
     def _make_state(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
@@ -419,6 +422,23 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
                 "warning": "⚠ STALE BASE: torque/impl forked behind main",
             }
 
+    class _ReviewBackstopWorktreeManager:
+        def __init__(self, *, ahead=1, head="reviewed-head"):
+            self.ahead = ahead
+            self.head = head
+
+        async def _ahead_behind(self, _cell, worktree_submodules=None):
+            return self.ahead, 0
+
+        async def stale_base_info(self, _cell):
+            return {"stale": False}
+
+        async def has_uncommitted_changes(self, _cell):
+            return False
+
+        async def current_head(self, _cell):
+            return self.head
+
     def _add_second_review_cycle_chain(self, state, *,
                                        reviewer_status="idle",
                                        reviewer_session="review-1-session"):
@@ -465,6 +485,285 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             agent_id=implementer.id,
         )
         return implementer, reviewer, root, fix
+
+    def _make_stream_backstop_implementer(self, state, *,
+                                          current_task_id=""):
+        implementer = self._make_agent(
+            "impl-1",
+            status="running",
+            current_task_id=current_task_id,
+        )
+        implementer.worktree_path = "/repo/.torque/worktrees/impl-1"
+        implementer.worktree_repo_root = "/repo"
+        implementer.git_root = "/repo"
+        implementer.worktree_branch = "torque/impl-1"
+        implementer.worktree_base_branch = "main"
+        state.agents[implementer.id] = implementer
+        state.groups["g"].append(implementer.id)
+        return implementer
+
+    def _add_stream_backstop_parent_boundary(self, state, implementer, *,
+                                             task_id="task-root",
+                                             agent_id="",
+                                             lane="In Progress"):
+        task = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane=lane,
+            id=task_id,
+            action_name="feature/implement",
+            agent_id=agent_id,
+        )
+        task.worktree_boundary = {
+            "version": "1",
+            "repo_root": implementer.worktree_repo_root,
+            "branch": implementer.worktree_branch,
+            "base_branch": implementer.worktree_base_branch,
+            "status": "open",
+            "recorded_at": "2026-04-07T10:00:00+00:00",
+            "commit_sha": "impl-head",
+            "recorded_by_agent_id": implementer.id,
+        }
+        return task
+
+    async def test_feature_review_derive_stream_backstop_restores_shared_branch_review(self):
+        state = self._make_state()
+        implementer = self._make_stream_backstop_implementer(state)
+        parent = self._add_stream_backstop_parent_boundary(
+            state,
+            implementer,
+        )
+        worktree_mgr = self._ReviewBackstopWorktreeManager(
+            ahead=1,
+            head="reviewed-head",
+        )
+        calls = []
+
+        async def dispatch(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "dispatch_task")
+            self.assertTrue(payload.get("create_agent"))
+            self.assertEqual(payload.get("inherit_worktree_from"),
+                             implementer.id)
+            self.assertEqual(payload.get("handoff_worktree_from"),
+                             implementer.id)
+            task = state.board_tasks[payload["id"]]
+            reviewer = self._make_agent(
+                "created-reviewer",
+                status="running",
+                current_task_id="",
+            )
+            reviewer.worktree_path = implementer.worktree_path
+            reviewer.worktree_repo_root = implementer.worktree_repo_root
+            reviewer.git_root = implementer.git_root
+            reviewer.worktree_branch = implementer.worktree_branch
+            reviewer.worktree_base_branch = implementer.worktree_base_branch
+            state.agents[reviewer.id] = reviewer
+            state.groups["g"].append(reviewer.id)
+            task.agent_id = reviewer.id
+            task.lane = "In Progress"
+            return {
+                "type": "ok",
+                "task_id": task.id,
+                "agent_id": reviewer.id,
+            }
+
+        async def record_task_boundary(task, cell, message=""):
+            for older in self.server_mod.branch_boundary_tasks(
+                state.board_tasks.values(),
+                repo_root=cell.worktree_repo_root,
+                branch=cell.worktree_branch,
+                statuses={"open"},
+            ):
+                if older.id == task.id:
+                    continue
+                boundary = dict(older.worktree_boundary or {})
+                boundary["status"] = "superseded"
+                boundary["superseded_by_task_id"] = task.id
+                older.worktree_boundary = boundary
+            task.worktree_boundary = {
+                "version": "1",
+                "repo_root": cell.worktree_repo_root,
+                "branch": cell.worktree_branch,
+                "base_branch": cell.worktree_base_branch,
+                "status": "open",
+                "recorded_at": "2026-04-07T12:00:00+00:00",
+                "commit_sha": await worktree_mgr.current_head(cell),
+                "recorded_by_agent_id": cell.id,
+                "message": message,
+            }
+            return dict(task.worktree_boundary)
+
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=worktree_mgr,
+            closure_overrides={
+                "_record_task_boundary": record_task_boundary,
+            },
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review implementation",
+        })
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(result["agent_id"], "created-reviewer")
+        self.assertEqual(implementer.current_task_id, "")
+        self.assertEqual(parent.agent_id, "")
+        reviews = [
+            task for task in state.board_tasks.values()
+            if task.action_name == "feature/review"
+        ]
+        self.assertEqual(len(reviews), 1)
+        review = reviews[0]
+        self.assertEqual(review.parent_task_id, parent.id)
+        self.assertNotEqual(review.agent_id, implementer.id)
+
+        done = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": review.agent_id,
+            "action": "done",
+            "message": "Ship",
+        })
+
+        self.assertTrue(done is None or done.get("type") == "ok", done)
+        self.assertEqual(review.worktree_boundary["repo_root"],
+                         implementer.worktree_repo_root)
+        self.assertEqual(review.worktree_boundary["branch"],
+                         implementer.worktree_branch)
+        self.assertEqual(review.worktree_boundary["commit_sha"],
+                         "reviewed-head")
+        self.assertEqual(parent.worktree_boundary["status"], "superseded")
+        latest = self.server_mod.latest_boundary_task(
+            state.board_tasks.values(),
+            repo_root=implementer.worktree_repo_root,
+            branch=implementer.worktree_branch,
+            statuses={"open"},
+        )
+        self.assertEqual(latest.id, review.id)
+
+    async def test_feature_review_derive_stream_backstop_does_not_fire_without_ahead_commits(self):
+        state = self._make_state()
+        implementer = self._make_stream_backstop_implementer(state)
+        self._add_stream_backstop_parent_boundary(state, implementer)
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=self._ReviewBackstopWorktreeManager(ahead=0),
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review implementation",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["message"], "No linked task to derive from")
+        self.assertEqual(calls, [])
+        self.assertEqual([
+            task.id for task in state.board_tasks.values()
+            if task.action_name == "feature/review"
+        ], [])
+
+    async def test_feature_review_derive_stream_backstop_does_not_fire_with_open_review_boundary(self):
+        state = self._make_state()
+        implementer = self._make_stream_backstop_implementer(state)
+        parent = self._add_stream_backstop_parent_boundary(state, implementer)
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="Done",
+            id="task-review",
+            action_name="feature/review",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": implementer.worktree_repo_root,
+            "branch": implementer.worktree_branch,
+            "base_branch": implementer.worktree_base_branch,
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "reviewed-head",
+            "recorded_by_agent_id": "reviewer-1",
+        }
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=self._ReviewBackstopWorktreeManager(ahead=1),
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review implementation again",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["message"], "No linked task to derive from")
+        self.assertEqual(calls, [])
+        self.assertEqual([
+            task.id for task in state.board_tasks.values()
+            if task.action_name == "feature/review"
+        ], [review.id])
+
+    async def test_feature_review_derive_stream_backstop_does_not_fire_when_tracked_task_exists(self):
+        state = self._make_state()
+        implementer = self._make_stream_backstop_implementer(
+            state,
+            current_task_id="task-live",
+        )
+        live = state.board_add_task(
+            "Implement tracked feature",
+            "g",
+            lane="In Progress",
+            id="task-live",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+        )
+        boundary = self._add_stream_backstop_parent_boundary(
+            state,
+            implementer,
+            task_id="task-boundary",
+        )
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=self._ReviewBackstopWorktreeManager(ahead=0),
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review tracked implementation",
+        })
+
+        self.assertEqual(result["type"], "ok")
+        reviews = [
+            task for task in state.board_tasks.values()
+            if task.action_name == "feature/review"
+        ]
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0].parent_task_id, live.id)
+        self.assertNotEqual(reviews[0].parent_task_id, boundary.id)
+        self.assertEqual(calls[0]["inherit_worktree_from"], implementer.id)
 
     async def test_feature_review_derive_reuses_live_prior_reviewer_in_chain(self):
         state = self._make_state()
