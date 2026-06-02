@@ -168,7 +168,12 @@ class ServerModuleExtractionTests(unittest.TestCase):
                 ai_index_corpus={"tasks": False},
             )
 
-            response = self.server_mod._build_ai_settings_response(state, db)
+            with mock.patch.object(
+                self.server_mod.ai_deps,
+                "embeddings_dependency_status",
+                return_value="available",
+            ):
+                response = self.server_mod._build_ai_settings_response(state, db)
             db.close()
 
         self.assertEqual(response["type"], "ai_settings")
@@ -209,7 +214,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
         )
         self.assertEqual(settings["embeddings"]["model_id"], "BAAI/bge-m3")
         self.assertEqual(settings["embeddings"]["desired_model_id"], "BAAI/bge-m3")
-        self.assertEqual(settings["embeddings"]["dependency"]["status"], "unknown")
+        self.assertEqual(settings["embeddings"]["dependency"]["status"], "available")
         self.assertEqual(settings["index"]["status"], "not_built")
         self.assertFalse(settings["index"]["corpus"]["tasks"])
         self.assertEqual(settings["index"]["counts"]["chunks"], 0)

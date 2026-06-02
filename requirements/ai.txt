@@ -1,0 +1,5 @@
+# Optional AI embeddings/indexing dependencies.
+# Installed only on demand with `make ai-deps`; base deploy paths must not
+# consume this file.
+sentence-transformers
+sqlite-vec
