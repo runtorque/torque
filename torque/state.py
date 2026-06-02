@@ -89,6 +89,16 @@ _DEFAULT_STATUS_BAR_VISIBILITY = {
     "tasks": True,
     "attention": True,
 }
+AI_GENERATION_PROVIDERS = ("anthropic", "openai_compatible")
+AI_EMBEDDING_RUNTIMES = ("sentence_transformers",)
+AI_DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
+AI_INDEX_CORPUS_KEYS = (
+    "architect_journals",
+    "engineer_journals",
+    "decisions",
+    "tasks",
+    "engineer_peer_threads",
+)
 AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 AGENT_MESSAGE_HISTORY_LIMIT = 100
 PEER_MESSAGE_CACHE_LIMIT = 20
@@ -488,6 +498,49 @@ def normalize_relay_enabled(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def default_ai_index_corpus() -> dict[str, bool]:
+    """Return the default corpus toggles for AI semantic indexing."""
+    return {key: True for key in AI_INDEX_CORPUS_KEYS}
+
+
+def normalize_ai_generation_provider(value, *, strict: bool = True) -> str:
+    provider = str(value or "").strip().lower()
+    if provider not in AI_GENERATION_PROVIDERS:
+        if not strict:
+            return AI_GENERATION_PROVIDERS[0]
+        raise ValueError(
+            "ai_generation_provider must be one of "
+            f"{', '.join(AI_GENERATION_PROVIDERS)}"
+        )
+    return provider
+
+
+def normalize_ai_embedding_runtime(value, *, strict: bool = True) -> str:
+    runtime = str(value or "").strip().lower()
+    if runtime not in AI_EMBEDDING_RUNTIMES:
+        if not strict:
+            return AI_EMBEDDING_RUNTIMES[0]
+        raise ValueError(
+            "ai_embedding_runtime must be one of "
+            f"{', '.join(AI_EMBEDDING_RUNTIMES)}"
+        )
+    return runtime
+
+
+def normalize_ai_text(value) -> str:
+    return str(value or "").strip()
+
+
+def normalize_ai_index_corpus(value) -> dict[str, bool]:
+    normalized = default_ai_index_corpus()
+    if not isinstance(value, dict):
+        return normalized
+    for key in normalized:
+        if key in value:
+            normalized[key] = normalize_relay_enabled(value.get(key))
+    return normalized
 
 
 def default_status_bar_visibility() -> dict[str, bool]:
@@ -2081,6 +2134,20 @@ class GlobalSettings:
     relay_daemon_id: str = ""
     relay_credential_id: str = ""
     relay_private_key_path: str = ""
+    # AI settings (non-secret only). Raw provider keys are intentionally stored
+    # outside GlobalSettings because this dataclass is persisted in snapshots,
+    # global_settings_update deltas, and CLI/offline reads.
+    ai_enabled: bool = False
+    ai_generation_provider: str = "anthropic"
+    ai_anthropic_model: str = ""
+    ai_openai_compatible_base_url: str = ""
+    ai_openai_compatible_model: str = ""
+    ai_embedding_model: str = AI_DEFAULT_EMBEDDING_MODEL
+    ai_embedding_runtime: str = "sentence_transformers"
+    ai_index_corpus: dict[str, bool] = field(
+        default_factory=default_ai_index_corpus
+    )
+    ai_boot_summary_enabled: bool = True
 
     def __post_init__(self):
         self.xterm_scrollback = normalize_xterm_scrollback(
@@ -2120,6 +2187,32 @@ class GlobalSettings:
         self.relay_credential_id = normalize_relay_text(self.relay_credential_id)
         self.relay_private_key_path = normalize_relay_text(
             self.relay_private_key_path
+        )
+        self.ai_enabled = normalize_relay_enabled(self.ai_enabled)
+        self.ai_generation_provider = normalize_ai_generation_provider(
+            self.ai_generation_provider,
+            strict=False,
+        )
+        self.ai_anthropic_model = normalize_ai_text(self.ai_anthropic_model)
+        self.ai_openai_compatible_base_url = normalize_ai_text(
+            self.ai_openai_compatible_base_url
+        )
+        self.ai_openai_compatible_model = normalize_ai_text(
+            self.ai_openai_compatible_model
+        )
+        self.ai_embedding_model = (
+            normalize_ai_text(self.ai_embedding_model)
+            or AI_DEFAULT_EMBEDDING_MODEL
+        )
+        self.ai_embedding_runtime = normalize_ai_embedding_runtime(
+            self.ai_embedding_runtime,
+            strict=False,
+        )
+        self.ai_index_corpus = normalize_ai_index_corpus(
+            self.ai_index_corpus
+        )
+        self.ai_boot_summary_enabled = normalize_relay_enabled(
+            self.ai_boot_summary_enabled
         )
 
 
@@ -8966,6 +9059,27 @@ class MatrixState:
                     "relay_private_key_path",
                 ):
                     value = normalize_relay_text(value)
+                elif key == "ai_enabled":
+                    value = normalize_relay_enabled(value)
+                elif key == "ai_generation_provider":
+                    value = normalize_ai_generation_provider(value)
+                elif key in (
+                    "ai_anthropic_model",
+                    "ai_openai_compatible_base_url",
+                    "ai_openai_compatible_model",
+                ):
+                    value = normalize_ai_text(value)
+                elif key == "ai_embedding_model":
+                    value = (
+                        normalize_ai_text(value)
+                        or AI_DEFAULT_EMBEDDING_MODEL
+                    )
+                elif key == "ai_embedding_runtime":
+                    value = normalize_ai_embedding_runtime(value)
+                elif key == "ai_index_corpus":
+                    value = normalize_ai_index_corpus(value)
+                elif key == "ai_boot_summary_enabled":
+                    value = normalize_relay_enabled(value)
                 updates[key] = value
         return updates
 
