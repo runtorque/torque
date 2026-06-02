@@ -63,6 +63,7 @@ _INSTRUCTIONS_BLOCK_RE = re.compile(
 _CODEX_HOOK_EVENT_LABELS = {
     "SessionStart": "session_start",
     "PreToolUse": "pre_tool_use",
+    "PermissionRequest": "permission_request",
     "Stop": "stop",
 }
 
@@ -99,7 +100,11 @@ def _current_torque_port() -> str:
 
 
 
-def _torque_event_curl_command(url: str) -> str:
+def _torque_event_curl_command(
+    url: str,
+    *,
+    discard_response_stdout: bool = False,
+) -> str:
     """Return a command hook that posts stdin JSON durably to /events.
 
     The Python shim adds a deterministic event_id when the agent hook payload
@@ -121,6 +126,10 @@ def _torque_event_curl_command(url: str) -> str:
         + ' -H "X-Torque-Cell-Id: $TORQUE_CELL_ID"'
         + ' --data-binary @"$tmp"'
     )
+    if discard_response_stdout:
+        # PermissionRequest hooks can make allow/deny decisions via stdout.
+        # Torque is a passive observer, so that hook must emit no response body.
+        curl += " --output /dev/null"
     # Use a temp file rather than piping into curl so curl can rewind the
     # request body for HTTP 503 retry attempts.
     return (
@@ -406,6 +415,52 @@ def _dict_value(source: dict, *keys: str):
         if key in source:
             return source.get(key)
     return None
+
+
+def _codex_tool_input_payload(raw: dict):
+    if not isinstance(raw, dict):
+        return {}
+    if "tool_input" in raw:
+        value = raw.get("tool_input")
+    else:
+        value = raw.get("input", {})
+    return {} if value is None else value
+
+
+def _codex_tool_activity_detail(tool: str, tool_input) -> str:
+    """Return a human-facing detail for Codex PreToolUse-style payloads."""
+    tool = str(tool or "").strip()
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    normalized = tool.lower().replace("-", "_")
+
+    if normalized in ("bash", "shell", "command"):
+        cmd = str(inp.get("command", "") or inp.get("cmd", "") or "").strip()
+        return f"Running: {_truncate(cmd, 40)}" if cmd else f"Using {tool}"
+
+    if normalized in ("apply_patch", "applypatch", "patch"):
+        return "Applying patch"
+
+    if tool.startswith("mcp__"):
+        return tool
+
+    # Codex MCP payloads may arrive either as a fully-qualified mcp__ tool name
+    # or as a generic MCP tool plus server/tool fields.  Preserve the
+    # fully-qualified shape when possible so the existing card/UI humanizers can
+    # count and label the call without exposing raw ids to operators.
+    if normalized in ("mcp", "mcp_tool", "mcp_tool_call"):
+        server = str(
+            _dict_value(inp, "server", "server_name", "mcp_server") or ""
+        ).strip()
+        mcp_tool = str(
+            _dict_value(inp, "tool_name", "name", "tool") or ""
+        ).strip()
+        if mcp_tool.startswith("mcp__"):
+            return mcp_tool
+        if server and mcp_tool:
+            return f"mcp__{server}__{mcp_tool}"
+        return tool or "Using MCP"
+
+    return f"Using {tool}" if tool else "Working"
 
 
 def _read_text_tail(path: Path, max_bytes: int) -> str:
@@ -738,10 +793,13 @@ class CodexAdapter(AgentAdapter):
         """
         timeout = 8
 
-        def _cmd_hook(matcher=None):
+        def _cmd_hook(matcher=None, *, discard_response_stdout=False):
             h = {"type": "command", "timeout": timeout,
                  "command": (
-                     _torque_event_curl_command(_torque_hook_url())
+                     _torque_event_curl_command(
+                         _torque_hook_url(),
+                         discard_response_stdout=discard_response_stdout,
+                     )
                  )}
             entry = {"hooks": [h]}
             if matcher:
@@ -752,6 +810,13 @@ class CodexAdapter(AgentAdapter):
             "hooks": {
                 "SessionStart": _cmd_hook(),
                 "PreToolUse": _cmd_hook(".*"),
+                # PermissionRequest can be policy-bearing in Codex.  Torque's
+                # hook is deliberately passive: it observes the prompt and
+                # suppresses the curl response body so stdout never emits an
+                # allow/deny decision.
+                "PermissionRequest": _cmd_hook(
+                    discard_response_stdout=True,
+                ),
                 # PostToolUse omitted — Codex command hooks print a noisy
                 # "Running PostToolUse hook" message for every tool call.
                 # The tool_end state reset is cosmetic and happens naturally
@@ -965,13 +1030,10 @@ class CodexAdapter(AgentAdapter):
 
         if hook_event == "PreToolUse":
             tool = raw.get("tool_name", "") or raw.get("name", "")
-            inp = raw.get("tool_input", {}) or raw.get("input", {})
-            # Codex currently fires Pre/PostToolUse only for Bash
-            if tool.lower() in ("bash", "shell", "command"):
-                cmd = inp.get("command", "") or inp.get("cmd", "")
-                detail = f"Running: {_truncate(cmd, 40)}" if cmd else f"Using {tool}"
-            else:
-                detail = f"Using {tool}" if tool else "Working"
+            inp = _codex_tool_input_payload(raw)
+            # Codex PreToolUse now covers shell, apply_patch, and MCP calls.
+            # Keep details tool-aware instead of assuming a Bash-only payload.
+            detail = _codex_tool_activity_detail(tool, inp)
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="tool_start",
@@ -979,6 +1041,23 @@ class CodexAdapter(AgentAdapter):
                     "tool": tool,
                     "input": inp,
                     "detail": detail,
+                }),
+            )
+
+        if hook_event == "PermissionRequest":
+            tool = raw.get("tool_name", "") or raw.get("name", "")
+            inp = _codex_tool_input_payload(raw)
+            detail = _codex_tool_activity_detail(tool, inp)
+            reason = "Waiting for approval"
+            if detail and detail != "Working":
+                reason += f": {detail}"
+            return AgentEvent(
+                cell_id=cell.id, timestamp=now,
+                event_type="waiting",
+                data=_attach_live_usage({
+                    "tool": tool,
+                    "input": inp,
+                    "reason": reason,
                 }),
             )
 

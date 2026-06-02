@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from torque import event_ingest_daemon, profiling
-from torque.event_ingest_db import EventIngestStore
+from torque.event_ingest_db import EventIngestStore, event_call_row_from_record
 from torque.event_ingest_daemon import (
     EventIngestDaemon,
     PROTOCOL_VERSION,
@@ -96,7 +96,8 @@ class _Harness:
 
 class EventIngestStoreTests(unittest.TestCase):
     def _envelope(self, cell_id, tool_name, hook, *, tool_input=None,
-                  tool_output=None, session_id="sess", received_at=0):
+                  tool_output=None, tool_response=None,
+                  session_id="sess", received_at=0):
         raw = {
             "hook_event_name": hook,
             "tool_name": tool_name,
@@ -106,6 +107,8 @@ class EventIngestStoreTests(unittest.TestCase):
             raw["tool_input"] = tool_input
         if tool_output is not None:
             raw["tool_output"] = tool_output
+        if tool_response is not None:
+            raw["tool_response"] = tool_response
         return build_event_ingest_envelope(
             raw,
             headers={"X-Torque-Cell-Id": cell_id},
@@ -329,6 +332,63 @@ class EventIngestStoreTests(unittest.TestCase):
                 meta.close()
                 full.close()
                 allow.close()
+
+    def test_call_row_maps_codex_tool_response_result(self):
+        event = self._envelope(
+            "cell",
+            "mcp__torque__torque_context",
+            "PostToolUse",
+            tool_response={"content": [{"type": "text", "text": "ok"}]},
+            received_at=123,
+        )
+
+        row = event_call_row_from_record({
+            "cursor": 7,
+            "idempotency_key": "codex-response",
+            "event": event,
+            "appended_at": 456,
+        })
+
+        self.assertEqual(row["cell_id"], "cell")
+        self.assertEqual(row["tool_name"], "mcp__torque__torque_context")
+        self.assertEqual(row["hook_event_name"], "PostToolUse")
+        self.assertEqual(
+            row["result"],
+            {"content": [{"type": "text", "text": "ok"}]},
+        )
+        self.assertFalse(row["result_redacted"])
+
+    def test_tool_response_redacts_with_output_capture_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event = self._envelope(
+                "cell",
+                "mcp__torque__secret",
+                "PostToolUse",
+                tool_response={"result": "secret"},
+            )
+            off = EventIngestStore(
+                Path(tmp) / "off.db",
+                args_capture="off",
+            ).init()
+            meta = EventIngestStore(
+                Path(tmp) / "meta.db",
+                args_capture="metadata",
+            ).init()
+            try:
+                off.append(event, "off")
+                off_row = event_call_row_from_record(off.query(limit=1)[0])
+                self.assertIsNone(off_row["result"])
+                self.assertTrue(off_row["result_redacted"])
+                self.assertNotIn("tool_response", off_row["raw"])
+
+                meta.append(event, "meta")
+                meta_row = event_call_row_from_record(meta.query(limit=1)[0])
+                self.assertTrue(meta_row["result_redacted"])
+                self.assertTrue(meta_row["result"]["redacted"])
+                self.assertNotIn("secret", json.dumps(meta_row["result"]))
+            finally:
+                off.close()
+                meta.close()
 
     def test_retention_trims_by_row_count_and_age(self):
         with tempfile.TemporaryDirectory() as tmp:
