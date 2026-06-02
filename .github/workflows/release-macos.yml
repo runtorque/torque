@@ -1,35 +1,128 @@
 name: Release macOS
 
+# Dispatch-to-release flow (TORQUE:806): a release is cut by running this workflow
+# with a version. The workflow owns version handling end-to-end — it stamps all
+# version sources, commits the bump to main, creates the annotated tag ON that
+# commit, then builds and publishes. There is no manual multi-file bump and no
+# assert-or-fail gate; the tag always points at the fully-bumped tree.
+#
+# To cut a release:    gh workflow run release-macos.yml -f version=2.2.0
+# To validate safely:  gh workflow run release-macos.yml -f version=2.2.0 -f dry_run=true
+#                      (builds from a throwaway tag, publishes a draft prerelease,
+#                       then deletes the draft + throwaway tag/branch; main untouched)
+
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Existing git tag to release, for example v1.1.0"
+      version:
+        description: "Release version without leading v, e.g. 2.2.0"
         required: true
         type: string
-      draft:
-        description: "Create a draft release when the release does not exist"
-        required: true
-        default: true
-        type: boolean
-      prerelease:
-        description: "Mark a newly created release as a prerelease"
-        required: true
+      dry_run:
+        description: "Validate end-to-end without touching main (throwaway tag + draft prerelease, auto-cleaned)."
+        required: false
         default: false
         type: boolean
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare:
+    name: Cut version commit + tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.cut.outputs.version }}
+      tag: ${{ steps.cut.outputs.tag }}
+      ref: ${{ steps.cut.outputs.ref }}
+      dry_run: ${{ steps.cut.outputs.dry_run }}
+      dryrun_branch: ${{ steps.cut.outputs.dryrun_branch }}
+    steps:
+      - name: Check out the dispatch ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Bump version, commit, and tag
+        id: cut
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          version="${VERSION_INPUT#v}"
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "Version must look like X.Y.Z. Got: $VERSION_INPUT" >&2
+              exit 1
+              ;;
+          esac
+          tag="v$version"
+          dry_run="${DRY_RUN:-false}"
+
+          # Real releases are always cut from main; dry runs may validate any branch.
+          if [ "$dry_run" != "true" ] && [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "Real releases must be dispatched from main (dispatched from: ${GITHUB_REF_NAME})." >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Never clobber an existing release on a real cut.
+          if git ls-remote --tags --exit-code origin "refs/tags/$tag" >/dev/null 2>&1; then
+            if [ "$dry_run" != "true" ]; then
+              echo "Tag $tag already exists on origin. Bump to a new version." >&2
+              exit 1
+            fi
+          fi
+
+          # Single source of truth for which files carry the version.
+          python3 scripts/set_release_version.py "$version"
+          git add VERSION torque/__init__.py src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+          git commit \
+            -m "Bump version to $version" \
+            -m "Cut by the release-macos workflow (workflow_dispatch). Stamps the five version sources via scripts/set_release_version.py."
+
+          if [ "$dry_run" = "true" ]; then
+            run_tag="${tag}-dryrun.${GITHUB_RUN_ID}"
+            dryrun_branch="ci/release-dryrun/${run_tag}"
+            git push origin "HEAD:refs/heads/${dryrun_branch}"
+            git tag -a "$run_tag" -m "Torque $version (dry run)"
+            git push origin "refs/tags/${run_tag}"
+            {
+              echo "ref=$run_tag"
+              echo "tag=$run_tag"
+              echo "dryrun_branch=$dryrun_branch"
+            } >> "$GITHUB_OUTPUT"
+          else
+            git push origin HEAD:main
+            git tag -a "$tag" -m "Torque $version"
+            git push origin "refs/tags/${tag}"
+            {
+              echo "ref=$tag"
+              echo "tag=$tag"
+              echo "dryrun_branch="
+            } >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "version=$version"
+            echo "dry_run=$dry_run"
+          } >> "$GITHUB_OUTPUT"
+
   build:
     name: Build macOS ${{ matrix.name }}
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -48,53 +141,8 @@ jobs:
       - name: Check out release ref
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
-
-      - name: Resolve release metadata
-        id: metadata
-        env:
-          DISPATCH_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "${DISPATCH_TAG:-}" ]; then
-            release_tag="$DISPATCH_TAG"
-          else
-            release_tag="$GITHUB_REF_NAME"
-          fi
-
-          case "$release_tag" in
-            v[0-9]*.[0-9]*.[0-9]*)
-              version="${release_tag#v}"
-              ;;
-            *)
-              echo "Release tags must look like v1.2.3. Got: $release_tag" >&2
-              exit 1
-              ;;
-          esac
-
-          git rev-parse --verify --quiet "$release_tag^{commit}" >/dev/null
-
-          file_version="$(tr -d '[:space:]' < VERSION)"
-          cargo_version="$(awk -F' = ' '/^version = / { gsub(/"/, "", $2); print $2; exit }' src-tauri/Cargo.toml)"
-          tauri_version="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["version"])')"
-
-          if [ "$version" != "$file_version" ]; then
-            echo "Tag $release_tag does not match VERSION ($file_version)." >&2
-            exit 1
-          fi
-          if [ "$version" != "$cargo_version" ]; then
-            echo "Tag $release_tag does not match src-tauri/Cargo.toml ($cargo_version)." >&2
-            exit 1
-          fi
-          if [ "$version" != "$tauri_version" ]; then
-            echo "Tag $release_tag does not match src-tauri/tauri.conf.json ($tauri_version)." >&2
-            exit 1
-          fi
-
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust stable
         run: |
@@ -216,7 +264,7 @@ jobs:
 
       - name: Collect artifacts
         env:
-          VERSION: ${{ steps.metadata.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -253,7 +301,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - name: Download macOS artifacts
@@ -262,33 +310,6 @@ jobs:
           pattern: torque-macos-*
           path: dist
           merge-multiple: true
-
-      - name: Resolve release metadata
-        id: metadata
-        env:
-          DISPATCH_TAG: ${{ github.event.inputs.tag }}
-          DRAFT_INPUT: ${{ github.event.inputs.draft }}
-          PRERELEASE_INPUT: ${{ github.event.inputs.prerelease }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "${DISPATCH_TAG:-}" ]; then
-            release_tag="$DISPATCH_TAG"
-          else
-            release_tag="$GITHUB_REF_NAME"
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            draft="${DRAFT_INPUT:-true}"
-            prerelease="${PRERELEASE_INPUT:-false}"
-          else
-            draft="false"
-            prerelease="false"
-          fi
-
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "draft=$draft" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Add aggregate checksum file
         run: |
@@ -303,9 +324,9 @@ jobs:
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.metadata.outputs.release_tag }}
-          RELEASE_DRAFT: ${{ steps.metadata.outputs.draft }}
-          RELEASE_PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
         run: |
           set -euo pipefail
 
@@ -326,11 +347,34 @@ jobs:
             --title "Torque ${RELEASE_TAG}"
             --generate-notes
           )
-          if [ "$RELEASE_DRAFT" = "true" ]; then
-            args+=(--draft)
-          fi
-          if [ "$RELEASE_PRERELEASE" = "true" ]; then
-            args+=(--prerelease)
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--draft --prerelease)
           fi
 
           gh release create "${args[@]}" --repo "$GITHUB_REPOSITORY"
+
+  cleanup-dry-run:
+    name: Clean up dry-run artifacts
+    needs: [prepare, build, release]
+    if: ${{ always() && needs.prepare.outputs.dry_run == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete dry-run release, tag, and branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          DRYRUN_BRANCH: ${{ needs.prepare.outputs.dryrun_branch }}
+        run: |
+          set -uo pipefail
+
+          # Remove the draft release and its throwaway tag (idempotent; ok if absent).
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            || echo "No release to delete for $TAG."
+          if git ls-remote --tags --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
+              || echo "Could not delete tag $TAG."
+          fi
+          if [ -n "${DRYRUN_BRANCH:-}" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$DRYRUN_BRANCH" \
+              || echo "Could not delete branch $DRYRUN_BRANCH."
+          fi

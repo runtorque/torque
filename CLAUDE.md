@@ -121,3 +121,4 @@ Moved reference material lives here to keep boot context small:
 - [Claude Code hooks gotchas](docs/reference/hooks-gotchas.md)
 - [Install locations](docs/reference/install-locations.md)
 - [Manual testing](docs/operate/manual-testing.md)
+- [Releasing](docs/operate/releasing.md) — dispatch-to-release flow (`gh workflow run release-macos.yml -f version=X.Y.Z`)
