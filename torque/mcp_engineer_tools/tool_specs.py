@@ -20,6 +20,17 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "engineer_boot_summary",
+        "description": (
+            "Return this Engineer's cached AI boot-recovery summary. "
+            "Read-only: never performs a live provider call. If the status is "
+            "empty, stale, refreshing, or error, fall back to "
+            "engineer_journal_read while keeping engineer_session_map as the "
+            "deterministic snapshot."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "engineer_session_map",
         "description": (
             "Return a deterministic structured Session Map for the "

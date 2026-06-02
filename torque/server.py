@@ -23,6 +23,7 @@ from aiohttp import web
 from . import ai_deps
 from .ai_embeddings import LocalEmbeddingService
 from .ai_index import AIIndexService
+from .ai_summaries import AISummaryService
 from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
@@ -253,6 +254,16 @@ def _build_ai_settings_response(
     index_counts = dict(index_payload.get("counts", {}) or {})
     current_job = index_payload.get("current_job")
     rebuild_warning = dict(index_payload.get("rebuild_warning", {}) or {})
+    summary_payload = {}
+    if db:
+        try:
+            getter = getattr(db, "ai_get_summary_status_payload", None)
+            if callable(getter):
+                summary_payload = getter() or {}
+        except Exception:
+            log.exception("Failed to load AI summary status payload")
+            summary_payload = {}
+    summary_counts = dict(summary_payload.get("counts", {}) or {})
     index_status = (
         "disabled"
         if not enabled
@@ -336,11 +347,27 @@ def _build_ai_settings_response(
                 "status": (
                     "disabled"
                     if (not enabled or not boot_summary_enabled)
-                    else "empty"
+                    else (
+                        "ready"
+                        if int(summary_counts.get("ready", 0) or 0)
+                        else (
+                            "stale"
+                            if int(summary_counts.get("stale", 0) or 0)
+                            else "empty"
+                        )
+                    )
                 ),
-                "counts": {"ready": 0, "stale": 0, "errors": 0},
-                "last_refreshed_at": 0,
-                "last_error": "",
+                "counts": {
+                    "ready": int(summary_counts.get("ready", 0) or 0),
+                    "stale": int(summary_counts.get("stale", 0) or 0),
+                    "refreshing": int(summary_counts.get("refreshing", 0) or 0),
+                    "empty": int(summary_counts.get("empty", 0) or 0),
+                    "errors": int(summary_counts.get("errors", 0) or 0),
+                },
+                "last_refreshed_at": float(
+                    summary_payload.get("last_refreshed_at", 0) or 0
+                ),
+                "last_error": str(summary_payload.get("last_error", "") or ""),
             },
             "metering": {
                 "last_call_at": 0,
@@ -514,6 +541,7 @@ def _apply_ai_settings_update_command(
     data: dict,
     *,
     ai_index_service: AIIndexService | None = None,
+    ai_summary_service: AISummaryService | None = None,
 ) -> dict:
     """Apply update_ai_settings and return the redacted settings response."""
     updates = _ai_settings_updates_from_payload(data.get("settings"))
@@ -572,6 +600,17 @@ def _apply_ai_settings_update_command(
         "ai_enabled" in updates or "ai_index_corpus" in updates
     ):
         ai_index_service.schedule_incremental("ai_settings_change")
+    if ai_summary_service is not None and any(
+        key in updates
+        for key in (
+            "ai_enabled",
+            "ai_boot_summary_enabled",
+            "ai_generation_provider",
+            "ai_anthropic_model",
+            "ai_openai_compatible_model",
+        )
+    ):
+        ai_summary_service.schedule_all_boot_summaries("ai_settings_change")
     response = _build_ai_settings_response(state, db)
     _emit_ai_settings_update_delta(state, response)
     return response
@@ -8480,6 +8519,7 @@ async def _shutdown_daemon_runtime(
     event_ingest_client,
     cloud_connector_runtime=None,
     ai_index_service=None,
+    ai_summary_service=None,
     bridge,
     runner,
     state,
@@ -8526,6 +8566,11 @@ async def _shutdown_daemon_runtime(
             await ai_index_service.shutdown()
         except Exception:
             log.exception("AI index service shutdown failed")
+    if ai_summary_service is not None:
+        try:
+            await ai_summary_service.shutdown()
+        except Exception:
+            log.exception("AI summary service shutdown failed")
     try:
         await bridge.shutdown()
     except Exception:
@@ -13112,8 +13157,13 @@ async def main(connection=None):
         data_dir=DATA_DIR,
         broadcast_callback=state.broadcast,
     )
+    ai_summary_service = AISummaryService(
+        db=db,
+        state=state,
+    )
     state.ai_embedding_service = embedding_service
     state.ai_index_service = ai_index_service
+    state.ai_summary_service = ai_summary_service
     if bool(getattr(state.global_settings, "ai_enabled", False)):
         try:
             asyncio.get_running_loop().call_later(
@@ -13121,8 +13171,14 @@ async def main(connection=None):
                 ai_index_service.schedule_incremental,
                 "startup",
             )
+            if bool(getattr(state.global_settings, "ai_boot_summary_enabled", True)):
+                asyncio.get_running_loop().call_later(
+                    3.0,
+                    ai_summary_service.schedule_all_boot_summaries,
+                    "startup",
+                )
         except Exception:
-            log.exception("Failed to schedule startup AI index scan")
+            log.exception("Failed to schedule startup AI jobs")
     def _schedule_ai_index_from_delta(delta: dict) -> None:
         op = str((delta or {}).get("op", "") or "")
         if op in {
@@ -13136,6 +13192,13 @@ async def main(connection=None):
             "agent_peer_thread_remove",
         }:
             ai_index_service.schedule_incremental(op)
+        if op in {
+            "architect_journal_append",
+            "journal_append",
+            "decision_upsert",
+            "decision_remove",
+        }:
+            ai_summary_service.schedule_for_delta(delta)
 
     state.register_delta_observer(_schedule_ai_index_from_delta)
     capture_deploy_boot_state(state, torque_config.SCRIPT_DIR)
@@ -15962,6 +16025,7 @@ async def main(connection=None):
                     db or state.db,
                     data,
                     ai_index_service=ai_index_service,
+                    ai_summary_service=ai_summary_service,
                 )
 
             elif cmd == "ai_index_start":
@@ -23102,6 +23166,7 @@ async def main(connection=None):
             event_ingest_client=event_ingest_client,
             cloud_connector_runtime=cloud_connector_runtime_holder[0],
             ai_index_service=ai_index_service,
+            ai_summary_service=ai_summary_service,
             bridge=bridge,
             runner=runner,
             state=state,

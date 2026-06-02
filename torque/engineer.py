@@ -163,8 +163,8 @@ You have access to engineer_* MCP tools:
 
 **Read**: engineer_board_list, engineer_task_show, engineer_agents_list, \
 engineer_agent_show, engineer_actions_list, engineer_action_show, \
-engineer_board_summary, engineer_session_map, engineer_streams_list, \
-engineer_stream_show
+engineer_boot_summary, engineer_board_summary, engineer_session_map, \
+engineer_streams_list, engineer_stream_show
 **Write**: engineer_task_create, engineer_task_edit, engineer_task_verify, engineer_task_move, \
 engineer_task_dispatch, engineer_batch_dispatch, engineer_task_resolve
 **Events**: engineer_events, engineer_notifications, engineer_resume
@@ -284,8 +284,11 @@ Operational rules:
    - task_verification_updated → review pending/failed verification before sending the next wave
 
 8. **Context recovery** — After a /clear or restart, your first actions
-   should be: engineer_journal_read → engineer_session_map → engineer_events.
-   Use `engineer_board_summary` when you want the compact snapshot and
+   should be: engineer_boot_summary → engineer_journal_read (when the
+   summary is `empty`, `stale`, `refreshing`, or `error`, or exact detail is
+   needed) → engineer_session_map → engineer_events. Keep
+   `engineer_session_map` as the deterministic snapshot. Use
+   `engineer_board_summary` when you want the compact board snapshot and
    `engineer_board_list` only when you need the full task inventory. Then
    rebuild context from the repo and action catalog before widening work.
 
