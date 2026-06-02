@@ -10171,6 +10171,37 @@ class MatrixState:
             default=-1,
         ) + 1
 
+    def _board_live_transition_lane(self, group: str, *,
+                                    agent_id: str = "") -> str:
+        """Return the active lane for a task that has just gone live.
+
+        Backlog represents unscheduled work.  A live task without a concrete
+        worker is best represented as To Do; once an agent is attached, prefer
+        the group's dispatch lane.
+        """
+        active_exclusions = {"", "Backlog", "Done", ARCHIVED_LANE}
+
+        def _valid_active(lane: str) -> str:
+            lane = str(lane or "").strip()
+            if lane and lane in self.board_lanes and lane not in active_exclusions:
+                return lane
+            return ""
+
+        dispatch_lane = self.get_group_settings(group).dispatch_lane or ""
+        if str(agent_id or "").strip():
+            candidates = (dispatch_lane, "In Progress", "To Do")
+        else:
+            candidates = ("To Do", dispatch_lane, "In Progress")
+        for lane in candidates:
+            active_lane = _valid_active(lane)
+            if active_lane:
+                return active_lane
+        for lane in self.board_lanes:
+            active_lane = _valid_active(lane)
+            if active_lane:
+                return active_lane
+        return ""
+
     def _board_apply_archive_state(self, task: BoardTask, *,
                                    lane: str,
                                    archived_at: str,
@@ -10281,6 +10312,15 @@ class MatrixState:
             kwargs["dispatch_state"] = TASK_DISPATCH_STATE_LIVE
         else:
             kwargs["dispatch_state"] = TASK_DISPATCH_STATE_QUEUED
+        if (
+                kwargs["dispatch_state"] == TASK_DISPATCH_STATE_LIVE
+                and lane == "Backlog"):
+            live_lane = self._board_live_transition_lane(
+                group,
+                agent_id=kwargs.get("agent_id", ""),
+            )
+            if live_lane:
+                lane = live_lane
         if "board_sync" in kwargs:
             kwargs["board_sync"] = _normalize_board_sync(kwargs["board_sync"])
         _normalize_verification_fields(kwargs)
@@ -10358,6 +10398,21 @@ class MatrixState:
             fields["dispatch_state"] = _normalize_task_dispatch_state(
                 fields.get("dispatch_state")
             )
+        old_dispatch_state = _normalize_task_dispatch_state(
+            getattr(task, "dispatch_state", TASK_DISPATCH_STATE_QUEUED)
+        )
+        new_dispatch_state = fields.get("dispatch_state", old_dispatch_state)
+        if (
+                old_dispatch_state != TASK_DISPATCH_STATE_LIVE
+                and new_dispatch_state == TASK_DISPATCH_STATE_LIVE
+                and task.lane == "Backlog"
+                and fields.get("lane", task.lane) == "Backlog"):
+            live_lane = self._board_live_transition_lane(
+                fields.get("group", task.group),
+                agent_id=fields.get("agent_id", task.agent_id),
+            )
+            if live_lane:
+                fields["lane"] = live_lane
         if "board_sync" in fields:
             fields["board_sync"] = _normalize_board_sync(fields["board_sync"])
         _normalize_verification_fields(fields)

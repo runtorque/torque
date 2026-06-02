@@ -1518,10 +1518,16 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(text)
         task = self.state.board_tasks[payload["task_id"]]
         self.assertEqual(task.dispatch_state, "live")
+        self.assertEqual(task.lane, "To Do")
         self.assertEqual(payload["dispatch_state"], "live")
         self.assertEqual(payload["dispatch"]["task_id"], task.id)
         self.assertEqual(payload["dispatch"]["dispatch_state"], "live")
         self.assertEqual(payload["dispatch"]["engineer_id"], alice.id)
+        creates = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "board_add_task"
+        ]
+        self.assertEqual(creates[0]["lane"], "To Do")
         injects = [
             call for call in self.handle_calls
             if call.get("cmd") == "inject_mcp_message"
@@ -1567,6 +1573,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["task_id"], task_id)
         self.assertEqual(payload["dispatch_state"], "live")
         self.assertEqual(self.state.board_tasks[task_id].dispatch_state, "live")
+        self.assertEqual(self.state.board_tasks[task_id].lane, "To Do")
 
     async def test_architect_message_task_id_inference_uses_exact_references(self):
         architect = self._add_architect("arch-1", "Architect")
