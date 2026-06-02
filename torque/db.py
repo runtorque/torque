@@ -68,6 +68,7 @@ AI_INDEX_SOURCE_TYPES = {
     "task",
     "engineer_peer_thread",
 }
+AI_SUMMARY_STATUSES = {"empty", "ready", "stale", "refreshing", "error"}
 
 
 def _normalize_ai_secret_provider(provider: str) -> str:
@@ -201,6 +202,43 @@ def _ai_source_dict(row, cols=None) -> dict | None:
         item.get("visibility_json", "{}"), {}
     )
     for key in ("discovered_at", "last_seen_at", "indexed_at"):
+        try:
+            item[key] = float(item.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            item[key] = 0.0
+    return item
+
+
+def _ai_summary_status(value: str) -> str:
+    status = str(value or "").strip().lower()
+    return status if status in AI_SUMMARY_STATUSES else "empty"
+
+
+def _ai_summary_dict(row, cols=None) -> dict | None:
+    if not row:
+        return None
+    cols = cols or [
+        "summary_key",
+        "summary_type",
+        "scope_kind",
+        "scope_ref",
+        "provider",
+        "model",
+        "prompt_version",
+        "source_hash",
+        "source_counts",
+        "summary_text",
+        "status",
+        "generated_at",
+        "updated_at",
+        "error",
+    ]
+    item = dict(zip(cols, row))
+    item["source_counts"] = _json_loads_default(
+        item.get("source_counts", "{}"), {}
+    )
+    item["status"] = _ai_summary_status(item.get("status", "empty"))
+    for key in ("generated_at", "updated_at"):
         try:
             item[key] = float(item.get(key, 0) or 0)
         except (TypeError, ValueError):
@@ -2490,6 +2528,193 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "cache_read_input_tokens",
         ]
         return [dict(zip(cols, row)) for row in rows]
+
+    # -- AI summary cache helpers ------------------------------------------
+
+    def ai_load_summary(
+        self,
+        summary_key: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> dict | None:
+        """Load one cached AI summary row."""
+
+        summary_key = str(summary_key or "").strip()
+        if not summary_key:
+            return None
+        executor = conn or self._conn
+        cursor = executor.execute(
+            "SELECT summary_key, summary_type, scope_kind, scope_ref, "
+            "provider, model, prompt_version, source_hash, source_counts, "
+            "summary_text, status, generated_at, updated_at, error "
+            "FROM ai_summaries WHERE summary_key=?",
+            (summary_key,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _ai_summary_dict(row, [d[0] for d in cursor.description])
+
+    def ai_upsert_summary(
+        self,
+        row_dict: dict,
+        conn: sqlite3.Connection | None = None,
+        *,
+        commit: bool = True,
+    ) -> dict:
+        """Upsert one cached AI summary row and return the normalized row."""
+
+        row = dict(row_dict or {})
+        summary_key = str(row.get("summary_key", "") or "").strip()
+        if not summary_key:
+            raise ValueError("summary_key is required")
+        existing = self.ai_load_summary(summary_key, conn=conn) or {}
+        now = float(row.get("updated_at", 0) or time.time())
+        source_counts = row.get("source_counts", existing.get("source_counts", {}))
+        if not isinstance(source_counts, dict):
+            source_counts = _json_loads_default(source_counts, {})
+        generated_at = float(
+            row.get("generated_at", existing.get("generated_at", 0)) or 0
+        )
+        status = _ai_summary_status(row.get("status", existing.get("status", "empty")))
+        executor = conn or self._conn
+        executor.execute(
+            """
+            INSERT INTO ai_summaries
+                (summary_key, summary_type, scope_kind, scope_ref, provider,
+                 model, prompt_version, source_hash, source_counts,
+                 summary_text, status, generated_at, updated_at, error)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(summary_key) DO UPDATE SET
+                summary_type=excluded.summary_type,
+                scope_kind=excluded.scope_kind,
+                scope_ref=excluded.scope_ref,
+                provider=excluded.provider,
+                model=excluded.model,
+                prompt_version=excluded.prompt_version,
+                source_hash=excluded.source_hash,
+                source_counts=excluded.source_counts,
+                summary_text=excluded.summary_text,
+                status=excluded.status,
+                generated_at=excluded.generated_at,
+                updated_at=excluded.updated_at,
+                error=excluded.error
+            """,
+            (
+                summary_key,
+                str(row.get("summary_type", existing.get("summary_type", "")) or ""),
+                str(row.get("scope_kind", existing.get("scope_kind", "")) or ""),
+                str(row.get("scope_ref", existing.get("scope_ref", "")) or ""),
+                str(row.get("provider", existing.get("provider", "")) or ""),
+                str(row.get("model", existing.get("model", "")) or ""),
+                str(row.get("prompt_version", existing.get("prompt_version", "")) or ""),
+                str(row.get("source_hash", existing.get("source_hash", "")) or ""),
+                _json_dumps_stable(source_counts),
+                str(row.get("summary_text", existing.get("summary_text", "")) or ""),
+                status,
+                generated_at,
+                now,
+                str(row.get("error", existing.get("error", "")) or ""),
+            ),
+        )
+        if commit and conn is None:
+            executor.commit()
+        saved = self.ai_load_summary(summary_key, conn=executor)
+        if not saved:
+            raise RuntimeError(f"failed to load saved AI summary {summary_key}")
+        return saved
+
+    def ai_delete_summary(
+        self,
+        summary_key: str,
+        conn: sqlite3.Connection | None = None,
+        *,
+        commit: bool = True,
+    ) -> None:
+        summary_key = str(summary_key or "").strip()
+        if not summary_key:
+            return
+        executor = conn or self._conn
+        executor.execute("DELETE FROM ai_summaries WHERE summary_key=?", (summary_key,))
+        if commit and conn is None:
+            executor.commit()
+
+    def ai_list_summaries(
+        self,
+        statuses: list[str] | tuple[str, ...] | set[str] | None = None,
+        *,
+        summary_type: str = "",
+        limit: int = 100,
+        conn: sqlite3.Connection | None = None,
+    ) -> list[dict]:
+        executor = conn or self._conn
+        filters = []
+        params: list[object] = []
+        valid_statuses = [
+            _ai_summary_status(status)
+            for status in (statuses or [])
+            if str(status or "").strip()
+        ]
+        if valid_statuses:
+            filters.append(
+                "status IN (" + ",".join(["?"] * len(valid_statuses)) + ")"
+            )
+            params.extend(valid_statuses)
+        summary_type = str(summary_type or "").strip()
+        if summary_type:
+            filters.append("summary_type=?")
+            params.append(summary_type)
+        params.append(max(0, min(_nonnegative_int(limit), 1000)))
+        where = (" WHERE " + " AND ".join(filters)) if filters else ""
+        cursor = executor.execute(
+            "SELECT summary_key, summary_type, scope_kind, scope_ref, "
+            "provider, model, prompt_version, source_hash, source_counts, "
+            "summary_text, status, generated_at, updated_at, error "
+            "FROM ai_summaries"
+            + where
+            + " ORDER BY updated_at DESC, summary_key ASC LIMIT ?",
+            tuple(params),
+        )
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [_ai_summary_dict(row, cols) for row in rows]
+
+    def ai_get_summary_status_payload(self) -> dict:
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*), MAX(generated_at), MAX(updated_at) "
+            "FROM ai_summaries GROUP BY status"
+        ).fetchall()
+        by_status = {
+            _ai_summary_status(row[0]): {
+                "count": int(row[1] or 0),
+                "last_generated_at": float(row[2] or 0),
+                "last_updated_at": float(row[3] or 0),
+            }
+            for row in rows
+        }
+        error_row = self._conn.execute(
+            "SELECT error FROM ai_summaries WHERE error<>'' "
+            "ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        last_refreshed_at = max(
+            [
+                float(item.get("last_generated_at", 0) or 0)
+                for item in by_status.values()
+            ]
+            or [0.0]
+        )
+        return {
+            "counts": {
+                "ready": int(by_status.get("ready", {}).get("count", 0) or 0),
+                "stale": int(by_status.get("stale", {}).get("count", 0) or 0),
+                "refreshing": int(
+                    by_status.get("refreshing", {}).get("count", 0) or 0
+                ),
+                "empty": int(by_status.get("empty", {}).get("count", 0) or 0),
+                "errors": int(by_status.get("error", {}).get("count", 0) or 0),
+            },
+            "last_refreshed_at": last_refreshed_at,
+            "last_error": str(error_row[0] or "") if error_row else "",
+        }
 
     # -- AI vector index helpers -------------------------------------------
 

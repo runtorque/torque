@@ -119,6 +119,16 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("peer-message counts", prompt)
         self.assertIn("cross-Architect coordination", prompt)
 
+    def test_prompt_includes_boot_summary_first_with_raw_fallback(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("architect_boot_summary", prompt)
+        self.assertIn("read the cached boot-recovery summary", prompt)
+        self.assertIn("fall back to the raw tools", prompt)
+        self.assertIn("architect_journal_read", prompt)
+        self.assertIn("architect_decision_list", prompt)
+        self.assertIn("never\n   wait for summary generation", prompt)
+
     def test_prompt_includes_owner_user_message_instruction(self):
         # Architects are user-created only, so their owner is always the
         # user: the post-bootstrap message-user instruction is always

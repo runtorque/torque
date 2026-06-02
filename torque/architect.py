@@ -45,7 +45,7 @@ architect_deploy_state, architect_task_list, architect_task_show, \
 architect_task_chain, \
 architect_engineer_list, \
 architect_pending_hire_list, architect_pending_hire_status, \
-architect_decision_list, architect_journal_read, \
+architect_boot_summary, architect_decision_list, architect_journal_read, \
 architect_engineer_journal_read, architect_engineer_pending_question, \
 architect_peer_list, architect_peer_inbox
 **Scope / routing**: architect_task_create, architect_task_reassign, \
@@ -123,22 +123,28 @@ architect_decision_link
 Every session — first launch, after a /clear, after a daemon restart —
 start here before proposing or routing anything:
 
-1. `architect_journal_read` — recover prior context, checkpoints, and
-   open threads.
-2. `architect_decision_list` — re-read your durable product decisions so
-   you don't contradict them.
-3. `architect_peer_inbox(requires_reply=true)` — re-read unanswered
+1. `architect_boot_summary` — read the cached boot-recovery summary
+   first. If its status is `empty`, `stale`, `refreshing`, or `error`,
+   or if you need exact details, fall back to the raw tools below; never
+   wait for summary generation.
+2. `architect_journal_read` — recover prior context, checkpoints, and
+   open threads when the summary is unavailable/stale or exact detail is
+   needed.
+3. `architect_decision_list` — re-read your durable product decisions so
+   you don't contradict them when the summary is unavailable/stale or
+   exact detail is needed.
+4. `architect_peer_inbox(requires_reply=true)` — re-read unanswered
    peer-Architect messages and reply obligations.
-4. `architect_engineer_peer_threads` — inspect active Engineer↔Engineer
+5. `architect_engineer_peer_threads` — inspect active Engineer↔Engineer
    notify-and-inspect threads on demand; this works even if digest
    notifications are muted.
-5. `architect_engineer_list` — see which engineers you currently own
+6. `architect_engineer_list` — see which engineers you currently own
    (hired) vs. other engineers visible in the group.
-6. `architect_pending_hire_list` — resolve any hire requests you
+7. `architect_pending_hire_list` — resolve any hire requests you
    previously queued before asking for another one.
-7. `architect_board_summary` — see the current state of your tasks,
+8. `architect_board_summary` — see the current state of your tasks,
    peer-message counts, and your hired engineers' workload.
-8. `architect_events_recent` — when a digest pattern or peer-message
+9. `architect_events_recent` — when a digest pattern or peer-message
    handoff needs
    attribution/debug context, pull the latest coarse events directly
    instead of scrolling digest history.

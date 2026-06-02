@@ -55,6 +55,16 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_boot_summary",
+        "description": (
+            "Return this Architect's cached AI boot-recovery summary. "
+            "Read-only: never performs a live provider call. If the status is "
+            "empty, stale, refreshing, or error, fall back to "
+            "architect_journal_read and architect_decision_list."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "architect_semantic_recall",
         "description": (
             "Search the local AI semantic index for snippets visible to this "

@@ -66,6 +66,23 @@ AI_INDEX_JOB_COLUMNS = {
     "error": "TEXT NOT NULL DEFAULT ''",
 }
 
+AI_SUMMARY_COLUMNS = {
+    "summary_key": "TEXT PRIMARY KEY",
+    "summary_type": "TEXT NOT NULL DEFAULT ''",
+    "scope_kind": "TEXT NOT NULL DEFAULT ''",
+    "scope_ref": "TEXT NOT NULL DEFAULT ''",
+    "provider": "TEXT NOT NULL DEFAULT ''",
+    "model": "TEXT NOT NULL DEFAULT ''",
+    "prompt_version": "TEXT NOT NULL DEFAULT ''",
+    "source_hash": "TEXT NOT NULL DEFAULT ''",
+    "source_counts": "TEXT NOT NULL DEFAULT '{}'",
+    "summary_text": "TEXT NOT NULL DEFAULT ''",
+    "status": "TEXT NOT NULL DEFAULT 'empty'",
+    "generated_at": "REAL NOT NULL DEFAULT 0",
+    "updated_at": "REAL NOT NULL DEFAULT 0",
+    "error": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def create_ai_embedding_vec_table(
     conn: sqlite3.Connection,
@@ -152,6 +169,20 @@ def _ensure_ai_index_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ai_index_jobs_status "
         "ON ai_index_jobs(status, updated_at DESC)"
+    )
+
+
+def _ensure_ai_summary_schema(conn: sqlite3.Connection) -> None:
+    """Keep AI summary-cache tables additive/idempotent."""
+
+    _ensure_columns(conn, "ai_summaries", AI_SUMMARY_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_summaries_scope "
+        "ON ai_summaries(summary_type, scope_kind, scope_ref)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_summaries_status "
+        "ON ai_summaries(status, updated_at DESC)"
     )
 
 _SCHEMA_SQL = """
@@ -490,6 +521,27 @@ CREATE TABLE IF NOT EXISTS ai_index_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_index_jobs_status
     ON ai_index_jobs(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_summaries (
+    summary_key    TEXT PRIMARY KEY,
+    summary_type   TEXT NOT NULL DEFAULT '',
+    scope_kind     TEXT NOT NULL DEFAULT '',
+    scope_ref      TEXT NOT NULL DEFAULT '',
+    provider       TEXT NOT NULL DEFAULT '',
+    model          TEXT NOT NULL DEFAULT '',
+    prompt_version TEXT NOT NULL DEFAULT '',
+    source_hash    TEXT NOT NULL DEFAULT '',
+    source_counts  TEXT NOT NULL DEFAULT '{}',
+    summary_text   TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'empty',
+    generated_at   REAL NOT NULL DEFAULT 0,
+    updated_at     REAL NOT NULL DEFAULT 0,
+    error          TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_summaries_scope
+    ON ai_summaries(summary_type, scope_kind, scope_ref);
+CREATE INDEX IF NOT EXISTS idx_ai_summaries_status
+    ON ai_summaries(status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS panel_events (
     id         INTEGER PRIMARY KEY,
@@ -1671,6 +1723,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _migrate_behavior_overlay_scope_schema(conn)
     conn.executescript(_SCHEMA_SQL)
     _ensure_ai_index_schema(conn)
+    _ensure_ai_summary_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads

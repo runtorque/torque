@@ -562,6 +562,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "behavior_overlay_proposal_list",
     "behavior_overlay_read",
     "behavior_overlay_versions",
+    "boot_summary",
     "board_list",
     "board_summary",
     "decision_list",
@@ -5115,6 +5116,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             caller_id,
             args,
         )
+
+    if tool_name == "boot_summary":
+        from torque.ai_summaries import cached_boot_summary_payload
+
+        return json.dumps(
+            cached_boot_summary_payload(real_state, caller_kind, caller_id)
+        ), False
 
     if tool_name == "mcp_calls":
         target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()
