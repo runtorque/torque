@@ -1026,6 +1026,7 @@
     <h2>Settings</h2>
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="gls-general" onclick="switchGlsTab('gls-general')">General</button>
+      <button class="gs-tab" data-tab="gls-ai" onclick="switchGlsTab('gls-ai')">AI</button>
       <button class="gs-tab" data-tab="gls-statusbar" onclick="switchGlsTab('gls-statusbar')">Status bar</button>
       <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')">Keybindings</button>
       <button class="gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')">System</button>
@@ -1161,6 +1162,13 @@
     <!-- Keybindings tab -->
     <div class="gs-pane" data-pane="gls-keybindings">
       <div id="gls-keybinding-list"></div>
+    </div>
+
+    <!-- AI tab -->
+    <div class="gs-pane" data-pane="gls-ai">
+      <div id="gls-ai-settings" class="ai-settings-tab" aria-live="polite">
+        <div class="ai-settings-loading">Loading AI settings…</div>
+      </div>
     </div>
 
     <!-- System tab -->
@@ -1395,7 +1403,8 @@
 
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
-      <button class="btn-primary" onclick="submitGlobalSettings()">Save</button>
+      <button class="btn-primary" id="gls-global-save-btn" onclick="submitGlobalSettings()">Save</button>
+      <button class="btn-primary" id="gls-ai-save-btn" onclick="submitAiSettings()" hidden>Save AI settings</button>
     </div>
   </div>
 </div>
@@ -1898,6 +1907,7 @@
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/js/terminal.js"></script>
 <script src="/static/js/modals.js"></script>
+<script src="/static/js/ai_settings.js"></script>
 <script src="/static/js/modals/engineer-launch.js"></script>
 <script src="/static/js/modals/add-cell.js"></script>
 <script src="/static/js/modals/task-artifacts.js"></script>

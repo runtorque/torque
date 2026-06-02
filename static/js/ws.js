@@ -712,6 +712,12 @@ function connect() {
       if (typeof handleRelayDaemonCredential === 'function') handleRelayDaemonCredential(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
+    } else if (msg.type === 'ai_settings') {
+      if (typeof aiSettingsReceive === 'function') aiSettingsReceive(msg);
+    } else if (msg.type === 'ai_settings_requires_confirmation') {
+      if (typeof aiSettingsRequiresConfirmation === 'function') aiSettingsRequiresConfirmation(msg);
+    } else if (msg.type === 'ai_index_job') {
+      if (typeof aiIndexJobReceive === 'function') aiIndexJobReceive(msg);
     } else if (msg.type === 'memory_entries') {
       if (typeof handleContextEntries === 'function') handleContextEntries(msg);
     } else if (msg.type === 'memory_entry') {
@@ -746,6 +752,7 @@ function connect() {
         specializationEditorErrorHandled = agentPanelHandleEngineerSpecializationsError(msg);
       }
       if (!systemPromptErrorHandled && !specializationEditorErrorHandled) {
+        if (typeof aiSettingsHandleError === 'function' && aiSettingsHandleError(msg)) return;
         if (typeof handleContextError === 'function') handleContextError(msg);
         else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
       }
@@ -1483,7 +1490,9 @@ function _globalSettingsDeltaHasChangedKeys(op) {
 function _globalSettingsDeltaSkipsBroadInvalidation(op) {
   if (!_globalSettingsDeltaHasChangedKeys(op)) return false;
   var changed = _globalSettingsDeltaChangedKeys(op);
-  return changed.every(function(key) { return key === 'status_bar_visibility'; });
+  return changed.every(function(key) {
+    return key === 'status_bar_visibility' || key.indexOf('ai_') === 0;
+  });
 }
 
 function _deltaSurfaceInvalidations(ops, hints) {
@@ -1529,6 +1538,13 @@ function _deltaSurfaceInvalidations(ops, hints) {
         if (!_globalSettingsDeltaSkipsBroadInvalidation(op)) {
           _markSurface(flags, 'main', 'context', 'engineer');
         }
+        break;
+      case 'ai_settings_update':
+      case 'ai_index_status_update':
+      case 'ai_summary_status_update':
+        // Consumed by ai_settings.js with targeted DOM updates when the Settings
+        // → AI tab is open. Do not mark broad settings/panel surfaces; those
+        // rerenders would clobber focus/caret in the modal.
         break;
       case 'focus_update':
         // focus_update carries PTY session/window focus
@@ -2927,6 +2943,18 @@ function _applyDelta(ops) {
         }
         break;
       }
+
+      case 'ai_settings_update':
+        if (typeof aiSettingsApplyDelta === 'function') aiSettingsApplyDelta(op);
+        break;
+
+      case 'ai_index_status_update':
+        if (typeof aiIndexStatusApplyDelta === 'function') aiIndexStatusApplyDelta(op);
+        break;
+
+      case 'ai_summary_status_update':
+        if (typeof aiSummaryStatusApplyDelta === 'function') aiSummaryStatusApplyDelta(op);
+        break;
 
       case 'event_append': {
         if (!state.panel_events) state.panel_events = [];
