@@ -46,7 +46,7 @@ _PROGRESS_ACTIONS = {"progress", "derive", "ask"}
 _BLOCKED_ACTIONS = {"blocked", "error"}
 IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON = "implemented_no_review_boundary"
 _REVIEW_ACTION_NAME = "feature/review"
-_OPEN_BOUNDARY_STATUSES = {"open"}
+_OPEN_BOUNDARY_STATUSES = {"open", "awaiting-review", "awaiting_review"}
 
 
 @dataclass(frozen=True)
