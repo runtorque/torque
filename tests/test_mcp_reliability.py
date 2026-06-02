@@ -123,6 +123,10 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             idempotency_key,
         )
 
+    def test_ai_settings_api_command_read_write_classification(self):
+        self.assertFalse(is_api_write_command("get_ai_settings"))
+        self.assertTrue(is_api_write_command("update_ai_settings"))
+
     def test_all_registered_write_tools_classify_independent_of_lazy_partition(self):
         mcp_mod = importlib.reload(importlib.import_module("torque.mcp"))
         write_tools = {
