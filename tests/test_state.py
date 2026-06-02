@@ -250,6 +250,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
             },
         )
         self.assertTrue(gs.ai_boot_summary_enabled)
+        self.assertEqual(gs.ai_boot_summary_min_interval_seconds, 600)
+        self.assertEqual(gs.ai_boot_summary_max_refreshes_per_hour, 20)
 
         state.update_global_settings(
             ai_anthropic_api_key="sk-should-not-stick",
@@ -279,6 +281,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
             ai_embedding_runtime=" sentence_transformers ",
             ai_index_corpus={"tasks": "false", "decisions": True, "bogus": True},
             ai_boot_summary_enabled="0",
+            ai_boot_summary_min_interval_seconds="30",
+            ai_boot_summary_max_refreshes_per_hour="5",
         )
 
         gs = state.global_settings
@@ -303,6 +307,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
             },
         )
         self.assertIs(gs.ai_boot_summary_enabled, False)
+        self.assertEqual(gs.ai_boot_summary_min_interval_seconds, 30)
+        self.assertEqual(gs.ai_boot_summary_max_refreshes_per_hour, 5)
 
         with self.assertRaises(ValueError):
             state.update_global_settings(ai_generation_provider="bad-provider")

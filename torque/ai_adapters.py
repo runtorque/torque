@@ -7,8 +7,11 @@ All normal provider/config/network errors return redacted ``LLMFailure`` values.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import email.utils
 import inspect
 import json
+import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 from urllib.parse import urljoin
@@ -305,6 +308,9 @@ async def _post_json(
             async with _ensure_async_context(post_cm) as response:
                 status = int(getattr(response, "status", 0) or 0)
                 if status < 200 or status >= 300:
+                    retry_after = _retry_after_seconds(
+                        getattr(response, "headers", None)
+                    )
                     return LLMFailure(
                         kind="http_error",
                         message=f"Provider request failed with HTTP {status}.",
@@ -312,6 +318,7 @@ async def _post_json(
                         model=config.model,
                         retriable=status in {408, 409, 425, 429} or status >= 500,
                         status_code=status,
+                        retry_after_seconds=retry_after,
                     )
                 try:
                     data = response.json()
@@ -483,12 +490,36 @@ def _with_provider(failure: LLMFailure, provider: str, model: str) -> LLMFailure
         model=failure.model or model,
         retriable=failure.retriable,
         status_code=failure.status_code,
+        retry_after_seconds=failure.retry_after_seconds,
     )
 
 
 def _join_url(base_url: str, path: str) -> str:
     base = str(base_url or "").strip().rstrip("/") + "/"
     return urljoin(base, path.lstrip("/"))
+
+
+def _retry_after_seconds(headers) -> float | None:
+    value = ""
+    if headers is not None:
+        with contextlib.suppress(Exception):
+            value = str(headers.get("Retry-After", "") or "").strip()
+        if not value:
+            with contextlib.suppress(Exception):
+                value = str(headers.get("retry-after", "") or "").strip()
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+        if seconds >= 0:
+            return seconds
+    except (TypeError, ValueError):
+        pass
+    try:
+        dt = email.utils.parsedate_to_datetime(value)
+        return max(0.0, float(dt.timestamp() - time.time()))
+    except Exception:
+        return None
 
 
 def _positive_int(value, default: int) -> int:
