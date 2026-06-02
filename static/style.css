@@ -12456,3 +12456,189 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   font-weight: 700;
 }
 #behavior-approval-note { min-height: 54px; resize: vertical; }
+
+/* Settings → AI tab ---------------------------------------------------- */
+.ai-settings-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-settings-loading,
+.ai-settings-copy,
+.ai-muted,
+.ai-secret-status,
+.ai-save-status {
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.ai-settings-copy {
+  margin: 6px 0 0;
+}
+.ai-settings-section-detail {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--text-dim);
+  font-weight: 500;
+  opacity: .85;
+}
+.ai-master-toggle {
+  font-size: 12px !important;
+  color: var(--text) !important;
+}
+.ai-provider-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+.ai-provider-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 8px;
+  opacity: .72;
+}
+.ai-provider-card-active {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  opacity: 1;
+}
+.ai-provider-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.ai-provider-card input,
+.ai-provider-card select,
+.ai-settings-tab input[type="text"],
+.ai-settings-tab input[type="password"],
+.ai-settings-tab select {
+  width: 100%;
+  min-width: 0;
+}
+.ai-provider-card input,
+.ai-settings-tab input[type="text"],
+.ai-settings-tab input[type="password"] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+.ai-secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-secret-row input {
+  flex: 1 1 auto;
+}
+.ai-secret-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.ai-secret-status {
+  margin-top: 4px;
+}
+.ai-secret-status-ok { color: var(--green); }
+.ai-secret-status-dirty { color: var(--amber); }
+.ai-secret-status-warning { color: var(--red); }
+.ai-warning,
+.ai-warning-inline {
+  color: var(--amber);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.ai-warning {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+}
+.ai-status-grid {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  gap: 7px 12px;
+  align-items: start;
+  margin-top: 8px;
+}
+.ai-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.ai-status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--bg-input, rgba(255,255,255,.05));
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.ai-status-ready,
+.ai-status-available,
+.ai-status-complete { color: var(--green); border-color: color-mix(in srgb, var(--green) 55%, var(--border)); }
+.ai-status-building,
+.ai-status-refreshing,
+.ai-status-queued,
+.ai-status-running,
+.ai-status-rebuild_pending,
+.ai-status-stale { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, var(--border)); }
+.ai-status-error,
+.ai-status-missing { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, var(--border)); }
+.ai-status-disabled,
+.ai-status-not_built,
+.ai-status-empty,
+.ai-status-unknown { color: var(--text-dim); }
+.ai-counts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+.ai-counts span {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.ai-error-text {
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+.ai-actions-row,
+.ai-settings-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.ai-actions-row button:disabled,
+#gls-ai-save-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.ai-save-status[data-level="success"] { color: var(--green); }
+.ai-save-status[data-level="warning"],
+.ai-save-status[data-level="pending"] { color: var(--amber); }
+.ai-save-status[data-level="error"] { color: var(--red); }
+.ai-corpus-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 10px;
+}
+
+@media (max-width: 720px) {
+  .ai-provider-grid,
+  .ai-corpus-list {
+    grid-template-columns: 1fr;
+  }
+  .ai-status-grid {
+    grid-template-columns: 1fr;
+  }
+}
