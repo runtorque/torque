@@ -222,6 +222,55 @@ class TorqueDBTests(unittest.TestCase):
         self.assertNotIn("prompt", lowered)
         self.assertNotIn("response", lowered)
 
+    def test_ai_index_tables_migrate_additively(self):
+        legacy_path = Path(self.tmp.name) / "legacy-ai-index.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.commit()
+        conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        source_columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(ai_embedding_sources)"
+            )
+        }
+        chunk_columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(ai_embedding_chunks)"
+            )
+        }
+        state_columns = {
+            row[1]
+            for row in migrated._conn.execute("PRAGMA table_info(ai_index_state)")
+        }
+        self.assertIn("content_hash", source_columns)
+        self.assertIn("indexed_content_hash", source_columns)
+        self.assertIn("source_sub_id", source_columns)
+        self.assertIn("group_name", source_columns)
+        self.assertIn("owner_kind", source_columns)
+        self.assertIn("owner_id", source_columns)
+        self.assertIn("participant_ids", source_columns)
+        self.assertIn("embedding_model_id", chunk_columns)
+        self.assertIn("embedding_dims", chunk_columns)
+        self.assertIn("chunk_hash", chunk_columns)
+        self.assertIn("rebuild_required", state_columns)
+
+        migrated.ai_update_index_state(
+            desired_model_id="model-a",
+            active_model_id="model-a",
+            active_dims=3,
+            status="ready",
+        )
+        state = migrated.ai_get_index_state()
+        self.assertEqual(state["active_model_id"], "model-a")
+        self.assertEqual(state["active_dims"], 3)
+
     def test_ai_call_metrics_table_migrates_additively(self):
         legacy_path = Path(self.tmp.name) / "legacy-ai-metrics.db"
         conn = sqlite3.connect(str(legacy_path))

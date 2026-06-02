@@ -1350,6 +1350,75 @@ def _warn_primary_runtime_missing(report: dict) -> dict | None:
 
 def _collect_ai_section(conn: sqlite3.Connection) -> dict:
     dependency_status = ai_deps.embeddings_dependency_status()
+    desired_model_id = _fetch_global_setting(
+        conn,
+        "ai_embedding_model",
+        "BAAI/bge-m3",
+    )
+    index_state = {
+        "desired_model_id": desired_model_id,
+        "active_model_id": "",
+        "active_dims": 0,
+        "status": "not_built",
+        "rebuild_required": False,
+        "rebuild_reason": "",
+        "last_error": "",
+    }
+    index_counts = {
+        "sources": 0,
+        "chunks": 0,
+        "indexed": 0,
+        "pending": 0,
+        "stale": 0,
+        "errors": 0,
+        "model_mismatch_chunks": 0,
+    }
+    try:
+        row = conn.execute(
+            "SELECT desired_model_id, active_model_id, active_dims, status, "
+            "rebuild_required, rebuild_reason, last_error "
+            "FROM ai_index_state WHERE id='default'"
+        ).fetchone()
+        if row:
+            index_state.update({
+                "desired_model_id": row[0] or desired_model_id,
+                "active_model_id": row[1] or "",
+                "active_dims": int(row[2] or 0),
+                "status": row[3] or "not_built",
+                "rebuild_required": bool(row[4]),
+                "rebuild_reason": row[5] or "",
+                "last_error": row[6] or "",
+            })
+    except sqlite3.Error:
+        pass
+    try:
+        source_rows = conn.execute(
+            "SELECT state, COUNT(*) FROM ai_embedding_sources GROUP BY state"
+        ).fetchall()
+        by_state = {str(state or ""): int(count or 0) for state, count in source_rows}
+        chunks = int(conn.execute(
+            "SELECT COUNT(*) FROM ai_embedding_chunks"
+        ).fetchone()[0] or 0)
+        active_model = str(index_state.get("active_model_id", "") or "")
+        active_dims = int(index_state.get("active_dims", 0) or 0)
+        mismatch = 0
+        if chunks and (active_model or active_dims):
+            mismatch = int(conn.execute(
+                "SELECT COUNT(*) FROM ai_embedding_chunks "
+                "WHERE embedding_model_id!=? OR embedding_dims!=?",
+                (active_model, active_dims),
+            ).fetchone()[0] or 0)
+        index_counts.update({
+            "sources": sum(by_state.values()),
+            "chunks": chunks,
+            "indexed": by_state.get("indexed", 0),
+            "pending": by_state.get("pending", 0),
+            "stale": by_state.get("stale", 0),
+            "errors": by_state.get("error", 0),
+            "model_mismatch_chunks": mismatch,
+        })
+    except sqlite3.Error:
+        pass
     return {
         "enabled": bool(_fetch_global_setting(conn, "ai_enabled", False)),
         "embeddings_dependency": {
@@ -1358,6 +1427,9 @@ def _collect_ai_section(conn: sqlite3.Connection) -> dict:
             "missing_packages": ai_deps.missing_ai_dependency_packages(),
             "install_hint": ai_deps.AI_DEPS_INSTALL_HINT,
         },
+        "desired_model_id": desired_model_id,
+        "index_state": index_state,
+        "index_counts": index_counts,
     }
 
 
@@ -1384,6 +1456,48 @@ def _warn_ai_optional_deps_missing(report: dict) -> dict | None:
                 "AI is enabled but optional embedding dependencies are missing; "
                 f"run {dependency.get('install_hint', ai_deps.AI_DEPS_INSTALL_HINT)}"
             ),
+        },
+    }
+
+
+def _warn_ai_index_rebuild_pending(report: dict) -> dict | None:
+    ai = report.get("ai", {}) or {}
+    state = ai.get("index_state", {}) or {}
+    counts = ai.get("index_counts", {}) or {}
+    desired = str(state.get("desired_model_id", "") or ai.get("desired_model_id", "") or "")
+    active = str(state.get("active_model_id", "") or "")
+    chunks = int(counts.get("chunks", 0) or 0)
+    rebuild_required = bool(state.get("rebuild_required"))
+    mismatch = chunks > 0 and desired and active and desired != active
+    if not rebuild_required and not mismatch:
+        return None
+    return {
+        "name": "ai_index_rebuild_pending",
+        "status": "warn",
+        "details": {
+            "desired_model_id": desired,
+            "active_model_id": active,
+            "chunks": chunks,
+            "rebuild_required": rebuild_required,
+            "reason": str(state.get("rebuild_reason", "") or "embedding_model_change"),
+        },
+    }
+
+
+def _warn_ai_index_chunk_model_mismatch(report: dict) -> dict | None:
+    ai = report.get("ai", {}) or {}
+    counts = ai.get("index_counts", {}) or {}
+    mismatch = int(counts.get("model_mismatch_chunks", 0) or 0)
+    if mismatch <= 0:
+        return None
+    state = ai.get("index_state", {}) or {}
+    return {
+        "name": "ai_index_chunk_model_mismatch",
+        "status": "warn",
+        "details": {
+            "count": mismatch,
+            "active_model_id": str(state.get("active_model_id", "") or ""),
+            "active_dims": int(state.get("active_dims", 0) or 0),
         },
     }
 
@@ -1490,6 +1604,8 @@ _DOCTOR_WARNINGS = [
     _warn_legacy_appsupport_python_runtime,
     _warn_primary_runtime_missing,
     _warn_ai_optional_deps_missing,
+    _warn_ai_index_rebuild_pending,
+    _warn_ai_index_chunk_model_mismatch,
     _warn_stuck_input_sessions,
 ]
 
@@ -1625,6 +1741,8 @@ def format_doctor_report(report: dict) -> str:
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
     ai = report.get("ai", {}) or {}
     ai_dependency = ai.get("embeddings_dependency", {}) or {}
+    ai_index_state = ai.get("index_state", {}) or {}
+    ai_index_counts = ai.get("index_counts", {}) or {}
     pty_supervisor = report.get("pty_supervisor", {}) or {}
     pty_metrics = pty_supervisor.get("metrics", {}) or {}
     pty_health = pty_supervisor.get("health", {}) or {}
@@ -1806,6 +1924,20 @@ def format_doctor_report(report: dict) -> str:
         f"{', '.join(list(ai_dependency.get('packages', []) or []))}",
         "  install_hint:                   "
         f"{ai_dependency.get('install_hint', ai_deps.AI_DEPS_INSTALL_HINT)}",
+        "  desired_embedding_model:        "
+        f"{ai_index_state.get('desired_model_id', ai.get('desired_model_id', ''))}",
+        "  active_embedding_model:         "
+        f"{ai_index_state.get('active_model_id', '')}",
+        "  active_embedding_dims:          "
+        f"{int(ai_index_state.get('active_dims', 0) or 0)}",
+        "  index_status:                   "
+        f"{ai_index_state.get('status', '')}",
+        "  index_chunks:                   "
+        f"{int(ai_index_counts.get('chunks', 0) or 0)}",
+        "  index_model_mismatch_chunks:    "
+        f"{int(ai_index_counts.get('model_mismatch_chunks', 0) or 0)}",
+        "  rebuild_required:               "
+        f"{str(bool(ai_index_state.get('rebuild_required'))).lower()}",
         "",
         "[pty_supervisor]",
         "  state:                          "
@@ -1994,6 +2126,23 @@ def format_doctor_report(report: dict) -> str:
                 if hint:
                     line += f" (run {hint})"
                 lines.append(line)
+            elif name == "ai_index_rebuild_pending":
+                line = (
+                    "  - AI vector index rebuild pending"
+                    f": desired={details.get('desired_model_id', '')}"
+                    f" active={details.get('active_model_id', '')}"
+                    f" chunks={int(details.get('chunks', 0) or 0)}"
+                )
+                reason = str(details.get("reason", "") or "")
+                if reason:
+                    line += f" reason={reason}"
+                lines.append(line)
+            elif name == "ai_index_chunk_model_mismatch":
+                lines.append(
+                    "  - AI vector index has chunks for a non-active "
+                    "embedding model/dims"
+                    f": {int(details.get('count', 0) or 0)}"
+                )
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])

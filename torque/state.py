@@ -2250,6 +2250,7 @@ class MatrixState:
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
         self._task_upsert_observers: list[Callable[[dict], None]] = []
+        self._delta_observers: list[Callable[[dict], None]] = []
         # Secondary task indexes. Maintained incrementally by
         # `_index_task` / `_unindex_task`; hot-path consumers should not
         # have to scan the full board when they already know the relevant
@@ -3424,6 +3425,7 @@ class MatrixState:
             meter.record_emit(op, kwargs)
         if op == "task_upsert":
             self._notify_task_upsert_observers(kwargs)
+        self._notify_delta_observers(delta)
 
     def register_task_upsert_observer(
             self,
@@ -3445,6 +3447,32 @@ class MatrixState:
                 pass
 
         return unregister
+
+    def register_delta_observer(
+            self,
+            observer: Callable[[dict], None],
+    ) -> Callable[[], None]:
+        """Register a best-effort observer for emitted delta operations."""
+        if observer not in self._delta_observers:
+            self._delta_observers.append(observer)
+
+        def unregister() -> None:
+            try:
+                self._delta_observers.remove(observer)
+            except ValueError:
+                pass
+
+        return unregister
+
+    def _notify_delta_observers(self, delta: dict) -> None:
+        if not self._delta_observers:
+            return
+        snapshot = copy.deepcopy(delta or {})
+        for observer in list(self._delta_observers):
+            try:
+                observer(snapshot)
+            except Exception:
+                log.exception("State delta observer failed")
 
     def _notify_task_upsert_observers(self, payload: dict) -> None:
         if not self._task_upsert_observers:
