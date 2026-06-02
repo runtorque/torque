@@ -251,9 +251,18 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
         self.assertTrue(gs.ai_boot_summary_enabled)
 
+        state.update_global_settings(
+            ai_anthropic_api_key="sk-should-not-stick",
+            api_key="sk-should-not-stick",
+        )
         serialized = json.dumps(state.to_dict(), sort_keys=True)
         compact = json.dumps(state.to_dict_compact(), sort_keys=True)
-        for secretish in ("api_key", "anthropic_api_key", "openai_api_key"):
+        for secretish in (
+            "api_key",
+            "anthropic_api_key",
+            "openai_api_key",
+            "sk-should-not-stick",
+        ):
             self.assertNotIn(secretish, serialized)
             self.assertNotIn(secretish, compact)
 
