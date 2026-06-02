@@ -868,6 +868,7 @@ class AgentLaunchService:
                 if prime_input_ready \
                         and hasattr(self.bridge, "prime_input_ready"):
                     self.bridge.prime_input_ready(target_session_id)
+                send_started_at = time.time()
                 if settled_submit:
                     await self.bridge.send_text(
                         target_session_id,
@@ -876,11 +877,18 @@ class AgentLaunchService:
                     )
                 else:
                     await self.bridge.send_text(target_session_id, payload)
-                self.state.mark_agent_optimistic_running(
-                    cell,
-                    emit=False,
-                    persist=persist,
+                completion_landed_during_send = (
+                    getattr(cell, "status", "") != "running"
+                    and not getattr(cell, "activity", "")
+                    and float(getattr(cell, "last_event_at", 0) or 0)
+                    >= send_started_at
                 )
+                if not completion_landed_during_send:
+                    self.state.mark_agent_optimistic_running(
+                        cell,
+                        emit=False,
+                        persist=persist,
+                    )
                 if target_session_id:
                     if self._prompt_queue_tails.get(target_session_id) is task_ref:
                         self._prompt_queue_optimistic_baselines.pop(

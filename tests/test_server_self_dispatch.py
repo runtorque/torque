@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import sys
 import tempfile
+import time
 import types
 import unittest
 from enum import Enum
@@ -6749,6 +6750,10 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         install_aiohttp_stub()
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
+        self.events_mod = importlib.import_module("torque.events")
+        self.events_mod = importlib.reload(self.events_mod)
+        self.base_mod = importlib.import_module("torque.adapters.base")
+        self.base_mod = importlib.reload(self.base_mod)
         self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
 
@@ -6835,6 +6840,135 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.last_activity_at, 124.0)
         self.assertEqual(cell.last_event_at, 124.0)
         self.assertGreaterEqual(state._seq, 2)
+
+    async def test_send_agent_prompt_does_not_revive_after_session_end_during_send(self):
+        state = self.state_mod.MatrixState()
+
+        async def noop_broadcast():
+            pass
+
+        state.broadcast = noop_broadcast
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+            agent_type="claude-code",
+            status="idle",
+        )
+        state.agents[cell.id] = cell
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload):
+                del session_id, payload
+                await bus.emit(self_base.AgentEvent(
+                    cell_id=cell.id,
+                    timestamp=time.time(),
+                    event_type="session_end",
+                    data={"summary": "done"},
+                ))
+
+        self_base = self.base_mod
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+
+        task = await service.send_agent_prompt(
+            cell,
+            "start work",
+            background=True,
+        )
+        await task
+
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(cell.activity_detail, "")
+        self.assertEqual(cell.last_event_text, "Session ended")
+        upserts = [
+            op for op in state._delta_ops
+            if op.get("op") == "agent_upsert" and op.get("id") == cell.id
+        ]
+        self.assertTrue(upserts)
+        self.assertEqual(upserts[-1]["status"], "idle")
+        self.assertEqual(upserts[-1]["last_event_text"], "Session ended")
+
+    async def test_send_agent_prompt_marks_running_for_next_prompt_after_prior_session_end(self):
+        state = self.state_mod.MatrixState()
+
+        async def noop_broadcast():
+            pass
+
+        state.broadcast = noop_broadcast
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+            agent_type="claude-code",
+            status="idle",
+        )
+        state.agents[cell.id] = cell
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+        sent = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload):
+                sent.append((session_id, payload))
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+
+        async def fake_sleep(delay):
+            self.assertEqual(delay, 3)
+            await bus.emit(self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="session_end",
+                data={"summary": "prior turn done"},
+            ))
+
+        orig_sleep = self.server_agent_mod.asyncio.sleep
+        self.server_agent_mod.asyncio.sleep = fake_sleep
+        try:
+            task = await service.send_agent_prompt(
+                cell,
+                "next work",
+                delay=3,
+                background=True,
+            )
+            await task
+        finally:
+            self.server_agent_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(sent, [("session-1", "next work\r")])
+        self.assertEqual(cell.status, "running")
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(cell.last_event_text, "Session ended")
+        upserts = [
+            op for op in state._delta_ops
+            if op.get("op") == "agent_upsert" and op.get("id") == cell.id
+        ]
+        self.assertTrue(upserts)
+        self.assertEqual(upserts[-1]["status"], "running")
 
     async def test_send_agent_prompt_rolls_back_queued_all_fail_chain(self):
         state = self.state_mod.MatrixState()
