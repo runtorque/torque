@@ -565,6 +565,15 @@ class AISummaryService:
                 "AI summary generation returned empty text.",
             )
 
+        current_bundle = self._build_bundle(summary_key)
+        if current_bundle is None:
+            return self.cached_summary(summary_key)
+        if not _same_bundle_version(bundle, current_bundle):
+            return self._source_changed_during_refresh_row(
+                current_bundle,
+                self._load_summary(summary_key) or refreshing,
+            )
+
         now = time.time()
         self._clear_rate_limit_state(bundle.summary_key)
         return self._upsert_summary({
@@ -582,6 +591,37 @@ class AISummaryService:
             "generated_at": now,
             "updated_at": now,
             "error": "",
+        })
+
+    def _source_changed_during_refresh_row(
+        self,
+        bundle: SummarySourceBundle,
+        prev: dict | None,
+    ) -> dict:
+        summary_text = str((prev or {}).get("summary_text", "") or "")
+        if not bundle.sources:
+            summary_text = ""
+        status = "stale" if summary_text.strip() else "empty"
+        error = (
+            "Source material changed during AI boot-summary refresh; "
+            "refresh will retry lazily on the next read."
+        )
+        if not bundle.sources:
+            error = "No source material is available."
+        return self._upsert_summary({
+            **(prev or {}),
+            "summary_key": bundle.summary_key,
+            "summary_type": bundle.summary_type,
+            "scope_kind": bundle.scope_kind,
+            "scope_ref": bundle.scope_ref,
+            "provider": bundle.provider,
+            "model": bundle.model,
+            "prompt_version": bundle.prompt_version,
+            "source_hash": bundle.source_hash,
+            "source_counts": bundle.source_counts,
+            "summary_text": summary_text,
+            "status": status,
+            "error": error,
         })
 
     async def _summarize_source(
@@ -952,6 +992,22 @@ def _is_fresh_ready(prev: dict | None, bundle: SummarySourceBundle) -> bool:
         and str(prev.get("model", "") or "") == bundle.model
         and str(prev.get("prompt_version", "") or "") == bundle.prompt_version
         and str(prev.get("summary_text", "") or "").strip()
+    )
+
+
+def _same_bundle_version(
+    left: SummarySourceBundle,
+    right: SummarySourceBundle,
+) -> bool:
+    return bool(
+        left.summary_key == right.summary_key
+        and left.summary_type == right.summary_type
+        and left.scope_kind == right.scope_kind
+        and left.scope_ref == right.scope_ref
+        and left.provider == right.provider
+        and left.model == right.model
+        and left.prompt_version == right.prompt_version
+        and left.source_hash == right.source_hash
     )
 
 

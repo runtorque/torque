@@ -431,6 +431,58 @@ class AISummaryMCPToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["status"], "ready")
         self.assertEqual(saved["summary_text"], "Generated later")
 
+    async def test_inflight_mutation_keeps_summary_stale_after_provider_returns(self):
+        fake = BlockingSummarizer(LLMResult(
+            provider="anthropic",
+            model="claude-summary-test",
+            text="Generated from old source material",
+            usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db,
+            state=self.state,
+            summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        key = architect_boot_summary_key(self.architect.id)
+        self._seed_architect_stale_summary(
+            service,
+            summary_text="Previous summary",
+        )
+
+        cached_boot_summary_payload(
+            self.state,
+            "architect",
+            self.architect.id,
+        )
+        await asyncio.wait_for(fake.started.wait(), timeout=1)
+        refreshing = self.db.ai_load_summary(key)
+        self.assertEqual(refreshing["status"], "refreshing")
+        self.assertEqual(refreshing["source_counts"]["total"], 1)
+
+        self.state.architect_journal_append(
+            self.architect.id,
+            "checkpoint",
+            "Checkpoint landed while provider refresh was in flight.",
+        )
+        stale = service.mark_stale_if_needed(key)
+        self.assertEqual(stale["status"], "stale")
+        self.assertEqual(stale["summary_text"], "Previous summary")
+        self.assertEqual(stale["source_counts"]["total"], 2)
+
+        fake.release.set()
+        await asyncio.wait_for(fake.finished.wait(), timeout=1)
+        await self._drain_read_tasks(service)
+        saved = self.db.ai_load_summary(key)
+
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(saved["status"], "stale")
+        self.assertEqual(saved["summary_text"], "Previous summary")
+        self.assertEqual(saved["source_counts"]["total"], 2)
+        self.assertNotEqual(saved["source_hash"], refreshing["source_hash"])
+        self.assertIn("changed during", saved["error"])
+
     async def test_stranded_refreshing_read_downgrades_and_schedules_refresh(self):
         self.state.global_settings.ai_boot_summary_min_interval_seconds = 0
         fake = FakeSummarizer(LLMResult(
