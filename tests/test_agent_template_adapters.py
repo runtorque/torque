@@ -1368,6 +1368,125 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn('TORQUE_ARCHITECT_ID = "arch-2"', reinstalled)
             self.assertNotIn("arch-1", reinstalled)
 
+    def test_codex_architect_stdio_config_launches_bound_proxy_for_tool_discovery(self):
+        import tomllib
+
+        received = queue.Queue()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                payload = json.loads(body.decode("utf-8"))
+                received.put(
+                    {
+                        "path": self.path,
+                        "cell_id": self.headers.get("X-Torque-Cell-Id", ""),
+                        "mcp_session_id": self.headers.get(
+                            "X-Torque-MCP-Session-Id", ""
+                        ),
+                        "body": payload,
+                    }
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": payload.get("id"),
+                            "result": {
+                                "tools": [
+                                    {"name": "architect_message_user"},
+                                    {"name": "architect_task_create"},
+                                ]
+                            },
+                        }
+                    ).encode("utf-8")
+                )
+
+            def log_message(self, fmt, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+                from torque.db import TorqueDB
+
+                db = TorqueDB(Path(data_dir) / "torque.db")
+                db.init()
+                db.save_agent(
+                    {
+                        "id": "arch-1",
+                        "name": "Architect",
+                        "group": "g",
+                        "cell_type": "agent",
+                        "kind": "architect",
+                    }
+                )
+                db.close()
+
+                adapter = CodexAdapter()
+                self.assertTrue(
+                    adapter.install_mcp_config(
+                        tmp,
+                        mcp_entrypoint="torque/mcp_architect.py",
+                        mcp_env={
+                            "TORQUE_CELL_ID": "arch-1",
+                            "TORQUE_ARCHITECT_ID": "arch-1",
+                            "TORQUE_PORT": str(server.server_port),
+                            "TORQUE_DATA_DIR": data_dir,
+                        },
+                    )
+                )
+                config = tomllib.loads(
+                    (Path(tmp) / ".codex" / "config.toml").read_text()
+                )
+                torque_cfg = config["mcp_servers"]["torque"]
+
+                proc = subprocess.run(
+                    [torque_cfg["command"], *torque_cfg["args"]],
+                    input=(
+                        json.dumps(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": 1,
+                                "method": "tools/list",
+                            }
+                        )
+                        + "\n"
+                    ).encode("utf-8"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env={**os.environ, **torque_cfg["env"]},
+                    timeout=10,
+                    check=False,
+                )
+
+                self.assertEqual(
+                    proc.returncode,
+                    0,
+                    proc.stderr.decode("utf-8", "replace")
+                    + proc.stdout.decode("utf-8", "replace"),
+                )
+                response = json.loads(proc.stdout.decode("utf-8"))
+                tool_names = [
+                    tool["name"] for tool in response["result"]["tools"]
+                ]
+                self.assertIn("architect_message_user", tool_names)
+                self.assertIn("architect_task_create", tool_names)
+                posted = received.get(timeout=5)
+                self.assertEqual(posted["path"], "/mcp")
+                self.assertEqual(posted["cell_id"], "arch-1")
+                self.assertTrue(posted["mcp_session_id"])
+                self.assertEqual(posted["body"]["method"], "tools/list")
+        finally:
+            server.server_close()
+            thread.join(timeout=5)
+
     def test_codex_parse_stop_attaches_context_window_from_transcript(self):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "rollout.jsonl"

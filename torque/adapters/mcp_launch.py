@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -30,7 +31,8 @@ def build_stdio_launch_spec(mcp_entrypoint: str = "") -> dict | None:
         f"sys.path.insert(0, {repo_root!r}); "
         f"runpy.run_module({module_name!r}, run_name='__main__')"
     )
+    python = str(os.environ.get("TORQUE_PYTHON_EXECUTABLE", "") or "").strip()
     return {
-        "command": sys.executable or "python3",
+        "command": python or sys.executable or "python3",
         "args": ["-c", bootstrap],
     }
