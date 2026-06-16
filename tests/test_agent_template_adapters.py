@@ -1297,7 +1297,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             self.assertTrue(
                 adapter.install_mcp_config(
-                    tmp, mcp_entrypoint="torque/mcp_engineer.py"
+                    tmp,
+                    mcp_entrypoint="torque/mcp_engineer.py",
+                    mcp_env={
+                        "TORQUE_CELL_ID": "eng-1",
+                        "TORQUE_ENGINEER_ID": "eng-1",
+                        "TORQUE_PORT": "18933",
+                        "TORQUE_DATA_DIR": "/tmp/torque-data",
+                    },
                 )
             )
 
@@ -1305,8 +1312,61 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("[mcp_servers.torque]", installed)
             self.assertIn("command = ", installed)
             self.assertIn("torque.mcp_engineer", installed)
+            self.assertIn("[mcp_servers.torque.env]", installed)
+            self.assertIn('TORQUE_CELL_ID = "eng-1"', installed)
+            self.assertIn('TORQUE_ENGINEER_ID = "eng-1"', installed)
+            self.assertIn('TORQUE_PORT = "18933"', installed)
+            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-data"', installed)
             self.assertNotIn('url = "http://127.0.0.1', installed)
             self.assertNotIn('env_http_headers = { "X-Torque-Cell-Id"', installed)
+
+            adapter.uninstall_mcp_config(tmp)
+            self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
+
+    def test_codex_architect_mcp_config_binds_stdio_server_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+
+            self.assertTrue(
+                adapter.install_mcp_config(
+                    tmp,
+                    mcp_entrypoint="torque/mcp_architect.py",
+                    mcp_env={
+                        "TORQUE_CELL_ID": "arch-1",
+                        "TORQUE_ARCHITECT_ID": "arch-1",
+                        "TORQUE_PORT": "18934",
+                        "TORQUE_DATA_DIR": "/tmp/torque-architect",
+                    },
+                )
+            )
+
+            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn("[mcp_servers.torque]", installed)
+            self.assertIn("torque.mcp_architect", installed)
+            self.assertIn("[mcp_servers.torque.env]", installed)
+            self.assertIn('TORQUE_ARCHITECT_ID = "arch-1"', installed)
+            self.assertIn('TORQUE_CELL_ID = "arch-1"', installed)
+            self.assertIn('TORQUE_PORT = "18934"', installed)
+            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-architect"', installed)
+
+            # A subsequent reinstall must replace the whole managed block,
+            # including the nested env table, instead of leaving stale
+            # architect bindings behind for Codex tool discovery.
+            self.assertTrue(
+                adapter.install_mcp_config(
+                    tmp,
+                    mcp_entrypoint="torque/mcp_architect.py",
+                    mcp_env={
+                        "TORQUE_CELL_ID": "arch-2",
+                        "TORQUE_ARCHITECT_ID": "arch-2",
+                        "TORQUE_PORT": "18935",
+                        "TORQUE_DATA_DIR": "/tmp/torque-architect-2",
+                    },
+                )
+            )
+            reinstalled = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn('TORQUE_ARCHITECT_ID = "arch-2"', reinstalled)
+            self.assertNotIn("arch-1", reinstalled)
 
     def test_codex_parse_stop_attaches_context_window_from_transcript(self):
         with tempfile.TemporaryDirectory() as tmp:

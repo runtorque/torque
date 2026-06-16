@@ -996,7 +996,8 @@ class ClaudeCodeAdapter(AgentAdapter):
             pass  # Best-effort cleanup
 
     def install_mcp_config(self, working_dir: str, *,
-                           mcp_entrypoint: str = "") -> bool:
+                           mcp_entrypoint: str = "",
+                           mcp_env: dict[str, str] | None = None) -> bool:
         """Write Torque MCP server entry into .mcp.json.
 
         Merges with any existing .mcp.json so user's other MCP servers
@@ -1004,6 +1005,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         env-var syntax which Claude Code interpolates natively.
         Returns True if config was installed successfully.
         """
+        del mcp_env
         mcp_file = Path(working_dir) / ".mcp.json"
 
         torque_entry = build_stdio_launch_spec(mcp_entrypoint)

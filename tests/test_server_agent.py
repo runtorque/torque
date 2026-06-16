@@ -1,6 +1,9 @@
 import importlib
+import os
 import types
 import unittest
+from pathlib import Path
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -904,6 +907,51 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             env,
             {"BASE": "1", "TORQUE_ARCHITECT_ID": "arch-1"},
         )
+
+    def test_mcp_env_vars_for_architect_include_codex_stdio_bindings(self):
+        cell = types.SimpleNamespace(
+            id="arch-1",
+            cell_type="agent",
+            kind="architect",
+        )
+
+        with mock.patch.object(
+            self.server_agent_mod.torque_config, "WS_PORT", 18934
+        ), mock.patch.object(
+            self.server_agent_mod.torque_config, "DATA_DIR", Path("/tmp/torque-data")
+        ), mock.patch.dict(os.environ, {"TORQUE_PROFILE": "desktop"}, clear=False):
+            env = self.server_agent_mod.mcp_env_vars_for_cell(cell)
+
+        self.assertEqual(
+            env,
+            {
+                "TORQUE_CELL_ID": "arch-1",
+                "TORQUE_ARCHITECT_ID": "arch-1",
+                "TORQUE_PORT": "18934",
+                "TORQUE_DATA_DIR": "/tmp/torque-data",
+                "TORQUE_PROFILE": "desktop",
+            },
+        )
+
+    def test_mcp_env_vars_for_worker_include_default_http_bindings(self):
+        cell = types.SimpleNamespace(
+            id="worker-1",
+            cell_type="agent",
+            kind="worker",
+        )
+
+        with mock.patch.object(
+            self.server_agent_mod.torque_config, "WS_PORT", 18935
+        ), mock.patch.object(
+            self.server_agent_mod.torque_config, "DATA_DIR", Path("/tmp/torque-worker")
+        ), mock.patch.dict(os.environ, {"TORQUE_PROFILE": ""}, clear=False):
+            env = self.server_agent_mod.mcp_env_vars_for_cell(cell)
+
+        self.assertEqual(env["TORQUE_CELL_ID"], "worker-1")
+        self.assertEqual(env["TORQUE_PORT"], "18935")
+        self.assertEqual(env["TORQUE_DATA_DIR"], "/tmp/torque-worker")
+        self.assertNotIn("TORQUE_ARCHITECT_ID", env)
+        self.assertNotIn("TORQUE_ENGINEER_ID", env)
 
     def test_mcp_entrypoint_for_cell_uses_kind_specific_entrypoint(self):
         architect = types.SimpleNamespace(cell_type="agent", kind="architect")
