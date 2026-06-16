@@ -1416,6 +1416,50 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
                 from torque.db import TorqueDB
 
+                stub_root = Path(tmp) / "python-stubs"
+                aiohttp_stub = stub_root / "aiohttp"
+                aiohttp_stub.mkdir(parents=True)
+                (aiohttp_stub / "__init__.py").write_text("from . import web\n")
+                (aiohttp_stub / "__init__.py").write_text(
+                    "\n".join(
+                        [
+                            "import json as _json",
+                            "import urllib.request as _request",
+                            "from . import web",
+                            "class ClientTimeout:",
+                            "    def __init__(self, total=None): self.total = total",
+                            "class TCPConnector:",
+                            "    def __init__(self, **kwargs): self.kwargs = kwargs",
+                            "class _Response:",
+                            "    def __init__(self, status, headers, body):",
+                            "        self.status = status",
+                            "        self.headers = headers",
+                            "        self._body = body",
+                            "    async def read(self): return self._body",
+                            "class _PostContext:",
+                            "    def __init__(self, url, payload, headers):",
+                            "        self.url = url; self.payload = payload; self.headers = headers",
+                            "    async def __aenter__(self):",
+                            "        data = _json.dumps(self.payload).encode('utf-8')",
+                            "        req = _request.Request(self.url, data=data, headers=self.headers, method='POST')",
+                            "        with _request.urlopen(req, timeout=10) as resp:",
+                            "            self.response = _Response(resp.status, dict(resp.headers), resp.read())",
+                            "        return self.response",
+                            "    async def __aexit__(self, exc_type, exc, tb): return False",
+                            "class ClientSession:",
+                            "    closed = False",
+                            "    def __init__(self, connector=None): self.connector = connector",
+                            "    def post(self, url, json=None, headers=None, timeout=None):",
+                            "        return _PostContext(url, json, headers or {})",
+                            "    async def close(self): self.closed = True",
+                            "",
+                        ]
+                    )
+                )
+                (aiohttp_stub / "web.py").write_text(
+                    "class WebSocketResponse:\n    pass\n"
+                )
+
                 db = TorqueDB(Path(data_dir) / "torque.db")
                 db.init()
                 db.save_agent(
@@ -1461,7 +1505,15 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     ).encode("utf-8"),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    env={**os.environ, **torque_cfg["env"]},
+                    env={
+                        **os.environ,
+                        **torque_cfg["env"],
+                        "PYTHONPATH": (
+                            str(stub_root)
+                            + os.pathsep
+                            + os.environ.get("PYTHONPATH", "")
+                        ),
+                    },
                     timeout=10,
                     check=False,
                 )
