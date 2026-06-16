@@ -174,6 +174,39 @@ def runtime_env_vars_for_cell(cell, env_vars: dict[str, str] | None = None):
     return merged or None
 
 
+def mcp_env_vars_for_cell(cell) -> dict[str, str] | None:
+    """Return explicit env vars for per-cell stdio MCP server launches.
+
+    Codex launches stdio MCP servers outside Torque's PTY bootstrap scripts, so
+    kind-scoped MCP entrypoints must not rely on inheriting the interactive
+    shell environment.  The generated MCP config carries the caller binding and
+    daemon address explicitly so tool discovery starts with the right
+    architect/engineer surface.
+    """
+    if getattr(cell, "cell_type", "") != "agent":
+        return None
+
+    cell_id = str(getattr(cell, "id", "") or "").strip()
+    if not cell_id:
+        return None
+
+    env = {
+        "TORQUE_CELL_ID": cell_id,
+        "TORQUE_PORT": str(torque_config.WS_PORT),
+        "TORQUE_DATA_DIR": str(torque_config.DATA_DIR),
+    }
+    profile = str(os.environ.get("TORQUE_PROFILE", "") or "").strip()
+    if profile:
+        env["TORQUE_PROFILE"] = profile
+
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "engineer":
+        env["TORQUE_ENGINEER_ID"] = cell_id
+    elif kind == "architect":
+        env["TORQUE_ARCHITECT_ID"] = cell_id
+    return env
+
+
 def mcp_entrypoint_for_cell(cell) -> str:
     """Return the MCP entrypoint path to associate with a cell launch."""
     if getattr(cell, "cell_type", "") != "agent":

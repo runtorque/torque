@@ -42,7 +42,8 @@ _ANY_AGENTS_SECTION_RE = re.compile(
 _MCP_SECTION_RE = re.compile(
     r"\n?" + re.escape(_MCP_MARKER) + r"\n"
     r"\[mcp_servers\.torque\]\n"
-    r"(?:(?!\n\[)[^\n]*\n)*",
+    r"(?:(?!\n\[)[^\n]*\n)*"
+    r"(?:\[mcp_servers\.torque\.env\]\n(?:(?!\n\[)[^\n]*\n)*)?",
 )
 _FEATURES_SECTION_RE = re.compile(
     r"(?ms)(^|\n)\[features\]\n(?P<body>(?:(?!\n\[).*\n?)*)"
@@ -910,7 +911,8 @@ class CodexAdapter(AgentAdapter):
             pass  # Best-effort cleanup
 
     def install_mcp_config(self, working_dir: str, *,
-                           mcp_entrypoint: str = "") -> bool:
+                           mcp_entrypoint: str = "",
+                           mcp_env: dict[str, str] | None = None) -> bool:
         """Write Torque MCP server entry into .codex/config.toml.
 
         Uses regex text manipulation for both reading and writing to
@@ -928,6 +930,15 @@ class CodexAdapter(AgentAdapter):
                 f"command = {json.dumps(stdio_spec['command'])}\n"
                 f"args = {json.dumps(stdio_spec['args'])}\n"
             )
+            clean_env = {
+                str(key): str(value)
+                for key, value in (mcp_env or {}).items()
+                if str(key or "").strip()
+            }
+            if clean_env:
+                torque_section += "[mcp_servers.torque.env]\n"
+                for key in sorted(clean_env):
+                    torque_section += f"{key} = {json.dumps(clean_env[key])}\n"
         else:
             torque_section = (
                 f"\n{_MCP_MARKER}\n"

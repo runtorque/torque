@@ -1297,7 +1297,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             self.assertTrue(
                 adapter.install_mcp_config(
-                    tmp, mcp_entrypoint="torque/mcp_engineer.py"
+                    tmp,
+                    mcp_entrypoint="torque/mcp_engineer.py",
+                    mcp_env={
+                        "TORQUE_CELL_ID": "eng-1",
+                        "TORQUE_ENGINEER_ID": "eng-1",
+                        "TORQUE_PORT": "18933",
+                        "TORQUE_DATA_DIR": "/tmp/torque-data",
+                    },
                 )
             )
 
@@ -1305,8 +1312,232 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("[mcp_servers.torque]", installed)
             self.assertIn("command = ", installed)
             self.assertIn("torque.mcp_engineer", installed)
+            self.assertIn("[mcp_servers.torque.env]", installed)
+            self.assertIn('TORQUE_CELL_ID = "eng-1"', installed)
+            self.assertIn('TORQUE_ENGINEER_ID = "eng-1"', installed)
+            self.assertIn('TORQUE_PORT = "18933"', installed)
+            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-data"', installed)
             self.assertNotIn('url = "http://127.0.0.1', installed)
             self.assertNotIn('env_http_headers = { "X-Torque-Cell-Id"', installed)
+
+            adapter.uninstall_mcp_config(tmp)
+            self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
+
+    def test_codex_architect_mcp_config_binds_stdio_server_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+
+            self.assertTrue(
+                adapter.install_mcp_config(
+                    tmp,
+                    mcp_entrypoint="torque/mcp_architect.py",
+                    mcp_env={
+                        "TORQUE_CELL_ID": "arch-1",
+                        "TORQUE_ARCHITECT_ID": "arch-1",
+                        "TORQUE_PORT": "18934",
+                        "TORQUE_DATA_DIR": "/tmp/torque-architect",
+                    },
+                )
+            )
+
+            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn("[mcp_servers.torque]", installed)
+            self.assertIn("torque.mcp_architect", installed)
+            self.assertIn("[mcp_servers.torque.env]", installed)
+            self.assertIn('TORQUE_ARCHITECT_ID = "arch-1"', installed)
+            self.assertIn('TORQUE_CELL_ID = "arch-1"', installed)
+            self.assertIn('TORQUE_PORT = "18934"', installed)
+            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-architect"', installed)
+
+            # A subsequent reinstall must replace the whole managed block,
+            # including the nested env table, instead of leaving stale
+            # architect bindings behind for Codex tool discovery.
+            self.assertTrue(
+                adapter.install_mcp_config(
+                    tmp,
+                    mcp_entrypoint="torque/mcp_architect.py",
+                    mcp_env={
+                        "TORQUE_CELL_ID": "arch-2",
+                        "TORQUE_ARCHITECT_ID": "arch-2",
+                        "TORQUE_PORT": "18935",
+                        "TORQUE_DATA_DIR": "/tmp/torque-architect-2",
+                    },
+                )
+            )
+            reinstalled = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn('TORQUE_ARCHITECT_ID = "arch-2"', reinstalled)
+            self.assertNotIn("arch-1", reinstalled)
+
+    def test_codex_architect_stdio_config_launches_bound_proxy_for_tool_discovery(self):
+        import tomllib
+
+        received = queue.Queue()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                payload = json.loads(body.decode("utf-8"))
+                received.put(
+                    {
+                        "path": self.path,
+                        "cell_id": self.headers.get("X-Torque-Cell-Id", ""),
+                        "mcp_session_id": self.headers.get(
+                            "X-Torque-MCP-Session-Id", ""
+                        ),
+                        "body": payload,
+                    }
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": payload.get("id"),
+                            "result": {
+                                "tools": [
+                                    {"name": "architect_message_user"},
+                                    {"name": "architect_task_create"},
+                                ]
+                            },
+                        }
+                    ).encode("utf-8")
+                )
+
+            def log_message(self, fmt, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+                from torque.db import TorqueDB
+
+                stub_root = Path(tmp) / "python-stubs"
+                aiohttp_stub = stub_root / "aiohttp"
+                aiohttp_stub.mkdir(parents=True)
+                (aiohttp_stub / "__init__.py").write_text("from . import web\n")
+                (aiohttp_stub / "__init__.py").write_text(
+                    "\n".join(
+                        [
+                            "import json as _json",
+                            "import urllib.request as _request",
+                            "from . import web",
+                            "class ClientTimeout:",
+                            "    def __init__(self, total=None): self.total = total",
+                            "class TCPConnector:",
+                            "    def __init__(self, **kwargs): self.kwargs = kwargs",
+                            "class _Response:",
+                            "    def __init__(self, status, headers, body):",
+                            "        self.status = status",
+                            "        self.headers = headers",
+                            "        self._body = body",
+                            "    async def read(self): return self._body",
+                            "class _PostContext:",
+                            "    def __init__(self, url, payload, headers):",
+                            "        self.url = url; self.payload = payload; self.headers = headers",
+                            "    async def __aenter__(self):",
+                            "        data = _json.dumps(self.payload).encode('utf-8')",
+                            "        req = _request.Request(self.url, data=data, headers=self.headers, method='POST')",
+                            "        with _request.urlopen(req, timeout=10) as resp:",
+                            "            self.response = _Response(resp.status, dict(resp.headers), resp.read())",
+                            "        return self.response",
+                            "    async def __aexit__(self, exc_type, exc, tb): return False",
+                            "class ClientSession:",
+                            "    closed = False",
+                            "    def __init__(self, connector=None): self.connector = connector",
+                            "    def post(self, url, json=None, headers=None, timeout=None):",
+                            "        return _PostContext(url, json, headers or {})",
+                            "    async def close(self): self.closed = True",
+                            "",
+                        ]
+                    )
+                )
+                (aiohttp_stub / "web.py").write_text(
+                    "class WebSocketResponse:\n    pass\n"
+                )
+
+                db = TorqueDB(Path(data_dir) / "torque.db")
+                db.init()
+                db.save_agent(
+                    {
+                        "id": "arch-1",
+                        "name": "Architect",
+                        "group": "g",
+                        "cell_type": "agent",
+                        "kind": "architect",
+                    }
+                )
+                db.close()
+
+                adapter = CodexAdapter()
+                self.assertTrue(
+                    adapter.install_mcp_config(
+                        tmp,
+                        mcp_entrypoint="torque/mcp_architect.py",
+                        mcp_env={
+                            "TORQUE_CELL_ID": "arch-1",
+                            "TORQUE_ARCHITECT_ID": "arch-1",
+                            "TORQUE_PORT": str(server.server_port),
+                            "TORQUE_DATA_DIR": data_dir,
+                        },
+                    )
+                )
+                config = tomllib.loads(
+                    (Path(tmp) / ".codex" / "config.toml").read_text()
+                )
+                torque_cfg = config["mcp_servers"]["torque"]
+
+                proc = subprocess.run(
+                    [torque_cfg["command"], *torque_cfg["args"]],
+                    input=(
+                        json.dumps(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": 1,
+                                "method": "tools/list",
+                            }
+                        )
+                        + "\n"
+                    ).encode("utf-8"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env={
+                        **os.environ,
+                        **torque_cfg["env"],
+                        "PYTHONPATH": (
+                            str(stub_root)
+                            + os.pathsep
+                            + os.environ.get("PYTHONPATH", "")
+                        ),
+                    },
+                    timeout=10,
+                    check=False,
+                )
+
+                self.assertEqual(
+                    proc.returncode,
+                    0,
+                    proc.stderr.decode("utf-8", "replace")
+                    + proc.stdout.decode("utf-8", "replace"),
+                )
+                response = json.loads(proc.stdout.decode("utf-8"))
+                tool_names = [
+                    tool["name"] for tool in response["result"]["tools"]
+                ]
+                self.assertIn("architect_message_user", tool_names)
+                self.assertIn("architect_task_create", tool_names)
+                posted = received.get(timeout=5)
+                self.assertEqual(posted["path"], "/mcp")
+                self.assertEqual(posted["cell_id"], "arch-1")
+                self.assertTrue(posted["mcp_session_id"])
+                self.assertEqual(posted["body"]["method"], "tools/list")
+        finally:
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_codex_parse_stop_attaches_context_window_from_transcript(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -31,7 +31,7 @@ from .pty_core import (
     preexec_acquire_ctty as _preexec_acquire_ctty,
     set_winsize as _pty_set_winsize,
 )
-from .server_agent import mcp_entrypoint_for_cell
+from .server_agent import mcp_entrypoint_for_cell, mcp_env_vars_for_cell
 from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
 from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
@@ -591,7 +591,8 @@ class LocalPtyAdapter:
                         hook_dir,
                         mcp_entrypoint=(
                             mcp_entrypoint or mcp_entrypoint_for_cell(cell)
-                        )):
+                        ),
+                        mcp_env=mcp_env_vars_for_cell(cell)):
                     log.info("Installed MCP config for '%s' in %s", cell.name, hook_dir)
             if hook_dir and hasattr(adapter, "install_skills"):
                 if adapter.install_skills(hook_dir):
@@ -1196,7 +1197,8 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             if hook_dir and hasattr(adapter, "install_mcp_config"):
                 if adapter.install_mcp_config(
                         hook_dir,
-                        mcp_entrypoint=mcp_entrypoint_for_cell(cell)):
+                        mcp_entrypoint=mcp_entrypoint_for_cell(cell),
+                        mcp_env=mcp_env_vars_for_cell(cell)):
                     log.info("Re-installed MCP config for '%s' in %s",
                              cell.name, hook_dir)
             if hook_dir and hasattr(adapter, "install_skills"):
