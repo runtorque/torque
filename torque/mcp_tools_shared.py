@@ -97,6 +97,9 @@ _ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT = 10_000
 _ARCHITECT_ATTENTION_DEFAULT_LIMIT = 5
 _ARCHITECT_ATTENTION_MAX_LIMIT = 20
+_ARCHITECT_WAVE_SUMMARY_DEFAULT_LIMIT = 8
+_ARCHITECT_WAVE_SUMMARY_MAX_LIMIT = 20
+_ARCHITECT_WAVE_SUMMARY_RESPONSE_LIMIT = 12_000
 _ARCHITECT_EVENTS_RECENT_DEFAULT_LIMIT = 20
 _ARCHITECT_EVENTS_RECENT_MAX_LIMIT = 100
 _ARCHITECT_EVENTS_RECENT_LOAD_LIMIT = 500
@@ -984,6 +987,556 @@ def _architect_board_summary_json(summary: dict, task_items: list[dict]) -> str:
         limit -= 1
 
 
+def _normalize_architect_wave_summary_limit(value) -> tuple[int, str]:
+    if value in (None, ""):
+        return _ARCHITECT_WAVE_SUMMARY_DEFAULT_LIMIT, ""
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0, "limit_per_section must be an integer"
+    if limit < 1:
+        return 0, "limit_per_section must be at least 1"
+    return min(limit, _ARCHITECT_WAVE_SUMMARY_MAX_LIMIT), ""
+
+
+def _wave_summary_text(value, *, limit: int = 240) -> str:
+    text = str(value or "").strip()
+    if limit > 0 and len(text) > limit:
+        return text[: max(limit - 1, 0)].rstrip() + "…"
+    return text
+
+
+def _wave_summary_unknown() -> str:
+    return "unknown/not recorded"
+
+
+def _wave_summary_known(value, *, limit: int = 240):
+    text = _wave_summary_text(value, limit=limit)
+    return text if text else _wave_summary_unknown()
+
+
+def _wave_summary_bool_known(value):
+    if value is None:
+        return _wave_summary_unknown()
+    return bool(value)
+
+
+def _wave_summary_task_sort_key(task) -> tuple[int, int, str, str]:
+    try:
+        depth = int(getattr(task, "pipeline_depth", 0) or 0)
+    except (TypeError, ValueError):
+        depth = 0
+    try:
+        position = int(getattr(task, "position", 0) or 0)
+    except (TypeError, ValueError):
+        position = 0
+    return (
+        depth,
+        position,
+        str(getattr(task, "created_at", "") or ""),
+        str(getattr(task, "id", "") or ""),
+    )
+
+
+def _wave_summary_category(task) -> str:
+    specialization = _wave_summary_text(
+        getattr(task, "suggested_specialization", "") or "",
+        limit=80,
+    )
+    if specialization:
+        return specialization
+    ignored = {
+        "p0", "p1", "p2", "p3", "priority", "urgent", "deferred",
+        "parked", "hold", "torque:hold", "torque:human",
+    }
+    labels = [
+        str(label or "").strip()
+        for label in (getattr(task, "labels", []) or [])
+        if str(label or "").strip()
+    ]
+    for label in labels:
+        if label.lower() not in ignored:
+            return label
+    return "uncategorized"
+
+
+def _wave_summary_task_base(task) -> dict:
+    item = {
+        "id": str(getattr(task, "id", "") or ""),
+        "title": _summary_task_title(task),
+        "lane": str(getattr(task, "lane", "") or ""),
+        "status": str(getattr(task, "status", "") or ""),
+        "action": str(getattr(task, "action_name", "") or ""),
+        "labels": list(getattr(task, "labels", []) or []),
+        "category": _wave_summary_category(task),
+        "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "agent_id": str(getattr(task, "agent_id", "") or "").strip(),
+        "updated_at": str(getattr(task, "updated_at", "") or ""),
+    }
+    return {
+        key: value for key, value in item.items()
+        if value not in ("", None, [], {})
+    }
+
+
+def _wave_summary_latest_message(task, actions: set[str]) -> dict:
+    for entry in reversed(getattr(task, "messages", []) or []):
+        if not isinstance(entry, dict):
+            continue
+        action = str(entry.get("action", "") or "").strip()
+        if action not in actions:
+            continue
+        return {
+            key: value for key, value in {
+                "action": action,
+                "message": _wave_summary_text(entry.get("message", ""), limit=500),
+                "agent_name": _wave_summary_text(
+                    entry.get("agent_name", ""), limit=120
+                ),
+                "timestamp": entry.get("timestamp", ""),
+            }.items()
+            if value not in ("", None)
+        }
+    return {}
+
+
+def _wave_summary_verification(task) -> dict:
+    summary = getattr(task, "verification_summary", {}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    evidence = {}
+    for field_name, limit in (
+            ("verification_state", 80),
+            ("verification_mode", 80),
+            ("verification_notes", 500),
+            ("verification_updated_at", 120),
+            ("verification_updated_by", 120),
+    ):
+        value = _wave_summary_text(getattr(task, field_name, "") or "", limit=limit)
+        if value:
+            evidence[field_name.replace("verification_", "")] = value
+    for key in (
+            "tests_run",
+            "test_outcome",
+            "isolated_rerun_evidence",
+            "human_validation_pending",
+            "reviewer_acceptance",
+    ):
+        value = _wave_summary_text(summary.get(key, ""), limit=500)
+        if value:
+            evidence[key] = value
+    for key in (
+            "manual_smoke_done",
+            "deploy_needed",
+            "deploy_attempted",
+            "full_suite_attempted",
+            "unrelated_flake_accepted",
+            "live_smoke_pending",
+    ):
+        if key in summary:
+            evidence[key] = bool(summary.get(key))
+    return evidence
+
+
+def _wave_summary_merge_and_boundary(task) -> dict:
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        evidence = {}
+    merge = evidence.get("merge", {}) or {}
+    if not isinstance(merge, dict):
+        merge = {}
+    boundary = getattr(task, "worktree_boundary", {}) or {}
+    if not isinstance(boundary, dict):
+        boundary = {}
+    pr = {}
+    for candidate in (merge.get("pr"), boundary.get("pr")):
+        if isinstance(candidate, dict):
+            pr.update({k: v for k, v in candidate.items() if v not in ("", None)})
+    pr_url = (
+        merge.get("pr_url")
+        or pr.get("url")
+        or boundary.get("pr_url")
+        or ""
+    )
+    squash_sha = (
+        merge.get("sha")
+        or merge.get("merge_commit_sha")
+        or boundary.get("merge_commit_sha")
+        or pr.get("merge_commit_sha")
+        or ""
+    )
+    origin = merge.get("origin", {}) if isinstance(merge.get("origin"), dict) else {}
+    origin_verified = (
+        bool(merge.get("origin_verified"))
+        if "origin_verified" in merge
+        else origin.get("verified")
+        if "verified" in origin
+        else None
+    )
+    reviewed_boundary = {
+        "task_id": str(getattr(task, "id", "") or ""),
+        "commit_sha": _wave_summary_known(boundary.get("commit_sha", ""), limit=80),
+        "status": _wave_summary_known(boundary.get("status", ""), limit=80),
+        "recorded_at": _wave_summary_known(boundary.get("recorded_at", ""), limit=120),
+    }
+    return {
+        "pr_url": _wave_summary_known(pr_url, limit=500),
+        "squash_sha": _wave_summary_known(squash_sha, limit=80),
+        "reviewed_boundary": reviewed_boundary,
+        "origin_verification": {
+            "verified": _wave_summary_bool_known(origin_verified),
+            "summary": _wave_summary_known(
+                merge.get("origin_summary")
+                or origin.get("summary")
+                or "",
+                limit=240,
+            ),
+            "ref": _wave_summary_known(
+                merge.get("origin_ref")
+                or origin.get("ref")
+                or "",
+                limit=120,
+            ),
+            "sha": _wave_summary_known(
+                merge.get("origin_sha")
+                or origin.get("sha")
+                or "",
+                limit=80,
+            ),
+        },
+    }
+
+
+def _wave_summary_review(task) -> dict:
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}
+    review = evidence.get("review", {}) or {}
+    if not isinstance(review, dict) or not review:
+        return {}
+    out = {}
+    for key in (
+            "verdict",
+            "follow_up_classification",
+            "source_action",
+            "derived_action",
+            "derived_task_id",
+            "recorded_at",
+            "agent_name",
+    ):
+        value = _wave_summary_text(review.get(key, ""), limit=240)
+        if value:
+            out[key] = value
+    summary = _wave_summary_text(review.get("summary", ""), limit=500)
+    if summary:
+        out["summary"] = summary
+    return out
+
+
+def _wave_summary_evidence(task) -> dict:
+    verification = _wave_summary_verification(task)
+    review = _wave_summary_review(task)
+    latest_done = _wave_summary_latest_message(
+        task,
+        {"done", "review_verdict", "verify"},
+    )
+    evidence = _wave_summary_merge_and_boundary(task)
+    if verification:
+        evidence["verification"] = verification
+    else:
+        evidence["verification"] = _wave_summary_unknown()
+    if review:
+        evidence["review"] = review
+    latest = latest_done
+    if latest:
+        evidence["latest_completion_message"] = latest
+    return evidence
+
+
+def _wave_summary_task_item(task, *, include_evidence: bool = False) -> dict:
+    item = _wave_summary_task_base(task)
+    if include_evidence:
+        item["evidence"] = _wave_summary_evidence(task)
+    return item
+
+
+def _wave_summary_collect_task_ids(state, seed_ids: list[str]) -> list[str]:
+    visible = set(getattr(state, "board_tasks", {}) or {})
+    collected: list[str] = []
+    seen: set[str] = set()
+
+    def include(task_id: str):
+        task_id = str(task_id or "").strip()
+        if not task_id or task_id in seen or task_id not in visible:
+            return
+        seen.add(task_id)
+        collected.append(task_id)
+
+    for seed_id in seed_ids:
+        seed = state.board_tasks.get(seed_id)
+        if not seed:
+            continue
+        root_id = str(getattr(seed, "pipeline_root_id", "") or "").strip()
+        if root_id and root_id in visible:
+            include(root_id)
+        include(seed_id)
+        for task in state.board_tasks.values():
+            if str(getattr(task, "id", "") or "") == seed_id:
+                continue
+            if (
+                root_id
+                and str(getattr(task, "pipeline_root_id", "") or "").strip()
+                == root_id
+            ):
+                include(task.id)
+                continue
+            parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+            while parent_id:
+                if parent_id == seed_id:
+                    include(task.id)
+                    break
+                parent = state.board_tasks.get(parent_id)
+                if not parent:
+                    break
+                parent_id = str(getattr(parent, "parent_task_id", "") or "").strip()
+    collected.sort(
+        key=lambda task_id: _wave_summary_task_sort_key(state.board_tasks[task_id])
+    )
+    return collected
+
+
+def _wave_summary_group_completed(tasks: list, limit: int) -> dict:
+    groups: dict[str, list[dict]] = {}
+    for task in tasks:
+        category = _wave_summary_category(task)
+        groups.setdefault(category, []).append(
+            _wave_summary_task_item(task, include_evidence=True)
+        )
+    categories = []
+    for category in sorted(groups):
+        items = groups[category]
+        categories.append({
+            "category": category,
+            "count": len(items),
+            "items": items[:limit],
+            "truncated": len(items) > limit,
+        })
+    count = sum(len(items) for items in groups.values())
+    return {
+        "count": count,
+        "categories": categories[:limit],
+        "truncated": len(categories) > limit,
+    }
+
+
+def _wave_summary_missing_evidence_count(tasks: list) -> int:
+    count = 0
+    unknown = _wave_summary_unknown()
+    for task in tasks:
+        evidence = _wave_summary_evidence(task)
+        if (
+            evidence.get("pr_url") == unknown
+            and evidence.get("squash_sha") == unknown
+            and evidence.get("verification") == unknown
+        ):
+            count += 1
+    return count
+
+
+def _architect_wave_summary_json(state, architect_id: str,
+                                 architect_group: str,
+                                 args: dict) -> tuple[str, bool]:
+    limit, limit_error = _normalize_architect_wave_summary_limit(
+        args.get("limit_per_section")
+    )
+    if limit_error:
+        return limit_error, True
+
+    decision_id = str(args.get("decision_id", "") or "").strip()
+    explicit_task_ids = _dedupe_strings(args.get("task_ids", []))
+    if bool(decision_id) == bool(explicit_task_ids):
+        return "Provide exactly one of decision_id or task_ids", True
+
+    visible_tasks = _filter_tasks_for_caller(state, "architect", architect_id)
+    seed_task_ids: list[str] = []
+    decision_payload = {}
+    if decision_id:
+        decision, decision_error = _load_architect_decision(
+            state,
+            architect_id,
+            decision_id,
+        )
+        if not decision:
+            return decision_error, True
+        seed_task_ids = [
+            task_id for task_id in _dedupe_strings(
+                decision.get("linked_task_ids", [])
+            )
+            if task_id in visible_tasks
+        ]
+        decision_payload = {
+            "id": decision.get("id", ""),
+            "title": decision.get("title", ""),
+            "status": decision.get("status", ""),
+            "linked_task_ids": list(decision.get("linked_task_ids", []) or []),
+            "linked_engineer_ids": list(
+                decision.get("linked_engineer_ids", []) or []
+            ),
+        }
+    else:
+        for task_ident in explicit_task_ids:
+            task_id = _resolve_task(state, task_ident)
+            if not task_id or task_id not in visible_tasks:
+                return f"Task not found: {task_ident}", True
+            seed_task_ids.append(task_id)
+
+    if not seed_task_ids:
+        return _compact_json({
+            "type": "wave_summary",
+            "source": {
+                "decision_id": decision_id,
+                "task_ids": explicit_task_ids,
+                "seed_task_ids": [],
+            },
+            "group": architect_group,
+            "summary": "No visible linked tasks were found.",
+            "sections": {
+                "completed_by_category": {
+                    "count": 0, "categories": [], "truncated": False,
+                },
+                "remaining_active": _bounded_items([], limit),
+                "parked_deferred": _bounded_items([], limit),
+            },
+            "scoping": {
+                "tasks": "same_group_visible_to_calling_architect",
+                "decisions": "caller_architect_only",
+            },
+        }), False
+
+    scoped_view = copy.copy(state)
+    scoped_view.board_tasks = dict(visible_tasks)
+    task_ids = _wave_summary_collect_task_ids(scoped_view, seed_task_ids)
+    tasks = [visible_tasks[task_id] for task_id in task_ids if task_id in visible_tasks]
+    completed = [
+        task for task in tasks
+        if task_counts_as_done(task) and not _task_parked_or_deferred(task)
+    ]
+    remaining = [
+        task for task in tasks
+        if not board_task_is_closed(task) and not _task_parked_or_deferred(task)
+    ]
+    parked_deferred = [
+        task for task in tasks
+        if _task_parked_or_deferred(task)
+    ]
+    remaining.sort(key=_wave_summary_task_sort_key)
+    parked_deferred.sort(key=_wave_summary_task_sort_key)
+
+    caveats = [
+        (
+            "This is a bounded drafting aid; the architect remains responsible "
+            "for final judgment."
+        ),
+        (
+            "Deploy/restart/live-smoke evidence is reported only when recorded; "
+            "worker-context deploys/restarts should remain pending unless a "
+            "non-worker operator records them."
+        ),
+        (
+            "Missing PR, squash SHA, reviewed boundary, origin, or test evidence "
+            "is marked unknown/not recorded rather than inferred."
+        ),
+    ]
+    payload = {
+        "type": "wave_summary",
+        "source": {
+            "decision_id": decision_id,
+            "decision": decision_payload,
+            "task_ids": explicit_task_ids,
+            "seed_task_ids": seed_task_ids,
+            "expanded_task_ids": task_ids,
+        },
+        "group": architect_group,
+        "limit_per_section": limit,
+        "counts": {
+            "seed_tasks": len(seed_task_ids),
+            "expanded_tasks": len(tasks),
+            "completed": len(completed),
+            "remaining_active": len(remaining),
+            "parked_deferred": len(parked_deferred),
+            "completed_missing_recorded_evidence": (
+                _wave_summary_missing_evidence_count(completed)
+            ),
+        },
+        "sections": {
+            "completed_by_category": _wave_summary_group_completed(
+                completed,
+                limit,
+            ),
+            "remaining_active": _bounded_items(
+                [_wave_summary_task_item(task) for task in remaining],
+                limit,
+            ),
+            "parked_deferred": {
+                **_bounded_items(
+                    [_wave_summary_task_item(task) for task in parked_deferred],
+                    limit,
+                ),
+                "note": (
+                    "Parked/deferred items are excluded from shipped/actionable "
+                    "completion summaries."
+                ),
+            },
+        },
+        "evidence_rules": {
+            "task_set": (
+                "decision linked tasks or explicit task_ids, expanded to visible "
+                "pipeline/root descendants in the caller architect's group"
+            ),
+            "pr_url": "completion_evidence.merge.pr_url, then PR boundary url",
+            "squash_sha": (
+                "completion_evidence.merge.sha, then worktree boundary merge SHA"
+            ),
+            "origin_verification": (
+                "completion_evidence.merge.origin/origin_verified only"
+            ),
+            "verification": (
+                "task verification fields and verification_summary only"
+            ),
+            "parked_deferred": (
+                "labels deferred/parked/hold/torque:hold or matching status"
+            ),
+        },
+        "caveats": caveats,
+        "scoping": {
+            "tasks": "same_group_visible_to_calling_architect",
+            "decisions": "caller_architect_only",
+            "hired_engineer_visibility": "unchanged_from_architect_mcp_scope",
+        },
+    }
+    while True:
+        text = _compact_json(payload)
+        if len(text) <= _ARCHITECT_WAVE_SUMMARY_RESPONSE_LIMIT or limit <= 1:
+            return text, False
+        limit -= 1
+        payload["limit_per_section"] = limit
+        payload["sections"]["completed_by_category"] = _wave_summary_group_completed(
+            completed,
+            limit,
+        )
+        payload["sections"]["remaining_active"] = _bounded_items(
+            [_wave_summary_task_item(task) for task in remaining],
+            limit,
+        )
+        payload["sections"]["parked_deferred"] = {
+            **_bounded_items(
+                [_wave_summary_task_item(task) for task in parked_deferred],
+                limit,
+            ),
+            "note": payload["sections"]["parked_deferred"]["note"],
+        }
+
+
 def _is_engineer_like_cell(state, cell) -> bool:
     if not cell or getattr(cell, "cell_type", "") != "agent":
         return False
@@ -1114,6 +1667,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "task_chain",
     "task_list",
     "task_show",
+    "wave_summary",
 })
 
 
@@ -5600,6 +6154,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "attention_digest" and caller_kind == "architect":
         return _architect_attention_digest_json(
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+
+    if tool_name == "wave_summary" and caller_kind == "architect":
+        return _architect_wave_summary_json(
             real_state,
             caller_id,
             _engineer_group,

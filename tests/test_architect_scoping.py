@@ -4063,6 +4063,194 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(archive_error, archive_text)
         self.assertEqual(self.state._delta_ops[-1]["op"], "decision_remove")
 
+    async def test_architect_wave_summary_from_decision_groups_evidence_and_exclusions(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        product = self._add_task(
+            "TORQUE:100",
+            "Ship wave root",
+            lane="Done",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            labels=["wave-a"],
+        )
+        impl = self._add_task(
+            "TORQUE:100:1",
+            "Implement shipped helper",
+            lane="Done",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            action_name="feature/implement",
+            suggested_specialization="orchestration-core",
+            labels=["P1", "wave-summary"],
+        )
+        impl.worktree_boundary = {
+            "status": "merged",
+            "commit_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "recorded_at": "2026-06-17T12:00:00+00:00",
+            "pr": {"url": "https://github.com/acme/repo/pull/7"},
+        }
+        impl.completion_evidence = {
+            "sources": ["merge"],
+            "merge": {
+                "sha": "squash789",
+                "pr_url": "https://github.com/acme/repo/pull/7",
+                "origin_verified": True,
+                "origin_summary": "origin/main == squash789",
+                "origin_ref": "origin/main",
+                "origin_sha": "squash789",
+            },
+        }
+        impl.verification_state = "passed"
+        impl.verification_summary = {
+            "tests_run": "pytest tests/test_architect_scoping.py",
+            "deploy_attempted": False,
+            "live_smoke_pending": True,
+        }
+        review = self._add_task(
+            "TORQUE:100:2",
+            "Review shipped helper",
+            lane="Done",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            action_name="feature/review",
+            labels=["review"],
+        )
+        review.worktree_boundary = {
+            "status": "open",
+            "commit_sha": "head123",
+            "recorded_at": "2026-06-17T12:05:00+00:00",
+        }
+        review.completion_evidence = {
+            "sources": ["review"],
+            "review": {
+                "verdict": "ship",
+                "follow_up_classification": "none",
+                "source_action": "done",
+                "recorded_at": "2026-06-17T12:10:00+00:00",
+            },
+        }
+        active = self._add_task(
+            "TORQUE:100:3",
+            "Update release notes",
+            lane="In Progress",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+        )
+        parked = self._add_task(
+            "TORQUE:100:4",
+            "Park future audit",
+            lane="Backlog",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            labels=["deferred"],
+        )
+        decision = self.state.save_decision({
+            "id": "decision-wave",
+            "architect_id": architect.id,
+            "title": "Wave A",
+            "rationale": "Summarize linked wave",
+            "status": "accepted",
+            "linked_task_ids": [product.id],
+            "linked_engineer_ids": [alice.id],
+        })
+
+        text, error = await self._call(
+            "architect_wave_summary",
+            {"decision_id": decision["id"], "limit_per_section": 5},
+            architect.id,
+        )
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "wave_summary")
+        self.assertEqual(payload["source"]["decision"]["id"], decision["id"])
+        self.assertIn(impl.id, payload["source"]["expanded_task_ids"])
+        categories = {
+            item["category"]: item
+            for item in payload["sections"]["completed_by_category"]["categories"]
+        }
+        shipped_items = categories["orchestration-core"]["items"]
+        shipped = next(item for item in shipped_items if item["id"] == impl.id)
+        evidence = shipped["evidence"]
+        self.assertEqual(evidence["pr_url"], "https://github.com/acme/repo/pull/7")
+        self.assertEqual(evidence["squash_sha"], "squash789")
+        self.assertTrue(evidence["origin_verification"]["verified"])
+        self.assertEqual(
+            evidence["verification"]["tests_run"],
+            "pytest tests/test_architect_scoping.py",
+        )
+        review_items = categories["review"]["items"]
+        self.assertEqual(review_items[0]["evidence"]["review"]["verdict"], "ship")
+        remaining_ids = [
+            item["id"]
+            for item in payload["sections"]["remaining_active"]["items"]
+        ]
+        self.assertIn(active.id, remaining_ids)
+        parked_ids = [
+            item["id"]
+            for item in payload["sections"]["parked_deferred"]["items"]
+        ]
+        self.assertIn(parked.id, parked_ids)
+        self.assertIn("worker-context deploys/restarts", " ".join(payload["caveats"]))
+
+        other_text, other_error = await self._call(
+            "architect_wave_summary",
+            {"decision_id": decision["id"]},
+            other_architect.id,
+        )
+        self.assertTrue(other_error)
+        self.assertEqual(other_text, "Decision not found")
+
+    async def test_architect_wave_summary_from_explicit_tasks_marks_missing_evidence_unknown(self):
+        architect = self._add_architect("arch-1", "Architect")
+        task = self._add_task(
+            "TORQUE:200",
+            "Done without recorded evidence",
+            lane="Done",
+            created_by_architect_id=architect.id,
+            labels=["cleanup"],
+        )
+
+        text, error = await self._call(
+            "architect_wave_summary",
+            {"task_ids": [task.id], "limit_per_section": 2},
+            architect.id,
+        )
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["source"]["task_ids"], [task.id])
+        category = payload["sections"]["completed_by_category"]["categories"][0]
+        self.assertEqual(category["category"], "cleanup")
+        evidence = category["items"][0]["evidence"]
+        self.assertEqual(evidence["pr_url"], "unknown/not recorded")
+        self.assertEqual(evidence["squash_sha"], "unknown/not recorded")
+        self.assertEqual(evidence["verification"], "unknown/not recorded")
+        self.assertEqual(payload["counts"]["completed_missing_recorded_evidence"], 1)
+
+        both_text, both_error = await self._call(
+            "architect_wave_summary",
+            {"decision_id": "decision-x", "task_ids": [task.id]},
+            architect.id,
+        )
+        self.assertTrue(both_error)
+        self.assertEqual(both_text, "Provide exactly one of decision_id or task_ids")
+
     async def test_architect_journal_round_trips_and_uses_private_file_permissions(self):
         architect = self._add_architect("arch-1", "Architect")
         with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
