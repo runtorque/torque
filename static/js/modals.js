@@ -317,6 +317,10 @@ function toggleHint(btn) {
 }
 
 let _confirmResolve = null;
+let _inputDialogResolve = null;
+let _inputDialogFields = [];
+let _inputDialogFieldElements = {};
+let _inputDialogFocusRestore = null;
 let _addEngineerGroup = '';
 let _addEngineerArchitectId = '';
 let _addEngineerSpecs = [];
@@ -425,6 +429,14 @@ function closeModals() {
   });
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+  if (_inputDialogResolve) {
+    const resolve = _inputDialogResolve;
+    _inputDialogResolve = null;
+    _inputDialogFields = [];
+    _inputDialogFieldElements = {};
+    resolve(null);
+    _restoreInputDialogFocus();
+  }
   if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();
   // Display-once relay device-link (TORQUE:603 #3): drop any minted secret +
   // confirm gesture so nothing transient survives the modal close.
@@ -483,6 +495,138 @@ function _confirmResult(accepted) {
 }
 function confirmYes() { _confirmResult(true); }
 function confirmNo() { _confirmResult(false); }
+
+/* -- Input dialog (replaces window.prompt for routine operator flows) --- */
+function _restoreInputDialogFocus() {
+  const target = _inputDialogFocusRestore;
+  _inputDialogFocusRestore = null;
+  if (target && typeof target.focus === 'function') {
+    try { target.focus(); } catch (_e) {}
+  }
+}
+
+function _inputDialogFieldId(key) {
+  return 'input-dialog-field-' + String(key || 'value').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function _setInputDialogError(message) {
+  const error = document.getElementById('input-dialog-error');
+  if (!error) return;
+  error.textContent = String(message || '');
+  error.classList.toggle('hidden', !message);
+}
+
+function showInputDialog(opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-input-dialog');
+    const title = document.getElementById('input-dialog-title');
+    const summary = document.getElementById('input-dialog-summary');
+    const fieldsRoot = document.getElementById('input-dialog-fields');
+    const submitBtn = document.getElementById('input-dialog-submit-btn');
+    if (!modal || !fieldsRoot || !submitBtn) {
+      resolve(null);
+      return;
+    }
+    if (_inputDialogResolve) {
+      const previousResolve = _inputDialogResolve;
+      _inputDialogResolve = null;
+      previousResolve(null);
+    }
+    _inputDialogResolve = resolve;
+    _inputDialogFocusRestore = document.activeElement || null;
+    _inputDialogFields = Array.isArray(opts.fields) && opts.fields.length
+      ? opts.fields.slice()
+      : [{ key: 'value', label: opts.label || '', defaultValue: opts.defaultValue || '' }];
+    _inputDialogFieldElements = {};
+    if (title) title.textContent = String(opts.title || 'Input');
+    if (summary) {
+      summary.textContent = String(opts.summary || '');
+      summary.classList.toggle('hidden', !opts.summary);
+    }
+    _setInputDialogError('');
+    fieldsRoot.innerHTML = '';
+    let firstInput = null;
+    let autofocusInput = null;
+    for (let i = 0; i < _inputDialogFields.length; i++) {
+      const field = _inputDialogFields[i] || {};
+      const key = String(field.key || ('value' + i));
+      const id = _inputDialogFieldId(key);
+      const label = document.createElement('label');
+      label.setAttribute('for', id);
+      label.textContent = String(field.label || key);
+      fieldsRoot.appendChild(label);
+      const input = document.createElement(field.multiline ? 'textarea' : 'input');
+      input.id = id;
+      if (!field.multiline) input.type = field.type || 'text';
+      input.value = String(
+        field.defaultValue === null || field.defaultValue === undefined ? '' : field.defaultValue
+      );
+      input.placeholder = String(field.placeholder || '');
+      input.autocomplete = field.autocomplete || 'off';
+      input.addEventListener('keydown', function(event) {
+        if (!event) return;
+        if (event.key === 'Escape') {
+          if (event.preventDefault) event.preventDefault();
+          cancelInputDialog();
+          return;
+        }
+        if (event.key === 'Enter' && !field.multiline) {
+          if (event.preventDefault) event.preventDefault();
+          submitInputDialog();
+        }
+      });
+      fieldsRoot.appendChild(input);
+      _inputDialogFieldElements[key] = input;
+      if (!firstInput) firstInput = input;
+      if (field.autofocus) autofocusInput = input;
+    }
+    submitBtn.textContent = String(opts.submitLabel || 'OK');
+    submitBtn.className = 'btn-primary ' + (opts.variant || '');
+    modal.classList.add('visible');
+    const focusTarget = autofocusInput || firstInput;
+    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+    if (focusTarget && typeof focusTarget.select === 'function') focusTarget.select();
+  });
+}
+
+function submitInputDialog() {
+  if (!_inputDialogResolve) return;
+  const values = {};
+  for (let i = 0; i < _inputDialogFields.length; i++) {
+    const field = _inputDialogFields[i] || {};
+    const key = String(field.key || ('value' + i));
+    const input = _inputDialogFieldElements[key];
+    values[key] = input ? String(input.value || '') : '';
+    if (field.required && !values[key].trim()) {
+      _setInputDialogError((field.label || key) + ' is required.');
+      if (input && typeof input.focus === 'function') input.focus();
+      return;
+    }
+  }
+  const resolve = _inputDialogResolve;
+  _inputDialogResolve = null;
+  _inputDialogFields = [];
+  _inputDialogFieldElements = {};
+  const modal = document.getElementById('modal-input-dialog');
+  if (modal) modal.classList.remove('visible');
+  _setInputDialogError('');
+  resolve(values);
+  _restoreInputDialogFocus();
+}
+
+function cancelInputDialog() {
+  if (!_inputDialogResolve) return;
+  const resolve = _inputDialogResolve;
+  _inputDialogResolve = null;
+  _inputDialogFields = [];
+  _inputDialogFieldElements = {};
+  const modal = document.getElementById('modal-input-dialog');
+  if (modal) modal.classList.remove('visible');
+  _setInputDialogError('');
+  resolve(null);
+  _restoreInputDialogFocus();
+}
 
 /* -- Add Group -------------------------------------------------------- */
 function openAddGroup() {
@@ -2975,7 +3119,6 @@ function _parseGlsXtermScrollback() {
     var message = 'Terminal scrollback must be an integer between '
       + min + ' and ' + max + ' lines.';
     if (typeof _showToast === 'function') _showToast(message, 'error');
-    else if (typeof alert === 'function') alert(message);
     if (input && typeof input.focus === 'function') input.focus();
     return null;
   }

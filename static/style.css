@@ -2932,6 +2932,12 @@ body.runtime-embedded .term-row.term-add {
   line-height: 1.5;
   color: var(--text-dim);
 }
+.modal-error {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--red);
+}
 .board-pull-preview-modal {
   max-width: min(760px, calc(100vw - 32px));
 }

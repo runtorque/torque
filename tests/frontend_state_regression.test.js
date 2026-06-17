@@ -5563,11 +5563,11 @@ test('renderAgentDetails shows architect pending hires but omits decisions from 
   assert.doesNotMatch(html, /Hidden decision/);
 });
 
-test('architect pending-hire actions send approve and reject commands', () => {
+test('architect pending-hire actions send approve and reject commands', async () => {
   const { sandbox } = createSandbox();
-  sandbox.window.prompt = function(message, initialValue) {
-    sandbox.promptArgs = [message, initialValue];
-    return 'Needs a narrower scope';
+  sandbox.showInputDialog = function(opts) {
+    sandbox.inputDialogArgs = JSON.parse(JSON.stringify(opts));
+    return Promise.resolve({ note: 'Needs a narrower scope' });
   };
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
@@ -5580,17 +5580,18 @@ test('architect pending-hire actions send approve and reject commands', () => {
   loadScript(context, 'static/js/grid/main.js');
 
   runInContext(context, `approvePendingHire('hire-1')`);
-  runInContext(context, `rejectPendingHire('hire-2')`);
+  await runInContext(context, `rejectPendingHire('hire-2')`);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     { cmd: 'pending_hire_approve', id: 'hire-1' },
     { cmd: 'pending_hire_reject', id: 'hire-2', note: 'Needs a narrower scope' },
   ]);
-  assert.deepEqual(sandbox.promptArgs, ['Optional rejection note', '']);
+  assert.equal(sandbox.inputDialogArgs.title, 'Reject Hire Request');
+  assert.equal(sandbox.inputDialogArgs.fields[0].label, 'Optional note');
 
   sandbox.sendCalls.length = 0;
-  sandbox.window.prompt = function() { return null; };
-  runInContext(context, `rejectPendingHire('hire-3')`);
+  sandbox.showInputDialog = function() { return Promise.resolve(null); };
+  await runInContext(context, `rejectPendingHire('hire-3')`);
   assert.equal(sandbox.sendCalls.length, 0);
 });
 

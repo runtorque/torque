@@ -3298,11 +3298,23 @@ function boardUnlinkAgent(taskId) {
 
 function boardImportExternal() {
   _closeCtxMenu();
-  var ref = window.prompt('External reference or URL');
-  if (!ref) return;
-  var group = window.prompt('Group', _currentGroup() || '');
-  if (!group) return;
-  send({ cmd: 'external_import_task', ref: ref.trim(), group: group, lane: _boardSelectedLane || '' });
+  if (typeof showInputDialog !== 'function') return;
+  return showInputDialog({
+    title: 'Import External Task',
+    fields: [
+      { key: 'ref', label: 'External reference or URL', autofocus: true },
+      { key: 'group', label: 'Group', defaultValue: _currentGroup() || '' },
+    ],
+    submitLabel: 'Import',
+  }).then(function(values) {
+    if (!values || !values.ref || !values.group) return;
+    send({
+      cmd: 'external_import_task',
+      ref: values.ref.trim(),
+      group: values.group,
+      lane: _boardSelectedLane || '',
+    });
+  });
 }
 
 function boardDetachTask(taskId) {
@@ -3372,22 +3384,35 @@ function boardLinkExternal(taskId) {
   var gh = _boardTaskGithubSync(task);
   var refDefault = task.external_url || gh.issue_url || ((task.provider && task.external_id)
     ? (task.provider + ':' + task.external_id) : (task.external_id || ''));
-  var ref = window.prompt('External reference or URL', refDefault);
-  if (ref === null) return;
-  var trimmedRef = ref.trim();
-  var payload = {
-    cmd: 'external_link_task',
-    id: taskId,
-    ref: trimmedRef,
-    provider: task.provider || '',
-    external_id: task.external_id || '',
-    external_url: task.external_url || '',
-  };
-  if (trimmedRef) {
-    var boardSync = _boardSyncForEditedExternalLink(task);
-    if (boardSync) payload.board_sync = boardSync;
-  }
-  send(payload);
+  if (typeof showInputDialog !== 'function') return;
+  return showInputDialog({
+    title: 'Link External Task',
+    fields: [
+      {
+        key: 'ref',
+        label: 'External reference or URL',
+        defaultValue: refDefault,
+        autofocus: true,
+      },
+    ],
+    submitLabel: 'Save',
+  }).then(function(values) {
+    if (!values) return;
+    var trimmedRef = values.ref.trim();
+    var payload = {
+      cmd: 'external_link_task',
+      id: taskId,
+      ref: trimmedRef,
+      provider: task.provider || '',
+      external_id: task.external_id || '',
+      external_url: task.external_url || '',
+    };
+    if (trimmedRef) {
+      var boardSync = _boardSyncForEditedExternalLink(task);
+      if (boardSync) payload.board_sync = boardSync;
+    }
+    send(payload);
+  });
 }
 
 function boardClearExternal(taskId) {
@@ -3628,18 +3653,48 @@ function boardPushExternalStatus(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
   if (!task) return;
-  var status = window.prompt('External status', task.status || task.lane || '');
-  if (status === null) return;
-  var note = window.prompt('Optional note', '');
-  if (note === null) return;
-  send({ cmd: 'external_push_task_status', id: taskId, status: status.trim(), note: note.trim() });
+  if (typeof showInputDialog !== 'function') return;
+  return showInputDialog({
+    title: 'Push External Status',
+    fields: [
+      {
+        key: 'status',
+        label: 'External status',
+        defaultValue: task.status || task.lane || '',
+        autofocus: true,
+      },
+      { key: 'note', label: 'Optional note', defaultValue: '' },
+    ],
+    submitLabel: 'Push',
+  }).then(function(values) {
+    if (!values) return;
+    send({
+      cmd: 'external_push_task_status',
+      id: taskId,
+      status: values.status.trim(),
+      note: values.note.trim(),
+    });
+  });
 }
 
 function boardPostExternalComment(taskId) {
   _closeCtxMenu();
-  var comment = window.prompt('Comment to post externally');
-  if (comment === null || !comment.trim()) return;
-  send({ cmd: 'external_post_task_comment', id: taskId, comment: comment.trim() });
+  if (typeof showInputDialog !== 'function') return;
+  return showInputDialog({
+    title: 'Post External Comment',
+    fields: [
+      {
+        key: 'comment',
+        label: 'Comment to post externally',
+        multiline: true,
+        autofocus: true,
+      },
+    ],
+    submitLabel: 'Post',
+  }).then(function(values) {
+    if (!values || !values.comment.trim()) return;
+    send({ cmd: 'external_post_task_comment', id: taskId, comment: values.comment.trim() });
+  });
 }
 
 /* ---- Dispatch task to agent ----------------------------------------- */

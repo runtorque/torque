@@ -165,6 +165,31 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /pytest/);
 });
 
+test('engineer and architect rename use custom input dialog submit/cancel semantics', async () => {
+  const { context, sendCalls } = createHarness();
+  context.state.agents = {
+    'eng-1': { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha' },
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha' },
+  };
+  const dialogCalls = [];
+  context.showInputDialog = function(opts) {
+    dialogCalls.push(JSON.parse(JSON.stringify(opts)));
+    if (opts.title === 'Rename Engineer') return Promise.resolve({ name: ' Builder Prime ' });
+    return Promise.resolve(null);
+  };
+
+  await context.engineerRenameEngineer('eng-1');
+  await context.engineerRenameArchitect('arch-1');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'rename_engineer', id: 'eng-1', new_name: 'Builder Prime' },
+  ]);
+  assert.equal(dialogCalls[0].title, 'Rename Engineer');
+  assert.equal(dialogCalls[0].fields[0].defaultValue, 'Builder');
+  assert.equal(dialogCalls[1].title, 'Rename Architect');
+  assert.equal(dialogCalls[1].fields[0].defaultValue, 'Planner');
+});
+
 test('engineer panel specialization editor reads cell field and writes full replacement', () => {
   const { context, panel, sendCalls } = createHarness();
   context.state.specializations_group = 'alpha';
