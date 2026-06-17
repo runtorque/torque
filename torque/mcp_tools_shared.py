@@ -63,7 +63,11 @@ from .state import (
 from .task_health import HEALTH_SEVERITY
 from .engineer_hints import compute_engineer_hints
 from .engineer_session_map import build_engineer_session_map
-from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
+from .worktree_streams import (
+    compute_worktree_streams,
+    member_task_ids_for_stream,
+    merge_report_snippet_from_merge_result,
+)
 from .worktree_boundaries import latest_boundary_task, task_boundary
 
 _STREAM_STATES = (
@@ -5055,6 +5059,11 @@ def _worktree_merge_success_payload(result: dict | None, cell, *,
         payload["stale_base_warning"] = str(
             result.get("stale_base_warning") or ""
         )
+    payload["merge_report_snippet"] = merge_report_snippet_from_merge_result(
+        result,
+        branch=branch,
+        base_branch=base_branch,
+    )
     # Surface the silent merge cleanup-override (queued follow-ups preserve the
     # agent + worktree even when close/remove flags were requested). The new
     # fields ride along in ``cleanup``; also raise a human-readable WARNING so
