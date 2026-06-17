@@ -1760,6 +1760,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_idle_hint_digest_sends_without_events_and_respects_cooldown(self):
         state, group, engineer = self._make_state()
+        state.update_group_settings(group, worktree_merge_cleanup="auto_sweep")
         for worker_id in ("worker-a", "worker-b"):
             worker = self.state_mod.AgentCell(
                 id=worker_id,
@@ -1820,8 +1821,40 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("3 idle agents have merged branches", bridge.sent[1])
         buffer.stop()
 
+    async def test_retained_by_policy_hint_does_not_send_idle_digest(self):
+        state, group, engineer = self._make_state()
+        for worker_id in ("worker-a", "worker-b"):
+            worker = self.state_mod.AgentCell(
+                id=worker_id,
+                name=worker_id.title(),
+                slug=worker_id,
+                group=group,
+                cell_type="agent",
+                kind="worker",
+                owner_engineer_id=engineer.id,
+                created_by_engineer_id=engineer.id,
+                status="idle",
+                worktree_path=f"/repo/.torque/worktrees/{worker_id}",
+                worktree_repo_root="/repo",
+                worktree_branch=f"torque/{worker_id}",
+                worktree_merged=True,
+            )
+            state.agents[worker.id] = worker
+            state.groups[group].append(worker.id)
+
+        bridge = FakeBridge()
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        buffer._check_engineer_flush(engineer)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(bridge.sent, [])
+        buffer.stop()
+
     async def test_due_hints_piggyback_on_buffered_event_digest(self):
         state, group, engineer = self._make_state()
+        state.update_group_settings(group, worktree_merge_cleanup="auto_sweep")
         state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             push_interval=60,
