@@ -114,6 +114,22 @@ _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
 _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 20
 _ARCHITECT_PEER_INBOX_MAX_LIMIT = 100
 _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT = 1000
+_ARCHITECT_FEEDBACK_DEFAULT_CATEGORIES = (
+    "What worked well?",
+    "What slowed you down?",
+    "What should we change next wave?",
+    "Risks or follow-ups the architect should track.",
+)
+_ARCHITECT_FEEDBACK_DEFAULT_PROMPT = (
+    "Please reply in this thread with concise retrospective feedback for "
+    "the latest wave."
+)
+_ARCHITECT_FEEDBACK_REQUEST_ID_RE = re.compile(
+    r"\bfeedback(?:_request)?_id\s*[:=]\s*([A-Za-z0-9_.:-]{1,80})\b",
+    re.IGNORECASE,
+)
+_ARCHITECT_FEEDBACK_REQUEST_ID_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+_ARCHITECT_FEEDBACK_STATUS_LOAD_LIMIT = 1000
 _DISPATCH_SHAPE_VALID_BATCH_STATUSES = {
     "dispatched",
     "queued",
@@ -2458,6 +2474,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "engineer_peer_inspect",
     "engineer_peer_threads",
     "engineer_journal_read",
+    "engineer_feedback_status",
     "engineer_list",
     "engineer_pending_question",
     "events",
@@ -5193,7 +5210,8 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
                                         action: str, message: str,
                                         reply_to_id: str = "",
                                         thread_id: str = "",
-                                        ack_required: bool = False) -> dict:
+                                        ack_required: bool = False,
+                                        context: dict | None = None) -> dict:
     message_text = str(message or "").strip()
     if not message_text:
         raise ValueError("message is required")
@@ -5208,6 +5226,7 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     group_name = str(getattr(sender, "group", "") or "").strip() or str(
         getattr(recipient, "group", "") or ""
     ).strip()
+    context = dict(context or {})
 
     saved = None
     if getattr(state, "db", None):
@@ -5227,6 +5246,15 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
             "created_at": timestamp,
             "ack_required": bool(ack_required),
             "blocking": False,
+            "context_task_ids": list(context.get("context_task_ids", []) or []),
+            "context_engineer_ids": list(
+                context.get("context_engineer_ids", []) or []
+            ),
+            "context_decision_ids": list(
+                context.get("context_decision_ids", []) or []
+            ),
+            "context_summary": str(context.get("context_summary", "") or ""),
+            "context_snapshot": dict(context.get("context_snapshot", {}) or {}),
             "delivery_state": "buffered",
             "delivery_reason": "",
             "delivered_at": 0,
@@ -5260,6 +5288,14 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         "delivery_state": "buffered",
         "delivered": False,
         "buffered": True,
+        "context_summary": str(context.get("context_summary", "") or ""),
+        "context_task_ids": list(context.get("context_task_ids", []) or []),
+        "context_engineer_ids": list(
+            context.get("context_engineer_ids", []) or []
+        ),
+        "context_decision_ids": list(
+            context.get("context_decision_ids", []) or []
+        ),
     }
     if sender_kind == "engineer" and recipient_kind == "architect":
         shared["ack_required"] = bool(ack_required)
@@ -5456,6 +5492,354 @@ async def _send_architect_engineer_message(real_state, handle_command,
         response["task_id"] = dispatch_task.id
         response["dispatch_state"] = "live"
     return response, ""
+
+
+def _normalize_feedback_request_id(value: str) -> tuple[str, str]:
+    request_id = str(value or "").strip()
+    if not request_id:
+        return "feedback-" + uuid.uuid4().hex[:12], ""
+    if not _ARCHITECT_FEEDBACK_REQUEST_ID_VALUE_RE.match(request_id):
+        return "", (
+            "request_id must be 1-80 characters and contain only letters, "
+            "numbers, dot, underscore, colon, or dash"
+        )
+    return request_id, ""
+
+
+def _normalize_feedback_categories(raw_categories) -> tuple[list[str], str]:
+    if raw_categories in (None, ""):
+        return list(_ARCHITECT_FEEDBACK_DEFAULT_CATEGORIES), ""
+    if not isinstance(raw_categories, list):
+        return [], "categories must be an array of strings"
+    categories = []
+    seen = set()
+    for item in raw_categories:
+        text = " ".join(str(item or "").split())
+        if not text or text in seen:
+            continue
+        categories.append(text)
+        seen.add(text)
+    if not categories:
+        return [], "categories must include at least one non-empty string"
+    if len(categories) > 12:
+        return [], "categories must include at most 12 items"
+    for category in categories:
+        if len(category) > 240:
+            return [], "each category must be at most 240 characters"
+    return categories, ""
+
+
+def _feedback_request_id_from_row(row: dict) -> str:
+    for source in (
+            str((row or {}).get("context_summary", "") or ""),
+            str((row or {}).get("message", "") or "")):
+        match = _ARCHITECT_FEEDBACK_REQUEST_ID_RE.search(source)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _format_engineer_feedback_message(
+        request_id: str,
+        prompt: str,
+        categories: list[str]) -> str:
+    parts = [
+        "Retrospective feedback request",
+        f"feedback_request_id: {request_id}",
+        "",
+        prompt,
+        "",
+        "Please reply in this thread with bullets for:",
+    ]
+    parts.extend(f"- {category}" for category in categories)
+    parts.extend([
+        "",
+        "Keep it compact; no task is being created for this request.",
+    ])
+    return "\n".join(parts)
+
+
+def _architect_feedback_hired_engineers(state, caller_id: str) -> list:
+    hired = []
+    for cell, relation in _architect_visible_engineers(
+            state, caller_id, include_tombstoned=False).values():
+        if relation != "hired":
+            continue
+        if _agent_is_tombstoned(state, cell):
+            continue
+        hired.append(cell)
+    hired.sort(
+        key=lambda cell: (
+            str(getattr(cell, "slug", "") or getattr(cell, "name", "") or "").lower(),
+            str(getattr(cell, "id", "") or ""),
+        )
+    )
+    return hired
+
+
+async def _architect_engineer_feedback_request_json(
+        real_state,
+        handle_command,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    architect = real_state.agents.get(str(caller_id or "").strip())
+    if not architect:
+        return "architect not found", True
+    raw_request_id = str(args.get("request_id", "") or "").strip()
+    request_id, request_id_error = _normalize_feedback_request_id(
+        raw_request_id
+    )
+    if request_id_error:
+        return request_id_error, True
+    categories, category_error = _normalize_feedback_categories(
+        args.get("categories", None)
+    )
+    if category_error:
+        return category_error, True
+    prompt = " ".join(str(args.get("prompt", "") or "").split())
+    if not prompt:
+        prompt = _ARCHITECT_FEEDBACK_DEFAULT_PROMPT
+    if len(prompt) > 4000:
+        return "prompt must be at most 4000 characters", True
+
+    if raw_request_id and _feedback_request_candidate_rows(
+            real_state,
+            caller_id,
+            request_id=request_id):
+        status_text, _status_error = _architect_engineer_feedback_status_json(
+            real_state,
+            caller_id,
+            {"request_id": request_id},
+        )
+        payload = json.loads(status_text)
+        payload["type"] = "engineer_feedback_request"
+        payload["deduped"] = True
+        return _compact_json(payload), False
+
+    engineers = _architect_feedback_hired_engineers(real_state, caller_id)
+    if not engineers:
+        return _compact_json({
+            "type": "engineer_feedback_request",
+            "request_id": request_id,
+            "requested_count": 0,
+            "requested": [],
+            "message": "no hired engineers in scope",
+            "categories": categories,
+        }), False
+
+    message = _format_engineer_feedback_message(
+        request_id,
+        prompt,
+        categories,
+    )
+    length_error = _validate_architect_peer_message_length(message)
+    if length_error:
+        return length_error, True
+    requested = []
+    for engineer in engineers:
+        context = {
+            "context_engineer_ids": [engineer.id],
+            "context_summary": f"feedback_request_id={request_id}",
+            "context_snapshot": {
+                "feedback_request": {
+                    "request_id": request_id,
+                    "categories": list(categories),
+                },
+            },
+        }
+        delivered = _deliver_architect_engineer_message(
+            real_state,
+            architect,
+            engineer,
+            action="architect_message",
+            message=message,
+            context=context,
+        )
+        await _inject_mcp_message(
+            handle_command,
+            real_state,
+            architect,
+            engineer,
+            delivered,
+            message,
+        )
+        requested.append({
+            "engineer_id": engineer.id,
+            "engineer_name": str(getattr(engineer, "name", "") or engineer.id),
+            "engineer_slug": str(getattr(engineer, "slug", "") or ""),
+            "message_id": delivered["id"],
+            "thread_id": delivered["thread_id"],
+        })
+    return _compact_json({
+        "type": "engineer_feedback_request",
+        "request_id": request_id,
+        "prompt": prompt,
+        "categories": categories,
+        "requested_count": len(requested),
+        "requested": requested,
+        "tracking": {
+            "status_tool": "architect_engineer_feedback_status",
+            "reply_detection": "engineer->architect messages in each request thread",
+        },
+    }), False
+
+
+def _feedback_request_candidate_rows(
+        state,
+        caller_id: str,
+        *,
+        request_id: str = "") -> list[dict]:
+    db = getattr(state, "db", None)
+    if not db:
+        return []
+    rows = db.load_agent_peer_messages_for_agent(
+        caller_id,
+        limit=_ARCHITECT_FEEDBACK_STATUS_LOAD_LIMIT,
+    )
+    candidates = []
+    for row in rows:
+        if (
+                str(row.get("sender_id", "") or "").strip() != caller_id
+                or str(row.get("sender_kind", "") or "").strip() != "architect"
+                or str(row.get("recipient_kind", "") or "").strip() != "engineer"):
+            continue
+        row_request_id = _feedback_request_id_from_row(row)
+        if not row_request_id:
+            continue
+        if request_id and row_request_id != request_id:
+            continue
+        candidate = dict(row)
+        candidate["feedback_request_id"] = row_request_id
+        candidates.append(candidate)
+    return candidates
+
+
+def _feedback_status_item_for_request(
+        state,
+        caller_id: str,
+        request_row: dict) -> dict:
+    engineer_id = str(request_row.get("recipient_id", "") or "").strip()
+    engineer = state.agents.get(engineer_id)
+    requested_at = float(request_row.get("created_at", 0) or 0)
+    thread_id = str(request_row.get("thread_id", "") or "").strip()
+    reply_rows = []
+    db = getattr(state, "db", None)
+    if db and thread_id:
+        for row in db.load_agent_peer_messages_for_thread(thread_id, limit=1000):
+            if (
+                    str(row.get("sender_id", "") or "").strip() == engineer_id
+                    and str(row.get("recipient_id", "") or "").strip() == caller_id
+                    and float(row.get("created_at", 0) or 0) > requested_at):
+                reply_rows.append(row)
+    reply_rows.sort(
+        key=lambda row: (
+            float(row.get("created_at", 0) or 0),
+            str(row.get("id", "") or ""),
+        )
+    )
+    item = {
+        "engineer_id": engineer_id,
+        "engineer_name": (
+            str(getattr(engineer, "name", "") or "").strip()
+            or str(request_row.get("recipient_name", "") or "").strip()
+            or engineer_id
+        ),
+        "engineer_slug": str(getattr(engineer, "slug", "") or ""),
+        "status": "replied" if reply_rows else "pending",
+        "request_message_id": str(request_row.get("id", "") or ""),
+        "thread_id": thread_id,
+        "requested_at": requested_at,
+        "reply_count": len(reply_rows),
+    }
+    if reply_rows:
+        first = reply_rows[0]
+        latest = reply_rows[-1]
+        item.update({
+            "reply_message_id": str(first.get("id", "") or ""),
+            "reply_at": float(first.get("created_at", 0) or 0),
+            "latest_reply_message_id": str(latest.get("id", "") or ""),
+            "latest_reply_at": float(latest.get("created_at", 0) or 0),
+        })
+    return item
+
+
+def _architect_engineer_feedback_status_json(
+        real_state,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    request_id = str(args.get("request_id", "") or "").strip()
+    if request_id and not _ARCHITECT_FEEDBACK_REQUEST_ID_VALUE_RE.match(request_id):
+        return (
+            "request_id must be 1-80 characters and contain only letters, "
+            "numbers, dot, underscore, colon, or dash"
+        ), True
+    candidates = _feedback_request_candidate_rows(
+        real_state,
+        caller_id,
+        request_id=request_id,
+    )
+    if not candidates:
+        return _compact_json({
+            "type": "engineer_feedback_status",
+            "request_id": request_id,
+            "requested_count": 0,
+            "replied_count": 0,
+            "pending_count": 0,
+            "requested": [],
+            "replied": [],
+            "pending": [],
+            "message": "feedback request not found",
+        }), False
+    if not request_id:
+        request_id = max(
+            candidates,
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            ),
+        )["feedback_request_id"]
+        candidates = [
+            row for row in candidates
+            if row.get("feedback_request_id") == request_id
+        ]
+
+    by_engineer: dict[str, dict] = {}
+    for row in candidates:
+        engineer_id = str(row.get("recipient_id", "") or "").strip()
+        current = by_engineer.get(engineer_id)
+        if not current or (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+        ) > (
+                float(current.get("created_at", 0) or 0),
+                str(current.get("id", "") or ""),
+        ):
+            by_engineer[engineer_id] = row
+
+    requested = [
+        _feedback_status_item_for_request(real_state, caller_id, row)
+        for row in by_engineer.values()
+    ]
+    requested.sort(
+        key=lambda item: (
+            0 if item["status"] == "pending" else 1,
+            item["engineer_slug"] or item["engineer_name"] or item["engineer_id"],
+            item["engineer_id"],
+        )
+    )
+    replied = [item for item in requested if item["status"] == "replied"]
+    pending = [item for item in requested if item["status"] == "pending"]
+    return _compact_json({
+        "type": "engineer_feedback_status",
+        "request_id": request_id,
+        "requested_count": len(requested),
+        "replied_count": len(replied),
+        "pending_count": len(pending),
+        "requested": requested,
+        "replied": replied,
+        "pending": pending,
+        "reply_detection": "engineer->architect messages in each request thread",
+    }), False
 
 
 def _load_existing_peer_message_for_idempotency(state, message_id: str) -> dict | None:
@@ -6992,6 +7376,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             real_state,
             caller_id,
             _engineer_group,
+            args,
+        )
+
+    if tool_name == "engineer_feedback_status" and caller_kind == "architect":
+        return _architect_engineer_feedback_status_json(
+            real_state,
+            caller_id,
             args,
         )
 
@@ -10103,6 +10494,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if message_error:
             return message_error, True
         return json.dumps(response), False
+
+    if tool_name == "engineer_feedback_request" and caller_kind == "architect":
+        return await _architect_engineer_feedback_request_json(
+            real_state,
+            handle_command,
+            caller_id,
+            args,
+        )
 
     if tool_name == "peer_message" and caller_kind == "architect":
         recipient, recipient_error = _resolve_architect_peer(

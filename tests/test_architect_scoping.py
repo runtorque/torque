@@ -2074,6 +2074,176 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(engineers[bob.id]["specializations"], [])
 
+    async def test_architect_engineer_feedback_request_fans_out_to_hired_only(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        dave = self._add_engineer(
+            "eng-dave", "Dave", hired_by_architect_id=architect.id
+        )
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=other_architect.id
+        )
+        user_visible = self._add_engineer("eng-user", "User Visible")
+        task_count = len(self.state.board_tasks)
+
+        text, is_error = await self._call(
+            "architect_engineer_feedback_request",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "engineer_feedback_request")
+        self.assertTrue(payload["request_id"].startswith("feedback-"))
+        self.assertEqual(payload["requested_count"], 2)
+        self.assertEqual(
+            {item["engineer_id"] for item in payload["requested"]},
+            {alice.id, dave.id},
+        )
+        self.assertIn("What worked well?", payload["categories"])
+        self.assertEqual(len(self.state.board_tasks), task_count)
+        self.assertEqual(len(alice.mcp_messages), 1)
+        self.assertEqual(len(dave.mcp_messages), 1)
+        self.assertEqual(bob.mcp_messages, [])
+        self.assertEqual(user_visible.mcp_messages, [])
+        self.assertIn(
+            f"feedback_request_id: {payload['request_id']}",
+            alice.mcp_messages[0]["message"],
+        )
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual(
+            {call["agent_id"] for call in injects},
+            {alice.id, dave.id},
+        )
+        rows = self.db.load_agent_peer_messages_for_agent(architect.id)
+        feedback_rows = [
+            row for row in rows
+            if row.get("context_summary")
+            == f"feedback_request_id={payload['request_id']}"
+        ]
+        self.assertEqual(len(feedback_rows), 2)
+
+    async def test_architect_engineer_feedback_status_tracks_thread_replies(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        dave = self._add_engineer(
+            "eng-dave", "Dave", hired_by_architect_id=architect.id
+        )
+        self._add_engineer("eng-user", "User Visible")
+
+        request_text, request_error = await self._call(
+            "architect_engineer_feedback_request",
+            {
+                "request_id": "retro-1",
+                "prompt": "Share release wave feedback.",
+                "categories": ["wins", "friction"],
+            },
+            architect.id,
+        )
+        self.assertFalse(request_error, request_text)
+        request_payload = json.loads(request_text)
+        by_engineer = {
+            item["engineer_id"]: item
+            for item in request_payload["requested"]
+        }
+
+        reply_text, reply_error = await self._call_engineer(
+            "engineer_reply",
+            {
+                "message_id": by_engineer[alice.id]["message_id"],
+                "message": "wins: fast reviews; friction: tracking replies",
+            },
+            alice.id,
+        )
+        self.assertFalse(reply_error, reply_text)
+        reply_payload = json.loads(reply_text)
+
+        status_text, status_error = await self._call(
+            "architect_engineer_feedback_status",
+            {"request_id": "retro-1"},
+            architect.id,
+        )
+
+        self.assertFalse(status_error, status_text)
+        status = json.loads(status_text)
+        self.assertEqual(status["type"], "engineer_feedback_status")
+        self.assertEqual(status["request_id"], "retro-1")
+        self.assertEqual(status["requested_count"], 2)
+        self.assertEqual(status["replied_count"], 1)
+        self.assertEqual(status["pending_count"], 1)
+        self.assertEqual(
+            {item["engineer_id"] for item in status["replied"]},
+            {alice.id},
+        )
+        self.assertEqual(
+            {item["engineer_id"] for item in status["pending"]},
+            {dave.id},
+        )
+        replied = status["replied"][0]
+        self.assertEqual(
+            replied["request_message_id"],
+            by_engineer[alice.id]["message_id"],
+        )
+        self.assertEqual(
+            replied["thread_id"],
+            by_engineer[alice.id]["thread_id"],
+        )
+        self.assertEqual(replied["reply_message_id"], reply_payload["message_id"])
+        pending = status["pending"][0]
+        self.assertEqual(
+            pending["request_message_id"],
+            by_engineer[dave.id]["message_id"],
+        )
+        self.assertEqual(
+            status["reply_detection"],
+            "engineer->architect messages in each request thread",
+        )
+
+        latest_text, latest_error = await self._call(
+            "architect_engineer_feedback_status",
+            {},
+            architect.id,
+        )
+        self.assertFalse(latest_error, latest_text)
+        self.assertEqual(json.loads(latest_text)["request_id"], "retro-1")
+
+        row_count_before_repeat = len(
+            self.db.load_agent_peer_messages_for_agent(architect.id)
+        )
+        inject_count_before_repeat = len([
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ])
+        repeat_text, repeat_error = await self._call(
+            "architect_engineer_feedback_request",
+            {"request_id": "retro-1"},
+            architect.id,
+        )
+        self.assertFalse(repeat_error, repeat_text)
+        repeat = json.loads(repeat_text)
+        self.assertTrue(repeat["deduped"])
+        self.assertEqual(repeat["requested_count"], 2)
+        self.assertEqual(
+            len(self.db.load_agent_peer_messages_for_agent(architect.id)),
+            row_count_before_repeat,
+        )
+        self.assertEqual(
+            len([
+                call for call in self.handle_calls
+                if call.get("cmd") == "inject_mcp_message"
+            ]),
+            inject_count_before_repeat,
+        )
+
     async def test_architect_engineer_set_specializations_replaces_and_persists(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(

@@ -774,6 +774,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_engineer_hire", architect_tool_names)
         self.assertIn("architect_engineer_set_specializations", architect_tool_names)
         self.assertIn("architect_engineer_message", architect_tool_names)
+        self.assertIn("architect_engineer_feedback_request", architect_tool_names)
+        self.assertIn("architect_engineer_feedback_status", architect_tool_names)
         self.assertIn("architect_peer_list", architect_tool_names)
         self.assertIn("architect_peer_message", architect_tool_names)
         self.assertIn("architect_peer_inbox", architect_tool_names)

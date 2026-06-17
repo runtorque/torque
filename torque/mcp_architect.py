@@ -1070,6 +1070,62 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_engineer_feedback_request",
+        "description": (
+            "Fan out one structured retrospective feedback request to all "
+            "Engineers hired by this Architect. Does not create tasks and "
+            "does not target visible-only/non-hired Engineers."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "Optional custom prompt. Defaults to a compact "
+                        "post-wave retrospective request."
+                    ),
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional feedback categories. Defaults cover what "
+                        "worked, blockers, next-wave changes, and risks/follow-ups."
+                    ),
+                },
+                "request_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional stable id for tracking/idempotent operator "
+                        "coordination. Auto-generated when omitted."
+                    ),
+                },
+            },
+        },
+    },
+    {
+        "name": "architect_engineer_feedback_status",
+        "description": (
+            "Return bounded response tracking for a retrospective feedback "
+            "request: requested Engineers, replied Engineers, pending Engineers, "
+            "and the relevant message/thread ids. Replies are detected as "
+            "Engineer→Architect messages in each request thread."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "description": (
+                        "Feedback request id. When omitted, returns the most "
+                        "recent feedback request from this Architect."
+                    ),
+                },
+            },
+        },
+    },
+    {
         "name": "architect_peer_list",
         "description": (
             "List same-group Architect peers that can receive direct "
