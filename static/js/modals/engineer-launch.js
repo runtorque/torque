@@ -317,8 +317,18 @@ function openEngineerLaunchDialog(group, agentId) {
   syncEngineerLaunchNotificationPreset();
   onEngineerLaunchProviderChange();
 
-  document.getElementById('modal-engineer-launch').classList.add('visible');
-  document.getElementById('engineer-launch-provider').focus();
+  if (typeof openModalDialog === 'function') {
+    openModalDialog('modal-engineer-launch', {
+      role: 'dialog',
+      labelledBy: 'engineer-launch-title',
+      initialFocus: '#engineer-launch-provider',
+      cancelOnEscape: true,
+      onCancel: closeModals,
+    });
+  } else {
+    document.getElementById('modal-engineer-launch').classList.add('visible');
+    document.getElementById('engineer-launch-provider').focus();
+  }
 }
 
 function submitEngineerLaunchDialog() {

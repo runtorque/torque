@@ -243,7 +243,7 @@
 
 <!-- Engineer launch / relaunch modal -->
 <div class="overlay" id="modal-engineer-launch">
-  <div class="modal modal-tall">
+  <div class="modal modal-tall" role="dialog" aria-modal="true" aria-labelledby="engineer-launch-title">
     <h2 id="engineer-launch-title">Launch Engineer</h2>
     <div class="task-modal-body">
     <div class="task-modal-section">
@@ -1852,7 +1852,7 @@
 
 <!-- Confirm dialog (replaces window.confirm for WKWebView) -->
 <div class="overlay" id="modal-confirm">
-  <div class="modal">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-label="Confirm action" aria-describedby="confirm-message">
     <p id="confirm-message"></p>
     <div id="confirm-extras"></div>
     <div class="modal-actions">
