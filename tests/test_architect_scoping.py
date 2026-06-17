@@ -1379,6 +1379,276 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(peer_messages["oldest_unanswered_at"], 30.0)
         self.assertEqual(peer_messages["latest_message_at"], 40.0)
 
+    async def test_architect_attention_digest_surfaces_actionable_gates(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        peer = self._add_architect("arch-peer", "Peer Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired Engineer", hired_by_architect_id=architect.id
+        )
+        other_hired = self._add_engineer(
+            "eng-other", "Other Engineer", hired_by_architect_id=other_architect.id
+        )
+        worker = self._add_worker("worker-hired", "Worker Hired", hired.id)
+        worker.worktree_repo_root = "/repo"
+        worker.git_root = "/repo"
+        worker.worktree_branch = "torque/hired-ready"
+        worker.status = "idle"
+        other_worker = self._add_worker(
+            "worker-other", "Worker Other", other_hired.id
+        )
+        other_worker.worktree_repo_root = "/repo"
+        other_worker.git_root = "/repo"
+        other_worker.worktree_branch = "torque/other-ready"
+        other_worker.status = "idle"
+        blocker_worker = self._add_worker(
+            "worker-blocker", "Worker Blocker", hired.id
+        )
+        blocker_worker.worktree_repo_root = "/repo"
+        blocker_worker.git_root = "/repo"
+        blocker_worker.worktree_branch = "torque/hired-blocker"
+        blocker_worker.status = "running"
+
+        ask = self._add_task(
+            "task-ask",
+            "Need product call",
+            labels=["torque:human"],
+            created_by_architect_id=architect.id,
+        )
+        parked = self._add_task(
+            "task-parked",
+            "Deferred follow-up",
+            labels=["deferred"],
+            created_by_architect_id=architect.id,
+        )
+        unhealthy = self._add_task(
+            "task-unhealthy",
+            "Unhealthy active work",
+            lane="In Progress",
+            assigned_engineer_id=hired.id,
+            created_by_architect_id=architect.id,
+        )
+        ready_product = self._add_task(
+            "task-ready",
+            "Ready product",
+            lane="Done",
+            agent_id=worker.id,
+            assigned_engineer_id=hired.id,
+            created_by_architect_id=architect.id,
+            verification_state="passed",
+        )
+        self._add_task(
+            "task-ready-review",
+            "Review ready product",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=ready_product.id,
+            pipeline_root_id=ready_product.id,
+            pipeline_depth=1,
+            agent_id=worker.id,
+            assigned_engineer_id=hired.id,
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/hired-ready",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "abc123",
+                "recorded_by_agent_id": worker.id,
+            },
+            completion_evidence={
+                "review": {
+                    "verdict": "ship",
+                    "follow_up_classification": "none",
+                    "recorded_at": "2026-04-07T11:30:00+00:00",
+                },
+            },
+        )
+        other_product = self._add_task(
+            "task-other-ready",
+            "Other architect ready product",
+            lane="Done",
+            agent_id=other_worker.id,
+            assigned_engineer_id=other_hired.id,
+            created_by_architect_id=other_architect.id,
+        )
+        self._add_task(
+            "task-other-ready-review",
+            "Review other ready product",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=other_product.id,
+            pipeline_root_id=other_product.id,
+            pipeline_depth=1,
+            agent_id=other_worker.id,
+            assigned_engineer_id=other_hired.id,
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/other-ready",
+                "status": "open",
+                "recorded_at": "2026-04-07T12:30:00+00:00",
+                "commit_sha": "def456",
+                "recorded_by_agent_id": other_worker.id,
+            },
+            completion_evidence={
+                "review": {
+                    "verdict": "ship",
+                    "follow_up_classification": "none",
+                    "recorded_at": "2026-04-07T12:30:00+00:00",
+                },
+            },
+        )
+        blocker_product = self._add_task(
+            "task-blocker",
+            "Blocked product",
+            lane="Done",
+            agent_id=blocker_worker.id,
+            assigned_engineer_id=hired.id,
+        )
+        blocker_review = self._add_task(
+            "task-blocker-review",
+            "Review blocked product",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=blocker_product.id,
+            pipeline_root_id=blocker_product.id,
+            pipeline_depth=1,
+            agent_id=blocker_worker.id,
+            assigned_engineer_id=hired.id,
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/hired-blocker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:30:00+00:00",
+                "commit_sha": "aaa111",
+                "recorded_by_agent_id": blocker_worker.id,
+            },
+            completion_evidence={
+                "review": {
+                    "verdict": "block",
+                    "follow_up_classification": "blocking",
+                    "recorded_at": "2026-04-07T10:30:00+00:00",
+                },
+            },
+        )
+        blocker_fix = self._add_task(
+            "task-blocker-fix",
+            "Fix review blockers",
+            lane="In Progress",
+            action_name="feature/implement",
+            parent_task_id=blocker_review.id,
+            pipeline_root_id=blocker_product.id,
+            pipeline_depth=2,
+            agent_id=blocker_worker.id,
+            assigned_engineer_id=hired.id,
+            labels=["review-fix"],
+        )
+        unhealthy.health_state = "stalled"
+        unhealthy.health_since = "2026-04-07T13:00:00+00:00"
+        blocker_fix.health_state = "idle-risk"
+        blocker_fix.health_since = "2026-04-07T13:05:00+00:00"
+
+        with mock.patch("time.time", return_value=1234.5):
+            self.state.update_engineer_settings(
+                "torque",
+                pending_question="Need approval for scope cut?",
+                paused=True,
+                _pending_question_actor_id=hired.id,
+            )
+        self.state.save_pending_hire({
+            "id": "hire-1",
+            "architect_id": architect.id,
+            "requested_name": "QA Engineer",
+            "requested_command": "codex",
+            "requested_provider": "codex",
+            "requested_specializations": ["quality-observability"],
+            "status": "pending",
+            "created_at": 99,
+        })
+        self.state.save_pending_hire({
+            "id": "hire-other",
+            "architect_id": other_architect.id,
+            "requested_name": "Other QA",
+            "status": "pending",
+            "created_at": 100,
+        })
+        self.db.save_agent_peer_message({
+            "id": "peer-needs-ack",
+            "thread_id": "peer-thread",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Please ack the handoff.",
+            "created_at": 50.0,
+            "ack_required": True,
+            "context_task_ids": [ask.id],
+            "context_summary": "handoff",
+        })
+
+        text, is_error = await self._call(
+            "architect_attention_digest",
+            {"limit_per_section": 3},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "architect_attention_digest")
+        self.assertEqual(payload["group"], "torque")
+        sections = payload["sections"]
+        self.assertEqual(
+            [item["id"] for item in sections["blocking_asks"]["items"]],
+            [ask.id],
+        )
+        self.assertEqual(
+            sections["engineer_pending_questions"]["items"][0]["engineer_id"],
+            hired.id,
+        )
+        self.assertEqual(
+            sections["peer_ack_required"]["items"][0]["thread_id"],
+            "peer-thread",
+        )
+        ready_ids = {
+            task_id
+            for item in sections["ready_to_merge_streams"]["items"]
+            for task_id in item["product_task_ids"]
+        }
+        self.assertIn(ready_product.id, ready_ids)
+        self.assertNotIn(other_product.id, ready_ids)
+        blocker_ids = {
+            item.get("active_blocker_task_id", "")
+            for item in sections["blocker_or_stale_streams"]["items"]
+        }
+        self.assertIn(blocker_fix.id, blocker_ids)
+        unhealthy_ids = {
+            item["id"] for item in sections["unhealthy_tasks"]["items"]
+        }
+        self.assertIn(unhealthy.id, unhealthy_ids)
+        unhealthy_stream_task_ids = {
+            task["id"]
+            for stream in sections["unhealthy_streams"]["items"]
+            for task in stream["unhealthy_tasks"]
+        }
+        self.assertIn(blocker_fix.id, unhealthy_stream_task_ids)
+        self.assertEqual(
+            [item["id"] for item in sections["pending_hires"]["items"]],
+            ["hire-1"],
+        )
+        self.assertEqual(payload["parked_deferred"]["count"], 1)
+        self.assertNotIn(
+            parked.id,
+            json.dumps(sections),
+            "parked/deferred work must stay out of attention sections",
+        )
+        self.assertEqual(
+            payload["scoping"]["ready_merge_and_stream_loops"],
+            "hired_engineers_only",
+        )
+
     async def test_architect_board_summary_bounds_large_task_excerpt(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(

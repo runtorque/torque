@@ -123,6 +123,8 @@ class ArchitectPromptTests(unittest.TestCase):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 
         self.assertIn("architect_boot_summary", prompt)
+        self.assertIn("architect_attention_digest", prompt)
+        self.assertIn("what needs my\n   attention now?", prompt)
         self.assertIn("read the cached boot-recovery summary", prompt)
         self.assertIn("fall back to the raw tools", prompt)
         self.assertIn("architect_journal_read", prompt)

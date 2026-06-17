@@ -752,6 +752,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"] for tool in listed_architect.payload["result"]["tools"]
         ]
         self.assertIn("architect_tool_search", architect_tool_names)
+        self.assertIn("architect_attention_digest", architect_tool_names)
         self.assertIn("architect_board_summary", architect_tool_names)
         self.assertIn("architect_events_recent", architect_tool_names)
         self.assertIn("architect_deploy_state", architect_tool_names)
