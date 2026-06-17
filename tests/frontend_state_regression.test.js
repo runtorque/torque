@@ -1863,6 +1863,58 @@ function createTaskHistoryHarness(options = {}) {
   return { context, document, sandbox, overlay };
 }
 
+function renderMarkdownForTest(rawText) {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/markdown.js');
+  context.__markdownInput = rawText;
+  try {
+    return runInContext(context, 'torqueRenderMarkdownMessage(__markdownInput)');
+  } finally {
+    delete context.__markdownInput;
+  }
+}
+
+test('shared markdown renderer autolinks bare safe URLs without touching explicit links or code', () => {
+  const html = renderMarkdownForTest([
+    '[Docs](https://example.com?a=1&b=2)',
+    'Bare https://example.org/path(foo)).',
+    'Also http://example.net/docs, and mailto:ops@example.com.',
+    '`https://code.example/path`',
+    '```',
+    'https://block.example/path',
+    '```',
+  ].join('\n'));
+
+  assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="https:\/\/example\.com\?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">Docs<\/a>/);
+  assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="https:\/\/example\.org\/path\(foo\)" target="_blank" rel="noopener noreferrer">https:\/\/example\.org\/path\(foo\)<\/a>\)\./);
+  assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="http:\/\/example\.net\/docs" target="_blank" rel="noopener noreferrer">http:\/\/example\.net\/docs<\/a>,/);
+  assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="mailto:ops@example\.com" target="_blank" rel="noopener noreferrer">mailto:ops@example\.com<\/a>\./);
+  assert.match(html, /<code class="torque-md-inline-code">https:\/\/code\.example\/path<\/code>/);
+  assert.match(html, /<pre class="torque-md-code-block"><code>https:\/\/block\.example\/path<\/code><\/pre>/);
+  assert.equal((html.match(/data-torque-markdown-link="1"/g) || []).length, 4);
+  assert.doesNotMatch(html, /href="https:\/\/code\.example/);
+  assert.doesNotMatch(html, /href="https:\/\/block\.example/);
+});
+
+test('shared markdown renderer keeps unsafe schemes and raw HTML inert around autolinks', () => {
+  const html = renderMarkdownForTest([
+    'Unsafe javascript:alert(1) and data:text/html,<svg onload=alert(1)>.',
+    '<img src="https://images.example/x.png" onerror="alert(1)">',
+    '<script>alert("x")</script>',
+  ].join('\n'));
+
+  assert.match(html, /javascript:alert\(1\)/);
+  assert.match(html, /data:text\/html,&lt;svg onload=alert\(1\)&gt;/);
+  assert.match(html, /&lt;img src=&quot;/);
+  assert.match(html, /&quot; onerror=&quot;alert\(1\)&quot;&gt;/);
+  assert.match(html, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
+  assert.match(html, /href="https:\/\/images\.example\/x\.png"/);
+  assert.doesNotMatch(html, /<img\b/i);
+  assert.doesNotMatch(html, /<script\b/i);
+  assert.doesNotMatch(html, /href="(?:javascript|data):/i);
+});
+
 test('board visible tasks combine group, search, label, action, and agent filters', () => {
   const { context } = createBoardHarness();
   context.state.agents = {
@@ -11526,6 +11578,7 @@ test('embedded terminal direct-message body renders shared markdown safely', () 
         '# Heading',
         '**bold** and *italic* plus `code`',
         '- [Docs](https://example.com?a=1&b=2)',
+        '- Bare https://terminal.example/logs?run=1&ok=1).',
         '- [Bad](javascript:alert(1))',
         '- [Entity](java&#115;cript:alert(1))',
         '> quoted line',
@@ -11556,6 +11609,7 @@ test('embedded terminal direct-message body renders shared markdown safely', () 
   assert.match(html, /<em>italic<\/em>/);
   assert.match(html, /<code class="torque-md-inline-code">code<\/code>/);
   assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="https:\/\/example\.com\?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">Docs<\/a>/);
+  assert.match(html, /<a class="torque-md-link" data-torque-markdown-link="1" href="https:\/\/terminal\.example\/logs\?run=1&amp;ok=1" target="_blank" rel="noopener noreferrer">https:\/\/terminal\.example\/logs\?run=1&amp;ok=1<\/a>\)\./);
   assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Bad<\/span>/);
   assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Entity<\/span>/);
   assert.match(html, /<blockquote><p>quoted line<\/p><\/blockquote>/);
@@ -20696,6 +20750,7 @@ test('chat panel renders message markdown with escaped raw HTML and safe links',
         '## Plan',
         'Use **bold**, *italic*, and `code`.',
         '- [Safe](mailto:ops@example.com)',
+        '- Bare http://chat.example/docs, and mailto:support@example.com.',
         '- [Nope](data:text/html,<svg onload=alert(1)>)',
         '```',
         '<script>alert("x")</script>',
@@ -20715,6 +20770,8 @@ test('chat panel renders message markdown with escaped raw HTML and safe links',
   assert.match(html, /<em>italic<\/em>/);
   assert.match(html, /<code class="torque-md-inline-code">code<\/code>/);
   assert.match(html, /href="mailto:ops@example\.com" target="_blank" rel="noopener noreferrer">Safe<\/a>/);
+  assert.match(html, /href="http:\/\/chat\.example\/docs" target="_blank" rel="noopener noreferrer">http:\/\/chat\.example\/docs<\/a>,/);
+  assert.match(html, /href="mailto:support@example\.com" target="_blank" rel="noopener noreferrer">mailto:support@example\.com<\/a>\./);
   assert.match(html, /<span class="torque-md-link-disabled" title="Unsafe link removed">Nope<\/span>/);
   assert.match(html, /<pre class="torque-md-code-block"><code>&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;<\/code><\/pre>/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
