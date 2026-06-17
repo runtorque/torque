@@ -32,6 +32,7 @@ prompt: |
   5. **Separate findings clearly**:
      - **Blocking issues** — problems that must be fixed before merge
      - **Follow-up suggestions** — worthwhile improvements that do not block merge
+     - **Follow-up classification** — exactly one of `blocking`, `non-blocking now`, `future-context only`, or `none`
   5. **Flag each blocking issue** using this format:
      - **File and line**: `path/to/file.py:42`
      - **Severity**: critical / warning / nit
@@ -51,12 +52,13 @@ prompt: |
   - **Verification summary** — tests run, manual checks run, and deploy/live verification still needed
   - **Merge-risk summary** — low / medium / high with brief rationale
   - **Follow-up suggestions** — non-blocking improvements, or `None`
+  - **Follow-up classification** — `blocking`, `non-blocking now`, `future-context only`, or `none`
 
   ## Verdict
 
-  End with one of:
-  - **Ship** — no issues, ready to merge
-  - **Ship with fixes** — minor issues that should be addressed first
-  - **Needs rework** — fundamental problems requiring significant changes
+  End with a final verdict line using one of:
+  - **Final review verdict: Ship** — no issues, ready to merge
+  - **Final review verdict: Ship with fixes** — minor issues that should be addressed first
+  - **Final review verdict: Needs rework** — fundamental problems requiring significant changes
 
   If changes look correct but still require human sign-off before merging, use `torque_ask(question="Human sign-off required", description="Include the verdict, verification summary, and merge-risk summary.")`.

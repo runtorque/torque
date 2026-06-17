@@ -49,6 +49,32 @@ _NON_PRODUCT_ACTION_HINTS = (
     "research",
 )
 
+
+def _task_review_evidence(task) -> dict:
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}
+    review = evidence.get("review", {}) or {}
+    if not isinstance(review, dict):
+        return {}
+    verdict = str(review.get("verdict", "") or "").strip()
+    if not verdict:
+        return {}
+    keys = (
+        "verdict",
+        "follow_up_classification",
+        "source_action",
+        "recorded_at",
+        "derived_action",
+        "derived_task_id",
+    )
+    return {
+        key: str(review.get(key, "") or "").strip()
+        for key in keys
+        if str(review.get(key, "") or "").strip()
+    }
+
+
 # `_branch_exists_locally` used to shell out to `git show-ref` per branch per
 # stream on every broadcast, forking dozens of times per second on the asyncio
 # event loop. We now batch the lookup: a single `git for-each-ref` per repo
@@ -824,6 +850,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         ),
         "latest_boundary_status": latest_boundary_info.get("status", "") or "",
         "latest_reviewed_commit_sha": latest_reviewed_commit_sha,
+        "latest_review": _task_review_evidence(latest_review_boundary),
         "latest_merged_commit_sha": latest_merged_commit_sha,
         "pr": latest_boundary_pr,
         "pr_url": latest_boundary_pr.get("url", ""),

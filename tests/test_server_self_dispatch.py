@@ -1754,6 +1754,125 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(task.verification_updated_by, "Worker")
 
+    async def test_feature_review_done_emits_final_verdict_before_completion(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="reviewer-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            current_task_id="TORQUE:170",
+            directory="/repo",
+        )
+        state.agents[cell.id] = cell
+        state.board_add_task(
+            "Review worker change",
+            "g",
+            id="TORQUE:170",
+            lane="In Progress",
+            action_name="feature/review",
+            agent_id=cell.id,
+        )
+        panel_events = []
+        handle_command = self._extract_handle_command(
+            state,
+            _panel_event=lambda *args, **kwargs: panel_events.append(
+                (args, kwargs)
+            ),
+            action_mgr=types.SimpleNamespace(
+                list_actions=lambda _base_dir: [],
+                get_transitions=lambda _action, _base_dir="": [],
+                load_action=lambda _action, _base_dir="": {},
+                get_auto_close_on_done=lambda _action, **_kwargs: False,
+            ),
+            _record_task_boundary=(
+                lambda *args, **kwargs: asyncio.sleep(0)
+            ),
+            _resolve_base_dir=lambda group="": asyncio.sleep(0, result=""),
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": cell.id,
+            "task_id": "TORQUE:170",
+            "action": "done",
+            "message": (
+                "Blocking issues: None\n"
+                "Follow-up suggestions: None\n"
+                "Follow-up classification: none\n"
+                "Final review verdict: Ship"
+            ),
+        })
+
+        self.assertTrue(result is None or result.get("type") == "ok")
+        task = state.board_tasks["TORQUE:170"]
+        review = task.completion_evidence["review"]
+        self.assertEqual(review["verdict"], "ship")
+        self.assertEqual(review["follow_up_classification"], "none")
+        self.assertEqual(review["source_action"], "done")
+        self.assertEqual(
+            [entry["action"] for entry in task.messages[-2:]],
+            ["done", "review_verdict"],
+        )
+        event_kinds = [args[0] for args, _kwargs in panel_events]
+        self.assertIn("review_verdict", event_kinds)
+        self.assertLess(
+            event_kinds.index("review_verdict"),
+            event_kinds.index("task_completed"),
+        )
+        self.assertEqual(task.lane, "Done")
+
+    def test_feature_review_blocking_derive_records_block_verdict(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        cell = self.state_mod.AgentCell(
+            id="reviewer-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        state.agents[cell.id] = cell
+        task = state.board_add_task(
+            "Review worker change",
+            "g",
+            id="TORQUE:171",
+            lane="In Progress",
+            action_name="feature/review",
+            agent_id=cell.id,
+        )
+
+        review = self.server_mod._record_review_verdict_evidence(
+            state,
+            task,
+            cell=cell,
+            source_action="derive",
+            message=(
+                "Blocking issues: missing migration test\n"
+                "Follow-up classification: blocking\n"
+                "Final review verdict: Needs rework"
+            ),
+            derived_action="feature/implement",
+            derived_task_id="TORQUE:172",
+            append_task_msg=lambda t, act, msg, agent_name: t.messages.append({
+                "action": act,
+                "message": msg,
+                "agent_name": agent_name,
+            }),
+        )
+
+        self.assertEqual(review["verdict"], "block")
+        self.assertEqual(review["follow_up_classification"], "blocking")
+        self.assertEqual(review["derived_task_id"], "TORQUE:172")
+        self.assertFalse(self.server_mod._review_task_has_ship_verdict(task))
+        self.assertEqual(
+            task.completion_evidence["review"]["derived_action"],
+            "feature/implement",
+        )
+        self.assertEqual(task.messages[-1]["action"], "review_verdict")
+
     def test_completion_evidence_snapshot_includes_verification_and_artifacts(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -5506,6 +5625,7 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             ("Ship", "ship"),
             ("ship", "ship"),
             ("SHIP", "ship"),
+            ("Final review verdict: Ship", "ship"),
             ("ship with fixes", "ship_with_fixes"),
             ("SHIP WITH FIXES", "ship_with_fixes"),
             ("- Ship", "ship"),

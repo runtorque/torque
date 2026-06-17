@@ -40,7 +40,7 @@ prompt: |
   - Run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
   - If you accept a narrower suite or unrelated flaky full-suite failure, state the focused/isolated rerun evidence and explicitly say you accepted the narrower suite or flake evidence
   - Distinguish deploy not attempted from deploy failed, and live smoke pending from completed smoke
-  - Separate blocking issues from follow-up suggestions so merge decisions are clear
+  - Separate blocking issues from follow-up suggestions so merge decisions are clear, and explicitly classify follow-ups as `blocking`, `non-blocking now`, `future-context only`, or `none`
   - Summarize merge risk: conflicts, migration/config/runtime risk, and any cleanup still needed
   - If you derive a fix, make the handoff self-contained: exact blocker(s), expected fix scope, files/areas involved, tests already run, tests expected after the fix, and whether another review is required
 
@@ -48,11 +48,12 @@ prompt: |
 
   - **Blocking issues** — only issues that must be fixed before merge; say `None` if there are none
   - **Follow-up suggestions** — non-blocking improvements or cleanup ideas; say `None` if there are none
+  - **Follow-up classification** — exactly one of `blocking`, `non-blocking now`, `future-context only`, or `none`
   - **Verification summary** — list the tests you ran, any manual checks you performed, and what deploy/live verification is still needed
   - **Merge-risk summary** — rate the merge risk as low / medium / high and explain why
-  - **Verdict** — end with `Ship`, `Ship with fixes`, or `Revert`
+  - **Final review verdict** — end with `Ship`, `Ship with fixes`, or `Revert`
 
-  If there are blocking issues, call `torque_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. Include the original goal, blocking issues, expected fix scope, relevant files, verification summary, merge-risk summary, and `Ship with fixes` or `Revert` verdict in the derive context. Do NOT call `torque_done` after deriving a fix task; the unresolved fix handoff is the valid blocking-review closeout path. If there are no blocking issues, use `torque_done(message="brief review summary")` and keep any follow-up suggestions separate from the `Ship` verdict.
+  If there are blocking issues, call `torque_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. Include the original goal, blocking issues, expected fix scope, relevant files, verification summary, merge-risk summary, follow-up classification `blocking`, and `Ship with fixes` or `Revert` verdict in the derive context. Do NOT call `torque_done` after deriving a fix task; the unresolved fix handoff is the valid blocking-review closeout path. If there are no blocking issues, use `torque_done(message="brief review summary")` and include a final line like `Final review verdict: Ship` plus `Follow-up classification: none` (or `non-blocking now` / `future-context only` if you are preserving optional follow-up notes). Keep any follow-up suggestions separate from the `Ship` verdict.
 
   Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.
 
@@ -60,6 +61,6 @@ prompt: |
 
   Pick exactly one closeout path:
   - Blocking issues found: your FINAL action MUST be `torque ai derive "Fix the issues found" -t feature/implement` (or `torque_derive(...)`) with the required review context. Do NOT call `torque ai done` after deriving the fix task.
-  - No blocking issues: your FINAL action MUST be `torque ai done` (or `torque_done(...)`) with a `Ship` verdict line stating there are no blocking issues and the work is ready to merge.
+  - No blocking issues: your FINAL action MUST be `torque ai done` (or `torque_done(...)`) with a `Final review verdict: Ship` line stating there are no blocking issues and the work is ready to merge, plus a `Follow-up classification: none` / `non-blocking now` / `future-context only` line.
 
   Replying via `engineer_reply` or posting an `agent_reply` is NOT a substitute for either closeout path. Do not exit without calling the appropriate closeout tool. If tests are still running, call `torque ai progress "<status>"` periodically so the dispatching engineer knows you are alive — silence is read as a stall.
