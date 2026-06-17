@@ -792,11 +792,11 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_tool_search", engineer_tool_names)
         self.assertIn("engineer_board_summary", engineer_tool_names)
         self.assertIn("engineer_task_verify", engineer_tool_names)
+        self.assertIn("engineer_task_upload_artifact", engineer_tool_names)
         self.assertIn("engineer_message_user", engineer_tool_names)
         self.assertNotIn("engineer_message_architect", engineer_tool_names)
         self.assertNotIn("engineer_reply", engineer_tool_names)
         self.assertNotIn("engineer_task_reassign", engineer_tool_names)
-        self.assertNotIn("engineer_task_upload_artifact", engineer_tool_names)
         self.assertNotIn("engineer_launch_settings", engineer_tool_names)
         self.assertNotIn("engineer_specializations_list", engineer_tool_names)
         self.assertNotIn("engineer_mcp_calls", engineer_tool_names)
@@ -1940,7 +1940,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "params": {
                         "name": "engineer_tool_search",
                         "arguments": {
-                            "query": "select:engineer_task_upload_artifact",
+                            "query": "select:engineer_mcp_calls",
                         },
                     },
                 },
@@ -1953,7 +1953,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [tool["name"] for tool in exact_payload["tools"]],
-            ["engineer_task_upload_artifact"],
+            ["engineer_mcp_calls"],
         )
         self.assertNotIn("deferred", exact_payload["tools"][0])
 
@@ -1966,7 +1966,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "params": {
                         "name": "engineer_tool_search",
                         "arguments": {
-                            "query": "artifact upload",
+                            "query": "mcp call history",
                             "max_results": 3,
                         },
                     },
@@ -1978,7 +1978,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             keyword.payload["result"]["content"][0]["text"]
         )
         self.assertIn(
-            "engineer_task_upload_artifact",
+            "engineer_mcp_calls",
             [tool["name"] for tool in keyword_payload["tools"]],
         )
 

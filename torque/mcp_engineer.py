@@ -24,7 +24,6 @@ from .mcp_engineer_tools.tool_specs import (
 _ENV_VAR = "TORQUE_ENGINEER_ID"
 
 ENGINEER_DEFERRED_TOOL_NAMES = {
-    "engineer_task_upload_artifact",
     "engineer_specializations_list",
     "engineer_specialization_show",
     "engineer_specialization_save",

@@ -245,9 +245,8 @@ def build_engineer_deliverable_awareness(task) -> str:
 
     Mirrors the worker dispatch postscript's deliverable contract block
     but engineer-flavored: surfaces the engineer-side
-    ``engineer_task_upload_artifact`` tool (with a lazy-load hint, since
-    that tool is deferred per ``ENGINEER_DEFERRED_TOOL_NAMES``) and notes
-    that workers see their own contract block via ``torque_task_upload_artifact``.
+    ``engineer_task_upload_artifact`` tool and notes that workers see their
+    own contract block via ``torque_task_upload_artifact``.
 
     Returns ``""`` when the task carries no deliverable contract so callers
     can splice the result into a response without conditionals.
@@ -284,10 +283,6 @@ def build_engineer_deliverable_awareness(task) -> str:
         "To attach the deliverable yourself:",
         "",
         f"  {upload_call}",
-        "",
-        "If the tool isn't visible, run "
-        '`engineer_tool_search("select:engineer_task_upload_artifact")` '
-        "to load the schema.",
         "",
         "When dispatching a worker, the worker's postscript will contain "
         "its own contract block — they will see the same contract via "
