@@ -1104,14 +1104,15 @@
         <div class="gs-settings-section-title">Visible status items</div>
         <div class="gs-settings-section-body statusbar-settings-list" id="gls-statusbar-visibility-list">
           <p class="label-hint">
-            Choose which chips appear in the bottom status bar. Relay follows
-            Daemon status and only appears when Relay is configured.
+            Choose which chips appear in the bottom status bar. Supervisor and
+            Relay visibility ride the daemon/runtime status item; Relay only
+            appears when configured.
           </p>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-daemon-status"
                    data-statusbar-item="daemon_status"
                    onchange="this.dataset.statusBarDirty='1'">
-            Daemon status
+            Daemon + Supervisor status
           </label>
           <label class="gs-checkbox">
             <input type="checkbox" id="gls-statusbar-claude-usage"

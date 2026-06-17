@@ -147,6 +147,9 @@ test('global settings System tab markup is present without removing existing tab
   assert.match(html, /<div class="gs-pane" data-pane="gls-keybindings">/);
   assert.match(html, /<div class="gs-pane" data-pane="gls-system">/);
   assert.match(html, /id="gls-statusbar-daemon-status"/);
+  assert.match(html, /Daemon \+ Supervisor status/);
+  assert.match(html, /Supervisor and\s+Relay visibility ride the daemon\/runtime status item/);
+  assert.match(html, /id="gls-statusbar-daemon-status"[\s\S]*data-statusbar-item="daemon_status"/);
   assert.match(html, /id="gls-statusbar-attention"/);
   assert.match(html, /id="gls-daemon-version"/);
   assert.match(html, /id="gls-daemon-log-path"/);

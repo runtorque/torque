@@ -904,7 +904,9 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   overflow-y: auto;
   background: rgba(13,17,23,.58);
   color: var(--text);
-  font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 12px/1.35 ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Consolas, monospace;
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
   outline: none;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
