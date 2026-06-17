@@ -1368,16 +1368,6 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
         await asyncio.sleep(30)
         now = time.time()
         changed = False
-        old_task_health = {
-            tid: {
-                "state": getattr(task, "health_state", "healthy") or "healthy",
-                "source_task_id": (
-                    task.health_details.get("source_task_id", "")
-                    if isinstance(task.health_details, dict) else ""
-                ),
-            }
-            for tid, task in state.board_tasks.items()
-        }
 
         for cell in state.cells_with_awareness():
             if cell.status != "running":
@@ -1432,6 +1422,18 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                     if notifier:
                         notifier.on_health_alert(cell.id, msg)
 
+        old_task_health = {}
+        if state.has_pending_task_health_recompute(now_ts=now):
+            old_task_health = {
+                tid: {
+                    "state": getattr(task, "health_state", "healthy") or "healthy",
+                    "source_task_id": (
+                        task.health_details.get("source_task_id", "")
+                        if isinstance(task.health_details, dict) else ""
+                    ),
+                }
+                for tid, task in state.board_tasks.items()
+            }
         changed_task_ids = state.recompute_task_health(now_ts=now)
         if changed_task_ids:
             changed = True

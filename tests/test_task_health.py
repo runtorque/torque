@@ -218,6 +218,166 @@ class TaskHealthTests(unittest.TestCase):
             ["message_churn"],
         )
 
+    def test_full_recompute_uses_precomputed_indexes_for_large_board_hot_paths(self):
+        base = 90_000
+        agents = {
+            "child-agent": self.state_mod.AgentCell(
+                id="child-agent",
+                name="Child",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_checkpoints=1,
+            ),
+            "other-agent": self.state_mod.AgentCell(
+                id="other-agent",
+                name="Other",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_checkpoints=1,
+            ),
+            "boundary-agent": self.state_mod.AgentCell(
+                id="boundary-agent",
+                name="Boundary",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_branch="feature/boundary",
+                worktree_repo_root="/repo",
+                worktree_ahead=1,
+            ),
+            "review-agent": self.state_mod.AgentCell(
+                id="review-agent",
+                name="Review",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_branch="feature/reviewed",
+                worktree_repo_root="/repo",
+                worktree_ahead=1,
+            ),
+        }
+        tasks = {
+            f"noise-{idx}": self.state_mod.BoardTask(
+                id=f"noise-{idx}",
+                task=f"Noise {idx}",
+                group="g",
+                lane="To Do",
+            )
+            for idx in range(300)
+        }
+        tasks.update({
+            "has-child": self.state_mod.BoardTask(
+                id="has-child",
+                task="Has child",
+                group="g",
+                lane="In Progress",
+                agent_id="child-agent",
+                updated_at=_iso(base),
+            ),
+            "child": self.state_mod.BoardTask(
+                id="child",
+                task="Child",
+                group="g",
+                lane="To Do",
+                parent_task_id="has-child",
+            ),
+            "same-agent": self.state_mod.BoardTask(
+                id="same-agent",
+                task="Same agent",
+                group="g",
+                lane="In Progress",
+                agent_id="other-agent",
+                updated_at=_iso(base),
+            ),
+            "same-agent-other": self.state_mod.BoardTask(
+                id="same-agent-other",
+                task="Same agent other",
+                group="g",
+                lane="To Do",
+                agent_id="other-agent",
+            ),
+            "boundary-task": self.state_mod.BoardTask(
+                id="boundary-task",
+                task="Boundary task",
+                group="g",
+                lane="In Progress",
+                agent_id="boundary-agent",
+                updated_at=_iso(base),
+            ),
+            "open-boundary": self.state_mod.BoardTask(
+                id="open-boundary",
+                task="Open boundary",
+                group="g",
+                lane="To Do",
+                worktree_boundary={
+                    "status": "open",
+                    "repo_root": "/repo",
+                    "branch": "feature/boundary",
+                },
+            ),
+            "review-root": self.state_mod.BoardTask(
+                id="review-root",
+                task="Review root",
+                group="g",
+                lane="To Do",
+                pipeline_root_id="review-root",
+            ),
+            "review-impl": self.state_mod.BoardTask(
+                id="review-impl",
+                task="Review implementation",
+                group="g",
+                lane="In Progress",
+                agent_id="review-agent",
+                parent_task_id="review-root",
+                updated_at=_iso(base),
+                pipeline_root_id="review-root",
+            ),
+            "review-task": self.state_mod.BoardTask(
+                id="review-task",
+                task="Review task",
+                group="g",
+                lane="To Do",
+                action_name="feature/review",
+                parent_task_id="review-root",
+                pipeline_root_id="review-root",
+            ),
+        })
+
+        with mock.patch.object(
+                self.task_health_mod,
+                "_scan_task_has_open_child",
+                side_effect=AssertionError("open-child fallback scan used")), \
+                mock.patch.object(
+                    self.task_health_mod,
+                    "_scan_agent_has_other_open_work",
+                    side_effect=AssertionError("agent-open-work fallback scan used")), \
+                mock.patch.object(
+                    self.task_health_mod,
+                    "_scan_branch_has_open_worktree_boundary",
+                    side_effect=AssertionError("boundary fallback scan used")), \
+                mock.patch.object(
+                    self.task_health_mod,
+                    "_scan_stream_has_open_review_task",
+                    side_effect=AssertionError("review fallback scan used")):
+            snapshots = self.task_health_mod.compute_task_health(
+                tasks,
+                agents,
+                now_ts=base + 3600,
+            )
+
+        self.assertEqual(snapshots["boundary-task"].state, "stale-in-progress")
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["boundary-task"].details["reasons"],
+        )
+        self.assertEqual(snapshots["review-impl"].state, "stale-in-progress")
+        self.assertNotIn(
+            self.task_health_mod.IMPLEMENTED_NO_REVIEW_BOUNDARY_REASON,
+            snapshots["review-impl"].details["reasons"],
+        )
+
     def test_idle_agent_with_checkpointed_work_is_flagged_stale_in_progress(self):
         task = self.state_mod.BoardTask(
             id="task-1",
@@ -857,6 +1017,67 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
                 "compute_task_health",
                 side_effect=AssertionError("full scan should be skipped")):
             self.assertEqual(state.recompute_task_health(persist=False), [])
+
+    def test_periodic_recompute_skips_until_next_health_deadline(self):
+        base = 120_000
+        state = self.state_mod.MatrixState()
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Timed",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            created_at=_iso(base),
+            updated_at=_iso(base),
+        )
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+
+        state.recompute_task_health(now_ts=base, persist=False)
+        self.assertEqual(state.board_tasks["task-1"].health_state, "healthy")
+        self.assertFalse(
+            state.has_pending_task_health_recompute(now_ts=base + 60)
+        )
+
+        task_health_mod = importlib.import_module("torque.task_health")
+        with mock.patch.object(
+                task_health_mod,
+                "compute_task_health",
+                side_effect=AssertionError("full scan should be skipped")):
+            self.assertEqual(
+                state.recompute_task_health(now_ts=base + 60, persist=False),
+                [],
+            )
+
+        self.assertTrue(
+            state.has_pending_task_health_recompute(
+                now_ts=base + (11 * 60),
+            )
+        )
+        state.recompute_task_health(now_ts=base + (11 * 60), persist=False)
+        self.assertEqual(state.board_tasks["task-1"].health_state, "idle-risk")
+
+    def test_recompute_task_health_records_metrics(self):
+        state = self.state_mod.MatrixState()
+        state.metrics_collector.set_enabled(True)
+        state.groups["g"] = []
+
+        state.board_add_task("Measured", "g", id="task-1")
+        payload = state.metrics_collector.aggregate_tick(
+            live={},
+            now=10_000,
+            interval_seconds=1.0,
+        )
+
+        task_health = payload["perf"]["task_health"]
+        self.assertGreaterEqual(task_health["recomputes"], 1)
+        self.assertGreaterEqual(task_health["active_tasks"], 1)
+        self.assertGreaterEqual(task_health["changed_tasks"], 1)
+        self.assertIn("full", task_health["modes"])
 
     def test_incremental_recompute_single_task_op_skips_unrelated(self):
         state = self.state_mod.MatrixState()

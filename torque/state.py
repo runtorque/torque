@@ -2299,6 +2299,8 @@ class MatrixState:
         self._task_health_dirty: set[str] = set()
         self._task_health_force_full: bool = True
         self._suppress_task_health_dirty: bool = False
+        self._task_health_deadlines: dict[str, float] = {}
+        self._task_health_last_recompute_ts: float = 0.0
         self.task_id_aliases: dict[str, str] = {}
         self.task_id_counters: dict[str, int] = {}
         self.pipeline_task_counters: dict[str, int] = {}
@@ -3919,9 +3921,37 @@ class MatrixState:
                     *self._tasks_by_agent.get(agent_id, set())
                 )
 
-    def has_pending_task_health_recompute(self) -> bool:
+    def _task_health_due_ids(self, now_ts: float) -> set[str]:
+        stale_ids: list[str] = []
+        due_ids: set[str] = set()
+        for tid, deadline in list(self._task_health_deadlines.items()):
+            if tid not in self.board_tasks:
+                stale_ids.append(tid)
+                continue
+            try:
+                due_at = float(deadline or 0.0)
+            except (TypeError, ValueError):
+                stale_ids.append(tid)
+                continue
+            if due_at <= 0:
+                stale_ids.append(tid)
+                continue
+            if due_at <= now_ts:
+                due_ids.add(tid)
+        for tid in stale_ids:
+            self._task_health_deadlines.pop(tid, None)
+        return due_ids
+
+    def has_pending_task_health_recompute(
+            self,
+            now_ts: float | None = None,
+    ) -> bool:
         """Return whether a broadcast tick has health work to coalesce."""
-        return bool(self._task_health_force_full or self._task_health_dirty)
+        if self._task_health_force_full or self._task_health_dirty:
+            return True
+        if now_ts is None:
+            return False
+        return bool(self._task_health_due_ids(float(now_ts)))
 
     def tasks_in_group(self, group: str) -> list["BoardTask"]:
         """Return the BoardTask objects belonging to ``group`` via the index.
@@ -10150,6 +10180,63 @@ class MatrixState:
             )
         return snapshots
 
+    def _update_task_health_deadlines(
+            self,
+            snapshots: dict,
+            *,
+            now_ts: float,
+            replace: bool = False,
+    ) -> None:
+        from .task_health import next_task_health_deadline
+
+        if replace:
+            self._task_health_deadlines = {}
+        for tid in list(snapshots.keys()):
+            task = self.board_tasks.get(tid)
+            if not task or task.lane == ARCHIVED_LANE:
+                self._task_health_deadlines.pop(tid, None)
+                continue
+            deadline = next_task_health_deadline(
+                task,
+                self.board_tasks,
+                self.agents,
+                now_ts,
+            )
+            if deadline:
+                self._task_health_deadlines[tid] = float(deadline)
+            else:
+                self._task_health_deadlines.pop(tid, None)
+
+    def _record_task_health_recompute_metric(
+            self,
+            *,
+            mode: str,
+            active_count: int,
+            target_count: int,
+            changed_count: int,
+            duration_ms: float,
+    ) -> None:
+        meter = getattr(self, "metrics_collector", None)
+        if meter is not None and getattr(meter, "enabled", False):
+            recorder = getattr(meter, "record_task_health_recompute", None)
+            if recorder:
+                recorder(
+                    mode=mode,
+                    active_count=active_count,
+                    target_count=target_count,
+                    changed_count=changed_count,
+                    duration_ms=duration_ms,
+                )
+        if changed_count or duration_ms >= 50.0:
+            log.debug(
+                "Task-health recompute mode=%s active=%d target=%d changed=%d duration=%.1fms",
+                mode,
+                active_count,
+                target_count,
+                changed_count,
+                duration_ms,
+            )
+
     def recompute_task_health(self, now_ts: float | None = None,
                               *, emit: bool = True,
                               persist: bool = True) -> list[str]:
@@ -10161,26 +10248,68 @@ class MatrixState:
         health-affecting deltas have been queued; explicit timestamped calls
         still run a full scan for time-based idle/stalled transitions.
         """
+        started = time.perf_counter()
         if not self.board_tasks:
             self._task_health_dirty.clear()
             self._task_health_force_full = False
+            self._task_health_deadlines.clear()
+            self._task_health_last_recompute_ts = 0.0
+            self._record_task_health_recompute_metric(
+                mode="empty",
+                active_count=0,
+                target_count=0,
+                changed_count=0,
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
             return []
 
-        force_full = self._task_health_force_full or now_ts is not None
+        if now_ts is None:
+            now_ts = datetime.now(timezone.utc).timestamp()
+
+        force_full = self._task_health_force_full
+        if (
+                now_ts is not None
+                and self._task_health_last_recompute_ts
+                and float(now_ts) < self._task_health_last_recompute_ts):
+            force_full = True
         dirty_ids = set(self._task_health_dirty)
-        if not force_full and not dirty_ids:
+        due_ids = self._task_health_due_ids(float(now_ts))
+        if not force_full and not dirty_ids and not due_ids:
+            self._record_task_health_recompute_metric(
+                mode="noop",
+                active_count=sum(
+                    1 for task in self.board_tasks.values()
+                    if getattr(task, "lane", "") != ARCHIVED_LANE
+                ),
+                target_count=0,
+                changed_count=0,
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
             return []
 
         from .task_health import compute_task_health, now_iso
 
         if force_full:
+            mode = "full"
             snapshots = compute_task_health(self.board_tasks, self.agents,
                                             now_ts=now_ts)
         else:
+            target_ids = dirty_ids | due_ids
+            if dirty_ids and due_ids:
+                mode = "mixed"
+            elif due_ids:
+                mode = "due"
+            else:
+                mode = "incremental"
             snapshots = self._compute_incremental_task_health(
-                dirty_ids,
+                target_ids,
                 now_ts,
             )
+        self._update_task_health_deadlines(
+            snapshots,
+            now_ts=float(now_ts),
+            replace=force_full,
+        )
         changed = []
         changed_set = set()
         changed_task_ids = []
@@ -10213,6 +10342,17 @@ class MatrixState:
         if not changed:
             self._task_health_dirty.clear()
             self._task_health_force_full = False
+            self._task_health_last_recompute_ts = float(now_ts)
+            self._record_task_health_recompute_metric(
+                mode=mode,
+                active_count=sum(
+                    1 for task in self.board_tasks.values()
+                    if getattr(task, "lane", "") != ARCHIVED_LANE
+                ),
+                target_count=len(snapshots),
+                changed_count=0,
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
             return []
 
         # If a task changes, re-emit and persist any open ancestors so root
@@ -10243,6 +10383,17 @@ class MatrixState:
                 self._db_save_task(task)
         self._task_health_dirty.clear()
         self._task_health_force_full = False
+        self._task_health_last_recompute_ts = float(now_ts)
+        self._record_task_health_recompute_metric(
+            mode=mode,
+            active_count=sum(
+                1 for task in self.board_tasks.values()
+                if getattr(task, "lane", "") != ARCHIVED_LANE
+            ),
+            target_count=len(snapshots),
+            changed_count=len(changed),
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
         return changed
 
     def _board_next_lane_position(self, lane: str, *, exclude_id: str = "") -> int:

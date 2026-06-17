@@ -67,6 +67,12 @@ class _IntervalCounters:
     ws_subscribers: int = 0
     db_latencies_ms: list[float] = field(default_factory=list)
     event_loop_lag_ms: list[float] = field(default_factory=list)
+    task_health_recomputes: int = 0
+    task_health_duration_ms: list[float] = field(default_factory=list)
+    task_health_changed_tasks: int = 0
+    task_health_active_tasks: int = 0
+    task_health_target_tasks: int = 0
+    task_health_modes: dict[str, int] = field(default_factory=dict)
 
 
 class MetricsCollector:
@@ -132,6 +138,31 @@ class MetricsCollector:
         if not self.enabled:
             return
         self._interval.event_loop_lag_ms.append(max(0.0, float(lag_ms or 0.0)))
+
+    def record_task_health_recompute(
+            self,
+            *,
+            mode: str,
+            active_count: int,
+            target_count: int,
+            changed_count: int,
+            duration_ms: float,
+    ) -> None:
+        """Observe advisory task-health recompute cost. No I/O."""
+        if not self.enabled:
+            return
+        started = time.perf_counter_ns()
+        interval = self._interval
+        interval.task_health_recomputes += 1
+        interval.task_health_duration_ms.append(max(0.0, float(duration_ms or 0.0)))
+        interval.task_health_changed_tasks += max(0, int(changed_count or 0))
+        interval.task_health_active_tasks = max(0, int(active_count or 0))
+        interval.task_health_target_tasks += max(0, int(target_count or 0))
+        mode_key = str(mode or "unknown")
+        interval.task_health_modes[mode_key] = (
+            interval.task_health_modes.get(mode_key, 0) + 1
+        )
+        self._add_inline_overhead(started)
 
     def record_frontend_render(self, payload: dict | None = None) -> None:
         """Best-effort ingest for Panelsmith's frontend render reporter.
@@ -221,6 +252,14 @@ class MetricsCollector:
                 "db": {"writes_per_s": 0.0, "write_latency_p95_ms": 0.0},
                 "proc": {"rss_mb": 0.0, "cpu_pct": 0.0},
                 "frontend": None,
+                "task_health": {
+                    "recomputes": 0,
+                    "duration_ms_p95": 0.0,
+                    "changed_tasks": 0,
+                    "active_tasks": 0,
+                    "target_tasks": 0,
+                    "modes": {},
+                },
                 "live": {"agents": 0, "ptys": 0, "prompt_queue_depth": 0},
             },
             "windows": {
@@ -263,6 +302,7 @@ class MetricsCollector:
 
         lag_samples = list(interval.event_loop_lag_ms)
         db_latencies = list(interval.db_latencies_ms)
+        task_health_durations = list(interval.task_health_duration_ms)
         ws_deltas_per_s = interval.ws_deltas / elapsed
         ws_bytes_per_s = interval.ws_bytes / elapsed
         db_writes_per_s = interval.db_writes / elapsed
@@ -318,6 +358,14 @@ class MetricsCollector:
                 },
                 "proc": proc,
                 "frontend": self._frontend_payload(generated_at),
+                "task_health": {
+                    "recomputes": int(interval.task_health_recomputes),
+                    "duration_ms_p95": _percentile(task_health_durations, 0.95),
+                    "changed_tasks": int(interval.task_health_changed_tasks),
+                    "active_tasks": int(interval.task_health_active_tasks),
+                    "target_tasks": int(interval.task_health_target_tasks),
+                    "modes": dict(interval.task_health_modes),
+                },
                 "live": live_payload,
             },
             "windows": {

@@ -55,6 +55,91 @@ class TaskHealthSnapshot:
     details: dict
 
 
+@dataclass
+class _HealthIndexes:
+    """Precomputed full-board lookups used during task-health recompute.
+
+    Full task-health passes used to call helper functions that scanned every
+    active task for every active task.  Keep those helper APIs intact for small
+    incremental contexts, but pass this context during full recomputes so the
+    known hot paths become O(1)/edge-local lookups after one indexing pass.
+    """
+
+    tasks_by_id: dict[str, Any]
+    children_by_id: dict[str, list[Any]]
+    open_child_ids_by_parent: dict[str, set[str]]
+    open_work_by_agent: dict[str, set[str]]
+    open_worktree_boundaries_by_repo_branch: set[tuple[str, str]]
+    open_review_stream_roots: set[str]
+    open_review_parent_ids: set[str]
+    open_review_ids: set[str]
+
+    @classmethod
+    def build(cls, tasks_by_id: dict[str, Any]) -> "_HealthIndexes":
+        children_by_id: dict[str, list[Any]] = defaultdict(list)
+        open_child_ids_by_parent: dict[str, set[str]] = defaultdict(set)
+        open_work_by_agent: dict[str, set[str]] = defaultdict(set)
+        open_worktree_boundaries_by_repo_branch: set[tuple[str, str]] = set()
+        open_review_stream_roots: set[str] = set()
+        open_review_parent_ids: set[str] = set()
+        open_review_ids: set[str] = set()
+
+        for task in tasks_by_id.values():
+            tid = str(getattr(task, "id", "") or "").strip()
+            parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+            lane = str(getattr(task, "lane", "") or "")
+            if parent_id and parent_id in tasks_by_id:
+                children_by_id[parent_id].append(task)
+                if lane not in {"Done", ARCHIVED_LANE} and tid:
+                    open_child_ids_by_parent[parent_id].add(tid)
+
+            agent_id = str(getattr(task, "agent_id", "") or "").strip()
+            if agent_id and tid and lane not in {"Done", "Backlog", ARCHIVED_LANE}:
+                open_work_by_agent[agent_id].add(tid)
+
+            boundary = getattr(task, "worktree_boundary", {}) or {}
+            if isinstance(boundary, dict):
+                status = str(boundary.get("status", "") or "").strip().lower()
+                if status in _OPEN_BOUNDARY_STATUSES:
+                    branch = str(boundary.get("branch", "") or "").strip()
+                    repo_root = str(boundary.get("repo_root", "") or "").strip()
+                    if branch and repo_root:
+                        open_worktree_boundaries_by_repo_branch.add(
+                            (repo_root, branch)
+                        )
+
+            action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+            if action_name == _REVIEW_ACTION_NAME and lane not in {"Done", ARCHIVED_LANE}:
+                if tid:
+                    open_review_ids.add(tid)
+                root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+                if not root_id:
+                    root_id = tid
+                if root_id:
+                    open_review_stream_roots.add(root_id)
+                if parent_id:
+                    open_review_parent_ids.add(parent_id)
+
+        return cls(
+            tasks_by_id=tasks_by_id,
+            children_by_id=dict(children_by_id),
+            open_child_ids_by_parent={
+                key: set(value)
+                for key, value in open_child_ids_by_parent.items()
+            },
+            open_work_by_agent={
+                key: set(value)
+                for key, value in open_work_by_agent.items()
+            },
+            open_worktree_boundaries_by_repo_branch=(
+                open_worktree_boundaries_by_repo_branch
+            ),
+            open_review_stream_roots=open_review_stream_roots,
+            open_review_parent_ids=open_review_parent_ids,
+            open_review_ids=open_review_ids,
+        )
+
+
 def now_iso(now_ts: float | None = None) -> str:
     dt = datetime.fromtimestamp(now_ts, tz=timezone.utc) if now_ts \
         else datetime.now(timezone.utc)
@@ -77,14 +162,10 @@ def compute_task_health(tasks_by_id: dict[str, Any], agents_by_id: dict[str, Any
         if getattr(task, "lane", "") != ARCHIVED_LANE
     }
 
-    children_by_id: dict[str, list[Any]] = defaultdict(list)
-    for task in active_tasks.values():
-        parent_id = getattr(task, "parent_task_id", "")
-        if parent_id and parent_id in active_tasks:
-            children_by_id[parent_id].append(task)
+    indexes = _HealthIndexes.build(active_tasks)
 
     locals_by_id = {
-        tid: _compute_local_health(task, active_tasks, agents_by_id, now_ts)
+        tid: _compute_local_health(task, indexes, agents_by_id, now_ts)
         for tid, task in active_tasks.items()
     }
 
@@ -96,7 +177,7 @@ def compute_task_health(tasks_by_id: dict[str, Any], agents_by_id: dict[str, Any
         snapshot = _roll_up_health(
             task,
             locals_by_id[task.id],
-            [_compute_effective(child) for child in children_by_id.get(task.id, [])
+            [_compute_effective(child) for child in indexes.children_by_id.get(task.id, [])
              if getattr(child, "lane", "") not in {"Done", ARCHIVED_LANE}],
             active_tasks,
         )
@@ -137,7 +218,7 @@ def _roll_up_health(task: Any, local: TaskHealthSnapshot,
     return TaskHealthSnapshot(state=worst.state, details=details)
 
 
-def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
+def _compute_local_health(task: Any, tasks_by_id: dict[str, Any] | _HealthIndexes,
                           agents_by_id: dict[str, Any],
                           now_ts: float) -> TaskHealthSnapshot:
     if _task_counts_as_done(task) or getattr(task, "lane", "") == ARCHIVED_LANE:
@@ -228,14 +309,65 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
     return TaskHealthSnapshot(state=HEALTH_HEALTHY, details=details)
 
 
+def next_task_health_deadline(task: Any, tasks_by_id: dict[str, Any] | _HealthIndexes,
+                              agents_by_id: dict[str, Any],
+                              now_ts: float) -> float | None:
+    """Return the next timestamp at which this task can change by time alone.
+
+    Structural changes (dependencies, labels, lanes, agents, worktree status)
+    are handled by MatrixState dirty tracking.  This helper is intentionally
+    conservative: it may schedule an extra due check, but should not schedule
+    later than a known idle/stalled/thrash/live-signal transition.
+    """
+    if _task_counts_as_done(task) or getattr(task, "lane", "") == ARCHIVED_LANE:
+        return None
+
+    labels = set(getattr(task, "labels", []) or [])
+    agent = agents_by_id.get(getattr(task, "agent_id", "") or "")
+    if (
+            "torque:human" in labels
+            or "torque:blocked" in labels
+            or _has_unmet_dependencies(task, tasks_by_id)
+            or (agent and getattr(agent, "activity", "") == "waiting")):
+        return None
+
+    deadlines: list[float] = []
+    thrash_deadline = _thrash_deadline(task, now_ts)
+    if thrash_deadline:
+        deadlines.append(thrash_deadline)
+
+    live_deadline = _live_work_signal_deadline(agent, now_ts)
+    if live_deadline:
+        deadlines.append(live_deadline)
+
+    if _is_monitored_task(task):
+        last_activity_ts = _task_last_activity_ts(task, agent)
+        if last_activity_ts is None:
+            return min(deadlines) if deadlines else None
+        idle_at = last_activity_ts + IDLE_RISK_AFTER_SECS
+        stalled_at = last_activity_ts + STALLED_AFTER_SECS
+        if now_ts < idle_at:
+            deadlines.append(idle_at)
+        if now_ts < stalled_at:
+            deadlines.append(stalled_at)
+
+    future_deadlines = [deadline for deadline in deadlines if deadline > now_ts]
+    return min(future_deadlines) if future_deadlines else None
+
+
 def _is_monitored_task(task: Any) -> bool:
     lane = getattr(task, "lane", "")
     return lane == "In Progress" or bool(getattr(task, "agent_id", ""))
 
 
 def _has_unmet_dependencies(task: Any, tasks_by_id: dict[str, Any]) -> bool:
+    tasks = (
+        tasks_by_id.tasks_by_id
+        if isinstance(tasks_by_id, _HealthIndexes)
+        else tasks_by_id
+    )
     for dep_id in getattr(task, "depends_on", []) or []:
-        dep = tasks_by_id.get(dep_id)
+        dep = tasks.get(dep_id)
         if dep and not _task_counts_as_done(dep):
             return True
     return False
@@ -312,6 +444,17 @@ def _branch_has_open_worktree_boundary(task: Any, tasks_by_id: dict[str, Any],
     ).strip()
     if not branch or not repo_root:
         return False
+    if isinstance(tasks_by_id, _HealthIndexes):
+        return (repo_root, branch) in tasks_by_id.open_worktree_boundaries_by_repo_branch
+
+    return _scan_branch_has_open_worktree_boundary(tasks_by_id, repo_root, branch)
+
+
+def _scan_branch_has_open_worktree_boundary(
+        tasks_by_id: dict[str, Any],
+        repo_root: str,
+        branch: str,
+) -> bool:
 
     for other in tasks_by_id.values():
         boundary = getattr(other, "worktree_boundary", {}) or {}
@@ -330,6 +473,23 @@ def _branch_has_open_worktree_boundary(task: Any, tasks_by_id: dict[str, Any],
 
 def _stream_has_open_review_task(task: Any,
                                  tasks_by_id: dict[str, Any]) -> bool:
+    if isinstance(tasks_by_id, _HealthIndexes):
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        if not root_id:
+            root_id = str(getattr(task, "id", "") or "").strip()
+        if root_id and root_id in tasks_by_id.open_review_stream_roots:
+            return True
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if task_id and task_id in tasks_by_id.open_review_parent_ids:
+            return True
+        parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+        return bool(parent_id and parent_id in tasks_by_id.open_review_ids)
+
+    return _scan_stream_has_open_review_task(task, tasks_by_id)
+
+
+def _scan_stream_has_open_review_task(task: Any,
+                                      tasks_by_id: dict[str, Any]) -> bool:
     for other in tasks_by_id.values():
         action_name = str(getattr(other, "action_name", "") or "").strip().lower()
         if action_name != _REVIEW_ACTION_NAME:
@@ -380,6 +540,20 @@ def _has_live_work_signal(agent: Any | None, now_ts: float) -> bool:
                       LIVE_WORK_SIGNAL_SECS)
 
 
+def _live_work_signal_deadline(agent: Any | None, now_ts: float) -> float | None:
+    if not agent:
+        return None
+    deadlines = []
+    for attr in ("last_checkpoint_at", "last_progress_at"):
+        try:
+            ts = float(getattr(agent, attr, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts > 0 and ts <= now_ts and (now_ts - ts) <= LIVE_WORK_SIGNAL_SECS:
+            deadlines.append(ts + LIVE_WORK_SIGNAL_SECS + 0.001)
+    return min(deadlines) if deadlines else None
+
+
 def _has_foreground_work_process(agent: Any) -> bool:
     current = _process_name(getattr(agent, "current_process", ""))
     if not current:
@@ -417,6 +591,16 @@ def _ts_within(value: Any, now_ts: float, window_secs: float) -> bool:
 
 
 def _task_has_open_child(task: Any, tasks_by_id: dict[str, Any]) -> bool:
+    if isinstance(tasks_by_id, _HealthIndexes):
+        return bool(
+            tasks_by_id.open_child_ids_by_parent.get(
+                str(getattr(task, "id", "") or "").strip()
+            )
+        )
+    return _scan_task_has_open_child(task, tasks_by_id)
+
+
+def _scan_task_has_open_child(task: Any, tasks_by_id: dict[str, Any]) -> bool:
     for other in tasks_by_id.values():
         if getattr(other, "parent_task_id", "") != getattr(task, "id", ""):
             continue
@@ -427,6 +611,16 @@ def _task_has_open_child(task: Any, tasks_by_id: dict[str, Any]) -> bool:
 
 def _agent_has_other_open_work(agent_id: str, task_id: str,
                                tasks_by_id: dict[str, Any]) -> bool:
+    if isinstance(tasks_by_id, _HealthIndexes):
+        return any(
+            other_id != task_id
+            for other_id in tasks_by_id.open_work_by_agent.get(agent_id, set())
+        )
+    return _scan_agent_has_other_open_work(agent_id, task_id, tasks_by_id)
+
+
+def _scan_agent_has_other_open_work(agent_id: str, task_id: str,
+                                    tasks_by_id: dict[str, Any]) -> bool:
     for other in tasks_by_id.values():
         if getattr(other, "id", "") == task_id:
             continue
@@ -485,6 +679,26 @@ def _is_thrashing(task: Any, now_ts: float) -> bool:
             transitions += 1
             prev = category
     return transitions >= THRASH_MIN_TRANSITIONS
+
+
+def _thrash_deadline(task: Any, now_ts: float) -> float | None:
+    if not _is_thrashing(task, now_ts):
+        return None
+    timestamps = []
+    for msg in getattr(task, "messages", []) or []:
+        if not isinstance(msg, dict):
+            continue
+        ts = msg.get("timestamp")
+        if not isinstance(ts, (int, float)):
+            continue
+        if now_ts - float(ts) > THRASH_WINDOW_SECS:
+            continue
+        if not _action_category(msg.get("action", "")):
+            continue
+        timestamps.append(float(ts))
+    if not timestamps:
+        return None
+    return min(timestamps) + THRASH_WINDOW_SECS + 0.001
 
 
 def _action_category(action: str) -> str:
