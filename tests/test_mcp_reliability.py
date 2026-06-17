@@ -216,7 +216,6 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             lazy_write_tools,
             {
-                "engineer_task_upload_artifact",
                 "engineer_launch_settings",
                 "engineer_task_reassign",
                 "engineer_specialization_save",

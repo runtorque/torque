@@ -176,6 +176,7 @@ The Engineer's `engineer_*` MCP toolkit is broad — board reads, task dispatch,
 
 - **Board and planning** — `engineer_board_summary`, `engineer_session_map`, `engineer_task_show`, `engineer_agent_show`, `engineer_actions_list`.
 - **Dispatch** — `engineer_task_dispatch`, `engineer_batch_dispatch`, `engineer_task_resolve`.
+- **Artifacts and reports** — `engineer_task_upload_artifact` attaches markdown/text reports, logs, screenshots, or file references directly to a scoped task (`task` is the preferred identifier; `task_id` is accepted as an alias).
 - **Review and merge** — `engineer_diff`, `engineer_merge` (default GitHub PR + squash merge), `engineer_rebase`, `engineer_create_pr`.
 - **Worktree** — `engineer_worktree_checkpoint`, `engineer_worktree_remove`.
 - **Communication** — `engineer_agent_message`, `engineer_note`, `engineer_ask`, `engineer_resume`.

@@ -120,7 +120,7 @@ operator sync actions.
 | `engineer_task_move` | Move a task between lanes. |
 | `engineer_task_reassign` | Reassign a task to a different Engineer. |
 | `engineer_task_verify` | Record deploy/restart attempted, smoke passed/failed, and verification notes. |
-| `engineer_task_upload_artifact` | Upload and attach an image or other artifact directly to a scoped task (`task`; `task_id` is accepted as an alias). |
+| `engineer_task_upload_artifact` | Upload and attach a markdown/text report, log, screenshot, generated document, or file reference directly to a scoped task (`task`; `task_id` is accepted as an alias). |
 | `engineer_task_resolve` | Resolve an `ask` task and send the answer back to the waiting agent. |
 
 ### Dispatch

@@ -59,9 +59,10 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
         # Worker contract reference and gate note both surface.
         self.assertIn("torque_task_upload_artifact", block)
         self.assertIn("engineer_task_resolve", block)
-        # Lazy-load hint (the tool is in ENGINEER_DEFERRED_TOOL_NAMES).
-        self.assertIn("engineer_tool_search", block)
-        self.assertIn("select:engineer_task_upload_artifact", block)
+        # The artifact upload tool is eager/first-class, so no lazy-load
+        # hint should be needed in report handoff guidance.
+        self.assertNotIn("engineer_tool_search", block)
+        self.assertNotIn("select:engineer_task_upload_artifact", block)
 
     def test_block_uses_deliverable_word_for_freeform_types(self):
         task = self.BoardTask(
@@ -224,7 +225,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         self.assertIn("engineer_task_upload_artifact", block)
         self.assertIn('task="TORQUE:500"', block)
         self.assertIn("Audit report", block)
-        self.assertIn("engineer_tool_search", block)
+        self.assertNotIn("engineer_tool_search", block)
 
     async def test_engineer_task_show_no_awareness_for_plain_task(self):
         engineer = self._add_engineer("eng-1", "Eng")
@@ -266,7 +267,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         self.assertIn("Deliverable contract on this task", block)
         self.assertIn("engineer_task_upload_artifact", block)
         self.assertIn("Regression report", block)
-        self.assertIn("engineer_tool_search", block)
+        self.assertNotIn("engineer_tool_search", block)
 
     async def test_architect_task_create_without_deliverable_omits_awareness(self):
         architect = self._add_architect("arch-1", "Architect")
