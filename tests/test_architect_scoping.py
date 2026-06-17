@@ -1421,6 +1421,20 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             labels=["deferred"],
             created_by_architect_id=architect.id,
         )
+        parked_human = self._add_task(
+            "task-parked-human",
+            "Deferred human ask",
+            labels=["torque:human", "deferred"],
+            created_by_architect_id=architect.id,
+        )
+        parked_unhealthy = self._add_task(
+            "task-parked-unhealthy",
+            "Deferred unhealthy work",
+            lane="In Progress",
+            labels=["deferred"],
+            assigned_engineer_id=hired.id,
+            created_by_architect_id=architect.id,
+        )
         unhealthy = self._add_task(
             "task-unhealthy",
             "Unhealthy active work",
@@ -1549,6 +1563,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         unhealthy.health_since = "2026-04-07T13:00:00+00:00"
         blocker_fix.health_state = "idle-risk"
         blocker_fix.health_since = "2026-04-07T13:05:00+00:00"
+        parked_unhealthy.health_state = "stalled"
+        parked_unhealthy.health_since = "2026-04-07T13:10:00+00:00"
 
         with mock.patch("time.time", return_value=1234.5):
             self.state.update_engineer_settings(
@@ -1638,16 +1654,49 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             [item["id"] for item in sections["pending_hires"]["items"]],
             ["hire-1"],
         )
-        self.assertEqual(payload["parked_deferred"]["count"], 1)
-        self.assertNotIn(
-            parked.id,
-            json.dumps(sections),
-            "parked/deferred work must stay out of attention sections",
-        )
+        self.assertEqual(payload["parked_deferred"]["count"], 3)
+        section_text = json.dumps(sections)
+        for parked_task in (parked, parked_human, parked_unhealthy):
+            self.assertNotIn(
+                parked_task.id,
+                section_text,
+                "parked/deferred work must stay out of attention sections",
+            )
         self.assertEqual(
             payload["scoping"]["ready_merge_and_stream_loops"],
             "hired_engineers_only",
         )
+
+    async def test_architect_attention_digest_counts_peer_ack_truncation(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-peer", "Peer Architect")
+        for idx in range(3):
+            self.db.save_agent_peer_message({
+                "id": f"peer-needs-ack-{idx}",
+                "thread_id": f"peer-thread-{idx}",
+                "group_name": "torque",
+                "sender_id": peer.id,
+                "sender_kind": "architect",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "message": f"Please ack handoff {idx}.",
+                "created_at": 50.0 + idx,
+                "ack_required": True,
+            })
+
+        text, is_error = await self._call(
+            "architect_attention_digest",
+            {"limit_per_section": 2},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        peer_section = payload["sections"]["peer_ack_required"]
+        self.assertEqual(peer_section["count"], 3)
+        self.assertEqual(len(peer_section["items"]), 2)
+        self.assertTrue(peer_section["truncated"])
+        self.assertEqual(payload["attention_count"], 3)
 
     async def test_architect_board_summary_bounds_large_task_excerpt(self):
         architect = self._add_architect("arch-1", "Architect")

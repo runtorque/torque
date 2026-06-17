@@ -589,6 +589,8 @@ def _stream_unhealthy_task_items(state, stream: dict) -> list[dict]:
         task = state.board_tasks.get(task_id)
         if not task or board_task_is_closed(task):
             continue
+        if _task_parked_or_deferred(task):
+            continue
         health_state = str(
             getattr(task, "health_state", "") or "healthy"
         ).strip() or "healthy"
@@ -610,18 +612,59 @@ def _stream_unhealthy_task_items(state, stream: dict) -> list[dict]:
 
 def _architect_attention_peer_ack_items(state, caller_id: str,
                                         limit: int) -> dict:
-    text, is_error = _architect_peer_inbox_json(
-        state,
-        caller_id,
-        {"requires_reply": True, "limit": limit},
-    )
-    if is_error:
-        return {"count": 0, "items": [], "truncated": False, "error": text}
-    try:
-        payload = json.loads(text)
-    except (TypeError, ValueError):
+    if not getattr(state, "db", None):
         return {"count": 0, "items": [], "truncated": False}
-    threads = payload.get("threads", []) if isinstance(payload, dict) else []
+    try:
+        rows = state.db.load_agent_peer_messages_for_agent(
+            caller_id,
+            limit=_ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+        )
+    except Exception as exc:
+        log.exception("Failed to load Architect peer ack attention rows")
+        return {
+            "count": 0,
+            "items": [],
+            "truncated": False,
+            "error": str(exc),
+        }
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        thread_id = str((row or {}).get("thread_id", "") or "").strip()
+        if not thread_id:
+            continue
+        grouped.setdefault(thread_id, []).append(row)
+    threads = []
+    for thread_id, messages in grouped.items():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        if not _thread_requires_architect_reply(messages, caller_id):
+            continue
+        last = messages[-1]
+        entry_for_caller = _agent_peer_message_row_to_entry(last, caller_id)
+        peer_architect_id = entry_for_caller["peer_id"]
+        peer = state.agents.get(peer_architect_id)
+        threads.append({
+            "thread_id": thread_id,
+            "peer_architect_id": peer_architect_id,
+            "peer_name": str(getattr(peer, "name", "") or "").strip()
+            or peer_architect_id,
+            "last_message_at": float(last.get("created_at", 0) or 0),
+            "messages": [
+                _agent_peer_message_row_to_entry(row, caller_id)
+                for row in messages
+            ],
+        })
+    threads.sort(
+        key=lambda item: (
+            float(item.get("last_message_at", 0) or 0),
+            str(item.get("thread_id", "") or ""),
+        ),
+        reverse=True,
+    )
     items = []
     for thread in threads if isinstance(threads, list) else []:
         messages = thread.get("messages", []) if isinstance(thread, dict) else []
@@ -657,7 +700,7 @@ def _architect_attention_peer_ack_items(state, caller_id: str,
     return {
         "count": len(items),
         "items": items[:limit],
-        "truncated": False,
+        "truncated": len(items) > limit or len(rows) >= _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
     }
 
 
@@ -679,7 +722,17 @@ def _architect_attention_digest_json(state, architect_id: str,
     open_tasks = [task for task in group_tasks if not board_task_is_closed(task)]
     actionable_tasks = [
         task for task in open_tasks
-        if not task_is_engineer_message_followup(task)
+        if (
+            not task_is_engineer_message_followup(task)
+            and not _task_parked_or_deferred(task)
+        )
+    ]
+    parked_deferred = [
+        task for task in open_tasks
+        if (
+            not task_is_engineer_message_followup(task)
+            and _task_parked_or_deferred(task)
+        )
     ]
 
     blocking_asks = [
@@ -816,11 +869,6 @@ def _architect_attention_digest_json(state, architect_id: str,
             status_filter="pending",
             architect_id=architect_id,
         )
-    ]
-
-    parked_deferred = [
-        task for task in actionable_tasks
-        if _task_parked_or_deferred(task)
     ]
 
     sections = {
