@@ -493,7 +493,17 @@ class WorktreeStreamTests(unittest.TestCase):
 
         self.assertEqual(stream["state"], "fixing_blockers")
         self.assertEqual(stream["code_state"], "review_blocked")
+        self.assertEqual(stream["merge_state"], "not_ready")
         self.assertEqual(stream["active_blocker_task_id"], blocker_fix.id)
+        self.assertEqual(stream["active_blocker_task_title"], blocker_fix.task)
+        self.assertEqual(stream["active_blocker_health_state"], "healthy")
+        self.assertEqual(stream["blocker_parent_review_task_id"], review.id)
+        self.assertEqual(
+            stream["blocker_parent_review_task_title"],
+            review.task,
+        )
+        self.assertEqual(stream["expected_next_transition"], "re-review")
+        self.assertEqual(stream["recommended_next_action"], "address_review_blockers")
         self.assertEqual(stream["foreground_task_id"], blocker_fix.id)
         self.assertIn(blocker_fix.id, stream["workflow_task_ids"])
 

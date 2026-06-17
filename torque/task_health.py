@@ -73,6 +73,7 @@ class _HealthIndexes:
     open_review_stream_roots: set[str]
     open_review_parent_ids: set[str]
     open_review_ids: set[str]
+    active_blocker_fix_by_ancestor: dict[str, Any]
 
     @classmethod
     def build(cls, tasks_by_id: dict[str, Any]) -> "_HealthIndexes":
@@ -83,6 +84,7 @@ class _HealthIndexes:
         open_review_stream_roots: set[str] = set()
         open_review_parent_ids: set[str] = set()
         open_review_ids: set[str] = set()
+        active_blocker_fix_by_ancestor: dict[str, Any] = {}
 
         for task in tasks_by_id.values():
             tid = str(getattr(task, "id", "") or "").strip()
@@ -120,6 +122,14 @@ class _HealthIndexes:
                 if parent_id:
                     open_review_parent_ids.add(parent_id)
 
+        for task in tasks_by_id.values():
+            if not _is_active_blocker_fix_task(task, tasks_by_id):
+                continue
+            for ancestor_id in _ancestor_task_ids(task, tasks_by_id):
+                current = active_blocker_fix_by_ancestor.get(ancestor_id)
+                if current is None or _task_activity_ts(task) >= _task_activity_ts(current):
+                    active_blocker_fix_by_ancestor[ancestor_id] = task
+
         return cls(
             tasks_by_id=tasks_by_id,
             children_by_id=dict(children_by_id),
@@ -137,6 +147,7 @@ class _HealthIndexes:
             open_review_stream_roots=open_review_stream_roots,
             open_review_parent_ids=open_review_parent_ids,
             open_review_ids=open_review_ids,
+            active_blocker_fix_by_ancestor=active_blocker_fix_by_ancestor,
         )
 
 
@@ -266,6 +277,12 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any] | _HealthIndexe
     if reasons:
         return TaskHealthSnapshot(state=HEALTH_BLOCKED, details=details)
 
+    active_blocker_fix = _active_blocker_fix_for_ancestor(task, tasks_by_id)
+    if active_blocker_fix:
+        details.update(_blocker_fix_health_context(active_blocker_fix, tasks_by_id))
+        details["reasons"] = ["parked_for_blocker_fix"]
+        return TaskHealthSnapshot(state=HEALTH_HEALTHY, details=details)
+
     stale_reasons = _stale_in_progress_reasons(
         task,
         tasks_by_id,
@@ -329,6 +346,9 @@ def next_task_health_deadline(task: Any, tasks_by_id: dict[str, Any] | _HealthIn
             or "torque:blocked" in labels
             or _has_unmet_dependencies(task, tasks_by_id)
             or (agent and getattr(agent, "activity", "") == "waiting")):
+        return None
+
+    if _active_blocker_fix_for_ancestor(task, tasks_by_id):
         return None
 
     deadlines: list[float] = []
@@ -519,6 +539,135 @@ def _tasks_share_stream(left: Any, right: Any) -> bool:
     )
 
 
+def _active_blocker_fix_for_ancestor(task: Any,
+                                     tasks_by_id: dict[str, Any]) -> Any | None:
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if not task_id:
+        return None
+    if isinstance(tasks_by_id, _HealthIndexes):
+        return tasks_by_id.active_blocker_fix_by_ancestor.get(task_id)
+    return _scan_active_blocker_fix_for_ancestor(task, tasks_by_id)
+
+
+def _scan_active_blocker_fix_for_ancestor(task: Any,
+                                          tasks_by_id: dict[str, Any]) -> Any | None:
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if not task_id:
+        return None
+    best = None
+    for other in tasks_by_id.values():
+        if not _is_active_blocker_fix_task(other, tasks_by_id):
+            continue
+        if task_id not in _ancestor_task_ids(other, tasks_by_id):
+            continue
+        if best is None or _task_activity_ts(other) >= _task_activity_ts(best):
+            best = other
+    return best
+
+
+def _is_active_blocker_fix_task(task: Any,
+                                tasks_by_id: dict[str, Any]) -> bool:
+    if _task_counts_as_done(task):
+        return False
+    if getattr(task, "lane", "") in {"Backlog", "To Do", ARCHIVED_LANE}:
+        return False
+    if _is_review_gate_task(task):
+        return False
+
+    parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+    if parent_id and _has_review_ancestor(parent_id, tasks_by_id):
+        return True
+
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    if "review-fix" in labels:
+        return True
+
+    action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+    if action_name.endswith("fix-review"):
+        return True
+
+    status = str(getattr(task, "status", "") or "").strip().lower()
+    return status == "fixing"
+
+
+def _is_review_gate_task(task: Any) -> bool:
+    action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    if action_name.endswith("fix-review") or "review-fix" in labels:
+        return False
+    if action_name == _REVIEW_ACTION_NAME or "review" in action_name:
+        return True
+    status = str(getattr(task, "status", "") or "").strip().lower()
+    return status == "on review"
+
+
+def _has_review_ancestor(task_id: str, tasks_by_id: dict[str, Any]) -> bool:
+    return bool(_nearest_review_ancestor(task_id, tasks_by_id))
+
+
+def _nearest_review_ancestor(task_id: str,
+                             tasks_by_id: dict[str, Any]) -> Any | None:
+    tasks = (
+        tasks_by_id.tasks_by_id
+        if isinstance(tasks_by_id, _HealthIndexes)
+        else tasks_by_id
+    )
+    current_id = str(task_id or "").strip()
+    seen: set[str] = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        current = tasks.get(current_id)
+        if not current:
+            return None
+        if _is_review_gate_task(current):
+            return current
+        current_id = str(getattr(current, "parent_task_id", "") or "").strip()
+    return None
+
+
+def _ancestor_task_ids(task: Any, tasks_by_id: dict[str, Any]) -> list[str]:
+    tasks = (
+        tasks_by_id.tasks_by_id
+        if isinstance(tasks_by_id, _HealthIndexes)
+        else tasks_by_id
+    )
+    ids: list[str] = []
+    current_id = str(getattr(task, "parent_task_id", "") or "").strip()
+    seen: set[str] = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        current = tasks.get(current_id)
+        if not current:
+            break
+        ids.append(current_id)
+        current_id = str(getattr(current, "parent_task_id", "") or "").strip()
+    return ids
+
+
+def _blocker_fix_health_context(active_blocker_fix: Any,
+                                tasks_by_id: dict[str, Any]) -> dict:
+    review = _nearest_review_ancestor(
+        str(getattr(active_blocker_fix, "parent_task_id", "") or "").strip(),
+        tasks_by_id,
+    )
+    return {
+        "source_task_id": getattr(active_blocker_fix, "id", "") or "",
+        "source_task_title": getattr(active_blocker_fix, "task", "") or "",
+        "last_activity_at": _iso_or_empty(_task_activity_ts(active_blocker_fix)),
+        "active_blocker_task_id": getattr(active_blocker_fix, "id", "") or "",
+        "active_blocker_task_title": getattr(active_blocker_fix, "task", "") or "",
+        "parent_review_task_id": getattr(review, "id", "") or "",
+        "parent_review_task_title": getattr(review, "task", "") or "",
+        "expected_next_transition": "re-review",
+    }
+
+
 def _has_live_work_signal(agent: Any | None, now_ts: float) -> bool:
     """Return true for real work signals that should soften idle hints.
 
@@ -637,6 +786,21 @@ def _task_counts_as_done(task: Any) -> bool:
     if lane == "Done":
         return True
     return lane == ARCHIVED_LANE and getattr(task, "archived_from_lane", "") == "Done"
+
+
+def _task_activity_ts(task: Any) -> float:
+    timestamps = [
+        _parse_iso(getattr(task, "updated_at", "")),
+        _parse_iso(getattr(task, "created_at", "")),
+    ]
+    for msg in getattr(task, "messages", []) or []:
+        ts = msg.get("timestamp") if isinstance(msg, dict) else None
+        if isinstance(ts, (int, float)):
+            timestamps.append(float(ts))
+        elif isinstance(ts, str):
+            timestamps.append(_parse_iso(ts))
+    timestamps = [ts for ts in timestamps if ts]
+    return max(timestamps) if timestamps else 0.0
 
 
 def _task_last_activity_ts(task: Any, agent: Any | None) -> float | None:

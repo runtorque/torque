@@ -967,6 +967,132 @@ class TaskHealthTests(unittest.TestCase):
             "child",
         )
 
+    def test_active_blocker_fix_suppresses_parked_review_health_noise(self):
+        base = 90_000
+        parent = self.state_mod.BoardTask(
+            id="TORQUE:1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            updated_at=_iso(base),
+        )
+        review = self.state_mod.BoardTask(
+            id="TORQUE:1:1",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            action_name="feature/review",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            status="Fixing",
+            updated_at=_iso(base + 60),
+        )
+        fix = self.state_mod.BoardTask(
+            id="TORQUE:1:2",
+            task="Fix review blockers",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            parent_task_id=review.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=2,
+            agent_id="agent-fix",
+            labels=["review-fix"],
+            updated_at=_iso(base + (20 * 60)),
+        )
+        agents = {
+            "agent-fix": self.state_mod.AgentCell(
+                id="agent-fix",
+                name="Fixer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                last_progress_at=base + (20 * 60),
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {parent.id: parent, review.id: review, fix.id: fix},
+            agents,
+            now_ts=base + (21 * 60),
+        )
+
+        self.assertEqual(snapshots[fix.id].state, "healthy")
+        self.assertEqual(snapshots[review.id].state, "healthy")
+        self.assertEqual(snapshots[parent.id].state, "healthy")
+        self.assertEqual(
+            snapshots[review.id].details["reasons"],
+            ["parked_for_blocker_fix"],
+        )
+        self.assertEqual(snapshots[review.id].details["source_task_id"], fix.id)
+        self.assertEqual(
+            snapshots[review.id].details["parent_review_task_id"],
+            review.id,
+        )
+        self.assertEqual(
+            snapshots[review.id].details["expected_next_transition"],
+            "re-review",
+        )
+
+    def test_unhealthy_blocker_fix_rolls_up_as_source_instead_of_review_gate(self):
+        base = 95_000
+        parent = self.state_mod.BoardTask(
+            id="TORQUE:2",
+            task="Implement second feature",
+            group="g",
+            lane="In Progress",
+            updated_at=_iso(base),
+        )
+        review = self.state_mod.BoardTask(
+            id="TORQUE:2:1",
+            task="Review second feature",
+            group="g",
+            lane="In Progress",
+            action_name="feature/review",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            status="Fixing",
+            updated_at=_iso(base + 60),
+        )
+        fix = self.state_mod.BoardTask(
+            id="TORQUE:2:2",
+            task="Fix second review blockers",
+            group="g",
+            lane="In Progress",
+            action_name="feature/fix-review",
+            parent_task_id=review.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=2,
+            agent_id="agent-fix",
+            labels=["review-fix"],
+            updated_at=_iso(base + (2 * 60)),
+        )
+        agents = {
+            "agent-fix": self.state_mod.AgentCell(
+                id="agent-fix",
+                name="Fixer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                last_progress_at=base + (2 * 60),
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {parent.id: parent, review.id: review, fix.id: fix},
+            agents,
+            now_ts=base + (24 * 60),
+        )
+
+        self.assertEqual(snapshots[fix.id].state, "stalled")
+        self.assertEqual(snapshots[review.id].state, "stalled")
+        self.assertTrue(snapshots[review.id].details["aggregate"])
+        self.assertEqual(snapshots[review.id].details["source_task_id"], fix.id)
+        self.assertEqual(snapshots[parent.id].state, "stalled")
+        self.assertEqual(snapshots[parent.id].details["source_task_id"], fix.id)
+
 
 class MatrixStateTaskHealthTests(unittest.TestCase):
     def setUp(self):
