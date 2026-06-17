@@ -122,6 +122,7 @@ operator sync actions.
 | `engineer_task_verify` | Record deploy/restart attempted, smoke passed/failed, and verification notes. |
 | `engineer_task_upload_artifact` | Upload and attach a markdown/text report, log, screenshot, generated document, or file reference directly to a scoped task (`task`; `task_id` is accepted as an alias). |
 | `engineer_task_resolve` | Resolve an `ask` task and send the answer back to the waiting agent. |
+| `engineer_hint_snooze` | Snooze or clear a deterministic hint fingerprint, for example acknowledging retained-by-policy merged workers without deleting them. |
 
 ### Dispatch
 

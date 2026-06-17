@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import time
+
 from .state import (
     ARCHIVED_LANE,
     board_task_is_closed,
+    normalize_worktree_merge_cleanup,
     task_is_engineer_message_followup,
 )
 from .task_health import (
@@ -197,6 +200,8 @@ def _dispatch_shape_ready_tasks(state, group: str, *,
 
 
 def _merged_cleanup_hints(state, group: str, *, engineer_id: str) -> list[dict]:
+    cleanup_policy = _group_worktree_merge_cleanup_policy(state, group)
+    retained_by_policy = cleanup_policy == "keep"
     candidates = []
     for cell in state.iter_active_agents():
         if not _is_visible_actionable_agent(
@@ -220,10 +225,36 @@ def _merged_cleanup_hints(state, group: str, *, engineer_id: str) -> list[dict]:
     candidates.sort(key=lambda cell: (_agent_label(cell).lower(), cell.id))
     names = [_agent_label(cell) for cell in candidates]
     agent_ids = [cell.id for cell in candidates]
+    kind = (
+        "merged_retained_by_policy"
+        if retained_by_policy else "merged_cleanup"
+    )
+    fingerprint = kind + ":" + ",".join(agent_ids)
+    if _hint_is_snoozed(state, group, fingerprint):
+        return []
+    if retained_by_policy:
+        return [{
+            "kind": kind,
+            "priority": 15,
+            "attention": False,
+            "snoozeable": True,
+            "policy": cleanup_policy,
+            "fingerprint": fingerprint,
+            "message": (
+                f"{len(candidates)} idle merged agents are retained by the "
+                f"group cleanup policy: {_preview_list(names)}"
+            ),
+            "agent_ids": agent_ids,
+            "task_ids": [],
+            "stream_ids": [],
+        }]
     return [{
-        "kind": "merged_cleanup",
+        "kind": kind,
         "priority": 90,
-        "fingerprint": "merged_cleanup:" + ",".join(agent_ids),
+        "attention": True,
+        "snoozeable": True,
+        "policy": cleanup_policy,
+        "fingerprint": fingerprint,
         "message": (
             f"{len(candidates)} idle agents have merged branches ready for "
             f"cleanup: {_preview_list(names)}"
@@ -232,6 +263,30 @@ def _merged_cleanup_hints(state, group: str, *, engineer_id: str) -> list[dict]:
         "task_ids": [],
         "stream_ids": [],
     }]
+
+
+def _group_worktree_merge_cleanup_policy(state, group: str) -> str:
+    getter = getattr(state, "get_group_settings", None)
+    settings = getter(group) if callable(getter) else None
+    return normalize_worktree_merge_cleanup(
+        getattr(settings, "worktree_merge_cleanup", "keep")
+    )
+
+
+def _hint_is_snoozed(state, group: str, fingerprint: str) -> bool:
+    fingerprint = str(fingerprint or "").strip()
+    if not fingerprint:
+        return False
+    getter = getattr(state, "get_group_settings", None)
+    settings = getter(group) if callable(getter) else None
+    snoozes = getattr(settings, "engineer_hint_snoozes", {}) or {}
+    if not isinstance(snoozes, dict):
+        return False
+    try:
+        expires_at = float(snoozes.get(fingerprint, 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return expires_at > time.time()
 
 
 def _ready_to_merge_hints(state, group: str, *, streams: list[dict],

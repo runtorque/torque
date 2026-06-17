@@ -5182,6 +5182,39 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             cached_boot_summary_payload(real_state, caller_kind, caller_id)
         ), False
 
+    if tool_name == "hint_snooze" and caller_kind == "engineer":
+        fingerprint = str(args.get("fingerprint", "") or "").strip()
+        if not fingerprint:
+            return "fingerprint is required", True
+        clear = bool(args.get("clear", False))
+        raw_hours = args.get("hours", 168)
+        try:
+            hours = float(raw_hours)
+        except (TypeError, ValueError):
+            return "hours must be a number", True
+        settings = real_state.get_group_settings(_engineer_group)
+        snoozes = dict(getattr(settings, "engineer_hint_snoozes", {}) or {})
+        if clear or hours <= 0:
+            snoozes.pop(fingerprint, None)
+            expires_at = 0.0
+            state_text = "cleared"
+        else:
+            hours = min(max(hours, 1.0), 24.0 * 365.0)
+            expires_at = time.time() + hours * 3600.0
+            snoozes[fingerprint] = expires_at
+            state_text = "snoozed"
+        real_state.update_group_settings(
+            _engineer_group,
+            engineer_hint_snoozes=snoozes,
+        )
+        return json.dumps({
+            "type": "ok",
+            "group": _engineer_group,
+            "fingerprint": fingerprint,
+            "state": state_text,
+            "snoozed_until": expires_at,
+        }), False
+
     if tool_name == "mcp_calls":
         target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()
         if target_agent:

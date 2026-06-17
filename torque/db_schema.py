@@ -314,6 +314,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 0,
     guidance_hint_cadence       INTEGER NOT NULL DEFAULT 4,
+    engineer_hint_snoozes       TEXT NOT NULL DEFAULT '{}',
     notifications               INTEGER NOT NULL DEFAULT 0,
     notify_on_finish            INTEGER NOT NULL DEFAULT 1,
     notify_on_error             INTEGER NOT NULL DEFAULT 1,
@@ -2181,6 +2182,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
             "guidance_hint_cadence INTEGER NOT NULL DEFAULT 4")
+        conn.commit()
+    # Migrate: add engineer_hint_snoozes column to group_settings
+    try:
+        conn.execute(
+            "SELECT engineer_hint_snoozes FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE group_settings ADD COLUMN "
+            "engineer_hint_snoozes TEXT NOT NULL DEFAULT '{}'")
         conn.commit()
     # Migrate: add engineer_agent_id column to group_settings
     try:

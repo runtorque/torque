@@ -798,6 +798,26 @@ def normalize_guidance_hint_cadence(value) -> int:
     )
 
 
+def _normalize_engineer_hint_snoozes(value) -> dict[str, float]:
+    """Return durable Engineer hint snoozes keyed by deterministic fingerprint."""
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, float] = {}
+    now = time.time()
+    for raw_key, raw_expires_at in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        try:
+            expires_at = float(raw_expires_at or 0)
+        except (TypeError, ValueError):
+            continue
+        if expires_at <= now:
+            continue
+        result[key] = expires_at
+    return result
+
+
 def merge_cleanup_flags(mode: str) -> tuple[bool, bool]:
     mode = normalize_worktree_merge_cleanup(mode)
     if mode == "close":
@@ -2136,6 +2156,7 @@ class GroupSettings:
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
     guidance_hint_cadence: int = _DEFAULT_GUIDANCE_HINT_CADENCE  # 0=every time; otherwise 1st, then every N
+    engineer_hint_snoozes: dict[str, float] = field(default_factory=dict)  # hint fingerprint -> unix expiry
     # Agent notifications
     notifications: bool = False
     notify_on_finish: bool = True
@@ -6408,6 +6429,11 @@ class MatrixState:
                             normalize_guidance_hint_cadence(
                                 filtered["guidance_hint_cadence"])
                         )
+                    if "engineer_hint_snoozes" in filtered:
+                        filtered["engineer_hint_snoozes"] = (
+                            _normalize_engineer_hint_snoozes(
+                                filtered["engineer_hint_snoozes"])
+                        )
                     if "board_sync_provider" in filtered:
                         filtered["board_sync_provider"] = (
                             _normalize_board_sync_provider(
@@ -6979,6 +7005,8 @@ class MatrixState:
                     value = normalize_engineer_merge_mode(value)
                 elif key == "guidance_hint_cadence":
                     value = normalize_guidance_hint_cadence(value)
+                elif key == "engineer_hint_snoozes":
+                    value = _normalize_engineer_hint_snoozes(value)
                 elif key == "board_sync_provider":
                     value = _normalize_board_sync_provider(value)
                 elif key == "board_sync_enabled":
