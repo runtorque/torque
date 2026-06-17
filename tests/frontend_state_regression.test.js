@@ -12143,6 +12143,20 @@ test('direct-message and chat message bodies explicitly allow native text select
   assert.match(css, /\.chat-message-body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
 });
 
+test('terminal composer uses a markdown-friendly monospace stack without changing sizing', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const rule = css.match(/\.terminal-compose-input\s*\{[^}]+\}/);
+  assert.ok(rule, 'terminal composer input CSS rule exists');
+  assert.match(rule[0], /min-height:\s*32px;/);
+  assert.match(rule[0], /max-height:\s*88px;/);
+  assert.match(
+    rule[0],
+    /font:\s*12px\/1\.35 ui-monospace,\s*"SF Mono",\s*"Cascadia Mono",\s*"Segoe UI Mono",\s*"Liberation Mono",\s*Menlo,\s*Consolas,\s*monospace;/,
+  );
+  assert.match(rule[0], /font-variant-ligatures:\s*none;/);
+  assert.match(rule[0], /font-variant-numeric:\s*tabular-nums;/);
+});
+
 test('embedded terminal markdown links do not select messages or refocus terminal', () => {
   const { context, document, dom, list, terminalFocusCalls } = setupTerminalDirectMessageClickHarness();
   document.activeElement = dom.surface;
