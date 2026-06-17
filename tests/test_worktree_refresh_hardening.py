@@ -153,6 +153,95 @@ class WorktreeRefreshHardeningTests(IsolatedAsyncioTestCase):
             self.assertEqual(peak, 1)
             self.assertEqual(mgr.refresh_metrics_snapshot()["max_concurrent"], 1)
 
+    async def test_nested_submodule_drift_probe_timeout_preserves_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sub = Path(tmp) / "sub"
+            sub.mkdir()
+            mgr = WorktreeManager(refresh_git_timeout_seconds=0.01)
+            cell = _cell("nested-drift", tmp)
+
+            async def refresh_git(_directory, *args, **_kwargs):
+                if args[:3] == ("rev-list", "--left-right", "--count"):
+                    return 0, "0 1", ""
+                if args[:2] == ("status", "--porcelain=v2"):
+                    return 0, "1 .M N... 160000 160000 160000 abc abc sub", ""
+                return 0, "", ""
+
+            async def hanging_git_run(*_args, **_kwargs):
+                await asyncio.sleep(60)
+                return 0, "", ""
+
+            with mock.patch.object(
+                mgr,
+                "_refresh_fingerprint",
+                return_value=(123.0, 456.0),
+            ), mock.patch.object(
+                mgr,
+                "_refresh_git",
+                side_effect=refresh_git,
+            ), mock.patch.object(mgr, "_git_run", side_effect=hanging_git_run):
+                changed = await asyncio.wait_for(
+                    mgr.refresh_state(cell, worktree_submodules=["sub"]),
+                    timeout=0.5,
+                )
+
+            self.assertFalse(changed)
+            self.assertEqual(cell.worktree_diff["files"], 9)
+            self.assertEqual(cell.worktree_changed_files, ["old.txt"])
+            self.assertEqual(cell.worktree_ahead, 7)
+            self.assertEqual(cell.worktree_behind, 2)
+            metrics = mgr.refresh_metrics_snapshot()
+            self.assertEqual(metrics["failures"], 1)
+            self.assertEqual(metrics["timeouts"], 1)
+            self.assertEqual(metrics["last_error_kind"], "timeout")
+            self.assertEqual(
+                metrics["last_error_command"],
+                "nested_submodule_gitlink_drift",
+            )
+
+    async def test_nested_submodule_discovery_timeout_preserves_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = WorktreeManager(refresh_git_timeout_seconds=0.01)
+            cell = _cell("nested-discovery", tmp)
+
+            async def refresh_git(_directory, *args, **_kwargs):
+                if args[:3] == ("rev-list", "--left-right", "--count"):
+                    return 0, "0 1", ""
+                return 0, "", ""
+
+            async def hanging_infos(*_args, **_kwargs):
+                await asyncio.sleep(60)
+                return []
+
+            with mock.patch.object(
+                mgr,
+                "_refresh_fingerprint",
+                return_value=(123.0, 456.0),
+            ), mock.patch.object(
+                mgr,
+                "_refresh_git",
+                side_effect=refresh_git,
+            ), mock.patch.object(
+                mgr,
+                "_nested_submodule_infos",
+                side_effect=hanging_infos,
+            ):
+                changed = await asyncio.wait_for(
+                    mgr.refresh_state(cell, worktree_submodules=["sub"]),
+                    timeout=0.5,
+                )
+
+            self.assertFalse(changed)
+            self.assertEqual(cell.worktree_ahead, 7)
+            self.assertEqual(cell.worktree_behind, 2)
+            metrics = mgr.refresh_metrics_snapshot()
+            self.assertEqual(metrics["failures"], 1)
+            self.assertEqual(metrics["timeouts"], 1)
+            self.assertEqual(
+                metrics["last_error_command"],
+                "nested_submodule_infos:ahead_behind",
+            )
+
 
     def test_metrics_tick_surfaces_worktree_refresh_snapshot(self):
         collector = MetricsCollector(enabled=True)

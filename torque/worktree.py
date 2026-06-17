@@ -1290,6 +1290,21 @@ class WorktreeManager:
             )
         return proc.returncode, stdout_text, stderr_text
 
+    async def _refresh_await(self, label: str, awaitable,
+                             *, timeout: float | None = None):
+        """Bound a refresh-only async helper that may call legacy git wrappers."""
+        deadline = float(timeout or self.refresh_git_timeout_seconds)
+        try:
+            return await asyncio.wait_for(awaitable, timeout=deadline)
+        except WorktreeRefreshError:
+            raise
+        except asyncio.TimeoutError as exc:
+            raise WorktreeRefreshError(
+                "timeout",
+                f"{label} exceeded {deadline:.1f}s",
+                command=label,
+            ) from exc
+
     @staticmethod
     def _resolve_gitdir(worktree_path: str) -> str:
         """Resolve the actual git directory for a worktree path.
@@ -1626,13 +1641,16 @@ class WorktreeManager:
             repo_root = await self.get_repo_root(cell.worktree_path) or ""
         if not repo_root:
             return (ahead, behind)
-        infos = await self._nested_submodule_infos(
-            repo_root,
-            cell.worktree_path,
-            submodule_paths,
-            ref="HEAD",
-            require_worktree=True,
-            strict=False,
+        infos = await self._refresh_await(
+            "nested_submodule_infos:ahead_behind",
+            self._nested_submodule_infos(
+                repo_root,
+                cell.worktree_path,
+                submodule_paths,
+                ref="HEAD",
+                require_worktree=True,
+                strict=False,
+            ),
         )
         base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
         for info in infos:
@@ -1673,11 +1691,14 @@ class WorktreeManager:
                     path = parts[8]
                     if (
                             submodule_paths
-                            and await self._is_clean_submodule_gitlink_drift(
-                                cell,
-                                path,
-                                submodule_paths,
-                                status_xy=parts[1] if len(parts) > 1 else "",
+                            and await self._refresh_await(
+                                "nested_submodule_gitlink_drift",
+                                self._is_clean_submodule_gitlink_drift(
+                                    cell,
+                                    path,
+                                    submodule_paths,
+                                    status_xy=parts[1] if len(parts) > 1 else "",
+                                ),
                             )):
                         ignored_submodule_drift.append(path)
                     else:
@@ -1708,9 +1729,13 @@ class WorktreeManager:
         replaced_paths: set[str] = set()
         if _normalize_worktree_submodules(worktree_submodules):
             submodule_text, replaced_paths = (
-                await self._nested_submodule_numstat(
-                    cell,
-                    worktree_submodules,
+                await self._refresh_await(
+                    "nested_submodule_numstat",
+                    self._nested_submodule_numstat(
+                        cell,
+                        worktree_submodules,
+                    ),
+                    timeout=self.refresh_git_timeout_seconds * 2,
                 )
             )
         if submodule_text:
@@ -6942,7 +6967,10 @@ class WorktreeManager:
                 repo_root,
                 "rev-parse",
                 cell.worktree_branch, cell.worktree_base_branch,
+                check=False,
             )
+            if _code != 0:
+                return False
             shas = out.split()
             if len(shas) == 2 and shas[0] == shas[1]:
                 return False
@@ -6972,7 +7000,10 @@ class WorktreeManager:
                 repo_root,
                 "rev-parse",
                 f"{cell.worktree_base_branch}^{{tree}}",
+                check=False,
             )
+            if _code != 0:
+                return False
             base_tree = stdout.strip()
 
             # 2. Simulate merging branch into base (git 2.38+)
@@ -6980,7 +7011,10 @@ class WorktreeManager:
                 repo_root,
                 "merge-tree", "--write-tree",
                 cell.worktree_base_branch, cell.worktree_branch,
+                check=False,
             )
+            if _code != 0:
+                return False
             merge_tree = stdout.strip().split('\n')[0]
 
             # 3. If the simulated merge produces base's tree unchanged,
