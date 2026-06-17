@@ -10452,6 +10452,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .agent-panel-stream-section-label-product { color: var(--accent); }
 .agent-panel-stream-section-label-workflow { color: var(--amber); }
 .agent-panel-stream-section-label-context { color: var(--text-dim); }
+.agent-panel-stream-section-label-merge { color: var(--text-dim); }
 .agent-panel-stream-summary-count,
 .agent-panel-stream-visibility-more,
 .agent-panel-stream-empty {
@@ -10512,6 +10513,121 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   font-size: 9px;
   color: var(--text-dim);
   line-height: 1.45;
+  word-break: break-word;
+}
+.agent-panel-merge-readiness {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-cell) 70%, transparent);
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-panel-merge-readiness-stale_base,
+.agent-panel-merge-readiness-blocker_fix {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--border));
+}
+.agent-panel-merge-readiness-ready_to_merge {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--border));
+}
+.agent-panel-merge-readiness-merged {
+  border-color: color-mix(in srgb, var(--text-dim) 35%, var(--border));
+}
+.agent-panel-merge-readiness-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-panel-merge-readiness-action {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.agent-panel-merge-readiness-action-stale_base,
+.agent-panel-merge-readiness-action-blocker_fix {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+.agent-panel-merge-readiness-action-re_review,
+.agent-panel-merge-readiness-action-validation {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.agent-panel-merge-readiness-action-ready_to_merge {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.agent-panel-merge-readiness-action-merged {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.agent-panel-merge-readiness-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+}
+.agent-panel-merge-readiness-label {
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.agent-panel-merge-readiness-value {
+  min-width: 0;
+  font-size: 9px;
+  color: var(--text);
+  word-break: break-word;
+}
+.agent-panel-merge-readiness-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.agent-panel-merge-readiness-followup {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  font-size: 8px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  background: var(--bg-card);
+}
+.agent-panel-merge-readiness-followup-blocking {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 35%, var(--border));
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+.agent-panel-merge-readiness-followup-queued,
+.agent-panel-merge-readiness-followup-started,
+.agent-panel-merge-readiness-followup-review {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 35%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+.agent-panel-merge-readiness-snippet {
+  margin: 0;
+  max-height: 88px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 8px;
+  line-height: 1.35;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 

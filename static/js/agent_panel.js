@@ -6622,6 +6622,8 @@ function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
     html += '</div>';
   }
 
+  html += _agentPanelLegacyRenderMergeReadiness(stream);
+
   if (productTasks.length) {
     html += _agentPanelLegacyRenderStreamTaskGroup(
       'Product tasks',
@@ -6644,6 +6646,215 @@ function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
 
   html += '</div>';
   return html;
+}
+
+function _agentPanelLegacyRenderMergeReadiness(stream) {
+  var packet = _engineerStreamMergeReadinessPacket(stream);
+  if (!packet) return '';
+  var presentation = _engineerMergeReadinessPresentation(stream, packet);
+  var className = _engineerClassSuffix(presentation.className || 'neutral');
+  var html = '<div class="agent-panel-merge-readiness agent-panel-merge-readiness-' + _esc(className) + '">';
+  html += '<div class="agent-panel-merge-readiness-header">';
+  html += '<span class="agent-panel-stream-section-label agent-panel-stream-section-label-merge">Merge readiness</span>';
+  html += '<span class="agent-panel-merge-readiness-action agent-panel-merge-readiness-action-'
+    + _esc(className) + '">' + _esc(presentation.statusLabel) + '</span>';
+  html += '</div>';
+
+  var fields = _engineerMergeReadinessFields(stream, packet);
+  if (fields.length) {
+    html += '<div class="agent-panel-merge-readiness-grid">';
+    for (var i = 0; i < fields.length; i++) {
+      html += '<div class="agent-panel-merge-readiness-label">' + _esc(fields[i].label) + '</div>';
+      html += '<div class="agent-panel-merge-readiness-value">' + _esc(fields[i].value) + '</div>';
+    }
+    html += '</div>';
+  }
+
+  var followups = _engineerMergeReadinessFollowups(packet);
+  if (followups.length) {
+    html += '<div class="agent-panel-merge-readiness-followups">';
+    for (var j = 0; j < followups.length; j++) {
+      html += '<span class="agent-panel-merge-readiness-followup agent-panel-merge-readiness-followup-'
+        + _esc(_engineerClassSuffix(followups[j].kind || 'note')) + '">'
+        + _esc(followups[j].label) + '</span>';
+    }
+    html += '</div>';
+  }
+
+  var snippet = String(packet.merge_report_snippet || '').trim();
+  if (snippet) {
+    html += '<pre class="agent-panel-merge-readiness-snippet">' + _esc(snippet) + '</pre>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _engineerStreamMergeReadinessPacket(stream) {
+  if (!stream || typeof stream !== 'object') return null;
+  var packet = stream.merge_readiness || stream.merge_readiness_packet || null;
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet)) return null;
+  return packet;
+}
+
+function _engineerMergeReadinessPresentation(stream, packet) {
+  var action = String((packet && packet.recommended_next_action) || (stream && stream.recommended_next_action) || '').toLowerCase();
+  var streamState = String((packet && packet.state) || (stream && stream.state) || '').toLowerCase();
+  var mergeState = String((packet && packet.merge_state) || (stream && stream.merge_state) || '').toLowerCase();
+  var stale = !!(packet && packet.stale_base && packet.stale_base.stale === true);
+  var branchAdvanced = _engineerMergeReadinessBranchAdvanced(stream, packet);
+  var followups = (packet && packet.followups) || {};
+  var hasBlocker = !!(followups.active_blocker_fix_task
+    && (followups.active_blocker_fix_task.task_id || followups.active_blocker_fix_task.task_title));
+
+  if (streamState === 'merged' || mergeState === 'merged'
+      || (packet && packet.latest_merged_commit_sha)) {
+    return { className: 'merged', statusLabel: 'Merged' };
+  }
+  if (stale || action === 'rebase') {
+    return { className: 'stale_base', statusLabel: 'Stale base' };
+  }
+  if (hasBlocker || action === 'address_review_blockers' || action === 'fix_review_blocker') {
+    return { className: 'blocker_fix', statusLabel: 'Blocker fix' };
+  }
+  if (branchAdvanced || action === 're-review' || action === 'review_latest_change') {
+    return { className: 're_review', statusLabel: 'Re-review needed' };
+  }
+  if (streamState === 'ready_to_merge' || mergeState === 'ready'
+      || action === 'merge_after_validation' || action === 'merge' || action === 'merge_stream') {
+    return { className: 'ready_to_merge', statusLabel: 'Ready to merge' };
+  }
+  if (action === 'run_manual_validation' || streamState === 'awaiting_human_validation') {
+    return { className: 'validation', statusLabel: 'Validation gate' };
+  }
+  if (action === 'wait_for_review' || streamState === 'reviewing') {
+    return { className: 'reviewing', statusLabel: 'Awaiting review' };
+  }
+  return { className: 'neutral', statusLabel: 'Tracked' };
+}
+
+function _engineerMergeReadinessFields(stream, packet) {
+  var fields = [];
+  var action = _engineerStreamActionLabel(stream);
+  if (action) fields.push({ label: 'Action', value: action });
+
+  var boundary = (packet && packet.latest_reviewed_boundary) || {};
+  var head = (packet && packet.head) || {};
+  var reviewed = String(
+    head.reviewed_boundary_sha
+    || boundary.reviewed_sha
+    || packet.latest_reviewed_commit_sha
+    || ''
+  ).trim();
+  if (reviewed) fields.push({ label: 'Reviewed', value: _engineerShortSha(reviewed) });
+
+  var branchHead = String(head.current_branch_head_sha || packet.branch_head || '').trim();
+  if (branchHead) {
+    var headValue = _engineerShortSha(branchHead);
+    var headSource = String(head.current_branch_head_sha_source || '').trim();
+    if (headSource && headSource !== 'unknown') {
+      headValue += ' · ' + _engineerHumanizeToken(headSource);
+    }
+    fields.push({ label: 'Head', value: headValue });
+  }
+
+  var baseState = _engineerMergeReadinessBaseState(stream, packet);
+  if (baseState) fields.push({ label: 'Base', value: baseState });
+
+  var review = (packet && packet.review_final) || {};
+  var verdict = String(review.verdict || '').trim();
+  if (verdict) {
+    var reviewValue = _engineerHumanizeToken(verdict);
+    if (review.task_id) reviewValue += ' · ' + review.task_id;
+    fields.push({ label: 'Review', value: reviewValue });
+  }
+
+  var verification = (packet && packet.verification) || {};
+  var verificationState = String(
+    verification.state || verification.verification_state || ''
+  ).trim();
+  if (verificationState) {
+    var verificationValue = _engineerHumanizeToken(verificationState);
+    var summary = verification.summary || {};
+    if (summary.tests_run) verificationValue += ' · ' + summary.tests_run;
+    else if (verification.verification_notes) verificationValue += ' · ' + verification.verification_notes;
+    fields.push({ label: 'Verification', value: verificationValue });
+  }
+
+  var mergedSha = String((packet && packet.latest_merged_commit_sha) || '').trim();
+  if (mergedSha) fields.push({ label: 'Merged', value: _engineerShortSha(mergedSha) });
+  return fields;
+}
+
+function _engineerMergeReadinessBaseState(stream, packet) {
+  var stale = (packet && packet.stale_base) || {};
+  if (stale.stale === true || stale.state === 'stale') {
+    var warning = String(stale.warning || stale.message || stale.merge_state || '').trim();
+    return warning ? ('Stale · ' + warning) : 'Stale';
+  }
+  if (stale.stale === false || stale.state === 'fresh') return 'Fresh';
+  if (_engineerMergeReadinessBranchAdvanced(stream, packet)) return 'Branch advanced';
+  return '';
+}
+
+function _engineerMergeReadinessBranchAdvanced(stream, packet) {
+  var head = (packet && packet.head) || {};
+  return !!(
+    (packet && packet.branch_advanced)
+    || head.branch_advanced
+    || (stream && stream.branch_advanced)
+  );
+}
+
+function _engineerMergeReadinessFollowups(packet) {
+  var followups = (packet && packet.followups) || {};
+  var items = [];
+  var blocker = followups.active_blocker_fix_task || {};
+  if (blocker.task_id || blocker.task_title) {
+    items.push({
+      kind: 'blocking',
+      label: 'Blocker fix: ' + (blocker.task_title || blocker.task_id),
+    });
+  }
+  var parentReview = followups.blocker_parent_review_task || {};
+  if (parentReview.task_id || parentReview.task_title) {
+    items.push({
+      kind: 'review',
+      label: 'Review: ' + (parentReview.task_title || parentReview.task_id),
+    });
+  }
+  var queuedCount = Number(followups.queued_count || 0);
+  if (queuedCount > 0) {
+    items.push({
+      kind: 'queued',
+      label: queuedCount + ' queued follow-up' + (queuedCount === 1 ? '' : 's'),
+    });
+  }
+  var startedCount = Number(followups.started_count || 0);
+  if (startedCount > 0) {
+    items.push({
+      kind: 'started',
+      label: startedCount + ' started after boundary',
+    });
+  }
+  var notes = followups.notes || {};
+  ['blocking', 'non_blocking', 'future_context'].forEach(function(kind) {
+    var values = Array.isArray(notes[kind]) ? notes[kind] : [];
+    for (var i = 0; i < values.length && i < 2; i++) {
+      var value = String(values[i] || '').trim();
+      if (!value) continue;
+      items.push({
+        kind: kind,
+        label: _engineerHumanizeToken(kind) + ': ' + value,
+      });
+    }
+  });
+  return items;
+}
+
+function _engineerShortSha(value) {
+  var text = String(value || '').trim();
+  if (text.length > 10) return text.slice(0, 7);
+  return text;
 }
 
 function _agentPanelLegacyRenderStreamMetaRow(label, value) {
@@ -6752,7 +6963,12 @@ function _engineerStreamStateName(stream) {
 }
 
 function _engineerStreamMergeState(stream) {
-  return (stream && (stream.merge_state || stream.merge_readiness)) || '';
+  if (!stream) return '';
+  if (stream.merge_state) return stream.merge_state;
+  var packet = _engineerStreamMergeReadinessPacket(stream);
+  if (packet) return packet.merge_state || '';
+  if (typeof stream.merge_readiness === 'string') return stream.merge_readiness;
+  return '';
 }
 
 function _engineerStreamMergeMeta(stream) {
@@ -6783,7 +6999,12 @@ function _engineerStreamGateReason(stream) {
 }
 
 function _engineerStreamActionLabel(stream) {
-  var action = String((stream && stream.recommended_next_action) || '').toLowerCase();
+  var packet = _engineerStreamMergeReadinessPacket(stream);
+  var action = String(
+    (packet && packet.recommended_next_action)
+    || (stream && stream.recommended_next_action)
+    || ''
+  ).toLowerCase();
   var labels = {
     'continue_implementation': 'Continue implementation',
     'run_manual_validation': 'Run manual validation',
@@ -6796,7 +7017,10 @@ function _engineerStreamActionLabel(stream) {
     'review_latest_change': 'Review latest change',
     'wait_for_review': 'Wait for review',
     'fix_review_blocker': 'Fix review blocker',
+    'rebase': 'Rebase stale base',
+    're-review': 'Request re-review',
     'resolve_merge_conflict': 'Resolve merge conflict',
+    'none': 'No merge action',
   };
   return labels[action] || _engineerHumanizeToken(action);
 }
@@ -6804,7 +7028,12 @@ function _engineerStreamActionLabel(stream) {
 function _engineerStreamLatestReviewedCommit(stream) {
   var value = '';
   if (stream) {
-    if (stream.latest_reviewed_commit_sha) value = String(stream.latest_reviewed_commit_sha);
+    var packet = _engineerStreamMergeReadinessPacket(stream);
+    var head = (packet && packet.head) || {};
+    var boundary = (packet && packet.latest_reviewed_boundary) || {};
+    if (head.reviewed_boundary_sha) value = String(head.reviewed_boundary_sha);
+    else if (boundary.reviewed_sha) value = String(boundary.reviewed_sha);
+    else if (stream.latest_reviewed_commit_sha) value = String(stream.latest_reviewed_commit_sha);
     else if (stream.latest_boundary_commit_sha) value = String(stream.latest_boundary_commit_sha);
     else if (stream.latest_reviewed_commit && stream.latest_reviewed_commit.sha) {
       value = String(stream.latest_reviewed_commit.sha);
