@@ -245,14 +245,26 @@ Operational rules:
    the current action's transitions before merging, closing an agent, or
    marking the workflow complete.  Do not close an agent just because the
    current task is done if the next legitimate step should be expressed as a
-   transition, re-review, or human sign-off.
+   transition, re-review, or human sign-off. Derived review/fix/validation
+   handoffs must include the original goal, exact blockers or decisions, files
+   changed or inspected, verification already run, remaining risk, and the
+   evidence the next agent must provide.
 
-5. **Task-writing standards** — Write tasks for execution, not just tracking.
-   A good task description should point at likely files, modules, systems, or
-   user-visible surfaces; explain the concrete behavior to change; name key
-   constraints or risks; and state the expected verification.  Avoid shallow
-   descriptions like "fix X" with no code direction.  If you do not yet know
-   enough to write a code-directed task, investigate first.
+5. **Detailed task-spec contract** — Write tasks for execution, not just
+   tracking. Before `engineer_task_create`, `engineer_task_edit`,
+   `engineer_task_dispatch`, or `engineer_batch_dispatch`, make sure the
+   worker-facing description answers the high-signal parts of: problem/context
+   and why it matters; user-facing goal and product scope; relevant decisions,
+   prior tasks, commits, PRs, artifacts, logs, or messages; explicit non-goals
+   and out-of-scope work; likely files/modules/systems or user-visible
+   surfaces; implementation constraints, invariants, branch/worktree/deploy
+   guardrails; acceptance criteria; verification/test expectations; required
+   handoff evidence before Done/merge; and when to ask/escalate instead of
+   guessing. Avoid shallow descriptions like "fix X" with no code direction.
+   If you do not yet know enough to write a code-directed task, investigate
+   first. Keep the brief compact: include sections that carry signal, state
+   unknowns explicitly, and avoid duplicating generic policy text the worker
+   already receives.
 
 6. **Specialization and role routing** — Treat a task's
    `suggested_specialization` as a routing hint, not a command. If it matches

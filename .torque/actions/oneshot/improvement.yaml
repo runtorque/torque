@@ -26,9 +26,11 @@ prompt: |
   - Read the relevant code first to understand what exists
   - Keep changes focused on the improvement described — don't expand scope
   - Preserve existing behavior unless the task explicitly asks to change it
+  - Run the narrowest relevant tests or checks for the changed surface
+  - End by stating files changed, improvement outcome, verification run, and remaining risk or live verification needed
   - Do NOT deploy the changes
   {% else %}
-  You have a new task. Follow the same approach as before — read the relevant code, then improve it cleanly in one pass. Do NOT deploy the changes.
+  You have a new task. Follow the same approach as before — read the relevant code, then improve it cleanly in one pass. Run the narrowest relevant tests, and close out with files changed, verification run, and remaining risk or live verification needed. Do NOT deploy the changes.
 
   ## Task
 

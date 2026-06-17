@@ -33,4 +33,4 @@ prompt: |
   4. **Keep the fix minimal** — no drive-by refactors or unrelated changes
   5. **Run the narrowest relevant tests or checks first** — only broaden to a larger suite if the changed surface or risk warrants it
   6. **Do a manual smoke check for user-visible changes when practical**
-  7. **Report verification explicitly** — say what you verified, what you did not verify, and when live verification could not be performed
+  7. **Report evidence explicitly** — say the root cause, files changed, acceptance criteria satisfied, what you verified, what you did not verify, and when live verification could not be performed

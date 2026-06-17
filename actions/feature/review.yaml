@@ -26,9 +26,10 @@ prompt: |
   ## Review process
 
   1. **Read the full diff** — examine every changed file, not just the ones that look interesting
-  2. **Check correctness** — does the code actually do what the task asked for? Are there edge cases that would break it?
+  2. **Check correctness** — does the code actually do what the task asked for, including acceptance criteria, non-goals, constraints, and required handoff evidence? Are there edge cases that would break it?
   3. **Check verification coverage** — run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
-  4. **Separate findings clearly**:
+  4. **Make fix handoffs self-contained** — if issues block merge, include exact blockers, expected fix scope, relevant files, tests already run, tests expected after the fix, and remaining risk
+  5. **Separate findings clearly**:
      - **Blocking issues** — problems that must be fixed before merge
      - **Follow-up suggestions** — worthwhile improvements that do not block merge
   5. **Flag each blocking issue** using this format:

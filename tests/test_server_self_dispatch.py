@@ -463,6 +463,9 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("torque_verify(state=", prompt)
         self.assertIn("blocking human decision or approval", prompt)
         self.assertIn("For status updates, non-blocking observations, or optional", prompt)
+        self.assertIn("When you derive a review, fix, validation", prompt)
+        self.assertIn("handoff self-contained", prompt)
+        self.assertIn("evidence the next agent should provide", prompt)
         self.assertIn("torque_context()", prompt)
         self.assertEqual(
             prompt.count("`torque_ask(question=\"question\", description=\"details\")`"),

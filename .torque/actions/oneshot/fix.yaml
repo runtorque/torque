@@ -28,9 +28,9 @@ prompt: |
   3. Keep the fix minimal — no drive-by refactors or unrelated changes
   4. Run the narrowest relevant tests or checks first — only broaden to a larger suite if the changed surface or risk warrants it
   5. Do a manual smoke check for user-visible changes when practical
-  6. End by stating what you verified, what you did not verify, and whether live verification could not be performed
+  6. End by stating root cause, files changed, acceptance criteria satisfied, what you verified, what you did not verify, and whether live verification could not be performed
   {% else %}
-  You have a new bug to fix. Same approach as before — understand the root cause before changing anything, keep the fix minimal, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you verified and what you did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
+  You have a new bug to fix. Same approach as before — understand the root cause before changing anything, keep the fix minimal, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say root cause, files changed, acceptance criteria satisfied, what you verified, and what you did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
 
   ## Bug report
 
