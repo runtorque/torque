@@ -2469,6 +2469,7 @@ class MatrixState:
         events: list[dict] = []
         agent_tasks: list[dict] = []
         mcp_calls: list[dict] = []
+        mcp_idempotency_storage: dict = {}
         if self.db:
             events = self.db.load_panel_events_window(
                 since,
@@ -2486,6 +2487,11 @@ class MatrixState:
                 until,
                 group=group,
             )
+            if hasattr(self.db, "mcp_idempotency_storage_stats"):
+                try:
+                    mcp_idempotency_storage = self.db.mcp_idempotency_storage_stats()
+                except Exception:
+                    mcp_idempotency_storage = {}
         elif self.panel_log:
             recent = self.panel_log.get_recent(
                 getattr(self.panel_log, "_max_size", 500)
@@ -2615,6 +2621,14 @@ class MatrixState:
                 "No MCP idempotency rows were found for dispatch shape in "
                 "this window."
             )
+        storage_warnings = list(
+            (mcp_idempotency_storage or {}).get("warnings", []) or []
+        )
+        if storage_warnings:
+            notes.append(
+                "MCP idempotency storage is above warning thresholds: "
+                + ", ".join(str(item) for item in storage_warnings)
+            )
 
         review_summary, review_distribution = self._system_health_reviews(
             tasks,
@@ -2718,6 +2732,7 @@ class MatrixState:
                         "current engineer count × configured concurrency"
                     ),
                 },
+                "mcp_idempotency_storage": mcp_idempotency_storage,
             },
             "notes": notes,
         }

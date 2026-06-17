@@ -185,6 +185,33 @@ def _ensure_ai_summary_schema(conn: sqlite3.Connection) -> None:
         "ON ai_summaries(status, updated_at DESC)"
     )
 
+MCP_IDEMPOTENCY_COLUMNS = {
+    "idempotency_key": "TEXT PRIMARY KEY",
+    "surface": "TEXT NOT NULL DEFAULT ''",
+    "tool_name": "TEXT NOT NULL DEFAULT ''",
+    "request_hash": "TEXT NOT NULL DEFAULT ''",
+    "response_json": "TEXT NOT NULL DEFAULT '{}'",
+    "response_bytes": "INTEGER NOT NULL DEFAULT 0",
+    "expires_at": "REAL NOT NULL DEFAULT 0",
+    "compacted_at": "REAL NOT NULL DEFAULT 0",
+    "created_at": "REAL NOT NULL DEFAULT 0",
+    "updated_at": "REAL NOT NULL DEFAULT 0",
+}
+
+
+def _ensure_mcp_idempotency_schema(conn: sqlite3.Connection) -> None:
+    """Keep idempotency retention metadata additive/idempotent."""
+
+    _ensure_columns(conn, "mcp_idempotency", MCP_IDEMPOTENCY_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_tool "
+        "ON mcp_idempotency(surface, tool_name, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_retention "
+        "ON mcp_idempotency(compacted_at, updated_at)"
+    )
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -1000,11 +1027,16 @@ CREATE TABLE IF NOT EXISTS mcp_idempotency (
     tool_name       TEXT NOT NULL DEFAULT '',
     request_hash    TEXT NOT NULL DEFAULT '',
     response_json   TEXT NOT NULL DEFAULT '{}',
+    response_bytes  INTEGER NOT NULL DEFAULT 0,
+    expires_at      REAL NOT NULL DEFAULT 0,
+    compacted_at    REAL NOT NULL DEFAULT 0,
     created_at      REAL NOT NULL,
     updated_at      REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_tool
     ON mcp_idempotency(surface, tool_name, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_retention
+    ON mcp_idempotency(compacted_at, updated_at);
 
 CREATE TABLE IF NOT EXISTS failed_writes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1724,6 +1756,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     conn.executescript(_SCHEMA_SQL)
     _ensure_ai_index_schema(conn)
     _ensure_ai_summary_schema(conn)
+    _ensure_mcp_idempotency_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads
