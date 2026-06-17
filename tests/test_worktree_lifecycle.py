@@ -460,7 +460,13 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stale["commits_on_base"], 1)
         self.assertEqual(stale["files_changed_on_base"], 1)
         self.assertIn("⚠ STALE BASE", stale["warning"])
+        self.assertIn("Current branch head", stale["warning"])
+        self.assertIn("Current main head", stale["warning"])
+        self.assertIn("Post-rebase evidence required", stale["warning"])
         self.assertIn("Base branch advanced", stale["base_head_subject"])
+        self.assertEqual(stale["branch_head"], checkpoint)
+        self.assertIn("remote_base_ref", stale)
+        self.assertIn("remote_base_head", stale)
 
         self.assertTrue(await self.mgr.rebase_onto_base(cell))
 

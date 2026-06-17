@@ -93,6 +93,7 @@ from .worktree import (
     WorktreeManager,
     classify_task_scope_domain,
     format_stale_base_warning,
+    stale_base_post_rebase_evidence_template,
 )
 from .worktree_boundaries import (
     advance_latest_boundary_after_mechanical_commit,
@@ -4229,6 +4230,36 @@ def _stale_base_rebase_command(aid: str) -> str:
     return f"worktree_rebase id={aid}" if aid else "worktree_rebase"
 
 
+def _stale_base_post_rebase_evidence_required(
+    stale_base: dict | None,
+    *,
+    post_rebase_head_sha: str = "",
+    base_head_sha: str = "",
+    review_boundary_updated=None,
+    review_boundary_task_id: str = "",
+) -> dict:
+    evidence = stale_base_post_rebase_evidence_template(stale_base)
+    post_head = str(post_rebase_head_sha or "").strip()
+    base_head = str(base_head_sha or "").strip()
+    if post_head:
+        evidence["post_rebase_head_sha"] = post_head
+    if base_head:
+        evidence["base_head_sha"] = base_head
+    if review_boundary_updated is not None:
+        evidence["review_boundary_updated"] = bool(review_boundary_updated)
+    task_id = str(review_boundary_task_id or "").strip()
+    if task_id:
+        evidence["review_boundary_task_id"] = task_id
+    evidence["rerun_tests"] = [
+        "<exact command(s) rerun after rebase; do not write 'tests passed' without commands>"
+    ]
+    evidence["note"] = (
+        "Include this shape in the next feature/review derive context or "
+        "merge handoff after rerunning the relevant tests."
+    )
+    return evidence
+
+
 def _stale_base_suggestion(aid: str, *, retry_action: str) -> str:
     command = _stale_base_rebase_command(aid)
     retry_action = str(retry_action or "retry").strip() or "retry"
@@ -4243,6 +4274,11 @@ def _attach_stale_base_guidance(result: dict, aid: str, *,
         aid,
         retry_action=retry_action,
     )
+    stale_base = result.get("stale_base")
+    if isinstance(stale_base, dict):
+        result["post_rebase_evidence_required"] = (
+            _stale_base_post_rebase_evidence_required(stale_base)
+        )
     return result
 
 
@@ -17433,8 +17469,63 @@ async def main(connection=None):
                             cell.worktree_diff = {}
                             cell.worktree_changed_files = []
                             state._emit_agent(cell)
-                            result = {"type": "worktree_rebase",
-                                      "id": aid, "ok": True}
+                            base_head_sha = str(
+                                (stale_base_before_rebase or {}).get(
+                                    "base_head", ""
+                                ) or ""
+                            ).strip()
+                            repo_root_for_evidence = (
+                                cell.worktree_repo_root
+                                or cell.git_root
+                                or ""
+                            )
+                            rev_parse = getattr(worktree_mgr, "rev_parse", None)
+                            if callable(rev_parse) and repo_root_for_evidence:
+                                try:
+                                    base_head_sha = (
+                                        await rev_parse(
+                                            repo_root_for_evidence,
+                                            cell.worktree_base_branch or "",
+                                        )
+                                        or base_head_sha
+                                    )
+                                except Exception:
+                                    log.debug(
+                                        "post-rebase base head evidence failed "
+                                        "for '%s'",
+                                        cell.name,
+                                        exc_info=True,
+                                    )
+                            post_rebase_evidence = (
+                                _stale_base_post_rebase_evidence_required(
+                                    stale_base_before_rebase,
+                                    post_rebase_head_sha=rebased_head_sha,
+                                    base_head_sha=base_head_sha,
+                                    review_boundary_updated=bool(
+                                        refreshed_boundary
+                                    ),
+                                    review_boundary_task_id=(
+                                        getattr(refreshed_boundary, "id", "")
+                                        if refreshed_boundary else ""
+                                    ),
+                                )
+                            )
+                            result = {
+                                "type": "worktree_rebase",
+                                "id": aid,
+                                "ok": True,
+                                "post_rebase_head_sha": rebased_head_sha,
+                                "base_head_sha": base_head_sha,
+                                "review_boundary_updated": bool(
+                                    refreshed_boundary
+                                ),
+                                "post_rebase_evidence": post_rebase_evidence,
+                            }
+                            if refreshed_boundary:
+                                result["review_boundary_task_id"] = (
+                                    getattr(refreshed_boundary, "id", "")
+                                    or ""
+                                )
                             breach_event = (
                                 _emit_stale_base_catch_workflow_breach(
                                     state,

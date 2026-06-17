@@ -816,6 +816,17 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["suggested_command"],
                          f"worktree_rebase id={implementer.id}")
         self.assertTrue(result["stale_base"]["stale"])
+        self.assertEqual(
+            result["stale_base"]["branch_head"],
+            "3333333333333333333333333333333333333333",
+        )
+        evidence = result["post_rebase_evidence_required"]
+        self.assertEqual(
+            evidence["base_head_sha"],
+            "2222222222222222222222222222222222222222",
+        )
+        self.assertEqual(evidence["base_branch"], "main")
+        self.assertIn("rerun_tests", evidence)
         self.assertEqual(calls, [])
         self.assertEqual(fix.status, "")
 

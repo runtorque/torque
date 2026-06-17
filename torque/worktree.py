@@ -523,6 +523,19 @@ def _select_github_remote_from_remote_v(stdout: str) -> tuple[str, str]:
     return remote, first_urls.get(remote, "")
 
 
+def stale_base_post_rebase_evidence_template(info: dict | None) -> dict:
+    """Return the standard evidence shape required after stale-base rebase."""
+    info = info or {}
+    base_branch = str(info.get("base_branch", "") or "").strip()
+    return {
+        "post_rebase_head_sha": "<HEAD after rebase>",
+        "base_branch": base_branch,
+        "base_head_sha": str(info.get("base_head", "") or "").strip(),
+        "rerun_tests": ["<exact command(s) rerun after rebase>"],
+        "review_boundary_updated": "<true|false>",
+    }
+
+
 def format_stale_base_warning(info: dict | None, *,
                               rebase_command: str = "") -> str:
     """Return the loud operator warning for a branch forked behind base."""
@@ -531,6 +544,9 @@ def format_stale_base_warning(info: dict | None, *,
     base = str(info.get("base_branch", "") or "base").strip()
     fork = _short_sha(info.get("fork_point", ""))
     base_head = _short_sha(info.get("base_head", ""))
+    branch_head = _short_sha(info.get("branch_head", ""))
+    remote_ref = str(info.get("remote_base_ref", "") or "").strip()
+    remote_head = _short_sha(info.get("remote_base_head", ""))
     fork_subject = str(
         info.get("fork_point_subject", "") or "unknown subject"
     ).strip()
@@ -546,13 +562,26 @@ def format_stale_base_warning(info: dict | None, *,
             f"engineer_rebase {agent_hint}".strip()
             if agent_hint else "engineer_rebase <worker>"
         )
+    remote_line = (
+        f"  Current {remote_ref} head: {remote_head}.\n"
+        if remote_ref and remote_head else ""
+    )
+    evidence = stale_base_post_rebase_evidence_template(info)
+    evidence_line = (
+        "  Post-rebase evidence required: "
+        "post_rebase_head_sha, base_head_sha, exact rerun_tests, "
+        "review_boundary_updated."
+    )
     return (
         f"⚠ STALE BASE: {branch} forks from {fork} ({fork_subject}).\n"
-        f"  {base} has advanced to {base_head} ({base_subject}).\n"
+        f"  Current branch head: {branch_head}.\n"
+        f"  Current {base} head: {base_head} ({base_subject}).\n"
+        f"{remote_line}"
         f"  {commits} commits + {files} files changed on {base} since fork.\n"
         "  `engineer_diff summary` against this base WILL mis-classify\n"
         "  other-branch changes as deletions.\n"
-        f"  Recommended: `{rebase_command}` then re-run diff before merge."
+        f"  Recommended: `{rebase_command}` then re-run diff before merge.\n"
+        f"{evidence_line} Template: {evidence}"
     )
 
 
@@ -4465,6 +4494,11 @@ class WorktreeManager:
 
         base_head = await self.rev_parse(repo_root, base) or ""
         branch_head = await self.rev_parse(repo_root, branch) or ""
+        remote_base_ref = f"origin/{base}" if base else ""
+        remote_base_head = (
+            await self.rev_parse(repo_root, f"refs/remotes/{remote_base_ref}")
+            if remote_base_ref else ""
+        ) or ""
         if not base_head or not branch_head:
             return {
                 "stale": False,
@@ -4509,6 +4543,8 @@ class WorktreeManager:
             "fork_point": fork_point,
             "base_head": base_head,
             "branch_head": branch_head,
+            "remote_base_ref": remote_base_ref,
+            "remote_base_head": remote_base_head,
             "fork_point_subject": await self._commit_subject(
                 repo_root, fork_point
             ),
