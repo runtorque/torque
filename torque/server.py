@@ -18410,6 +18410,12 @@ async def main(connection=None):
                         "deploy_needed",
                         "deploy_attempted",
                         "human_validation_pending",
+                        "test_outcome",
+                        "full_suite_attempted",
+                        "unrelated_flake_accepted",
+                        "isolated_rerun_evidence",
+                        "reviewer_acceptance",
+                        "live_smoke_pending",
                         "smoke_status",
                     ):
                         if key in data:
@@ -20927,6 +20933,12 @@ async def main(connection=None):
                                 "deploy_needed",
                                 "deploy_attempted",
                                 "human_validation_pending",
+                                "test_outcome",
+                                "full_suite_attempted",
+                                "unrelated_flake_accepted",
+                                "isolated_rerun_evidence",
+                                "reviewer_acceptance",
+                                "live_smoke_pending",
                             ):
                                 if key in data:
                                     payload[key] = data[key]
