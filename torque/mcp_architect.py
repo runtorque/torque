@@ -74,6 +74,43 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_wave_summary",
+        "description": (
+            "Generate a compact bounded wave-summary drafting aid from either "
+            "one caller-owned decision id or an explicit task-id list. The "
+            "summary expands visible linked task chains, groups completed work "
+            "by category/labels, reports recorded PR/squash/review/origin/test "
+            "evidence with unknown markers for missing data, separates active "
+            "gates from parked/deferred exclusions, and includes deploy/live "
+            "smoke caveats."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "decision_id": {
+                    "type": "string",
+                    "description": (
+                        "Caller-owned decision id whose linked tasks define "
+                        "the wave. Provide exactly one of decision_id or "
+                        "task_ids."
+                    ),
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Explicit task ids/slugs defining the wave. Provide "
+                        "exactly one of decision_id or task_ids."
+                    ),
+                },
+                "limit_per_section": {
+                    "type": "integer",
+                    "description": "Maximum items per bounded section (default 8, max 20).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_boot_summary",
         "description": (
             "Return this Architect's cached AI boot-recovery summary. "
