@@ -91,7 +91,7 @@ from .notifications import NotificationManager
 from .worktree import (
     ExistingWorktreeTarget,
     WorktreeManager,
-    classify_task_scope_domain,
+    build_diff_scope_context,
     format_stale_base_warning,
     stale_base_post_rebase_evidence_template,
 )
@@ -4946,8 +4946,8 @@ def _format_workflow_breach_message(*, subkind: str, source: str,
     return f"{subkind}: {text}"
 
 
-def _scope_domain_for_cell(state: MatrixState, cell) -> str | None:
-    """Resolve a cell's declared scope domain for the out-of-scope diff flag.
+def _scope_domain_for_cell(state: MatrixState, cell) -> dict | None:
+    """Resolve a cell's declared diff scope for the out-of-scope diff flag.
 
     Observability only (TORQUE:604 A2): used to annotate the diff summary, not
     to gate anything. Returns ``None`` when the task or its domain is ambiguous.
@@ -4965,11 +4965,17 @@ def _scope_domain_for_cell(state: MatrixState, cell) -> str | None:
             task = None
     if task is None:
         return None
-    return classify_task_scope_domain(
+    scope = build_diff_scope_context(
         specialization=getattr(task, "suggested_specialization", "") or "",
         labels=getattr(task, "labels", None),
+        task=getattr(task, "task", "") or "",
         description=getattr(task, "description", "") or "",
+        context=getattr(task, "context", "") or "",
+        criteria=getattr(task, "criteria", "") or "",
     )
+    if not scope.get("domain") and not scope.get("allowed_foreign_domains"):
+        return None
+    return scope
 
 
 def _emit_workflow_breach_event(state: MatrixState, panel_event, *,

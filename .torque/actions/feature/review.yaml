@@ -37,6 +37,7 @@ prompt: |
   ## Review process
 
   - Read the full diff and verify that the code does what the task asked for, including stated acceptance criteria, non-goals, constraints, and handoff evidence
+  - Treat diff scope warnings as explainable signals: compare any `out_of_scope` paths and rationale against the task labels/description/expected code areas before deciding whether they are real scope drift
   - Run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
   - If you accept a narrower suite or unrelated flaky full-suite failure, state the focused/isolated rerun evidence and explicitly say you accepted the narrower suite or flake evidence
   - Distinguish deploy not attempted from deploy failed, and live smoke pending from completed smoke

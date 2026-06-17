@@ -1031,6 +1031,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_diff_summary_flags_backend_task_touching_frontend(self):
         # A2: a backend-scoped task whose diff reaches into frontend-only
         # paths (ee/frontend, static/js) raises the out_of_scope flag.
+        from torque.worktree import build_diff_scope_context
         cell = self._make_cell()
         wt_path = await self.mgr.create(
             cell, str(self.repo_root), base_branch="main")
@@ -1051,17 +1052,25 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         cwd=wt_path)
 
         summary = await self.mgr.diff_files_summary(
-            cell, scope_domain="backend")
+            cell,
+            scope_domain=build_diff_scope_context(
+                specialization="quality-observability",
+                description="Backend-only daemon change in torque/server.py.",
+            ),
+        )
 
         oos = summary.get("out_of_scope")
         self.assertIsNotNone(oos)
         self.assertEqual(oos["domain"], "backend")
+        self.assertIn("quality-observability", oos["domain_reason"])
         self.assertEqual(oos["count"], 2)
         self.assertEqual(
             oos["paths"],
             ["ee/frontend/widget.tsx", "static/js/store.js"],
         )
         self.assertIn("outside declared backend scope", oos["digest_line"])
+        self.assertIn("rationale", oos)
+        self.assertIn("static/js/store.js", oos["path_reasons"])
         self.assertEqual(summary["signal_counts"].get("out_of_scope"), 2)
         files = {item["path"]: item for item in summary["files"]}
         self.assertIn("out_of_scope", files["static/js/store.js"]["signals"])
@@ -1093,6 +1102,52 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("out_of_scope", summary["signal_counts"])
         for item in summary["files"]:
             self.assertNotIn("out_of_scope", item["signals"])
+
+    async def test_diff_summary_allows_explicit_state_shape_frontend_scope(self):
+        # TORQUE:857: backend-routed state-shape / compact-snapshot tasks often
+        # must update frontend consumers. Explicit task scope should suppress
+        # the misleading backend->frontend out_of_scope warning while retaining
+        # explainable scope metadata.
+        from torque.worktree import build_diff_scope_context
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+
+        backend_file = Path(wt_path) / "torque" / "state.py"
+        backend_file.parent.mkdir(parents=True)
+        backend_file.write_text("x = 1\n")
+        consumer_js = Path(wt_path) / "static" / "js" / "store.js"
+        consumer_js.parent.mkdir(parents=True)
+        consumer_js.write_text("export const x = 1;\n")
+
+        await self._git("add", "-A", cwd=wt_path)
+        await self._git("commit", "-m", "State shape and consumer update",
+                        cwd=wt_path)
+
+        summary = await self.mgr.diff_files_summary(
+            cell,
+            scope_domain=build_diff_scope_context(
+                specialization="quality-observability",
+                labels=["state-shape"],
+                description=(
+                    "Compact snapshot/state-shape task: update torque/state.py "
+                    "and static/js frontend consumers."
+                ),
+            ),
+        )
+
+        self.assertNotIn("out_of_scope", summary)
+        self.assertNotIn("out_of_scope", summary["signal_counts"])
+        scope = summary["scope_classification"]
+        self.assertEqual(scope["domain"], "backend")
+        self.assertIn("frontend", scope["allowed_foreign_domains"])
+        self.assertIn(
+            "state-shape",
+            scope["allowed_foreign_reasons"]["frontend"],
+        )
+        files = {item["path"]: item for item in summary["files"]}
+        self.assertNotIn("out_of_scope", files["static/js/store.js"]["signals"])
 
     async def test_diff_summary_no_scope_domain_never_flags(self):
         # A2 bounding: without a resolved scope domain, nothing is flagged
@@ -1473,7 +1528,10 @@ class ScopeDomainClassifierTests(unittest.TestCase):
     """Unit coverage for the out-of-scope diff classifier (TORQUE:604 A2)."""
 
     def test_specialization_slug_wins(self):
-        from torque.worktree import classify_task_scope_domain
+        from torque.worktree import (
+            build_diff_scope_context,
+            classify_task_scope_domain,
+        )
         self.assertEqual(
             classify_task_scope_domain(specialization="orchestration-core"),
             "backend",
@@ -1490,6 +1548,43 @@ class ScopeDomainClassifierTests(unittest.TestCase):
                 description="Backend only — NO ee/frontend / static/js.",
             ),
             "backend",
+        )
+        excluded_scope = build_diff_scope_context(
+            specialization="orchestration-core",
+            description="Backend only — NO ee/frontend / static/js.",
+        )
+        self.assertEqual(excluded_scope["domain"], "backend")
+        self.assertEqual(excluded_scope["allowed_foreign_domains"], [])
+
+    def test_cross_surface_scope_can_override_backend_specialization_warning(self):
+        from torque.worktree import (
+            build_diff_scope_context,
+            classify_task_scope_domain,
+        )
+        self.assertIsNone(
+            classify_task_scope_domain(
+                specialization="quality-observability",
+                labels=["state-shape"],
+                description=(
+                    "Compact snapshot/state-shape task: update backend "
+                    "state and static/js frontend consumers."
+                ),
+            )
+        )
+        scope = build_diff_scope_context(
+            specialization="quality-observability",
+            labels=["state-shape"],
+            description=(
+                "Compact snapshot/state-shape task: update backend state "
+                "and frontend consumers."
+            ),
+        )
+        self.assertEqual(scope["domain"], "backend")
+        self.assertIn("quality-observability", scope["domain_reason"])
+        self.assertIn("frontend", scope["allowed_foreign_domains"])
+        self.assertIn(
+            "state-shape",
+            scope["allowed_foreign_reasons"]["frontend"],
         )
 
     def test_text_heuristic_is_low_false_positive(self):
@@ -1512,7 +1607,10 @@ class ScopeDomainClassifierTests(unittest.TestCase):
         self.assertIsNone(classify_task_scope_domain())
 
     def test_out_of_scope_diff_paths(self):
-        from torque.worktree import out_of_scope_diff_paths
+        from torque.worktree import (
+            build_diff_scope_context,
+            out_of_scope_diff_paths,
+        )
         paths = [
             "torque/server.py",
             "static/js/store.js",
@@ -1523,6 +1621,12 @@ class ScopeDomainClassifierTests(unittest.TestCase):
             out_of_scope_diff_paths("backend", paths),
             ["ee/frontend/app.tsx", "static/js/store.js"],
         )
+        allowed_scope = build_diff_scope_context(
+            specialization="quality-observability",
+            labels=["state-shape"],
+            description="State-shape change includes frontend consumers.",
+        )
+        self.assertEqual(out_of_scope_diff_paths(allowed_scope, paths), [])
         # Non-backend / unknown domains never flag.
         self.assertEqual(out_of_scope_diff_paths("frontend", paths), [])
         self.assertEqual(out_of_scope_diff_paths(None, paths), [])
