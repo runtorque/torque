@@ -3544,6 +3544,20 @@ def _initiative_visible_task_ids_for_caller(state, caller_kind: str,
     return set(_filter_tasks_for_caller(state, caller_kind, caller_id))
 
 
+def _initiative_visible_decision_ids_for_caller(state, caller_kind: str,
+                                                caller_id: str) -> set[str]:
+    if caller_kind != "architect":
+        return set()
+    return {
+        str(decision.get("id", "") or "")
+        for decision in state.load_decisions_for_architect(
+            caller_id,
+            include_archived=False,
+        )
+        if str(decision.get("id", "") or "")
+    }
+
+
 def _initiative_scope_group(state, caller_id: str) -> str:
     return _caller_group(state, caller_id)
 
@@ -3581,6 +3595,9 @@ def _initiative_read_json(state, caller_kind: str, caller_id: str,
     visible_task_ids = _initiative_visible_task_ids_for_caller(
         state, caller_kind, caller_id,
     )
+    visible_decision_ids = _initiative_visible_decision_ids_for_caller(
+        state, caller_kind, caller_id,
+    )
     if show:
         initiative, error = _initiative_from_args(state, caller_id, args)
         if not initiative:
@@ -3588,6 +3605,7 @@ def _initiative_read_json(state, caller_kind: str, caller_id: str,
         payload = state.initiative_payload(
             initiative["id"],
             visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
         )
         if not payload:
             return "Initiative not found", True
@@ -3599,6 +3617,7 @@ def _initiative_read_json(state, caller_kind: str, caller_id: str,
         payload = state.initiative_payload(
             item["id"],
             visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
             include_links=bool(args.get("include_links", False)),
         ) or item
         initiatives.append(payload)

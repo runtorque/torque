@@ -207,21 +207,45 @@ class InitiativeStateAndMCPTests(unittest.IsolatedAsyncioTestCase):
         })
         self.db.save_initiative_link(initiative["id"], "task", task.id)
         self.db.save_initiative_link(initiative["id"], "task", hidden.id)
+        self.state.save_decision({
+            "id": "decision-hidden",
+            "architect_id": "arch-1",
+            "title": "Hidden decision",
+            "rationale": "Engineers have no decision list surface",
+        })
+        self.db.save_initiative_link(
+            initiative["id"], "decision", "decision-hidden"
+        )
 
         text, is_error = await self._engineer_tool(
             "engineer_initiative_show", {"initiative": initiative["id"]}
         )
         self.assertFalse(is_error, text)
+        self.assertNotIn(hidden.id, text)
+        self.assertNotIn("decision-hidden", text)
         payload = json.loads(text)
+        self.assertEqual(payload["links"]["tasks"], [task.id])
+        self.assertEqual(payload["links"]["decisions"], [])
         self.assertEqual(payload["linked_tasks"]["count"], 1)
         self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(payload["linked_decisions"]["count"], 0)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
         self.assertEqual(payload["linked_tasks"]["items"][0]["lane"], "Backlog")
+
+        text, is_error = await self._engineer_tool(
+            "engineer_initiative_list", {"include_links": True}
+        )
+        self.assertFalse(is_error, text)
+        self.assertNotIn(hidden.id, text)
+        self.assertNotIn("decision-hidden", text)
 
         self.state.board_update_task(task.id, lane="Done")
         text, is_error = await self._engineer_tool(
             "engineer_initiative_show", {"initiative": initiative["id"]}
         )
         self.assertFalse(is_error, text)
+        self.assertNotIn(hidden.id, text)
+        self.assertNotIn("decision-hidden", text)
         self.assertEqual(json.loads(text)["linked_tasks"]["items"][0]["lane"], "Done")
         self.assertEqual(self.db.load_initiative(initiative["id"])["planning_status"], "triage")
 

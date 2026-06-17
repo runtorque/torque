@@ -8027,6 +8027,7 @@ class MatrixState:
 
     def initiative_payload(self, initiative_id: str, *,
                            visible_task_ids: set[str] | None = None,
+                           visible_decision_ids: set[str] | None = None,
                            include_links: bool = True) -> dict | None:
         initiative = self.load_initiative(initiative_id)
         if not initiative:
@@ -8044,17 +8045,35 @@ class MatrixState:
                 for link in links
                 if str(link.get("link_type", "") or "") == "decision"
             ]
+            visible_link_task_ids = (
+                [
+                    task_id for task_id in task_ids
+                    if task_id in visible_task_ids
+                ]
+                if visible_task_ids is not None else task_ids
+            )
+            visible_link_decision_ids = (
+                [
+                    decision_id for decision_id in decision_ids
+                    if decision_id in visible_decision_ids
+                ]
+                if visible_decision_ids is not None else decision_ids
+            )
             payload["links"] = {
-                "tasks": task_ids,
-                "decisions": decision_ids,
+                "tasks": visible_link_task_ids,
+                "decisions": visible_link_decision_ids,
             }
             payload["linked_tasks"] = self._initiative_linked_task_payload(
                 task_ids,
                 visible_task_ids=visible_task_ids,
             )
             payload["linked_decisions"] = {
-                "count": len(decision_ids),
-                "items": decision_ids,
+                "count": len(visible_link_decision_ids),
+                "hidden_count": (
+                    len(decision_ids) - len(visible_link_decision_ids)
+                    if visible_decision_ids is not None else 0
+                ),
+                "items": visible_link_decision_ids,
             }
         return payload
 
