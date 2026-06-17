@@ -19710,6 +19710,147 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
   assert.match(panel.innerHTML, /Queued next: Queue release notes/);
 });
 
+test('renderAgentPanel surfaces merge-readiness packets on Session Map stream cards', () => {
+  const { context, document } = createEngineerHarness();
+  const panel = document.register('panel-agent');
+
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Builder',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+      status: 'running',
+    },
+  };
+  context.state.board_tasks = {
+    'TORQUE:1': {
+      id: 'TORQUE:1',
+      task: 'Ship merge-readiness UI',
+      lane: 'Review',
+    },
+  };
+  context.state.engineer_session_maps = {
+    'alpha::eng-1': {
+      streams: {
+        items: [
+          {
+            stream_id: 'stream:/repo::torque/readiness-ui',
+            branch: 'torque/readiness-ui',
+            state: 'ready_to_merge',
+            merge_state: 'ready',
+            product_task_ids: ['TORQUE:1'],
+            merge_readiness: {
+              version: 1,
+              branch: 'torque/readiness-ui',
+              state: 'ready_to_merge',
+              merge_state: 'ready',
+              product_task_ids: ['TORQUE:1'],
+              latest_reviewed_boundary: {
+                task_id: 'TORQUE:2',
+                task_title: 'Review merge-readiness UI',
+                reviewed_sha: 'abcdef1234567890',
+              },
+              head: {
+                reviewed_boundary_sha: 'abcdef1234567890',
+                current_branch_head_sha: 'def5678123456789',
+                current_branch_head_sha_source: 'pull_request',
+                branch_advanced: false,
+              },
+              stale_base: { state: 'fresh', stale: false, source: 'boundary' },
+              review_final: { verdict: 'ship', task_id: 'TORQUE:2' },
+              verification: {
+                state: 'passed',
+                summary: { tests_run: 'node --test tests/frontend_state_regression.test.js' },
+              },
+              followups: {
+                queued_count: 1,
+                started_count: 0,
+                active_blocker_fix_task: {},
+                notes: { blocking: ['confirm release note wording'] },
+              },
+              recommended_next_action: 'merge_after_validation',
+              merge_report_snippet: 'Merge report:\\n- Stream: torque/readiness-ui\\n- Reviewed SHA: abcdef1234567890',
+            },
+          },
+        ],
+      },
+    },
+  };
+  context._engineerJournalSubviewByGroup.alpha = 'session_map';
+  context.focusedItemId = 'eng-1';
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Active streams/);
+  assert.match(panel.innerHTML, /Merge readiness/);
+  assert.match(panel.innerHTML, /Ready to merge/);
+  assert.match(panel.innerHTML, /Merge after validation/);
+  assert.match(panel.innerHTML, /abcdef1/);
+  assert.match(panel.innerHTML, /def5678 · Pull Request/);
+  assert.match(panel.innerHTML, /Fresh/);
+  assert.match(panel.innerHTML, /Ship · TORQUE:2/);
+  assert.match(panel.innerHTML, /Passed · node --test tests\/frontend_state_regression\.test\.js/);
+  assert.match(panel.innerHTML, /1 queued follow-up/);
+  assert.match(panel.innerHTML, /Blocking: confirm release note wording/);
+  assert.match(panel.innerHTML, /Merge report:/);
+});
+
+test('merge-readiness cards expose distinct visual classes for merge states', () => {
+  const { context } = createEngineerHarness();
+  const html = context._agentPanelLegacyRenderOpenStreamCard({
+    branch: 'torque/stale',
+    state: 'reviewing',
+    merge_readiness: {
+      state: 'reviewing',
+      stale_base: { state: 'stale', stale: true, warning: 'behind main' },
+      head: { reviewed_boundary_sha: '111111111111' },
+      recommended_next_action: 'rebase',
+    },
+  }, 0) + context._agentPanelLegacyRenderOpenStreamCard({
+    branch: 'torque/blocker',
+    state: 'fixing_blockers',
+    merge_readiness: {
+      state: 'fixing_blockers',
+      stale_base: { state: 'fresh', stale: false },
+      followups: {
+        active_blocker_fix_task: { task_id: 'TORQUE:3', task_title: 'Fix blocker' },
+      },
+      recommended_next_action: 'address_review_blockers',
+    },
+  }, 1) + context._agentPanelLegacyRenderOpenStreamCard({
+    branch: 'torque/ready',
+    state: 'ready_to_merge',
+    merge_state: 'ready',
+    merge_readiness: {
+      state: 'ready_to_merge',
+      merge_state: 'ready',
+      stale_base: { state: 'fresh', stale: false },
+      recommended_next_action: 'merge_after_validation',
+    },
+  }, 2) + context._agentPanelLegacyRenderOpenStreamCard({
+    branch: 'torque/merged',
+    state: 'merged',
+    merge_state: 'merged',
+    merge_readiness: {
+      state: 'merged',
+      merge_state: 'merged',
+      latest_merged_commit_sha: '999999999999',
+      recommended_next_action: 'none',
+    },
+  }, 3);
+
+  assert.match(html, /agent-panel-merge-readiness-stale_base/);
+  assert.match(html, /agent-panel-merge-readiness-blocker_fix/);
+  assert.match(html, /agent-panel-merge-readiness-ready_to_merge/);
+  assert.match(html, /agent-panel-merge-readiness-merged/);
+  assert.match(html, /Stale base/);
+  assert.match(html, /Blocker fix/);
+  assert.match(html, /Ready to merge/);
+  assert.match(html, /Merged/);
+});
+
 test('task deltas do not rerender the templates panel when it is active', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'templates';
