@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,15 @@ except ModuleNotFoundError:
 install_aiohttp_stub(include_json_helpers=True)
 
 from torque.db import TorqueDB
-from torque.doctor import build_doctor_report, format_mcp_health_report
+from torque.doctor import (
+    build_doctor_report,
+    format_doctor_report,
+    format_mcp_health_report,
+)
+from torque.mcp_idempotency import (
+    MCP_IDEMPOTENCY_FULL_TTL_SECONDS,
+    MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES,
+)
 from torque.mcp_retry import (
     IDEMPOTENCY_ARG,
     api_request_hash,
@@ -553,6 +562,193 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", response)
         self.assertIn("Idempotency key", response["error"]["message"])
 
+    async def test_oversize_idempotency_receipt_replays_safe_compacted_error(self):
+        calls = []
+
+        async def handle_command(_payload):
+            calls.append(1)
+            return {"type": "ok", "blob": "x" * (MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES + 1024)}
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "torque_progress",
+                "arguments": {
+                    "message": "large",
+                    IDEMPOTENCY_ARG: "idem-large",
+                },
+            },
+        }
+        first, status = await self.mcp.dispatch_mcp_rpc_body(
+            body,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(first["result"]["isError"])
+
+        stored = self.db.load_mcp_idempotency("idem-large")
+        self.assertIsNotNone(stored)
+        self.assertGreater(float(stored.get("compacted_at", 0) or 0), 0)
+        self.assertLess(
+            len((stored.get("response_json") or "").encode("utf-8")),
+            MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES,
+        )
+
+        retry = json.loads(json.dumps(body))
+        retry["id"] = 2
+        second, status = await self.mcp.dispatch_mcp_rpc_body(
+            retry,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(second["result"]["isError"])
+        self.assertIn("Exact replay is unavailable", second["result"]["content"][0]["text"])
+        self.assertEqual(len(calls), 1)
+
+    async def test_compacted_idempotency_receipt_still_rejects_conflicting_hash(self):
+        async def handle_command(_payload):
+            return {"type": "ok", "blob": "x" * (MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES + 1024)}
+
+        base = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "torque_progress",
+                "arguments": {
+                    "message": "first",
+                    IDEMPOTENCY_ARG: "idem-large-conflict",
+                },
+            },
+        }
+        await self.mcp.dispatch_mcp_rpc_body(
+            base,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertGreater(
+            float(self.db.load_mcp_idempotency("idem-large-conflict").get("compacted_at", 0) or 0),
+            0,
+        )
+        changed = json.loads(json.dumps(base))
+        changed["id"] = 2
+        changed["params"]["arguments"]["message"] = "different"
+        response, _status = await self.mcp.dispatch_mcp_rpc_body(
+            changed,
+            cell_id="agent-1",
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertIn("error", response)
+        self.assertIn("Idempotency key", response["error"]["message"])
+
+    def test_expired_idempotency_receipts_compact_in_bounded_batches(self):
+        for idx in range(3):
+            self.db.save_mcp_idempotency(
+                idempotency_key=f"idem-old-{idx}",
+                surface="torque",
+                tool_name="torque_progress",
+                request_hash=f"hash-{idx}",
+                response={"content": [{"type": "text", "text": str(idx)}], "isError": False},
+            )
+        old_updated = 1000.0
+        self.db._conn.execute(
+            "UPDATE mcp_idempotency SET updated_at=?, expires_at=?",
+            (old_updated, old_updated + MCP_IDEMPOTENCY_FULL_TTL_SECONDS),
+        )
+        self.db._conn.commit()
+
+        summary = self.db.maintain_mcp_idempotency(
+            now=old_updated + MCP_IDEMPOTENCY_FULL_TTL_SECONDS + 10,
+            batch_size=2,
+        )
+        self.assertEqual(summary["compacted"], 2)
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT COUNT(*) FROM mcp_idempotency WHERE compacted_at > 0"
+            ).fetchone()[0],
+            2,
+        )
+        kept = self.db.load_mcp_idempotency("idem-old-0")
+        self.assertEqual(kept["request_hash"], "hash-0")
+        cached = json.loads(kept["response_json"])
+        self.assertTrue(cached["isError"])
+        self.assertIn("idempotency_receipt", cached)
+
+    def test_mcp_idempotency_schema_defaults_and_storage_stats(self):
+        columns = {
+            row[1]: row for row in self.db._conn.execute("PRAGMA table_info(mcp_idempotency)")
+        }
+        for column in ("response_bytes", "expires_at", "compacted_at"):
+            self.assertIn(column, columns)
+
+        self.db.save_mcp_idempotency(
+            idempotency_key="idem-schema",
+            surface="torque",
+            tool_name="torque_progress",
+            request_hash="hash",
+            response={"content": [{"type": "text", "text": "ok"}], "isError": False},
+        )
+        stored = self.db.load_mcp_idempotency("idem-schema")
+        self.assertGreater(int(stored["response_bytes"]), 0)
+        self.assertGreater(float(stored["expires_at"]), float(stored["updated_at"]))
+        self.assertEqual(float(stored["compacted_at"]), 0.0)
+        stats = self.db.mcp_idempotency_storage_stats()
+        self.assertEqual(stats["row_count"], 1)
+        self.assertGreater(stats["response_bytes"], 0)
+
+    def test_legacy_mcp_idempotency_schema_migrates_before_retention_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "legacy.db"
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE mcp_idempotency (
+                        idempotency_key TEXT PRIMARY KEY,
+                        surface         TEXT NOT NULL DEFAULT '',
+                        tool_name       TEXT NOT NULL DEFAULT '',
+                        request_hash    TEXT NOT NULL DEFAULT '',
+                        response_json   TEXT NOT NULL DEFAULT '{}',
+                        created_at      REAL NOT NULL,
+                        updated_at      REAL NOT NULL
+                    );
+                    CREATE INDEX idx_mcp_idempotency_tool
+                        ON mcp_idempotency(surface, tool_name, updated_at DESC);
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            migrated = TorqueDB(db_path)
+            try:
+                migrated.init()
+                columns = {
+                    row[1]
+                    for row in migrated._conn.execute(
+                        "PRAGMA table_info(mcp_idempotency)"
+                    )
+                }
+                for column in ("response_bytes", "expires_at", "compacted_at"):
+                    self.assertIn(column, columns)
+                indexes = {
+                    row[1]
+                    for row in migrated._conn.execute(
+                        "PRAGMA index_list(mcp_idempotency)"
+                    )
+                }
+                self.assertIn("idx_mcp_idempotency_retention", indexes)
+            finally:
+                migrated.close()
+
     async def test_architect_journal_retry_after_outer_receipt_loss_reuses_internal_record(self):
         architect = AgentCell(
             id="arch-1",
@@ -932,6 +1128,40 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("retries=1", rendered)
         self.assertIn("drops=1", rendered)
         self.assertIn("architect_journal", rendered)
+
+    def test_doctor_warns_on_mcp_idempotency_storage_bloat_without_dbstat(self):
+        self.db.save_mcp_idempotency(
+            idempotency_key="idem-doctor-large",
+            surface="torque",
+            tool_name="torque_progress",
+            request_hash="hash",
+            response={"content": [{"type": "text", "text": "x" * (2 * 1024 * 1024)}], "isError": False},
+        )
+        # Simulate an old/large DB row that predates write-time compaction so
+        # doctor can exercise max-receipt warning paths.
+        self.db._conn.execute(
+            "UPDATE mcp_idempotency SET response_json=?, response_bytes=? WHERE idempotency_key=?",
+            ("x" * (2 * 1024 * 1024), 2 * 1024 * 1024, "idem-doctor-large"),
+        )
+        self.db._conn.commit()
+
+        class NoDbstatProxy:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, params=()):
+                if "dbstat" in str(sql).lower():
+                    raise __import__("sqlite3").OperationalError("no such table: dbstat")
+                return self._conn.execute(sql, params)
+
+        report = build_doctor_report(NoDbstatProxy(self.db._conn), self.db.db_path)
+        storage = report["mcp_idempotency_storage"]
+        rendered = format_doctor_report(report)
+
+        self.assertFalse(storage["dbstat_available"])
+        self.assertIn("max_response_bytes", storage["warnings"])
+        self.assertIn("mcp_idempotency_storage_bloat", [w["name"] for w in report["warnings"]])
+        self.assertIn("dbstat unavailable", rendered)
 
 
 class CriticalWriteCaptureIsolationTests(unittest.IsolatedAsyncioTestCase):

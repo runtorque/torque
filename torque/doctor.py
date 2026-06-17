@@ -14,6 +14,7 @@ import yaml
 
 from . import ai_deps
 from . import install_locations
+from .mcp_idempotency import collect_mcp_idempotency_storage_stats
 
 DOCTOR_SCHEMA_VERSION = 3
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
@@ -778,6 +779,10 @@ def _collect_task_aliases_section(conn: sqlite3.Connection) -> dict:
     section["literal_collision_count"] = len(section["literal_collisions"])
     section["missing_canonical_count"] = len(section["missing_canonical"])
     return section
+
+
+def _collect_mcp_idempotency_storage_section(conn: sqlite3.Connection) -> dict:
+    return collect_mcp_idempotency_storage_stats(conn)
 
 
 def _collect_mcp_health_section(conn: sqlite3.Connection) -> dict:
@@ -1563,6 +1568,31 @@ def _check_pty_supervisor_reachable(report: dict) -> dict:
     }
 
 
+def _warn_mcp_idempotency_storage(report: dict) -> dict | None:
+    storage = report.get("mcp_idempotency_storage", {}) or {}
+    warnings = list(storage.get("warnings", []) or [])
+    if not warnings:
+        return None
+    return {
+        "name": "mcp_idempotency_storage_bloat",
+        "status": "warn",
+        "details": {
+            "warnings": warnings,
+            "row_count": int(storage.get("row_count", 0) or 0),
+            "response_bytes": int(storage.get("response_bytes", 0) or 0),
+            "max_response_bytes": int(storage.get("max_response_bytes", 0) or 0),
+            "avg_response_bytes": float(storage.get("avg_response_bytes", 0.0) or 0.0),
+            "table_bytes": storage.get("table_bytes"),
+            "dbstat_available": bool(storage.get("dbstat_available")),
+            "hint": (
+                "new Torque versions compact MCP idempotency receipts in "
+                "bounded batches; after enough compaction, run VACUUM from a "
+                "non-worker shell during maintenance if disk must be reclaimed"
+            ),
+        },
+    }
+
+
 def _warn_stuck_input_sessions(report: dict) -> dict | None:
     sup = report.get("pty_supervisor", {}) or {}
     breakers = sup.get("open_write_breakers") or {}
@@ -1606,6 +1636,7 @@ _DOCTOR_WARNINGS = [
     _warn_ai_optional_deps_missing,
     _warn_ai_index_rebuild_pending,
     _warn_ai_index_chunk_model_mismatch,
+    _warn_mcp_idempotency_storage,
     _warn_stuck_input_sessions,
 ]
 
@@ -1635,6 +1666,7 @@ def build_doctor_report(
         "tasks": tasks,
         "task_aliases": _collect_task_aliases_section(conn),
         "mcp_health": _collect_mcp_health_section(conn),
+        "mcp_idempotency_storage": _collect_mcp_idempotency_storage_section(conn),
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
         "stage_6_cleanup": _collect_stage_6_cleanup_section(
@@ -1736,6 +1768,7 @@ def format_doctor_report(report: dict) -> str:
     tasks = report.get("tasks", {})
     task_aliases = report.get("task_aliases", {}) or {}
     mcp_health = report.get("mcp_health", {}) or {}
+    mcp_idempotency_storage = report.get("mcp_idempotency_storage", {}) or {}
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
@@ -1891,6 +1924,20 @@ def format_doctor_report(report: dict) -> str:
         "  replays:                       "
         f"{int((mcp_health.get('totals', {}) or {}).get('replay', 0) or 0)}",
         "",
+        "[mcp_idempotency_storage]",
+        "  rows:                          "
+        f"{int(mcp_idempotency_storage.get('row_count', 0) or 0)}",
+        "  compacted_rows:                "
+        f"{int(mcp_idempotency_storage.get('compacted_row_count', 0) or 0)}",
+        "  response_bytes:                "
+        f"{_format_size(int(mcp_idempotency_storage.get('response_bytes', 0) or 0))}",
+        "  max_response_bytes:            "
+        f"{_format_size(int(mcp_idempotency_storage.get('max_response_bytes', 0) or 0))}",
+        "  avg_response_bytes:            "
+        f"{_format_size(int(float(mcp_idempotency_storage.get('avg_response_bytes', 0.0) or 0.0)))}",
+        "  table_bytes:                   "
+        f"{_format_size(int(mcp_idempotency_storage.get('table_bytes') or 0)) if mcp_idempotency_storage.get('table_bytes') is not None else '— (dbstat unavailable)'}",
+        "",
         "[drift]",
         "  agents.template ↔ role:                 "
         f"{int(drift.get('agents_template_role', 0) or 0)}",
@@ -1992,6 +2039,21 @@ def format_doctor_report(report: dict) -> str:
                 lines.append(
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
+                )
+            elif name == "mcp_idempotency_storage_bloat":
+                table_bytes = details.get("table_bytes")
+                table_display = (
+                    _format_size(int(table_bytes or 0))
+                    if table_bytes is not None
+                    else "dbstat unavailable"
+                )
+                lines.append(
+                    "  - MCP idempotency storage is above warning thresholds"
+                    f": rows={int(details.get('row_count', 0) or 0)} "
+                    f"response_bytes={_format_size(int(details.get('response_bytes', 0) or 0))} "
+                    f"max_receipt={_format_size(int(details.get('max_response_bytes', 0) or 0))} "
+                    f"table={table_display}; compacted receipts require a "
+                    "manual VACUUM to reclaim already-allocated SQLite pages"
                 )
             elif name == "stuck_input_sessions":
                 sessions = details.get("sessions", []) or []

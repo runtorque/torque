@@ -49,6 +49,15 @@ from torque.db_schema import (
     drop_ai_embedding_vec_table,
     initialize_database,
 )
+from torque.mcp_idempotency import (
+    MCP_IDEMPOTENCY_FULL_TTL_SECONDS,
+    MCP_IDEMPOTENCY_MAINTENANCE_INTERVAL_SECONDS,
+    MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES,
+    compacted_idempotency_response,
+    collect_mcp_idempotency_storage_stats,
+    json_response_bytes,
+    maintain_mcp_idempotency_storage,
+)
 from torque.task_ids import (
     format_derived_task_id,
     format_root_task_id,
@@ -1067,6 +1076,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn: Optional[sqlite3.Connection] = None
         self._async_writer: Optional["_QueuedAsyncDBWriter"] = None
         self.async_writes_enabled: bool = False
+        self._last_mcp_idempotency_maintenance_at: float = 0.0
 
     def enable_async_writes(self, enabled: bool = True) -> None:
         """Toggle fire-and-forget async persistence for ``*_deferred`` calls."""
@@ -1280,7 +1290,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return None
         row = self._conn.execute(
             "SELECT idempotency_key, surface, tool_name, request_hash, "
-            "response_json, created_at, updated_at "
+            "response_json, response_bytes, expires_at, compacted_at, "
+            "created_at, updated_at "
             "FROM mcp_idempotency WHERE idempotency_key=?",
             (key,),
         ).fetchone()
@@ -1292,9 +1303,40 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "tool_name": row[2],
             "request_hash": row[3],
             "response_json": row[4],
-            "created_at": row[5],
-            "updated_at": row[6],
+            "response_bytes": row[5],
+            "expires_at": row[6],
+            "compacted_at": row[7],
+            "created_at": row[8],
+            "updated_at": row[9],
         }
+
+    def _maybe_maintain_mcp_idempotency(self, *, now: float | None = None) -> None:
+        """Run bounded receipt compaction opportunistically after writes."""
+        now_value = float(time.time() if now is None else now)
+        if (
+            now_value - self._last_mcp_idempotency_maintenance_at
+            < MCP_IDEMPOTENCY_MAINTENANCE_INTERVAL_SECONDS
+        ):
+            return
+        self._last_mcp_idempotency_maintenance_at = now_value
+        try:
+            summary = self.maintain_mcp_idempotency(now=now_value)
+            if summary.get("compacted") or summary.get("deleted"):
+                log.info(
+                    "mcp idempotency maintenance compacted=%s deleted=%s",
+                    summary.get("compacted", 0),
+                    summary.get("deleted", 0),
+                )
+        except Exception:
+            log.exception("MCP idempotency maintenance failed")
+
+    def maintain_mcp_idempotency(self, **kwargs) -> dict:
+        """Compact/delete idempotency receipts in bounded batches."""
+        return maintain_mcp_idempotency_storage(self._conn, **kwargs)
+
+    def mcp_idempotency_storage_stats(self) -> dict:
+        """Return logical/table-size stats for doctor and metrics surfaces."""
+        return collect_mcp_idempotency_storage_stats(self._conn)
 
     def save_mcp_idempotency(
         self,
@@ -1310,24 +1352,50 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not key:
             return
         now = time.time()
+        surface_value = str(surface or "")
+        tool_value = str(tool_name or "")
+        response_json = json.dumps(response or {}, separators=(",", ":"))
+        original_response_bytes = json_response_bytes(response_json)
+        compacted_at = 0.0
+        if original_response_bytes > MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES:
+            compacted_at = now
+            response_json = json.dumps(
+                compacted_idempotency_response(
+                    surface=surface_value,
+                    tool_name=tool_value,
+                    reason="oversize",
+                    original_response_bytes=original_response_bytes,
+                    max_response_bytes=MCP_IDEMPOTENCY_MAX_RESPONSE_BYTES,
+                ),
+                separators=(",", ":"),
+            )
+        response_bytes = json_response_bytes(response_json)
         existing = self.load_mcp_idempotency(key)
         created_at = float((existing or {}).get("created_at", 0) or now)
+        expires_at = (
+            now if compacted_at else now + MCP_IDEMPOTENCY_FULL_TTL_SECONDS
+        )
         self._conn.execute(
             "INSERT OR REPLACE INTO mcp_idempotency "
             "(idempotency_key, surface, tool_name, request_hash, "
-            "response_json, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "response_json, response_bytes, expires_at, compacted_at, "
+            "created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 key,
-                str(surface or ""),
-                str(tool_name or ""),
+                surface_value,
+                tool_value,
                 str(request_hash or ""),
-                json.dumps(response or {}, separators=(",", ":")),
+                response_json,
+                response_bytes,
+                expires_at,
+                compacted_at,
                 created_at,
                 now,
             ),
         )
         self._conn.commit()
+        self._maybe_maintain_mcp_idempotency(now=now)
 
     def load_command_receipt(self, idempotency_key: str) -> dict | None:
         """Load one internal command receipt by idempotency key."""
