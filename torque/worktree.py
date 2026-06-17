@@ -1,11 +1,13 @@
 """Git worktree lifecycle management for Torque agents."""
 
 import asyncio
+import contextlib
 import glob
 import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from typing import Optional
 
@@ -90,6 +92,14 @@ _BUILD_TEST_RE = re.compile(
 # off a repo-root HEAD that was left on another worker's branch.
 _WORKER_NAMESPACED_BRANCH_RE = re.compile(r"^torque/[^/]+/.+")
 _WORKTREE_NAME_MAX_LEN = 40
+# Bounded background refresh probes: each git subprocess in the periodic
+# worktree refresh path gets this many seconds before the refresh is treated
+# as stale and the previous cell state is preserved. Keep comfortably below
+# the 60s refresh cadence so one slow repository cannot monopolize the daemon.
+WORKTREE_REFRESH_GIT_TIMEOUT_SECONDS = 10.0
+WORKTREE_REFRESH_KILL_GRACE_SECONDS = 1.0
+WORKTREE_REFRESH_MAX_CONCURRENT = 4
+WORKTREE_REFRESH_LOG_THROTTLE_SECONDS = 300.0
 _TEST_DIR_NAMES = {
     "__snapshots__",
     "__tests__",
@@ -334,6 +344,16 @@ _GITHUB_PR_VIEW_FIELDS = ",".join([
     "statusCheckRollup",
 ])
 _PR_NUMBER_RE = re.compile(r"/pull/(\d+)(?:$|[/?#])")
+
+
+
+class WorktreeRefreshError(RuntimeError):
+    """Non-fatal refresh probe failure that must preserve prior state."""
+
+    def __init__(self, kind: str, message: str, *, command: str = ""):
+        super().__init__(message)
+        self.kind = str(kind or "failure")
+        self.command = str(command or "")
 
 
 def _worktree_ok(phase: str, **extra) -> dict:
@@ -1106,12 +1126,184 @@ def _repo_root_from_common_dir(common_dir: str) -> str:
 class WorktreeManager:
     """Manages git worktrees for agent isolation."""
 
-    def __init__(self):
+    def __init__(self, *,
+                 refresh_git_timeout_seconds: float =
+                 WORKTREE_REFRESH_GIT_TIMEOUT_SECONDS,
+                 refresh_max_concurrent: int =
+                 WORKTREE_REFRESH_MAX_CONCURRENT):
         # Per-cell ephemeral fingerprint of (worktree_index_mtime,
         # base_ref_mtime). Used by `refresh_state` to skip the entire
         # status/diff/ahead-behind/is_merged probe when neither side has
         # advanced since the last tick.
         self._refresh_fingerprints: dict[str, tuple[float, float]] = {}
+        self.refresh_git_timeout_seconds = max(
+            0.1,
+            float(refresh_git_timeout_seconds or
+                  WORKTREE_REFRESH_GIT_TIMEOUT_SECONDS),
+        )
+        self._refresh_semaphore = asyncio.Semaphore(
+            max(1, int(refresh_max_concurrent or WORKTREE_REFRESH_MAX_CONCURRENT))
+        )
+        self._refresh_inflight: dict[str, asyncio.Task] = {}
+        self._refresh_metrics: dict[str, float | int | str] = {
+            "attempts": 0,
+            "successes": 0,
+            "failures": 0,
+            "timeouts": 0,
+            "missing_worktrees": 0,
+            "coalesced": 0,
+            "skipped_unchanged": 0,
+            "examined": 0,
+            "last_duration_ms": 0.0,
+            "max_duration_ms": 0.0,
+            "last_error_kind": "",
+            "last_error_cell": "",
+            "last_error_command": "",
+            "active": 0,
+            "max_concurrent": max(
+                1,
+                int(refresh_max_concurrent or WORKTREE_REFRESH_MAX_CONCURRENT),
+            ),
+        }
+        self._refresh_issue_log_at: dict[tuple[str, str], float] = {}
+
+    def refresh_metrics_snapshot(self) -> dict:
+        """Return low-noise counters for recent background refresh health."""
+        return dict(self._refresh_metrics)
+
+    def _record_refresh_metric(self, *,
+                               outcome: str,
+                               duration_ms: float = 0.0,
+                               cell=None,
+                               error_kind: str = "",
+                               command: str = "") -> None:
+        metrics = self._refresh_metrics
+        if outcome == "attempt":
+            metrics["attempts"] = int(metrics.get("attempts", 0) or 0) + 1
+        elif outcome == "success":
+            metrics["successes"] = int(metrics.get("successes", 0) or 0) + 1
+            metrics["examined"] = int(metrics.get("examined", 0) or 0) + 1
+        elif outcome == "failure":
+            metrics["failures"] = int(metrics.get("failures", 0) or 0) + 1
+            if error_kind == "timeout":
+                metrics["timeouts"] = int(metrics.get("timeouts", 0) or 0) + 1
+            elif error_kind == "missing_worktree":
+                metrics["missing_worktrees"] = (
+                    int(metrics.get("missing_worktrees", 0) or 0) + 1
+                )
+            metrics["last_error_kind"] = str(error_kind or "failure")
+            metrics["last_error_cell"] = str(
+                getattr(cell, "name", "") or getattr(cell, "id", "") or ""
+            )
+            metrics["last_error_command"] = str(command or "")
+        elif outcome == "coalesced":
+            metrics["coalesced"] = int(metrics.get("coalesced", 0) or 0) + 1
+        elif outcome == "skipped_unchanged":
+            metrics["skipped_unchanged"] = (
+                int(metrics.get("skipped_unchanged", 0) or 0) + 1
+            )
+        if duration_ms >= 0:
+            metrics["last_duration_ms"] = float(duration_ms)
+            metrics["max_duration_ms"] = max(
+                float(metrics.get("max_duration_ms", 0.0) or 0.0),
+                float(duration_ms),
+            )
+
+    def _log_refresh_issue(self, cell, kind: str, message: str,
+                           *, command: str = "") -> None:
+        """Throttle repeated refresh diagnostics from the same cell/kind."""
+        cell_key = str(getattr(cell, "id", "") or getattr(cell, "name", "") or "")
+        key = (cell_key, str(kind or "failure"))
+        now = time.monotonic()
+        last = self._refresh_issue_log_at.get(key, 0.0)
+        if now - last < WORKTREE_REFRESH_LOG_THROTTLE_SECONDS:
+            return
+        self._refresh_issue_log_at[key] = now
+        detail = f" command={command}" if command else ""
+        log.warning(
+            "Worktree refresh %s for '%s': %s%s; preserving previous state",
+            kind,
+            getattr(cell, "name", "") or getattr(cell, "id", ""),
+            message,
+            detail,
+        )
+
+    async def _communicate_refresh_git(self, proc, *, command: str):
+        timeout = self.refresh_git_timeout_seconds
+        try:
+            return await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(
+                    proc.wait(),
+                    timeout=WORKTREE_REFRESH_KILL_GRACE_SECONDS,
+                )
+            raise WorktreeRefreshError(
+                "timeout",
+                f"git refresh command exceeded {timeout:.1f}s",
+                command=command,
+            ) from exc
+
+    async def _refresh_git(self, directory: str, *args: str,
+                           stderr_pipe: bool = False,
+                           check: bool = True) -> tuple[int, str, str]:
+        """Run a bounded git command used by background worktree refresh.
+
+        Failures raise ``WorktreeRefreshError`` so refresh_state can leave
+        previously visible worktree metadata untouched instead of replacing it
+        with misleading zero/clean values.
+        """
+        command = "git -C {} {}".format(directory, " ".join(args))
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=(
+                    asyncio.subprocess.PIPE
+                    if stderr_pipe else asyncio.subprocess.DEVNULL
+                ),
+            )
+            stdout, stderr = await self._communicate_refresh_git(
+                proc,
+                command=command,
+            )
+        except WorktreeRefreshError:
+            raise
+        except Exception as exc:
+            raise WorktreeRefreshError(
+                "spawn_failed",
+                str(exc) or "failed to start git refresh command",
+                command=command,
+            ) from exc
+        stdout_text = stdout.decode("utf-8", errors="replace").strip()
+        stderr_text = (
+            stderr.decode("utf-8", errors="replace").strip()
+            if stderr else ""
+        )
+        if check and proc.returncode != 0:
+            raise WorktreeRefreshError(
+                "git_failed",
+                stderr_text or f"git exited with status {proc.returncode}",
+                command=command,
+            )
+        return proc.returncode, stdout_text, stderr_text
+
+    async def _refresh_await(self, label: str, awaitable,
+                             *, timeout: float | None = None):
+        """Bound a refresh-only async helper that may call legacy git wrappers."""
+        deadline = float(timeout or self.refresh_git_timeout_seconds)
+        try:
+            return await asyncio.wait_for(awaitable, timeout=deadline)
+        except WorktreeRefreshError:
+            raise
+        except asyncio.TimeoutError as exc:
+            raise WorktreeRefreshError(
+                "timeout",
+                f"{label} exceeded {deadline:.1f}s",
+                command=label,
+            ) from exc
 
     @staticmethod
     def _resolve_gitdir(worktree_path: str) -> str:
@@ -1227,16 +1419,116 @@ class WorktreeManager:
 
         Returns True if any field changed. Skips the work entirely when
         the cheap mtime fingerprint matches the last successful refresh,
-        which is the common case (most agents are idle most ticks).
+        which is the common case (most agents are idle most ticks). Git
+        subprocesses in this refresh path are bounded and failures preserve
+        previously visible state rather than overwriting it with false
+        clean/ready values.
         """
         if not cell.worktree_path or not cell.worktree_base_branch:
+            return False
+        if not os.path.isdir(cell.worktree_path):
+            self._record_refresh_metric(
+                outcome="failure",
+                cell=cell,
+                error_kind="missing_worktree",
+            )
+            self._log_refresh_issue(
+                cell,
+                "missing_worktree",
+                f"path does not exist: {cell.worktree_path}",
+            )
             return False
 
         fingerprint = self._refresh_fingerprint(cell, worktree_submodules)
         previous = self._refresh_fingerprints.get(cell.id)
         if previous == fingerprint and previous != (0.0, 0.0):
+            self._record_refresh_metric(outcome="skipped_unchanged")
             return False
 
+        inflight = self._refresh_inflight.get(cell.id)
+        if inflight is not None and not inflight.done():
+            self._record_refresh_metric(outcome="coalesced")
+            return await asyncio.shield(inflight)
+
+        task = asyncio.create_task(
+            self._refresh_state_with_limit(
+                cell,
+                fingerprint,
+                worktree_submodules=worktree_submodules,
+            )
+        )
+        self._refresh_inflight[cell.id] = task
+        try:
+            return await task
+        finally:
+            if self._refresh_inflight.get(cell.id) is task:
+                self._refresh_inflight.pop(cell.id, None)
+
+    async def _refresh_state_with_limit(self, cell, fingerprint: tuple,
+                                        worktree_submodules=None) -> bool:
+        """Run one refresh under the manager-wide concurrency cap."""
+        async with self._refresh_semaphore:
+            self._refresh_metrics["active"] = (
+                int(self._refresh_metrics.get("active", 0) or 0) + 1
+            )
+            try:
+                return await self._refresh_state_inner(
+                    cell,
+                    fingerprint,
+                    worktree_submodules=worktree_submodules,
+                )
+            finally:
+                self._refresh_metrics["active"] = max(
+                    0,
+                    int(self._refresh_metrics.get("active", 0) or 0) - 1,
+                )
+
+    async def _refresh_state_inner(self, cell, fingerprint: tuple,
+                                   worktree_submodules=None) -> bool:
+        """Uncoalesced refresh body. Caller owns concurrency limiting."""
+        started = time.perf_counter()
+        self._record_refresh_metric(outcome="attempt")
+        try:
+            changed = await self._refresh_state_apply(
+                cell,
+                fingerprint,
+                worktree_submodules=worktree_submodules,
+            )
+            self._record_refresh_metric(
+                outcome="success",
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
+            return changed
+        except WorktreeRefreshError as exc:
+            duration_ms = (time.perf_counter() - started) * 1000.0
+            self._record_refresh_metric(
+                outcome="failure",
+                duration_ms=duration_ms,
+                cell=cell,
+                error_kind=exc.kind,
+                command=exc.command,
+            )
+            self._log_refresh_issue(
+                cell,
+                exc.kind,
+                str(exc),
+                command=exc.command,
+            )
+            return False
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - started) * 1000.0
+            self._record_refresh_metric(
+                outcome="failure",
+                duration_ms=duration_ms,
+                cell=cell,
+                error_kind="exception",
+            )
+            self._log_refresh_issue(cell, "exception", str(exc))
+            return False
+
+    async def _refresh_state_apply(self, cell, fingerprint: tuple,
+                                   worktree_submodules=None) -> bool:
+        """Apply a successful refresh to the cell, preserving healthy semantics."""
         # Three consolidated git invocations replace the previous six:
         #   - rev-list --left-right --count → ahead + behind
         #   - status --porcelain=v2         → dirty + uncommitted/untracked
@@ -1262,10 +1554,29 @@ class WorktreeManager:
         elif behind == 0:
             merged = False
         else:
-            merged = await self.is_merged(
-                cell,
-                worktree_submodules=worktree_submodules,
-            )
+            try:
+                merged = await asyncio.wait_for(
+                    self.is_merged(
+                        cell,
+                        worktree_submodules=worktree_submodules,
+                    ),
+                    timeout=max(
+                        self.refresh_git_timeout_seconds,
+                        self.refresh_git_timeout_seconds * 3,
+                    ),
+                )
+            except asyncio.TimeoutError as exc:
+                raise WorktreeRefreshError(
+                    "timeout",
+                    "is_merged refresh probe exceeded timeout",
+                    command="is_merged",
+                ) from exc
+            except Exception as exc:
+                raise WorktreeRefreshError(
+                    "git_failed",
+                    str(exc) or "is_merged refresh probe failed",
+                    command="is_merged",
+                ) from exc
 
         all_changed = sorted(
             set(committed_files) | set(uncommitted_files) | set(untracked_files)
@@ -1312,23 +1623,15 @@ class WorktreeManager:
         """One git call: returns (ahead, behind) commits vs base."""
         ahead = 0
         behind = 0
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
-                "rev-list", "--left-right", "--count",
-                f"{cell.worktree_base_branch}...HEAD",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return (0, 0)
-            parts = stdout.decode().split()
-            if len(parts) >= 2:
-                ahead = int(parts[1])
-                behind = int(parts[0])
-        except Exception:
-            log.debug("ahead_behind failed for '%s'", cell.name)
+        _code, stdout, _stderr = await self._refresh_git(
+            cell.worktree_path,
+            "rev-list", "--left-right", "--count",
+            f"{cell.worktree_base_branch}...HEAD",
+        )
+        parts = stdout.split()
+        if len(parts) >= 2:
+            ahead = int(parts[1])
+            behind = int(parts[0])
 
         submodule_paths = _normalize_worktree_submodules(worktree_submodules)
         if not submodule_paths:
@@ -1338,134 +1641,113 @@ class WorktreeManager:
             repo_root = await self.get_repo_root(cell.worktree_path) or ""
         if not repo_root:
             return (ahead, behind)
-        infos = await self._nested_submodule_infos(
-            repo_root,
-            cell.worktree_path,
-            submodule_paths,
-            ref="HEAD",
-            require_worktree=True,
-            strict=False,
+        infos = await self._refresh_await(
+            "nested_submodule_infos:ahead_behind",
+            self._nested_submodule_infos(
+                repo_root,
+                cell.worktree_path,
+                submodule_paths,
+                ref="HEAD",
+                require_worktree=True,
+                strict=False,
+            ),
         )
         base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
         for info in infos:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "-C", info["worktree_path"],
-                    "rev-list", "--left-right", "--count",
-                    f"{base}...HEAD",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                stdout, _ = await proc.communicate()
-                if proc.returncode != 0:
-                    continue
-                parts = stdout.decode().split()
-                if len(parts) >= 2:
-                    ahead += int(parts[1])
-                    behind += int(parts[0])
-            except Exception:
-                log.debug(
-                    "nested ahead_behind failed for '%s' submodule %s",
-                    cell.name,
-                    info.get("path", ""),
-                )
+            _code, stdout, _stderr = await self._refresh_git(
+                info["worktree_path"],
+                "rev-list", "--left-right", "--count",
+                f"{base}...HEAD",
+            )
+            parts = stdout.split()
+            if len(parts) >= 2:
+                ahead += int(parts[1])
+                behind += int(parts[0])
         return (ahead, behind)
 
     async def _status_v2(self, cell,
                          worktree_submodules=None) -> tuple[bool, list[str], list[str]]:
         """One git call: returns (dirty, uncommitted_paths, untracked_paths)."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
-                "status", "--porcelain=v2", "--untracked-files=normal",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return (False, [], [])
-            uncommitted: list[str] = []
-            untracked: list[str] = []
-            dirty = False
-            ignored_submodule_drift: list[str] = []
-            submodule_paths = set(_normalize_worktree_submodules(
-                worktree_submodules
-            ))
-            for raw in stdout.decode().splitlines():
-                if not raw:
-                    continue
-                dirty = True
-                tag = raw[0]
-                if tag == "1":
-                    # ordinary changed entry: "1 XY ... <path>"
-                    parts = raw.split(" ", 8)
-                    if len(parts) >= 9:
-                        path = parts[8]
-                        if (
-                                submodule_paths
-                                and await self._is_clean_submodule_gitlink_drift(
+        _code, stdout, _stderr = await self._refresh_git(
+            cell.worktree_path,
+            "status", "--porcelain=v2", "--untracked-files=normal",
+        )
+        uncommitted: list[str] = []
+        untracked: list[str] = []
+        dirty = False
+        ignored_submodule_drift: list[str] = []
+        submodule_paths = set(_normalize_worktree_submodules(
+            worktree_submodules
+        ))
+        for raw in stdout.splitlines():
+            if not raw:
+                continue
+            dirty = True
+            tag = raw[0]
+            if tag == "1":
+                # ordinary changed entry: "1 XY ... <path>"
+                parts = raw.split(" ", 8)
+                if len(parts) >= 9:
+                    path = parts[8]
+                    if (
+                            submodule_paths
+                            and await self._refresh_await(
+                                "nested_submodule_gitlink_drift",
+                                self._is_clean_submodule_gitlink_drift(
                                     cell,
                                     path,
                                     submodule_paths,
                                     status_xy=parts[1] if len(parts) > 1 else "",
-                                )):
-                            ignored_submodule_drift.append(path)
-                        else:
-                            uncommitted.append(path)
-                elif tag == "2":
-                    # rename/copy: "2 XY ... <path>\t<orig>"
-                    parts = raw.split(" ", 9)
-                    if len(parts) >= 10:
-                        path_field = parts[9].split("\t", 1)[0]
-                        uncommitted.append(path_field)
-                elif tag == "?":
-                    # untracked: "? <path>"
-                    untracked.append(raw[2:])
-            if dirty and not uncommitted and not untracked \
-                    and ignored_submodule_drift:
-                dirty = False
-            return (dirty, uncommitted, untracked)
-        except Exception:
-            log.debug("status_v2 failed for '%s'", cell.name)
-            return (False, [], [])
+                                ),
+                            )):
+                        ignored_submodule_drift.append(path)
+                    else:
+                        uncommitted.append(path)
+            elif tag == "2":
+                # rename/copy: "2 XY ... <path>\t<orig>"
+                parts = raw.split(" ", 9)
+                if len(parts) >= 10:
+                    path_field = parts[9].split("\t", 1)[0]
+                    uncommitted.append(path_field)
+            elif tag == "?":
+                # untracked: "? <path>"
+                untracked.append(raw[2:])
+        if dirty and not uncommitted and not untracked \
+                and ignored_submodule_drift:
+            dirty = False
+        return (dirty, uncommitted, untracked)
 
     async def _diff_numstat(self, cell,
                             worktree_submodules=None) -> tuple[dict, list[str]]:
         """One git call: returns (diff_summary_dict, committed_paths)."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
-                "diff", "--numstat",
-                f"{cell.worktree_base_branch}...HEAD",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return ({}, [])
-            numstat_text = stdout.decode()
-            submodule_text = ""
-            replaced_paths: set[str] = set()
-            if _normalize_worktree_submodules(worktree_submodules):
-                submodule_text, replaced_paths = (
-                    await self._nested_submodule_numstat(
+        _code, numstat_text, _stderr = await self._refresh_git(
+            cell.worktree_path,
+            "diff", "--numstat",
+            f"{cell.worktree_base_branch}...HEAD",
+        )
+        submodule_text = ""
+        replaced_paths: set[str] = set()
+        if _normalize_worktree_submodules(worktree_submodules):
+            submodule_text, replaced_paths = (
+                await self._refresh_await(
+                    "nested_submodule_numstat",
+                    self._nested_submodule_numstat(
                         cell,
                         worktree_submodules,
-                    )
+                    ),
+                    timeout=self.refresh_git_timeout_seconds * 2,
                 )
-            if submodule_text:
-                numstat_text = self._filter_numstat_paths(
-                    numstat_text,
-                    replaced_paths,
-                )
-                if numstat_text.strip():
-                    numstat_text = f"{numstat_text.rstrip()}\n{submodule_text}"
-                else:
-                    numstat_text = submodule_text
-            return _numstat_summary(numstat_text)
-        except Exception:
-            log.debug("diff_numstat failed for '%s'", cell.name)
-            return ({}, [])
+            )
+        if submodule_text:
+            numstat_text = self._filter_numstat_paths(
+                numstat_text,
+                replaced_paths,
+            )
+            if numstat_text.strip():
+                numstat_text = f"{numstat_text.rstrip()}\n{submodule_text}"
+            else:
+                numstat_text = submodule_text
+        return _numstat_summary(numstat_text)
 
     async def rev_parse(self, directory: str, ref: str) -> Optional[str]:
         """Resolve a git ref or object to a full SHA."""
@@ -2259,8 +2541,11 @@ class WorktreeManager:
                 # gitlink. This replaces the superproject's coarse gitlink
                 # numstat with file-level submodule stats.
                 args.append(base_sha)
-            code, stdout = await self._git_stdout(info["worktree_path"], *args)
-            if code != 0 or not stdout:
+            _code, stdout, _stderr = await self._refresh_git(
+                info["worktree_path"],
+                *args,
+            )
+            if not stdout:
                 continue
             prefixed = self._prefix_numstat_paths(stdout, info["path"])
             if prefixed:
@@ -6678,27 +6963,26 @@ class WorktreeManager:
             return False
         try:
             # Guard: if branch hasn't diverged from base, nothing to merge
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", repo_root, "rev-parse",
+            _code, out, _err = await self._refresh_git(
+                repo_root,
+                "rev-parse",
                 cell.worktree_branch, cell.worktree_base_branch,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                check=False,
             )
-            out, _ = await proc.communicate()
-            shas = out.decode().split()
+            if _code != 0:
+                return False
+            shas = out.split()
             if len(shas) == 2 and shas[0] == shas[1]:
                 return False
 
             # Fast path: check if worktree branch is an ancestor of base
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", repo_root,
+            returncode, _out, _err = await self._refresh_git(
+                repo_root,
                 "merge-base", "--is-ancestor",
                 cell.worktree_branch, cell.worktree_base_branch,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                check=False,
             )
-            await proc.communicate()
-            if proc.returncode == 0:
+            if returncode == 0:
                 return await self._nested_submodule_branches_merged(
                     cell,
                     repo_root,
@@ -6712,30 +6996,26 @@ class WorktreeManager:
             # comparison, this works even when base has diverged.
 
             # 1. Get base branch tree SHA
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", repo_root,
+            _code, stdout, _err = await self._refresh_git(
+                repo_root,
                 "rev-parse",
                 f"{cell.worktree_base_branch}^{{tree}}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                check=False,
             )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
+            if _code != 0:
                 return False
-            base_tree = stdout.decode().strip()
+            base_tree = stdout.strip()
 
             # 2. Simulate merging branch into base (git 2.38+)
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", repo_root,
+            _code, stdout, _err = await self._refresh_git(
+                repo_root,
                 "merge-tree", "--write-tree",
                 cell.worktree_base_branch, cell.worktree_branch,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                check=False,
             )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
+            if _code != 0:
                 return False
-            merge_tree = stdout.decode().strip().split('\n')[0]
+            merge_tree = stdout.strip().split('\n')[0]
 
             # 3. If the simulated merge produces base's tree unchanged,
             #    the branch's changes are already in base.
@@ -6747,6 +7027,8 @@ class WorktreeManager:
                 repo_root,
                 worktree_submodules,
             )
+        except WorktreeRefreshError:
+            raise
         except Exception:
             log.debug("is_merged check failed for '%s'", cell.name)
             return False

@@ -145,10 +145,12 @@ async def _worktree_diff_updater(state, worktree_mgr):
     """Periodically update diff stats for cells with active worktrees."""
     while True:
         await asyncio.sleep(60)
-        changed = False
-        for cell in state.iter_active_agents():
-            if not cell.worktree_path:
-                continue
+        cells = [
+            cell for cell in state.iter_active_agents()
+            if getattr(cell, "worktree_path", "")
+        ]
+
+        async def _refresh_cell(cell):
             try:
                 gs = state.get_group_settings(getattr(cell, "group", "") or "")
                 cell_changed = await worktree_mgr.refresh_state(
@@ -162,10 +164,16 @@ async def _worktree_diff_updater(state, worktree_mgr):
             except Exception:
                 log.exception(
                     "Worktree refresh failed for '%s'", cell.name)
-                continue
+                return False
             if cell_changed:
                 state._emit_agent(cell)
-                changed = True
+            return bool(cell_changed)
+
+        results = await asyncio.gather(
+            *(_refresh_cell(cell) for cell in cells),
+            return_exceptions=True,
+        )
+        changed = any(result is True for result in results)
         if changed:
             await state.broadcast()
 

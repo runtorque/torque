@@ -1201,6 +1201,45 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_conflicting_branch_is_not_merged_and_refresh_updates_counts(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        readme = Path(wt_path) / "README.md"
+        readme.write_text("line one\nworker branch change\n")
+        await self._git("add", "README.md", cwd=wt_path)
+        await self._git("commit", "-m", "Worker conflicting change", cwd=wt_path)
+
+        (self.repo_root / "README.md").write_text("line one\nmain branch change\n")
+        await self._git("add", "README.md")
+        await self._git("commit", "-m", "Main conflicting change")
+
+        self.assertFalse(await self.mgr.is_merged(cell))
+        self.assertFalse(
+            await self.mgr.is_branch_merged(
+                str(self.repo_root),
+                branch=cell.worktree_branch,
+                base_branch=cell.worktree_base_branch,
+            )
+        )
+
+        cell.worktree_diff = {}
+        cell.worktree_changed_files = []
+        cell.worktree_dirty = False
+        cell.worktree_checkpoints = 0
+        cell.worktree_ahead = 0
+        cell.worktree_behind = 0
+        cell.worktree_merged = False
+
+        self.assertTrue(await self.mgr.refresh_state(cell))
+        self.assertEqual(cell.worktree_ahead, 1)
+        self.assertEqual(cell.worktree_behind, 1)
+        self.assertEqual(cell.worktree_checkpoints, 1)
+        self.assertFalse(cell.worktree_merged)
+        self.assertEqual(cell.worktree_changed_files, ["README.md"])
+
     async def test_check_merge_conflicts_reports_binary_add_add_details(self):
         cell = self._make_cell()
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")

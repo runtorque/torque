@@ -58,9 +58,14 @@ _NON_PRODUCT_ACTION_HINTS = (
 # The per-branch cache is retained as a fallback for the rare sync-context
 # entry (CLI, tests) where no prefill has happened.
 _BRANCH_EXISTS_TTL_SECONDS = 60.0
+# Bound and limit the stream branch-exists prefill git call. This path feeds
+# state snapshots, so it must never let slow branch metadata block the daemon.
+_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS = 5.0
+_BRANCH_EXISTS_MAX_CONCURRENT_REFRESHES = 4
 _branch_exists_ttl_cache: dict[tuple[str, str], tuple[float, bool]] = {}
 _repo_branches_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _repo_branches_inflight: dict[str, asyncio.Future] = {}
+_repo_branches_semaphore = asyncio.Semaphore(_BRANCH_EXISTS_MAX_CONCURRENT_REFRESHES)
 
 
 def _normalize_repo_root(repo_root: str) -> str:
@@ -96,14 +101,19 @@ async def _list_repo_branches_async(repo_root: str) -> frozenset[str]:
     """Run one `git for-each-ref` and return the set of local branch names."""
     if not repo_root or not os.path.isdir(repo_root):
         return frozenset()
+    proc = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", repo_root,
-            "for-each-ref", "--format=%(refname:short)", "refs/heads/",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
+        async with _repo_branches_semaphore:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "for-each-ref", "--format=%(refname:short)", "refs/heads/",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS,
+            )
         if proc.returncode != 0:
             return frozenset()
         return frozenset(
@@ -111,6 +121,17 @@ async def _list_repo_branches_async(repo_root: str) -> frozenset[str]:
             for line in stdout.decode("utf-8", errors="replace").splitlines()
             if line.strip()
         )
+    except asyncio.TimeoutError:
+        if proc is not None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except Exception:
+                pass
+        return frozenset()
     except (OSError, asyncio.CancelledError):
         return frozenset()
 
@@ -875,9 +896,10 @@ def _branch_exists_locally(repo_root: str, branch: str, *,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS,
             )
             exists = proc.returncode == 0
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             exists = False
 
     _branch_exists_ttl_cache[key] = (now + _BRANCH_EXISTS_TTL_SECONDS, exists)

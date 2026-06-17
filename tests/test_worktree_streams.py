@@ -1,6 +1,8 @@
+import asyncio
 import importlib
 import sys
 import types
+import tempfile
 import unittest
 from unittest import mock
 from datetime import datetime, timezone
@@ -30,6 +32,41 @@ class WorktreeStreamTests(unittest.TestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.streams_mod = importlib.import_module("torque.worktree_streams")
         self.streams_mod = importlib.reload(self.streams_mod)
+
+
+    def test_branch_prefill_async_timeout_is_bounded(self):
+        class HangingProc:
+            returncode = None
+
+            def __init__(self):
+                self.killed = False
+
+            async def communicate(self):
+                await asyncio.sleep(60)
+                return b"", b""
+
+            def kill(self):
+                self.killed = True
+                self.returncode = -9
+
+            async def wait(self):
+                return self.returncode
+
+        proc = HangingProc()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            self.streams_mod,
+            "_BRANCH_EXISTS_GIT_TIMEOUT_SECONDS",
+            0.01,
+        ), mock.patch(
+            "torque.worktree_streams.asyncio.create_subprocess_exec",
+            new=mock.AsyncMock(return_value=proc),
+        ):
+            branches = asyncio.run(
+                self.streams_mod._list_repo_branches_async(tmp)
+            )
+
+        self.assertEqual(branches, frozenset())
+        self.assertTrue(proc.killed)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()

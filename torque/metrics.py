@@ -329,6 +329,10 @@ class MetricsCollector:
                 (live or {}).get("prompt_queue_depth", 0) or 0
             ),
         }
+        if isinstance((live or {}).get("worktree_refresh"), dict):
+            live_payload["worktree_refresh"] = dict(
+                (live or {}).get("worktree_refresh") or {}
+            )
         collect_overhead_pct = (
             (self._inline_overhead_ns / 1_000_000_000.0) / elapsed * 100.0
         ) if elapsed > 0 else 0.0

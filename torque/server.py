@@ -14035,6 +14035,12 @@ async def main(connection=None):
             ),
             "prompt_queue_depth": len(prompt_tails),
         }
+        refresh_metrics = getattr(worktree_mgr, "refresh_metrics_snapshot", None)
+        if callable(refresh_metrics):
+            try:
+                sample["worktree_refresh"] = refresh_metrics()
+            except Exception:
+                log.debug("Worktree refresh metrics snapshot failed", exc_info=True)
         # daemon↔supervisor hop health (when the supervised adapter is active).
         connected_fn = getattr(bridge, "supervisor_connected", None)
         if callable(connected_fn):
