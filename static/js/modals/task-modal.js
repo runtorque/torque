@@ -469,6 +469,14 @@ function _renderTaskCompletionEvidencePreview(evidence) {
   if (evidence.sources && evidence.sources.length) {
     lines.push('Sources: ' + evidence.sources.join(', '));
   }
+  var coveredBy = evidence.covered_by || {};
+  if (coveredBy.task_id) lines.push('Covered by task: ' + coveredBy.task_id);
+  if (coveredBy.task_title) lines.push('Covering task title: ' + coveredBy.task_title);
+  if (coveredBy.pr_url) lines.push('PR: ' + coveredBy.pr_url);
+  if (coveredBy.sha) lines.push('SHA: ' + coveredBy.sha);
+  if (coveredBy.tests_run) lines.push('Tests: ' + coveredBy.tests_run);
+  if (coveredBy.evidence) lines.push('Evidence: ' + coveredBy.evidence);
+  if (coveredBy.notes) lines.push('Coverage notes: ' + coveredBy.notes);
   var merge = evidence.merge || {};
   if (merge.sha) lines.push('Merge SHA: ' + merge.sha);
   if (merge.origin_summary) lines.push('Origin: ' + merge.origin_summary);

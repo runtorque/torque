@@ -633,6 +633,58 @@ ENGINEER_TOOLS = [
         },
     },
     {
+        "name": "engineer_task_mark_covered",
+        "description": (
+            "Mark an assigned/created task as covered by another visible "
+            "task or PR. Records durable completion evidence and an activity "
+            "message; set move_to_done=true to close the covered card."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Covered task ID or alias.",
+                },
+                "covering_task": {
+                    "type": "string",
+                    "description": (
+                        "Optional visible task ID/alias whose work covers this card."
+                    ),
+                },
+                "covering_task_id": {
+                    "type": "string",
+                    "description": "Alias for covering_task.",
+                },
+                "pr_url": {
+                    "type": "string",
+                    "description": "Optional PR URL that covers the card.",
+                },
+                "sha": {
+                    "type": "string",
+                    "description": "Optional commit or merge SHA evidence.",
+                },
+                "tests_run": {
+                    "type": "string",
+                    "description": "Optional tests/checks evidence.",
+                },
+                "evidence": {
+                    "type": "string",
+                    "description": "Optional concise evidence summary.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Optional additional notes.",
+                },
+                "move_to_done": {
+                    "type": "boolean",
+                    "description": "Move the covered card to Done after recording evidence.",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
         "name": "engineer_task_verify",
         "description": (
             "Record a task verification checkpoint for deploy/restart "

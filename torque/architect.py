@@ -49,7 +49,7 @@ architect_boot_summary, architect_decision_list, architect_journal_read, \
 architect_engineer_journal_read, architect_engineer_pending_question, \
 architect_peer_list, architect_peer_inbox
 **Scope / routing**: architect_task_create, architect_task_reassign, \
-architect_task_move, architect_task_update
+architect_task_move, architect_task_update, architect_task_mark_covered
 **Hiring / specialization metadata**: architect_engineer_hire (queues a \
 user-approval request; may include an ordered `specializations` list), \
 architect_engineer_set_specializations (full-replace ordered project \

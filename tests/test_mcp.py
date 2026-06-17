@@ -766,6 +766,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_task_chain", architect_tool_names)
         self.assertIn("architect_task_update", architect_tool_names)
         self.assertIn("architect_task_move", architect_tool_names)
+        self.assertIn("architect_task_mark_covered", architect_tool_names)
         self.assertIn("architect_decision_create", architect_tool_names)
         self.assertIn("architect_engineer_hire", architect_tool_names)
         self.assertIn("architect_engineer_set_specializations", architect_tool_names)
@@ -791,6 +792,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("engineer_tool_search", engineer_tool_names)
         self.assertIn("engineer_board_summary", engineer_tool_names)
+        self.assertIn("engineer_task_mark_covered", engineer_tool_names)
         self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_task_upload_artifact", engineer_tool_names)
         self.assertIn("engineer_message_user", engineer_tool_names)

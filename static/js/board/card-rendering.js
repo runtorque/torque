@@ -464,6 +464,10 @@ function _boardCompletionEvidenceTitle(task) {
   if (evidence.sources && evidence.sources.length) {
     parts.push('Sources: ' + evidence.sources.join(', '));
   }
+  var coveredBy = evidence.covered_by || {};
+  if (coveredBy.task_id) parts.push('Covered by: ' + coveredBy.task_id);
+  if (coveredBy.pr_url) parts.push('PR: ' + coveredBy.pr_url);
+  if (coveredBy.sha) parts.push('SHA: ' + coveredBy.sha);
   var merge = evidence.merge || {};
   if (merge.sha) parts.push('Merge SHA: ' + merge.sha);
   if (merge.origin_summary) parts.push('Origin: ' + merge.origin_summary);

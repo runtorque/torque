@@ -18586,6 +18586,67 @@ async def main(connection=None):
                         group=_update_task.group if _update_task else "",
                     )
 
+            elif cmd == "board_mark_task_covered":
+                tid = _resolve_task_id(state, data.get("id", ""))
+                _covered_task = state.board_tasks.get(tid)
+                if not _covered_task:
+                    result = {"type": "error", "message": "Task not found"}
+                else:
+                    _covered_resume_targets = _capture_auto_resume_targets(
+                        state,
+                        task=_covered_task,
+                        group=_covered_task.group,
+                    )
+                    _covering_task_id = _resolve_task_id(
+                        data.get("covering_task_id", "")
+                        or data.get("covering_task", "")
+                    )
+                    try:
+                        result = state.board_mark_task_covered(
+                            tid,
+                            covering_task_id=_covering_task_id,
+                            pr_url=data.get("pr_url", ""),
+                            sha=data.get("sha", ""),
+                            tests_run=data.get("tests_run", ""),
+                            evidence=data.get("evidence", ""),
+                            notes=data.get("notes", ""),
+                            actor_name=data.get("actor_name", "") or "Torque",
+                            actor_id=data.get("actor_id", ""),
+                            actor_kind=data.get("actor_kind", ""),
+                            move_to_done=bool(data.get("move_to_done", False)),
+                        )
+                    except ValueError as exc:
+                        result = {"type": "error", "message": str(exc)}
+                    else:
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_for_local_change(
+                                tid,
+                                reason="task_covered",
+                                fields=(
+                                    "completion_evidence",
+                                    "messages",
+                                    "lane",
+                                ) if result.get("moved_to_done") else (
+                                    "completion_evidence",
+                                    "messages",
+                                ),
+                            )
+                        _panel_event(
+                            "task_covered",
+                            data.get("actor_id", ""),
+                            data.get("actor_name", "") or "Torque",
+                            _covered_task.group,
+                            result.get("message", ""),
+                            task_id=tid,
+                        )
+                        await _maybe_auto_resume_targets(
+                            state,
+                            handle_command,
+                            _panel_event,
+                            targets=_covered_resume_targets,
+                            group=_covered_task.group,
+                        )
+
             elif cmd == "board_verify_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)

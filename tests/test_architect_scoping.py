@@ -164,6 +164,23 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 **{k: v for k, v in payload.items() if k not in {"cmd", "id"}},
             )
             return {"type": "ok"}
+        if payload["cmd"] == "board_mark_task_covered":
+            try:
+                return self.state.board_mark_task_covered(
+                    payload["id"],
+                    covering_task_id=payload.get("covering_task_id", ""),
+                    pr_url=payload.get("pr_url", ""),
+                    sha=payload.get("sha", ""),
+                    tests_run=payload.get("tests_run", ""),
+                    evidence=payload.get("evidence", ""),
+                    notes=payload.get("notes", ""),
+                    actor_name=payload.get("actor_name", ""),
+                    actor_id=payload.get("actor_id", ""),
+                    actor_kind=payload.get("actor_kind", ""),
+                    move_to_done=payload.get("move_to_done", False),
+                )
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
         if payload["cmd"] == "list_actions":
             return {
                 "type": "actions", "group": payload.get("group", ""),
@@ -2838,6 +2855,76 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertEqual(text, "Task not found")
         self.assertEqual(self.state.board_tasks[hidden_task.id].lane, "Backlog")
+
+    async def test_architect_task_mark_covered_records_evidence_and_done(self):
+        architect = self._add_architect("arch-1", "Architect")
+        covered = self._add_task(
+            "TORQUE:833",
+            "Triage card covered elsewhere",
+            lane="To Do",
+            status="Needs triage",
+            created_by_architect_id=architect.id,
+        )
+        covering = self._add_task(
+            "TORQUE:855",
+            "Implementation task",
+            lane="In Progress",
+            created_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": covered.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/999",
+                "sha": "abc1234",
+                "notes": "Covered by implementation.",
+                "move_to_done": True,
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "task_marked_covered")
+        refreshed = self.state.board_tasks[covered.id]
+        self.assertEqual(refreshed.lane, "Done")
+        self.assertEqual(refreshed.status, "")
+        self.assertEqual(refreshed.completion_evidence["sources"], ["covered_by"])
+        self.assertEqual(refreshed.completion_evidence["covered_by"]["task_id"], covering.id)
+        self.assertEqual(refreshed.completion_evidence["covered_by"]["pr_url"], "https://github.com/runtorque/torque/pull/999")
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
+
+        db_task = self.db.load_all()["board_tasks"][covered.id]
+        self.assertEqual(db_task["lane"], "Done")
+        self.assertEqual(
+            db_task["completion_evidence"]["covered_by"]["sha"],
+            "abc1234",
+        )
+
+    async def test_architect_task_mark_covered_rejects_other_architect_task(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        task = self._add_task(
+            "TORQUE:834",
+            "Other architect card",
+            created_by_architect_id=other_architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": task.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/1",
+            },
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task was not created by this architect")
+        self.assertEqual(self.state.board_tasks[task.id].completion_evidence, {})
+        self.assertEqual(self.state.board_tasks[task.id].lane, "Backlog")
 
     async def test_architect_and_engineer_messaging_respects_hiring_scope(self):
         architect = self._add_architect("arch-1", "Architect")
