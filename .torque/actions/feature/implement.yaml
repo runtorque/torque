@@ -34,6 +34,7 @@ prompt: |
 
   ## Approach
 
+  - Before coding, confirm the task context includes the goal, relevant prior decisions or artifacts, constraints/non-goals, acceptance criteria, and verification expectations. If something important is missing but inferable, state your assumption in progress or closeout; if it blocks safe implementation, use `torque_ask(...)` instead of guessing.
   - Follow the plan from the previous steps — do not redesign or re-scope
   - Write clean, minimal code that follows the existing patterns in the codebase
   - Add or update tests to cover the new behavior
@@ -43,6 +44,10 @@ prompt: |
   If you encounter something the plan didn't account for, handle it pragmatically. Only deviate from the plan when the plan is clearly wrong, and document what you changed and why in the derive description.
 
   Do NOT deploy, run `make deploy`/`make deploy-toolbelt`, or restart services. Only write code and commit.
+
+  ## Handoff evidence
+
+  Before deriving review or reporting completion, summarize: files changed and why; acceptance criteria satisfied; tests/checks run; any manual smoke coverage; deviations from the plan; remaining risks or live verification still needed. Put this evidence in the `feature/review` derive context so the reviewer can evaluate the work without rediscovering basic context.
 
   ## Closeout reminder
 

@@ -36,10 +36,11 @@ prompt: |
 
   ## Review process
 
-  - Read the full diff and verify that the code does what the task asked for
+  - Read the full diff and verify that the code does what the task asked for, including stated acceptance criteria, non-goals, constraints, and handoff evidence
   - Run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
   - Separate blocking issues from follow-up suggestions so merge decisions are clear
   - Summarize merge risk: conflicts, migration/config/runtime risk, and any cleanup still needed
+  - If you derive a fix, make the handoff self-contained: exact blocker(s), expected fix scope, files/areas involved, tests already run, tests expected after the fix, and whether another review is required
 
   ## Response format
 
@@ -49,7 +50,7 @@ prompt: |
   - **Merge-risk summary** — rate the merge risk as low / medium / high and explain why
   - **Verdict** — end with `Ship`, `Ship with fixes`, or `Revert`
 
-  If there are blocking issues, call `torque_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. Include the blocking issues, verification summary, merge-risk summary, and `Ship with fixes` or `Revert` verdict in the derive context. Do NOT call `torque_done` after deriving a fix task; the unresolved fix handoff is the valid blocking-review closeout path. If there are no blocking issues, use `torque_done(message="brief review summary")` and keep any follow-up suggestions separate from the `Ship` verdict.
+  If there are blocking issues, call `torque_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. Include the original goal, blocking issues, expected fix scope, relevant files, verification summary, merge-risk summary, and `Ship with fixes` or `Revert` verdict in the derive context. Do NOT call `torque_done` after deriving a fix task; the unresolved fix handoff is the valid blocking-review closeout path. If there are no blocking issues, use `torque_done(message="brief review summary")` and keep any follow-up suggestions separate from the `Ship` verdict.
 
   Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.
 

@@ -24,5 +24,5 @@ prompt: |
   - Add or update tests for any new behavior
   - Run the narrowest relevant tests or checks first — only broaden to a larger suite if the changed surface or risk warrants it
   - Do a manual smoke check for user-visible changes when practical
-  - In your final response, state what you verified, what you did not verify, and whether live verification could not be performed
+  - In your final response, state files changed, acceptance criteria satisfied, what you verified, what you did not verify, and whether live verification could not be performed
   - Keep the diff focused — if you notice unrelated issues, leave them for a separate change

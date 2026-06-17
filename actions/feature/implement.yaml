@@ -28,8 +28,10 @@ prompt: |
 
   ## Approach
 
+  - Confirm the task gives enough context: goal, constraints/non-goals, acceptance criteria, verification expectations, and any branch/deploy guardrails; ask if a missing detail blocks safe implementation
   - Read the relevant code first to understand the existing patterns and architecture
   - Write clean, minimal code — no speculative abstractions or premature generalization
   - Add or update tests to cover the new behavior
   - Run the test suite to make sure nothing is broken
   - Keep the diff focused — no unrelated changes
+  - Handoff evidence must include files changed, acceptance criteria satisfied, tests/checks run, deviations, and remaining risks or live verification needed

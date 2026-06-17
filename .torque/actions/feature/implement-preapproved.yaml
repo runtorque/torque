@@ -42,6 +42,7 @@ prompt: |
   - Keep the diff minimal; if it grows beyond the reviewer's pre-approval, derive `feature/review` instead of shipping
   - Run the narrowest relevant tests; full suite if reasonably fast
   - Commit with a clear message
+  - In your closeout, state the exact review item addressed, files changed, tests/checks run, and why the fix stayed within the pre-approved scope
 
   When the small fix is in and tests pass, call `torque_done(message="brief summary")` directly. No re-review derivation is required for this task — the reviewer's `pre_approved: true` transition is the structural bypass.
 

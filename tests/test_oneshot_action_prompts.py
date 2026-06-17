@@ -16,6 +16,7 @@ class OneshotActionPromptTests(unittest.TestCase):
             self.assertIn("Run the narrowest relevant tests or checks first", prompt)
             self.assertIn("manual smoke check for user-visible changes when practical", prompt)
             self.assertIn("live verification could not be performed", prompt)
+            self.assertIn("acceptance criteria satisfied", prompt)
 
         self.assertNotIn("Run the full test suite", fix_prompt)
         self.assertNotIn("Run the test suite before finishing", feature_prompt)
@@ -49,4 +50,5 @@ class OneshotActionPromptTests(unittest.TestCase):
             self.assertIn("narrowest relevant tests or checks", prompt)
             self.assertIn("user-visible changes", prompt)
             self.assertIn("what you did not verify", prompt)
+            self.assertIn("acceptance criteria satisfied", prompt)
             self.assertIn("live verification could not be performed", prompt)

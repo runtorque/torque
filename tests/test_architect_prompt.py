@@ -159,3 +159,16 @@ class ArchitectPromptTests(unittest.TestCase):
             self.assertIn(slug, prompt)
         self.assertIn("assigned engineer does not carry", prompt)
         self.assertIn("choose the primary deliverable", prompt)
+
+    def test_prompt_includes_detailed_task_spec_contract(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("**Detailed task-spec contract**", prompt)
+        self.assertIn("problem/context and why it matters", prompt)
+        self.assertIn("user-facing goal and product", prompt)
+        self.assertIn("relevant decisions, prior tasks", prompt)
+        self.assertIn("explicit non-goals", prompt)
+        self.assertIn("acceptance criteria", prompt)
+        self.assertIn("verification or\n   test expectations", prompt)
+        self.assertIn("required handoff evidence before Done/merge", prompt)
+        self.assertIn("when\n   to ask or escalate", prompt)

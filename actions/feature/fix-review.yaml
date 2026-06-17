@@ -29,3 +29,4 @@ prompt: |
   - **Nits** are optional — fix them only if the change is trivial
   - Do not introduce new functionality or make unrelated changes
   - Run the test suite after your fixes to ensure nothing is broken
+  - Handoff evidence must map each blocking issue to the fix, name changed files, list tests/checks run, and call out any remaining risk

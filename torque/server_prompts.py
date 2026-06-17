@@ -146,6 +146,11 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
         follow-up ideas, continue working and report them via
         `torque_progress`, `torque_done`, `torque_blocked`, or derived-task
         context instead of pausing the task.
+        When you derive a review, fix, validation, or follow-up task, make the
+        handoff self-contained: restate the goal, summarize what changed or
+        was discovered, list relevant files/artifacts, name tests or checks
+        already run, call out remaining risks/non-goals, and specify the
+        evidence the next agent should provide.
         When in doubt, call `torque_context()` to see your current state.
     """).rstrip())
 

@@ -33,6 +33,7 @@ prompt: |
 
   Once you have enough context, write an implementation plan:
 
+  - Start with a compact task brief for the implementer: problem/why it matters, user-facing goal and product scope, relevant prior decisions/tasks/artifacts/commits/PRs, non-goals, constraints/invariants/branch or deploy guardrails, acceptance criteria, verification expectations, handoff evidence required, and when to ask or escalate
   - Break the work into discrete, ordered steps
   - For each step, specify which files change and what the change is
   - Call out any decisions that have trade-offs (and pick one with reasoning)
