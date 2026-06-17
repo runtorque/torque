@@ -100,6 +100,9 @@ _ARCHITECT_ATTENTION_MAX_LIMIT = 20
 _ARCHITECT_WAVE_SUMMARY_DEFAULT_LIMIT = 8
 _ARCHITECT_WAVE_SUMMARY_MAX_LIMIT = 20
 _ARCHITECT_WAVE_SUMMARY_RESPONSE_LIMIT = 12_000
+_ARCHITECT_COMPLETION_AUDIT_DEFAULT_LIMIT = 8
+_ARCHITECT_COMPLETION_AUDIT_MAX_LIMIT = 20
+_ARCHITECT_COMPLETION_AUDIT_RESPONSE_LIMIT = 12_000
 _ARCHITECT_EVENTS_RECENT_DEFAULT_LIMIT = 20
 _ARCHITECT_EVENTS_RECENT_MAX_LIMIT = 100
 _ARCHITECT_EVENTS_RECENT_LOAD_LIMIT = 500
@@ -999,6 +1002,18 @@ def _normalize_architect_wave_summary_limit(value) -> tuple[int, str]:
     return min(limit, _ARCHITECT_WAVE_SUMMARY_MAX_LIMIT), ""
 
 
+def _normalize_architect_completion_audit_limit(value) -> tuple[int, str]:
+    if value in (None, ""):
+        return _ARCHITECT_COMPLETION_AUDIT_DEFAULT_LIMIT, ""
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0, "limit_per_section must be an integer"
+    if limit < 1:
+        return 0, "limit_per_section must be at least 1"
+    return min(limit, _ARCHITECT_COMPLETION_AUDIT_MAX_LIMIT), ""
+
+
 def _wave_summary_text(value, *, limit: int = 240) -> str:
     text = str(value or "").strip()
     if limit > 0 and len(text) > limit:
@@ -1305,6 +1320,322 @@ def _wave_summary_collect_task_ids(state, seed_ids: list[str]) -> list[str]:
     return collected
 
 
+def _architect_wave_scope_from_args(state, architect_id: str, architect_group: str,
+                                    args: dict) -> tuple[dict, str, bool]:
+    decision_id = str(args.get("decision_id", "") or "").strip()
+    explicit_task_ids = _dedupe_strings(args.get("task_ids", []))
+    if bool(decision_id) == bool(explicit_task_ids):
+        return {}, "Provide exactly one of decision_id or task_ids", True
+
+    visible_tasks = _filter_tasks_for_caller(state, "architect", architect_id)
+    seed_task_ids: list[str] = []
+    decision_payload = {}
+    if decision_id:
+        decision, decision_error = _load_architect_decision(
+            state,
+            architect_id,
+            decision_id,
+        )
+        if not decision:
+            return {}, decision_error, True
+        seed_task_ids = [
+            task_id for task_id in _dedupe_strings(
+                decision.get("linked_task_ids", [])
+            )
+            if task_id in visible_tasks
+        ]
+        decision_payload = {
+            "id": decision.get("id", ""),
+            "title": decision.get("title", ""),
+            "status": decision.get("status", ""),
+            "linked_task_ids": list(decision.get("linked_task_ids", []) or []),
+            "linked_engineer_ids": list(
+                decision.get("linked_engineer_ids", []) or []
+            ),
+        }
+    else:
+        for task_ident in explicit_task_ids:
+            task_id = _resolve_task(state, task_ident)
+            if not task_id or task_id not in visible_tasks:
+                return {}, f"Task not found: {task_ident}", True
+            seed_task_ids.append(task_id)
+
+    if seed_task_ids:
+        scoped_view = copy.copy(state)
+        scoped_view.board_tasks = dict(visible_tasks)
+        task_ids = _wave_summary_collect_task_ids(scoped_view, seed_task_ids)
+    else:
+        task_ids = []
+    return {
+        "decision_id": decision_id,
+        "decision": decision_payload,
+        "task_ids": explicit_task_ids,
+        "seed_task_ids": seed_task_ids,
+        "expanded_task_ids": task_ids,
+        "visible_tasks": visible_tasks,
+        "tasks": [
+            visible_tasks[task_id]
+            for task_id in task_ids
+            if task_id in visible_tasks
+        ],
+        "group": architect_group,
+    }, "", False
+
+
+def _completion_audit_task_item(task, *, gate_reasons: list[str] | None = None,
+                                include_evidence: bool = False) -> dict:
+    item = _wave_summary_task_item(task, include_evidence=include_evidence)
+    if gate_reasons:
+        item["gate_reasons"] = list(gate_reasons)
+    health_state = str(getattr(task, "health_state", "") or "").strip()
+    if health_state and health_state != "healthy":
+        item["health_state"] = health_state
+        item["health_since"] = str(getattr(task, "health_since", "") or "")
+    return {key: value for key, value in item.items()
+            if value not in ("", None, [], {})}
+
+
+def _completion_audit_task_gate_reasons(task) -> list[str]:
+    reasons = []
+    if not task_counts_as_done(task):
+        lane = str(getattr(task, "lane", "") or "").strip()
+        if lane == ARCHIVED_LANE:
+            reasons.append("archived_without_done_evidence")
+        else:
+            reasons.append("not_done")
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    if "torque:human" in labels:
+        reasons.append("blocking_human_ask")
+    health_state = str(getattr(task, "health_state", "") or "healthy").strip()
+    if health_state and health_state != "healthy":
+        reasons.append("unhealthy")
+    return reasons
+
+
+def _completion_audit_verification_caveats(task) -> list[dict]:
+    task_id = str(getattr(task, "id", "") or "")
+    title = _summary_task_title(task)
+    evidence = _wave_summary_verification(task)
+    summary = getattr(task, "verification_summary", {}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    caveats = []
+
+    state = str(getattr(task, "verification_state", "") or "").strip()
+    if not evidence:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "verification_unknown",
+            "severity": "caveat",
+            "message": "No verification evidence is recorded for this in-scope task.",
+        })
+    elif state and state != "passed":
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "verification_not_passed",
+            "severity": "gate" if state in {"failed", "pending"} else "caveat",
+            "state": state,
+        })
+
+    tests_run = str(summary.get("tests_run", "") or "").strip()
+    if not tests_run:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "tests_unknown",
+            "severity": "caveat",
+            "message": "Recorded tests/checks are missing.",
+        })
+
+    deploy_needed = summary.get("deploy_needed")
+    deploy_attempted = summary.get("deploy_attempted")
+    live_smoke_pending = summary.get("live_smoke_pending")
+    human_validation_pending = str(
+        summary.get("human_validation_pending", "") or ""
+    ).strip()
+    if human_validation_pending:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "human_validation_pending",
+            "severity": "gate",
+            "message": human_validation_pending,
+        })
+    if deploy_needed is True:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "deploy_needed",
+            "severity": "caveat",
+            "deploy_attempted": bool(deploy_attempted),
+        })
+    elif deploy_needed is None:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "deploy_need_unknown",
+            "severity": "caveat",
+            "message": "Deploy requirement is not recorded.",
+        })
+    if live_smoke_pending is True:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "live_smoke_pending",
+            "severity": "caveat",
+        })
+    elif live_smoke_pending is None:
+        caveats.append({
+            "task_id": task_id,
+            "title": title,
+            "kind": "live_smoke_unknown",
+            "severity": "caveat",
+            "message": "Live-smoke state is not recorded.",
+        })
+    return caveats
+
+
+def _completion_audit_scope_engineer_ids(tasks: list, decision: dict) -> set[str]:
+    engineer_ids = {
+        str(engineer_id or "").strip()
+        for engineer_id in (decision.get("linked_engineer_ids", []) or [])
+        if str(engineer_id or "").strip()
+    }
+    for task in tasks:
+        for value in (
+            _effective_assigned_engineer_id(task),
+            str(getattr(task, "created_by_engineer_id", "") or "").strip(),
+        ):
+            if value:
+                engineer_ids.add(value)
+    return engineer_ids
+
+
+def _completion_audit_engineer_questions(state, engineer_ids: set[str]) -> list[dict]:
+    questions = []
+    for engineer_id in sorted(engineer_ids):
+        engineer = state.agents.get(engineer_id)
+        group = str(getattr(engineer, "group", "") or "").strip()
+        if not group:
+            continue
+        settings = state.get_engineer_settings(group)
+        actor_id = str(
+            getattr(settings, "pending_question_actor_id", "") or ""
+        ).strip()
+        question = str(getattr(settings, "pending_question", "") or "").strip()
+        if not question or actor_id != engineer_id:
+            continue
+        questions.append({
+            "engineer_id": engineer_id,
+            "engineer_name": str(getattr(engineer, "name", "") or "")
+            or engineer_id,
+            "group": group,
+            "question": question,
+            "set_at": float(
+                getattr(settings, "pending_question_set_at", 0.0) or 0.0
+            ),
+            "paused": bool(getattr(settings, "paused", False)),
+        })
+    questions.sort(
+        key=lambda item: (float(item.get("set_at", 0) or 0), item["engineer_id"]),
+        reverse=True,
+    )
+    return questions
+
+
+def _completion_audit_peer_ack_items(state, architect_id: str, *,
+                                     task_ids: set[str],
+                                     engineer_ids: set[str],
+                                     decision_id: str,
+                                     limit: int) -> dict:
+    section = _architect_attention_peer_ack_items(
+        state,
+        architect_id,
+        _ARCHITECT_ATTENTION_MAX_LIMIT,
+    )
+    items = []
+    for item in section.get("items", []) if isinstance(section, dict) else []:
+        context = item.get("context", {}) if isinstance(item, dict) else {}
+        if not isinstance(context, dict):
+            context = {}
+        context_task_ids = {
+            str(task_id or "").strip()
+            for task_id in (context.get("task_ids", []) or [])
+            if str(task_id or "").strip()
+        }
+        context_engineer_ids = {
+            str(engineer_id or "").strip()
+            for engineer_id in (context.get("engineer_ids", []) or [])
+            if str(engineer_id or "").strip()
+        }
+        context_decision_ids = {
+            str(item_id or "").strip()
+            for item_id in (context.get("decision_ids", []) or [])
+            if str(item_id or "").strip()
+        }
+        has_context = bool(context_task_ids or context_engineer_ids
+                           or context_decision_ids)
+        matches_scope = bool(
+            context_task_ids & task_ids
+            or context_engineer_ids & engineer_ids
+            or (decision_id and decision_id in context_decision_ids)
+        )
+        if not matches_scope and has_context:
+            continue
+        scoped_item = dict(item)
+        scoped_item["scope_match"] = "matched" if matches_scope else "unknown_context"
+        items.append(scoped_item)
+    return {
+        **_bounded_items(items, limit),
+        "truncated": bool(section.get("truncated")) or len(items) > limit,
+    }
+
+
+def _completion_audit_branch_sections(state, architect_group: str,
+                                      task_ids: set[str],
+                                      limit: int) -> dict:
+    streams = []
+    for stream in compute_worktree_streams(
+            state,
+            group=architect_group,
+            visibility_limit=limit,
+            include_orphaned=False,
+    ):
+        if not (member_task_ids_for_stream(stream) & task_ids):
+            continue
+        stream_state = str((stream or {}).get("state", "") or "").strip()
+        if stream_state == "merged":
+            continue
+        item = _architect_attention_stream_item(stream)
+        if item:
+            streams.append(item)
+    streams.sort(
+        key=lambda item: (
+            0 if item.get("state") == "ready_to_merge" else 1,
+            item.get("last_activity_at", ""),
+            item.get("stream_id", ""),
+        )
+    )
+    ready = [
+        item for item in streams
+        if str(item.get("state", "") or "") == "ready_to_merge"
+    ]
+    return {
+        "ready_to_merge": _bounded_items(ready, limit),
+        "open_or_unmerged": _bounded_items(streams, limit),
+        "note": (
+            "Any in-scope stream that is not merged is treated as an open "
+            "branch-boundary gate; ready_to_merge means it may be ready for "
+            "the engineer merge surface, not already complete."
+        ),
+    }
+
+
 def _wave_summary_group_completed(tasks: list, limit: int) -> dict:
     groups: dict[str, list[dict]] = {}
     for task in tasks:
@@ -1537,6 +1868,446 @@ def _architect_wave_summary_json(state, architect_id: str,
         }
 
 
+def _architect_completion_audit_json(state, architect_id: str,
+                                     architect_group: str,
+                                     args: dict) -> tuple[str, bool]:
+    limit, limit_error = _normalize_architect_completion_audit_limit(
+        args.get("limit_per_section")
+    )
+    if limit_error:
+        return limit_error, True
+
+    scope, scope_error, is_error = _architect_wave_scope_from_args(
+        state,
+        architect_id,
+        architect_group,
+        args,
+    )
+    if is_error:
+        return scope_error, True
+
+    tasks = list(scope.get("tasks", []) or [])
+    expanded_task_ids = list(scope.get("expanded_task_ids", []) or [])
+    decision_id = str(scope.get("decision_id", "") or "").strip()
+    decision_payload = scope.get("decision", {}) or {}
+    if not expanded_task_ids:
+        payload = {
+            "type": "completion_audit",
+            "source": {
+                "decision_id": decision_id,
+                "decision": decision_payload,
+                "task_ids": scope.get("task_ids", []),
+                "seed_task_ids": scope.get("seed_task_ids", []),
+                "expanded_task_ids": [],
+            },
+            "group": architect_group,
+            "limit_per_section": limit,
+            "recommendation": "not_complete",
+            "recommendation_reason": [
+                "No visible linked tasks were found for the requested scope."
+            ],
+            "sections": {
+                "active_tasks": _bounded_items([], limit),
+                "remaining_gates": _bounded_items([
+                    {
+                        "kind": "empty_scope",
+                        "severity": "gate",
+                        "message": (
+                            "Completion audit requires a visible decision-linked "
+                            "or explicit task scope."
+                        ),
+                    }
+                ], limit),
+                "parked_deferred": _bounded_items([], limit),
+            },
+            "scoping": {
+                "tasks": "same_group_visible_to_calling_architect",
+                "decisions": "caller_architect_only",
+            },
+        }
+        return _compact_json(payload), False
+
+    task_id_set = {str(task_id or "").strip() for task_id in expanded_task_ids}
+    scope_engineer_ids = _completion_audit_scope_engineer_ids(
+        tasks,
+        decision_payload,
+    )
+    active_tasks = [
+        task for task in tasks
+        if not board_task_is_closed(task) and not _task_parked_or_deferred(task)
+    ]
+    active_task_items = [
+        _completion_audit_task_item(
+            task,
+            gate_reasons=_completion_audit_task_gate_reasons(task),
+        )
+        for task in active_tasks
+    ]
+    active_task_items.sort(key=lambda item: (
+        item.get("updated_at", ""),
+        item.get("id", ""),
+    ), reverse=True)
+
+    accepted_scope_not_done = [
+        task for task in tasks
+        if not task_counts_as_done(task) and not _task_parked_or_deferred(task)
+    ]
+    accepted_scope_not_done.sort(key=_wave_summary_task_sort_key)
+    blocking_asks = [
+        _completion_audit_task_item(
+            task,
+            gate_reasons=["blocking_human_ask"],
+        )
+        for task in tasks
+        if (
+            not board_task_is_closed(task)
+            and not _task_parked_or_deferred(task)
+            and "torque:human" in {
+                str(label or "").strip().lower()
+                for label in (getattr(task, "labels", []) or [])
+            }
+        )
+    ]
+    blocking_asks.sort(key=lambda item: (
+        item.get("updated_at", ""),
+        item.get("id", ""),
+    ), reverse=True)
+
+    engineer_questions = _completion_audit_engineer_questions(
+        state,
+        scope_engineer_ids,
+    )
+    peer_ack = _completion_audit_peer_ack_items(
+        state,
+        architect_id,
+        task_ids=task_id_set,
+        engineer_ids=scope_engineer_ids,
+        decision_id=decision_id,
+        limit=limit,
+    )
+    pending_hires = [
+        {
+            "id": str(hire.get("id", "") or ""),
+            "requested_name": str(hire.get("requested_name", "") or ""),
+            "requested_provider": str(hire.get("requested_provider", "") or ""),
+            "requested_specializations": list(
+                hire.get("requested_specializations", []) or []
+            ),
+            "created_at": int(hire.get("created_at", 0) or 0),
+        }
+        for hire in state.load_pending_hires(
+            status_filter="pending",
+            architect_id=architect_id,
+        )
+    ]
+    pending_hires.sort(key=lambda item: (
+        int(item.get("created_at", 0) or 0),
+        item.get("id", ""),
+    ), reverse=True)
+
+    branch_boundaries = _completion_audit_branch_sections(
+        state,
+        architect_group,
+        task_id_set,
+        limit,
+    )
+    parked_deferred = [
+        task for task in tasks
+        if _task_parked_or_deferred(task)
+    ]
+    parked_deferred.sort(key=_wave_summary_task_sort_key)
+
+    verification_items = []
+    for task in tasks:
+        if _task_parked_or_deferred(task):
+            continue
+        if not task_counts_as_done(task):
+            continue
+        verification_items.extend(_completion_audit_verification_caveats(task))
+    gate_verification_items = [
+        item for item in verification_items
+        if item.get("severity") == "gate"
+    ]
+
+    remaining_gates = []
+    for item in active_task_items:
+        remaining_gates.append({
+            "kind": "active_task",
+            "severity": "gate",
+            "task": item,
+        })
+    for item in branch_boundaries["open_or_unmerged"]["items"]:
+        remaining_gates.append({
+            "kind": "open_branch_boundary",
+            "severity": "gate",
+            "stream": item,
+        })
+    for item in blocking_asks:
+        remaining_gates.append({
+            "kind": "blocking_ask",
+            "severity": "gate",
+            "task": item,
+        })
+    for item in engineer_questions:
+        remaining_gates.append({
+            "kind": "engineer_pending_question",
+            "severity": "gate",
+            "engineer_question": item,
+        })
+    for item in peer_ack.get("items", []):
+        remaining_gates.append({
+            "kind": "peer_ack_required",
+            "severity": "gate",
+            "peer_ack": item,
+        })
+    for item in pending_hires:
+        remaining_gates.append({
+            "kind": "pending_hire",
+            "severity": "gate",
+            "pending_hire": item,
+        })
+    for task in accepted_scope_not_done:
+        remaining_gates.append({
+            "kind": "accepted_scope_not_done",
+            "severity": "gate",
+            "task": _completion_audit_task_item(
+                task,
+                gate_reasons=_completion_audit_task_gate_reasons(task),
+            ),
+        })
+    for item in gate_verification_items:
+        remaining_gates.append({
+            "kind": item.get("kind", "verification_gate"),
+            "severity": "gate",
+            "verification": item,
+        })
+
+    caveat_count = len([
+        item for item in verification_items
+        if item.get("severity") != "gate"
+    ]) + len(parked_deferred)
+    gate_count = len(remaining_gates)
+    if gate_count:
+        recommendation = "not_complete"
+    elif caveat_count:
+        recommendation = "complete_with_caveats"
+    else:
+        recommendation = "complete"
+
+    recommendation_reason = []
+    if gate_count:
+        recommendation_reason.append(
+            f"{gate_count} active gate(s) remain in the requested scope."
+        )
+    if caveat_count:
+        recommendation_reason.append(
+            f"{caveat_count} caveat(s) require architect judgment or recorded evidence."
+        )
+    if not recommendation_reason:
+        recommendation_reason.append(
+            "No active gates, open branch boundaries, pending obligations, or "
+            "recorded evidence caveats were found in the requested scope."
+        )
+
+    payload = {
+        "type": "completion_audit",
+        "source": {
+            "decision_id": decision_id,
+            "decision": decision_payload,
+            "task_ids": scope.get("task_ids", []),
+            "seed_task_ids": scope.get("seed_task_ids", []),
+            "expanded_task_ids": expanded_task_ids,
+        },
+        "group": architect_group,
+        "limit_per_section": limit,
+        "recommendation": recommendation,
+        "recommendation_reason": recommendation_reason,
+        "counts": {
+            "seed_tasks": len(scope.get("seed_task_ids", []) or []),
+            "expanded_tasks": len(tasks),
+            "active_tasks": len(active_tasks),
+            "accepted_scope_not_done": len(accepted_scope_not_done),
+            "blocking_asks": len(blocking_asks),
+            "engineer_pending_questions": len(engineer_questions),
+            "peer_ack_required": int(peer_ack.get("count", 0) or 0),
+            "pending_hires": len(pending_hires),
+            "open_branch_boundaries": int(
+                branch_boundaries["open_or_unmerged"].get("count", 0) or 0
+            ),
+            "verification_caveats": len(verification_items),
+            "parked_deferred": len(parked_deferred),
+            "remaining_gates": gate_count,
+        },
+        "sections": {
+            "active_tasks": _bounded_items(active_task_items, limit),
+            "remaining_gates": _bounded_items(remaining_gates, limit),
+            "branch_boundaries": branch_boundaries,
+            "blocking_asks": _bounded_items(blocking_asks, limit),
+            "engineer_pending_questions": _bounded_items(
+                engineer_questions,
+                limit,
+            ),
+            "peer_ack_required": peer_ack,
+            "pending_hires": {
+                **_bounded_items(pending_hires, limit),
+                "note": (
+                    "Pending hires are caller-architect scoped; hire records "
+                    "are not task-scoped, so unresolved caller hires are "
+                    "reported conservatively."
+                ),
+            },
+            "accepted_scope_not_done": _bounded_items(
+                [
+                    _completion_audit_task_item(
+                        task,
+                        gate_reasons=_completion_audit_task_gate_reasons(task),
+                    )
+                    for task in accepted_scope_not_done
+                ],
+                limit,
+            ),
+            "parked_deferred": {
+                **_bounded_items(
+                    [
+                        _completion_audit_task_item(task)
+                        for task in parked_deferred
+                    ],
+                    limit,
+                ),
+                "note": (
+                    "Parked/deferred items are separated from active blockers "
+                    "and do not by themselves force not_complete."
+                ),
+            },
+            "verification_caveats": _bounded_items(
+                verification_items,
+                limit,
+            ),
+        },
+        "recommendation_rules": {
+            "not_complete": (
+                "Any active in-scope task, accepted-scope task not Done, "
+                "open/ready branch boundary, blocking ask, pending engineer "
+                "question, peer ack obligation, pending hire, or hard "
+                "verification gate remains."
+            ),
+            "complete_with_caveats": (
+                "No active gates remain, but parked/deferred exclusions or "
+                "unknown/not-recorded verification, deploy, tests, or "
+                "live-smoke evidence remains."
+            ),
+            "complete": (
+                "No active gates or caveats were found in the bounded scope."
+            ),
+        },
+        "evidence_rules": {
+            "task_set": (
+                "decision linked tasks or explicit task_ids, expanded to visible "
+                "pipeline/root descendants in the caller architect's group"
+            ),
+            "done": "task lane Done or Archived-from-Done",
+            "parked_deferred": (
+                "labels deferred/parked/hold/torque:hold or matching status"
+            ),
+            "verification": (
+                "task verification fields and verification_summary only; "
+                "missing values are reported unknown/not recorded"
+            ),
+            "branch_boundaries": (
+                "computed worktree streams intersecting the in-scope task ids"
+            ),
+            "peer_ack_required": (
+                "caller architect peer threads whose context matches scope, "
+                "plus ack-required threads with no recorded context marked "
+                "unknown_context"
+            ),
+        },
+        "caveats": [
+            (
+                "This helper is an audit aid only; it never marks goals or "
+                "tasks complete and does not replace architect judgment."
+            ),
+            (
+                "Deploy/restart/live-smoke evidence is reported only when "
+                "recorded; worker-context deploys/restarts should remain "
+                "pending unless a non-worker operator records them."
+            ),
+            (
+                "Parked/deferred tasks are shown separately from active "
+                "incomplete work."
+            ),
+        ],
+        "scoping": {
+            "tasks": "same_group_visible_to_calling_architect",
+            "decisions": "caller_architect_only",
+            "engineers": "decision-linked and in-scope assigned/creator engineers",
+            "pending_hires": "caller_architect_only",
+            "peer_messages": "caller_threads_matching_scope_or_unknown_context",
+        },
+    }
+    while True:
+        text = _compact_json(payload)
+        if len(text) <= _ARCHITECT_COMPLETION_AUDIT_RESPONSE_LIMIT or limit <= 1:
+            return text, False
+        limit -= 1
+        payload["limit_per_section"] = limit
+        payload["sections"]["active_tasks"] = _bounded_items(
+            active_task_items,
+            limit,
+        )
+        payload["sections"]["remaining_gates"] = _bounded_items(
+            remaining_gates,
+            limit,
+        )
+        payload["sections"]["branch_boundaries"] = _completion_audit_branch_sections(
+            state,
+            architect_group,
+            task_id_set,
+            limit,
+        )
+        payload["sections"]["blocking_asks"] = _bounded_items(
+            blocking_asks,
+            limit,
+        )
+        payload["sections"]["engineer_pending_questions"] = _bounded_items(
+            engineer_questions,
+            limit,
+        )
+        payload["sections"]["peer_ack_required"] = _completion_audit_peer_ack_items(
+            state,
+            architect_id,
+            task_ids=task_id_set,
+            engineer_ids=scope_engineer_ids,
+            decision_id=decision_id,
+            limit=limit,
+        )
+        payload["sections"]["pending_hires"] = {
+            **_bounded_items(pending_hires, limit),
+            "note": payload["sections"]["pending_hires"]["note"],
+        }
+        payload["sections"]["accepted_scope_not_done"] = _bounded_items(
+            [
+                _completion_audit_task_item(
+                    task,
+                    gate_reasons=_completion_audit_task_gate_reasons(task),
+                )
+                for task in accepted_scope_not_done
+            ],
+            limit,
+        )
+        payload["sections"]["parked_deferred"] = {
+            **_bounded_items(
+                [_completion_audit_task_item(task) for task in parked_deferred],
+                limit,
+            ),
+            "note": payload["sections"]["parked_deferred"]["note"],
+        }
+        payload["sections"]["verification_caveats"] = _bounded_items(
+            verification_items,
+            limit,
+        )
+
+
 def _is_engineer_like_cell(state, cell) -> bool:
     if not cell or getattr(cell, "cell_type", "") != "agent":
         return False
@@ -1639,6 +2410,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "behavior_overlay_read",
     "behavior_overlay_versions",
     "boot_summary",
+    "completion_audit",
     "board_list",
     "board_summary",
     "decision_list",
@@ -6162,6 +6934,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "wave_summary" and caller_kind == "architect":
         return _architect_wave_summary_json(
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+
+    if tool_name == "completion_audit" and caller_kind == "architect":
+        return _architect_completion_audit_json(
             real_state,
             caller_id,
             _engineer_group,

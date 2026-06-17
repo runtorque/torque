@@ -4251,6 +4251,212 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(both_error)
         self.assertEqual(both_text, "Provide exactly one of decision_id or task_ids")
 
+    async def test_architect_completion_audit_recommends_complete_when_no_gates_or_caveats(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        root = self._add_task(
+            "TORQUE:300",
+            "Complete goal root",
+            lane="Done",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            verification_state="passed",
+        )
+        root.verification_summary = {
+            "tests_run": "pytest tests/test_architect_scoping.py",
+            "deploy_needed": False,
+            "live_smoke_pending": False,
+        }
+        decision = self.state.save_decision({
+            "id": "decision-complete",
+            "architect_id": architect.id,
+            "title": "Complete goal",
+            "status": "accepted",
+            "linked_task_ids": [root.id],
+            "linked_engineer_ids": [alice.id],
+        })
+
+        text, error = await self._call(
+            "architect_completion_audit",
+            {"decision_id": decision["id"], "limit_per_section": 5},
+            architect.id,
+        )
+
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "completion_audit")
+        self.assertEqual(payload["recommendation"], "complete")
+        self.assertEqual(payload["counts"]["remaining_gates"], 0)
+        self.assertEqual(payload["counts"]["verification_caveats"], 0)
+        self.assertIn(root.id, payload["source"]["expanded_task_ids"])
+
+    async def test_architect_completion_audit_recommends_not_complete_for_remaining_gates(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-peer", "Peer Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        worker = self._add_worker("worker-1", "Worker", owner_engineer_id=alice.id)
+        active = self._add_task(
+            "TORQUE:310",
+            "Active scoped work",
+            lane="In Progress",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            labels=["torque:human"],
+        )
+        review = self._add_task(
+            "TORQUE:310:1",
+            "Review scoped work",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=active.id,
+            pipeline_root_id=active.id,
+            pipeline_depth=1,
+            agent_id=worker.id,
+            assigned_engineer_id=alice.id,
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/alice-ready",
+                "status": "open",
+                "recorded_at": "2026-06-17T12:00:00+00:00",
+                "commit_sha": "abc123",
+                "recorded_by_agent_id": worker.id,
+            },
+            completion_evidence={
+                "review": {
+                    "verdict": "ship",
+                    "follow_up_classification": "none",
+                    "recorded_at": "2026-06-17T12:00:00+00:00",
+                },
+            },
+        )
+        parked = self._add_task(
+            "TORQUE:310:2",
+            "Deferred follow-up",
+            lane="Backlog",
+            parent_task_id=active.id,
+            pipeline_root_id=active.id,
+            pipeline_depth=1,
+            labels=["deferred"],
+        )
+        with mock.patch("time.time", return_value=123.0):
+            self.state.update_engineer_settings(
+                "torque",
+                pending_question="Should this scope wait?",
+                paused=True,
+                _pending_question_actor_id=alice.id,
+            )
+        self.state.save_pending_hire({
+            "id": "hire-audit",
+            "architect_id": architect.id,
+            "requested_name": "QA",
+            "requested_provider": "codex",
+            "status": "pending",
+            "created_at": 10,
+        })
+        self.db.save_agent_peer_message({
+            "id": "peer-audit-ack",
+            "thread_id": "peer-audit",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Please ack scoped handoff.",
+            "created_at": 50.0,
+            "ack_required": True,
+            "context_task_ids": [active.id],
+            "context_engineer_ids": [alice.id],
+            "context_summary": "completion audit",
+        })
+        decision = self.state.save_decision({
+            "id": "decision-incomplete",
+            "architect_id": architect.id,
+            "title": "Incomplete goal",
+            "status": "accepted",
+            "linked_task_ids": [active.id],
+            "linked_engineer_ids": [alice.id],
+        })
+
+        text, error = await self._call(
+            "architect_completion_audit",
+            {"decision_id": decision["id"], "limit_per_section": 5},
+            architect.id,
+        )
+
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["recommendation"], "not_complete")
+        self.assertGreater(payload["counts"]["remaining_gates"], 0)
+        self.assertEqual(payload["sections"]["blocking_asks"]["items"][0]["id"], active.id)
+        self.assertEqual(
+            payload["sections"]["engineer_pending_questions"]["items"][0]["engineer_id"],
+            alice.id,
+        )
+        self.assertEqual(
+            payload["sections"]["peer_ack_required"]["items"][0]["thread_id"],
+            "peer-audit",
+        )
+        self.assertEqual(
+            payload["sections"]["pending_hires"]["items"][0]["id"],
+            "hire-audit",
+        )
+        branch_task_ids = {
+            task_id
+            for item in payload["sections"]["branch_boundaries"]["open_or_unmerged"]["items"]
+            for task_id in item.get("workflow_task_ids", []) + item.get("product_task_ids", [])
+        }
+        self.assertIn(review.id, branch_task_ids)
+        parked_ids = [
+            item["id"] for item in payload["sections"]["parked_deferred"]["items"]
+        ]
+        self.assertIn(parked.id, parked_ids)
+
+    async def test_architect_completion_audit_recommends_complete_with_caveats_for_unknown_evidence(self):
+        architect = self._add_architect("arch-1", "Architect")
+        shipped = self._add_task(
+            "TORQUE:320",
+            "Shipped without recorded smoke",
+            lane="Done",
+            created_by_architect_id=architect.id,
+            labels=["cleanup"],
+        )
+        parked = self._add_task(
+            "TORQUE:320:1",
+            "Park future cleanup",
+            lane="Backlog",
+            parent_task_id=shipped.id,
+            pipeline_root_id=shipped.id,
+            pipeline_depth=1,
+            labels=["parked"],
+        )
+
+        text, error = await self._call(
+            "architect_completion_audit",
+            {"task_ids": [shipped.id], "limit_per_section": 5},
+            architect.id,
+        )
+
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["recommendation"], "complete_with_caveats")
+        self.assertEqual(payload["counts"]["remaining_gates"], 0)
+        caveat_kinds = {
+            item["kind"]
+            for item in payload["sections"]["verification_caveats"]["items"]
+        }
+        self.assertIn("verification_unknown", caveat_kinds)
+        self.assertIn("deploy_need_unknown", caveat_kinds)
+        self.assertEqual(
+            payload["sections"]["parked_deferred"]["items"][0]["id"],
+            parked.id,
+        )
+        self.assertIn("unknown/not-recorded", payload["recommendation_rules"]["complete_with_caveats"])
+
     async def test_architect_journal_round_trips_and_uses_private_file_permissions(self):
         architect = self._add_architect("arch-1", "Architect")
         with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
