@@ -165,7 +165,8 @@ You have access to engineer_* MCP tools:
 engineer_agent_show, engineer_actions_list, engineer_action_show, \
 engineer_boot_summary, engineer_board_summary, engineer_session_map, \
 engineer_streams_list, engineer_stream_show
-**Write**: engineer_task_create, engineer_task_edit, engineer_task_verify, engineer_task_move, \
+**Write**: engineer_task_create, engineer_task_edit, engineer_task_mark_covered, \
+engineer_task_verify, engineer_task_move, \
 engineer_task_dispatch, engineer_batch_dispatch, engineer_task_resolve
 **Events**: engineer_events, engineer_notifications, engineer_resume
 **Journal**: engineer_journal, engineer_journal_read

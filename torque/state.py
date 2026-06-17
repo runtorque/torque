@@ -1605,6 +1605,46 @@ def _normalize_completion_evidence(evidence) -> dict:
     return source
 
 
+def _append_unique_string(values, value: str) -> list[str]:
+    out: list[str] = []
+    seen = set()
+    for item in list(values or []):
+        text = str(item or "").strip()
+        if text and text not in seen:
+            out.append(text)
+            seen.add(text)
+    text = str(value or "").strip()
+    if text and text not in seen:
+        out.append(text)
+    return out
+
+
+def _coverage_card_message(covered_by: dict) -> str:
+    parts = []
+    task_id = str(covered_by.get("task_id", "") or "").strip()
+    if task_id:
+        parts.append(f"task {task_id}")
+    pr_url = str(covered_by.get("pr_url", "") or "").strip()
+    if pr_url:
+        parts.append(f"PR {pr_url}")
+    sha = str(covered_by.get("sha", "") or "").strip()
+    if sha:
+        parts.append(f"SHA {sha}")
+    if not parts:
+        parts.append("provided evidence")
+    message = "Marked covered by " + " · ".join(parts)
+    tests_run = str(covered_by.get("tests_run", "") or "").strip()
+    if tests_run:
+        message += f" · Tests: {tests_run}"
+    evidence = str(covered_by.get("evidence", "") or "").strip()
+    if evidence:
+        message += f" · Evidence: {evidence}"
+    notes = str(covered_by.get("notes", "") or "").strip()
+    if notes:
+        message += f" · Notes: {notes}"
+    return message
+
+
 def _json_safe_copy(value, default):
     """Return a JSON-compatible deep copy, falling back to ``default``."""
     try:
@@ -10753,6 +10793,125 @@ class MatrixState:
         self._db_save_task(bt)
         self.recompute_task_health()
         return bt
+
+    def board_mark_task_covered(
+            self,
+            tid: str,
+            *,
+            covering_task_id: str = "",
+            pr_url: str = "",
+            sha: str = "",
+            tests_run: str = "",
+            evidence: str = "",
+            notes: str = "",
+            actor_name: str = "Torque",
+            actor_id: str = "",
+            actor_kind: str = "",
+            move_to_done: bool = False) -> dict:
+        """Record durable evidence that one card is covered elsewhere.
+
+        This intentionally does not infer coverage.  Callers provide the
+        covering task/PR/SHA/test evidence, and this method appends an
+        auditable task-history message plus a structured completion_evidence
+        entry.  ``move_to_done`` uses normal board move semantics so cascades
+        and health updates stay centralized.
+        """
+        tid = self.resolve_task_alias(tid)
+        task = self.board_tasks.get(tid)
+        if not task:
+            raise ValueError("Task not found")
+
+        def _clean(value) -> str:
+            return str(value or "").strip()
+
+        covering_task_id = self.resolve_task_alias(_clean(covering_task_id))
+        pr_url = _clean(pr_url)
+        sha = _clean(sha)
+        tests_run = _clean(tests_run)
+        evidence = _clean(evidence)
+        notes = _clean(notes)
+        actor_name = _clean(actor_name) or "Torque"
+        actor_id = _clean(actor_id)
+        actor_kind = _clean(actor_kind)
+
+        covering_task = None
+        if covering_task_id:
+            if covering_task_id == tid:
+                raise ValueError("covering_task_id must reference another task")
+            covering_task = self.board_tasks.get(covering_task_id)
+            if not covering_task:
+                raise ValueError("Covering task not found")
+        if not any((covering_task_id, pr_url, sha, tests_run, evidence, notes)):
+            raise ValueError(
+                "At least one coverage evidence field is required"
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        covered_by = {
+            "recorded_at": now_iso,
+            "recorded_by": actor_name,
+            "recorded_by_id": actor_id,
+            "recorded_by_kind": actor_kind,
+            "moved_to_done": bool(move_to_done),
+        }
+        if covering_task_id:
+            covered_by["task_id"] = covering_task_id
+            if covering_task:
+                covered_by["task_title"] = str(
+                    getattr(covering_task, "task", "") or ""
+                ).strip()
+        for key, value in (
+                ("pr_url", pr_url),
+                ("sha", sha),
+                ("tests_run", tests_run),
+                ("evidence", evidence),
+                ("notes", notes),
+        ):
+            if value:
+                covered_by[key] = value
+
+        completion_evidence = _normalize_completion_evidence(
+            getattr(task, "completion_evidence", {}) or {}
+        )
+        completion_evidence["status"] = "evidence_attached"
+        completion_evidence["sources"] = _append_unique_string(
+            completion_evidence.get("sources", []),
+            "covered_by",
+        )
+        completion_evidence["covered_by"] = covered_by
+        completion_evidence["updated_by"] = actor_name
+        completion_evidence["updated_at"] = now_iso
+
+        messages = list(getattr(task, "messages", []) or [])
+        message = _coverage_card_message(covered_by)
+        messages.append({
+            "timestamp": time.time(),
+            "action": "covered_by",
+            "message": message,
+            "agent_name": actor_name,
+            "agent_id": actor_id,
+            "agent_kind": actor_kind,
+        })
+
+        update_fields = {
+            "completion_evidence": completion_evidence,
+            "messages": messages,
+        }
+        if move_to_done:
+            update_fields["status"] = ""
+        self.board_update_task(tid, **update_fields)
+        if move_to_done:
+            self.board_move_task(tid, "Done", clear_status=True)
+
+        refreshed = self.board_tasks.get(tid)
+        return {
+            "type": "task_marked_covered",
+            "task_id": tid,
+            "lane": str(getattr(refreshed, "lane", "") or ""),
+            "covered_by": covered_by,
+            "message": message,
+            "moved_to_done": bool(move_to_done),
+        }
 
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)

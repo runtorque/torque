@@ -1113,6 +1113,93 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertEqual(text, "Task not found")
 
+    async def test_engineer_task_mark_covered_records_and_moves_owned_task(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        covered = self._add_task(
+            state,
+            "TORQUE:833",
+            "Covered triage card",
+            lane="To Do",
+            status="Needs triage",
+            assigned_engineer_id=alice.id,
+        )
+        covering = self._add_task(
+            state,
+            "TORQUE:855",
+            "Implementation task",
+            assigned_engineer_id=alice.id,
+        )
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] != "board_mark_task_covered":
+                self.fail(f"Unexpected command: {payload}")
+            try:
+                return state.board_mark_task_covered(
+                    payload["id"],
+                    covering_task_id=payload.get("covering_task_id", ""),
+                    pr_url=payload.get("pr_url", ""),
+                    sha=payload.get("sha", ""),
+                    tests_run=payload.get("tests_run", ""),
+                    evidence=payload.get("evidence", ""),
+                    notes=payload.get("notes", ""),
+                    actor_name=payload.get("actor_name", ""),
+                    actor_id=payload.get("actor_id", ""),
+                    actor_kind=payload.get("actor_kind", ""),
+                    move_to_done=payload.get("move_to_done", False),
+                )
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_mark_covered",
+            {
+                "task": covered.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/999",
+                "sha": "abc1234",
+                "tests_run": "pytest tests/test_mcp_scoping.py -k covered",
+                "move_to_done": True,
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "task_marked_covered")
+        self.assertEqual(calls[-1]["actor_id"], alice.id)
+        self.assertEqual(calls[-1]["actor_kind"], "engineer")
+        refreshed = state.board_tasks[covered.id]
+        self.assertEqual(refreshed.lane, "Done")
+        self.assertEqual(refreshed.status, "")
+        self.assertEqual(refreshed.completion_evidence["covered_by"]["task_id"], covering.id)
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
+
+    async def test_engineer_task_mark_covered_rejects_unassigned_task(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        task = self._add_task(state, "TORQUE:834", "Unassigned triage card")
+
+        async def fake_handle_command(_payload):
+            self.fail("unassigned coverage close should be rejected before mutation")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_mark_covered",
+            {"task": task.id, "pr_url": "https://github.com/runtorque/torque/pull/1"},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "task not found in scope")
+        self.assertEqual(state.board_tasks[task.id].lane, "Backlog")
+        self.assertEqual(state.board_tasks[task.id].completion_evidence, {})
+
     async def test_engineer_task_reassign_transfers_task_between_board_summaries(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

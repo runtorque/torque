@@ -3678,6 +3678,77 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
+    def test_board_mark_task_covered_records_evidence_and_history(self):
+        state = self._make_state()
+        covered = state.board_add_task("Stale triage card", "g", id="TORQUE:833")
+        covering = state.board_add_task(
+            "Implementation covers stale card",
+            "g",
+            id="TORQUE:855",
+        )
+
+        result = state.board_mark_task_covered(
+            covered.id,
+            covering_task_id=covering.id,
+            pr_url="https://github.com/runtorque/torque/pull/999",
+            sha="abc1234",
+            tests_run="pytest tests/test_state.py -k covered",
+            notes="Implementation includes the triage fix.",
+            actor_name="Panelsmith",
+            actor_id="eng-1",
+            actor_kind="engineer",
+        )
+
+        self.assertEqual(result["type"], "task_marked_covered")
+        refreshed = state.board_tasks[covered.id]
+        self.assertEqual(refreshed.lane, "Backlog")
+        evidence = refreshed.completion_evidence
+        self.assertEqual(evidence["status"], "evidence_attached")
+        self.assertEqual(evidence["sources"], ["covered_by"])
+        covered_by = evidence["covered_by"]
+        self.assertEqual(covered_by["task_id"], covering.id)
+        self.assertEqual(covered_by["task_title"], covering.task)
+        self.assertEqual(covered_by["pr_url"], "https://github.com/runtorque/torque/pull/999")
+        self.assertEqual(covered_by["sha"], "abc1234")
+        self.assertEqual(covered_by["tests_run"], "pytest tests/test_state.py -k covered")
+        self.assertFalse(covered_by["moved_to_done"])
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
+        self.assertIn(covering.id, refreshed.messages[-1]["message"])
+        self.assertIn("abc1234", refreshed.messages[-1]["message"])
+
+    def test_board_mark_task_covered_can_move_to_done(self):
+        state = self._make_state()
+        covered = state.board_add_task(
+            "Covered backlog card",
+            "g",
+            lane="To Do",
+            id="TORQUE:834",
+            status="Needs triage",
+        )
+
+        result = state.board_mark_task_covered(
+            covered.id,
+            pr_url="https://github.com/runtorque/torque/pull/1000",
+            evidence="Resolved by linked PR.",
+            actor_name="Panelsmith",
+            move_to_done=True,
+        )
+
+        self.assertTrue(result["moved_to_done"])
+        refreshed = state.board_tasks[covered.id]
+        self.assertEqual(refreshed.lane, "Done")
+        self.assertEqual(refreshed.status, "")
+        self.assertTrue(refreshed.completion_evidence["covered_by"]["moved_to_done"])
+
+    def test_board_mark_task_covered_rejects_empty_or_self_coverage(self):
+        state = self._make_state()
+        task = state.board_add_task("Triage card", "g", id="TORQUE:794")
+
+        with self.assertRaisesRegex(ValueError, "At least one"):
+            state.board_mark_task_covered(task.id)
+        with self.assertRaisesRegex(ValueError, "another task"):
+            state.board_mark_task_covered(task.id, covering_task_id=task.id)
+
     def test_agent_message_history_persists_across_state_reload(self):
         from torque.db import TorqueDB
 

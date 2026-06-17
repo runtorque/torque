@@ -7120,6 +7120,71 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
 
+    if tool_name == "task_mark_covered":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if not task:
+            return "Task not found", True
+
+        caller_id_str = str(caller_id or "").strip()
+        if caller_kind == "engineer":
+            if not real_state.engineer_can_access_task(
+                caller_id_str,
+                task,
+                allow_created=True,
+                allow_unassigned=False,
+            ):
+                return "task not found in scope", True
+        else:
+            creator_class = _task_created_by_classifier(task)
+            creator_architect_id = str(
+                getattr(task, "created_by_architect_id", "") or ""
+            ).strip()
+            if creator_class != "user" and creator_architect_id != caller_id_str:
+                return "Task was not created by this architect", True
+
+        covering_ident = (
+            args.get("covering_task", "")
+            or args.get("covering_task_id", "")
+        )
+        covering_task_id = ""
+        if str(covering_ident or "").strip():
+            covering_task_id = _resolve_task(state, covering_ident)
+            if not covering_task_id:
+                return "covering_task not found in scope", True
+
+        move_to_done, move_error = _optional_bool_arg(
+            args,
+            "move_to_done",
+            False,
+        )
+        if move_error:
+            return move_error, True
+
+        actor_name = (
+            str(getattr(_engineer_cell, "slug", "") or "").strip()
+            or str(getattr(_engineer_cell, "name", "") or "").strip()
+            or caller_kind
+        )
+        payload = {
+            "cmd": "board_mark_task_covered",
+            "id": tid,
+            "covering_task_id": covering_task_id,
+            "actor_name": actor_name,
+            "actor_id": caller_id_str,
+            "actor_kind": caller_kind,
+            "move_to_done": move_to_done,
+        }
+        for key in ("pr_url", "sha", "tests_run", "evidence", "notes"):
+            if key in args:
+                payload[key] = args[key]
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
     if tool_name == "task_verify":
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
