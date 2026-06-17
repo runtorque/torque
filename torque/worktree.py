@@ -713,13 +713,37 @@ _BACKEND_SPECIALIZATIONS = frozenset({
     "runtime-pty",
 })
 _FRONTEND_HINT_RE = re.compile(
-    r"\b(frontend|webview|panelsmith)\b|ee/frontend|static/js|ui[-/ ]?ux",
+    r"\b(frontend|webview|panelsmith)\b|ee/frontend|static/js|static/css|"
+    r"ui[-/ ]?ux",
     re.IGNORECASE,
 )
 _BACKEND_HINT_RE = re.compile(
-    r"\b(backend|orchestration|daemon|mcp)\b|server\.py|state\.py|"
-    r"(^|\s|/)torque/\w",
+    r"\b(backend|orchestration|daemon|mcp|server|state)\b|"
+    r"server\.py|state\.py|(^|\s|/)torque/\w",
     re.IGNORECASE,
+)
+_CROSS_SURFACE_LABELS = frozenset({
+    "cross-surface",
+    "cross-surface-scope",
+    "cross-domain",
+    "full-stack",
+    "state-shape",
+    "state-shape-change",
+    "compact-snapshot",
+    "compact-snapshots",
+})
+_CROSS_SURFACE_HINT_RE = re.compile(
+    r"\b(cross[- ]?surface|cross[- ]?domain|full[- ]?stack|"
+    r"state[- ]?shape|compact[- ]?snapshot|frontend consumers?|"
+    r"frontend-facing|consumer panels?|state consumers?)\b",
+    re.IGNORECASE,
+)
+_FRONTEND_EXCLUSION_RE = re.compile(
+    r"\b(no|not|avoid|exclude|excluding|without|skip|do not|don't)\b"
+    r".{0,50}\b(frontend|webview|static/js|static/css|ee/frontend|ui[-/ ]?ux)\b|"
+    r"\b(frontend|webview|static/js|static/css|ee/frontend|ui[-/ ]?ux)\b"
+    r".{0,50}\b(out of scope|non[- ]?goal|excluded|do not touch)\b",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -740,6 +764,129 @@ def path_is_frontend_domain(path: str) -> bool:
     return bool(normalized) and bool(_FRONTEND_DOMAIN_RE.search(normalized))
 
 
+def _normalized_labels(labels) -> list[str]:
+    return [
+        str(label or "").strip().lower()
+        for label in (labels or [])
+        if str(label or "").strip()
+    ]
+
+
+def _scope_text(*, labels=None, description: str = "", task: str = "",
+                context: str = "", criteria: str = "") -> str:
+    return " ".join([
+        *_normalized_labels(labels),
+        str(task or ""),
+        str(description or ""),
+        str(context or ""),
+        str(criteria or ""),
+    ])
+
+
+def _domain_from_specialization(specialization: str) -> tuple[str | None, str]:
+    spec = str(specialization or "").strip().lower()
+    if spec in _FRONTEND_SPECIALIZATIONS:
+        return "frontend", f"suggested specialization '{spec}' maps to frontend"
+    if spec in _BACKEND_SPECIALIZATIONS:
+        return "backend", f"suggested specialization '{spec}' maps to backend"
+    return None, ""
+
+
+def _domain_from_text(text: str) -> tuple[str | None, str]:
+    has_frontend = bool(_FRONTEND_HINT_RE.search(text))
+    has_backend = bool(_BACKEND_HINT_RE.search(text))
+    if has_backend and not has_frontend:
+        return "backend", "task text mentions backend/server scope only"
+    if has_frontend and not has_backend:
+        return "frontend", "task text mentions frontend/webview scope only"
+    return None, ""
+
+
+def _cross_surface_allowance(labels, text: str) -> tuple[bool, str]:
+    """Return whether task text explicitly allows frontend reach for backend.
+
+    This is intentionally conservative: generic mixed backend+frontend mentions
+    are not enough when a backend specialization is present. The task needs a
+    cross-surface label or phrasing that explains why frontend consumers are in
+    scope (state-shape/compact-snapshot/full-stack/etc.). Negative scope such as
+    "NO frontend" always wins.
+    """
+    if _FRONTEND_EXCLUSION_RE.search(text):
+        return False, ""
+    label_hits = [
+        label for label in _normalized_labels(labels)
+        if label in _CROSS_SURFACE_LABELS
+    ]
+    if label_hits:
+        return True, (
+            "task label explicitly allows cross-surface work: "
+            + ", ".join(label_hits)
+        )
+    has_frontend = bool(_FRONTEND_HINT_RE.search(text))
+    has_backend = bool(_BACKEND_HINT_RE.search(text))
+    if has_frontend and has_backend and _CROSS_SURFACE_HINT_RE.search(text):
+        return True, (
+            "task scope describes a cross-surface/state-shape change with "
+            "frontend consumers"
+        )
+    return False, ""
+
+
+def build_diff_scope_context(*, specialization: str = "", labels=None,
+                             description: str = "", task: str = "",
+                             context: str = "",
+                             criteria: str = "") -> dict:
+    """Build explainable task-scope metadata for diff classification.
+
+    The returned dict is advisory/observability-only.  ``domain`` is the
+    primary declared domain used for foreign-path warnings.  Known legitimate
+    cross-surface patterns (for example state-shape or compact-snapshot work
+    with frontend consumers) are captured in ``allowed_foreign_domains`` so a
+    backend-routed task can touch frontend consumers without a false alarm.
+    """
+    text = _scope_text(
+        labels=labels,
+        description=description,
+        task=task,
+        context=context,
+        criteria=criteria,
+    )
+    domain, reason = _domain_from_specialization(specialization)
+    if not domain:
+        domain, reason = _domain_from_text(text)
+    scope = {
+        "domain": domain,
+        "domain_reason": reason,
+        "allowed_foreign_domains": [],
+        "allowed_foreign_reasons": {},
+    }
+    allow_frontend, allow_reason = _cross_surface_allowance(labels, text)
+    if domain == "backend" and allow_frontend:
+        scope["allowed_foreign_domains"].append("frontend")
+        scope["allowed_foreign_reasons"]["frontend"] = allow_reason
+    return scope
+
+
+def _normalize_diff_scope_context(scope) -> dict:
+    if isinstance(scope, dict):
+        return {
+            "domain": scope.get("domain"),
+            "domain_reason": scope.get("domain_reason", ""),
+            "allowed_foreign_domains": list(
+                scope.get("allowed_foreign_domains") or []
+            ),
+            "allowed_foreign_reasons": dict(
+                scope.get("allowed_foreign_reasons") or {}
+            ),
+        }
+    return {
+        "domain": scope,
+        "domain_reason": "",
+        "allowed_foreign_domains": [],
+        "allowed_foreign_reasons": {},
+    }
+
+
 def classify_task_scope_domain(*, specialization: str = "",
                                labels=None,
                                description: str = "") -> Optional[str]:
@@ -747,37 +894,59 @@ def classify_task_scope_domain(*, specialization: str = "",
 
     Returns ``"backend"`` or ``"frontend"`` only when the task carries a clear
     domain signal; ``None`` (don't flag) when ambiguous. The structured
-    specialization slug wins; otherwise a low-false-positive text heuristic is
-    used, and a task that mentions BOTH domains stays ``None``.
+    specialization slug wins unless task labels/description explicitly describe
+    a known cross-surface pattern where frontend consumers are in scope.
     """
-    spec = str(specialization or "").strip().lower()
-    if spec in _FRONTEND_SPECIALIZATIONS:
-        return "frontend"
-    if spec in _BACKEND_SPECIALIZATIONS:
-        return "backend"
-    text = " ".join([*(labels or []), str(description or "")])
-    has_frontend = bool(_FRONTEND_HINT_RE.search(text))
-    has_backend = bool(_BACKEND_HINT_RE.search(text))
-    if has_backend and not has_frontend:
-        return "backend"
-    if has_frontend and not has_backend:
-        return "frontend"
-    return None
+    scope = build_diff_scope_context(
+        specialization=specialization,
+        labels=labels,
+        description=description,
+    )
+    if scope["domain"] == "backend" \
+            and "frontend" in scope["allowed_foreign_domains"]:
+        return None
+    return scope["domain"]
 
 
-def out_of_scope_diff_paths(domain: Optional[str], paths) -> list[str]:
-    """Return diff paths that fall in a foreign domain for *domain*.
+def out_of_scope_diff_paths(scope, paths) -> list[str]:
+    """Return diff paths that fall in a foreign domain for *scope*.
 
     Coarse + low-false-positive: only the motivating backend->frontend case is
     flagged today. An unknown/None domain never flags.
     """
-    if domain != "backend":
+    scope_context = _normalize_diff_scope_context(scope)
+    if scope_context.get("domain") != "backend":
+        return []
+    if "frontend" in set(scope_context.get("allowed_foreign_domains") or []):
         return []
     return sorted({
         _normalize_repo_rel_path(p)
         for p in (paths or [])
         if p and path_is_frontend_domain(p)
     })
+
+
+def out_of_scope_diff_classification(scope, paths) -> dict:
+    """Return explainable out-of-scope path details for a diff."""
+    normalized = _normalize_diff_scope_context(scope)
+    out_paths = out_of_scope_diff_paths(normalized, paths)
+    domain = normalized.get("domain")
+    path_reasons = {}
+    if domain == "backend":
+        for path in out_paths:
+            path_reasons[path] = (
+                "frontend-only path (static/js, static/css, ee/frontend, or "
+                "webview.html) in a backend-scoped task"
+            )
+    return {
+        "domain": domain,
+        "domain_reason": normalized.get("domain_reason", ""),
+        "paths": out_paths,
+        "count": len(out_paths),
+        "path_reasons": path_reasons,
+        "allowed_foreign_domains": normalized.get("allowed_foreign_domains", []),
+        "allowed_foreign_reasons": normalized.get("allowed_foreign_reasons", {}),
+    }
 
 
 def ensure_git_exclude(directory: str) -> None:
@@ -6407,13 +6576,15 @@ class WorktreeManager:
 
     async def diff_files_summary(self, cell,
                                  paths: list[str] | None = None,
-                                 *, scope_domain: str | None = None) -> dict:
+                                 *, scope_domain=None) -> dict:
         """Return structured per-file diff summary for review planning.
 
-        ``scope_domain`` (optional) is the task's declared domain, used only to
-        add an observability-only ``out_of_scope`` signal/field when the diff
-        reaches into a clearly-foreign domain (TORQUE:604 A2). It never blocks
-        or changes any behavior; when ``None`` no scope flag is computed.
+        ``scope_domain`` (optional) is the task's declared domain or an
+        explainable diff-scope context from ``build_diff_scope_context``. It is
+        used only to add an observability-only ``out_of_scope`` signal/field
+        when the diff reaches into a clearly-foreign domain (TORQUE:604 A2).
+        It never blocks or changes behavior; when ``None`` no scope flag is
+        computed.
         """
         if not cell.worktree_path or not cell.worktree_base_branch:
             return {}
@@ -6496,9 +6667,11 @@ class WorktreeManager:
 
             # Tag out-of-scope files before tallying so the signal flows into
             # interesting_files / signal_counts naturally (observability only).
-            out_of_scope = out_of_scope_diff_paths(
-                scope_domain, [f["path"] for f in files]
+            scope_context = _normalize_diff_scope_context(scope_domain)
+            out_of_scope_info = out_of_scope_diff_classification(
+                scope_context, [f["path"] for f in files]
             )
+            out_of_scope = out_of_scope_info["paths"]
             if out_of_scope:
                 foreign = set(out_of_scope)
                 for file_info in files:
@@ -6527,14 +6700,26 @@ class WorktreeManager:
                 "interesting_files": interesting_files,
                 "signal_counts": signal_counts,
             }
+            if scope_context.get("domain") \
+                    or scope_context.get("allowed_foreign_domains"):
+                summary["scope_classification"] = scope_context
             if out_of_scope:
                 summary["out_of_scope"] = {
-                    "domain": scope_domain,
+                    "domain": scope_context.get("domain"),
+                    "domain_reason": out_of_scope_info.get(
+                        "domain_reason", ""),
                     "paths": out_of_scope,
                     "count": len(out_of_scope),
+                    "path_reasons": out_of_scope_info.get(
+                        "path_reasons", {}),
+                    "rationale": (
+                        "Foreign-domain diff paths are flagged only when "
+                        "task scope has a clear declared domain and no "
+                        "matching cross-surface allowance."
+                    ),
                     "digest_line": (
                         f"diff touches {len(out_of_scope)} file(s) outside "
-                        f"declared {scope_domain} scope: "
+                        f"declared {scope_context.get('domain')} scope: "
                         f"{', '.join(out_of_scope)}"
                     ),
                 }
