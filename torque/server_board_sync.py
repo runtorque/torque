@@ -15,6 +15,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+import json
 from typing import Awaitable, Callable, Iterable
 
 from .board_sync import get_provider, normalize_provider_name
@@ -62,10 +63,28 @@ _AUTO_RETRY_METADATA_KEYS = (
     "next_retry_at_iso",
     "retry_backoff_seconds",
 )
+_BOARD_SYNC_ERROR_METADATA_KEYS = (
+    "last_error_at",
+    "last_error_provider",
+    "last_error_attempt",
+    "last_error_reasons",
+    "last_error_current",
+)
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _iso_from_timestamp(value: float) -> str:
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return default
 
 
 def _task_title(task: BoardTask | None) -> str:
@@ -404,9 +423,11 @@ class BoardSyncManager:
         self._idle_event: asyncio.Event | None = None
         self._inflight_count = 0
         self._observer_unregister: Callable[[], None] | None = None
+        self._delta_observer_unregister: Callable[[], None] | None = None
         self._suppress_observer_depth = 0
         self._worker: asyncio.Task | None = None
         self._stopping = False
+        self._group_sync_fingerprints: dict[str, tuple] = {}
 
     # -- Lifecycle ---------------------------------------------------------
 
@@ -415,12 +436,17 @@ class BoardSyncManager:
             return
         self._stopping = False
         self._seed_task_fingerprints()
+        self._seed_group_sync_fingerprints()
         self._wake_event = asyncio.Event()
         self._idle_event = asyncio.Event()
         self._idle_event.set()
         registrar = getattr(self.state, "register_task_upsert_observer", None)
         if callable(registrar) and self._observer_unregister is None:
             self._observer_unregister = registrar(self._on_task_upsert)
+        delta_registrar = getattr(self.state, "register_delta_observer", None)
+        if callable(delta_registrar) and self._delta_observer_unregister is None:
+            self._delta_observer_unregister = delta_registrar(self._on_delta)
+        self._recover_durable_queue()
         self._worker = asyncio.create_task(self._run(), name="board-sync-manager")
 
     async def stop(self) -> None:
@@ -430,6 +456,11 @@ class BoardSyncManager:
                 self._observer_unregister()
             finally:
                 self._observer_unregister = None
+        if self._delta_observer_unregister:
+            try:
+                self._delta_observer_unregister()
+            finally:
+                self._delta_observer_unregister = None
         self._wake()
         worker = self._worker
         if not worker:
@@ -482,33 +513,33 @@ class BoardSyncManager:
         task = self.state.board_tasks.get(tid)
         if not task:
             return {"ok": False, "queued": False, "reason": "task_not_found"}
-        settings = self.state.get_group_settings(task.group)
-        provider_name = normalize_provider_name(
-            getattr(settings, "board_sync_provider", "")
+        ok, not_eligible_reason, provider_name = self._task_sync_eligibility(
+            task,
+            explicit=explicit,
+            force=force,
         )
-        enabled = bool(getattr(settings, "board_sync_enabled", False))
-        if provider_name == "none":
-            return {"ok": False, "queued": False, "reason": "provider_disabled"}
-        if not enabled:
-            return {"ok": False, "queued": False, "reason": "sync_disabled"}
-        sync = getattr(task, "board_sync", {}) or {}
-        if isinstance(sync, dict) and sync.get("enabled") is False and not force:
-            return {"ok": False, "queued": False, "reason": "task_opted_out"}
-        tracked = task_is_tracked_for_board_sync(task)
-        auto_track = (
-            group_auto_tracks_new_tasks(settings)
-            and task_allows_auto_create_for_board_sync(task)
-            and not self._task_is_schedule_created(task)
-        )
-        if not (force or explicit or tracked or auto_track):
-            return {"ok": False, "queued": False, "reason": "task_not_tracked"}
+        if not ok:
+            self._dirty_by_task.pop(tid, None)
+            self._clear_stale_sync(task, not_eligible_reason, provider_name)
+            return {
+                "ok": False,
+                "queued": False,
+                "reason": not_eligible_reason,
+            }
 
-        sync = self._queued_sync(task, provider_name)
-        self._save_task_sync(task, sync)
-
+        existing_sync = getattr(task, "board_sync", {}) or {}
         retry_due_at = 0.0
         if not (explicit or force):
-            retry_due_at = self._cooldown_due_at(sync)
+            retry_due_at = self._cooldown_due_at(existing_sync)
+
+        sync = self._queued_sync(task, provider_name, reason=reason)
+        if retry_due_at and not (explicit or force):
+            for key in _AUTO_RETRY_METADATA_KEYS:
+                if key in existing_sync:
+                    sync[key] = existing_sync[key]
+            sync["next_retry_at"] = retry_due_at
+            sync["next_retry_at_iso"] = _iso_from_timestamp(retry_due_at)
+        self._save_task_sync(task, sync)
 
         item = self._dirty_by_task.get(tid)
         if item:
@@ -1063,10 +1094,15 @@ class BoardSyncManager:
         task = self.state.board_tasks.get(tid)
         if not task:
             return
-        settings = self.state.get_group_settings(task.group)
-        provider_name = normalize_provider_name(
-            getattr(settings, "board_sync_provider", "")
+        ok, reason, provider_name = self._task_sync_eligibility(
+            task,
+            explicit=getattr(item, "explicit", False),
+            force=getattr(item, "force", False),
         )
+        if not ok:
+            self._clear_stale_sync(task, reason, provider_name)
+            return
+        settings = self.state.get_group_settings(task.group)
         provider = self._provider(provider_name)
         lock_key = self._lock_key(task, settings, provider_name)
         task_lock = self._task_locks.setdefault(tid, asyncio.Lock())
@@ -1080,12 +1116,26 @@ class BoardSyncManager:
                 if isinstance(sync, dict) and sync.get("enabled") is False and not item.explicit:
                     return
                 syncing = dict(getattr(task, "board_sync", {}) or {})
+                previous_error = str(syncing.get("last_error", "") or "").strip()
+                attempt = _safe_int(syncing.get("sync_attempt", 0)) + 1
+                now_iso = _now_iso()
                 syncing.update({
                     "version": 1,
                     "provider": provider_name,
                     "enabled": True,
                     "sync_state": "syncing",
+                    "sync_attempt": attempt,
+                    "last_attempt_at": now_iso,
+                    "last_attempt_provider": provider_name,
+                    "last_attempt_reason": ",".join(sorted(getattr(item, "reasons", set()) or [])),
                 })
+                if previous_error:
+                    syncing["last_cleared_error"] = previous_error
+                    syncing["last_error_cleared_at"] = now_iso
+                    syncing["last_error_cleared_reason"] = "superseded_by_attempt"
+                syncing["last_error"] = ""
+                for key in _BOARD_SYNC_ERROR_METADATA_KEYS:
+                    syncing.pop(key, None)
                 self._save_task_sync(task, syncing)
                 await self._maybe_broadcast()
                 task = self.state.board_tasks.get(tid) or task
@@ -1124,10 +1174,32 @@ class BoardSyncManager:
         if sync.get("sync_state") not in {"idle", "queued", "syncing", "error"}:
             sync["sync_state"] = "idle"
         if sync.get("sync_state") != "error":
+            task_sync = getattr(task, "board_sync", {}) or {}
+            prior_error = str(
+                task_sync.get("last_error", "")
+                if isinstance(task_sync, dict)
+                else ""
+            ).strip()
             sync["sync_state"] = "idle"
+            if prior_error:
+                sync["last_cleared_error"] = prior_error
+                sync["last_error_cleared_at"] = _now_iso()
+                sync["last_error_cleared_reason"] = "success"
             sync["last_error"] = ""
+            sync["last_success_at"] = _now_iso()
+            for key in _BOARD_SYNC_ERROR_METADATA_KEYS:
+                sync.pop(key, None)
             self._clear_retry_metadata(sync)
         else:
+            attempt = _safe_int(sync.get("sync_attempt", 0))
+            sync["last_error"] = str(
+                sync.get("last_error") or sync.get("error") or "unknown error"
+            ).strip()
+            sync["last_error_at"] = _now_iso()
+            sync["last_error_provider"] = provider_name
+            sync["last_error_attempt"] = attempt
+            sync["last_error_reasons"] = sorted(getattr(item, "reasons", set()) or [])
+            sync["last_error_current"] = True
             if not self._schedule_retry_if_needed(
                 task_id,
                 provider_name,
@@ -1208,6 +1280,120 @@ class BoardSyncManager:
             task.id: self._task_sync_fingerprint(task)
             for task in self.state.board_tasks.values()
         }
+
+    def _seed_group_sync_fingerprints(self) -> None:
+        self._group_sync_fingerprints = {
+            group: self._group_sync_fingerprint(self.state.get_group_settings(group))
+            for group in self.state.groups.keys()
+        }
+
+    @staticmethod
+    def _group_sync_fingerprint(group_settings) -> tuple:
+        provider_name = normalize_provider_name(
+            getattr(group_settings, "board_sync_provider", "")
+        )
+        nested = _provider_nested_settings(group_settings, provider_name)
+        try:
+            nested_key = json.dumps(nested, sort_keys=True, default=str)
+        except TypeError:
+            nested_key = str(nested)
+        return (
+            ("provider", provider_name),
+            ("enabled", bool(getattr(group_settings, "board_sync_enabled", False))),
+            ("settings", nested_key),
+        )
+
+    def _on_delta(self, delta: dict) -> None:
+        if self._suppress_observer_depth:
+            return
+        if not isinstance(delta, dict):
+            return
+        if delta.get("op") != "group_settings_update":
+            return
+        group = str(delta.get("name", "") or "").strip()
+        if not group:
+            return
+        new_fingerprint = self._group_sync_fingerprint(
+            self.state.get_group_settings(group)
+        )
+        old_fingerprint = self._group_sync_fingerprints.get(group)
+        self._group_sync_fingerprints[group] = new_fingerprint
+        if old_fingerprint == new_fingerprint:
+            return
+        self._reconcile_group_settings_change(group)
+
+    def _recover_durable_queue(self) -> None:
+        """Rehydrate persisted queued/retry sync state after daemon restart.
+
+        The in-memory dirty map is only a coalescing implementation detail.
+        Task-visible ``board_sync`` state is persisted in SQLite, so startup
+        reconstructs dirty items for tasks that were queued/syncing or waiting
+        for a bounded automatic retry when the previous daemon exited.
+        """
+        now = time.time()
+        for task in list(self.state.board_tasks.values()):
+            sync = getattr(task, "board_sync", {}) or {}
+            if not isinstance(sync, dict) or not sync:
+                continue
+            state_name = str(sync.get("sync_state", "") or "").strip().lower()
+            if state_name not in {"queued", "syncing", "error"}:
+                continue
+            ok, reason, provider_name = self._task_sync_eligibility(task)
+            if not ok:
+                self._clear_stale_sync(task, reason, provider_name)
+                continue
+            due_at = self._cooldown_due_at(sync)
+            if state_name == "error":
+                error = str(sync.get("last_error") or sync.get("error") or "").strip()
+                if not due_at or not self._is_transient_error(error):
+                    continue
+            if state_name == "syncing":
+                queued = self._queued_sync(
+                    task,
+                    provider_name,
+                    reason="restart_recover",
+                    clear_error=False,
+                )
+                queued["last_recovered_at"] = _now_iso()
+                self._save_task_sync(task, queued)
+            self._dirty_by_task[task.id] = _DirtyItem(
+                task_id=task.id,
+                explicit=False,
+                force=False,
+                reasons={"restart_recover" if state_name != "error" else "auto_retry"},
+                fields=set(_SYNC_RELEVANT_FIELDS),
+                enqueued_at=now,
+                first_marked_at=now,
+                last_marked_at=now,
+                due_at=max(now + self.debounce_seconds, due_at or 0.0),
+                retry_attempt=_safe_int(sync.get("auto_retry_attempts", 0)),
+            )
+        if self._dirty_by_task and self._idle_event:
+            self._idle_event.clear()
+            self._wake()
+
+    def _reconcile_group_settings_change(self, group: str) -> None:
+        for task in list(self.state.board_tasks.values()):
+            if task.group != group:
+                continue
+            sync = getattr(task, "board_sync", {}) or {}
+            if not isinstance(sync, dict) or not sync:
+                continue
+            state_name = str(sync.get("sync_state", "") or "").strip().lower()
+            has_error = bool(str(sync.get("last_error", "") or "").strip())
+            if state_name not in {"queued", "syncing", "error"} and not has_error:
+                continue
+            ok, reason, provider_name = self._task_sync_eligibility(task)
+            if not ok:
+                self._dirty_by_task.pop(task.id, None)
+                self._clear_stale_sync(task, reason, provider_name)
+                continue
+            if state_name == "error" or has_error:
+                self.enqueue_task(
+                    task.id,
+                    reason="provider_config_change",
+                    fields={"board_sync"},
+                )
 
     def _on_task_upsert(self, payload: dict) -> None:
         task_id = str((payload or {}).get("id", "") or "").strip()
@@ -1334,10 +1520,7 @@ class BoardSyncManager:
         sync["auto_retry_attempts"] = attempt
         sync["retry_backoff_seconds"] = backoff
         sync["next_retry_at"] = due_at
-        sync["next_retry_at_iso"] = datetime.fromtimestamp(
-            due_at,
-            timezone.utc,
-        ).isoformat()
+        sync["next_retry_at_iso"] = _iso_from_timestamp(due_at)
         retry_item = self._dirty_by_task.get(task_id)
         if retry_item:
             retry_item.retry_attempt = attempt
@@ -1405,15 +1588,63 @@ class BoardSyncManager:
             return resolver(tid)
         return tid
 
-    def _queued_sync(self, task: BoardTask, provider_name: str) -> dict:
+    def _task_sync_eligibility(
+        self,
+        task: BoardTask | None,
+        *,
+        explicit: bool = False,
+        force: bool = False,
+    ) -> tuple[bool, str, str]:
+        if not task:
+            return False, "task_not_found", ""
+        settings = self.state.get_group_settings(task.group)
+        provider_name = normalize_provider_name(
+            getattr(settings, "board_sync_provider", "")
+        )
+        if provider_name == "none":
+            return False, "provider_disabled", provider_name
+        if not bool(getattr(settings, "board_sync_enabled", False)):
+            return False, "sync_disabled", provider_name
+        sync = getattr(task, "board_sync", {}) or {}
+        if isinstance(sync, dict) and sync.get("enabled") is False and not force:
+            return False, "task_opted_out", provider_name
+        tracked = task_is_tracked_for_board_sync(task)
+        auto_track = (
+            group_auto_tracks_new_tasks(settings)
+            and task_allows_auto_create_for_board_sync(task)
+            and not self._task_is_schedule_created(task)
+        )
+        if not (force or explicit or tracked or auto_track):
+            return False, "task_not_tracked", provider_name
+        return True, "", provider_name
+
+    def _queued_sync(
+        self,
+        task: BoardTask,
+        provider_name: str,
+        *,
+        reason: str = "",
+        clear_error: bool = True,
+    ) -> dict:
         sync = dict(getattr(task, "board_sync", {}) or {})
+        prior_error = str(sync.get("last_error", "") or "").strip()
         sync.update({
             "version": 1,
             "provider": provider_name,
             "enabled": True,
             "sync_state": "queued",
-            "last_error": "",
+            "queued_at": _now_iso(),
+            "queued_reason": str(reason or "").strip(),
         })
+        if clear_error:
+            if prior_error:
+                sync["last_cleared_error"] = prior_error
+                sync["last_error_cleared_at"] = _now_iso()
+                sync["last_error_cleared_reason"] = reason or "superseded"
+            sync["last_error"] = ""
+            for key in _BOARD_SYNC_ERROR_METADATA_KEYS:
+                sync.pop(key, None)
+            self._clear_retry_metadata(sync)
         return sync
 
     def _error_sync(self, task: BoardTask, provider_name: str, error: str) -> dict:
@@ -1426,6 +1657,33 @@ class BoardSyncManager:
             "last_error": str(error or "").strip(),
         })
         return sync
+
+    def _clear_stale_sync(
+        self,
+        task: BoardTask,
+        reason: str,
+        provider_name: str = "",
+    ) -> None:
+        sync = dict(getattr(task, "board_sync", {}) or {})
+        if not sync:
+            return
+        state_name = str(sync.get("sync_state", "") or "").strip().lower()
+        last_error = str(sync.get("last_error", "") or "").strip()
+        if state_name not in {"queued", "syncing", "error"} and not last_error:
+            return
+        if last_error:
+            sync["last_cleared_error"] = last_error
+            sync["last_error_cleared_at"] = _now_iso()
+            sync["last_error_cleared_reason"] = reason or "stale"
+        sync["sync_state"] = "idle"
+        sync["last_error"] = ""
+        sync["last_reconciled_at"] = _now_iso()
+        sync["last_reconciled_reason"] = reason or "stale"
+        sync["last_reconciled_provider"] = normalize_provider_name(provider_name)
+        for key in _BOARD_SYNC_ERROR_METADATA_KEYS:
+            sync.pop(key, None)
+        self._clear_retry_metadata(sync)
+        self._save_task_sync(task, sync)
 
     def _save_task_sync(self, task: BoardTask, sync: dict) -> None:
         with self.suppress_auto_sync_observer():

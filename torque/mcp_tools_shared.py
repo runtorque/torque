@@ -267,6 +267,21 @@ def _task_board_sync_inline_state(task) -> dict:
         "sync_state": str(sync.get("sync_state", "") or ""),
         "last_error": str(sync.get("last_error", "") or ""),
     }
+    for key in (
+        "last_attempt_at",
+        "next_retry_at_iso",
+        "last_error_at",
+        "last_error_provider",
+        "last_error_attempt",
+        "last_cleared_error",
+        "last_error_cleared_at",
+        "last_error_cleared_reason",
+    ):
+        value = sync.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    if "next_retry_at" in sync and "next_retry_at_iso" not in payload:
+        payload["next_retry_at"] = sync.get("next_retry_at")
     return payload if any(payload.values()) else {}
 
 
