@@ -272,6 +272,7 @@ def member_task_ids_for_stream(stream: dict) -> set[str]:
         "latest_boundary_task_id",
         "active_review_task_id",
         "active_blocker_task_id",
+        "blocker_parent_review_task_id",
         "ready_to_resume_task_id",
     ):
         task_id = str(stream.get(key, "") or "").strip()
@@ -662,6 +663,11 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 
     active_blocker_task = blocker_tasks[0] if blocker_tasks else None
     active_review_task = review_tasks[0] if review_tasks else None
+    blocker_parent_review_task = (
+        _nearest_review_ancestor(active_blocker_task, tasks_by_id)
+        if active_blocker_task
+        else None
+    )
     foreground_task = _select_foreground_task(
         state,
         branch=branch,
@@ -825,6 +831,21 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         "pr_head_sha": latest_boundary_pr.get("head_sha", ""),
         "active_review_task_id": getattr(active_review_task, "id", "") or "",
         "active_blocker_task_id": getattr(active_blocker_task, "id", "") or "",
+        "active_blocker_task_title": (
+            getattr(active_blocker_task, "task", "") or ""
+        ),
+        "active_blocker_health_state": (
+            getattr(active_blocker_task, "health_state", "") or ""
+        ),
+        "blocker_parent_review_task_id": (
+            getattr(blocker_parent_review_task, "id", "") or ""
+        ),
+        "blocker_parent_review_task_title": (
+            getattr(blocker_parent_review_task, "task", "") or ""
+        ),
+        "expected_next_transition": (
+            "re-review" if stream_state == "fixing_blockers" else ""
+        ),
         "state": stream_state,
         "code_state": code_state,
         "validation_state": validation_state,
@@ -1353,14 +1374,19 @@ def _is_held_task(task) -> bool:
 
 
 def _nearest_review_ancestor_id(task, tasks_by_id: dict[str, Any]) -> str:
+    review = _nearest_review_ancestor(task, tasks_by_id)
+    return str(getattr(review, "id", "") or "").strip() if review else ""
+
+
+def _nearest_review_ancestor(task, tasks_by_id: dict[str, Any]):
     current = task
     while current:
         current_id = str(getattr(current, "id", "") or "").strip()
         if current_id and _is_review_task(current):
-            return current_id
+            return current
         parent_id = str(getattr(current, "parent_task_id", "") or "").strip()
         current = tasks_by_id.get(parent_id) if parent_id else None
-    return ""
+    return None
 
 
 def _compute_queue_gate(*, queue_tasks: list[Any], tasks_by_id: dict[str, Any],

@@ -87,7 +87,7 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description": (
                         "Optional stream state filter such as "
-                        "'implementing', 'reviewing', "
+                        "'implementing', 'reviewing', 'fixing_blockers', "
                         "'awaiting_human_validation', or 'ready_to_merge'."
                     ),
                 },
