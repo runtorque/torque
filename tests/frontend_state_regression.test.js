@@ -4960,6 +4960,70 @@ test('renderBoardCard shows verification badges and preview text', () => {
   assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
 });
 
+test('renderBoardCard distinguishes deploy not attempted and flake evidence', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardScripts(context);
+
+  context.state.board_tasks = {
+    pending: {
+      id: 'pending',
+      group: 'alpha',
+      task: 'Smoke after operator deploy',
+      lane: 'Done',
+      position: 1,
+      verification_mode: 'deploy',
+      verification_state: 'pending',
+      verification_summary: {
+        deploy_attempted: false,
+        live_smoke_pending: true,
+        test_outcome: 'passed',
+      },
+    },
+    noDeploy: {
+      id: 'noDeploy',
+      group: 'alpha',
+      task: 'Deploy intentionally skipped',
+      lane: 'Done',
+      position: 2,
+      verification_mode: 'deploy',
+      verification_state: 'pending',
+      verification_summary: {
+        deploy_attempted: false,
+      },
+    },
+    flake: {
+      id: 'flake',
+      group: 'alpha',
+      task: 'Accept unrelated full-suite flake',
+      lane: 'Done',
+      position: 3,
+      verification_state: 'attempted',
+      verification_summary: {
+        test_outcome: 'unrelated_flake_accepted',
+        full_suite_attempted: true,
+        unrelated_flake_accepted: true,
+        isolated_rerun_evidence: 'targeted rerun passed',
+      },
+    },
+  };
+
+  const pendingHtml = runInContext(context, `
+    _renderBoardCard(state.board_tasks.pending, {}, 0)
+  `);
+  const flakeHtml = runInContext(context, `
+    _renderBoardCard(state.board_tasks.flake, {}, 0)
+  `);
+  const noDeployHtml = runInContext(context, `
+    _renderBoardCard(state.board_tasks.noDeploy, {}, 0)
+  `);
+
+  assert.match(pendingHtml, /Live smoke pending/);
+  assert.match(noDeployHtml, /Deploy not attempted/);
+  assert.match(flakeHtml, /Tests: unrelated flake accepted/);
+  assert.match(flakeHtml, /targeted rerun passed/);
+});
+
 test('renderBoardCard shows completion evidence badge', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

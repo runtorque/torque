@@ -376,6 +376,8 @@ torque task verify deploy-auth-middleware --mode deploy --attempted --note "Depl
 torque task verify deploy-auth-middleware --smoke passed --note "Login and billing pages load"
 torque task verify deploy-auth-middleware --smoke failed --note "Smoke failed on login redirect"
 torque task verify deploy-auth-middleware --clear-deploy-needed --clear-human --smoke passed
+torque task verify deploy-auth-middleware --test-outcome unrelated_flake_accepted --full-suite-attempted --flake-accepted --isolated-rerun "pytest tests/test_auth.py passed on rerun"
+torque task verify deploy-auth-middleware --state pending --clear-attempted --live-smoke-pending --human "Operator live smoke after deploy"
 ```
 
 | Flag | Description |
@@ -388,6 +390,12 @@ torque task verify deploy-auth-middleware --clear-deploy-needed --clear-human --
 | `--note` | Set verification notes |
 | `--clear-note` | Clear verification notes |
 | `--tests` | Set tests run summary |
+| `--test-outcome` | Set test taxonomy (`passed`, `full_suite_passed`, `full_suite_attempted`, `unrelated_flake_accepted`, `narrower_suite_accepted`, `failed`) or clear it |
+| `--full-suite-attempted` / `--clear-full-suite-attempted` | Mark or clear full-suite attempted evidence |
+| `--flake-accepted` / `--clear-flake-accepted` | Mark or clear accepted unrelated flake evidence |
+| `--isolated-rerun` / `--clear-isolated-rerun` | Record or clear focused/isolated rerun evidence |
+| `--reviewer-acceptance` | Record reviewer acceptance (`accepted_flake_evidence`, `accepted_narrower_suite`) |
+| `--live-smoke-pending` / `--clear-live-smoke-pending` | Mark or clear operator-side live smoke pending |
 | `--clear-tests` | Clear the tests run summary |
 | `--deploy-needed` | Mark that a deploy is still needed |
 | `--clear-deploy-needed` | Clear the deploy-needed flag |

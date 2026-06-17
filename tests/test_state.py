@@ -4745,6 +4745,57 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
         self.assertEqual(state.board_tasks[task.id].depends_on, [])
 
+    def test_verification_summary_normalizes_taxonomy_fields(self):
+        state = self._make_state()
+
+        task = state.board_add_task(
+            "Verify flaky run",
+            "g",
+            id="task-1",
+            verification_state="attempted",
+            verification_summary={
+                "tests_run": "make test",
+                "test_outcome": "unrelated_flake_accepted",
+                "full_suite_attempted": 1,
+                "unrelated_flake_accepted": True,
+                "isolated_rerun_evidence": (
+                    "python3 -m unittest tests.test_state passed"
+                ),
+                "reviewer_acceptance": "accepted_flake_evidence",
+                "live_smoke_pending": False,
+                "unknown_future_key": "ignored",
+            },
+        )
+
+        summary = task.verification_summary
+        self.assertEqual(summary["test_outcome"], "unrelated_flake_accepted")
+        self.assertTrue(summary["full_suite_attempted"])
+        self.assertTrue(summary["unrelated_flake_accepted"])
+        self.assertFalse(summary["live_smoke_pending"])
+        self.assertEqual(
+            summary["isolated_rerun_evidence"],
+            "python3 -m unittest tests.test_state passed",
+        )
+        self.assertEqual(
+            summary["reviewer_acceptance"],
+            "accepted_flake_evidence",
+        )
+        self.assertNotIn("unknown_future_key", summary)
+
+        state.board_update_task(
+            task.id,
+            verification_summary={
+                "test_outcome": "not-a-real-outcome",
+                "reviewer_acceptance": "not-a-real-acceptance",
+                "deploy_attempted": False,
+            },
+        )
+
+        summary = state.board_tasks[task.id].verification_summary
+        self.assertNotIn("test_outcome", summary)
+        self.assertNotIn("reviewer_acceptance", summary)
+        self.assertFalse(summary["deploy_attempted"])
+
     def test_dependency_updates_strip_invalid_entries_and_reject_cycles(self):
         state = self._make_state()
         task_a = state.board_add_task("Task A", "g", id="task-a")

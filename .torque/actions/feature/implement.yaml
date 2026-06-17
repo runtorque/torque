@@ -39,6 +39,8 @@ prompt: |
   - Write clean, minimal code that follows the existing patterns in the codebase
   - Add or update tests to cover the new behavior
   - Run the test suite to make sure nothing is broken
+  - If a broad suite hits an unrelated flake, preserve the full-suite-attempted evidence, rerun the focused failing/changed tests in isolation, and report the isolated pass plus why the flake is unrelated instead of flattening it into a generic pass/fail
+  - When live deploy/smoke cannot be run from the worker context, say deploy was not attempted and live smoke remains pending rather than implying deploy-mode verification ran
   - Keep the diff focused — no unrelated changes
 
   If you encounter something the plan didn't account for, handle it pragmatically. Only deviate from the plan when the plan is clearly wrong, and document what you changed and why in the derive description.

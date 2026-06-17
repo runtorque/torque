@@ -665,6 +665,39 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description": "What still needs human validation.",
                 },
+                "test_outcome": {
+                    "type": "string",
+                    "enum": [
+                        "passed",
+                        "full_suite_passed",
+                        "full_suite_attempted",
+                        "unrelated_flake_accepted",
+                        "narrower_suite_accepted",
+                        "failed",
+                    ],
+                    "description": "Structured test outcome taxonomy.",
+                },
+                "full_suite_attempted": {
+                    "type": "boolean",
+                    "description": "Whether the full test suite was attempted.",
+                },
+                "unrelated_flake_accepted": {
+                    "type": "boolean",
+                    "description": "Whether an unrelated flaky failure is accepted with evidence.",
+                },
+                "isolated_rerun_evidence": {
+                    "type": "string",
+                    "description": "Focused or isolated rerun evidence supporting flake acceptance.",
+                },
+                "reviewer_acceptance": {
+                    "type": "string",
+                    "enum": ["accepted_flake_evidence", "accepted_narrower_suite"],
+                    "description": "Reviewer acceptance of flake evidence or narrower-suite coverage.",
+                },
+                "live_smoke_pending": {
+                    "type": "boolean",
+                    "description": "Whether live smoke remains pending operator-side.",
+                },
                 "deploy_needed": {
                     "type": "boolean",
                     "description": "Whether a deploy is still required.",

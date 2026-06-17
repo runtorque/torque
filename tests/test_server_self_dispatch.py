@@ -455,6 +455,84 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("state=passed", message)
         self.assertIn("manual smoke done", message)
 
+    def test_apply_verification_report_records_flake_taxonomy(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Verify flaky suite",
+            group="g",
+            lane="In Progress",
+        )
+        saved = []
+
+        message, root = self.server_mod._apply_verification_report(
+            task,
+            {
+                "verification_state": "attempted",
+                "tests_run": "make test (sidecar reaper failed)",
+                "full_suite_attempted": True,
+                "unrelated_flake_accepted": True,
+                "isolated_rerun_evidence": (
+                    "python3 -m unittest tests.test_state passed"
+                ),
+                "reviewer_acceptance": "accepted_flake_evidence",
+                "verification_notes": "Sidecar reaper flake unrelated.",
+            },
+            "Reviewer",
+            lambda current: saved.append(current.id),
+            timestamp="2026-06-17T12:00:00+00:00",
+        )
+
+        self.assertIsNone(root)
+        self.assertEqual(task.verification_state, "attempted")
+        self.assertEqual(
+            task.verification_summary["test_outcome"],
+            "unrelated_flake_accepted",
+        )
+        self.assertTrue(task.verification_summary["full_suite_attempted"])
+        self.assertTrue(task.verification_summary["unrelated_flake_accepted"])
+        self.assertEqual(
+            task.verification_summary["isolated_rerun_evidence"],
+            "python3 -m unittest tests.test_state passed",
+        )
+        self.assertEqual(
+            task.verification_summary["reviewer_acceptance"],
+            "accepted_flake_evidence",
+        )
+        self.assertEqual(saved, ["task-1"])
+        self.assertIn("full suite attempted", message)
+        self.assertIn("unrelated flake accepted", message)
+        self.assertIn("reviewer acceptance=accepted_flake_evidence", message)
+
+    def test_apply_verification_report_records_live_smoke_pending_without_deploy(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Needs operator smoke",
+            group="g",
+            lane="In Progress",
+        )
+
+        message, _root = self.server_mod._apply_verification_report(
+            task,
+            {
+                "verification_state": "pending",
+                "tests_run": "python3 -m unittest tests.test_mcp",
+                "test_outcome": "passed",
+                "deploy_attempted": False,
+                "live_smoke_pending": True,
+                "human_validation_pending": "Operator live smoke after deploy",
+            },
+            "Worker",
+            lambda _current: None,
+            timestamp="2026-06-17T12:05:00+00:00",
+        )
+
+        self.assertEqual(task.verification_state, "pending")
+        self.assertEqual(task.verification_summary["test_outcome"], "passed")
+        self.assertFalse(task.verification_summary["deploy_attempted"])
+        self.assertTrue(task.verification_summary["live_smoke_pending"])
+        self.assertIn("deploy not attempted", message)
+        self.assertIn("live smoke pending", message)
+
     def test_torque_system_prompt_prefers_mcp_reporting_tools(self):
         prompt = self.server_prompts_mod.build_torque_system_prompt()
 

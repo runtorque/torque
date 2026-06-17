@@ -38,6 +38,8 @@ prompt: |
 
   - Read the full diff and verify that the code does what the task asked for, including stated acceptance criteria, non-goals, constraints, and handoff evidence
   - Run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
+  - If you accept a narrower suite or unrelated flaky full-suite failure, state the focused/isolated rerun evidence and explicitly say you accepted the narrower suite or flake evidence
+  - Distinguish deploy not attempted from deploy failed, and live smoke pending from completed smoke
   - Separate blocking issues from follow-up suggestions so merge decisions are clear
   - Summarize merge risk: conflicts, migration/config/runtime risk, and any cleanup still needed
   - If you derive a fix, make the handoff self-contained: exact blocker(s), expected fix scope, files/areas involved, tests already run, tests expected after the fix, and whether another review is required

@@ -5403,6 +5403,28 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if not board_task_is_closed(task) and verification_state in verification_counts:
                 verification_counts[verification_state] += 1
                 if verification_state in {"pending", "failed"}:
+                    verification_summary = getattr(
+                        task, "verification_summary", {}
+                    ) or {}
+                    if not isinstance(verification_summary, dict):
+                        verification_summary = {}
+                    detail = (
+                        verification_summary.get("human_validation_pending", "")
+                        or (
+                            "Live smoke pending"
+                            if verification_summary.get("live_smoke_pending")
+                            else ""
+                        )
+                        or (
+                            "Deploy not attempted"
+                            if verification_summary.get("deploy_attempted") is False
+                            else ""
+                        )
+                        or verification_summary.get("test_outcome", "")
+                        or getattr(task, "verification_notes", "")
+                        or verification_summary.get("tests_run", "")
+                        or ""
+                    )
                     item = {
                         "id": task.id,
                         "title": task.task,
@@ -5413,6 +5435,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                         "verification_notes": getattr(
                             task, "verification_notes", ""
                         ) or "",
+                        "detail": str(detail).strip(),
                     }
                     if include_created_by:
                         item["created_by"] = created_by
@@ -7037,6 +7060,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["tests_run"] = args["tests_run"]
         if "human_validation_pending" in args:
             payload["human_validation_pending"] = args["human_validation_pending"]
+        for key in (
+            "test_outcome",
+            "full_suite_attempted",
+            "unrelated_flake_accepted",
+            "isolated_rerun_evidence",
+            "reviewer_acceptance",
+            "live_smoke_pending",
+        ):
+            if key in args:
+                payload[key] = args[key]
         if "deploy_needed" in args:
             payload["deploy_needed"] = args["deploy_needed"]
         if "attempted" in args:

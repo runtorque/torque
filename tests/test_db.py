@@ -2008,6 +2008,11 @@ class TorqueDBTests(unittest.TestCase):
                     "manual_smoke_done": False,
                     "deploy_needed": True,
                     "human_validation_pending": "Confirm dashboard loads",
+                    "test_outcome": "full_suite_attempted",
+                    "full_suite_attempted": True,
+                    "deploy_attempted": False,
+                    "live_smoke_pending": True,
+                    "isolated_rerun_evidence": "targeted rerun passed",
                 },
                 completion_evidence={
                     "status": "evidence_attached",
@@ -2221,6 +2226,16 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["verification_summary"]["tests_run"],
             "python3 -m unittest",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["verification_summary"]["test_outcome"],
+            "full_suite_attempted",
+        )
+        self.assertFalse(
+            loaded["board_tasks"]["task-1"]["verification_summary"]["deploy_attempted"]
+        )
+        self.assertTrue(
+            loaded["board_tasks"]["task-1"]["verification_summary"]["live_smoke_pending"]
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["completion_evidence"]["sources"],

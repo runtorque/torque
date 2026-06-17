@@ -112,6 +112,20 @@ _ENGINEER_DISPATCH_SHAPE_ORDER = ("serial", "batch", "warm_cluster")
 _ENGINEER_DISPATCH_SHAPES = set(_ENGINEER_DISPATCH_SHAPE_ORDER)
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
+_VERIFICATION_TEST_OUTCOMES = {
+    "",
+    "passed",
+    "full_suite_passed",
+    "full_suite_attempted",
+    "unrelated_flake_accepted",
+    "narrower_suite_accepted",
+    "failed",
+}
+_VERIFICATION_REVIEWER_ACCEPTANCES = {
+    "",
+    "accepted_flake_evidence",
+    "accepted_narrower_suite",
+}
 TASK_DISPATCH_STATE_QUEUED = "queued"
 TASK_DISPATCH_STATE_LIVE = "live"
 TASK_DISPATCH_STATES = {TASK_DISPATCH_STATE_QUEUED, TASK_DISPATCH_STATE_LIVE}
@@ -1524,7 +1538,11 @@ def _normalize_verification_summary(summary) -> dict:
     if not isinstance(summary, dict):
         return {}
     out = {}
-    text_keys = ("tests_run", "human_validation_pending")
+    text_keys = (
+        "tests_run",
+        "human_validation_pending",
+        "isolated_rerun_evidence",
+    )
     for key in text_keys:
         value = summary.get(key, "")
         if value is None:
@@ -1534,7 +1552,28 @@ def _normalize_verification_summary(summary) -> dict:
         value = value.strip()
         if value:
             out[key] = value
-    for key in ("manual_smoke_done", "deploy_needed", "deploy_attempted"):
+
+    test_outcome = str(summary.get("test_outcome", "") or "").strip()
+    if test_outcome in _VERIFICATION_TEST_OUTCOMES and test_outcome:
+        out["test_outcome"] = test_outcome
+
+    reviewer_acceptance = str(
+        summary.get("reviewer_acceptance", "") or ""
+    ).strip()
+    if (
+        reviewer_acceptance in _VERIFICATION_REVIEWER_ACCEPTANCES
+        and reviewer_acceptance
+    ):
+        out["reviewer_acceptance"] = reviewer_acceptance
+
+    for key in (
+        "manual_smoke_done",
+        "deploy_needed",
+        "deploy_attempted",
+        "full_suite_attempted",
+        "unrelated_flake_accepted",
+        "live_smoke_pending",
+    ):
         if key in summary:
             out[key] = bool(summary.get(key))
     return out
