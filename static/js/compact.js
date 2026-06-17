@@ -25,6 +25,10 @@ const COMPACT_HEAVY_TASK_FIELDS = [
   'criteria',
   'action_vars',
   'agent_template',
+  'messages_thread',
+  'verification_notes',
+  'verification_summary',
+  'completion_evidence',
 ];
 
 function _compactFlagValue() {
@@ -193,6 +197,25 @@ function ensureTaskDetail(taskId, cb) {
  * The next render (driven by the task_detail merge) paints the hydrated
  * data. Bounded by ensureTaskDetail's per-task dedup, so repeated calls
  * per render are free. */
+function _compactTaskThreadSummary(task) {
+  var summary = task && task.messages_thread_summary;
+  return (summary && typeof summary === 'object') ? summary : {};
+}
+
+function _compactTaskThreadMayTargetAgent(task, agentId) {
+  agentId = String(agentId || '');
+  if (!task || !agentId) return false;
+  var summary = _compactTaskThreadSummary(task);
+  if (!summary.count) return false;
+  if (String(task.agent_id || '') === agentId) return true;
+  var recipients = Array.isArray(summary.recipient_agent_ids)
+    ? summary.recipient_agent_ids : [];
+  for (var i = 0; i < recipients.length; i++) {
+    if (String(recipients[i] || '') === agentId) return true;
+  }
+  return false;
+}
+
 function _compactHydrateTasksMatching(predicate) {
   if (!_compactModeActive() || typeof predicate !== 'function') return 0;
   if (!state || !state.board_tasks) return 0;

@@ -53,11 +53,8 @@ COMPACT_CARD_FIELDS = {
     "health_details",
     "verification_state",
     "verification_mode",
-    "verification_notes",
-    "verification_summary",
-    "completion_evidence",
     "messages",
-    "messages_thread",
+    "messages_thread_summary",
     "lane_entered_at",
     "worktree_boundary",
     "resume_after_boundary_task_id",
@@ -76,6 +73,10 @@ HEAVY_TASK_FIELDS = {
     "criteria",
     "action_vars",
     "agent_template",
+    "messages_thread",
+    "verification_notes",
+    "verification_summary",
+    "completion_evidence",
 }
 
 
@@ -110,7 +111,14 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             provider="github",
             external_id="123",
             external_url="https://example.test/tasks/123",
-            board_sync={"provider": "github", "sync_state": "idle"},
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "sync_state": "idle",
+                "last_synced_hash": "heavy-hash",
+                "github": {"issue_number": 123, "project_item_id": "heavy"},
+            },
             status="on-review",
             health_state="attention",
             health_since="2026-04-22T12:00:00+00:00",
@@ -123,10 +131,23 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
                 "status": "evidence_attached",
                 "sources": ["verification"],
             },
-            worktree_boundary={"repo_root": "/tmp/repo", "branch": "main"},
+            worktree_boundary={
+                "repo_root": "/tmp/repo",
+                "branch": "main",
+                "status": "open",
+                "diff": "heavy",
+                "pr": {"url": "https://example.test/pr/1", "number": 1, "body": "heavy"},
+            },
             resume_after_boundary_task_id="task-boundary",
             description="full description with lots of detail",
             messages=[{"action": "progress", "message": "progress body"}],
+            messages_thread=[{
+                "timestamp": 123,
+                "sender_agent_id": "eng-1",
+                "recipient_agent_id": "agent-1",
+                "content": "inline body",
+                "reply_required": True,
+            }],
             artifacts=[{"kind": "log", "url": "http://x"}],
             attachments=[{"kind": "pr", "url": "http://pr"}],
         )
@@ -201,20 +222,31 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         self.assertEqual(card["external_id"], "123")
         self.assertEqual(
             card["external_url"], "https://example.test/tasks/123")
-        self.assertEqual(
-            card["board_sync"], {"provider": "github", "sync_state": "idle"})
+        self.assertEqual(card["board_sync"], {
+            "version": 1,
+            "provider": "github",
+            "enabled": True,
+            "sync_state": "idle",
+        })
         self.assertEqual(card["health_since"], "2026-04-22T12:00:00+00:00")
         self.assertEqual(card["health_details"], {"reason": "recent_activity"})
-        self.assertEqual(card["verification_notes"], "needs smoke")
-        self.assertEqual(
-            card["verification_summary"], {"tests_run": "targeted"})
-        self.assertEqual(card["completion_evidence"]["sources"], ["verification"])
         self.assertEqual(
             card["messages"],
             [{"count": 1, "action": "progress", "message": "progress"}],
         )
-        self.assertEqual(
-            card["worktree_boundary"], {"repo_root": "/tmp/repo", "branch": "main"})
+        self.assertEqual(card["messages_thread_summary"], {
+            "count": 1,
+            "recipient_agent_ids": ["agent-1"],
+            "sender_agent_ids": ["eng-1"],
+            "reply_required": True,
+            "last_timestamp": 123.0,
+        })
+        self.assertEqual(card["worktree_boundary"], {
+            "repo_root": "/tmp/repo",
+            "branch": "main",
+            "status": "open",
+            "pr": {"url": "https://example.test/pr/1", "number": 1},
+        })
         self.assertEqual(
             card["resume_after_boundary_task_id"], "task-boundary")
 

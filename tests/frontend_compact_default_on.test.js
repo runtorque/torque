@@ -1,17 +1,18 @@
-/* Phase-2 regression harness for compact-v1 default-ON under the v2
- * eager-field contract (TORQUE:180).
+/* Regression harness for compact-v1 default-ON under the compact-card
+ * lazy-detail contract.
  *
  * Pins the behaviors that flipped in this phase:
  *   - default-ON: unset localStorage opts into compact, explicit sentinels opt
  *     out.
- *   - agent_panel engineer summaries no longer hydrate against eager fields.
- *   - _preservedMergeDiffForAgent narrows its hydrate scope via the now-eager
- *     worktree_boundary.
+ *   - agent_panel engineer summaries hydrate verification details only when the
+ *     focused surface needs them.
+ *   - _preservedMergeDiffForAgent narrows its hydrate scope via the eager
+ *     worktree_boundary summary.
  *   - showTaskMessages uses the eager messages-preview count to skip
  *     hydrating tasks with no messages.
- *   - board search treats description as lazy in compact mode: title / action
- *     / labels / verification fields all match, description-only queries
- *     only match tasks the operator has already hydrated.
+ *   - board search treats heavy detail as lazy in compact mode: title / action
+ *     / labels match from cards; description / verification notes match only
+ *     tasks the operator has already hydrated.
  *   - toolbelt runtime (embedded_terminal=false) exercises the same compact
  *     paths as standalone. */
 
@@ -107,7 +108,7 @@ test('compact-v1 / 1 / yes still opt in explicitly', () => {
   }
 });
 
-/* -- agent_panel engineer summaries: no redundant hydrate in v2 ----------- */
+/* -- agent_panel engineer summaries: lazy verification detail ------------ */
 
 function createEngineerSummaryHarness() {
   const { context, sandbox } = createCompactSandbox({
@@ -122,9 +123,7 @@ function createEngineerSummaryHarness() {
           health_details: { reason: 'idle' },
           verification_state: 'pending',
           verification_mode: 'deploy',
-          verification_notes: 'needs smoke',
-          verification_summary: { tests_run: 'targeted' },
-          completion_evidence: { status: 'evidence_attached', sources: ['verification'] },
+          messages_thread_summary: { count: 1, recipient_agent_ids: ['agent-1'] },
         },
         b: {
           id: 'b', group: 'alpha', task: 'Beta', lane: 'To Do',
@@ -152,7 +151,7 @@ function createEngineerSummaryHarness() {
   return { context, sandbox };
 }
 
-test('_engineerTaskHealthSummary does not hydrate compact cards in v2', () => {
+test('_engineerTaskHealthSummary reads compact health summaries without hydrate', () => {
   const { context, sandbox } = createEngineerSummaryHarness();
   const summary = plain(run(context, `_engineerTaskHealthSummary('alpha')`));
   assert.equal(summary.total, 1);
@@ -161,13 +160,13 @@ test('_engineerTaskHealthSummary does not hydrate compact cards in v2', () => {
   eq(sandbox.sendCalls.map(function(c) { return c.cmd; }), []);
 });
 
-test('_engineerVerificationSummary does not hydrate compact cards in v2', () => {
+test('_engineerVerificationSummary hydrates compact cards for lazy detail', () => {
   const { context, sandbox } = createEngineerSummaryHarness();
   const summary = plain(run(context, `_engineerVerificationSummary('alpha')`));
   assert.equal(summary.total, 1);
   assert.equal(summary.items[0].id, 'a');
-  assert.equal(summary.items[0].detail, 'needs smoke');
-  eq(sandbox.sendCalls.map(function(c) { return c.cmd; }), []);
+  assert.equal(summary.items[0].detail, '');
+  eq(sandbox.sendCalls, [{ cmd: 'task_detail', id: 'a' }]);
 });
 
 /* -- _preservedMergeDiffForAgent: narrowed hydrate via eager boundary --- */
@@ -328,9 +327,7 @@ function createBoardSearchHarness(opts) {
       group: 'alpha', lane: 'To Do', position: 1,
       action_name: 'feature/implement', labels: ['performance'],
       verification_state: 'pending', verification_mode: 'deploy',
-      verification_notes: 'smoke checks',
-      verification_summary: { tests_run: 'targeted' },
-      completion_evidence: { status: 'evidence_attached', sources: ['verification'] },
+      verification_state: 'pending', verification_mode: 'deploy',
     },
     't-desc': {
       id: 't-desc', task: 'plain card',
@@ -386,10 +383,14 @@ function createBoardSearchHarness(opts) {
         var parts = [t.task, descriptionForSearch, t.id, t.action_name, t.agent_id];
         parts.push(t.verification_mode || '');
         parts.push(t.verification_state || '');
-        parts.push(t.verification_notes || '');
-        var vs = t.verification_summary || {};
-        parts.push(vs.tests_run || '');
-        parts.push(vs.human_validation_pending || '');
+        if (!compactActive
+            || typeof _compactTaskHasFullDetail !== 'function'
+            || _compactTaskHasFullDetail(t)) {
+          parts.push(t.verification_notes || '');
+          var vs = t.verification_summary || {};
+          parts.push(vs.tests_run || '');
+          parts.push(vs.human_validation_pending || '');
+        }
         if (t.labels && t.labels.length) {
           for (var li = 0; li < t.labels.length; li++) {
             parts.push(t.labels[li]);
@@ -418,7 +419,7 @@ test('board search matches eager fields in compact mode (standalone)', () => {
     ['t-action', 't-label', 't-title']);
   eq(run(context, `_boardSearchMatch('feature/review')`), ['t-desc']);
   eq(run(context, `_boardSearchMatch('chore')`), ['t-unrelated']);
-  eq(run(context, `_boardSearchMatch('smoke')`), ['t-title']);
+  eq(run(context, `_boardSearchMatch('smoke')`), []);
 });
 
 test('board search skips description bodies for unhydrated compact cards', () => {
@@ -439,13 +440,13 @@ test('board search behaves identically in toolbelt-mode runtime', () => {
   });
   eq(run(context, `_boardSearchMatch('supernova')`),
     ['t-action', 't-label', 't-title']);
-  eq(run(context, `_boardSearchMatch('smoke')`), ['t-title']);
+  eq(run(context, `_boardSearchMatch('smoke')`), []);
   eq(run(context, `_boardSearchMatch('body text')`), []);
 });
 
 /* -- Card-level eager fields render without hydrate -------------------- */
 
-test('compact cards expose eager v2 fields for deps / external / sync / boundary', () => {
+test('compact cards expose only card-level fields for deps / external / sync / boundary', () => {
   const { context } = createCompactSandbox({
     state: {
       snapshot_protocol: 'compact-v1',
@@ -457,20 +458,22 @@ test('compact cards expose eager v2 fields for deps / external / sync / boundary
           external_id: '42',
           external_url: 'https://example.test/issues/42',
           board_sync: {
+            version: 1,
             provider: 'github',
+            enabled: true,
             sync_state: 'error',
             last_error: 'missing project scope',
           },
           worktree_boundary: {
             repo_root: '/repo', branch: 'feature/x', status: 'open',
+            pr: { url: 'https://example.test/pr/1', number: 1, state: 'open' },
           },
           resume_after_boundary_task_id: 't-boundary',
           messages: [{ count: 7, action: 'progress', message: '7 updates · last progress' }],
           health_state: 'stalled',
           health_details: { reason: 'idle' },
           verification_state: 'pending',
-          verification_summary: { tests_run: 'targeted' },
-          completion_evidence: { status: 'evidence_attached', sources: ['verification'] },
+          messages_thread_summary: { count: 2, recipient_agent_ids: ['agent-1'] },
         },
       },
     },
@@ -479,16 +482,20 @@ test('compact cards expose eager v2 fields for deps / external / sync / boundary
   eq(card.depends_on, ['t-root']);
   assert.equal(card.provider, 'github');
   assert.equal(card.external_url, 'https://example.test/issues/42');
+  assert.equal(card.board_sync.version, 1);
   assert.equal(card.board_sync.provider, 'github');
   assert.equal(card.board_sync.sync_state, 'error');
   assert.equal(card.board_sync.last_error, 'missing project scope');
   assert.equal(card.worktree_boundary.status, 'open');
+  assert.equal(card.worktree_boundary.pr.number, 1);
   assert.equal(card.resume_after_boundary_task_id, 't-boundary');
   assert.equal(card.messages.length, 1);
   assert.equal(card.messages[0].count, 7);
   assert.equal(card.messages[0].action, 'progress');
   assert.equal(card.health_state, 'stalled');
   assert.equal(card.verification_state, 'pending');
-  assert.equal(card.verification_summary.tests_run, 'targeted');
-  assert.deepEqual(card.completion_evidence.sources, ['verification']);
+  assert.equal(card.messages_thread_summary.count, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(card, 'verification_summary'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(card, 'completion_evidence'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(card, 'messages_thread'), false);
 });

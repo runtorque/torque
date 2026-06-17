@@ -310,17 +310,17 @@ COMPACT_BOARD_TASK_FIELDS = (
     "provider",
     "external_id",
     "external_url",
+    # Compact summaries for fields whose full value can grow with provider
+    # metadata, nested evidence, or message history. Full values remain
+    # available via task_detail.
     "board_sync",
     "health_state",
     "health_since",
     "health_details",
     "verification_state",
     "verification_mode",
-    "verification_notes",
-    "verification_summary",
-    "completion_evidence",
     "messages",
-    "messages_thread",
+    "messages_thread_summary",
     "lane_entered_at",
     "worktree_boundary",
     "resume_after_boundary_task_id",
@@ -1695,6 +1695,14 @@ def board_task_compact(task: BoardTask) -> dict:
     for field_name in COMPACT_BOARD_TASK_FIELDS:
         if field_name == "messages":
             value = _compact_task_messages_preview(getattr(task, field_name))
+        elif field_name == "messages_thread_summary":
+            value = _compact_messages_thread_summary(task.messages_thread)
+        elif field_name == "board_sync":
+            value = _compact_board_sync_summary(task.board_sync)
+        elif field_name == "health_details":
+            value = _compact_health_details_summary(task.health_details)
+        elif field_name == "worktree_boundary":
+            value = _compact_worktree_boundary_summary(task.worktree_boundary)
         else:
             value = getattr(task, field_name)
         if isinstance(value, dict):
@@ -1725,6 +1733,115 @@ def _compact_task_messages_preview(messages) -> list[dict]:
     if action:
         preview["action"] = action
     return [preview]
+
+
+def _compact_messages_thread_summary(messages) -> dict:
+    """Return a count/recipient summary for lazy inline-message hydration."""
+    entries = [entry for entry in list(messages or []) if isinstance(entry, dict)]
+    if not entries:
+        return {}
+    recipients: list[str] = []
+    senders: list[str] = []
+    reply_required = False
+    last_ts = 0.0
+    for entry in entries:
+        recipient = str(entry.get("recipient_agent_id", "") or "").strip()
+        sender = str(entry.get("sender_agent_id", "") or "").strip()
+        if recipient and recipient not in recipients:
+            recipients.append(recipient)
+        if sender and sender not in senders:
+            senders.append(sender)
+        reply_required = reply_required or bool(entry.get("reply_required"))
+        try:
+            last_ts = max(last_ts, float(entry.get("timestamp", 0) or 0))
+        except (TypeError, ValueError):
+            pass
+    summary = {
+        "count": len(entries),
+        "recipient_agent_ids": recipients[:8],
+        "sender_agent_ids": senders[:8],
+        "reply_required": reply_required,
+    }
+    if last_ts > 0:
+        summary["last_timestamp"] = last_ts
+    return summary
+
+
+def _compact_board_sync_summary(sync) -> dict:
+    """Return card-level board-sync state without provider history/details."""
+    if not isinstance(sync, dict):
+        return {}
+    out: dict = {}
+    for key in ("version", "provider", "enabled", "sync_state", "skipped"):
+        if key in sync:
+            out[key] = sync.get(key)
+    last_error = str(sync.get("last_error", "") or "").strip()
+    if last_error:
+        out["last_error"] = last_error[:500]
+    return out
+
+
+def _compact_health_details_summary(details) -> dict:
+    """Return fields needed by board/engineer summaries from health_details."""
+    if not isinstance(details, dict):
+        return {}
+    out: dict = {}
+    for key in (
+            "aggregate",
+            "source_task_id",
+            "source_task_title",
+            "last_activity_at",
+            "silence_secs"):
+        if key in details:
+            out[key] = details.get(key)
+    reasons = details.get("reasons")
+    if isinstance(reasons, list) and reasons:
+        out["reasons"] = [str(item) for item in reasons[:4]]
+    reason = str(details.get("reason", "") or "").strip()
+    if reason:
+        out["reason"] = reason[:160]
+    return out
+
+
+def _compact_worktree_boundary_summary(boundary) -> dict:
+    """Return branch/PR summary required for card and branch-overview UI."""
+    if not isinstance(boundary, dict):
+        return {}
+    out: dict = {}
+    for key in (
+            "repo_root",
+            "branch",
+            "base_branch",
+            "status",
+            "recorded_at",
+            "merged_at",
+            "merge_commit_sha"):
+        value = boundary.get(key, "")
+        if value not in ("", None):
+            out[key] = value
+    pr = boundary.get("pr")
+    if not isinstance(pr, dict):
+        pr = boundary.get("pull_request")
+    if isinstance(pr, dict):
+        pr_out: dict = {}
+        for key in ("url", "number", "state", "status", "merge_state", "head_sha"):
+            value = pr.get(key, "")
+            if value not in ("", None):
+                pr_out[key] = value
+        if pr_out:
+            out["pr"] = pr_out
+    for key in (
+            "pr_url",
+            "pr_number",
+            "pr_state",
+            "pr_status",
+            "pr_merge_state",
+            "pr_head_sha",
+            "pr_pending"):
+        value = boundary.get(key, "")
+        if value not in ("", None):
+            out[key] = value
+    return out
 
 
 def _normalize_messages_thread(messages) -> list[dict]:
