@@ -275,6 +275,71 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state.board_tasks[task.id].board_sync["sync_state"], "error")
         self.assertEqual(state.board_tasks[task.id].board_sync["last_error"], "boom")
+        self.assertEqual(
+            state.board_tasks[task.id].board_sync["last_error_provider"],
+            "github",
+        )
+        self.assertEqual(
+            state.board_tasks[task.id].board_sync["last_error_attempt"],
+            1,
+        )
+        self.assertTrue(
+            state.board_tasks[task.id].board_sync["last_error_current"],
+        )
+
+    async def test_failed_sync_then_success_clears_stale_error_metadata(self):
+        class FailOnceProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                if len(self.push_calls) == 1:
+                    return {
+                        "version": 1,
+                        "provider": self.name,
+                        "enabled": True,
+                        "sync_state": "error",
+                        "last_error": 'Unknown JSON field: "repository"',
+                    }
+                return {
+                    **dict(task.board_sync or {}),
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "idle",
+                    "last_error": "",
+                }
+
+        provider = FailOnceProvider()
+        state = make_state()
+        task = state.board_add_task(
+            "Tracked",
+            "g",
+            id="task-fail-then-success",
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        manager = self.make_manager(state, provider)
+        manager.start()
+
+        manager.enqueue_task(task.id, reason="explicit", explicit=True)
+        await asyncio.wait_for(manager.queue.join(), timeout=1)
+        failed_sync = state.board_tasks[task.id].board_sync
+        self.assertEqual(failed_sync["sync_state"], "error")
+        self.assertIn("repository", failed_sync["last_error"])
+        self.assertEqual(failed_sync["last_error_attempt"], 1)
+
+        manager.enqueue_task(task.id, reason="manual_retry", explicit=True)
+        await asyncio.wait_for(manager.queue.join(), timeout=1)
+
+        sync = state.board_tasks[task.id].board_sync
+        self.assertEqual(provider.push_calls, [task.id, task.id])
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["last_error"], "")
+        self.assertNotIn("last_error_attempt", sync)
+        self.assertNotIn("last_error_current", sync)
+        self.assertIn("repository", sync["last_cleared_error"])
+        self.assertEqual(sync["last_error_cleared_reason"], "manual_retry")
+        self.assertEqual(sync["sync_attempt"], 2)
+        self.assertIn("last_success_at", sync)
 
     async def test_repo_lock_serializes_concurrent_syncs(self):
         provider = FakeBoardSyncProvider()
@@ -310,6 +375,43 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.queue.qsize(), 1)
         self.assertEqual(state.board_tasks[task.id].board_sync["sync_state"], "queued")
         self.assertEqual(provider.push_calls, [])
+
+    async def test_start_rehydrates_persisted_queued_work(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        task = state.board_add_task(
+            "Tracked",
+            "g",
+            id="task-restart-queued",
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        first_manager = self.make_manager(state, provider)
+
+        result = first_manager.enqueue_task(task.id, reason="task_update")
+
+        self.assertTrue(result["queued"])
+        self.assertEqual(first_manager.queue.qsize(), 1)
+        self.assertEqual(provider.push_calls, [])
+        self.manager = None
+        restarted_manager = BoardSyncManager(
+            state,
+            provider_factory=lambda _name: provider,
+            debounce_seconds=0,
+        )
+        self.manager = restarted_manager
+        restarted_manager.start()
+        await asyncio.wait_for(restarted_manager.queue.join(), timeout=1)
+
+        self.assertEqual(provider.push_calls, [task.id])
+        self.assertEqual(
+            state.board_tasks[task.id].board_sync["sync_state"],
+            "idle",
+        )
+        self.assertEqual(
+            state.board_tasks[task.id].board_sync["last_attempt_reason"],
+            "restart_recover",
+        )
 
     async def test_task_upsert_observer_coalesces_create_and_update_to_latest(self):
         provider = FakeBoardSyncProvider()
@@ -444,6 +546,99 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
             "retry_backoff_seconds",
         ):
             self.assertNotIn(key, sync)
+
+    async def test_provider_config_change_requeues_failed_sync(self):
+        class FailThenSuccessProvider(FakeBoardSyncProvider):
+            async def push_task(self, task, settings):
+                await super().push_task(task, settings)
+                if len(self.push_calls) == 1:
+                    return {
+                        "version": 1,
+                        "provider": self.name,
+                        "enabled": True,
+                        "sync_state": "error",
+                        "last_error": "project field missing",
+                    }
+                return {
+                    **dict(task.board_sync or {}),
+                    "version": 1,
+                    "provider": self.name,
+                    "enabled": True,
+                    "sync_state": "idle",
+                    "last_error": "",
+                }
+
+        provider = FailThenSuccessProvider()
+        state = make_state()
+        task = state.board_add_task(
+            "Config retry",
+            "g",
+            id="task-config-retry",
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        manager = self.make_manager(state, provider)
+        manager.start()
+
+        manager.enqueue_task(task.id, reason="explicit", explicit=True)
+        await asyncio.wait_for(manager.queue.join(), timeout=1)
+        self.assertEqual(
+            state.board_tasks[task.id].board_sync["sync_state"],
+            "error",
+        )
+
+        state.update_group_settings(
+            "g",
+            board_sync_github={
+                "github_repo": "owner/repo",
+                "github_project_owner": "owner",
+                "github_project_number": 2,
+            },
+        )
+        await asyncio.wait_for(manager.queue.join(), timeout=1)
+
+        sync = state.board_tasks[task.id].board_sync
+        self.assertEqual(provider.push_calls, [task.id, task.id])
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["last_error"], "")
+        self.assertEqual(
+            sync["last_error_cleared_reason"],
+            "provider_config_change",
+        )
+        self.assertEqual(sync["last_attempt_reason"], "provider_config_change")
+
+    async def test_provider_disable_reconciles_stale_error_without_retry(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state()
+        task = state.board_add_task(
+            "Stale error",
+            "g",
+            id="task-stale-error",
+            provider="github",
+            external_id="owner/repo#1",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "sync_state": "error",
+                "last_error": "old schema error",
+                "last_error_attempt": 3,
+            },
+        )
+        manager = self.make_manager(state, provider)
+        manager.start()
+
+        state.update_group_settings("g", board_sync_enabled=False)
+        await asyncio.sleep(0.02)
+
+        sync = state.board_tasks[task.id].board_sync
+        self.assertEqual(provider.push_calls, [])
+        self.assertEqual(manager.queue.qsize(), 0)
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["last_error"], "")
+        self.assertEqual(sync["last_cleared_error"], "old schema error")
+        self.assertEqual(sync["last_error_cleared_reason"], "sync_disabled")
+        self.assertNotIn("last_error_attempt", sync)
 
     async def test_later_non_transient_error_clears_retry_metadata(self):
         class TransientThenTerminalProvider(FakeBoardSyncProvider):
