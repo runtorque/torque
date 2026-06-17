@@ -326,6 +326,256 @@ let _addEngineerArchitectId = '';
 let _addEngineerSpecs = [];
 let _addEngineerSpecializationsGroup = null;
 
+// Shared focus/ARIA behavior for custom dialog overlays.
+//
+// Keep this helper intentionally small: it owns initial focus, focus restore,
+// Escape/cancel, optional Enter submit for simple flows, Tab containment, and
+// basic dialog ARIA attributes. The first adopters are the custom confirm/input
+// dialogs from the native-prompt replacement work plus the high-use Engineer
+// launch dialog. Larger multi-section modals (task, group settings, artifacts,
+// behavior approval, diff preview) are deferred so each can opt in with its own
+// submit/cancel semantics instead of broadening this slice.
+let _modalDialogControllers = new Map();
+
+function _modalDialogOverlay(target) {
+  if (!target) return null;
+  if (typeof target === 'string') return document.getElementById(target);
+  return target;
+}
+
+function _modalDialogPanel(overlay) {
+  if (!overlay) return null;
+  if (overlay.classList && overlay.classList.contains('modal')) return overlay;
+  if (typeof overlay.querySelector === 'function') {
+    return overlay.querySelector('.modal') || overlay;
+  }
+  return overlay;
+}
+
+function _modalDialogSetAttr(el, name, value) {
+  if (!el || !name) return;
+  if (value === null || value === undefined || value === '') {
+    if (typeof el.removeAttribute === 'function') el.removeAttribute(name);
+    else if (el.attributes) delete el.attributes[name];
+    return;
+  }
+  if (typeof el.setAttribute === 'function') el.setAttribute(name, String(value));
+  else {
+    el.attributes = el.attributes || {};
+    el.attributes[name] = String(value);
+  }
+}
+
+function _modalDialogGetAttr(el, name) {
+  if (!el || !name) return '';
+  if (typeof el.getAttribute === 'function') return el.getAttribute(name) || '';
+  return el.attributes ? (el.attributes[name] || '') : '';
+}
+
+function _modalDialogEnsureTitleId(panel) {
+  if (!panel || typeof panel.querySelector !== 'function') return '';
+  const title = panel.querySelector('h1,h2,h3,[data-modal-title]');
+  if (!title) return '';
+  if (!title.id) {
+    const overlay = panel.parentNode && panel.parentNode.id ? panel.parentNode.id : 'modal-dialog';
+    title.id = overlay + '-title';
+  }
+  return title.id || '';
+}
+
+function _modalDialogApplyAria(panel, opts) {
+  if (!panel) return;
+  opts = opts || {};
+  _modalDialogSetAttr(panel, 'role', opts.role || _modalDialogGetAttr(panel, 'role') || 'dialog');
+  _modalDialogSetAttr(panel, 'aria-modal', 'true');
+  const labelledBy = opts.labelledBy || _modalDialogGetAttr(panel, 'aria-labelledby')
+    || (opts.label ? '' : _modalDialogEnsureTitleId(panel));
+  if (labelledBy) {
+    _modalDialogSetAttr(panel, 'aria-labelledby', labelledBy);
+    if (!opts.label) _modalDialogSetAttr(panel, 'aria-label', null);
+  } else {
+    if (opts.label) _modalDialogSetAttr(panel, 'aria-label', opts.label);
+  }
+  if (opts.describedBy) _modalDialogSetAttr(panel, 'aria-describedby', opts.describedBy);
+}
+
+function _modalDialogIsFocusable(el) {
+  if (!el || typeof el.focus !== 'function') return false;
+  if (el.disabled) return false;
+  if (el.hidden) return false;
+  if (el.classList && el.classList.contains('hidden')) return false;
+  return true;
+}
+
+function _modalDialogFocusable(panel) {
+  if (!panel || typeof panel.querySelectorAll !== 'function') return [];
+  const selector = [
+    'a[href]',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    '[tabindex]:not([tabindex="-1"])',
+    '[contenteditable="true"]',
+  ].join(',');
+  return Array.prototype.slice.call(panel.querySelectorAll(selector))
+    .filter(_modalDialogIsFocusable);
+}
+
+function _modalDialogResolveFocus(panel, initialFocus) {
+  let target = null;
+  if (typeof initialFocus === 'function') {
+    try { target = initialFocus(panel); } catch (_e) { target = null; }
+  } else if (typeof initialFocus === 'string' && panel && typeof panel.querySelector === 'function') {
+    target = panel.querySelector(initialFocus);
+  } else if (initialFocus && typeof initialFocus.focus === 'function') {
+    target = initialFocus;
+  }
+  if (target && _modalDialogIsFocusable(target)) return target;
+  if (panel && typeof panel.querySelector === 'function') {
+    target = panel.querySelector('[autofocus]');
+    if (target && _modalDialogIsFocusable(target)) return target;
+  }
+  const focusable = _modalDialogFocusable(panel);
+  if (focusable.length) return focusable[0];
+  return panel && typeof panel.focus === 'function' ? panel : null;
+}
+
+function _modalDialogFocusInitial(controller) {
+  if (!controller || controller.closed) return;
+  const target = _modalDialogResolveFocus(controller.panel, controller.opts.initialFocus);
+  if (!target) return;
+  try { target.focus(); } catch (_e) {}
+  if (controller.opts.selectInitialFocus && typeof target.select === 'function') {
+    try { target.select(); } catch (_e) {}
+  }
+}
+
+function _modalDialogRestoreFocus(target) {
+  if (!target || typeof target.focus !== 'function') return;
+  try { target.focus(); } catch (_e) {}
+}
+
+function _modalDialogShouldSubmitOnEnter(event) {
+  if (!event || event.key !== 'Enter') return false;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
+  const target = event.target || document.activeElement;
+  const tag = target && target.tagName ? String(target.tagName).toUpperCase() : '';
+  if (tag === 'TEXTAREA') return false;
+  if (target && target.isContentEditable) return false;
+  return true;
+}
+
+function openModalDialog(target, opts) {
+  opts = opts || {};
+  const overlay = _modalDialogOverlay(target);
+  if (!overlay) return null;
+  const existing = _modalDialogControllers.get(overlay);
+  if (existing) existing.cleanup({ restoreFocus: false });
+  const panel = _modalDialogPanel(overlay);
+  _modalDialogApplyAria(panel, opts);
+  if (overlay.classList && opts.show !== false) overlay.classList.add('visible');
+  if (overlay.classList && opts.nested) overlay.classList.add('modal-nested');
+
+  const controller = {
+    overlay: overlay,
+    panel: panel,
+    opts: opts,
+    restoreTarget: opts.restoreFocusTo || document.activeElement || null,
+    closed: false,
+    cleanup: null,
+    close: null,
+  };
+
+  const keydown = function(event) {
+    if (!event) return;
+    if (event.key === 'Escape' && opts.cancelOnEscape !== false) {
+      if (event.preventDefault) event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+      if (typeof opts.onCancel === 'function') {
+        opts.onCancel(event);
+      } else {
+        closeModalDialog(overlay, { restoreFocus: true });
+      }
+      return;
+    }
+    if (event.key === 'Tab' && opts.trapFocus !== false) {
+      const focusable = _modalDialogFocusable(panel);
+      if (!focusable.length) {
+        if (event.preventDefault) event.preventDefault();
+        return;
+      }
+      const active = document.activeElement;
+      let idx = focusable.indexOf(active);
+      if (event.shiftKey) {
+        if (idx <= 0) idx = focusable.length;
+        idx -= 1;
+      } else {
+        idx = idx < 0 || idx >= focusable.length - 1 ? 0 : idx + 1;
+      }
+      if (event.preventDefault) event.preventDefault();
+      try { focusable[idx].focus(); } catch (_e) {}
+      return;
+    }
+    if (opts.submitOnEnter && _modalDialogShouldSubmitOnEnter(event)) {
+      if (event.preventDefault) event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+      if (typeof opts.onSubmit === 'function') opts.onSubmit(event);
+    }
+  };
+
+  controller.cleanup = function(cleanupOpts) {
+    cleanupOpts = cleanupOpts || {};
+    if (controller.closed) return;
+    controller.closed = true;
+    if (overlay && typeof overlay.removeEventListener === 'function') {
+      overlay.removeEventListener('keydown', keydown, true);
+    }
+    _modalDialogControllers.delete(overlay);
+    if (cleanupOpts.restoreFocus !== false) {
+      _modalDialogRestoreFocus(controller.restoreTarget);
+    }
+  };
+  controller.close = function(closeOpts) {
+    closeOpts = closeOpts || {};
+    controller.cleanup(closeOpts);
+    if (overlay.classList && closeOpts.hide !== false) {
+      overlay.classList.remove('visible');
+      overlay.classList.remove('modal-nested');
+    }
+  };
+
+  _modalDialogControllers.set(overlay, controller);
+  if (overlay && typeof overlay.addEventListener === 'function') {
+    overlay.addEventListener('keydown', keydown, true);
+  }
+  _modalDialogFocusInitial(controller);
+  return controller;
+}
+
+function closeModalDialog(target, opts) {
+  opts = opts || {};
+  const overlay = _modalDialogOverlay(target);
+  if (!overlay) return false;
+  const controller = _modalDialogControllers.get(overlay);
+  if (controller) {
+    controller.close(opts);
+    return true;
+  }
+  if (overlay.classList && opts.hide !== false) {
+    overlay.classList.remove('visible');
+    overlay.classList.remove('modal-nested');
+  }
+  if (opts.restoreFocusTo) _modalDialogRestoreFocus(opts.restoreFocusTo);
+  return false;
+}
+
+function cleanupModalDialogs(opts) {
+  Array.from(_modalDialogControllers.keys()).forEach(function(overlay) {
+    closeModalDialog(overlay, opts || {});
+  });
+}
+
 // Modal stack for nested modals. When a nested modal is opened on top of
 // another (e.g. "New specialization" inside the engineer-launch dialog),
 // the opener pushes onto this stack via openNestedModal(), and Cancel/
@@ -335,12 +585,14 @@ let _modalStack = [];
 function openNestedModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.add('visible');
   // Raise above the parent overlay regardless of DOM order. Without this
   // class, two .visible overlays at the same z-index render in document
   // order — a parent declared later in the DOM (e.g. Group Settings) would
   // paint on top of an earlier-declared child like #modal-new-specialization.
-  el.classList.add('modal-nested');
+  openModalDialog(el, {
+    nested: true,
+    onCancel: function() { closeNestedModal(id); },
+  });
   if (_modalStack.indexOf(id) === -1) _modalStack.push(id);
 }
 
@@ -353,8 +605,7 @@ function closeNestedModal(id) {
   if (!target) return false;
   const el = document.getElementById(target);
   if (el) {
-    el.classList.remove('visible');
-    el.classList.remove('modal-nested');
+    closeModalDialog(el, { restoreFocus: true });
   }
   const idx = _modalStack.lastIndexOf(target);
   if (idx >= 0) _modalStack.splice(idx, 1);
@@ -388,8 +639,7 @@ function closeModals() {
     const topId = _modalStack.pop();
     const el = document.getElementById(topId);
     if (el) {
-      el.classList.remove('visible');
-      el.classList.remove('modal-nested');
+      closeModalDialog(el, { restoreFocus: true });
     }
     return;
   }
@@ -410,8 +660,7 @@ function closeModals() {
     document.querySelectorAll('.overlay').forEach(o => {
       if (o && o.id === 'diff-view-root') return;
       if (o && o.classList.contains('visible')) {
-        o.classList.remove('visible');
-        o.classList.remove('modal-nested');
+        closeModalDialog(o, { restoreFocus: true });
         closedOverlayAboveDiff = true;
       }
     });
@@ -424,8 +673,7 @@ function closeModals() {
     }
   }
   document.querySelectorAll('.overlay').forEach(o => {
-    o.classList.remove('visible');
-    o.classList.remove('modal-nested');
+    closeModalDialog(o, { restoreFocus: true });
   });
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
@@ -478,11 +726,18 @@ function showConfirm(message, opts) {
     const defaultLabel = /^\s*Delete\b/.test(String(message || '')) ? 'Delete' : 'OK';
     btn.textContent = (opts && opts.label) || defaultLabel;
     btn.className = 'btn-primary ' + ((opts && opts.variant) || 'btn-danger');
-    document.getElementById('modal-confirm').classList.add('visible');
+    openModalDialog('modal-confirm', {
+      role: (opts && opts.role) || 'alertdialog',
+      label: (opts && opts.title) || 'Confirm action',
+      describedBy: 'confirm-message',
+      initialFocus: '#confirm-yes-btn',
+      cancelOnEscape: true,
+      onCancel: confirmNo,
+    });
   });
 }
 function _confirmResult(accepted) {
-  document.getElementById('modal-confirm').classList.remove('visible');
+  closeModalDialog('modal-confirm', { restoreFocus: true });
   if (!_confirmResolve) return;
   if (!accepted) { _confirmResolve(false); _confirmResolve = null; return; }
   const extras = document.getElementById('confirm-extras');
@@ -583,10 +838,17 @@ function showInputDialog(opts) {
     }
     submitBtn.textContent = String(opts.submitLabel || 'OK');
     submitBtn.className = 'btn-primary ' + (opts.variant || '');
-    modal.classList.add('visible');
     const focusTarget = autofocusInput || firstInput;
-    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
-    if (focusTarget && typeof focusTarget.select === 'function') focusTarget.select();
+    openModalDialog(modal, {
+      role: 'dialog',
+      labelledBy: 'input-dialog-title',
+      describedBy: opts.summary ? 'input-dialog-summary' : '',
+      initialFocus: focusTarget,
+      selectInitialFocus: true,
+      submitOnEnter: true,
+      onSubmit: submitInputDialog,
+      onCancel: cancelInputDialog,
+    });
   });
 }
 
@@ -609,10 +871,9 @@ function submitInputDialog() {
   _inputDialogFields = [];
   _inputDialogFieldElements = {};
   const modal = document.getElementById('modal-input-dialog');
-  if (modal) modal.classList.remove('visible');
+  if (modal) closeModalDialog(modal, { restoreFocus: true });
   _setInputDialogError('');
   resolve(values);
-  _restoreInputDialogFocus();
 }
 
 function cancelInputDialog() {
@@ -622,10 +883,9 @@ function cancelInputDialog() {
   _inputDialogFields = [];
   _inputDialogFieldElements = {};
   const modal = document.getElementById('modal-input-dialog');
-  if (modal) modal.classList.remove('visible');
+  if (modal) closeModalDialog(modal, { restoreFocus: true });
   _setInputDialogError('');
   resolve(null);
-  _restoreInputDialogFocus();
 }
 
 /* -- Add Group -------------------------------------------------------- */
