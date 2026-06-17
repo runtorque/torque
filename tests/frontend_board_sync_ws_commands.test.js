@@ -512,9 +512,8 @@ test('board sync-only GitHub links can be unlinked and opt out of tracking', () 
   });
 });
 
-test('editing a board sync-only GitHub link clears stale sync metadata', () => {
+test('editing a board sync-only GitHub link uses custom dialog and clears stale sync metadata', async () => {
   const { sandbox } = createSandbox();
-  sandbox.promptResponses.push('https://github.com/acme/widgets/issues/789');
   sandbox.state.board_tasks['sync-only'] = {
     id: 'sync-only',
     group: 'alpha',
@@ -537,13 +536,16 @@ test('editing a board sync-only GitHub link clears stale sync metadata', () => {
   const context = vm.createContext(sandbox);
   loadBoardSyncScripts(context);
 
-  vm.runInContext('boardLinkExternal("sync-only");', context);
+  await vm.runInContext(`(async function() {
+    var dialogPromise = boardLinkExternal("sync-only");
+    if (!_inputDialogFieldElements.ref.focused) throw new Error('ref input was not focused');
+    _inputDialogFieldElements.ref.value = 'https://github.com/acme/widgets/issues/789';
+    submitInputDialog();
+    await dialogPromise;
+  })()`, context);
   const payload = lastCall(sandbox);
 
-  assert.deepEqual(sandbox.promptCalls[0], {
-    message: 'External reference or URL',
-    defaultValue: 'https://github.com/acme/widgets/issues/456',
-  });
+  assert.equal(sandbox.promptCalls.length, 0);
   assert.equal(payload.cmd, 'external_link_task');
   assert.equal(payload.id, 'sync-only');
   assert.equal(payload.ref, 'https://github.com/acme/widgets/issues/789');
@@ -557,6 +559,80 @@ test('editing a board sync-only GitHub link clears stale sync metadata', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(payload.board_sync, 'github'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload.board_sync, 'last_synced_hash'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload.board_sync, 'last_push_at'), false);
+});
+
+test('board custom input dialog cancel and Escape close without mutation and restore focus', async () => {
+  const { sandbox } = createSandbox();
+  let restored = 0;
+  sandbox.document.activeElement = { focus() { restored += 1; } };
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+
+  await vm.runInContext(`(async function() {
+    var dialogPromise = boardPostExternalComment("task-1");
+    if (!_inputDialogFieldElements.comment.focused) throw new Error('comment input was not focused');
+    _inputDialogFieldElements.comment.value = 'should not send';
+    cancelInputDialog();
+    await dialogPromise;
+  })()`, context);
+  assert.equal(sandbox.sendCalls.length, 0);
+  assert.equal(restored, 1);
+
+  await vm.runInContext(`(async function() {
+    var dialogPromise = boardPostExternalComment("task-1");
+    _inputDialogFieldElements.comment.dispatchEvent({ type: 'keydown', key: 'Escape' });
+    await dialogPromise;
+  })()`, context);
+  assert.equal(sandbox.sendCalls.length, 0);
+  assert.equal(restored, 2);
+});
+
+test('board custom input dialog submits import, status, and comment payloads', async () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+  vm.runInContext('_currentGroup = function() { return "alpha"; };', context);
+
+  await vm.runInContext(`(async function() {
+    var dialogPromise = boardImportExternal();
+    _inputDialogFieldElements.ref.value = ' https://example.test/item/1 ';
+    _inputDialogFieldElements.group.value = 'alpha';
+    submitInputDialog();
+    await dialogPromise;
+  })()`, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox))), {
+    cmd: 'external_import_task',
+    ref: 'https://example.test/item/1',
+    group: 'alpha',
+    lane: '',
+  });
+
+  await vm.runInContext(`(async function() {
+    var dialogPromise = boardPushExternalStatus("task-1");
+    _inputDialogFieldElements.status.value = ' Done ';
+    _inputDialogFieldElements.note.value = ' shipped ';
+    submitInputDialog();
+    await dialogPromise;
+  })()`, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox))), {
+    cmd: 'external_push_task_status',
+    id: 'task-1',
+    status: 'Done',
+    note: 'shipped',
+  });
+
+  await vm.runInContext(`(async function() {
+    var dialogPromise = boardPostExternalComment("task-1");
+    _inputDialogFieldElements.comment.value = ' Looks good ';
+    submitInputDialog();
+    await dialogPromise;
+  })()`, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox))), {
+    cmd: 'external_post_task_comment',
+    id: 'task-1',
+    comment: 'Looks good',
+  });
+  assert.equal(sandbox.promptCalls.length, 0);
 });
 
 test('board_sync_task responses toast success and route errors to retry toast', () => {

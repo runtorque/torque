@@ -1862,6 +1862,20 @@
   </div>
 </div>
 
+<!-- Input dialog (replaces window.prompt for routine operator flows) -->
+<div class="overlay" id="modal-input-dialog">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="input-dialog-title">
+    <h2 id="input-dialog-title">Input</h2>
+    <div id="input-dialog-summary" class="modal-summary hidden"></div>
+    <div id="input-dialog-fields"></div>
+    <div id="input-dialog-error" class="modal-error hidden" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cancelInputDialog()">Cancel</button>
+      <button id="input-dialog-submit-btn" class="btn-primary" onclick="submitInputDialog()">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- Dynamic Behavior user approval modal -->
 <div class="overlay behavior-overlay-approval-modal" id="modal-behavior-approval">
   <div class="modal modal-tall">

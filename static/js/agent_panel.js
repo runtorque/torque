@@ -5093,11 +5093,19 @@ function engineerRenameEngineer(engineerId) {
   var engineer = state && state.agents ? state.agents[engineerId] : null;
   if (!engineer) return;
   var currentName = String(engineer.name || '').trim();
-  var nextName = window.prompt('Rename engineer', currentName);
-  if (typeof nextName !== 'string') return;
-  nextName = nextName.trim();
-  if (!nextName || nextName === currentName) return;
-  send({ cmd: 'rename_engineer', id: engineerId, new_name: nextName });
+  if (typeof showInputDialog !== 'function') return;
+  return showInputDialog({
+    title: 'Rename Engineer',
+    fields: [
+      { key: 'name', label: 'Name', defaultValue: currentName, autofocus: true },
+    ],
+    submitLabel: 'Rename',
+  }).then(function(values) {
+    if (!values || typeof values.name !== 'string') return;
+    var nextName = values.name.trim();
+    if (!nextName || nextName === currentName) return;
+    send({ cmd: 'rename_engineer', id: engineerId, new_name: nextName });
+  });
 }
 
 async function engineerDeleteEngineer(engineerId) {
@@ -5119,11 +5127,19 @@ function engineerRenameArchitect(architectId) {
   var architect = state && state.agents ? state.agents[architectId] : null;
   if (!architect) return;
   var currentName = String(architect.name || '').trim();
-  var nextName = window.prompt('Rename architect', currentName);
-  if (typeof nextName !== 'string') return;
-  nextName = nextName.trim();
-  if (!nextName || nextName === currentName) return;
-  send({ cmd: 'update_agent', id: architectId, name: nextName });
+  if (typeof showInputDialog !== 'function') return;
+  return showInputDialog({
+    title: 'Rename Architect',
+    fields: [
+      { key: 'name', label: 'Name', defaultValue: currentName, autofocus: true },
+    ],
+    submitLabel: 'Rename',
+  }).then(function(values) {
+    if (!values || typeof values.name !== 'string') return;
+    var nextName = values.name.trim();
+    if (!nextName || nextName === currentName) return;
+    send({ cmd: 'update_agent', id: architectId, name: nextName });
+  });
 }
 
 async function engineerDeleteArchitect(architectId) {

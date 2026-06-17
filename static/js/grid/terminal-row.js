@@ -90,13 +90,28 @@ function rejectPendingHire(hireId) {
     return;
   }
   if (typeof send !== 'function') return;
-  const note = (typeof window !== 'undefined'
-    && window
-    && typeof window.prompt === 'function')
-    ? window.prompt('Optional rejection note', '')
-    : '';
-  if (note === null) return;
-  rejectPendingHireWithNote(id, String(note || ''));
+  if (typeof showInputDialog === 'function') {
+    return showInputDialog({
+      title: 'Reject Hire Request',
+      summary: summary,
+      fields: [
+        {
+          key: 'note',
+          label: 'Optional note',
+          defaultValue: '',
+          multiline: true,
+          autofocus: true,
+        },
+      ],
+      submitLabel: 'Reject',
+      variant: 'btn-danger',
+    }).then(function(values) {
+      if (!values) return;
+      rejectPendingHireWithNote(id, String(values.note || ''));
+    });
+    return;
+  }
+  rejectPendingHireWithNote(id, '');
 }
 
 function rejectPendingHireWithNote(hireId, note) {
