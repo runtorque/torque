@@ -2387,6 +2387,8 @@ class EngineerEventBuffer:
         sent_now = time.time() if now is None else now
         due = []
         for hint in current:
+            if hint.get("attention") is False:
+                continue
             fingerprint = str(hint.get("fingerprint", "") or "").strip()
             if not fingerprint:
                 continue

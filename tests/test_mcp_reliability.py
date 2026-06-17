@@ -167,6 +167,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "engineer_task_dispatch",
             "engineer_batch_dispatch",
             "engineer_task_resolve",
+            "engineer_hint_snooze",
             "engineer_journal",
             "engineer_agent_message",
             "engineer_ask",

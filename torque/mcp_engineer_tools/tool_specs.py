@@ -46,6 +46,39 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "engineer_hint_snooze",
+        "description": (
+            "Snooze or clear a deterministic Engineer hint by fingerprint. "
+            "Use this to acknowledge expected low-noise hints, such as "
+            "merged workers retained by the group's keep-warm cleanup "
+            "policy, without changing cleanup policy or deleting anything."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "fingerprint": {
+                    "type": "string",
+                    "description": (
+                        "Exact hint fingerprint from engineer_board_summary "
+                        "or engineer_session_map."
+                    ),
+                },
+                "hours": {
+                    "type": "number",
+                    "description": (
+                        "How many hours to snooze. Defaults to 168. Values "
+                        "<= 0 clear the existing snooze."
+                    ),
+                },
+                "clear": {
+                    "type": "boolean",
+                    "description": "Clear this fingerprint's snooze.",
+                },
+            },
+            "required": ["fingerprint"],
+        },
+    },
+    {
         "name": "engineer_semantic_recall",
         "description": (
             "Search the local AI semantic index for snippets visible to this "

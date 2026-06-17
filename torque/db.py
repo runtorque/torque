@@ -326,6 +326,7 @@ _GS_JSON_FIELDS = {
     "architect_review_gate_thresholds",
     "architect_enabled_events",
     "default_engineer_specializations",
+    "engineer_hint_snoozes",
 }
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.

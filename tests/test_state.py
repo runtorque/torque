@@ -2,6 +2,7 @@ import importlib
 import json
 import sys
 import tempfile
+import time
 import types
 import unittest
 from datetime import datetime, timezone
@@ -3233,6 +3234,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
             worktree_merge_preserve_diff=True,
             engineer_merge_mode="direct",
             guidance_hint_cadence=150,
+            engineer_hint_snoozes={
+                "merged_retained_by_policy:a,b": time.time() + 3600,
+                "expired": time.time() - 1,
+                "bad": "not-a-time",
+            },
         )
 
         ws = state.engineer_settings["g"]
@@ -3248,6 +3254,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertTrue(gs.worktree_merge_preserve_diff)
         self.assertEqual(gs.engineer_merge_mode, "direct")
         self.assertEqual(gs.guidance_hint_cadence, 100)
+        self.assertEqual(
+            set(gs.engineer_hint_snoozes),
+            {"merged_retained_by_policy:a,b"},
+        )
 
         state.update_group_settings("g", engineer_merge_mode="not-real")
         self.assertEqual(state.group_settings["g"].engineer_merge_mode, "pr")
