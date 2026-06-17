@@ -366,6 +366,13 @@ function _boardVisibleTasksFromScoped(scopedTasks) {
         var verificationSummary = t.verification_summary || {};
         parts.push(verificationSummary.tests_run || '');
         parts.push(verificationSummary.human_validation_pending || '');
+        parts.push(verificationSummary.test_outcome || '');
+        parts.push(verificationSummary.isolated_rerun_evidence || '');
+        parts.push(verificationSummary.reviewer_acceptance || '');
+        if (verificationSummary.live_smoke_pending) parts.push('live smoke pending');
+        if (verificationSummary.full_suite_attempted) parts.push('full suite attempted');
+        if (verificationSummary.unrelated_flake_accepted) parts.push('unrelated flake accepted');
+        if (verificationSummary.deploy_attempted === false) parts.push('deploy not attempted');
         var completionEvidence = t.completion_evidence || {};
         parts.push(completionEvidence.status || '');
         if (completionEvidence.sources && completionEvidence.sources.length) {

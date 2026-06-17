@@ -261,17 +261,24 @@ def _build_verification(tasks, *, limit: int) -> dict:
         summary = getattr(task, "verification_summary", {}) or {}
         if not isinstance(summary, dict):
             summary = {}
+        detail = (
+            summary.get("human_validation_pending", "")
+            or ("Live smoke pending" if summary.get("live_smoke_pending") else "")
+            or (
+                "Deploy not attempted"
+                if summary.get("deploy_attempted") is False else ""
+            )
+            or summary.get("test_outcome", "")
+            or getattr(task, "verification_notes", "")
+            or summary.get("tests_run", "")
+            or ""
+        )
         items.append({
             "id": getattr(task, "id", "") or "",
             "title": getattr(task, "task", "") or "",
             "verification_state": verification_state,
             "verification_mode": getattr(task, "verification_mode", "") or "",
-            "detail": str(
-                summary.get("human_validation_pending", "")
-                or getattr(task, "verification_notes", "")
-                or summary.get("tests_run", "")
-                or ""
-            ).strip(),
+            "detail": str(detail).strip(),
         })
     items.sort(
         key=lambda item: (

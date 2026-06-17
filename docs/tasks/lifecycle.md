@@ -118,9 +118,12 @@ Some workflows include a verification step — checking that the merged change a
 torque_verify(
   state="passed",
   tests_run="auth integration suite, smoke",
+  test_outcome="full_suite_passed",
   notes="Restart clean, no errors in logs for 5min",
 )
 ```
+
+Use `full_suite_attempted=true`, `test_outcome="unrelated_flake_accepted"`, and `isolated_rerun_evidence="..."` when a broad suite hit an unrelated flake but focused/isolated reruns passed. Use `deploy_attempted=false` plus `live_smoke_pending=true` when a worker intentionally did not deploy/restart from inside the live daemon and operator smoke remains.
 
 The CLI equivalents (`torque task verify ...`) and the Engineer tool (`engineer_task_verify(...)`) stamp the same audit fields. They emit a `task_verification_updated` event so failed/pending checkpoints stay visible at the orchestration layer rather than being buried in agent activity.
 

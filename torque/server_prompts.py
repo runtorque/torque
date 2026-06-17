@@ -25,8 +25,10 @@ _FALLBACK_LINES = [
     '- `torque_blocked(reason="reason")` — need user input',
     '- `torque_error(message="message")` — unrecoverable error',
     '- `torque_verify(state="pending|attempted|passed|failed", '
-    'mode="deploy|restart", tests_run="...", notes="...")` '
-    '— record manual deploy/restart/smoke verification details when relevant',
+    'mode="deploy|restart", tests_run="...", '
+    'test_outcome="full_suite_passed|unrelated_flake_accepted|narrower_suite_accepted", '
+    'deploy_attempted=false, live_smoke_pending=true, notes="...")` '
+    '— record tests/deploy/smoke verification details when relevant',
 ]
 
 
@@ -121,7 +123,7 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
         - `torque_progress(message="current activity")` — update your activity status
         - `torque_blocked(reason="reason")` — signal that you need help
         - `torque_error(message="message")` — report an unrecoverable error
-        - `torque_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
+        - `torque_verify(state="passed", tests_run="...", test_outcome="full_suite_passed", notes="...")` — record tests/deploy/smoke verification details when relevant; use `unrelated_flake_accepted` with isolated rerun evidence for accepted flakes and `live_smoke_pending=true, deploy_attempted=false` when operator smoke remains
         - `torque_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
         - `torque_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
         - `torque_message_user(message="message", thread_id="thread-id", reply_to_id="message-id")` — send a non-blocking durable message to the user-facing conversation panel

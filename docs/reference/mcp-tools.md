@@ -17,7 +17,7 @@ Available to **every authenticated agent**. These are how Workers report progres
 | `torque_blocked` | Marks the task as needing user input. Adds `blocked` label. |
 | `torque_error` | Records an unrecoverable error. Adds `error` label, surfaces the agent for attention. |
 | `torque_ready` | Done + unlink agent + cascade. Used when the agent should be cleared from this task entirely. |
-| `torque_verify` | Records manual deploy/restart/smoke verification details (state, tests run, notes). |
+| `torque_verify` | Records tests/deploy/restart/smoke verification details, including full-suite/flaky-test taxonomy, deploy attempted/not attempted, and live-smoke pending. |
 
 ### Pipeline handoff
 

@@ -9850,6 +9850,45 @@ def _apply_verification_report(task, payload, actor_name, save_task,
             summary["human_validation_pending"] = human_pending
         else:
             summary.pop("human_validation_pending", None)
+    if "isolated_rerun_evidence" in payload:
+        isolated_rerun = str(
+            payload.get("isolated_rerun_evidence", "") or ""
+        ).strip()
+        if isolated_rerun:
+            summary["isolated_rerun_evidence"] = isolated_rerun
+        else:
+            summary.pop("isolated_rerun_evidence", None)
+    if "test_outcome" in payload:
+        test_outcome = str(payload.get("test_outcome", "") or "").strip()
+        if test_outcome in {
+            "passed",
+            "full_suite_passed",
+            "full_suite_attempted",
+            "unrelated_flake_accepted",
+            "narrower_suite_accepted",
+            "failed",
+        }:
+            summary["test_outcome"] = test_outcome
+        else:
+            summary.pop("test_outcome", None)
+    if "reviewer_acceptance" in payload:
+        reviewer_acceptance = str(
+            payload.get("reviewer_acceptance", "") or ""
+        ).strip()
+        if reviewer_acceptance in {
+            "accepted_flake_evidence",
+            "accepted_narrower_suite",
+        }:
+            summary["reviewer_acceptance"] = reviewer_acceptance
+        else:
+            summary.pop("reviewer_acceptance", None)
+    for key in (
+        "full_suite_attempted",
+        "unrelated_flake_accepted",
+        "live_smoke_pending",
+    ):
+        if key in payload:
+            summary[key] = bool(payload.get(key))
 
     if "verification_mode" in payload:
         mode = str(payload.get("verification_mode", "") or "").strip()
@@ -9876,6 +9915,20 @@ def _apply_verification_report(task, payload, actor_name, save_task,
         if verification_state == "passed":
             summary.pop("human_validation_pending", None)
             summary.pop("deploy_needed", None)
+            summary.pop("live_smoke_pending", None)
+            if summary.get("full_suite_attempted"):
+                summary.setdefault("test_outcome", "full_suite_passed")
+            elif summary.get("tests_run"):
+                summary.setdefault("test_outcome", "passed")
+        elif verification_state == "failed" and summary.get("tests_run"):
+            summary.setdefault("test_outcome", "failed")
+    if summary.get("unrelated_flake_accepted"):
+        summary.setdefault("test_outcome", "unrelated_flake_accepted")
+    elif (
+        summary.get("full_suite_attempted")
+        and not summary.get("test_outcome")
+    ):
+        summary["test_outcome"] = "full_suite_attempted"
 
     if "verification_notes" in payload:
         task.verification_notes = str(
@@ -9896,12 +9949,27 @@ def _apply_verification_report(task, payload, actor_name, save_task,
         parts.append(f"mode={task.verification_mode}")
     if summary.get("tests_run"):
         parts.append(f"tests={summary['tests_run']}")
+    if summary.get("test_outcome"):
+        parts.append(f"test outcome={summary['test_outcome']}")
+    if summary.get("full_suite_attempted"):
+        parts.append("full suite attempted")
+    if summary.get("unrelated_flake_accepted"):
+        parts.append("unrelated flake accepted")
+    if summary.get("isolated_rerun_evidence"):
+        parts.append("isolated rerun=" + summary["isolated_rerun_evidence"])
+    if summary.get("reviewer_acceptance"):
+        parts.append("reviewer acceptance=" + summary["reviewer_acceptance"])
     if summary.get("manual_smoke_done"):
         parts.append("manual smoke done")
+    if summary.get("live_smoke_pending"):
+        parts.append("live smoke pending")
     if summary.get("deploy_needed"):
         parts.append("deploy needed")
-    if summary.get("deploy_attempted"):
-        parts.append("deploy attempted")
+    if "deploy_attempted" in summary:
+        parts.append(
+            "deploy attempted" if summary.get("deploy_attempted")
+            else "deploy not attempted"
+        )
     if summary.get("human_validation_pending"):
         parts.append(
             "human validation="
@@ -9956,11 +10024,24 @@ def _task_verification_evidence(task) -> dict:
     if mode_value:
         evidence["mode"] = mode_value
     normalized_summary = {}
-    for key in ("tests_run", "human_validation_pending"):
+    for key in (
+        "tests_run",
+        "human_validation_pending",
+        "isolated_rerun_evidence",
+        "test_outcome",
+        "reviewer_acceptance",
+    ):
         value = _completion_evidence_text(summary.get(key, ""))
         if value:
             normalized_summary[key] = value
-    for key in ("manual_smoke_done", "deploy_needed", "deploy_attempted"):
+    for key in (
+        "manual_smoke_done",
+        "deploy_needed",
+        "deploy_attempted",
+        "full_suite_attempted",
+        "unrelated_flake_accepted",
+        "live_smoke_pending",
+    ):
         if key in summary:
             normalized_summary[key] = bool(summary.get(key))
     if normalized_summary:
@@ -18329,6 +18410,12 @@ async def main(connection=None):
                         "deploy_needed",
                         "deploy_attempted",
                         "human_validation_pending",
+                        "test_outcome",
+                        "full_suite_attempted",
+                        "unrelated_flake_accepted",
+                        "isolated_rerun_evidence",
+                        "reviewer_acceptance",
+                        "live_smoke_pending",
                         "smoke_status",
                     ):
                         if key in data:
@@ -20846,6 +20933,12 @@ async def main(connection=None):
                                 "deploy_needed",
                                 "deploy_attempted",
                                 "human_validation_pending",
+                                "test_outcome",
+                                "full_suite_attempted",
+                                "unrelated_flake_accepted",
+                                "isolated_rerun_evidence",
+                                "reviewer_acceptance",
+                                "live_smoke_pending",
                             ):
                                 if key in data:
                                     payload[key] = data[key]

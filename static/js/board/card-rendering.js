@@ -497,6 +497,16 @@ function _boardVerificationPreview(task) {
   if (summary.human_validation_pending) {
     return 'Needs human validation: ' + summary.human_validation_pending;
   }
+  if (summary.live_smoke_pending) return 'Live smoke pending';
+  if (summary.deploy_attempted === false) return 'Deploy not attempted';
+  if (summary.test_outcome === 'unrelated_flake_accepted') {
+    return 'Tests: unrelated flake accepted'
+      + (summary.isolated_rerun_evidence ? ' · ' + summary.isolated_rerun_evidence : '');
+  }
+  if (summary.test_outcome === 'narrower_suite_accepted') {
+    return 'Tests: narrower suite accepted';
+  }
+  if (summary.test_outcome) return 'Tests: ' + summary.test_outcome;
   if (task.verification_notes) return task.verification_notes;
   if (summary.tests_run) return 'Tests: ' + summary.tests_run;
   return '';

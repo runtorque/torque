@@ -2929,8 +2929,20 @@ def cmd_task_show(args):
         summary = t.get("verification_summary") or {}
         if summary.get("tests_run"):
             print(f"  {'Tests run:':<14} {summary['tests_run']}")
+        if summary.get("test_outcome"):
+            print(f"  {'Test outcome:':<14} {summary['test_outcome']}")
+        if "full_suite_attempted" in summary:
+            print(f"  {'Full suite:':<14} {'attempted' if summary['full_suite_attempted'] else 'not attempted'}")
+        if "unrelated_flake_accepted" in summary:
+            print(f"  {'Flake accepted:':<14} {'yes' if summary['unrelated_flake_accepted'] else 'no'}")
+        if summary.get("isolated_rerun_evidence"):
+            print(f"  {'Isolated rerun:':<14} {summary['isolated_rerun_evidence']}")
+        if summary.get("reviewer_acceptance"):
+            print(f"  {'Reviewer:':<14} {summary['reviewer_acceptance']}")
         if "manual_smoke_done" in summary:
             print(f"  {'Manual smoke:':<14} {'yes' if summary['manual_smoke_done'] else 'no'}")
+        if "live_smoke_pending" in summary:
+            print(f"  {'Live smoke:':<14} {'pending' if summary['live_smoke_pending'] else 'not pending'}")
         if "deploy_needed" in summary:
             print(f"  {'Deploy needed:':<14} {'yes' if summary['deploy_needed'] else 'no'}")
         if "deploy_attempted" in summary:
@@ -3821,6 +3833,31 @@ def cmd_task_verify(args):
         payload["human_validation_pending"] = args.human
     if args.clear_human:
         payload["human_validation_pending"] = ""
+    if getattr(args, "test_outcome", None) is not None:
+        payload["test_outcome"] = (
+            "" if args.test_outcome == "clear" else args.test_outcome
+        )
+    if getattr(args, "full_suite_attempted", False):
+        payload["full_suite_attempted"] = True
+    if getattr(args, "clear_full_suite_attempted", False):
+        payload["full_suite_attempted"] = False
+    if getattr(args, "flake_accepted", False):
+        payload["unrelated_flake_accepted"] = True
+    if getattr(args, "clear_flake_accepted", False):
+        payload["unrelated_flake_accepted"] = False
+    if getattr(args, "isolated_rerun", None) is not None:
+        payload["isolated_rerun_evidence"] = args.isolated_rerun
+    if getattr(args, "clear_isolated_rerun", False):
+        payload["isolated_rerun_evidence"] = ""
+    if getattr(args, "reviewer_acceptance", None) is not None:
+        payload["reviewer_acceptance"] = (
+            "" if args.reviewer_acceptance == "clear"
+            else args.reviewer_acceptance
+        )
+    if getattr(args, "live_smoke_pending", False):
+        payload["live_smoke_pending"] = True
+    if getattr(args, "clear_live_smoke_pending", False):
+        payload["live_smoke_pending"] = False
     if args.deploy_needed:
         payload["deploy_needed"] = True
     if args.clear_deploy_needed:
@@ -4878,6 +4915,18 @@ def cmd_ai_verify(args):
         kwargs["deploy_attempted"] = True
     if args.human is not None:
         kwargs["human_validation_pending"] = args.human
+    if getattr(args, "test_outcome", None) is not None:
+        kwargs["test_outcome"] = args.test_outcome
+    if getattr(args, "full_suite_attempted", False):
+        kwargs["full_suite_attempted"] = True
+    if getattr(args, "flake_accepted", False):
+        kwargs["unrelated_flake_accepted"] = True
+    if getattr(args, "isolated_rerun", None) is not None:
+        kwargs["isolated_rerun_evidence"] = args.isolated_rerun
+    if getattr(args, "reviewer_acceptance", None) is not None:
+        kwargs["reviewer_acceptance"] = args.reviewer_acceptance
+    if getattr(args, "live_smoke_pending", False):
+        kwargs["live_smoke_pending"] = True
     resp = api_call("ai_report", port=args.port, **kwargs)
     data = check_ok(resp)
     print(data.get("message", "Verification updated"))
@@ -6236,6 +6285,32 @@ def build_parser():
                    help="What still needs human validation")
     p.add_argument("--clear-human", action="store_true",
                    help="Clear human validation requirements")
+    p.add_argument("--test-outcome",
+                   choices=["passed", "full_suite_passed",
+                            "full_suite_attempted",
+                            "unrelated_flake_accepted",
+                            "narrower_suite_accepted", "failed", "clear"],
+                   help="Structured test outcome, or clear")
+    p.add_argument("--full-suite-attempted", action="store_true",
+                   help="Mark that the full test suite was attempted")
+    p.add_argument("--clear-full-suite-attempted", action="store_true",
+                   help="Clear the full-suite-attempted flag")
+    p.add_argument("--flake-accepted", action="store_true",
+                   help="Mark unrelated flaky failure accepted with evidence")
+    p.add_argument("--clear-flake-accepted", action="store_true",
+                   help="Clear unrelated flaky-failure acceptance")
+    p.add_argument("--isolated-rerun",
+                   help="Focused/isolated rerun evidence for flake acceptance")
+    p.add_argument("--clear-isolated-rerun", action="store_true",
+                   help="Clear isolated rerun evidence")
+    p.add_argument("--reviewer-acceptance",
+                   choices=["accepted_flake_evidence",
+                            "accepted_narrower_suite", "clear"],
+                   help="Reviewer acceptance of flake or narrower-suite evidence")
+    p.add_argument("--live-smoke-pending", action="store_true",
+                   help="Mark live smoke as pending operator-side")
+    p.add_argument("--clear-live-smoke-pending", action="store_true",
+                   help="Clear live-smoke-pending")
     p.set_defaults(func=cmd_task_verify)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],
@@ -6477,6 +6552,24 @@ def build_parser():
                    help="Mark that deploy/restart was attempted")
     p.add_argument("--human",
                    help="What still needs human validation")
+    p.add_argument("--test-outcome",
+                   choices=["passed", "full_suite_passed",
+                            "full_suite_attempted",
+                            "unrelated_flake_accepted",
+                            "narrower_suite_accepted", "failed"],
+                   help="Structured test outcome")
+    p.add_argument("--full-suite-attempted", action="store_true",
+                   help="Mark that the full test suite was attempted")
+    p.add_argument("--flake-accepted", action="store_true",
+                   help="Mark unrelated flaky failure accepted with evidence")
+    p.add_argument("--isolated-rerun",
+                   help="Focused/isolated rerun evidence for flake acceptance")
+    p.add_argument("--reviewer-acceptance",
+                   choices=["accepted_flake_evidence",
+                            "accepted_narrower_suite"],
+                   help="Reviewer acceptance of flake or narrower-suite evidence")
+    p.add_argument("--live-smoke-pending", action="store_true",
+                   help="Mark live smoke as pending operator-side")
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_verify)
