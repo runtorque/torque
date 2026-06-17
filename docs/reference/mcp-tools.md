@@ -421,6 +421,18 @@ For Architect ↔ Engineer threads, `architect_reply` preserves the existing hir
 
 The architect's durable product log. Decisions can be updated and archived but task/engineer links are append-only.
 
+### Initiatives
+
+Initiatives are product-intent wrappers above the Board, not a second task
+tracker. Durable membership lives in typed link rows:
+`architect_initiative_list/show/create/update/archive`,
+`architect_initiative_link/unlink_task`, and
+`architect_initiative_link/unlink_decision`. Engineers have read-only
+`engineer_initiative_list/show`. Linked task summaries are derived from Board
+tasks at read time; initiative writes do not move tasks or mutate decisions.
+Scoped MCP reads redact linked task/decision IDs that the caller cannot
+otherwise see while preserving aggregate hidden counts.
+
 | Tool | What it does |
 |---|---|
 | `architect_decision_create` | Create a new decision (`proposed` / `accepted` / `revised` / `rejected`, optionally linking tasks/engineers). |

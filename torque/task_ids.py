@@ -7,6 +7,9 @@ import unicodedata
 
 
 DRAFT_TASK_PREFIX = "draft-"
+_INITIATIVE_ID_RE = re.compile(
+    r"^(?P<group_prefix>[A-Z][A-Z0-9_]*)-I:(?P<number>[1-9][0-9]*)$"
+)
 _TASK_ID_RE = re.compile(
     r"^(?P<prefix>[A-Z][A-Z0-9_]*):(?P<root>[1-9][0-9]*)(?::(?P<child>[1-9][0-9]*))?$"
 )
@@ -23,6 +26,30 @@ def normalize_group_prefix(group_name: str) -> str:
     if value[0].isdigit():
         value = f"G_{value}"
     return value
+
+
+def parse_initiative_id(initiative_id: str) -> dict | None:
+    """Parse a canonical Initiative ID, or return None if invalid.
+
+    Initiative IDs deliberately use ``<GROUP>-I:<n>`` (for example
+    ``TORQUE-I:1``) instead of a plain ``INIT:<n>`` prefix so they never
+    collide with canonical Board task IDs.
+    """
+    match = _INITIATIVE_ID_RE.match(str(initiative_id or "").strip())
+    if not match:
+        return None
+    return {
+        "group_prefix": match.group("group_prefix"),
+        "number": int(match.group("number")),
+    }
+
+
+def is_canonical_initiative_id(initiative_id: str) -> bool:
+    return parse_initiative_id(initiative_id) is not None
+
+
+def format_initiative_id(group_prefix: str, number: int) -> str:
+    return f"{normalize_group_prefix(group_prefix)}-I:{int(number)}"
 
 
 def parse_task_id(task_id: str) -> dict | None:
