@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -702,6 +703,51 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         stats = self.db.mcp_idempotency_storage_stats()
         self.assertEqual(stats["row_count"], 1)
         self.assertGreater(stats["response_bytes"], 0)
+
+    def test_legacy_mcp_idempotency_schema_migrates_before_retention_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "legacy.db"
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE mcp_idempotency (
+                        idempotency_key TEXT PRIMARY KEY,
+                        surface         TEXT NOT NULL DEFAULT '',
+                        tool_name       TEXT NOT NULL DEFAULT '',
+                        request_hash    TEXT NOT NULL DEFAULT '',
+                        response_json   TEXT NOT NULL DEFAULT '{}',
+                        created_at      REAL NOT NULL,
+                        updated_at      REAL NOT NULL
+                    );
+                    CREATE INDEX idx_mcp_idempotency_tool
+                        ON mcp_idempotency(surface, tool_name, updated_at DESC);
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            migrated = TorqueDB(db_path)
+            try:
+                migrated.init()
+                columns = {
+                    row[1]
+                    for row in migrated._conn.execute(
+                        "PRAGMA table_info(mcp_idempotency)"
+                    )
+                }
+                for column in ("response_bytes", "expires_at", "compacted_at"):
+                    self.assertIn(column, columns)
+                indexes = {
+                    row[1]
+                    for row in migrated._conn.execute(
+                        "PRAGMA index_list(mcp_idempotency)"
+                    )
+                }
+                self.assertIn("idx_mcp_idempotency_retention", indexes)
+            finally:
+                migrated.close()
 
     async def test_architect_journal_retry_after_outer_receipt_loss_reuses_internal_record(self):
         architect = AgentCell(

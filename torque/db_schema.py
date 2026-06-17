@@ -1035,8 +1035,6 @@ CREATE TABLE IF NOT EXISTS mcp_idempotency (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_tool
     ON mcp_idempotency(surface, tool_name, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_retention
-    ON mcp_idempotency(compacted_at, updated_at);
 
 CREATE TABLE IF NOT EXISTS failed_writes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
