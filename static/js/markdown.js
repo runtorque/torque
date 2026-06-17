@@ -51,6 +51,11 @@
     return href;
   }
 
+  function _torqueMarkdownLinkHtml(href, labelHtml) {
+    return '<a class="torque-md-link" data-torque-markdown-link="1" href="' + href
+      + '" target="_blank" rel="noopener noreferrer">' + labelHtml + '</a>';
+  }
+
   function _torqueMarkdownEmphasis(text) {
     text = String(text || '');
     text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '<strong>$2</strong>');
@@ -85,9 +90,7 @@
       var href = _torqueMarkdownSafeHref(text.slice(close + 2, end));
       var labelHtml = _torqueMarkdownRestoreTokens(_torqueMarkdownEmphasis(label), tokens) || href || 'link';
       if (href) {
-        out += _torqueMarkdownToken(tokens,
-          '<a class="torque-md-link" data-torque-markdown-link="1" href="' + href
-          + '" target="_blank" rel="noopener noreferrer">' + labelHtml + '</a>');
+        out += _torqueMarkdownToken(tokens, _torqueMarkdownLinkHtml(href, labelHtml));
       } else {
         out += _torqueMarkdownToken(tokens,
           '<span class="torque-md-link-disabled" title="Unsafe link removed">' + labelHtml + '</span>');
@@ -95,6 +98,55 @@
       i = end + 1;
     }
     return out;
+  }
+
+  function _torqueMarkdownCountChar(text, ch) {
+    var count = 0;
+    text = String(text || '');
+    for (var i = 0; i < text.length; i++) {
+      if (text.charAt(i) === ch) count += 1;
+    }
+    return count;
+  }
+
+  function _torqueMarkdownSplitAutolinkTarget(candidate) {
+    var href = String(candidate || '');
+    var suffix = '';
+    var changed = true;
+    while (href && changed) {
+      changed = false;
+      if (href.slice(-4) === '&gt;') {
+        suffix = '&gt;' + suffix;
+        href = href.slice(0, -4);
+        changed = true;
+        continue;
+      }
+      var last = href.charAt(href.length - 1);
+      if (last === '.' || last === ',' || last === '>') {
+        suffix = last + suffix;
+        href = href.slice(0, -1);
+        changed = true;
+      } else if (last === ')' && _torqueMarkdownCountChar(href, ')') > _torqueMarkdownCountChar(href, '(')) {
+        suffix = last + suffix;
+        href = href.slice(0, -1);
+        changed = true;
+      } else if (last === ']' && _torqueMarkdownCountChar(href, ']') > _torqueMarkdownCountChar(href, '[')) {
+        suffix = last + suffix;
+        href = href.slice(0, -1);
+        changed = true;
+      }
+    }
+    return { href: href, suffix: suffix };
+  }
+
+  function _torqueMarkdownAutolink(text, tokens) {
+    text = String(text || '');
+    return text.replace(/(^|[^A-Za-z0-9+.-])((?:https?:\/\/|mailto:)(?:(?:&amp;)|[^\s<>"'&])+)/gi, function(match, prefix, candidate) {
+      var parts = _torqueMarkdownSplitAutolinkTarget(candidate);
+      var href = _torqueMarkdownSafeHref(parts.href);
+      if (!href) return match;
+      return prefix + _torqueMarkdownToken(tokens, _torqueMarkdownLinkHtml(href, href)) + parts.suffix;
+    });
   }
 
   function _torqueMarkdownFindLinkEnd(text, openParenIndex) {
@@ -115,6 +167,7 @@
     var tokens = [];
     var text = _torqueMarkdownExtractCode(escapedText, tokens);
     text = _torqueMarkdownExtractLinks(text, tokens);
+    text = _torqueMarkdownAutolink(text, tokens);
     text = _torqueMarkdownEmphasis(text);
     return _torqueMarkdownRestoreTokens(text, tokens);
   }
