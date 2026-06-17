@@ -48,6 +48,22 @@ _NON_PRODUCT_ACTION_HINTS = (
     "conflict",
     "research",
 )
+_STALE_PR_MERGE_STATES = {"BEHIND"}
+_VERIFICATION_SUMMARY_TEXT_KEYS = (
+    "tests_run",
+    "human_validation_pending",
+    "isolated_rerun_evidence",
+    "test_outcome",
+    "reviewer_acceptance",
+)
+_VERIFICATION_SUMMARY_BOOL_KEYS = (
+    "manual_smoke_done",
+    "deploy_needed",
+    "deploy_attempted",
+    "full_suite_attempted",
+    "unrelated_flake_accepted",
+    "live_smoke_pending",
+)
 
 
 def _task_review_evidence(task) -> dict:
@@ -67,12 +83,343 @@ def _task_review_evidence(task) -> dict:
         "recorded_at",
         "derived_action",
         "derived_task_id",
+        "notes",
+        "summary",
+        "follow_up_notes",
     )
     return {
         key: str(review.get(key, "") or "").strip()
         for key in keys
         if str(review.get(key, "") or "").strip()
     }
+
+
+def _task_packet_ref(task) -> dict:
+    if not task:
+        return {}
+    return {
+        "task_id": getattr(task, "id", "") or "",
+        "task_title": getattr(task, "task", "") or "",
+        "lane": getattr(task, "lane", "") or "",
+    }
+
+
+def _task_refs(tasks: Iterable) -> list[dict]:
+    return [_task_packet_ref(task) for task in tasks if task]
+
+
+def _verification_packet(validation_state: str,
+                         validation_record: dict | None) -> dict:
+    record = validation_record or {}
+    summary = record.get("summary", {}) if isinstance(record, dict) else {}
+    if not isinstance(summary, dict):
+        summary = {}
+
+    normalized_summary = {}
+    for key in _VERIFICATION_SUMMARY_TEXT_KEYS:
+        value = str(summary.get(key, "") or "").strip()
+        if value:
+            normalized_summary[key] = value
+    for key in _VERIFICATION_SUMMARY_BOOL_KEYS:
+        if key in summary:
+            normalized_summary[key] = bool(summary.get(key))
+
+    packet = {
+        "state": validation_state,
+        "task_id": str(record.get("task_id", "") or "").strip(),
+        "verification_state": str(
+            record.get("verification_state", "") or ""
+        ).strip(),
+        "verification_notes": str(
+            record.get("verification_notes", "") or ""
+        ).strip(),
+        "summary": normalized_summary,
+    }
+    return {
+        key: value
+        for key, value in packet.items()
+        if value not in ("", {}, None)
+    }
+
+
+def _review_packet(review_boundary, latest_review: dict) -> dict:
+    packet = dict(latest_review or {})
+    if review_boundary:
+        packet.setdefault("task_id", getattr(review_boundary, "id", "") or "")
+        packet.setdefault(
+            "task_title", getattr(review_boundary, "task", "") or ""
+        )
+        packet.setdefault("lane", getattr(review_boundary, "lane", "") or "")
+    return {
+        key: value
+        for key, value in packet.items()
+        if value not in ("", {}, None)
+    }
+
+
+def _follow_up_note_packets(latest_review: dict) -> dict:
+    if not isinstance(latest_review, dict) or not latest_review:
+        return {}
+    classification = str(
+        latest_review.get("follow_up_classification", "") or ""
+    ).strip().lower()
+    if classification in {"none", ""}:
+        return {}
+
+    note = str(
+        latest_review.get("follow_up_notes")
+        or latest_review.get("notes")
+        or latest_review.get("summary")
+        or ""
+    ).strip()
+    if not note:
+        derived = str(latest_review.get("derived_task_id", "") or "").strip()
+        note = f"Follow-up derived: {derived}" if derived else classification
+
+    bucket = {
+        "blocking": "blocking",
+        "block": "blocking",
+        "non_blocking": "non_blocking",
+        "non-blocking": "non_blocking",
+        "future_context": "future_context",
+        "future-context": "future_context",
+    }.get(classification, classification)
+    if bucket not in {"blocking", "non_blocking", "future_context"}:
+        bucket = "non_blocking"
+    return {bucket: [note]}
+
+
+def _stale_base_packet(boundary: dict, pr: dict) -> dict:
+    stale = boundary.get("stale_base") if isinstance(boundary, dict) else {}
+    if isinstance(stale, dict) and stale:
+        packet = dict(stale)
+        packet["state"] = "stale" if packet.get("stale") else "fresh"
+        packet["source"] = packet.get("source") or "boundary"
+        return packet
+
+    pr_merge_state = str((pr or {}).get("merge_state", "") or "").strip()
+    if pr_merge_state.upper() in _STALE_PR_MERGE_STATES:
+        return {
+            "state": "stale",
+            "stale": True,
+            "source": "pr_merge_state",
+            "merge_state": pr_merge_state,
+        }
+    return {"state": "unknown", "stale": None, "source": "not_checked"}
+
+
+def _current_head_packet(*, reviewed_sha: str, branch_advanced: bool,
+                         boundary: dict, pr: dict) -> dict:
+    pr_head_sha = str((pr or {}).get("head_sha", "") or "").strip()
+    current = str(
+        (boundary or {}).get("head_sha", "")
+        or (boundary or {}).get("current_head_sha", "")
+        or pr_head_sha
+        or ""
+    ).strip()
+    source = ""
+    if current:
+        if current == str((boundary or {}).get("head_sha", "") or "").strip():
+            source = "merge_check"
+        elif current == str(
+            (boundary or {}).get("current_head_sha", "") or ""
+        ).strip():
+            source = "boundary_current_head"
+        else:
+            source = "pull_request"
+    elif reviewed_sha and not branch_advanced:
+        current = reviewed_sha
+        source = "review_boundary_assumed_current"
+    else:
+        source = "unknown"
+    return {
+        "reviewed_boundary_sha": reviewed_sha,
+        "current_branch_head_sha": current,
+        "current_branch_head_sha_source": source,
+        "branch_advanced": branch_advanced,
+    }
+
+
+def merge_report_snippet_template(packet: dict | None = None) -> str:
+    packet = packet or {}
+    task_ids = ", ".join(packet.get("product_task_ids", []) or []) or "<task ids>"
+    branch = str(packet.get("branch", "") or "<branch>")
+    reviewed_sha = str(
+        ((packet.get("head", {}) or {}).get("reviewed_boundary_sha", ""))
+        or "<reviewed_sha>"
+    )
+    verification = packet.get("verification", {}) or {}
+    verification_summary = str(
+        verification.get("state")
+        or verification.get("verification_state")
+        or "<verification_summary>"
+    )
+    return "\n".join([
+        "Merge report:",
+        f"- Stream: {branch}",
+        f"- Product tasks: {task_ids}",
+        f"- Reviewed SHA: {reviewed_sha}",
+        "- PR: <pr_url>",
+        "- Merged SHA: <merge_sha>",
+        "- Origin verification: <origin_verification>",
+        f"- Verification: {verification_summary}",
+        "- Follow-ups: <followups_or_none>",
+    ])
+
+
+def merge_report_snippet_from_merge_result(result: dict | None,
+                                           *, branch: str = "",
+                                           base_branch: str = "") -> str:
+    result = result or {}
+    pr = result.get("pr") if isinstance(result.get("pr"), dict) else {}
+    origin = (
+        result.get("origin_verification")
+        if isinstance(result.get("origin_verification"), dict)
+        else {}
+    )
+    pr_url = str(
+        result.get("pr_url")
+        or result.get("url")
+        or pr.get("url")
+        or ""
+    ).strip()
+    merge_sha = str(
+        result.get("sha")
+        or result.get("merge_commit_sha")
+        or pr.get("merge_commit_sha")
+        or ""
+    ).strip()
+    head_sha = str(
+        result.get("head_sha")
+        or pr.get("head_sha")
+        or ""
+    ).strip()
+    origin_status = str(
+        origin.get("status")
+        or origin.get("state")
+        or ("provided" if origin else "")
+    ).strip()
+    return "\n".join([
+        "Merge report:",
+        f"- Stream: {branch or result.get('branch', '') or '<branch>'}",
+        f"- Base: {base_branch or result.get('base_branch', '') or '<base>'}",
+        f"- PR: {pr_url or '<pr_url>'}",
+        f"- Reviewed/head SHA: {head_sha or '<reviewed_or_head_sha>'}",
+        f"- Merged SHA: {merge_sha or '<merge_sha>'}",
+        f"- Origin verification: {origin_status or '<origin_verification>'}",
+        f"- Result: {str(result.get('message') or '').strip() or '<merge result>'}",
+    ])
+
+
+def _merge_readiness_next_action(*, stream_state: str, stale_base: dict,
+                                 branch_advanced: bool,
+                                 recommended_next_action: str) -> str:
+    if stream_state == "merged":
+        return "none"
+    if bool((stale_base or {}).get("stale")):
+        return "rebase"
+    if recommended_next_action in {
+        "resolve_merge_conflict",
+        "address_review_blockers",
+        "wait_for_review",
+        "run_manual_validation",
+        "merge_after_validation",
+    }:
+        return recommended_next_action
+    if branch_advanced:
+        return "re-review"
+    return recommended_next_action
+
+
+def _merge_readiness_packet(*, stream_id_value: str, repo_root: str,
+                            branch: str, stream_state: str,
+                            merge_state: str, code_state: str,
+                            product_tasks: list[Any],
+                            workflow_tasks: list[Any],
+                            queued_followers: list[Any],
+                            started_followers: list[Any],
+                            latest_review_boundary,
+                            latest_boundary_info: dict,
+                            latest_review: dict,
+                            latest_reviewed_commit_sha: str,
+                            latest_merged_commit_sha: str,
+                            latest_boundary_pr: dict,
+                            branch_has_advanced: bool,
+                            partial_review_safe: bool,
+                            validation_state: str,
+                            validation_record: dict,
+                            active_blocker_task,
+                            blocker_parent_review_task,
+                            gate_reason: str,
+                            recommended_next_action: str) -> dict:
+    stale_base = _stale_base_packet(latest_boundary_info, latest_boundary_pr)
+    next_action = _merge_readiness_next_action(
+        stream_state=stream_state,
+        stale_base=stale_base,
+        branch_advanced=branch_has_advanced,
+        recommended_next_action=recommended_next_action,
+    )
+    active_workflow_tasks = [
+        task for task in workflow_tasks if not board_task_is_closed(task)
+    ]
+    boundary_status = str(
+        (latest_boundary_info or {}).get("status", "") or ""
+    ).strip()
+    packet = {
+        "version": 1,
+        "stream_id": stream_id_value,
+        "repo_root": repo_root,
+        "branch": branch,
+        "state": stream_state,
+        "code_state": code_state,
+        "merge_state": merge_state,
+        "product_task_ids": [task.id for task in product_tasks],
+        "workflow_task_ids": [task.id for task in workflow_tasks],
+        "active_workflow_task_ids": [
+            task.id for task in active_workflow_tasks
+        ],
+        "latest_reviewed_boundary": {
+            "task_id": getattr(latest_review_boundary, "id", "") or "",
+            "task_title": getattr(latest_review_boundary, "task", "") or "",
+            "lane": getattr(latest_review_boundary, "lane", "") or "",
+            "status": boundary_status,
+            "recorded_at": (
+                (latest_boundary_info or {}).get("recorded_at", "") or ""
+            ),
+            "reviewed_sha": latest_reviewed_commit_sha,
+        },
+        "head": _current_head_packet(
+            reviewed_sha=latest_reviewed_commit_sha,
+            branch_advanced=branch_has_advanced,
+            boundary=latest_boundary_info,
+            pr=latest_boundary_pr,
+        ),
+        "stale_base": stale_base,
+        "review_final": _review_packet(latest_review_boundary, latest_review),
+        "verification": _verification_packet(
+            validation_state,
+            validation_record,
+        ),
+        "followups": {
+            "queued": _task_refs(queued_followers),
+            "started": _task_refs(started_followers),
+            "queued_count": len(queued_followers),
+            "started_count": len(started_followers),
+            "active_blocker_fix_task": _task_packet_ref(active_blocker_task),
+            "blocker_parent_review_task": _task_packet_ref(
+                blocker_parent_review_task
+            ),
+            "notes": _follow_up_note_packets(latest_review),
+        },
+        "pr": latest_boundary_pr,
+        "latest_merged_commit_sha": latest_merged_commit_sha,
+        "branch_advanced": branch_has_advanced,
+        "partial_review_safe": partial_review_safe,
+        "gate_reason": gate_reason,
+        "recommended_next_action": next_action,
+    }
+    packet["merge_report_snippet"] = merge_report_snippet_template(packet)
+    return packet
 
 
 # `_branch_exists_locally` used to shell out to `git show-ref` per branch per
@@ -802,11 +1149,46 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
     )
 
     group_value = _stream_group(stream_tasks, owner_agent)
+    stream_id_value = stream_id(repo_root, branch)
     latest_boundary_info = task_boundary(latest_boundary) if latest_boundary else {}
+    latest_review_boundary_info = (
+        task_boundary(latest_review_boundary) if latest_review_boundary else {}
+    )
     latest_boundary_pr = boundary_pr_metadata(latest_boundary_info)
     latest_merged_commit_sha = (
         str(latest_boundary_info.get("merge_commit_sha", "") or "").strip()
         or str(latest_boundary_pr.get("merge_commit_sha", "") or "").strip()
+    )
+    latest_review = _task_review_evidence(latest_review_boundary)
+    merge_readiness = _merge_readiness_packet(
+        stream_id_value=stream_id_value,
+        repo_root=repo_root,
+        branch=branch,
+        stream_state=stream_state,
+        merge_state=merge_state,
+        code_state=code_state,
+        product_tasks=product_tasks,
+        workflow_tasks=workflow_tasks,
+        queued_followers=queued_followers,
+        started_followers=started_followers,
+        latest_review_boundary=latest_review_boundary,
+        latest_boundary_info=latest_review_boundary_info or latest_boundary_info,
+        latest_review=latest_review,
+        latest_reviewed_commit_sha=latest_reviewed_commit_sha,
+        latest_merged_commit_sha=latest_merged_commit_sha,
+        latest_boundary_pr=latest_boundary_pr,
+        branch_has_advanced=branch_has_advanced,
+        partial_review_safe=partial_review_safe,
+        validation_state=validation_state,
+        validation_record=validation_record,
+        active_blocker_task=active_blocker_task,
+        blocker_parent_review_task=blocker_parent_review_task,
+        gate_reason=gate_reason,
+        recommended_next_action=recommended_next_action,
+    )
+    recommended_next_action = merge_readiness.get(
+        "recommended_next_action",
+        recommended_next_action,
     )
     branch_exists_locally = _branch_exists_locally(
         repo_root,
@@ -827,7 +1209,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
     )
 
     return {
-        "stream_id": stream_id(repo_root, branch),
+        "stream_id": stream_id_value,
         "group": group_value,
         "repo_root": repo_root,
         "branch": branch,
@@ -850,7 +1232,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         ),
         "latest_boundary_status": latest_boundary_info.get("status", "") or "",
         "latest_reviewed_commit_sha": latest_reviewed_commit_sha,
-        "latest_review": _task_review_evidence(latest_review_boundary),
+        "latest_review": latest_review,
         "latest_merged_commit_sha": latest_merged_commit_sha,
         "pr": latest_boundary_pr,
         "pr_url": latest_boundary_pr.get("url", ""),
@@ -892,6 +1274,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         ),
         "gate_reason": gate_reason,
         "recommended_next_action": recommended_next_action,
+        "merge_readiness": merge_readiness,
         "branch_advanced": branch_has_advanced,
         "partial_review_safe": partial_review_safe,
         "last_activity_at": last_activity_at,

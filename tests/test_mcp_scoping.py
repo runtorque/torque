@@ -643,6 +643,10 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["auto_force_push"])
         self.assertEqual(payload["push"]["reason"], "remote_merged_to_base")
         self.assertTrue(payload["push"]["force_with_lease"])
+        self.assertIn("merge_report_snippet", payload)
+        self.assertIn("https://github.com/acme/repo/pull/7",
+                      payload["merge_report_snippet"])
+        self.assertIn("torque/alice/worker-a", payload["merge_report_snippet"])
         self.assertEqual(
             [call["cmd"] for call in calls],
             ["worktree_check_merge", "worktree_merge"],

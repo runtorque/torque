@@ -75,8 +75,9 @@ ENGINEER_TOOLS = [
             "Returns compact stream objects including identity, ownership, "
             "product/workflow membership, product-queue state, queue gates, "
             "recent visibility items, state, live/dormant/orphaned "
-            "presence classification, review/boundary metadata, and "
-            "recommended next action. Orphaned historical streams are "
+            "presence classification, review/boundary metadata, merge-readiness "
+            "packet with report snippet, and recommended next action. Orphaned "
+            "historical streams are "
             "suppressed by default; pass include_orphaned=true to include "
             "them."
         ),
@@ -122,7 +123,8 @@ ENGINEER_TOOLS = [
             "Show one computed stream by stream id, branch identity, or a "
             "related task id. Returns the full compact stream payload with "
             "product, workflow, and visibility distinctions preserved, "
-            "including queue items, queue gate, and auto-resume readiness."
+            "including queue items, queue gate, auto-resume readiness, and "
+            "the merge_readiness packet for merge/report decisions."
         ),
         "inputSchema": {
             "type": "object",
