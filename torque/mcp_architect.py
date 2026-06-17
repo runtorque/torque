@@ -32,6 +32,25 @@ ARCHITECT_DEFERRED_TOOL_NAMES = {
 _ARCHITECT_TOOL_SPECS = [
     make_tool_search_spec("architect_tool_search", "architect"),
     {
+        "name": "architect_attention_digest",
+        "description": (
+            "Return a compact bounded digest of actionable orchestration "
+            "states needing this Architect's attention: blocking asks, "
+            "hired-engineer human questions, ack-required peer messages, "
+            "ready-to-merge streams, blocker/stale-base loops, unhealthy "
+            "active work, pending hires, and a separate parked/deferred count."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit_per_section": {
+                    "type": "integer",
+                    "description": "Maximum items per section (default 5, max 20).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_board_summary",
         "description": (
             "Return a compact board overview for this architect's group, "

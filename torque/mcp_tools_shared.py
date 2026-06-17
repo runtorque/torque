@@ -95,6 +95,8 @@ _HEALTH_SUMMARY_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT = 20
 _ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT = 10_000
+_ARCHITECT_ATTENTION_DEFAULT_LIMIT = 5
+_ARCHITECT_ATTENTION_MAX_LIMIT = 20
 _ARCHITECT_EVENTS_RECENT_DEFAULT_LIMIT = 20
 _ARCHITECT_EVENTS_RECENT_MAX_LIMIT = 100
 _ARCHITECT_EVENTS_RECENT_LOAD_LIMIT = 500
@@ -447,6 +449,473 @@ def _normalize_architect_task_list_limit(value) -> tuple[int, str]:
     return limit, ""
 
 
+def _normalize_architect_attention_limit(value) -> tuple[int, str]:
+    if value in (None, ""):
+        return _ARCHITECT_ATTENTION_DEFAULT_LIMIT, ""
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0, "limit_per_section must be an integer"
+    if limit < 1:
+        return 0, "limit_per_section must be at least 1"
+    return min(limit, _ARCHITECT_ATTENTION_MAX_LIMIT), ""
+
+
+def _bounded_items(items: list[dict], limit: int) -> dict:
+    return {
+        "count": len(items),
+        "items": items[:limit],
+        "truncated": len(items) > limit,
+    }
+
+
+def _architect_attention_task_item(task, *, created_by: str = "") -> dict:
+    item = {
+        "id": getattr(task, "id", "") or "",
+        "title": _summary_task_title(task),
+        "lane": getattr(task, "lane", "") or "",
+        "status": getattr(task, "status", "") or "",
+        "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "agent_id": str(getattr(task, "agent_id", "") or "").strip(),
+        "updated_at": getattr(task, "updated_at", "") or "",
+    }
+    if created_by:
+        item["created_by"] = created_by
+    health_state = str(getattr(task, "health_state", "") or "").strip()
+    if health_state and health_state != "healthy":
+        item["health_state"] = health_state
+        item["health_since"] = getattr(task, "health_since", "") or ""
+    return {key: value for key, value in item.items() if value not in ("", None)}
+
+
+def _task_parked_or_deferred(task) -> bool:
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    if labels.intersection({"deferred", "torque:hold", "hold", "parked"}):
+        return True
+    status = str(getattr(task, "status", "") or "").strip().lower()
+    return status in {"deferred", "parked", "on hold", "hold"}
+
+
+def _stream_stale_base(stream: dict) -> dict:
+    readiness = (stream or {}).get("merge_readiness", {})
+    if not isinstance(readiness, dict):
+        readiness = {}
+    stale = readiness.get("stale_base", {})
+    if not isinstance(stale, dict):
+        stale = {}
+    return stale
+
+
+def _stream_recommended_next_action(stream: dict) -> str:
+    readiness = (stream or {}).get("merge_readiness", {})
+    if isinstance(readiness, dict):
+        action = str(readiness.get("recommended_next_action", "") or "").strip()
+        if action:
+            return action
+    return str((stream or {}).get("recommended_next_action", "") or "").strip()
+
+
+def _architect_attention_stream_item(stream: dict) -> dict:
+    item = {
+        "stream_id": str((stream or {}).get("stream_id", "") or ""),
+        "state": str((stream or {}).get("state", "") or ""),
+        "branch": str((stream or {}).get("branch", "") or ""),
+        "repo_root": str((stream or {}).get("repo_root", "") or ""),
+        "agent_id": str((stream or {}).get("agent_id", "") or ""),
+        "agent_name": str((stream or {}).get("agent_name", "") or ""),
+        "foreground_task_id": str(
+            (stream or {}).get("foreground_task_id", "") or ""
+        ),
+        "foreground_task_title": str(
+            (stream or {}).get("foreground_task_title", "") or ""
+        ),
+        "active_blocker_task_id": str(
+            (stream or {}).get("active_blocker_task_id", "") or ""
+        ),
+        "active_blocker_task_title": str(
+            (stream or {}).get("active_blocker_task_title", "") or ""
+        ),
+        "product_task_ids": list((stream or {}).get("product_task_ids", []) or []),
+        "workflow_task_ids": list((stream or {}).get("workflow_task_ids", []) or []),
+        "pr_url": str((stream or {}).get("pr_url", "") or ""),
+        "branch_advanced": bool((stream or {}).get("branch_advanced", False)),
+        "recommended_next_action": _stream_recommended_next_action(stream),
+        "last_activity_at": str((stream or {}).get("last_activity_at", "") or ""),
+    }
+    stale = _stream_stale_base(stream)
+    if stale:
+        item["stale_base"] = stale
+    return {
+        key: value for key, value in item.items()
+        if value not in ("", None, {}, [])
+    }
+
+
+def _stream_owner_engineer_ids(state, stream: dict) -> set[str]:
+    owner_ids: set[str] = set()
+    agent_id = str((stream or {}).get("agent_id", "") or "").strip()
+    agent = state.agents.get(agent_id)
+    if agent:
+        for field in ("owner_engineer_id", "created_by_engineer_id"):
+            value = str(getattr(agent, field, "") or "").strip()
+            if value:
+                owner_ids.add(value)
+        if str(getattr(agent, "kind", "") or "").strip() == "engineer":
+            owner_ids.add(str(getattr(agent, "id", "") or "").strip())
+    for task_id in member_task_ids_for_stream(stream):
+        task = state.board_tasks.get(task_id)
+        if not task:
+            continue
+        for value in (
+            _effective_assigned_engineer_id(task),
+            str(getattr(task, "created_by_engineer_id", "") or "").strip(),
+        ):
+            if value:
+                owner_ids.add(value)
+    return {owner_id for owner_id in owner_ids if owner_id}
+
+
+def _stream_owned_by_hired_engineer(state, stream: dict,
+                                    hired_engineer_ids: set[str]) -> bool:
+    return bool(_stream_owner_engineer_ids(state, stream) & hired_engineer_ids)
+
+
+def _stream_unhealthy_task_items(state, stream: dict) -> list[dict]:
+    items = []
+    for task_id in member_task_ids_for_stream(stream):
+        task = state.board_tasks.get(task_id)
+        if not task or board_task_is_closed(task):
+            continue
+        if _task_parked_or_deferred(task):
+            continue
+        health_state = str(
+            getattr(task, "health_state", "") or "healthy"
+        ).strip() or "healthy"
+        if health_state == "healthy":
+            continue
+        items.append(_architect_attention_task_item(
+            task,
+            created_by=_task_created_by_classifier(task),
+        ))
+    items.sort(
+        key=lambda item: (
+            -HEALTH_SEVERITY.get(item.get("health_state", ""), 0),
+            item.get("health_since", ""),
+            item.get("title", "").lower(),
+        )
+    )
+    return items
+
+
+def _architect_attention_peer_ack_items(state, caller_id: str,
+                                        limit: int) -> dict:
+    if not getattr(state, "db", None):
+        return {"count": 0, "items": [], "truncated": False}
+    try:
+        rows = state.db.load_agent_peer_messages_for_agent(
+            caller_id,
+            limit=_ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+        )
+    except Exception as exc:
+        log.exception("Failed to load Architect peer ack attention rows")
+        return {
+            "count": 0,
+            "items": [],
+            "truncated": False,
+            "error": str(exc),
+        }
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        thread_id = str((row or {}).get("thread_id", "") or "").strip()
+        if not thread_id:
+            continue
+        grouped.setdefault(thread_id, []).append(row)
+    threads = []
+    for thread_id, messages in grouped.items():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        if not _thread_requires_architect_reply(messages, caller_id):
+            continue
+        last = messages[-1]
+        entry_for_caller = _agent_peer_message_row_to_entry(last, caller_id)
+        peer_architect_id = entry_for_caller["peer_id"]
+        peer = state.agents.get(peer_architect_id)
+        threads.append({
+            "thread_id": thread_id,
+            "peer_architect_id": peer_architect_id,
+            "peer_name": str(getattr(peer, "name", "") or "").strip()
+            or peer_architect_id,
+            "last_message_at": float(last.get("created_at", 0) or 0),
+            "messages": [
+                _agent_peer_message_row_to_entry(row, caller_id)
+                for row in messages
+            ],
+        })
+    threads.sort(
+        key=lambda item: (
+            float(item.get("last_message_at", 0) or 0),
+            str(item.get("thread_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    items = []
+    for thread in threads if isinstance(threads, list) else []:
+        messages = thread.get("messages", []) if isinstance(thread, dict) else []
+        latest_ack = {}
+        for message in messages if isinstance(messages, list) else []:
+            if (
+                isinstance(message, dict)
+                and message.get("direction") == "received"
+                and message.get("ack_required")
+            ):
+                latest_ack = message
+        item = {
+            "thread_id": str(thread.get("thread_id", "") or ""),
+            "peer_architect_id": str(thread.get("peer_architect_id", "") or ""),
+            "peer_name": str(thread.get("peer_name", "") or ""),
+            "last_message_at": float(thread.get("last_message_at", 0) or 0),
+        }
+        if latest_ack:
+            item["message_id"] = str(latest_ack.get("id", "") or "")
+            item["ack_required_at"] = float(latest_ack.get("timestamp", 0) or 0)
+            context = latest_ack.get("context", {})
+            if isinstance(context, dict):
+                item["context"] = _peer_row_context({
+                    "context_task_ids": context.get("task_ids", []),
+                    "context_engineer_ids": context.get("engineer_ids", []),
+                    "context_decision_ids": context.get("decision_ids", []),
+                    "context_summary": context.get("summary", ""),
+                })
+        items.append({
+            key: value for key, value in item.items()
+            if value not in ("", None, {}, [])
+        })
+    return {
+        "count": len(items),
+        "items": items[:limit],
+        "truncated": len(items) > limit or len(rows) >= _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+    }
+
+
+def _architect_attention_digest_json(state, architect_id: str,
+                                     architect_group: str,
+                                     args: dict) -> tuple[str, bool]:
+    limit, limit_error = _normalize_architect_attention_limit(
+        args.get("limit_per_section")
+    )
+    if limit_error:
+        return limit_error, True
+
+    hired_engineer_ids = _architect_hired_engineer_ids(state, architect_id)
+    group_tasks = [
+        task for task in state.board_tasks.values()
+        if str(getattr(task, "group", "") or "").strip() == architect_group
+        and getattr(task, "lane", "") != ARCHIVED_LANE
+    ]
+    open_tasks = [task for task in group_tasks if not board_task_is_closed(task)]
+    actionable_tasks = [
+        task for task in open_tasks
+        if (
+            not task_is_engineer_message_followup(task)
+            and not _task_parked_or_deferred(task)
+        )
+    ]
+    parked_deferred = [
+        task for task in open_tasks
+        if (
+            not task_is_engineer_message_followup(task)
+            and _task_parked_or_deferred(task)
+        )
+    ]
+
+    blocking_asks = [
+        _architect_attention_task_item(
+            task,
+            created_by=_task_created_by_classifier(task),
+        )
+        for task in actionable_tasks
+        if "torque:human" in set(getattr(task, "labels", []) or [])
+    ]
+    blocking_asks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]),
+                       reverse=True)
+
+    engineer_questions = []
+    for engineer_id in sorted(hired_engineer_ids):
+        engineer = state.agents.get(engineer_id)
+        group = str(getattr(engineer, "group", "") or "").strip()
+        if not group:
+            continue
+        settings = state.get_engineer_settings(group)
+        actor_id = str(
+            getattr(settings, "pending_question_actor_id", "") or ""
+        ).strip()
+        question = str(getattr(settings, "pending_question", "") or "").strip()
+        if not question or actor_id != engineer_id:
+            continue
+        engineer_questions.append({
+            "engineer_id": engineer_id,
+            "engineer_name": str(getattr(engineer, "name", "") or "")
+            or engineer_id,
+            "group": group,
+            "question": question,
+            "set_at": float(
+                getattr(settings, "pending_question_set_at", 0.0) or 0.0
+            ),
+            "paused": bool(getattr(settings, "paused", False)),
+        })
+    engineer_questions.sort(
+        key=lambda item: (float(item.get("set_at", 0) or 0), item["engineer_id"]),
+        reverse=True,
+    )
+
+    streams = compute_worktree_streams(
+        state,
+        group=architect_group,
+        visibility_limit=limit,
+        include_orphaned=False,
+    )
+    hired_streams = [
+        stream for stream in streams
+        if _stream_owned_by_hired_engineer(state, stream, hired_engineer_ids)
+    ]
+    ready_to_merge = [
+        _architect_attention_stream_item(stream)
+        for stream in hired_streams
+        if str((stream or {}).get("state", "") or "") == "ready_to_merge"
+    ]
+    ready_to_merge.sort(
+        key=lambda item: (item.get("last_activity_at", ""), item["stream_id"]),
+        reverse=True,
+    )
+
+    blocker_or_stale_streams = []
+    for stream in hired_streams:
+        stream_state = str((stream or {}).get("state", "") or "")
+        stale = _stream_stale_base(stream)
+        if (
+            stream_state == "fixing_blockers"
+            or bool((stream or {}).get("branch_advanced", False))
+            or bool(stale.get("stale"))
+            or _stream_recommended_next_action(stream) == "rebase"
+        ):
+            blocker_or_stale_streams.append(
+                _architect_attention_stream_item(stream)
+            )
+    blocker_or_stale_streams.sort(
+        key=lambda item: (
+            0 if item.get("recommended_next_action") == "rebase" else 1,
+            item.get("last_activity_at", ""),
+            item["stream_id"],
+        )
+    )
+
+    unhealthy_tasks = [
+        _architect_attention_task_item(
+            task,
+            created_by=_task_created_by_classifier(task),
+        )
+        for task in actionable_tasks
+        if str(getattr(task, "health_state", "") or "healthy").strip()
+        != "healthy"
+    ]
+    unhealthy_tasks.sort(
+        key=lambda item: (
+            -HEALTH_SEVERITY.get(item.get("health_state", ""), 0),
+            item.get("health_since", ""),
+            item.get("title", "").lower(),
+        )
+    )
+
+    unhealthy_streams = []
+    for stream in hired_streams:
+        task_items = _stream_unhealthy_task_items(state, stream)
+        if not task_items:
+            continue
+        item = _architect_attention_stream_item(stream)
+        item["unhealthy_tasks"] = task_items[:limit]
+        item["unhealthy_task_count"] = len(task_items)
+        unhealthy_streams.append(item)
+    unhealthy_streams.sort(
+        key=lambda item: (
+            -max(
+                [
+                    HEALTH_SEVERITY.get(task.get("health_state", ""), 0)
+                    for task in item.get("unhealthy_tasks", [])
+                ] or [0]
+            ),
+            item.get("last_activity_at", ""),
+            item.get("stream_id", ""),
+        )
+    )
+
+    pending_hires = [
+        {
+            "id": str(hire.get("id", "") or ""),
+            "requested_name": str(hire.get("requested_name", "") or ""),
+            "requested_provider": str(hire.get("requested_provider", "") or ""),
+            "requested_specializations": list(
+                hire.get("requested_specializations", []) or []
+            ),
+            "created_at": int(hire.get("created_at", 0) or 0),
+        }
+        for hire in state.load_pending_hires(
+            status_filter="pending",
+            architect_id=architect_id,
+        )
+    ]
+
+    sections = {
+        "blocking_asks": _bounded_items(blocking_asks, limit),
+        "engineer_pending_questions": _bounded_items(engineer_questions, limit),
+        "peer_ack_required": _architect_attention_peer_ack_items(
+            state,
+            architect_id,
+            limit,
+        ),
+        "ready_to_merge_streams": _bounded_items(ready_to_merge, limit),
+        "blocker_or_stale_streams": _bounded_items(
+            blocker_or_stale_streams,
+            limit,
+        ),
+        "unhealthy_tasks": _bounded_items(unhealthy_tasks, limit),
+        "unhealthy_streams": _bounded_items(unhealthy_streams, limit),
+        "pending_hires": _bounded_items(pending_hires, limit),
+    }
+    attention_total = sum(
+        int(section.get("count", 0) or 0)
+        for section in sections.values()
+    )
+    return _compact_json({
+        "type": "architect_attention_digest",
+        "group": architect_group,
+        "limit_per_section": limit,
+        "attention_count": attention_total,
+        "sections": sections,
+        "parked_deferred": {
+            "count": len(parked_deferred),
+            "note": (
+                "Parked/deferred items are low-priority context only and are "
+                "not included in attention_count."
+            ),
+        },
+        "scoping": {
+            "group": architect_group,
+            "hired_engineer_ids": sorted(hired_engineer_ids),
+            "ready_merge_and_stream_loops": "hired_engineers_only",
+            "tasks": "same_group_open_non_archived",
+            "pending_hires": "caller_architect_only",
+            "peer_messages": "caller_threads_only",
+        },
+    }), False
+
+
 def _architect_task_creator_filter_matches(task, creator_filter: str
                                            ) -> tuple[bool, str]:
     creator_filter = str(creator_filter or "").strip()
@@ -611,6 +1080,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "actions_list",
     "agent_show",
     "agents_list",
+    "attention_digest",
     "behavior_overlay_diff",
     "behavior_overlay_proposal_list",
     "behavior_overlay_read",
@@ -5127,6 +5597,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return await _raw_handle_command(command_payload)
 
     # -- Read tools ---------------------------------------------------------
+
+    if tool_name == "attention_digest" and caller_kind == "architect":
+        return _architect_attention_digest_json(
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
 
     if tool_name == "events_recent" and caller_kind == "architect":
         return _architect_events_recent_json(
