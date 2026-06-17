@@ -8872,7 +8872,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if blocked:
             return error_text, True
 
-        return json.dumps({
+        payload = {
             "type": "ok",
             "message": f"Rebased {cell.worktree_branch} onto "
                        f"{cell.worktree_base_branch}",
@@ -8882,7 +8882,22 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "conflicts_after": postcheck.get("conflicts", []),
             "boundary": postcheck.get("boundary"),
             "clean_boundary": postcheck.get("clean_boundary"),
-        }), False
+        }
+        for key in (
+                "post_rebase_head_sha",
+                "base_head_sha",
+                "review_boundary_updated",
+                "review_boundary_task_id",
+                "post_rebase_evidence",
+                "workflow_breach",
+        ):
+            if key in result:
+                payload[key] = result[key]
+        if isinstance(result.get("post_rebase_evidence"), dict):
+            payload["post_rebase_evidence_required"] = (
+                result["post_rebase_evidence"]
+            )
+        return json.dumps(payload), False
 
     if tool_name == "create_pr":
         valid_target, target_error = _validate_exactly_one_worktree_target(args)

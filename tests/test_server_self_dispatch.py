@@ -1375,6 +1375,94 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             closure,
         )
 
+
+    async def test_worktree_rebase_returns_standard_post_rebase_evidence(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-rebase",
+            name="Worker Rebase",
+            group="g",
+            cell_type="agent",
+            worktree_path="/tmp/worker-rebase",
+            worktree_branch="torque/worker-rebase",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        class FakeWorktreeManager:
+            async def rebase_untracked_overwrite_paths(self, _cell):
+                return []
+
+            async def has_uncommitted_changes(self, _cell):
+                return False
+
+            async def stale_base_info(self, _cell):
+                return {
+                    "stale": True,
+                    "branch": "torque/worker-rebase",
+                    "base_branch": "main",
+                    "fork_point": "1111111111111111111111111111111111111111",
+                    "base_head": "2222222222222222222222222222222222222222",
+                    "branch_head": "3333333333333333333333333333333333333333",
+                }
+
+            async def check_merge_conflicts(self, _cell):
+                return {"clean": True, "conflicts": []}
+
+            async def current_head(self, _cell):
+                return "4444444444444444444444444444444444444444"
+
+            async def nested_submodule_head_states(self, _cell, _submodules):
+                return []
+
+            async def rebase_onto_base(self, _cell):
+                return True
+
+            async def count_commits(self, _cell):
+                return 1
+
+            async def rev_parse(self, _repo_root, ref):
+                if ref == "main":
+                    return "5555555555555555555555555555555555555555"
+                return ""
+
+        handle_command = self._extract_handle_command(
+            state,
+            worktree_mgr=FakeWorktreeManager(),
+            _save_task_record=lambda _task: None,
+            _worktree_submodules_for_cell=lambda _cell: [],
+        )
+
+        result = await handle_command({
+            "cmd": "worktree_rebase",
+            "id": worker.id,
+        })
+
+        self.assertEqual(result["type"], "worktree_rebase")
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["post_rebase_head_sha"],
+            "4444444444444444444444444444444444444444",
+        )
+        self.assertEqual(
+            result["base_head_sha"],
+            "5555555555555555555555555555555555555555",
+        )
+        evidence = result["post_rebase_evidence"]
+        self.assertEqual(
+            evidence["post_rebase_head_sha"],
+            "4444444444444444444444444444444444444444",
+        )
+        self.assertEqual(
+            evidence["base_head_sha"],
+            "5555555555555555555555555555555555555555",
+        )
+        self.assertFalse(evidence["review_boundary_updated"])
+        self.assertIn("rerun_tests", evidence)
+
     async def test_board_verify_task_handler_accepts_minimal_payload(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

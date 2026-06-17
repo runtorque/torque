@@ -49,6 +49,8 @@ prompt: |
 
   Before deriving review or reporting completion, summarize: files changed and why; acceptance criteria satisfied; tests/checks run; any manual smoke coverage; deviations from the plan; remaining risks or live verification still needed. Put this evidence in the `feature/review` derive context so the reviewer can evaluate the work without rediscovering basic context.
 
+  If Torque blocks review derivation because the worktree has a stale base, run the suggested rebase command and include the standard post-rebase evidence in the next `feature/review` derive context: `post_rebase_head_sha`, `base_head_sha`, exact `rerun_tests` command(s), and `review_boundary_updated`.
+
   ## Closeout reminder
 
   If your task description contains a review requirement, you MUST call `torque ai derive "<summary>" -t feature/review` before `torque ai done`.
