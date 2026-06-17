@@ -70,6 +70,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "decision_create",
     "decision_update",
     "decision_link",
+    "hint_snooze",
     "journal",
     "engineer_message",
     "peer_message",
