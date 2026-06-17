@@ -5757,12 +5757,14 @@ def _normalized_review_verdict_line(line: str) -> str:
         text = text.replace(token, "")
     text = text.strip()
     lower = text.lower()
-    if lower.startswith("verdict"):
-        rest = text[len("verdict"):].lstrip()
-        if rest[:1] in {":", "-", "—", "–"}:
-            text = rest[1:].strip()
-        else:
-            text = rest.strip()
+    for label in ("final review verdict", "review verdict", "verdict"):
+        if lower.startswith(label):
+            rest = text[len(label):].lstrip()
+            if rest[:1] in {":", "-", "—", "–"}:
+                text = rest[1:].strip()
+            else:
+                text = rest.strip()
+            break
     return text.strip()
 
 
@@ -5792,9 +5794,219 @@ def _review_verdict_from_message(message: str) -> str:
     return ""
 
 
+def _normalize_review_followup_classification(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = text.replace("_", "-")
+    text = re.sub(r"\s+", " ", text)
+    if (
+            "future-context" in text
+            or "future context" in text
+            or text in {"future", "future-only", "future only"}):
+        return "future_context"
+    if (
+            "non-blocking" in text
+            or "non blocking" in text
+            or "optional" in text
+            or "follow-up" in text
+            or "follow up" in text):
+        return "non_blocking_now"
+    if "blocking" in text or text in {"block", "blocker", "blockers"}:
+        return "blocking"
+    if text in {"none", "no", "no follow-ups", "no follow ups", "n/a", "na"}:
+        return "none"
+    return ""
+
+
+def _review_followup_classification_from_message(message: str) -> str:
+    """Best-effort parse of a review's structured follow-up class."""
+    lines = str(message or "").splitlines()
+    for line in reversed(lines):
+        text = _normalized_review_verdict_line(line)
+        if not text:
+            continue
+        lower = text.lower()
+        for label in (
+                "follow-up classification",
+                "follow up classification",
+                "follow-up class",
+                "follow up class",
+                "follow-up",
+                "follow up"):
+            if not lower.startswith(label):
+                continue
+            value = text[len(label):].strip()
+            if value[:1] in {":", "-", "—", "–"}:
+                value = value[1:].strip()
+            normalized = _normalize_review_followup_classification(value)
+            if normalized:
+                return normalized
+
+    text = str(message or "")
+    lower = text.lower()
+    if "future-context only" in lower or "future context only" in lower:
+        return "future_context"
+    if (
+            re.search(r"follow[- ]up suggestions\W+(none|no\b)", lower)
+            or re.search(r"follow[- ]ups?\W+(none|no\b)", lower)):
+        return "none"
+    if (
+            "follow-up suggestions" in lower
+            or "follow up suggestions" in lower):
+        return "non_blocking_now"
+    return ""
+
+
+def _task_review_evidence(task) -> dict:
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}
+    review = evidence.get("review", {}) or {}
+    return review if isinstance(review, dict) else {}
+
+
+def _review_event_message(review: dict) -> str:
+    verdict = str((review or {}).get("verdict", "") or "unknown").strip()
+    followup = str(
+        (review or {}).get("follow_up_classification", "") or ""
+    ).strip()
+    parts = [f"Final review verdict: {verdict}"]
+    if followup:
+        parts.append(f"follow-ups={followup}")
+    derived = str((review or {}).get("derived_task_id", "") or "").strip()
+    if derived:
+        parts.append(f"derived_task={derived}")
+    return "; ".join(parts)
+
+
+def _build_review_verdict_payload(*, task, cell=None, source_action: str,
+                                  message: str = "",
+                                  derived_action: str = "",
+                                  derived_task_id: str = "",
+                                  pre_approved: bool = False,
+                                  timestamp: str = "") -> dict:
+    """Return a structured final verdict payload for a feature/review task."""
+    if not task or not _is_feature_review_task(task):
+        return {}
+
+    source_action = _completion_evidence_text(source_action, limit=80)
+    message = _completion_evidence_text(message, limit=2000)
+    derived_action = _completion_evidence_text(derived_action, limit=120)
+    verdict = ""
+    followup = _review_followup_classification_from_message(message)
+    parsed = _review_verdict_from_message(message)
+
+    if source_action == "derive":
+        if pre_approved or derived_action.endswith("preapproved"):
+            verdict = "needs_followup"
+            followup = followup or "non_blocking_now"
+        elif derived_action in {"feature/implement", "feature/fix-review"}:
+            verdict = "block"
+            followup = "blocking"
+    if not verdict:
+        if parsed == "ship":
+            verdict = "ship"
+        elif parsed == "ship_with_fixes":
+            verdict = "needs_followup"
+            followup = followup or "non_blocking_now"
+        elif parsed == "needs_rework":
+            verdict = "block"
+            followup = "blocking"
+    if not verdict and source_action == "done":
+        verdict = "unknown"
+    if not verdict:
+        return {}
+    if not followup and verdict == "ship":
+        followup = "none"
+    elif not followup and verdict == "needs_followup":
+        followup = "non_blocking_now"
+    elif verdict == "block":
+        followup = "blocking"
+
+    recorded_at = timestamp or datetime.now(timezone.utc).isoformat()
+    payload = {
+        "verdict": verdict,
+        "follow_up_classification": followup,
+        "source_action": source_action,
+        "summary": message,
+        "recorded_at": recorded_at,
+    }
+    if parsed:
+        payload["parsed_verdict"] = parsed
+    if cell:
+        payload["agent_id"] = _completion_evidence_text(
+            getattr(cell, "id", ""), limit=80)
+        payload["agent_name"] = _completion_evidence_text(
+            getattr(cell, "name", ""), limit=160)
+    if derived_action:
+        payload["derived_action"] = derived_action
+    if derived_task_id:
+        payload["derived_task_id"] = _completion_evidence_text(
+            derived_task_id, limit=80)
+    if pre_approved:
+        payload["pre_approved_followup"] = True
+    return payload
+
+
+def _record_review_verdict_evidence(
+        state: MatrixState,
+        task,
+        *,
+        cell=None,
+        source_action: str,
+        message: str = "",
+        derived_action: str = "",
+        derived_task_id: str = "",
+        pre_approved: bool = False,
+        append_task_msg=None,
+        record_history_msg=None,
+        timestamp: str = "",
+) -> dict:
+    """Persist a structured final feature/review verdict if one is present."""
+    if not state or not task:
+        return {}
+    review = _build_review_verdict_payload(
+        task=task,
+        cell=cell,
+        source_action=source_action,
+        message=message,
+        derived_action=derived_action,
+        derived_task_id=derived_task_id,
+        pre_approved=pre_approved,
+        timestamp=timestamp,
+    )
+    if not review:
+        return {}
+
+    actor_name = _completion_evidence_text(
+        getattr(cell, "name", ""), limit=160) or "torque"
+    update = {
+        "sources": ["review"],
+        "review": review,
+        "updated_at": review["recorded_at"],
+        "updated_by": actor_name,
+    }
+    task.completion_evidence = _merge_completion_evidence(
+        getattr(task, "completion_evidence", {}) or {},
+        update,
+    )
+    event_message = _review_event_message(review)
+    if append_task_msg:
+        append_task_msg(task, "review_verdict", event_message, actor_name)
+    if record_history_msg and cell:
+        record_history_msg(cell, "review_verdict", event_message)
+    _save_completion_evidence_task(state, task)
+    return review
+
+
 def _review_task_has_ship_verdict(task) -> bool:
     if not task:
         return False
+    review = _task_review_evidence(task)
+    verdict = str(review.get("verdict", "") or "").strip()
+    if verdict and verdict != "unknown":
+        return verdict == "ship"
     for entry in reversed(getattr(task, "messages", []) or []):
         if str(entry.get("action", "") or "").lower() != "done":
             continue
@@ -10126,7 +10338,7 @@ def _merge_completion_evidence(existing, update: dict) -> dict:
         if source and source not in sources:
             sources.append(source)
 
-    for key in ("completion", "verification", "artifacts", "merge"):
+    for key in ("completion", "verification", "artifacts", "merge", "review"):
         if key in update:
             evidence[key] = update[key]
     evidence["version"] = _COMPLETION_EVIDENCE_VERSION
@@ -20753,6 +20965,17 @@ async def main(connection=None):
                                 action="done",
                                 message=message or "Done",
                             )
+                            review_verdict = _record_review_verdict_evidence(
+                                state,
+                                task,
+                                cell=cell,
+                                source_action="done",
+                                message=message or "Done",
+                                append_task_msg=_append_task_msg,
+                                record_history_msg=_record_history_msg,
+                            )
+                        else:
+                            review_verdict = {}
                         state._emit_agent(cell)
                         # Auto-checkpoint on done. The session_end hook
                         # callback (_on_agent_session_end, wired at
@@ -20836,6 +21059,12 @@ async def main(connection=None):
                                         f"Task '{_dt.task[:60]}'"
                                         " is now unblocked",
                                         task_id=_dt.id)
+                        if review_verdict:
+                            _panel_event(
+                                "review_verdict", cell.id,
+                                cell.name, cell.group,
+                                _review_event_message(review_verdict),
+                                task_id=task.id if task else "")
                         _panel_event(
                             "task_completed", cell.id,
                             cell.name, cell.group,
@@ -21298,8 +21527,38 @@ async def main(connection=None):
                                         _record_history_msg(
                                             cell, "derive",
                                             message[:80])
+                                        review_verdict = (
+                                            _record_review_verdict_evidence(
+                                                state,
+                                                task,
+                                                cell=cell,
+                                                source_action="derive",
+                                                message=derive_desc
+                                                or message,
+                                                derived_action=act_name,
+                                                derived_task_id=new_task.id,
+                                                pre_approved=bool(
+                                                    derive_pre_approved_by
+                                                ),
+                                                append_task_msg=(
+                                                    _append_task_msg
+                                                ),
+                                                record_history_msg=(
+                                                    _record_history_msg
+                                                ),
+                                            )
+                                        )
                                         _save_task(task)
                                         state._emit_agent(cell)
+                                        if review_verdict:
+                                            _panel_event(
+                                                "review_verdict",
+                                                cell.id, cell.name,
+                                                cell.group,
+                                                _review_event_message(
+                                                    review_verdict
+                                                ),
+                                                task_id=task.id)
                                         if not reused_existing_task:
                                             _panel_event(
                                                 "task_derived",

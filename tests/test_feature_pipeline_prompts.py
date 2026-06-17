@@ -41,6 +41,7 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("Merge-risk summary", sample_prompt)
         self.assertIn("Blocking issues", sample_prompt)
         self.assertIn("Follow-up suggestions", sample_prompt)
+        self.assertIn("Follow-up classification", sample_prompt)
         self.assertIn("torque_ask", sample_prompt)
         self.assertIn("torque_derive", project_prompt)
         self.assertIn("torque_done", project_prompt)
@@ -52,6 +53,7 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("Merge-risk summary", rendered_prompt)
         self.assertIn("Blocking issues", rendered_prompt)
         self.assertIn("Follow-up suggestions", rendered_prompt)
+        self.assertIn("Follow-up classification", rendered_prompt)
         self.assertIn("torque_derive", rendered_prompt)
         self.assertIn("torque_done", rendered_prompt)
         self.assertIn("deploy or live verification that still needs to happen", rendered_prompt)
@@ -60,6 +62,7 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("expected fix scope", rendered_prompt)
         self.assertIn("Pick exactly one closeout path", rendered_prompt)
         self.assertIn("No blocking issues: your FINAL action MUST be `torque ai done`", rendered_prompt)
+        self.assertIn("Final review verdict: Ship", rendered_prompt)
         self.assertIn("Replying via `engineer_reply`", rendered_prompt)
         self.assertTrue(rendered_prompt.rstrip().endswith("silence is read as a stall."))
 

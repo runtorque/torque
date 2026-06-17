@@ -292,6 +292,39 @@ def _attach_task_board_sync_inline_state(item: dict, task) -> dict:
     return item
 
 
+def _task_review_inline_state(task) -> dict:
+    """Return compact structured review verdict state for MCP read surfaces."""
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}
+    review = evidence.get("review", {}) or {}
+    if not isinstance(review, dict):
+        return {}
+    verdict = str(review.get("verdict", "") or "").strip()
+    if not verdict:
+        return {}
+    payload = {
+        "verdict": verdict,
+        "follow_up_classification": str(
+            review.get("follow_up_classification", "") or ""
+        ).strip(),
+        "source_action": str(review.get("source_action", "") or "").strip(),
+        "recorded_at": str(review.get("recorded_at", "") or "").strip(),
+    }
+    for key in ("derived_action", "derived_task_id", "agent_name"):
+        value = str(review.get(key, "") or "").strip()
+        if value:
+            payload[key] = value
+    return {k: v for k, v in payload.items() if v not in ("", None)}
+
+
+def _attach_task_review_inline_state(item: dict, task) -> dict:
+    review = _task_review_inline_state(task)
+    if review:
+        item["review"] = review
+    return item
+
+
 def _board_sync_summary_payload(tasks) -> dict:
     items = []
     for task in tasks:
@@ -334,6 +367,7 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
     if suggested_specialization:
         item["suggested_specialization"] = suggested_specialization
     _attach_task_board_sync_inline_state(item, task)
+    _attach_task_review_inline_state(item, task)
     return item
 
 
@@ -5331,9 +5365,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "passed": 0,
             "failed": 0,
         }
+        review_counts = {
+            "ship": 0,
+            "block": 0,
+            "needs_followup": 0,
+            "unknown": 0,
+        }
         unhealthy = []
         pending_asks = []
         verification_items = []
+        review_items = []
         include_created_by = caller_kind == "architect"
         architect_task_items = []
         specialization_filter = set()
@@ -5451,6 +5492,21 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     item["created_by"] = created_by
                 pending_asks.append(item)
 
+            review = _task_review_inline_state(task)
+            if review:
+                verdict = review.get("verdict", "unknown") or "unknown"
+                if verdict not in review_counts:
+                    review_counts[verdict] = 0
+                review_counts[verdict] += 1
+                item = {
+                    "id": task.id,
+                    "title": task.task,
+                    **review,
+                }
+                if include_created_by:
+                    item["created_by"] = created_by
+                review_items.append(item)
+
         ordered_lanes = dict(lane_counts)
         for lane_name in sorted(extra_lanes):
             ordered_lanes[lane_name] = extra_lanes[lane_name]
@@ -5532,6 +5588,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 item["title"].lower(),
             ),
         )
+        review_items.sort(
+            key=lambda item: (
+                item.get("recorded_at", ""),
+                item["title"].lower(),
+            ),
+            reverse=True,
+        )
         boundary_items.sort(
             key=lambda item: (
                 0 if item["partial_review_safe"] else 1,
@@ -5576,6 +5639,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "counts": verification_counts,
                 "items": verification_items[:10],
                 "truncated": len(verification_items) > 10,
+            },
+            "reviews": {
+                "counts": review_counts,
+                "items": review_items[:10],
+                "truncated": len(review_items) > 10,
             },
             "agents": {
                 "total": total_agents,
@@ -5743,6 +5811,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if agent_hidden:
                 item["agent_hidden"] = True
             _attach_task_board_sync_inline_state(item, t)
+            _attach_task_review_inline_state(item, t)
             lane_tasks.append(item)
 
         # Order lanes by board_lanes order
@@ -5773,6 +5842,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         board_sync = _task_board_sync_inline_state(task)
         if board_sync:
             d["board_sync"] = board_sync
+        _attach_task_review_inline_state(d, task)
         awareness_block = build_engineer_deliverable_awareness(task)
         if awareness_block:
             d["deliverable_awareness"] = awareness_block
@@ -5828,6 +5898,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 if agent_hidden:
                     item["agent_hidden"] = True
                 _attach_task_board_sync_inline_state(item, ct)
+                _attach_task_review_inline_state(item, ct)
                 d["pipeline_chain"].append(item)
         return json.dumps(d), False
 
