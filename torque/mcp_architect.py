@@ -1370,6 +1370,91 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_initiative_list",
+        "description": "List first-class product Initiatives in this architect's group. Read-only; Board remains execution source of truth.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_archived": {"type": "boolean"},
+                "include_links": {"type": "boolean", "description": "Include bounded linked task/decision summaries."},
+            },
+        },
+    },
+    {
+        "name": "architect_initiative_show",
+        "description": "Show one same-group Initiative with typed links and Board-derived linked task summary.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "initiative": {"type": "string", "description": "Initiative id (for example TORQUE-I:1) or slug."},
+                "initiative_id": {"type": "string", "description": "Alias for initiative."},
+            },
+        },
+    },
+    {
+        "name": "architect_initiative_create",
+        "description": "Create an architect-owned Initiative in this architect's group.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "summary": {"type": "string"},
+                "why": {"type": "string"},
+                "in_scope": {"type": "string"},
+                "out_of_scope": {"type": "string"},
+                "done_definition": {"type": "string"},
+                "planning_status": {"type": "string", "enum": ["triage", "now", "next", "later", "parked", "shipped"]},
+                "priority": {"type": "string"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "architect_initiative_update",
+        "description": "Update an Initiative owned or created by this architect. User-created initiatives not owned/created by this architect are not writable via MCP.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "initiative": {"type": "string"},
+                "initiative_id": {"type": "string"},
+                "title": {"type": "string"},
+                "summary": {"type": "string"},
+                "why": {"type": "string"},
+                "in_scope": {"type": "string"},
+                "out_of_scope": {"type": "string"},
+                "done_definition": {"type": "string"},
+                "planning_status": {"type": "string", "enum": ["triage", "now", "next", "later", "parked", "shipped"]},
+                "priority": {"type": "string"},
+            },
+            "required": ["initiative"],
+        },
+    },
+    {
+        "name": "architect_initiative_archive",
+        "description": "Archive an Initiative owned or created by this architect.",
+        "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["initiative"]},
+    },
+    {
+        "name": "architect_initiative_link_task",
+        "description": "Link a visible same-group Board task to an Initiative through a typed link row; does not mutate the task.",
+        "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["initiative", "task"]},
+    },
+    {
+        "name": "architect_initiative_unlink_task",
+        "description": "Remove an Initiative↔task typed link row only; does not mutate the task.",
+        "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["initiative", "task"]},
+    },
+    {
+        "name": "architect_initiative_link_decision",
+        "description": "Link one caller-owned architect decision to an Initiative through a typed link row; does not mutate the decision.",
+        "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["initiative", "decision"]},
+    },
+    {
+        "name": "architect_initiative_unlink_decision",
+        "description": "Remove an Initiative↔decision typed link row only; does not mutate the decision.",
+        "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["initiative", "decision"]},
+    },
+    {
         "name": "architect_decision_create",
         "description": "Create a new architect decision log entry.",
         "inputSchema": {

@@ -99,6 +99,29 @@ for _tool in ENGINEER_TOOLS:
     if str(_tool.get("name", "") or "").strip() in ENGINEER_DEFERRED_TOOL_NAMES:
         _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
+    {
+        "name": "engineer_initiative_list",
+        "description": "Read-only list of first-class product Initiatives in this engineer's group. Board remains execution source of truth.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_archived": {"type": "boolean"},
+                "include_links": {"type": "boolean"},
+            },
+        },
+    },
+    {
+        "name": "engineer_initiative_show",
+        "description": "Read-only show for one same-group Initiative with typed links and Board-derived linked task summary filtered to engineer-visible tasks.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "initiative": {"type": "string"},
+                "initiative_id": {"type": "string"},
+            },
+            "required": ["initiative"],
+        },
+    },
     make_tool_search_spec("engineer_tool_search", "engineer"),
     {
         "name": "engineer_behavior_overlay_read",

@@ -202,6 +202,13 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "architect_decision_create",
             "architect_decision_update",
             "architect_decision_link",
+            "architect_initiative_create",
+            "architect_initiative_update",
+            "architect_initiative_archive",
+            "architect_initiative_link_task",
+            "architect_initiative_unlink_task",
+            "architect_initiative_link_decision",
+            "architect_initiative_unlink_decision",
             "architect_journal",
         }
         registered_names = {tool["name"] for tool in mcp_mod.ALL_TOOLS}
@@ -209,6 +216,10 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(write_tools <= registered_names)
         for tool_name in write_tools:
             self.assertTrue(is_mcp_write_tool(tool_name), tool_name)
+        self.assertFalse(is_mcp_write_tool("architect_initiative_list"))
+        self.assertFalse(is_mcp_write_tool("architect_initiative_show"))
+        self.assertFalse(is_mcp_write_tool("engineer_initiative_list"))
+        self.assertFalse(is_mcp_write_tool("engineer_initiative_show"))
 
         lazy_names = {
             tool["name"]

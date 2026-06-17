@@ -2480,6 +2480,8 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "events",
     "events_recent",
     "get_architect_settings",
+    "initiative_list",
+    "initiative_show",
     "journal_read",
     "mcp_calls",
     "pending_hire_list",
@@ -3535,6 +3537,98 @@ def _load_architect_decision(state, caller_id: str,
         return None, "Decision not found"
     return decision, ""
 
+
+
+def _initiative_visible_task_ids_for_caller(state, caller_kind: str,
+                                            caller_id: str) -> set[str]:
+    return set(_filter_tasks_for_caller(state, caller_kind, caller_id))
+
+
+def _initiative_scope_group(state, caller_id: str) -> str:
+    return _caller_group(state, caller_id)
+
+
+def _initiative_from_args(state, caller_id: str, args: dict) -> tuple[dict | None, str]:
+    ident = str(
+        args.get("initiative", "") or args.get("initiative_id", "")
+        or args.get("id", "") or ""
+    ).strip()
+    if not ident:
+        return None, "initiative is required"
+    group = _initiative_scope_group(state, caller_id)
+    initiative_id = state.resolve_initiative_id(ident, group=group)
+    if not initiative_id:
+        return None, "Initiative not found"
+    initiative = state.load_initiative(initiative_id)
+    if not initiative or str(initiative.get("group_name", "") or "").strip() != group:
+        return None, "Initiative not found"
+    return initiative, ""
+
+
+def _architect_can_write_initiative(initiative: dict, architect_id: str) -> bool:
+    architect_id = str(architect_id or "").strip()
+    return bool(
+        (str(initiative.get("owner_kind", "") or "") == "architect"
+         and str(initiative.get("owner_id", "") or "").strip() == architect_id)
+        or (str(initiative.get("created_by_kind", "") or "") == "architect"
+            and str(initiative.get("created_by_id", "") or "").strip() == architect_id)
+    )
+
+
+def _initiative_read_json(state, caller_kind: str, caller_id: str,
+                          args: dict, *, show: bool) -> tuple[str, bool]:
+    group = _initiative_scope_group(state, caller_id)
+    visible_task_ids = _initiative_visible_task_ids_for_caller(
+        state, caller_kind, caller_id,
+    )
+    if show:
+        initiative, error = _initiative_from_args(state, caller_id, args)
+        if not initiative:
+            return error, True
+        payload = state.initiative_payload(
+            initiative["id"],
+            visible_task_ids=visible_task_ids,
+        )
+        if not payload:
+            return "Initiative not found", True
+        payload["type"] = "initiative"
+        return _compact_json(payload), False
+    include_archived = bool(args.get("include_archived", False))
+    initiatives = []
+    for item in state.list_initiatives(group=group, include_archived=include_archived):
+        payload = state.initiative_payload(
+            item["id"],
+            visible_task_ids=visible_task_ids,
+            include_links=bool(args.get("include_links", False)),
+        ) or item
+        initiatives.append(payload)
+    return _compact_json({
+        "type": "initiative_list",
+        "group": group,
+        "initiatives": initiatives,
+    }), False
+
+
+def _initiative_task_link_target(state, caller_kind: str, caller_id: str,
+                                 task_ref: str) -> tuple[str, str]:
+    task_id = _resolve_task(state, task_ref)
+    if not task_id:
+        return "", "Task not found"
+    visible = _filter_tasks_for_caller(state, caller_kind, caller_id)
+    if task_id not in visible:
+        return "", "Task not found"
+    return task_id, ""
+
+
+def _initiative_decision_link_target(state, architect_id: str,
+                                     decision_ref: str) -> tuple[str, str]:
+    decision_id = str(decision_ref or "").strip()
+    if not decision_id:
+        return "", "decision_id is required"
+    decision, error = _load_architect_decision(state, architect_id, decision_id)
+    if not decision:
+        return "", error
+    return decision_id, ""
 
 def _load_architect_pending_hire(state, caller_id: str,
                                  hire_id: str) -> tuple[dict | None, str]:
@@ -7432,6 +7526,24 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             cached_boot_summary_payload(real_state, caller_kind, caller_id)
         ), False
 
+    if tool_name == "initiative_list":
+        return _initiative_read_json(
+            real_state,
+            caller_kind,
+            caller_id,
+            args,
+            show=False,
+        )
+
+    if tool_name == "initiative_show":
+        return _initiative_read_json(
+            real_state,
+            caller_kind,
+            caller_id,
+            args,
+            show=True,
+        )
+
     if tool_name == "hint_snooze" and caller_kind == "engineer":
         fingerprint = str(args.get("fingerprint", "") or "").strip()
         if not fingerprint:
@@ -10168,6 +10280,111 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return "Event delivery resumed.", False
 
     # -- Context tools ------------------------------------------------------
+
+    if tool_name == "initiative_create" and caller_kind == "architect":
+        title = str(args.get("title", "") or "").strip()
+        if not title:
+            return "title is required", True
+        status = str(args.get("planning_status", "triage") or "triage").strip()
+        if status not in {"triage", "now", "next", "later", "parked", "shipped"}:
+            return "planning_status must be one of: triage, now, next, later, parked, shipped", True
+        try:
+            created = await real_state.create_initiative_async({
+                "group": _engineer_group,
+                "title": title,
+                "summary": args.get("summary", ""),
+                "why": args.get("why", ""),
+                "in_scope": args.get("in_scope", ""),
+                "out_of_scope": args.get("out_of_scope", ""),
+                "done_definition": args.get("done_definition", ""),
+                "planning_status": status,
+                "priority": args.get("priority", ""),
+                "owner_kind": "architect",
+                "owner_id": caller_id,
+                "created_by_kind": "architect",
+                "created_by_id": caller_id,
+                "updated_by_kind": "architect",
+                "updated_by_id": caller_id,
+            })
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({"type": "initiative_created", "initiative": created}), False
+
+    if tool_name in {
+        "initiative_update", "initiative_archive", "initiative_link_task",
+        "initiative_unlink_task", "initiative_link_decision",
+        "initiative_unlink_decision",
+    } and caller_kind == "architect":
+        initiative, error = _initiative_from_args(real_state, caller_id, args)
+        if not initiative:
+            return error, True
+        if not _architect_can_write_initiative(initiative, caller_id):
+            return "Initiative not found", True
+
+        if tool_name == "initiative_update":
+            allowed = {
+                "title", "summary", "why", "in_scope", "out_of_scope",
+                "done_definition", "planning_status", "priority", "owner_kind",
+                "owner_id", "slug",
+            }
+            patch = {key: args[key] for key in allowed if key in args}
+            if "owner_kind" in patch or "owner_id" in patch:
+                owner_kind = str(patch.get("owner_kind", initiative.get("owner_kind", "")) or "").strip()
+                owner_id = str(patch.get("owner_id", initiative.get("owner_id", "")) or "").strip()
+                if owner_kind != "architect" or owner_id != str(caller_id or "").strip():
+                    return "Architect MCP can only keep initiatives owned by the caller architect", True
+            patch["updated_by_kind"] = "architect"
+            patch["updated_by_id"] = caller_id
+            try:
+                updated = await real_state.update_initiative_async(initiative["id"], patch)
+            except ValueError as exc:
+                return str(exc), True
+            return _compact_json({"type": "initiative_updated", "initiative": updated}), False
+
+        if tool_name == "initiative_archive":
+            archived = await real_state.archive_initiative_async(
+                initiative["id"], archived_by_kind="architect", archived_by_id=caller_id,
+            )
+            return _compact_json({"type": "initiative_archived", "initiative": archived}), False
+
+        if tool_name in {"initiative_link_task", "initiative_unlink_task"}:
+            task_id, task_error = _initiative_task_link_target(
+                real_state, caller_kind, caller_id,
+                args.get("task", args.get("task_id", "")),
+            )
+            if not task_id:
+                return task_error, True
+            task = real_state.board_tasks.get(task_id)
+            if str(getattr(task, "group", "") or "").strip() != str(initiative.get("group_name", "") or "").strip():
+                return "Task is outside initiative group", True
+            if tool_name == "initiative_link_task":
+                link = await real_state.save_initiative_link_async(
+                    initiative["id"], "task", task_id,
+                    created_by_kind="architect", created_by_id=caller_id,
+                )
+                return _compact_json({"type": "initiative_task_linked", "link": link}), False
+            removed = await real_state.delete_initiative_link_async(
+                initiative["id"], "task", task_id,
+            )
+            return _compact_json({"type": "initiative_task_unlinked", "removed": removed}), False
+
+        decision_id, decision_error = _initiative_decision_link_target(
+            real_state,
+            caller_id,
+            args.get("decision", args.get("decision_id", "")),
+        )
+        if not decision_id:
+            return decision_error, True
+        if tool_name == "initiative_link_decision":
+            link = await real_state.save_initiative_link_async(
+                initiative["id"], "decision", decision_id,
+                created_by_kind="architect", created_by_id=caller_id,
+            )
+            return _compact_json({"type": "initiative_decision_linked", "link": link}), False
+        removed = await real_state.delete_initiative_link_async(
+            initiative["id"], "decision", decision_id,
+        )
+        return _compact_json({"type": "initiative_decision_unlinked", "removed": removed}), False
 
     if tool_name == "decision_create" and caller_kind == "architect":
         title = str(args.get("title", "") or "").strip()

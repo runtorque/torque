@@ -12041,6 +12041,167 @@ def _handle_agent_message_history_command(
     }
 
 
+
+def _initiative_error(message: str) -> dict:
+    return {"type": "error", "message": str(message or "")}
+
+
+def _initiative_actor_from_data(data: dict, *, default_kind: str = "user") -> dict:
+    kind = str(data.get("actor_kind", "") or default_kind).strip().lower() or default_kind
+    actor_id = str(data.get("actor_id", "") or "").strip()
+    return {"kind": kind, "id": actor_id}
+
+
+def _decision_belongs_to_group(state: MatrixState, decision_id: str,
+                               group: str) -> bool:
+    decision = state.load_decision(decision_id)
+    if not decision:
+        return False
+    architect_id = str(decision.get("architect_id", "") or "").strip()
+    architect = state.agents.get(architect_id)
+    return bool(
+        architect
+        and str(getattr(architect, "group", "") or "").strip()
+        == str(group or "").strip()
+    )
+
+
+async def _handle_initiative_command(data: dict, state: MatrixState) -> dict:
+    cmd = str(data.get("cmd", "") or "").strip()
+    if cmd == "initiative_list":
+        group = str(data.get("group", "") or "").strip()
+        include_archived = bool(data.get("include_archived", False))
+        initiatives = [
+            state.initiative_payload(item["id"], include_links=False) or item
+            for item in state.list_initiatives(
+                group=group,
+                include_archived=include_archived,
+            )
+        ]
+        return {"type": "initiative_list", "initiatives": initiatives}
+
+    ident = str(
+        data.get("initiative", "") or data.get("initiative_id", "")
+        or data.get("id", "") or ""
+    ).strip()
+    group_hint = str(data.get("group", "") or "").strip()
+    initiative_id = state.resolve_initiative_id(ident, group=group_hint)
+
+    if cmd == "initiative_show":
+        if not initiative_id:
+            return _initiative_error("Initiative not found")
+        payload = state.initiative_payload(initiative_id)
+        if not payload:
+            return _initiative_error("Initiative not found")
+        payload["type"] = "initiative"
+        return payload
+
+    if cmd == "initiative_create":
+        actor = _initiative_actor_from_data(data)
+        owner_kind = str(data.get("owner_kind", "") or actor["kind"]).strip()
+        owner_id = str(data.get("owner_id", "") or actor["id"]).strip()
+        try:
+            created = await state.create_initiative_async({
+                "group": data.get("group", ""),
+                "title": data.get("title", data.get("task", "")),
+                "summary": data.get("summary", ""),
+                "why": data.get("why", ""),
+                "in_scope": data.get("in_scope", ""),
+                "out_of_scope": data.get("out_of_scope", ""),
+                "done_definition": data.get("done_definition", ""),
+                "planning_status": data.get("planning_status", "triage"),
+                "priority": data.get("priority", ""),
+                "owner_kind": owner_kind,
+                "owner_id": owner_id,
+                "created_by_kind": actor["kind"],
+                "created_by_id": actor["id"],
+                "updated_by_kind": actor["kind"],
+                "updated_by_id": actor["id"],
+            })
+        except ValueError as exc:
+            return _initiative_error(str(exc))
+        return {"type": "initiative_created", "initiative": created}
+
+    if not initiative_id:
+        return _initiative_error("Initiative not found")
+    initiative = state.load_initiative(initiative_id)
+    if not initiative:
+        return _initiative_error("Initiative not found")
+
+    if cmd == "initiative_update":
+        actor = _initiative_actor_from_data(data)
+        allowed = {
+            "title", "summary", "why", "in_scope", "out_of_scope",
+            "done_definition", "planning_status", "priority", "owner_kind",
+            "owner_id", "slug",
+        }
+        patch = {key: data[key] for key in allowed if key in data}
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_initiative_async(initiative_id, patch)
+        except ValueError as exc:
+            return _initiative_error(str(exc))
+        return {"type": "initiative_updated", "initiative": updated}
+
+    if cmd == "initiative_archive":
+        actor = _initiative_actor_from_data(data)
+        archived = await state.archive_initiative_async(
+            initiative_id,
+            archived_by_kind=actor["kind"],
+            archived_by_id=actor["id"],
+        )
+        return {"type": "initiative_archived", "initiative": archived}
+
+    task_ref = str(data.get("task", "") or data.get("task_id", "") or "").strip()
+    decision_ref = str(
+        data.get("decision", "") or data.get("decision_id", "") or ""
+    ).strip()
+    actor = _initiative_actor_from_data(data)
+
+    if cmd in {"initiative_link_task", "initiative_unlink_task"}:
+        task_id = state.resolve_board_task_id(task_ref)
+        task = state.board_tasks.get(task_id)
+        if not task:
+            return _initiative_error("Task not found")
+        if str(getattr(task, "group", "") or "").strip() != str(
+                initiative.get("group_name", "") or "").strip():
+            return _initiative_error("Task is outside initiative group")
+        if cmd == "initiative_link_task":
+            link = await state.save_initiative_link_async(
+                initiative_id,
+                "task",
+                task_id,
+                created_by_kind=actor["kind"],
+                created_by_id=actor["id"],
+            )
+            return {"type": "initiative_task_linked", "link": link}
+        removed = await state.delete_initiative_link_async(
+            initiative_id, "task", task_id,
+        )
+        return {"type": "initiative_task_unlinked", "removed": removed}
+
+    if cmd in {"initiative_link_decision", "initiative_unlink_decision"}:
+        decision_id = decision_ref
+        if not decision_id or not _decision_belongs_to_group(
+                state, decision_id, initiative.get("group_name", "")):
+            return _initiative_error("Decision not found")
+        if cmd == "initiative_link_decision":
+            link = await state.save_initiative_link_async(
+                initiative_id,
+                "decision",
+                decision_id,
+                created_by_kind=actor["kind"],
+                created_by_id=actor["id"],
+            )
+            return {"type": "initiative_decision_linked", "link": link}
+        removed = await state.delete_initiative_link_async(
+            initiative_id, "decision", decision_id,
+        )
+        return {"type": "initiative_decision_unlinked", "removed": removed}
+
+    return _initiative_error(f"Unknown initiative command: {cmd}")
+
 def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
     """Return deferred architect decisions for compact snapshot clients."""
     include_archived = bool(data.get("include_archived", False))
@@ -15844,6 +16005,19 @@ async def main(connection=None):
 
         if cmd == "task_detail":
             return _handle_task_detail_command(data, state)
+
+        if cmd in {
+            "initiative_list",
+            "initiative_show",
+            "initiative_create",
+            "initiative_update",
+            "initiative_archive",
+            "initiative_link_task",
+            "initiative_unlink_task",
+            "initiative_link_decision",
+            "initiative_unlink_decision",
+        }:
+            return await _handle_initiative_command(data, state)
 
         if cmd == "get_agent_message_history":
             return _handle_agent_message_history_command(data, state)

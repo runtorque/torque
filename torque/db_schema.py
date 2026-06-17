@@ -212,6 +212,68 @@ def _ensure_mcp_idempotency_schema(conn: sqlite3.Connection) -> None:
         "ON mcp_idempotency(compacted_at, updated_at)"
     )
 
+INITIATIVE_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "slug": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "summary": "TEXT NOT NULL DEFAULT ''",
+    "why": "TEXT NOT NULL DEFAULT ''",
+    "in_scope": "TEXT NOT NULL DEFAULT ''",
+    "out_of_scope": "TEXT NOT NULL DEFAULT ''",
+    "done_definition": "TEXT NOT NULL DEFAULT ''",
+    "planning_status": "TEXT NOT NULL DEFAULT 'triage'",
+    "priority": "TEXT NOT NULL DEFAULT ''",
+    "owner_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "owner_id": "TEXT NOT NULL DEFAULT ''",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+INITIATIVE_LINK_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "initiative_id": "TEXT NOT NULL",
+    "link_type": "TEXT NOT NULL",
+    "target_id": "TEXT NOT NULL",
+    "created_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _ensure_initiatives_schema(conn: sqlite3.Connection) -> None:
+    """Keep Initiative tables additive/idempotent across partial migrations."""
+
+    _ensure_columns(conn, "initiatives", INITIATIVE_COLUMNS)
+    _ensure_columns(conn, "initiative_links", INITIATIVE_LINK_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_initiatives_group_status "
+        "ON initiatives(group_name, planning_status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_initiatives_owner "
+        "ON initiatives(owner_kind, owner_id, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_initiative_links_initiative "
+        "ON initiative_links(initiative_id, link_type, target_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_initiative_links_target "
+        "ON initiative_links(link_type, target_id, initiative_id)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_initiative_links_unique "
+        "ON initiative_links(initiative_id, link_type, target_id)"
+    )
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -844,6 +906,56 @@ CREATE TABLE IF NOT EXISTS task_id_counters (
     group_prefix     TEXT PRIMARY KEY,
     next_root_number INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS initiative_id_counters (
+    group_prefix                TEXT PRIMARY KEY,
+    next_initiative_number      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS initiatives (
+    id                 TEXT PRIMARY KEY,
+    slug               TEXT NOT NULL DEFAULT '',
+    group_name         TEXT NOT NULL DEFAULT '',
+    title              TEXT NOT NULL DEFAULT '',
+    summary            TEXT NOT NULL DEFAULT '',
+    why                TEXT NOT NULL DEFAULT '',
+    in_scope           TEXT NOT NULL DEFAULT '',
+    out_of_scope       TEXT NOT NULL DEFAULT '',
+    done_definition    TEXT NOT NULL DEFAULT '',
+    planning_status    TEXT NOT NULL DEFAULT 'triage',
+    priority           TEXT NOT NULL DEFAULT '',
+    owner_kind         TEXT NOT NULL DEFAULT 'user',
+    owner_id           TEXT NOT NULL DEFAULT '',
+    created_by_kind    TEXT NOT NULL DEFAULT 'user',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    archived_by_kind   TEXT NOT NULL DEFAULT '',
+    archived_by_id     TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    archived_at        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_initiatives_group_status
+    ON initiatives(group_name, planning_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_initiatives_owner
+    ON initiatives(owner_kind, owner_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS initiative_links (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    initiative_id      TEXT NOT NULL,
+    link_type          TEXT NOT NULL,
+    target_id          TEXT NOT NULL,
+    created_by_kind    TEXT NOT NULL DEFAULT '',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    UNIQUE(initiative_id, link_type, target_id),
+    FOREIGN KEY(initiative_id) REFERENCES initiatives(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_initiative_links_initiative
+    ON initiative_links(initiative_id, link_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_initiative_links_target
+    ON initiative_links(link_type, target_id, initiative_id);
 
 CREATE TABLE IF NOT EXISTS pipeline_task_counters (
     root_task_id       TEXT PRIMARY KEY,
@@ -1756,6 +1868,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_ai_index_schema(conn)
     _ensure_ai_summary_schema(conn)
     _ensure_mcp_idempotency_schema(conn)
+    _ensure_initiatives_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads
