@@ -189,6 +189,12 @@ function _eventsMatchesFilters(evt) {
 }
 
 function _eventsInlineThreadEvents() {
+  if (typeof _compactHydrateTasksMatching === 'function') {
+    _compactHydrateTasksMatching(function(task) {
+      var summary = task && task.messages_thread_summary;
+      return !!(summary && summary.count);
+    });
+  }
   var tasks = (state && state.board_tasks) || {};
   var agents = (state && state.agents) || {};
   var events = [];

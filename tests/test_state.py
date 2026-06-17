@@ -1436,7 +1436,15 @@ class MatrixStateCleanupTests(unittest.TestCase):
             provider="github",
             external_id="123",
             external_url="https://example.test/tasks/123",
-            board_sync={"provider": "github", "sync_state": "queued"},
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "sync_state": "queued",
+                "last_error": "retry later",
+                "last_synced_hash": "heavy-hash",
+                "github": {"issue_number": 123, "project_item_id": "heavy"},
+            },
             health_state="attention",
             health_since="2026-04-22T12:00:00+00:00",
             health_details={"reason": "large"},
@@ -1449,13 +1457,33 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 "sources": ["verification"],
             },
             lane_entered_at="2026-04-22T00:00:00+00:00",
-            worktree_boundary={"base": "main"},
+            worktree_boundary={
+                "repo_root": "/tmp/repo",
+                "branch": "feature/x",
+                "status": "open",
+                "base": "main",
+                "diff_stats": {"files": ["heavy"] * 50},
+                "pr": {
+                    "url": "https://example.test/pr/5",
+                    "number": 5,
+                    "state": "open",
+                    "head_sha": "abc123",
+                    "body": "heavy",
+                },
+            },
             resume_after_boundary_task_id="task-boundary",
             description="long description",
             context="legacy context",
             criteria="legacy criteria",
             instructions="legacy instructions",
             messages=[{"action": "progress", "message": "full progress body"}],
+            messages_thread=[{
+                "timestamp": 123,
+                "sender_agent_id": "eng-1",
+                "recipient_agent_id": "agent-1",
+                "content": "full inline message body",
+                "reply_required": True,
+            }],
             attachments=[{"filename": "image.png"}],
             artifacts=[{"kind": "log"}],
             action_vars={"name": "value"},
@@ -1500,20 +1528,37 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task["external_id"], "123")
         self.assertEqual(
             task["external_url"], "https://example.test/tasks/123")
-        self.assertEqual(
-            task["board_sync"], {"provider": "github", "sync_state": "queued"})
+        self.assertEqual(task["board_sync"], {
+            "version": 1,
+            "provider": "github",
+            "enabled": True,
+            "sync_state": "queued",
+            "last_error": "retry later",
+        })
         self.assertEqual(task["health_since"], "2026-04-22T12:00:00+00:00")
         self.assertEqual(task["health_details"], {"reason": "large"})
-        self.assertEqual(task["verification_notes"], "needs smoke")
-        self.assertEqual(
-            task["verification_summary"], {"tests_run": "targeted"})
-        self.assertEqual(
-            task["completion_evidence"]["sources"], ["verification"])
         self.assertEqual(
             task["messages"],
             [{"count": 1, "action": "progress", "message": "progress"}],
         )
-        self.assertEqual(task["worktree_boundary"], {"base": "main"})
+        self.assertEqual(task["messages_thread_summary"], {
+            "count": 1,
+            "recipient_agent_ids": ["agent-1"],
+            "sender_agent_ids": ["eng-1"],
+            "reply_required": True,
+            "last_timestamp": 123.0,
+        })
+        self.assertEqual(task["worktree_boundary"], {
+            "repo_root": "/tmp/repo",
+            "branch": "feature/x",
+            "status": "open",
+            "pr": {
+                "url": "https://example.test/pr/5",
+                "number": 5,
+                "state": "open",
+                "head_sha": "abc123",
+            },
+        })
         self.assertEqual(
             task["resume_after_boundary_task_id"], "task-boundary")
         self.assertNotIn("description", task)
@@ -1523,6 +1568,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertNotIn("attachments", task)
         self.assertNotIn("artifacts", task)
         self.assertNotIn("action_vars", task)
+        self.assertNotIn("messages_thread", task)
+        self.assertNotIn("verification_notes", task)
+        self.assertNotIn("verification_summary", task)
+        self.assertNotIn("completion_evidence", task)
         self.assertNotIn("task-archived", compact["board_tasks"])
         self.assertNotIn("decisions", compact)
         self.assertNotIn("pending_hires", compact)

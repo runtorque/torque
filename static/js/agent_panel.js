@@ -2263,6 +2263,15 @@ function _agentPanelArchitectPeerComposeHtml(agent) {
 function _agentPanelInlineThreadMessageList(agent) {
   var agentId = String((agent && agent.id) || '');
   if (!agentId || !state || !state.board_tasks) return [];
+  if (typeof _compactHydrateTasksMatching === 'function') {
+    _compactHydrateTasksMatching(function(task) {
+      if (typeof _compactTaskThreadMayTargetAgent === 'function') {
+        return _compactTaskThreadMayTargetAgent(task, agentId);
+      }
+      var summary = task && task.messages_thread_summary;
+      return !!(summary && summary.count && String(task.agent_id || '') === agentId);
+    });
+  }
   var tasks = state.board_tasks || {};
   var messages = [];
   for (var taskId in tasks) {
@@ -7131,6 +7140,12 @@ function _engineerTaskHealthSummary(group) {
 }
 
 function _engineerVerificationSummary(group) {
+  if (typeof _compactHydrateTasksMatching === 'function') {
+    _compactHydrateTasksMatching(function(task) {
+      if (!task || task.group !== group || task.lane === 'Done') return false;
+      return !!(task.verification_state || task.verification_mode);
+    });
+  }
   var summary = {
     counts: { pending: 0, attempted: 0, passed: 0, failed: 0 },
     order: ['failed', 'pending', 'attempted', 'passed'],
