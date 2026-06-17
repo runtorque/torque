@@ -4416,6 +4416,81 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn(parked.id, parked_ids)
 
+    async def test_architect_completion_audit_scans_peer_acks_before_output_bound(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-peer", "Peer Architect")
+        task = self._add_task(
+            "TORQUE:315",
+            "Complete scoped work with old peer ack",
+            lane="Done",
+            created_by_architect_id=architect.id,
+            verification_state="passed",
+        )
+        task.verification_summary = {
+            "tests_run": "python3 -m unittest tests.test_architect_scoping",
+            "deploy_needed": False,
+            "live_smoke_pending": False,
+        }
+        decision = self.state.save_decision({
+            "id": "decision-peer-ack-bound",
+            "architect_id": architect.id,
+            "title": "Peer ack bound",
+            "status": "accepted",
+            "linked_task_ids": [task.id],
+            "linked_engineer_ids": [],
+        })
+        for idx in range(self.shared_mod._ARCHITECT_ATTENTION_MAX_LIMIT + 1):
+            self.db.save_agent_peer_message({
+                "id": f"peer-newer-other-{idx}",
+                "thread_id": f"peer-newer-other-{idx}",
+                "group_name": "torque",
+                "sender_id": peer.id,
+                "sender_kind": "architect",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "message": f"Newer unrelated ack {idx}",
+                "created_at": 1000.0 + idx,
+                "ack_required": True,
+                "context_task_ids": [f"TORQUE:other-{idx}"],
+                "context_decision_ids": [f"decision-other-{idx}"],
+                "context_summary": "unrelated newer ack",
+            })
+        self.db.save_agent_peer_message({
+            "id": "peer-older-matching",
+            "thread_id": "peer-older-matching",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Older scoped ack still needs response.",
+            "created_at": 10.0,
+            "ack_required": True,
+            "context_task_ids": [task.id],
+            "context_decision_ids": [decision["id"]],
+            "context_summary": "matching old ack",
+        })
+
+        text, error = await self._call(
+            "architect_completion_audit",
+            {"decision_id": decision["id"], "limit_per_section": 5},
+            architect.id,
+        )
+
+        self.assertFalse(error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["recommendation"], "not_complete")
+        self.assertEqual(payload["sections"]["peer_ack_required"]["count"], 1)
+        self.assertEqual(
+            payload["sections"]["peer_ack_required"]["items"][0]["thread_id"],
+            "peer-older-matching",
+        )
+        gate_kinds = {
+            item["kind"]
+            for item in payload["sections"]["remaining_gates"]["items"]
+        }
+        self.assertIn("peer_ack_required", gate_kinds)
+
     async def test_architect_completion_audit_recommends_complete_with_caveats_for_unknown_evidence(self):
         architect = self._add_architect("arch-1", "Architect")
         shipped = self._add_task(

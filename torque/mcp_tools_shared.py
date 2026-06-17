@@ -616,10 +616,14 @@ def _stream_unhealthy_task_items(state, stream: dict) -> list[dict]:
     return items
 
 
-def _architect_attention_peer_ack_items(state, caller_id: str,
-                                        limit: int) -> dict:
+def _architect_peer_ack_candidates(state, caller_id: str) -> dict:
     if not getattr(state, "db", None):
-        return {"count": 0, "items": [], "truncated": False}
+        return {
+            "count": 0,
+            "items": [],
+            "source_truncated": False,
+            "load_limit": _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+        }
     try:
         rows = state.db.load_agent_peer_messages_for_agent(
             caller_id,
@@ -630,7 +634,8 @@ def _architect_attention_peer_ack_items(state, caller_id: str,
         return {
             "count": 0,
             "items": [],
-            "truncated": False,
+            "source_truncated": False,
+            "load_limit": _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
             "error": str(exc),
         }
     grouped: dict[str, list[dict]] = {}
@@ -705,9 +710,26 @@ def _architect_attention_peer_ack_items(state, caller_id: str,
         })
     return {
         "count": len(items),
-        "items": items[:limit],
-        "truncated": len(items) > limit or len(rows) >= _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+        "items": items,
+        "source_truncated": len(rows) >= _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+        "load_limit": _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
     }
+
+
+def _architect_attention_peer_ack_items(state, caller_id: str,
+                                        limit: int) -> dict:
+    section = _architect_peer_ack_candidates(state, caller_id)
+    items = list(section.get("items", []) or [])
+    payload = {
+        "count": len(items),
+        "items": items[:limit],
+        "truncated": (
+            len(items) > limit or bool(section.get("source_truncated"))
+        ),
+    }
+    if section.get("error"):
+        payload["error"] = section.get("error")
+    return payload
 
 
 def _architect_attention_digest_json(state, architect_id: str,
@@ -1553,11 +1575,7 @@ def _completion_audit_peer_ack_items(state, architect_id: str, *,
                                      engineer_ids: set[str],
                                      decision_id: str,
                                      limit: int) -> dict:
-    section = _architect_attention_peer_ack_items(
-        state,
-        architect_id,
-        _ARCHITECT_ATTENTION_MAX_LIMIT,
-    )
+    section = _architect_peer_ack_candidates(state, architect_id)
     items = []
     for item in section.get("items", []) if isinstance(section, dict) else []:
         context = item.get("context", {}) if isinstance(item, dict) else {}
@@ -1590,10 +1608,19 @@ def _completion_audit_peer_ack_items(state, architect_id: str, *,
         scoped_item = dict(item)
         scoped_item["scope_match"] = "matched" if matches_scope else "unknown_context"
         items.append(scoped_item)
-    return {
+    payload = {
         **_bounded_items(items, limit),
-        "truncated": bool(section.get("truncated")) or len(items) > limit,
+        "truncated": bool(section.get("source_truncated")) or len(items) > limit,
+        "source_truncated": bool(section.get("source_truncated")),
+        "load_limit": int(
+            section.get("load_limit", _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT)
+            or _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT
+        ),
+        "scan": "all_loaded_peer_ack_threads_filtered_before_output_bound",
     }
+    if section.get("error"):
+        payload["error"] = section.get("error")
+    return payload
 
 
 def _completion_audit_branch_sections(state, architect_group: str,
@@ -2059,6 +2086,18 @@ def _architect_completion_audit_json(state, architect_id: str,
             "kind": "peer_ack_required",
             "severity": "gate",
             "peer_ack": item,
+        })
+    if peer_ack.get("source_truncated") and not peer_ack.get("items"):
+        remaining_gates.append({
+            "kind": "peer_ack_scan_truncated",
+            "severity": "gate",
+            "peer_ack": {
+                "message": (
+                    "Peer-ack source hit the internal load limit before the "
+                    "audit could prove no in-scope ack obligations remain."
+                ),
+                "load_limit": peer_ack.get("load_limit"),
+            },
         })
     for item in pending_hires:
         remaining_gates.append({
