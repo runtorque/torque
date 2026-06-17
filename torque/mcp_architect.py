@@ -111,6 +111,44 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_completion_audit",
+        "description": (
+            "Run a compact conservative completion audit before marking a "
+            "decision/task wave complete. Given one caller-owned decision id "
+            "or an explicit task-id list, it expands visible task chains, "
+            "separates active gates from parked/deferred exclusions, reports "
+            "open branch boundaries, blocking asks, pending engineer/peer "
+            "obligations, pending hires, verification/deploy/live-smoke "
+            "caveats, and recommends complete, not_complete, or "
+            "complete_with_caveats."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "decision_id": {
+                    "type": "string",
+                    "description": (
+                        "Caller-owned decision id whose linked tasks define "
+                        "the audit scope. Provide exactly one of decision_id "
+                        "or task_ids."
+                    ),
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Explicit task ids/slugs defining the audit scope. "
+                        "Provide exactly one of decision_id or task_ids."
+                    ),
+                },
+                "limit_per_section": {
+                    "type": "integer",
+                    "description": "Maximum items per bounded section (default 8, max 20).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_boot_summary",
         "description": (
             "Return this Architect's cached AI boot-recovery summary. "

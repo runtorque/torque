@@ -131,6 +131,13 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("architect_decision_list", prompt)
         self.assertIn("never\n   wait for summary generation", prompt)
 
+    def test_prompt_includes_completion_audit_before_goal_completion(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("architect_completion_audit", prompt)
+        self.assertIn("Before marking a decision/task wave or product goal complete", prompt)
+        self.assertIn("complete_with_caveats", prompt)
+
     def test_prompt_includes_owner_user_message_instruction(self):
         # Architects are user-created only, so their owner is always the
         # user: the post-bootstrap message-user instruction is always

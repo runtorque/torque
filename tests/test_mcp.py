@@ -769,6 +769,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_task_move", architect_tool_names)
         self.assertIn("architect_task_mark_covered", architect_tool_names)
         self.assertIn("architect_wave_summary", architect_tool_names)
+        self.assertIn("architect_completion_audit", architect_tool_names)
         self.assertIn("architect_decision_create", architect_tool_names)
         self.assertIn("architect_engineer_hire", architect_tool_names)
         self.assertIn("architect_engineer_set_specializations", architect_tool_names)
