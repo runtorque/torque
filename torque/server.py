@@ -7471,10 +7471,10 @@ def _format_user_direct_message_prompt(
     row = row or {}
     if str(row.get("message_type", "") or "").strip() == "ask_reply":
         return _format_ask_reply_direct_message_prompt(state, row)
-    thread_id = str(row.get("thread_id", "") or "").strip()
+    message_id = str(row.get("id", "") or "").strip()
     message = str(row.get("message", "") or "").strip("\n")
     tool_name = _user_direct_message_reply_tool(recipient_kind)
-    thread_arg = json.dumps(thread_id)
+    reply_arg = json.dumps(message_id)
     parts = [
         "## Message from the User",
         "",
@@ -7482,8 +7482,8 @@ def _format_user_direct_message_prompt(
     if message:
         parts.extend([message, ""])
     parts.extend([
-        "Reply to this user-facing thread with:",
-        f"  mcp__torque__{tool_name}(thread_id={thread_arg}, message=\"...\")",
+        "Reply to this user-facing conversation with:",
+        f"  mcp__torque__{tool_name}(message=\"...\", reply_to_id={reply_arg})",
         "",
     ])
     if include_free_text_reply_hint:

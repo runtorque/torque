@@ -3161,7 +3161,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             (
                 'mcp__torque__torque_message_user('
-                f'thread_id="{result["thread_id"]}", message="...")'
+                f'message="...", reply_to_id="{result["message_id"]}")'
             ),
             prompt,
         )
@@ -3321,11 +3321,20 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             [hint in prompt for _agent_id, prompt, _kwargs in sent],
             [True, False, False, True, False],
         )
-        reply_snippet = (
-            'mcp__torque__torque_message_user('
-            f'thread_id="{results[0]["thread_id"]}", message="...")'
-        )
-        for _agent_id, prompt, _kwargs in sent:
+        expected_reply_to_ids = [
+            results[0]['message_id'],
+            results[1]['message_id'],
+            results[2]['message_id'],
+            buffered['message_id'],
+            result5['message_id'],
+        ]
+        for (_agent_id, prompt, _kwargs), reply_to_id in zip(
+                sent,
+                expected_reply_to_ids):
+            reply_snippet = (
+                'mcp__torque__torque_message_user('
+                f'message="...", reply_to_id="{reply_to_id}")'
+            )
             self.assertIn(reply_snippet, prompt)
             self.assertNotIn('Message ID:', prompt)
             self.assertNotIn('Thread ID:', prompt)
@@ -3443,7 +3452,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             (
                 'mcp__torque__architect_message_user('
-                f'thread_id="{result["thread_id"]}", message="...")'
+                f'message="...", reply_to_id="{result["message_id"]}")'
             ),
             prompt,
         )
