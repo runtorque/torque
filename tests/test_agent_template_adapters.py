@@ -1291,89 +1291,80 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             )
             self.assertEqual(user_config.read_text(), 'model = "gpt-5"\n')
 
-    def test_codex_engineer_mcp_config_uses_local_stdio_entrypoint(self):
+    def test_codex_mcp_config_uses_role_neutral_http_endpoint_for_role_entrypoints(self):
+        import tomllib
+
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
 
-            self.assertTrue(
-                adapter.install_mcp_config(
-                    tmp,
-                    mcp_entrypoint="torque/mcp_engineer.py",
-                    mcp_env={
-                        "TORQUE_CELL_ID": "eng-1",
-                        "TORQUE_ENGINEER_ID": "eng-1",
-                        "TORQUE_PORT": "18933",
-                        "TORQUE_DATA_DIR": "/tmp/torque-data",
-                    },
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
+                self.assertTrue(
+                    adapter.install_mcp_config(
+                        tmp,
+                        mcp_entrypoint="torque/mcp_engineer.py",
+                        mcp_env={
+                            "TORQUE_CELL_ID": "eng-1",
+                            "TORQUE_ENGINEER_ID": "eng-1",
+                            "TORQUE_PORT": "18999",
+                            "TORQUE_DATA_DIR": "/tmp/torque-data",
+                        },
+                    )
                 )
-            )
 
             installed = (Path(tmp) / ".codex" / "config.toml").read_text()
-            self.assertIn("[mcp_servers.torque]", installed)
-            self.assertIn("command = ", installed)
-            self.assertIn("torque.mcp_engineer", installed)
-            self.assertIn("[mcp_servers.torque.env]", installed)
-            self.assertNotIn('TORQUE_CELL_ID', installed)
-            self.assertNotIn('TORQUE_ENGINEER_ID', installed)
-            self.assertIn('TORQUE_PORT = "18933"', installed)
-            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-data"', installed)
-            self.assertNotIn('url = "http://127.0.0.1', installed)
-            self.assertNotIn('env_http_headers = { "X-Torque-Cell-Id"', installed)
+            parsed = tomllib.loads(installed)
+            torque_cfg = parsed["mcp_servers"]["torque"]
+            self.assertEqual(torque_cfg["url"], "http://127.0.0.1:18933/mcp")
+            self.assertEqual(
+                torque_cfg["env_http_headers"],
+                {"X-Torque-Cell-Id": "TORQUE_CELL_ID"},
+            )
+            self.assertNotIn("command", torque_cfg)
+            self.assertNotIn("args", torque_cfg)
+            self.assertNotIn("env", torque_cfg)
+            self.assertNotIn("torque.mcp_engineer", installed)
+            self.assertNotIn("torque.mcp_architect", installed)
+            self.assertNotIn("TORQUE_ENGINEER_ID", installed)
+            self.assertNotIn("TORQUE_ARCHITECT_ID", installed)
+            self.assertNotIn("TORQUE_DATA_DIR", installed)
+
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18934"}, clear=False):
+                self.assertTrue(
+                    adapter.install_mcp_config(
+                        tmp,
+                        mcp_entrypoint="torque/mcp_architect.py",
+                        mcp_env={
+                            "TORQUE_CELL_ID": "arch-1",
+                            "TORQUE_ARCHITECT_ID": "arch-1",
+                            "TORQUE_PORT": "18999",
+                            "TORQUE_DATA_DIR": "/tmp/torque-architect",
+                        },
+                    )
+                )
+
+            reinstalled = (Path(tmp) / ".codex" / "config.toml").read_text()
+            reparsed = tomllib.loads(reinstalled)
+            torque_cfg = reparsed["mcp_servers"]["torque"]
+            self.assertEqual(torque_cfg["url"], "http://127.0.0.1:18934/mcp")
+            self.assertEqual(
+                torque_cfg["env_http_headers"],
+                {"X-Torque-Cell-Id": "TORQUE_CELL_ID"},
+            )
+            self.assertNotIn("command", torque_cfg)
+            self.assertNotIn("args", torque_cfg)
+            self.assertNotIn("env", torque_cfg)
+            self.assertNotIn("torque.mcp_engineer", reinstalled)
+            self.assertNotIn("torque.mcp_architect", reinstalled)
+            self.assertNotIn("TORQUE_ENGINEER_ID", reinstalled)
+            self.assertNotIn("TORQUE_ARCHITECT_ID", reinstalled)
+            self.assertNotIn("TORQUE_DATA_DIR", reinstalled)
 
             adapter.uninstall_mcp_config(tmp)
             self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
 
-    def test_codex_architect_mcp_config_excludes_shared_identity_env(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            adapter = CodexAdapter()
-
-            self.assertTrue(
-                adapter.install_mcp_config(
-                    tmp,
-                    mcp_entrypoint="torque/mcp_architect.py",
-                    mcp_env={
-                        "TORQUE_CELL_ID": "arch-1",
-                        "TORQUE_ARCHITECT_ID": "arch-1",
-                        "TORQUE_PORT": "18934",
-                        "TORQUE_DATA_DIR": "/tmp/torque-architect",
-                    },
-                )
-            )
-
-            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
-            self.assertIn("[mcp_servers.torque]", installed)
-            self.assertIn("torque.mcp_architect", installed)
-            self.assertIn("[mcp_servers.torque.env]", installed)
-            self.assertNotIn('TORQUE_ARCHITECT_ID', installed)
-            self.assertNotIn('TORQUE_CELL_ID', installed)
-            self.assertIn('TORQUE_PORT = "18934"', installed)
-            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-architect"', installed)
-
-            # A subsequent reinstall must replace the whole managed block and
-            # still not persist stale architect bindings for Codex tool
-            # discovery. Identity is inherited from the Codex PTY process.
-            self.assertTrue(
-                adapter.install_mcp_config(
-                    tmp,
-                    mcp_entrypoint="torque/mcp_architect.py",
-                    mcp_env={
-                        "TORQUE_CELL_ID": "arch-2",
-                        "TORQUE_ARCHITECT_ID": "arch-2",
-                        "TORQUE_PORT": "18935",
-                        "TORQUE_DATA_DIR": "/tmp/torque-architect-2",
-                    },
-                )
-            )
-            reinstalled = (Path(tmp) / ".codex" / "config.toml").read_text()
-            self.assertNotIn('TORQUE_ARCHITECT_ID', reinstalled)
-            self.assertNotIn('TORQUE_CELL_ID', reinstalled)
-            self.assertNotIn("arch-1", reinstalled)
-            self.assertNotIn("arch-2", reinstalled)
-            self.assertIn('TORQUE_PORT = "18935"', reinstalled)
-            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-architect-2"', reinstalled)
-
-    def test_codex_architect_stdio_config_launches_bound_proxy_for_tool_discovery(self):
+    def test_codex_shared_mcp_config_install_order_preserves_each_role_discovery(self):
         import tomllib
+        import urllib.request
 
         received = queue.Queue()
 
@@ -1381,13 +1372,21 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 payload = json.loads(body.decode("utf-8"))
+                cell_id = self.headers.get("X-Torque-Cell-Id", "")
+                if cell_id.startswith("arch"):
+                    tools = [
+                        {"name": "architect_message_user"},
+                        {"name": "architect_task_create"},
+                    ]
+                else:
+                    tools = [
+                        {"name": "engineer_message_user"},
+                        {"name": "engineer_task_create"},
+                    ]
                 received.put(
                     {
                         "path": self.path,
-                        "cell_id": self.headers.get("X-Torque-Cell-Id", ""),
-                        "mcp_session_id": self.headers.get(
-                            "X-Torque-MCP-Session-Id", ""
-                        ),
+                        "cell_id": cell_id,
                         "body": payload,
                     }
                 )
@@ -1400,10 +1399,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                             "jsonrpc": "2.0",
                             "id": payload.get("id"),
                             "result": {
-                                "tools": [
-                                    {"name": "architect_message_user"},
-                                    {"name": "architect_task_create"},
-                                ]
+                                "tools": tools,
                             },
                         }
                     ).encode("utf-8")
@@ -1413,160 +1409,118 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 pass
 
         server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        def _serve_two_requests():
-            server.handle_request()
-            server.handle_request()
+        def _serve_four_requests():
+            for _ in range(4):
+                server.handle_request()
 
-        thread = threading.Thread(target=_serve_two_requests, daemon=True)
+        thread = threading.Thread(target=_serve_four_requests, daemon=True)
         thread.start()
 
         try:
-            with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
-                from torque.db import TorqueDB
-
-                stub_root = Path(tmp) / "python-stubs"
-                aiohttp_stub = stub_root / "aiohttp"
-                aiohttp_stub.mkdir(parents=True)
-                (aiohttp_stub / "__init__.py").write_text("from . import web\n")
-                (aiohttp_stub / "__init__.py").write_text(
-                    "\n".join(
-                        [
-                            "import json as _json",
-                            "import urllib.request as _request",
-                            "from . import web",
-                            "class ClientTimeout:",
-                            "    def __init__(self, total=None): self.total = total",
-                            "class TCPConnector:",
-                            "    def __init__(self, **kwargs): self.kwargs = kwargs",
-                            "class _Response:",
-                            "    def __init__(self, status, headers, body):",
-                            "        self.status = status",
-                            "        self.headers = headers",
-                            "        self._body = body",
-                            "    async def read(self): return self._body",
-                            "class _PostContext:",
-                            "    def __init__(self, url, payload, headers):",
-                            "        self.url = url; self.payload = payload; self.headers = headers",
-                            "    async def __aenter__(self):",
-                            "        data = _json.dumps(self.payload).encode('utf-8')",
-                            "        req = _request.Request(self.url, data=data, headers=self.headers, method='POST')",
-                            "        with _request.urlopen(req, timeout=10) as resp:",
-                            "            self.response = _Response(resp.status, dict(resp.headers), resp.read())",
-                            "        return self.response",
-                            "    async def __aexit__(self, exc_type, exc, tb): return False",
-                            "class ClientSession:",
-                            "    closed = False",
-                            "    def __init__(self, connector=None): self.connector = connector",
-                            "    def post(self, url, json=None, headers=None, timeout=None):",
-                            "        return _PostContext(url, json, headers or {})",
-                            "    async def close(self): self.closed = True",
-                            "",
-                        ]
-                    )
-                )
-                (aiohttp_stub / "web.py").write_text(
-                    "class WebSocketResponse:\n    pass\n"
-                )
-
-                db = TorqueDB(Path(data_dir) / "torque.db")
-                db.init()
-                db.save_agent(
-                    {
-                        "id": "arch-1",
-                        "name": "Architect",
-                        "group": "g",
-                        "cell_type": "agent",
-                        "kind": "architect",
-                    }
-                )
-                db.close()
-
+            def install_sequence(tmp: str, entrypoints: tuple[str, str]) -> dict:
                 adapter = CodexAdapter()
-                self.assertTrue(
-                    adapter.install_mcp_config(
-                        tmp,
-                        mcp_entrypoint="torque/mcp_architect.py",
-                        mcp_env={
-                            "TORQUE_CELL_ID": "arch-1",
-                            "TORQUE_ARCHITECT_ID": "arch-1",
-                            "TORQUE_PORT": str(server.server_port),
-                            "TORQUE_DATA_DIR": data_dir,
-                        },
-                    )
-                )
+                for entrypoint in entrypoints:
+                    is_architect = entrypoint.endswith("mcp_architect.py")
+                    mcp_env = {
+                        "TORQUE_CELL_ID": "arch-1" if is_architect else "eng-1",
+                        "TORQUE_PORT": "99999",
+                        "TORQUE_DATA_DIR": "/tmp/ignored-shared-codex-env",
+                    }
+                    if is_architect:
+                        mcp_env["TORQUE_ARCHITECT_ID"] = "arch-1"
+                    else:
+                        mcp_env["TORQUE_ENGINEER_ID"] = "eng-1"
+                    with mock.patch.dict(
+                        os.environ,
+                        {"TORQUE_PORT": str(server.server_port)},
+                        clear=False,
+                    ):
+                        self.assertTrue(
+                            adapter.install_mcp_config(
+                                tmp,
+                                mcp_entrypoint=entrypoint,
+                                mcp_env=mcp_env,
+                            )
+                        )
+
                 config = tomllib.loads(
                     (Path(tmp) / ".codex" / "config.toml").read_text()
                 )
                 torque_cfg = config["mcp_servers"]["torque"]
+                self.assertIn("url", torque_cfg)
+                self.assertNotIn("command", torque_cfg)
+                self.assertNotIn("args", torque_cfg)
+                self.assertNotIn("env", torque_cfg)
+                return torque_cfg
 
-                self.assertNotIn("TORQUE_CELL_ID", torque_cfg.get("env", {}))
-                self.assertNotIn("TORQUE_ARCHITECT_ID", torque_cfg.get("env", {}))
+            def codex_tools_list(torque_cfg: dict, cell_id: str, request_id: int):
+                body = json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "method": "tools/list",
+                    }
+                ).encode("utf-8")
+                env = {"TORQUE_CELL_ID": cell_id}
+                headers = {"Content-Type": "application/json"}
+                for header, env_name in torque_cfg["env_http_headers"].items():
+                    headers[header] = env[env_name]
+                request = urllib.request.Request(
+                    torque_cfg["url"],
+                    data=body,
+                    headers=headers,
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    return json.loads(response.read().decode("utf-8"))
 
-                def run_proxy_for_architect(architect_id: str, request_id: int):
-                    return subprocess.run(
-                        [torque_cfg["command"], *torque_cfg["args"]],
-                        input=(
-                            json.dumps(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "id": request_id,
-                                    "method": "tools/list",
-                                }
-                            )
-                            + "\n"
-                        ).encode("utf-8"),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env={
-                            **os.environ,
-                            **torque_cfg.get("env", {}),
-                            # Identity comes from the Torque-managed Codex
-                            # process environment, not shared config.toml.
-                            "TORQUE_CELL_ID": architect_id,
-                            "TORQUE_ARCHITECT_ID": architect_id,
-                            "PYTHONPATH": (
-                                str(stub_root)
-                                + os.pathsep
-                                + os.environ.get("PYTHONPATH", "")
-                            ),
-                        },
-                        timeout=10,
-                        check=False,
+            for order, entrypoints in enumerate(
+                (
+                    ("torque/mcp_engineer.py", "torque/mcp_architect.py"),
+                    ("torque/mcp_architect.py", "torque/mcp_engineer.py"),
+                ),
+                start=1,
+            ):
+                with tempfile.TemporaryDirectory() as tmp:
+                    torque_cfg = install_sequence(tmp, entrypoints)
+                    arch_response = codex_tools_list(
+                        torque_cfg, "arch-1", order * 10 + 1
+                    )
+                    eng_response = codex_tools_list(
+                        torque_cfg, "eng-1", order * 10 + 2
                     )
 
-                for architect_id, request_id in (("arch-1", 1), ("arch-2", 2)):
-                    if architect_id == "arch-2":
-                        db = TorqueDB(Path(data_dir) / "torque.db")
-                        db.init()
-                        db.save_agent(
-                            {
-                                "id": "arch-2",
-                                "name": "Architect 2",
-                                "group": "g",
-                                "cell_type": "agent",
-                                "kind": "architect",
-                            }
-                        )
-                        db.close()
-                    proc = run_proxy_for_architect(architect_id, request_id)
-                    self.assertEqual(
-                        proc.returncode,
-                        0,
-                        proc.stderr.decode("utf-8", "replace")
-                        + proc.stdout.decode("utf-8", "replace"),
-                    )
-                    response = json.loads(proc.stdout.decode("utf-8"))
-                    tool_names = [
-                        tool["name"] for tool in response["result"]["tools"]
+                    arch_tool_names = [
+                        tool["name"] for tool in arch_response["result"]["tools"]
                     ]
-                    self.assertIn("architect_message_user", tool_names)
-                    self.assertIn("architect_task_create", tool_names)
+                    eng_tool_names = [
+                        tool["name"] for tool in eng_response["result"]["tools"]
+                    ]
+                    self.assertIn("architect_message_user", arch_tool_names)
+                    self.assertIn("architect_task_create", arch_tool_names)
+                    self.assertIn("engineer_message_user", eng_tool_names)
+                    self.assertIn("engineer_task_create", eng_tool_names)
+
+                    # This is the live regression guard: even when an
+                    # Engineer was one of the installers, an Architect session
+                    # uses the shared HTTP config and never launches
+                    # torque.mcp_engineer, so it cannot exit with
+                    # "TORQUE_ENGINEER_ID is required".
+                    config_text = (Path(tmp) / ".codex" / "config.toml").read_text()
+                    self.assertNotIn("torque.mcp_engineer", config_text)
+                    self.assertNotIn("torque.mcp_architect", config_text)
+                    self.assertNotIn("TORQUE_ENGINEER_ID", config_text)
+
                     posted = received.get(timeout=5)
                     self.assertEqual(posted["path"], "/mcp")
-                    self.assertEqual(posted["cell_id"], architect_id)
-                    self.assertTrue(posted["mcp_session_id"])
+                    self.assertEqual(posted["cell_id"], "arch-1")
                     self.assertEqual(posted["body"]["method"], "tools/list")
-                    self.assertEqual(posted["body"]["id"], request_id)
+                    self.assertEqual(posted["body"]["id"], order * 10 + 1)
+                    posted = received.get(timeout=5)
+                    self.assertEqual(posted["path"], "/mcp")
+                    self.assertEqual(posted["cell_id"], "eng-1")
+                    self.assertEqual(posted["body"]["method"], "tools/list")
+                    self.assertEqual(posted["body"]["id"], order * 10 + 2)
         finally:
             server.server_close()
             thread.join(timeout=5)

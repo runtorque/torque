@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
-from .mcp_launch import build_stdio_launch_spec
 from ..context_window import normalize_context_window_usage
 from ..provider_usage import normalize_provider_usage_rate_limits
 
@@ -62,29 +61,6 @@ _INSTRUCTIONS_BLOCK_RE = re.compile(
     r'model_instructions_file = "(?:[^"\\]|\\.)*"\n?',
 )
 
-_IDENTITY_MCP_ENV_KEYS = {
-    "TORQUE_CELL_ID",
-    "TORQUE_ARCHITECT_ID",
-    "TORQUE_ENGINEER_ID",
-}
-
-
-def _shared_mcp_config_env(mcp_env: dict[str, str] | None) -> dict[str, str]:
-    """Return env vars safe for Codex's shared project MCP config.
-
-    ``.codex/config.toml`` is scoped to the working directory, not one Torque
-    cell.  Persisting caller identity here lets the last same-directory
-    Architect/Engineer to reinstall the config bind every other live/resumed
-    Codex MCP proxy to that caller.  Identity must instead come from the Codex
-    process environment created for the PTY session.
-    """
-    clean: dict[str, str] = {}
-    for key, value in (mcp_env or {}).items():
-        key = str(key or "").strip()
-        if not key or key in _IDENTITY_MCP_ENV_KEYS:
-            continue
-        clean[key] = str(value)
-    return clean
 _CODEX_HOOK_EVENT_LABELS = {
     "SessionStart": "session_start",
     "PreToolUse": "pre_tool_use",
@@ -939,6 +915,13 @@ class CodexAdapter(AgentAdapter):
                            mcp_env: dict[str, str] | None = None) -> bool:
         """Write Torque MCP server entry into .codex/config.toml.
 
+        Codex's project config is shared by working directory, while Torque can
+        run multiple same-directory Codex Architects and Engineers at once.
+        Always use the role-neutral HTTP MCP endpoint and Codex's
+        ``env_http_headers`` indirection so each live Codex process supplies
+        its own ``TORQUE_CELL_ID`` at request time.  Do not persist
+        role-specific stdio entrypoints or per-cell env here.
+
         Uses regex text manipulation for both reading and writing to
         avoid needing a TOML writer dependency.
         Returns True if config was installed successfully.
@@ -946,26 +929,12 @@ class CodexAdapter(AgentAdapter):
         config_dir = Path(working_dir) / ".codex"
         config_file = config_dir / "config.toml"
 
-        stdio_spec = build_stdio_launch_spec(mcp_entrypoint)
-        if stdio_spec:
-            torque_section = (
-                f"\n{_MCP_MARKER}\n"
-                "[mcp_servers.torque]\n"
-                f"command = {json.dumps(stdio_spec['command'])}\n"
-                f"args = {json.dumps(stdio_spec['args'])}\n"
-            )
-            clean_env = _shared_mcp_config_env(mcp_env)
-            if clean_env:
-                torque_section += "[mcp_servers.torque.env]\n"
-                for key in sorted(clean_env):
-                    torque_section += f"{key} = {json.dumps(clean_env[key])}\n"
-        else:
-            torque_section = (
-                f"\n{_MCP_MARKER}\n"
-                "[mcp_servers.torque]\n"
-                f'url = "{_torque_mcp_url()}"\n'
-                'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }\n'
-            )
+        torque_section = (
+            f"\n{_MCP_MARKER}\n"
+            "[mcp_servers.torque]\n"
+            f'url = "{_torque_mcp_url()}"\n'
+            'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }\n'
+        )
 
         try:
             config_dir.mkdir(parents=True, exist_ok=True)
