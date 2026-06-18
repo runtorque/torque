@@ -1313,8 +1313,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("command = ", installed)
             self.assertIn("torque.mcp_engineer", installed)
             self.assertIn("[mcp_servers.torque.env]", installed)
-            self.assertIn('TORQUE_CELL_ID = "eng-1"', installed)
-            self.assertIn('TORQUE_ENGINEER_ID = "eng-1"', installed)
+            self.assertNotIn('TORQUE_CELL_ID', installed)
+            self.assertNotIn('TORQUE_ENGINEER_ID', installed)
             self.assertIn('TORQUE_PORT = "18933"', installed)
             self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-data"', installed)
             self.assertNotIn('url = "http://127.0.0.1', installed)
@@ -1323,7 +1323,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             adapter.uninstall_mcp_config(tmp)
             self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
 
-    def test_codex_architect_mcp_config_binds_stdio_server_env(self):
+    def test_codex_architect_mcp_config_excludes_shared_identity_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
 
@@ -1344,14 +1344,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("[mcp_servers.torque]", installed)
             self.assertIn("torque.mcp_architect", installed)
             self.assertIn("[mcp_servers.torque.env]", installed)
-            self.assertIn('TORQUE_ARCHITECT_ID = "arch-1"', installed)
-            self.assertIn('TORQUE_CELL_ID = "arch-1"', installed)
+            self.assertNotIn('TORQUE_ARCHITECT_ID', installed)
+            self.assertNotIn('TORQUE_CELL_ID', installed)
             self.assertIn('TORQUE_PORT = "18934"', installed)
             self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-architect"', installed)
 
-            # A subsequent reinstall must replace the whole managed block,
-            # including the nested env table, instead of leaving stale
-            # architect bindings behind for Codex tool discovery.
+            # A subsequent reinstall must replace the whole managed block and
+            # still not persist stale architect bindings for Codex tool
+            # discovery. Identity is inherited from the Codex PTY process.
             self.assertTrue(
                 adapter.install_mcp_config(
                     tmp,
@@ -1365,8 +1365,12 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
             reinstalled = (Path(tmp) / ".codex" / "config.toml").read_text()
-            self.assertIn('TORQUE_ARCHITECT_ID = "arch-2"', reinstalled)
+            self.assertNotIn('TORQUE_ARCHITECT_ID', reinstalled)
+            self.assertNotIn('TORQUE_CELL_ID', reinstalled)
             self.assertNotIn("arch-1", reinstalled)
+            self.assertNotIn("arch-2", reinstalled)
+            self.assertIn('TORQUE_PORT = "18935"', reinstalled)
+            self.assertIn('TORQUE_DATA_DIR = "/tmp/torque-architect-2"', reinstalled)
 
     def test_codex_architect_stdio_config_launches_bound_proxy_for_tool_discovery(self):
         import tomllib
@@ -1409,7 +1413,11 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 pass
 
         server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.handle_request, daemon=True)
+        def _serve_two_requests():
+            server.handle_request()
+            server.handle_request()
+
+        thread = threading.Thread(target=_serve_two_requests, daemon=True)
         thread.start()
 
         try:
@@ -1491,50 +1499,74 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
                 torque_cfg = config["mcp_servers"]["torque"]
 
-                proc = subprocess.run(
-                    [torque_cfg["command"], *torque_cfg["args"]],
-                    input=(
-                        json.dumps(
+                self.assertNotIn("TORQUE_CELL_ID", torque_cfg.get("env", {}))
+                self.assertNotIn("TORQUE_ARCHITECT_ID", torque_cfg.get("env", {}))
+
+                def run_proxy_for_architect(architect_id: str, request_id: int):
+                    return subprocess.run(
+                        [torque_cfg["command"], *torque_cfg["args"]],
+                        input=(
+                            json.dumps(
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": request_id,
+                                    "method": "tools/list",
+                                }
+                            )
+                            + "\n"
+                        ).encode("utf-8"),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env={
+                            **os.environ,
+                            **torque_cfg.get("env", {}),
+                            # Identity comes from the Torque-managed Codex
+                            # process environment, not shared config.toml.
+                            "TORQUE_CELL_ID": architect_id,
+                            "TORQUE_ARCHITECT_ID": architect_id,
+                            "PYTHONPATH": (
+                                str(stub_root)
+                                + os.pathsep
+                                + os.environ.get("PYTHONPATH", "")
+                            ),
+                        },
+                        timeout=10,
+                        check=False,
+                    )
+
+                for architect_id, request_id in (("arch-1", 1), ("arch-2", 2)):
+                    if architect_id == "arch-2":
+                        db = TorqueDB(Path(data_dir) / "torque.db")
+                        db.init()
+                        db.save_agent(
                             {
-                                "jsonrpc": "2.0",
-                                "id": 1,
-                                "method": "tools/list",
+                                "id": "arch-2",
+                                "name": "Architect 2",
+                                "group": "g",
+                                "cell_type": "agent",
+                                "kind": "architect",
                             }
                         )
-                        + "\n"
-                    ).encode("utf-8"),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env={
-                        **os.environ,
-                        **torque_cfg["env"],
-                        "PYTHONPATH": (
-                            str(stub_root)
-                            + os.pathsep
-                            + os.environ.get("PYTHONPATH", "")
-                        ),
-                    },
-                    timeout=10,
-                    check=False,
-                )
-
-                self.assertEqual(
-                    proc.returncode,
-                    0,
-                    proc.stderr.decode("utf-8", "replace")
-                    + proc.stdout.decode("utf-8", "replace"),
-                )
-                response = json.loads(proc.stdout.decode("utf-8"))
-                tool_names = [
-                    tool["name"] for tool in response["result"]["tools"]
-                ]
-                self.assertIn("architect_message_user", tool_names)
-                self.assertIn("architect_task_create", tool_names)
-                posted = received.get(timeout=5)
-                self.assertEqual(posted["path"], "/mcp")
-                self.assertEqual(posted["cell_id"], "arch-1")
-                self.assertTrue(posted["mcp_session_id"])
-                self.assertEqual(posted["body"]["method"], "tools/list")
+                        db.close()
+                    proc = run_proxy_for_architect(architect_id, request_id)
+                    self.assertEqual(
+                        proc.returncode,
+                        0,
+                        proc.stderr.decode("utf-8", "replace")
+                        + proc.stdout.decode("utf-8", "replace"),
+                    )
+                    response = json.loads(proc.stdout.decode("utf-8"))
+                    tool_names = [
+                        tool["name"] for tool in response["result"]["tools"]
+                    ]
+                    self.assertIn("architect_message_user", tool_names)
+                    self.assertIn("architect_task_create", tool_names)
+                    posted = received.get(timeout=5)
+                    self.assertEqual(posted["path"], "/mcp")
+                    self.assertEqual(posted["cell_id"], architect_id)
+                    self.assertTrue(posted["mcp_session_id"])
+                    self.assertEqual(posted["body"]["method"], "tools/list")
+                    self.assertEqual(posted["body"]["id"], request_id)
         finally:
             server.server_close()
             thread.join(timeout=5)

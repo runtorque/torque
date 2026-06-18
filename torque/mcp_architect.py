@@ -1641,6 +1641,24 @@ def bound_architect_id_from_env() -> str:
     return str(os.environ.get(_ENV_VAR, "") or "").strip()
 
 
+def _bound_architect_id_candidates_from_env() -> list[str]:
+    """Return candidate Architect ids in safest binding order.
+
+    ``TORQUE_CELL_ID`` is the per-PTY identity installed by Torque's terminal
+    runtime.  ``TORQUE_ARCHITECT_ID`` may also be present for compatibility,
+    but older shared Codex MCP config files could persist a stale Architect id.
+    Prefer the current cell id when it validates as an Architect, then fall
+    back to the explicit kind-specific variable for non-Torque/manual launch
+    compatibility.
+    """
+    candidates = []
+    for key in ("TORQUE_CELL_ID", _ENV_VAR):
+        value = str(os.environ.get(key, "") or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+    return candidates
+
+
 def _load_architect_row_from_db(architect_id: str) -> dict | None:
     architect_id = str(architect_id or "").strip()
     if not architect_id:
@@ -1653,44 +1671,55 @@ def _load_architect_row_from_db(architect_id: str) -> dict | None:
         db.close()
 
 
-def validate_architect_binding(state=None) -> tuple[str, str]:
-    architect_id = bound_architect_id_from_env()
-    if not architect_id:
-        return "", f"{_ENV_VAR} is required"
-
-    if state is None:
-        try:
-            record = _load_architect_row_from_db(architect_id)
-        except Exception as exc:
-            return "", f"failed to load Torque state for architect binding: {exc}"
-        if not record:
-            return "", f"no architect with id={architect_id} exists"
-        if str(record.get("cell_type", "") or "").strip() != "agent":
-            return "", f"cell {architect_id} is not an agent"
-        kind = str(record.get("kind", "") or "").strip()
-        if kind != "architect":
-            return (
-                "",
-                f"agent {architect_id} exists but kind={kind or '<empty>'}; expected architect",
-            )
-        group = str(record.get("group", "") or "").strip()
-        if not group:
-            return "", f"architect {architect_id} is not assigned to a group"
-        return architect_id, ""
-
-    cell = state.agents.get(architect_id)
-    if not cell or getattr(cell, "cell_type", "") != "agent":
-        return "", f"no architect with id={architect_id} exists"
-    kind = str(getattr(cell, "kind", "") or "").strip()
+def _validate_architect_record(architect_id: str, record: dict | None) -> str:
+    if not record:
+        return f"no architect with id={architect_id} exists"
+    if str(record.get("cell_type", "") or "").strip() != "agent":
+        return f"cell {architect_id} is not an agent"
+    kind = str(record.get("kind", "") or "").strip()
     if kind != "architect":
         return (
-            "",
-            f"agent {architect_id} exists but kind={kind or '<empty>'}; expected architect",
+            f"agent {architect_id} exists but kind={kind or '<empty>'}; "
+            "expected architect"
         )
-    group = str(getattr(cell, "group", "") or "").strip()
+    group = str(record.get("group", "") or "").strip()
     if not group:
-        return "", f"architect {architect_id} is not assigned to a group"
-    return architect_id, ""
+        return f"architect {architect_id} is not assigned to a group"
+    return ""
+
+
+def validate_architect_binding(state=None) -> tuple[str, str]:
+    candidates = _bound_architect_id_candidates_from_env()
+    if not candidates:
+        return "", f"{_ENV_VAR} is required"
+
+    errors = []
+    if state is None:
+        for architect_id in candidates:
+            try:
+                record = _load_architect_row_from_db(architect_id)
+            except Exception as exc:
+                return "", f"failed to load Torque state for architect binding: {exc}"
+            error = _validate_architect_record(architect_id, record)
+            if not error:
+                return architect_id, ""
+            errors.append(error)
+        return "", errors[0]
+
+    for architect_id in candidates:
+        cell = state.agents.get(architect_id)
+        record = None
+        if cell is not None:
+            record = {
+                "cell_type": getattr(cell, "cell_type", ""),
+                "kind": getattr(cell, "kind", ""),
+                "group": getattr(cell, "group", ""),
+            }
+        error = _validate_architect_record(architect_id, record)
+        if not error:
+            return architect_id, ""
+        errors.append(error)
+    return "", errors[0]
 
 
 def exit_if_invalid_architect_binding(state=None) -> str:

@@ -61,6 +61,30 @@ _INSTRUCTIONS_BLOCK_RE = re.compile(
     r"\n?" + re.escape(_INSTRUCTIONS_MARKER) + r"\n"
     r'model_instructions_file = "(?:[^"\\]|\\.)*"\n?',
 )
+
+_IDENTITY_MCP_ENV_KEYS = {
+    "TORQUE_CELL_ID",
+    "TORQUE_ARCHITECT_ID",
+    "TORQUE_ENGINEER_ID",
+}
+
+
+def _shared_mcp_config_env(mcp_env: dict[str, str] | None) -> dict[str, str]:
+    """Return env vars safe for Codex's shared project MCP config.
+
+    ``.codex/config.toml`` is scoped to the working directory, not one Torque
+    cell.  Persisting caller identity here lets the last same-directory
+    Architect/Engineer to reinstall the config bind every other live/resumed
+    Codex MCP proxy to that caller.  Identity must instead come from the Codex
+    process environment created for the PTY session.
+    """
+    clean: dict[str, str] = {}
+    for key, value in (mcp_env or {}).items():
+        key = str(key or "").strip()
+        if not key or key in _IDENTITY_MCP_ENV_KEYS:
+            continue
+        clean[key] = str(value)
+    return clean
 _CODEX_HOOK_EVENT_LABELS = {
     "SessionStart": "session_start",
     "PreToolUse": "pre_tool_use",
@@ -930,11 +954,7 @@ class CodexAdapter(AgentAdapter):
                 f"command = {json.dumps(stdio_spec['command'])}\n"
                 f"args = {json.dumps(stdio_spec['args'])}\n"
             )
-            clean_env = {
-                str(key): str(value)
-                for key, value in (mcp_env or {}).items()
-                if str(key or "").strip()
-            }
+            clean_env = _shared_mcp_config_env(mcp_env)
             if clean_env:
                 torque_section += "[mcp_servers.torque.env]\n"
                 for key in sorted(clean_env):
