@@ -40,6 +40,7 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
+from .mission_control import build_mission_control_summary
 from .remote_ingress import (
     ingest_remote_command_request,
     ingest_remote_user_agent_message,
@@ -110,6 +111,7 @@ from .worktree_boundaries import (
     started_successor_tasks,
     task_boundary,
 )
+from .worktree_streams import compute_worktree_streams, prefill_branch_exists_for_state
 from .actions import (
     ActionManager,
     DEFAULT_REVIEW_REQUIRED_ABOVE_LOC,
@@ -15964,6 +15966,73 @@ async def main(connection=None):
             if "daemon_uptime_seconds" not in payload:
                 payload["daemon_uptime_seconds"] = None
             return payload
+
+        if cmd == "get_mission_control":
+            if "group" not in data:
+                return {
+                    "type": "error",
+                    "message": "group required",
+                }
+            group = str(data.get("group", "") or "")
+            try:
+                limit_per_section = int(
+                    data.get("limit_per_section", 20) or 20
+                )
+            except (TypeError, ValueError):
+                limit_per_section = 20
+            include_recent_completed_raw = data.get(
+                "include_recent_completed", True)
+            if isinstance(include_recent_completed_raw, str):
+                include_recent_completed = (
+                    include_recent_completed_raw.strip().lower()
+                    not in {"0", "false", "no", "off"}
+                )
+            else:
+                include_recent_completed = bool(include_recent_completed_raw)
+            try:
+                recent_completed_seconds = int(
+                    data.get("recent_completed_seconds", 604800) or 604800
+                )
+            except (TypeError, ValueError):
+                recent_completed_seconds = 604800
+
+            deploy_payload = None
+            source_errors = {}
+            try:
+                deploy_payload = architect_deploy_state_payload(state, group)
+            except Exception as exc:
+                log.exception("failed to compute Mission Control deploy state")
+                source_errors["deploy_state"] = str(exc) or exc.__class__.__name__
+                deploy_payload = {"error": source_errors["deploy_state"]}
+
+            try:
+                await prefill_branch_exists_for_state(state, group=group)
+            except Exception as exc:
+                log.exception("failed to prefill Mission Control branch cache")
+                source_errors["branch_cache"] = str(exc) or exc.__class__.__name__
+
+            try:
+                streams = compute_worktree_streams(
+                    state,
+                    group=group,
+                    visibility_limit=max(1, min(limit_per_section, 100)),
+                    include_orphaned=False,
+                )
+            except Exception as exc:
+                log.exception("failed to compute Mission Control streams")
+                source_errors["streams"] = str(exc) or exc.__class__.__name__
+                streams = []
+
+            return build_mission_control_summary(
+                state,
+                group=group,
+                limit_per_section=limit_per_section,
+                include_recent_completed=include_recent_completed,
+                recent_completed_seconds=recent_completed_seconds,
+                deploy_state=deploy_payload,
+                streams=streams,
+                source_errors=source_errors,
+            )
 
         if cmd == "supervisor_sessions_list":
             return await build_supervisor_sessions_payload(
