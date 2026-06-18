@@ -78,6 +78,8 @@ class FakeDocument {
     return null;
   }
 
+  querySelector() { return null; }
+
   querySelectorAll() { return []; }
 
   rebuildFromPanelHtml(html, panel) {
@@ -214,6 +216,35 @@ test('initiative detail rerender preserves selected drawer, draft text, caret, f
   assert.equal(document.activeElement, restoredSummary);
   assert.equal(restoredColumn.scrollTop, 47);
   assert.match(document.getElementById('panel-initiatives').innerHTML, /TORQUE-I:1/);
+});
+
+
+test('Planning surface participates in classic active-panel invalidation renders', () => {
+  const { sandbox } = createSandbox();
+  let renders = 0;
+  sandbox.renderInitiativesPanel = function() { renders += 1; };
+  sandbox._activePanelApp = 'initiatives';
+
+  const surfaces = vm.runInContext('_currentPanelSurfaces()', sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(surfaces)), ['initiatives']);
+  vm.runInContext('renderInvalidatedSurfaces({ initiatives: true })', sandbox);
+
+  assert.equal(renders, 1);
+});
+
+test('Planning surface participates in standalone visible-surface invalidation renders', () => {
+  const { sandbox } = createSandbox();
+  let renders = 0;
+  sandbox.renderInitiativesPanel = function() { renders += 1; };
+  sandbox._standalonePanelsEnabled = function() { return true; };
+  sandbox._visiblePanelSurfaces = function() { return ['board', 'initiatives', 'initiatives']; };
+  sandbox.renderBoard = function() {};
+
+  const surfaces = vm.runInContext('_currentPanelSurfaces()', sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(surfaces)), ['board', 'initiatives']);
+  vm.runInContext('renderInvalidatedSurfaces({ initiatives: true })', sandbox);
+
+  assert.equal(renders, 1);
 });
 
 test('saving scope and linking artifacts use Wave 1 initiative commands', () => {

@@ -715,6 +715,7 @@ function _surfacePanelApp(surface) {
   if (surface === 'board') return 'board';
   if (surface === 'chat') return 'chat';
   if (surface === 'actions') return 'actions';
+  if (surface === 'initiatives') return 'initiatives';
   if (surface === 'context') return 'context';
   if (surface === 'events') return 'events';
   if (surface === 'engineer') return 'engineer';
