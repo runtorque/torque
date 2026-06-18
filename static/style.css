@@ -12834,6 +12834,17 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   font-size: 12px;
 }
 .initiative-loading { padding: 10px 12px; color: var(--muted); font-size: 12px; }
+.initiative-status {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+}
+.initiative-status-success { border-color: var(--success, #3a8f5a); color: var(--success-fg, #9ee6b4); background: rgba(58, 143, 90, 0.12); }
+.initiative-status-error { border-color: var(--danger, #9f3a3a); color: var(--danger-fg, #ffb4b4); background: rgba(160, 48, 48, 0.12); }
 
 .initiatives-workspace {
   width: 100%;
@@ -12994,7 +13005,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .initiative-form textarea { resize: vertical; min-height: 54px; }
 .initiative-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.initiative-detail-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.initiative-detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .initiative-links-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
 .initiative-links-list { display: flex; flex-direction: column; gap: 6px; }
 .initiative-link-row { display: flex; gap: 6px; align-items: stretch; }

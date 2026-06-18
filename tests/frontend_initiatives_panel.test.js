@@ -334,3 +334,90 @@ test('saving scope and linking artifacts use Wave 1 initiative commands', () => 
   assert.equal(sendCalls.at(-1).cmd, 'initiative_link_decision');
   assert.equal(sendCalls.at(-1).decision, 'decision-abc');
 });
+
+test('initiative detail opens existing task modal prefilled from editable brief', () => {
+  const { sandbox, document } = createSandbox();
+  let modalPrefill = null;
+  sandbox.openAddTaskFromInitiative = function(prefill) { modalPrefill = prefill; };
+  vm.runInContext(`initiativesReceiveList(${JSON.stringify({
+    type: 'initiative_list',
+    group: 'Torque',
+    initiatives: [sampleInitiative()],
+  })})`, sandbox);
+  vm.runInContext("initiativesSelect('TORQUE-I:1')", sandbox);
+
+  document.getElementById('initiative-field-title').value = 'Edited task title';
+  document.getElementById('initiative-field-summary').value = 'Draft summary from the drawer';
+  document.getElementById('initiative-field-why').value = 'Draft why';
+  document.getElementById('initiative-field-in-scope').value = 'Draft scope';
+  document.getElementById('initiative-field-done-definition').value = 'Draft acceptance';
+  const summary = document.getElementById('initiative-field-summary');
+  summary.selectionStart = 5;
+  summary.selectionEnd = 12;
+  summary.focus();
+  const drawer = document.getElementById('initiative-detail-drawer');
+  drawer.scrollTop = 88;
+
+  vm.runInContext('initiativesCreateBoardTask()', sandbox);
+
+  assert.ok(modalPrefill, 'expected the Planning affordance to reuse the Board task modal path');
+  assert.equal(modalPrefill.task, 'Edited task title');
+  assert.equal(modalPrefill.group, 'Torque');
+  assert.deepEqual(JSON.parse(JSON.stringify(modalPrefill.labels)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(modalPrefill.createContext)), {
+    type: 'initiative',
+    initiativeId: 'TORQUE-I:1',
+    group: 'Torque',
+  });
+  assert.match(modalPrefill.description, /Source initiative: TORQUE-I:1 — Edited task title/);
+  assert.match(modalPrefill.description, /Summary\nDraft summary from the drawer/);
+  assert.match(modalPrefill.description, /Why\nDraft why/);
+  assert.match(modalPrefill.description, /In scope\nDraft scope/);
+  assert.match(modalPrefill.description, /Done definition\nDraft acceptance/);
+
+  const restoredSummary = document.getElementById('initiative-field-summary');
+  const restoredDrawer = document.getElementById('initiative-detail-drawer');
+  assert.equal(restoredSummary.value, 'Draft summary from the drawer');
+  assert.equal(restoredSummary.selectionStart, 5);
+  assert.equal(restoredSummary.selectionEnd, 12);
+  assert.equal(document.activeElement, restoredSummary);
+  assert.equal(restoredDrawer.scrollTop, 88);
+  assert.match(document.getElementById('panel-initiatives').innerHTML, /Review the prefilled Board task/);
+});
+
+test('created board task response links back to initiative without dispatching', () => {
+  const { sandbox, document, sendCalls } = createSandbox();
+  vm.runInContext(`initiativesReceiveList(${JSON.stringify({
+    type: 'initiative_list',
+    group: 'Torque',
+    initiatives: [sampleInitiative()],
+  })})`, sandbox);
+  vm.runInContext("initiativesSelect('TORQUE-I:1')", sandbox);
+  const drawer = document.getElementById('initiative-detail-drawer');
+  drawer.scrollTop = 33;
+
+  vm.runInContext(`initiativesRegisterTaskCreatePending({
+    source: { type: 'initiative', initiativeId: 'TORQUE-I:1', group: 'Torque' },
+    task: 'Ship initiatives UI',
+    group: 'Torque',
+    draftId: 'draft-1234'
+  })`, sandbox);
+  vm.runInContext(`initiativesHandleBoardTaskCreated({ type: 'board_task_added', task_id: 'TORQUE:99', title: 'Ship initiatives UI' })`, sandbox);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
+    cmd: 'initiative_link_task',
+    initiative: 'TORQUE-I:1',
+    task: 'TORQUE:99',
+    group: 'Torque',
+  });
+  assert.equal(sendCalls.some((call) => call.cmd === 'dispatch_task'), false);
+  assert.equal(document.getElementById('initiative-detail-drawer').scrollTop, 33);
+  assert.match(document.getElementById('panel-initiatives').innerHTML, /Linking it to the initiative/);
+
+  vm.runInContext(`initiativesReceiveLinkMutation({
+    type: 'initiative_task_linked',
+    initiative_id: 'TORQUE-I:1',
+    link: { initiative_id: 'TORQUE-I:1', link_type: 'task', linked_id: 'TORQUE:99' }
+  })`, sandbox);
+  assert.match(document.getElementById('panel-initiatives').innerHTML, /Created and linked Board task TORQUE:99/);
+});

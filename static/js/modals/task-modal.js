@@ -20,6 +20,8 @@ let _taskExternalUrl = '';
 let _taskBoardSync = {};
 let _taskModalDrafts = {};      // keyed by create/edit mode to survive reopen
 let _taskDraftScope = 'create'; // separates plain create drafts from clone flows
+let _taskCreateSubmitHook = null;
+let _taskCreateContext = null;
 var _labelDropdownIdx = -1;
 var _taskTitleLabelDropdownIdx = -1;
 var _taskTitleEscapedPercents = [];
@@ -762,6 +764,8 @@ function _taskClearDraft(editId, draftScope) {
 
 function _taskOpenModal(config) {
   _taskDraftScope = config.draftScope || 'create';
+  _taskCreateSubmitHook = config.afterCreateSubmit || null;
+  _taskCreateContext = config.createContext || null;
   var draft = _taskModalDrafts[_taskDraftKey(config.editId, _taskDraftScope)] || null;
   var taskEl = document.getElementById('task-task-input');
   var descEl = document.getElementById('task-description-input');
@@ -1200,6 +1204,47 @@ function openAddTask(lane) {
   });
 }
 
+function openAddTaskFromInitiative(prefill) {
+  prefill = prefill || {};
+  var initiativeId = String(prefill.initiativeId || (prefill.createContext && prefill.createContext.initiativeId) || '').trim();
+  _taskOpenModal({
+    editId: null,
+    title: 'Create Board Task',
+    submitLabel: 'Create task',
+    task: prefill.task || '',
+    description: prefill.description || '',
+    labels: prefill.labels || [],
+    dependsOn: [],
+    attachments: [],
+    originalAttachments: [],
+    artifacts: [],
+    originalArtifacts: [],
+    actionName: '',
+    agentTemplate: '',
+    actionVars: {},
+    group: prefill.group || _currentGroup(),
+    lane: prefill.lane || '',
+    scheduledInput: '',
+    verificationMode: '',
+    verificationState: '',
+    verificationNotes: '',
+    verificationSummary: {},
+    draftId: _generateDraftId(),
+    draftScope: initiativeId ? 'initiative:' + initiativeId : 'initiative',
+    createContext: prefill.createContext || {
+      type: 'initiative',
+      initiativeId: initiativeId,
+      group: prefill.group || _currentGroup(),
+    },
+    afterCreateSubmit: function(meta) {
+      if (typeof initiativesRegisterTaskCreatePending === 'function') {
+        initiativesRegisterTaskCreatePending(meta);
+      }
+    },
+    selectTask: false,
+  });
+}
+
 function openEditTask(taskId) {
   var tasks = (state && state.board_tasks) || {};
   var t = tasks[taskId];
@@ -1370,8 +1415,21 @@ function submitTask() {
       msg.verification_summary = verificationSummary;
     }
     send(msg);
+    if (typeof _taskCreateSubmitHook === 'function') {
+      _taskCreateSubmitHook({
+        source: _taskCreateContext,
+        createContext: _taskCreateContext,
+        task: task,
+        group: group,
+        lane: lane,
+        draftId: _taskDraftId,
+        message: Object.assign({}, msg),
+      });
+    }
   }
 
+  _taskCreateSubmitHook = null;
+  _taskCreateContext = null;
   _taskClearDraft(draftKeyId, draftScope);
   _taskDraftId = '';
   _taskAttachments = [];

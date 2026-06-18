@@ -105,3 +105,34 @@ test('render shows hint naming the best-match engineer', () => {
   assert.notEqual(hintEl.style.display, 'none');
   assert.match(hintEl.textContent, /best-match: Alice/);
 });
+
+test('initiative create helper opens Board task modal with source-scoped create context', () => {
+  const { ctx } = buildContext({});
+  let captured = null;
+  ctx._currentGroup = () => 'Fallback';
+  ctx._generateDraftId = () => 'draft-fixed';
+  ctx._taskOpenModal = (config) => { captured = config; };
+  vm.runInContext(`openAddTaskFromInitiative({
+    initiativeId: 'TORQUE-I:1',
+    group: 'Torque',
+    task: 'Initiative title',
+    description: 'Source initiative brief',
+    labels: []
+  })`, ctx);
+
+  assert.equal(captured.title, 'Create Board Task');
+  assert.equal(captured.submitLabel, 'Create task');
+  assert.equal(captured.task, 'Initiative title');
+  assert.equal(captured.description, 'Source initiative brief');
+  assert.equal(captured.group, 'Torque');
+  assert.equal(captured.lane, '');
+  assert.equal(captured.actionName, '');
+  assert.equal(captured.agentTemplate, '');
+  assert.equal(captured.draftScope, 'initiative:TORQUE-I:1');
+  assert.deepEqual(JSON.parse(JSON.stringify(captured.createContext)), {
+    type: 'initiative',
+    initiativeId: 'TORQUE-I:1',
+    group: 'Torque',
+  });
+  assert.equal(typeof captured.afterCreateSubmit, 'function');
+});
