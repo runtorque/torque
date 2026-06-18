@@ -4794,6 +4794,7 @@ body.runtime-embedded #standalone-right-rail {
 body.runtime-embedded .standalone-panel-zone-body > #panel-board,
 body.runtime-embedded .standalone-panel-zone-body > #panel-chat,
 body.runtime-embedded .standalone-panel-zone-body > #panel-actions,
+body.runtime-embedded .standalone-panel-zone-body > #panel-initiatives,
 body.runtime-embedded .standalone-panel-zone-body > #panel-templates,
 body.runtime-embedded .standalone-panel-zone-body > #panel-history,
 body.runtime-embedded .standalone-panel-zone-body > #panel-context,
@@ -4804,6 +4805,7 @@ body.runtime-embedded .standalone-panel-zone-body > #panel-health,
 body.runtime-embedded .standalone-float-body > #panel-board,
 body.runtime-embedded .standalone-float-body > #panel-chat,
 body.runtime-embedded .standalone-float-body > #panel-actions,
+body.runtime-embedded .standalone-float-body > #panel-initiatives,
 body.runtime-embedded .standalone-float-body > #panel-templates,
 body.runtime-embedded .standalone-float-body > #panel-history,
 body.runtime-embedded .standalone-float-body > #panel-context,
@@ -12800,14 +12802,21 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 
 /* Planning / Initiatives panel ----------------------------------------- */
 #panel-initiatives {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  width: 100%;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
+  container-type: inline-size;
 }
 
 .initiatives-panel {
   height: 100%;
+  width: 100%;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   color: var(--fg);
@@ -12827,15 +12836,19 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .initiative-loading { padding: 10px 12px; color: var(--muted); font-size: 12px; }
 
 .initiatives-workspace {
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  box-sizing: border-box;
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(320px, 420px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, clamp(360px, 28vw, 520px));
   gap: 10px;
   padding: 10px 12px 12px;
 }
 
 .initiatives-roadmap-scroll {
+  width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -12846,9 +12859,11 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 
 .initiative-primary-columns {
+  width: 100%;
+  min-width: 0;
   min-height: 250px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
   gap: 10px;
 }
 
@@ -13013,6 +13028,60 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .initiative-link-add { display: flex; gap: 6px; margin-top: 8px; }
 .initiative-link-add input { flex: 1 1 auto; }
 .initiative-link-add button { min-height: 31px; }
+
+#panel-initiatives[data-panel-placement="right"] .initiatives-workspace {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+#panel-initiatives[data-panel-placement="right"] .initiatives-roadmap-scroll {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+#panel-initiatives[data-panel-placement="right"] .initiative-primary-columns {
+  grid-template-columns: 1fr;
+  min-height: 0;
+}
+#panel-initiatives[data-panel-placement="right"] .initiative-column-body { max-height: 240px; }
+#panel-initiatives[data-panel-placement="right"] .initiative-column-secondary { max-height: none; }
+#panel-initiatives[data-panel-placement="right"] .initiative-detail {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+#panel-initiatives[data-panel-placement="right"] .initiative-form-grid { grid-template-columns: 1fr; }
+#panel-initiatives[data-panel-placement="right"] .initiative-link-row,
+#panel-initiatives[data-panel-placement="right"] .initiative-link-add {
+  flex-wrap: wrap;
+}
+#panel-initiatives[data-panel-placement="right"] .initiative-unlink,
+#panel-initiatives[data-panel-placement="right"] .initiative-link-add button {
+  min-height: 31px;
+}
+
+@container (max-width: 640px) {
+  .initiatives-workspace {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .initiatives-roadmap-scroll {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .initiative-primary-columns {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .initiative-column-body { max-height: 240px; }
+  .initiative-column-secondary { max-height: none; }
+  .initiative-detail {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .initiative-form-grid { grid-template-columns: 1fr; }
+  .initiative-link-row,
+  .initiative-link-add { flex-wrap: wrap; }
+}
 
 @media (max-width: 920px) {
   .initiatives-workspace { grid-template-columns: 1fr; }

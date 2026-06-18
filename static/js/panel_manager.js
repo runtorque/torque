@@ -18,7 +18,7 @@ var _standalonePanelDefaults = {
   board: 'bottom',
   chat: 'bottom',
   actions: 'right',
-  initiatives: 'right',
+  initiatives: 'bottom',
   templates: 'right',
   history: 'right',
   context: 'bottom',
@@ -210,6 +210,7 @@ function _standaloneParkPanelRoots(roots, placed) {
     if (!panelRoot || (placed && placed[app])) continue;
     _appendPanelRoot(parkingHost, panelRoot);
     _setPanelHidden(panelRoot, true);
+    _setPanelPlacement(panelRoot, 'parked');
   }
 }
 
@@ -902,6 +903,13 @@ function _setPanelHidden(root, hidden) {
   root.classList.toggle('panel-hidden', !!hidden);
 }
 
+function _setPanelPlacement(root, placement) {
+  if (!root) return;
+  var value = String(placement || 'parked');
+  if (root.dataset) root.dataset.panelPlacement = value;
+  if (typeof root.setAttribute === 'function') root.setAttribute('data-panel-placement', value);
+}
+
 function _clearElement(el) {
   if (!el) return;
   el.innerHTML = '';
@@ -1052,6 +1060,7 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
     _appendPanelRoot(body, panelRoot);
     if (placed) placed[app] = true;
     _setPanelHidden(panelRoot, !(zone.open && app === zone.active));
+    _setPanelPlacement(panelRoot, zoneName);
   }
 }
 
@@ -1121,6 +1130,7 @@ function _standaloneBuildFloats(layer, roots, placed) {
       _appendPanelRoot(body, panelRoot);
       if (placed) placed[app] = true;
       _setPanelHidden(panelRoot, false);
+      _setPanelPlacement(panelRoot, 'float');
     }
     _standaloneAppendFloatResizeHandles(shell, app);
     layer.appendChild(shell);

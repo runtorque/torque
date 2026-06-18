@@ -27739,7 +27739,7 @@ test('standalone layout restore migrates legacy panel state into bottom and righ
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
 });
 
-test('standalone panel defaults place Context in the bottom dock and Agent in the right rail', () => {
+test('standalone panel defaults place Planning with board-like bottom dock apps and Agent in the right rail', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -27754,12 +27754,39 @@ test('standalone panel defaults place Context in the bottom dock and Agent in th
 
   assert.equal(jsonValue(context, `_standalonePanelDefaults.context`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelDefaults.chat`), 'bottom');
+  assert.equal(jsonValue(context, `_standalonePanelDefaults.initiatives`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelDefaults.engineer`), 'right');
   assert.equal(jsonValue(context, `_standalonePanelPlacement('chat')`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelPlacement('context')`), 'bottom');
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('initiatives')`), 'bottom');
   assert.equal(jsonValue(context, `_standalonePanelPlacement('engineer')`), 'right');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'engineer');
+});
+
+test('standalone assigns placement attributes when panels move between bottom, side, and float', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  document.register('panel-initiatives');
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {},
+    };
+    _restoreStandalonePanelState();
+  `);
+
+  assert.equal(document.getElementById('panel-initiatives').dataset.panelPlacement, 'bottom');
+
+  runInContext(context, `_standaloneMovePanelToZone('initiatives', 'right', { prepend: true });`);
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('initiatives')`), 'right');
+  assert.equal(document.getElementById('panel-initiatives').dataset.panelPlacement, 'right');
+
+  runInContext(context, `_standaloneMovePanelToZone('initiatives', 'float');`);
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('initiatives')`), 'float');
+  assert.equal(document.getElementById('panel-initiatives').dataset.panelPlacement, 'float');
 });
 
 test('standalone restore includes Supervisor panel in the bottom dock by default', () => {
@@ -27779,7 +27806,7 @@ test('standalone restore includes Supervisor panel in the bottom dock by default
   context.togglePanel('supervisor');
 
   assert.equal(jsonValue(context, `_standalonePanelPlacement('supervisor')`), 'bottom');
-  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'chat', 'context', 'supervisor']);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'chat', 'initiatives', 'context', 'supervisor']);
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'supervisor');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs.includes('supervisor')`), false);
   assert.equal(sandbox.sendCalls.length, 1);
@@ -27960,11 +27987,11 @@ test('standalone first full-state restore persists responsive defaults once', ()
     cmd: 'standalone_set_panel_layout',
     layout: {
       version: 1,
-      bottom: { open: true, size: 306, tabs: ['board', 'chat', 'context', 'supervisor'], active: 'context' },
+      bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'context', 'supervisor'], active: 'context' },
       right: {
         open: true,
         size: 320,
-        tabs: ['actions', 'initiatives', 'templates', 'history', 'events', 'engineer', 'health'],
+        tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
         active: 'engineer',
       },
       floats: {},
@@ -28116,11 +28143,11 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,
-    bottom: { open: true, size: 306, tabs: ['board', 'chat', 'context', 'supervisor'], active: 'context' },
+    bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'context', 'supervisor'], active: 'context' },
     right: {
       open: true,
       size: 320,
-      tabs: ['actions', 'initiatives', 'templates', 'history', 'events', 'engineer', 'health'],
+      tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
       active: 'engineer',
     },
     floats: {},
@@ -28139,11 +28166,11 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
       cmd: 'standalone_set_panel_layout',
       layout: {
         version: 1,
-        bottom: { open: true, size: 306, tabs: ['board', 'chat', 'context', 'supervisor'], active: 'context' },
+        bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'context', 'supervisor'], active: 'context' },
         right: {
           open: true,
           size: 320,
-          tabs: ['actions', 'initiatives', 'templates', 'history', 'events', 'engineer', 'health'],
+          tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
           active: 'engineer',
         },
         floats: {},
