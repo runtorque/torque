@@ -676,13 +676,33 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 return result
 
             blueprint_thread = db_mod.canonical_user_agent_thread_id(blueprint.id)
+            blueprint_default_result = await call_architect_message_user(
+                blueprint.id,
+                {"message": "Blueprint default-lane update for the user."},
+                101,
+            )
+            self.assertFalse(blueprint_default_result["result"]["isError"])
+            blueprint_default_payload = json.loads(
+                blueprint_default_result["result"]["content"][0]["text"]
+            )
+            blueprint_default_row = db.load_direct_message(
+                blueprint_default_payload["message_id"]
+            )
+            self.assertEqual(blueprint_default_payload["thread_id"], blueprint_thread)
+            self.assertEqual(blueprint_default_payload["agent_id"], blueprint.id)
+            self.assertEqual(blueprint_default_payload["sender_id"], blueprint.id)
+            self.assertEqual(blueprint_default_payload["sender_kind"], "architect")
+            self.assertEqual(blueprint_default_row["thread_id"], blueprint_thread)
+            self.assertEqual(blueprint_default_row["sender_id"], blueprint.id)
+            self.assertEqual(blueprint_default_row["sender_kind"], "architect")
+
             blueprint_result = await call_architect_message_user(
                 blueprint.id,
                 {
-                    "message": "Blueprint update for the user.",
+                    "message": "Blueprint explicit-lane update for the user.",
                     "thread_id": blueprint_thread,
                 },
-                101,
+                102,
             )
             self.assertFalse(blueprint_result["result"]["isError"])
             blueprint_payload = json.loads(
@@ -702,7 +722,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             torqly_result = await call_architect_message_user(
                 torqly.id,
                 {"message": "Torqly update for the user."},
-                102,
+                103,
             )
             self.assertFalse(torqly_result["result"]["isError"])
             torqly_payload = json.loads(
@@ -720,26 +740,26 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 [row["id"] for row in state.direct_messages_by_agent[blueprint.id]],
-                [blueprint_row["id"]],
+                [blueprint_default_row["id"], blueprint_row["id"]],
             )
             self.assertEqual(
                 [row["id"] for row in state.direct_messages_by_agent[torqly.id]],
                 [torqly_row["id"]],
             )
-            self.assertEqual(len(notifications), 2)
+            self.assertEqual(len(notifications), 3)
             self.assertEqual(
                 [row["thread_id"] for row in notifications],
-                [blueprint_thread, torqly_thread],
+                [blueprint_thread, blueprint_thread, torqly_thread],
             )
             self.assertEqual(
                 [row["sender_id"] for row in notifications],
-                [blueprint.id, torqly.id],
+                [blueprint.id, blueprint.id, torqly.id],
             )
             self.assertEqual(
                 [row["id"] for row in db.load_direct_messages_for_thread(
                     blueprint_thread
                 )],
-                [blueprint_row["id"]],
+                [blueprint_default_row["id"], blueprint_row["id"]],
             )
             self.assertEqual(
                 [row["id"] for row in db.load_direct_messages_for_thread(
@@ -781,35 +801,44 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             async def fake_handle_command(payload):
                 self.fail(f"architect_message_user should not call command: {payload}")
 
-            body = {
-                "jsonrpc": "2.0",
-                "id": 201,
-                "method": "tools/call",
-                "params": {
-                    "name": "architect_message_user",
-                    "arguments": {
-                        "message": "Do not silently attribute this to Torqly.",
-                        "thread_id": db_mod.canonical_user_agent_thread_id(
-                            blueprint.id
-                        ),
+            async def assert_rejects(caller_id, requested_thread, expected_thread, req_id):
+                body = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_message_user",
+                        "arguments": {
+                            "message": "Do not silently re-attribute this.",
+                            "thread_id": requested_thread,
+                        },
                     },
-                },
-            }
+                }
 
-            result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
-                body,
-                cell_id=torqly.id,
-                handle_command=fake_handle_command,
-                state=state,
-            )
+                result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                    body,
+                    cell_id=caller_id,
+                    handle_command=fake_handle_command,
+                    state=state,
+                )
 
-            self.assertEqual(status, 200)
-            self.assertTrue(result["result"]["isError"])
-            text = result["result"]["content"][0]["text"]
-            self.assertIn("thread_id is for a different user-agent lane", text)
-            self.assertIn(
+                self.assertEqual(status, 200)
+                self.assertTrue(result["result"]["isError"])
+                text = result["result"]["content"][0]["text"]
+                self.assertIn("thread_id is for a different user-agent lane", text)
+                self.assertIn(expected_thread, text)
+
+            await assert_rejects(
+                torqly.id,
+                db_mod.canonical_user_agent_thread_id(blueprint.id),
                 db_mod.canonical_user_agent_thread_id(torqly.id),
-                text,
+                201,
+            )
+            await assert_rejects(
+                blueprint.id,
+                db_mod.canonical_user_agent_thread_id(torqly.id),
+                db_mod.canonical_user_agent_thread_id(blueprint.id),
+                202,
             )
             self.assertEqual(notifications, [])
             self.assertEqual(

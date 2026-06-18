@@ -5083,3 +5083,78 @@ class ArchitectBindingValidationTests(unittest.TestCase):
                 self.mcp_architect_mod.exit_if_invalid_architect_binding(state)
 
         self.assertEqual(ctx.exception.code, 2)
+
+    def test_validate_architect_binding_prefers_current_cell_over_stale_architect_env(self):
+        state = self._make_state()
+        blueprint = self.state_mod.AgentCell(
+            id="88b5b1ee",
+            name="Blueprint",
+            slug="blueprint",
+            group="torque",
+            cell_type="agent",
+            kind="architect",
+            status="running",
+        )
+        torqly = self.state_mod.AgentCell(
+            id="a5a7fc9e",
+            name="Torqly",
+            slug="torqly",
+            group="torque",
+            cell_type="agent",
+            kind="architect",
+            status="running",
+        )
+        state.agents[blueprint.id] = blueprint
+        state.agents[torqly.id] = torqly
+        state.groups["torque"].extend([blueprint.id, torqly.id])
+
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "TORQUE_CELL_ID": blueprint.id,
+                "TORQUE_ARCHITECT_ID": torqly.id,
+            },
+            clear=True,
+        ):
+            architect_id, error = self.mcp_architect_mod.validate_architect_binding(
+                state
+            )
+
+        self.assertEqual(error, "")
+        self.assertEqual(architect_id, blueprint.id)
+
+    def test_validate_architect_binding_falls_back_to_architect_env_when_cell_is_not_architect(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            slug="worker",
+            group="torque",
+            cell_type="agent",
+            kind="worker",
+            status="running",
+        )
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            slug="architect",
+            group="torque",
+            cell_type="agent",
+            kind="architect",
+            status="running",
+        )
+        state.agents[worker.id] = worker
+        state.agents[architect.id] = architect
+        state.groups["torque"].extend([worker.id, architect.id])
+
+        with mock.patch.dict(
+            "os.environ",
+            {"TORQUE_CELL_ID": worker.id, "TORQUE_ARCHITECT_ID": architect.id},
+            clear=True,
+        ):
+            architect_id, error = self.mcp_architect_mod.validate_architect_binding(
+                state
+            )
+
+        self.assertEqual(error, "")
+        self.assertEqual(architect_id, architect.id)

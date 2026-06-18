@@ -908,7 +908,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             {"BASE": "1", "TORQUE_ARCHITECT_ID": "arch-1"},
         )
 
-    def test_mcp_env_vars_for_architect_include_codex_stdio_bindings(self):
+    def test_mcp_env_vars_for_architect_exclude_shared_config_identity(self):
         cell = types.SimpleNamespace(
             id="arch-1",
             cell_type="agent",
@@ -925,8 +925,6 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             env,
             {
-                "TORQUE_CELL_ID": "arch-1",
-                "TORQUE_ARCHITECT_ID": "arch-1",
                 "TORQUE_PORT": "18934",
                 "TORQUE_DATA_DIR": "/tmp/torque-data",
                 "TORQUE_PROFILE": "desktop",
@@ -947,7 +945,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         ), mock.patch.dict(os.environ, {"TORQUE_PROFILE": ""}, clear=False):
             env = self.server_agent_mod.mcp_env_vars_for_cell(cell)
 
-        self.assertEqual(env["TORQUE_CELL_ID"], "worker-1")
+        self.assertNotIn("TORQUE_CELL_ID", env)
         self.assertEqual(env["TORQUE_PORT"], "18935")
         self.assertEqual(env["TORQUE_DATA_DIR"], "/tmp/torque-worker")
         self.assertNotIn("TORQUE_ARCHITECT_ID", env)
