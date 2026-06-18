@@ -603,6 +603,37 @@ body.runtime-embedded .group-body-inner {
   height: 100%;
   padding: 10px 8px;
 }
+.terminal-tail-button {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: 5;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(13,17,23,.62);
+  box-shadow: 0 8px 22px rgba(0,0,0,.24);
+  opacity: .72;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: opacity .12s, transform .12s, border-color .12s, background .12s;
+}
+.terminal-tail-button:hover,
+.terminal-tail-button:focus-visible {
+  opacity: .96;
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 48%, rgba(255,255,255,.18));
+  background: rgba(13,17,23,.82);
+  outline: none;
+}
+.terminal-tail-button[hidden] {
+  display: none;
+}
 .terminal-surface.terminal-drop-target {
   border-color: var(--accent);
   background: rgba(88,166,255,.08);
