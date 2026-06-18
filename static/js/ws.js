@@ -552,6 +552,10 @@ function connect() {
       if (typeof statusBarReceiveDeployState === 'function') {
         statusBarReceiveDeployState(msg);
       }
+    } else if (msg.type === 'mission_control_summary') {
+      if (typeof missionControlReceiveSummary === 'function') {
+        missionControlReceiveSummary(msg);
+      }
     } else if (msg.type === 'daemon_stop') {
       if (typeof _daemonStopRequestedByUser !== 'undefined'
           && _daemonStopRequestedByUser
@@ -753,6 +757,7 @@ function connect() {
         healthReceiveMetrics(msg);
         return;
       }
+      if (typeof missionControlHandleError === 'function' && missionControlHandleError(msg)) return;
       if (typeof initiativesHandleError === 'function' && initiativesHandleError(msg)) return;
       var systemPromptErrorHandled = false;
       if (typeof _showSystemPromptPreviewError === 'function') {
