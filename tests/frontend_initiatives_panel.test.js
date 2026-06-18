@@ -337,8 +337,9 @@ test('saving scope and linking artifacts use Wave 1 initiative commands', () => 
 
 test('initiative detail opens existing task modal prefilled from editable brief', () => {
   const { sandbox, document } = createSandbox();
-  let modalPrefill = null;
-  sandbox.openAddTaskFromInitiative = function(prefill) { modalPrefill = prefill; };
+  let modalConfig = null;
+  sandbox._generateDraftId = () => 'draft-from-initiative';
+  sandbox._taskOpenModal = function(config) { modalConfig = config; };
   vm.runInContext(`initiativesReceiveList(${JSON.stringify({
     type: 'initiative_list',
     group: 'Torque',
@@ -360,20 +361,28 @@ test('initiative detail opens existing task modal prefilled from editable brief'
 
   vm.runInContext('initiativesCreateBoardTask()', sandbox);
 
-  assert.ok(modalPrefill, 'expected the Planning affordance to reuse the Board task modal path');
-  assert.equal(modalPrefill.task, 'Edited task title');
-  assert.equal(modalPrefill.group, 'Torque');
-  assert.deepEqual(JSON.parse(JSON.stringify(modalPrefill.labels)), []);
-  assert.deepEqual(JSON.parse(JSON.stringify(modalPrefill.createContext)), {
+  assert.ok(modalConfig, 'expected the Planning affordance to reuse the Board task modal path');
+  assert.equal(modalConfig.title, 'Create Board Task');
+  assert.equal(modalConfig.submitLabel, 'Create task');
+  assert.equal(modalConfig.task, 'Edited task title');
+  assert.equal(modalConfig.group, 'Torque');
+  assert.equal(modalConfig.lane, '');
+  assert.equal(modalConfig.actionName, '');
+  assert.equal(modalConfig.agentTemplate, '');
+  assert.equal(modalConfig.draftId, 'draft-from-initiative');
+  assert.equal(modalConfig.draftScope, 'initiative:TORQUE-I:1');
+  assert.deepEqual(JSON.parse(JSON.stringify(modalConfig.labels)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(modalConfig.createContext)), {
     type: 'initiative',
     initiativeId: 'TORQUE-I:1',
     group: 'Torque',
   });
-  assert.match(modalPrefill.description, /Source initiative: TORQUE-I:1 — Edited task title/);
-  assert.match(modalPrefill.description, /Summary\nDraft summary from the drawer/);
-  assert.match(modalPrefill.description, /Why\nDraft why/);
-  assert.match(modalPrefill.description, /In scope\nDraft scope/);
-  assert.match(modalPrefill.description, /Done definition\nDraft acceptance/);
+  assert.equal(typeof modalConfig.afterCreateSubmit, 'function');
+  assert.match(modalConfig.description, /Source initiative: TORQUE-I:1 — Edited task title/);
+  assert.match(modalConfig.description, /Summary\nDraft summary from the drawer/);
+  assert.match(modalConfig.description, /Why\nDraft why/);
+  assert.match(modalConfig.description, /In scope\nDraft scope/);
+  assert.match(modalConfig.description, /Done definition\nDraft acceptance/);
 
   const restoredSummary = document.getElementById('initiative-field-summary');
   const restoredDrawer = document.getElementById('initiative-detail-drawer');
@@ -383,6 +392,7 @@ test('initiative detail opens existing task modal prefilled from editable brief'
   assert.equal(document.activeElement, restoredSummary);
   assert.equal(restoredDrawer.scrollTop, 88);
   assert.match(document.getElementById('panel-initiatives').innerHTML, /Review the prefilled Board task/);
+  assert.doesNotMatch(document.getElementById('panel-initiatives').innerHTML, /Task creation modal is unavailable/);
 });
 
 test('created board task response links back to initiative without dispatching', () => {
