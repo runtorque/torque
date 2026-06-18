@@ -68,6 +68,7 @@ function _compactInitDeferredMaps() {
   if (!_compactModeActive()) return;
   if (!state.decisions) state.decisions = {};
   if (!state.pending_hires) state.pending_hires = {};
+  if (!state.initiatives) state.initiatives = {};
   if (!state.board_tasks_archived) state.board_tasks_archived = {};
   if (!state.engineer_journal) state.engineer_journal = {};
   if (!state.engineer_worklog) state.engineer_worklog = {};
@@ -288,6 +289,7 @@ function _compactApplyPendingHiresSnapshot(msg) {
     if (k.indexOf('pending_hires:') === 0) delete _compactInFlight[k];
   }
   if (!state.pending_hires) state.pending_hires = {};
+  if (!state.initiatives) state.initiatives = {};
   var merged = (msg && msg.pending_hires) || {};
   for (var hid in merged) state.pending_hires[hid] = merged[hid];
   _compactPendingHiresFetched = true;

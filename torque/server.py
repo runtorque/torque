@@ -12072,13 +12072,13 @@ async def _handle_initiative_command(data: dict, state: MatrixState) -> dict:
         group = str(data.get("group", "") or "").strip()
         include_archived = bool(data.get("include_archived", False))
         initiatives = [
-            state.initiative_payload(item["id"], include_links=False) or item
+            state.initiative_payload(item["id"], include_links=True) or item
             for item in state.list_initiatives(
                 group=group,
                 include_archived=include_archived,
             )
         ]
-        return {"type": "initiative_list", "initiatives": initiatives}
+        return {"type": "initiative_list", "group": group, "initiatives": initiatives}
 
     ident = str(
         data.get("initiative", "") or data.get("initiative_id", "")

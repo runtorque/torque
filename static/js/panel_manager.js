@@ -1,10 +1,11 @@
 /* Standalone-only panel workspace manager */
 
-var _standalonePanelApps = ['board', 'chat', 'actions', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health'];
+var _standalonePanelApps = ['board', 'chat', 'actions', 'initiatives', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health'];
 var _standalonePanelTitles = {
   board: 'Board',
   chat: 'Chat',
   actions: 'Actions',
+  initiatives: 'Planning',
   templates: 'Library',
   history: 'History',
   context: 'Context',
@@ -17,6 +18,7 @@ var _standalonePanelDefaults = {
   board: 'bottom',
   chat: 'bottom',
   actions: 'right',
+  initiatives: 'right',
   templates: 'right',
   history: 'right',
   context: 'bottom',

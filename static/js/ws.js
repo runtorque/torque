@@ -722,6 +722,14 @@ function connect() {
       if (typeof handleContextEntries === 'function') handleContextEntries(msg);
     } else if (msg.type === 'memory_entry') {
       if (typeof handleContextEntry === 'function') handleContextEntry(msg);
+    } else if (msg.type === 'initiative_list') {
+      if (typeof initiativesReceiveList === 'function') initiativesReceiveList(msg);
+    } else if (msg.type === 'initiative') {
+      if (typeof initiativesReceiveDetail === 'function') initiativesReceiveDetail(msg);
+    } else if (msg.type === 'initiative_created' || msg.type === 'initiative_updated' || msg.type === 'initiative_archived') {
+      if (typeof initiativesReceiveMutation === 'function') initiativesReceiveMutation(msg);
+    } else if (msg.type === 'initiative_task_linked' || msg.type === 'initiative_task_unlinked' || msg.type === 'initiative_decision_linked' || msg.type === 'initiative_decision_unlinked') {
+      if (typeof initiativesReceiveLinkMutation === 'function') initiativesReceiveLinkMutation(msg);
     } else if (msg.type === 'error') {
       if (typeof healthMetricsReceiveHistory === 'function'
           && typeof healthMetricsState !== 'undefined'
@@ -742,6 +750,7 @@ function connect() {
         healthReceiveMetrics(msg);
         return;
       }
+      if (typeof initiativesHandleError === 'function' && initiativesHandleError(msg)) return;
       var systemPromptErrorHandled = false;
       if (typeof _showSystemPromptPreviewError === 'function') {
         systemPromptErrorHandled = _showSystemPromptPreviewError(msg);
@@ -1556,6 +1565,9 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'task_upsert':
       case 'task_remove':
         _applyTaskSurfaceInvalidation(flags, op, hint);
+        if (_taskDeltaInvalidatesInitiatives(hint && hint.task, _taskNextFromDelta(op, hint && hint.task), op)) {
+          _markSurface(flags, 'initiatives');
+        }
         break;
       case 'lanes_update':
       case 'schedule_upsert':
@@ -1723,6 +1735,11 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         break;
       }
+      case 'initiative_upsert':
+      case 'initiative_link_upsert':
+      case 'initiative_link_remove':
+        _markSurface(flags, 'initiatives');
+        break;
       case 'behavior_overlay_version_append':
       case 'behavior_overlay_active_update':
       case 'behavior_overlay_proposal_upsert':
@@ -1976,6 +1993,24 @@ function _taskDeltaInvalidatesMain(previous, next, op) {
   return _deltaHasChangedField(changed, [
     'worktree_boundary',
     'resume_after_boundary_task_id',
+  ]);
+}
+
+function _taskDeltaInvalidatesInitiatives(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _currentSurfaceGroup();
+  if (!_taskTouchesGroup(previous, next, group)) return false;
+  if (!previous || !next) return true;
+  const changed = _taskDeltaChangedFields(previous, next, op);
+  if (_deltaIsDispatchStateOnly(changed)) return false;
+  return _deltaHasChangedField(changed, [
+    'id',
+    'group',
+    'task',
+    'lane',
+    'status',
+    'health_state',
+    'archived_at',
   ]);
 }
 
@@ -2428,13 +2463,13 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
 
 function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
-    _markSurface(flags, 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
+    _markSurface(flags, 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives');
   }
   if (key === 'active_group') {
-    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives');
   }
   if (key === 'workspace_sidebar_width') {
-    _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
+    _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives');
   }
   if (key === 'terminal_direct_messages_height') {
     _markSurface(flags, 'main');
@@ -2504,7 +2539,7 @@ function _surfaceUsesCurrentGroup(surface) {
   if (surface === 'events') {
     return typeof _eventsFilterByGroup === 'undefined' || !!_eventsFilterByGroup;
   }
-  return surface === 'context' || surface === 'engineer';
+  return surface === 'context' || surface === 'engineer' || surface === 'initiatives';
 }
 
 function _captureDeltaGroupHints(ops) {
@@ -3256,6 +3291,22 @@ function _applyDelta(ops) {
           var digestSettings = Object.assign({}, op);
           delete digestSettings.op;
           state.agent_digest_settings[digestAgentId] = digestSettings;
+        }
+        break;
+      }
+
+      case 'initiative_upsert': {
+        if (!state.initiatives) state.initiatives = {};
+        var initiative = Object.assign({}, op);
+        delete initiative.op;
+        if (initiative.id) state.initiatives[initiative.id] = Object.assign({}, state.initiatives[initiative.id] || {}, initiative);
+        break;
+      }
+
+      case 'initiative_link_upsert':
+      case 'initiative_link_remove': {
+        if (typeof initiativesLoadDetail === 'function' && op.initiative_id && typeof _initiativesSelectedId !== 'undefined' && _initiativesSelectedId === op.initiative_id) {
+          initiativesLoadDetail(op.initiative_id, { force: true });
         }
         break;
       }
