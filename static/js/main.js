@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-initiatives', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
+var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-initiatives', 'panel-mission-control', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
@@ -114,6 +114,9 @@ function _loadPanelApp(appName) {
   if (appName === 'initiatives' && typeof initiativesEnsureLoaded === 'function') {
     initiativesEnsureLoaded();
   }
+  if (appName === 'mission-control' && typeof missionControlEnsureLoaded === 'function') {
+    missionControlEnsureLoaded();
+  }
   if (appName === 'history' && typeof agentHistoryLoad === 'function') {
     agentHistoryLoad();
   }
@@ -172,6 +175,9 @@ function _reloadGroupScopedPanelApp(appName) {
   if (appName === 'initiatives') {
     if (typeof initiativesBeginGroupSwitch === 'function') initiativesBeginGroupSwitch();
   }
+  if (appName === 'mission-control') {
+    if (typeof missionControlBeginGroupSwitch === 'function') missionControlBeginGroupSwitch();
+  }
   if (appName === 'history') {
     if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
     if (typeof renderHistoryPanel === 'function') renderHistoryPanel();
@@ -185,7 +191,7 @@ function _reloadGroupScopedPanelApp(appName) {
 function _reloadVisibleGroupScopedPanelApps() {
   var seen = {};
   _visiblePanelAppsForGroupScopeReload().forEach(function(appName) {
-    if ((appName !== 'actions' && appName !== 'templates' && appName !== 'initiatives' && appName !== 'history' && appName !== 'health') || seen[appName]) return;
+    if ((appName !== 'actions' && appName !== 'templates' && appName !== 'initiatives' && appName !== 'mission-control' && appName !== 'history' && appName !== 'health') || seen[appName]) return;
     seen[appName] = true;
     _reloadGroupScopedPanelApp(appName);
   });
@@ -295,6 +301,7 @@ function togglePanel(appName) {
     if (appName === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'initiatives' && typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
+    if (appName === 'mission-control' && typeof renderMissionControlPanel === 'function') renderMissionControlPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
     if (appName === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
     if (appName === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
@@ -325,6 +332,7 @@ function _restorePanelState() {
     if (detachedApp === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
     if (detachedApp === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (detachedApp === 'initiatives' && typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
+    if (detachedApp === 'mission-control' && typeof renderMissionControlPanel === 'function') renderMissionControlPanel();
     if (detachedApp === 'events' && typeof renderEvents === 'function') renderEvents();
     if (detachedApp === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
     if (detachedApp === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
@@ -376,6 +384,7 @@ function _restorePanelState() {
     if (active === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'initiatives' && typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
+    if (active === 'mission-control' && typeof renderMissionControlPanel === 'function') renderMissionControlPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
     if (active === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
