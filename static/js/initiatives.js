@@ -25,6 +25,9 @@ var _initiativesSaving = false;
 var _initiativesLastError = '';
 var _initiativesSecondaryExpanded = {};
 var _initiativesDraftsById = {};
+var _initiativesTaskCreatePending = null;
+var _initiativesTaskCreateLinking = null;
+var _initiativesTaskCreateStatusById = {};
 
 function _initiativesGroup() {
   if (typeof _currentGroup === 'function') return _currentGroup() || '';
@@ -168,8 +171,22 @@ function initiativesReceiveLinkMutation(msg) {
     || _initiativesSelectedId
     || ''
   );
-  if (initiativeId) initiativesLoadDetail(initiativeId, { force: true });
+  if (initiativeId) {
+    if (msg && msg.type === 'initiative_task_linked'
+        && _initiativesTaskCreateLinking
+        && _initiativesTaskCreateLinking.initiativeId === initiativeId) {
+      var linkedTaskId = String((msg.link && (msg.link.linked_id || msg.link.task_id || msg.link.id)) || _initiativesTaskCreateLinking.taskId || (msg && msg.task_id) || '');
+      _initiativesTaskCreateStatusById[initiativeId] = {
+        kind: 'success',
+        message: 'Created and linked Board task' + (linkedTaskId ? ' ' + linkedTaskId : '') + '.',
+      };
+      _initiativesTaskCreateLinking = null;
+      if (typeof _showToast === 'function') _showToast(_initiativesTaskCreateStatusById[initiativeId].message, 'info');
+    }
+    initiativesLoadDetail(initiativeId, { force: true });
+  }
   initiativesEnsureLoaded({ force: true });
+  renderInitiativesPanel();
 }
 
 function initiativesHandleError(msg) {
@@ -177,6 +194,8 @@ function initiativesHandleError(msg) {
   var text = String((msg && msg.message) || 'Initiative command failed');
   if (text.toLowerCase().indexOf('initiative') < 0
       && !_initiativesSaving
+      && !_initiativesTaskCreatePending
+      && !_initiativesTaskCreateLinking
       && !_initiativesDetailLoadingId
       && !_initiativesLoadingGroup) {
     return false;
@@ -184,6 +203,14 @@ function initiativesHandleError(msg) {
   _initiativesSaving = false;
   _initiativesDetailLoadingId = '';
   _initiativesLoadingGroup = null;
+  if (_initiativesTaskCreatePending || _initiativesTaskCreateLinking) {
+    var pending = _initiativesTaskCreatePending || _initiativesTaskCreateLinking;
+    _initiativesTaskCreatePending = null;
+    _initiativesTaskCreateLinking = null;
+    if (pending.initiativeId) {
+      _initiativesTaskCreateStatusById[pending.initiativeId] = { kind: 'error', message: text };
+    }
+  }
   _initiativesLastError = text;
   renderInitiativesPanel();
   return true;
@@ -281,6 +308,106 @@ function initiativesSaveDetail() {
   _initiativesLastError = '';
   if (typeof send === 'function') send(payload);
   renderInitiativesPanel();
+}
+
+function _initiativeCompactSection(label, value) {
+  value = String(value || '').trim();
+  if (!value) return '';
+  return label + '\n' + value;
+}
+
+function _initiativeBoardTaskPrefill(detail) {
+  detail = detail || {};
+  var initiativeId = String(detail.id || _initiativesSelectedId || '').trim();
+  var title = String(detail.title || initiativeId || 'Untitled initiative').trim();
+  var sections = [];
+  if (initiativeId) {
+    sections.push('Source initiative: ' + initiativeId + (title ? ' — ' + title : ''));
+  }
+  var summary = _initiativeCompactSection('Summary', detail.summary);
+  var why = _initiativeCompactSection('Why', detail.why);
+  var inScope = _initiativeCompactSection('In scope', detail.in_scope);
+  var done = _initiativeCompactSection('Done definition', detail.done_definition);
+  [summary, why, inScope, done].forEach(function(section) {
+    if (section) sections.push(section);
+  });
+  if (!sections.length) sections.push('Source initiative brief.');
+  return {
+    initiativeId: initiativeId,
+    group: String(detail.group || detail.group_name || _initiativesGroup() || ''),
+    task: title,
+    description: sections.join('\n\n'),
+    labels: [],
+    createContext: {
+      type: 'initiative',
+      initiativeId: initiativeId,
+      group: String(detail.group || detail.group_name || _initiativesGroup() || ''),
+    },
+  };
+}
+
+function initiativesCreateBoardTask() {
+  if (!_initiativesSelectedId) return;
+  _initiativesCaptureDrafts();
+  var detail = _initiativeDetailBase();
+  detail.id = detail.id || _initiativesSelectedId;
+  var prefill = _initiativeBoardTaskPrefill(detail);
+  if (typeof openAddTaskFromInitiative !== 'function') {
+    _initiativesLastError = 'Task creation modal is unavailable.';
+    renderInitiativesPanel();
+    return;
+  }
+  _initiativesTaskCreateStatusById[prefill.initiativeId] = {
+    kind: 'info',
+    message: 'Review the prefilled Board task, then create it from the modal.',
+  };
+  openAddTaskFromInitiative(prefill);
+  renderInitiativesPanel();
+}
+
+function initiativesRegisterTaskCreatePending(meta) {
+  meta = meta || {};
+  var source = meta.source || meta.createContext || {};
+  if (source.type !== 'initiative') return false;
+  var initiativeId = String(source.initiativeId || source.initiative_id || '').trim();
+  if (!initiativeId) return false;
+  _initiativesTaskCreatePending = {
+    initiativeId: initiativeId,
+    group: String(source.group || meta.group || _initiativesGroup() || ''),
+    title: String(meta.task || meta.title || '').trim(),
+    draftId: String(meta.draftId || meta.draft_id || '').trim(),
+  };
+  _initiativesTaskCreateStatusById[initiativeId] = {
+    kind: 'info',
+    message: 'Creating Board task…',
+  };
+  if (_initiativesSelectedId === initiativeId) renderInitiativesPanel();
+  return true;
+}
+
+function initiativesHandleBoardTaskCreated(msg) {
+  if (!_initiativesTaskCreatePending) return false;
+  var taskId = String((msg && (msg.task_id || msg.id)) || '').trim();
+  if (!taskId) return false;
+  var pending = _initiativesTaskCreatePending;
+  _initiativesTaskCreatePending = null;
+  _initiativesTaskCreateLinking = { initiativeId: pending.initiativeId, taskId: taskId };
+  _initiativesTaskCreateStatusById[pending.initiativeId] = {
+    kind: 'info',
+    message: 'Board task ' + taskId + ' created. Linking it to the initiative…',
+  };
+  _initiativesSaving = true;
+  _initiativesLastError = '';
+  if (typeof send === 'function') {
+    send({
+      cmd: 'initiative_link_task',
+      initiative: pending.initiativeId,
+      task: taskId,
+      group: pending.group || _initiativesGroup(),
+    });
+  }
+  if (_initiativesSelectedId === pending.initiativeId) renderInitiativesPanel();
+  return true;
 }
 
 function initiativesLinkTask() {
@@ -522,6 +649,10 @@ function _renderInitiativeDetail() {
   html += '<button type="button" class="initiative-close" onclick="initiativesCloseDetail()" title="Close">×</button>';
   html += '</div>';
   if (loading) html += '<div class="initiative-loading">Loading detail...</div>';
+  var taskCreateStatus = _initiativesTaskCreateStatusById[_initiativesSelectedId];
+  if (taskCreateStatus && taskCreateStatus.message) {
+    html += '<div class="initiative-status initiative-status-' + esc(taskCreateStatus.kind || 'info') + '">' + esc(taskCreateStatus.message) + '</div>';
+  }
   html += '<div class="initiative-form">';
   html += _initiativeInput('title', 'Title', detail.title || '');
   html += '<div class="initiative-form-grid">';
@@ -534,6 +665,7 @@ function _renderInitiativeDetail() {
   html += _initiativeInput('out_of_scope', 'Out of scope', detail.out_of_scope || '', { textarea: true, rows: 4 });
   html += _initiativeInput('done_definition', 'Done definition', detail.done_definition || '', { textarea: true, rows: 4 });
   html += '<div class="initiative-detail-actions">';
+  html += '<button type="button" class="btn-secondary" onclick="initiativesCreateBoardTask()"' + (_initiativesSaving ? ' disabled' : '') + '>Create board task</button>';
   html += '<button type="button" class="btn-primary" onclick="initiativesSaveDetail()"' + (_initiativesSaving ? ' disabled' : '') + '>' + (_initiativesSaving ? 'Saving...' : 'Save scope') + '</button>';
   html += '</div>';
   html += '</div>';

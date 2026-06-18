@@ -683,7 +683,10 @@ function connect() {
     } else if (msg.type === 'external_open') {
       if (msg.url) window.open(msg.url);
     } else if (msg.type === 'external_imported') {
+      if (typeof initiativesHandleBoardTaskCreated === 'function') initiativesHandleBoardTaskCreated(msg);
       _showToast('Imported external ticket', 'info');
+    } else if (msg.type === 'board_task_added') {
+      if (typeof initiativesHandleBoardTaskCreated === 'function') initiativesHandleBoardTaskCreated(msg);
     } else if (msg.type === 'external_linked') {
       _showToast('External issue linked', 'info');
     } else if (msg.type === 'external_unlinked') {
