@@ -346,13 +346,63 @@ function _initiativeBoardTaskPrefill(detail) {
   };
 }
 
+function _initiativesOpenBoardTaskModal(prefill) {
+  prefill = prefill || {};
+  if (typeof openAddTaskFromInitiative === 'function') {
+    openAddTaskFromInitiative(prefill);
+    return true;
+  }
+  if (typeof _taskOpenModal !== 'function' || typeof _generateDraftId !== 'function') {
+    return false;
+  }
+  var initiativeId = String(prefill.initiativeId || (prefill.createContext && prefill.createContext.initiativeId) || '').trim();
+  var group = prefill.group || _initiativesGroup();
+  _taskOpenModal({
+    editId: null,
+    title: 'Create Board Task',
+    submitLabel: 'Create task',
+    task: prefill.task || '',
+    description: prefill.description || '',
+    labels: prefill.labels || [],
+    dependsOn: [],
+    attachments: [],
+    originalAttachments: [],
+    artifacts: [],
+    originalArtifacts: [],
+    actionName: '',
+    agentTemplate: '',
+    actionVars: {},
+    group: group,
+    lane: prefill.lane || '',
+    scheduledInput: '',
+    verificationMode: '',
+    verificationState: '',
+    verificationNotes: '',
+    verificationSummary: {},
+    draftId: _generateDraftId(),
+    draftScope: initiativeId ? 'initiative:' + initiativeId : 'initiative',
+    createContext: prefill.createContext || {
+      type: 'initiative',
+      initiativeId: initiativeId,
+      group: group,
+    },
+    afterCreateSubmit: function(meta) {
+      if (typeof initiativesRegisterTaskCreatePending === 'function') {
+        initiativesRegisterTaskCreatePending(meta);
+      }
+    },
+    selectTask: false,
+  });
+  return true;
+}
+
 function initiativesCreateBoardTask() {
   if (!_initiativesSelectedId) return;
   _initiativesCaptureDrafts();
   var detail = _initiativeDetailBase();
   detail.id = detail.id || _initiativesSelectedId;
   var prefill = _initiativeBoardTaskPrefill(detail);
-  if (typeof openAddTaskFromInitiative !== 'function') {
+  if (!_initiativesOpenBoardTaskModal(prefill)) {
     _initiativesLastError = 'Task creation modal is unavailable.';
     renderInitiativesPanel();
     return;
@@ -361,7 +411,6 @@ function initiativesCreateBoardTask() {
     kind: 'info',
     message: 'Review the prefilled Board task, then create it from the modal.',
   };
-  openAddTaskFromInitiative(prefill);
   renderInitiativesPanel();
 }
 
