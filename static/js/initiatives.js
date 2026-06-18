@@ -551,6 +551,7 @@ function renderInitiativesPanel() {
   if (typeof _captureSurfaceState === 'function') {
     snapshot = _captureSurfaceState(panel, {
       scrollSelectors: [
+        '#initiatives-workspace',
         '#initiatives-roadmap-scroll',
         '#initiative-col-now',
         '#initiative-col-next',
@@ -585,7 +586,7 @@ function renderInitiativesPanel() {
   if (_initiativesLoadingGroup === group && _initiativesLoadedGroup !== group) {
     html += '<div class="initiative-loading">Loading initiatives...</div>';
   }
-  html += '<div class="initiatives-workspace">';
+  html += '<div class="initiatives-workspace" id="initiatives-workspace">';
   html += _renderInitiativesRoadmap(group, buckets);
   html += _renderInitiativeDetail();
   html += '</div></div>';

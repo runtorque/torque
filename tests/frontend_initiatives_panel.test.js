@@ -247,6 +247,9 @@ test('initiative rerender preserves drafts and scroll after side placement chang
   why.selectionStart = 7;
   why.selectionEnd = 11;
   why.focus();
+  const workspace = document.getElementById('initiatives-workspace');
+  workspace.scrollLeft = 12;
+  workspace.scrollTop = 144;
   const roadmap = document.getElementById('initiatives-roadmap-scroll');
   roadmap.scrollLeft = 36;
   roadmap.scrollTop = 58;
@@ -254,11 +257,14 @@ test('initiative rerender preserves drafts and scroll after side placement chang
   vm.runInContext(`state.initiatives['TORQUE-I:1'].summary = 'Delta while side panel is open'; renderInitiativesPanel();`, sandbox);
 
   const restoredWhy = document.getElementById('initiative-field-why');
+  const restoredWorkspace = document.getElementById('initiatives-workspace');
   const restoredRoadmap = document.getElementById('initiatives-roadmap-scroll');
   assert.equal(restoredWhy.value, 'Narrow side-panel draft');
   assert.equal(restoredWhy.selectionStart, 7);
   assert.equal(restoredWhy.selectionEnd, 11);
   assert.equal(document.activeElement, restoredWhy);
+  assert.equal(restoredWorkspace.scrollLeft, 12);
+  assert.equal(restoredWorkspace.scrollTop, 144);
   assert.equal(restoredRoadmap.scrollLeft, 36);
   assert.equal(restoredRoadmap.scrollTop, 58);
   assert.match(document.getElementById('panel-initiatives').innerHTML, /Parked/);
