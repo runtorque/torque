@@ -1324,7 +1324,6 @@ function _blankSurfaceInvalidations() {
     engineer: false,
     templates: false,
     health: false,
-    initiatives: false,
   };
 }
 
@@ -1566,7 +1565,9 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'task_upsert':
       case 'task_remove':
         _applyTaskSurfaceInvalidation(flags, op, hint);
-        _markSurface(flags, 'initiatives');
+        if (_taskDeltaInvalidatesInitiatives(hint && hint.task, _taskNextFromDelta(op, hint && hint.task), op)) {
+          _markSurface(flags, 'initiatives');
+        }
         break;
       case 'lanes_update':
       case 'schedule_upsert':
@@ -1992,6 +1993,24 @@ function _taskDeltaInvalidatesMain(previous, next, op) {
   return _deltaHasChangedField(changed, [
     'worktree_boundary',
     'resume_after_boundary_task_id',
+  ]);
+}
+
+function _taskDeltaInvalidatesInitiatives(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _currentSurfaceGroup();
+  if (!_taskTouchesGroup(previous, next, group)) return false;
+  if (!previous || !next) return true;
+  const changed = _taskDeltaChangedFields(previous, next, op);
+  if (_deltaIsDispatchStateOnly(changed)) return false;
+  return _deltaHasChangedField(changed, [
+    'id',
+    'group',
+    'task',
+    'lane',
+    'status',
+    'health_state',
+    'archived_at',
   ]);
 }
 

@@ -27964,7 +27964,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
       right: {
         open: true,
         size: 320,
-        tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
+        tabs: ['actions', 'initiatives', 'templates', 'history', 'events', 'engineer', 'health'],
         active: 'engineer',
       },
       floats: {},
@@ -28120,7 +28120,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
     right: {
       open: true,
       size: 320,
-      tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
+      tabs: ['actions', 'initiatives', 'templates', 'history', 'events', 'engineer', 'health'],
       active: 'engineer',
     },
     floats: {},
@@ -28128,7 +28128,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   });
   assert.deepEqual(
     jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs.concat(_standalonePanelCurrentLayout().right.tabs).sort()`),
-    ['actions', 'board', 'chat', 'context', 'engineer', 'events', 'health', 'history', 'supervisor', 'templates']
+    ['actions', 'board', 'chat', 'context', 'engineer', 'events', 'health', 'history', 'initiatives', 'supervisor', 'templates']
   );
   assert.deepEqual(jsonValue(context, `sendCalls`), [
     {
@@ -28143,7 +28143,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
         right: {
           open: true,
           size: 320,
-          tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
+          tabs: ['actions', 'initiatives', 'templates', 'history', 'events', 'engineer', 'health'],
           active: 'engineer',
         },
         floats: {},
