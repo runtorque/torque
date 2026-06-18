@@ -624,6 +624,210 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(notifications), 2)
             db.close()
 
+    async def test_architect_message_user_preserves_bound_architect_lane(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            blueprint = self.state_mod.AgentCell(
+                id="88b5b1ee",
+                name="Blueprint",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            torqly = self.state_mod.AgentCell(
+                id="a5a7fc9e",
+                name="Torqly",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            state.agents[blueprint.id] = blueprint
+            state.agents[torqly.id] = torqly
+            state.groups["g"] = [blueprint.id, torqly.id]
+
+            notifications = []
+            state.on_direct_user_message = lambda row: notifications.append(
+                dict(row)
+            )
+
+            async def fake_handle_command(payload):
+                self.fail(f"architect_message_user should not call command: {payload}")
+
+            async def call_architect_message_user(agent_id, arguments, req_id):
+                body = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_message_user",
+                        "arguments": arguments,
+                    },
+                }
+                result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                    body,
+                    cell_id=agent_id,
+                    handle_command=fake_handle_command,
+                    state=state,
+                )
+                self.assertEqual(status, 200)
+                return result
+
+            blueprint_thread = db_mod.canonical_user_agent_thread_id(blueprint.id)
+            blueprint_result = await call_architect_message_user(
+                blueprint.id,
+                {
+                    "message": "Blueprint update for the user.",
+                    "thread_id": blueprint_thread,
+                },
+                101,
+            )
+            self.assertFalse(blueprint_result["result"]["isError"])
+            blueprint_payload = json.loads(
+                blueprint_result["result"]["content"][0]["text"]
+            )
+            blueprint_row = db.load_direct_message(
+                blueprint_payload["message_id"]
+            )
+            self.assertEqual(blueprint_payload["thread_id"], blueprint_thread)
+            self.assertEqual(blueprint_payload["agent_id"], blueprint.id)
+            self.assertEqual(blueprint_payload["sender_id"], blueprint.id)
+            self.assertEqual(blueprint_payload["sender_kind"], "architect")
+            self.assertEqual(blueprint_row["thread_id"], blueprint_thread)
+            self.assertEqual(blueprint_row["sender_id"], blueprint.id)
+            self.assertEqual(blueprint_row["sender_kind"], "architect")
+
+            torqly_result = await call_architect_message_user(
+                torqly.id,
+                {"message": "Torqly update for the user."},
+                102,
+            )
+            self.assertFalse(torqly_result["result"]["isError"])
+            torqly_payload = json.loads(
+                torqly_result["result"]["content"][0]["text"]
+            )
+            torqly_thread = db_mod.canonical_user_agent_thread_id(torqly.id)
+            torqly_row = db.load_direct_message(torqly_payload["message_id"])
+            self.assertEqual(torqly_payload["thread_id"], torqly_thread)
+            self.assertEqual(torqly_payload["agent_id"], torqly.id)
+            self.assertEqual(torqly_payload["sender_id"], torqly.id)
+            self.assertEqual(torqly_payload["sender_kind"], "architect")
+            self.assertEqual(torqly_row["thread_id"], torqly_thread)
+            self.assertEqual(torqly_row["sender_id"], torqly.id)
+            self.assertEqual(torqly_row["sender_kind"], "architect")
+
+            self.assertEqual(
+                [row["id"] for row in state.direct_messages_by_agent[blueprint.id]],
+                [blueprint_row["id"]],
+            )
+            self.assertEqual(
+                [row["id"] for row in state.direct_messages_by_agent[torqly.id]],
+                [torqly_row["id"]],
+            )
+            self.assertEqual(len(notifications), 2)
+            self.assertEqual(
+                [row["thread_id"] for row in notifications],
+                [blueprint_thread, torqly_thread],
+            )
+            self.assertEqual(
+                [row["sender_id"] for row in notifications],
+                [blueprint.id, torqly.id],
+            )
+            self.assertEqual(
+                [row["id"] for row in db.load_direct_messages_for_thread(
+                    blueprint_thread
+                )],
+                [blueprint_row["id"]],
+            )
+            self.assertEqual(
+                [row["id"] for row in db.load_direct_messages_for_thread(
+                    torqly_thread
+                )],
+                [torqly_row["id"]],
+            )
+
+            db.close()
+
+    async def test_architect_message_user_rejects_other_architect_thread(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            blueprint = self.state_mod.AgentCell(
+                id="88b5b1ee",
+                name="Blueprint",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            torqly = self.state_mod.AgentCell(
+                id="a5a7fc9e",
+                name="Torqly",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            state.agents[blueprint.id] = blueprint
+            state.agents[torqly.id] = torqly
+            state.groups["g"] = [blueprint.id, torqly.id]
+            notifications = []
+            state.on_direct_user_message = lambda row: notifications.append(
+                dict(row)
+            )
+
+            async def fake_handle_command(payload):
+                self.fail(f"architect_message_user should not call command: {payload}")
+
+            body = {
+                "jsonrpc": "2.0",
+                "id": 201,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_message_user",
+                    "arguments": {
+                        "message": "Do not silently attribute this to Torqly.",
+                        "thread_id": db_mod.canonical_user_agent_thread_id(
+                            blueprint.id
+                        ),
+                    },
+                },
+            }
+
+            result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                body,
+                cell_id=torqly.id,
+                handle_command=fake_handle_command,
+                state=state,
+            )
+
+            self.assertEqual(status, 200)
+            self.assertTrue(result["result"]["isError"])
+            text = result["result"]["content"][0]["text"]
+            self.assertIn("thread_id is for a different user-agent lane", text)
+            self.assertIn(
+                db_mod.canonical_user_agent_thread_id(torqly.id),
+                text,
+            )
+            self.assertEqual(notifications, [])
+            self.assertEqual(
+                db.load_direct_messages_for_thread(
+                    db_mod.canonical_user_agent_thread_id(blueprint.id)
+                ),
+                [],
+            )
+            self.assertEqual(
+                db.load_direct_messages_for_thread(
+                    db_mod.canonical_user_agent_thread_id(torqly.id)
+                ),
+                [],
+            )
+            self.assertNotIn(blueprint.id, state.direct_messages_by_agent)
+            self.assertNotIn(torqly.id, state.direct_messages_by_agent)
+            db.close()
+
     async def test_message_user_rejects_empty_message(self):
         state = self.state_mod.MatrixState()
         worker = self.state_mod.AgentCell(
