@@ -26,6 +26,7 @@ from .behavior_overlay import (
     version_summary,
 )
 from .config import log
+from .db import canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
 from .direct_message_mirrors import save_direct_ask_mirror
@@ -6019,6 +6020,33 @@ def _agent_user_direct_message_conflicts_with_existing(
     return False
 
 
+
+def _requested_user_agent_thread_mismatch(
+        requested_thread_id: str,
+        agent_id: str) -> tuple[bool, str]:
+    """Return whether an explicit canonical user↔agent thread is spoofed.
+
+    V1 direct-message storage always normalizes user lanes to
+    ``user-agent:<user-id>:<agent-id>`` based on the persisted sender/recipient.
+    Non-canonical legacy/client thread ids are still ignored by the DB layer,
+    but an explicit canonical id for a different agent is almost certainly a
+    stale or spoofed caller binding and must not be silently re-attributed.
+    """
+    requested = str(requested_thread_id or "").strip()
+    aid = str(agent_id or "").strip()
+    prefix = "user-agent:"
+    if not requested.startswith(prefix):
+        return False, ""
+    parts = requested.split(":", 2)
+    if len(parts) != 3:
+        return False, ""
+    user_id = parts[1].strip() or "user"
+    requested_agent_id = parts[2].strip()
+    expected = canonical_user_agent_thread_id(aid, user_id=user_id)
+    if aid and requested_agent_id and requested != expected:
+        return True, expected
+    return False, ""
+
 def _agent_user_direct_message_reply_thread_id(
         state,
         reply_to_id: str,
@@ -6146,12 +6174,22 @@ def save_agent_user_direct_message_from_mcp(
         created = True
 
     context = dict(context or {})
+    sender_id = str(getattr(sender, "id", "") or "").strip()
     requested_thread_id = str(thread_id or "").strip()
+    mismatched, expected_thread_id = _requested_user_agent_thread_mismatch(
+        requested_thread_id,
+        sender_id,
+    )
+    if mismatched:
+        raise ValueError(
+            "thread_id is for a different user-agent lane; "
+            f"expected {expected_thread_id}"
+        )
     if not requested_thread_id:
         requested_thread_id = _agent_user_direct_message_reply_thread_id(
             state,
             reply_to,
-            str(getattr(sender, "id", "") or "").strip(),
+            sender_id,
         )
     now = time.time()
     row = {
