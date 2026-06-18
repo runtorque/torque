@@ -745,6 +745,7 @@ function _renderSurface(surface) {
   if (surface === 'board' && typeof renderBoard === 'function') renderBoard();
   if (surface === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
   if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
+  if (surface === 'initiatives' && typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
   if (surface === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
