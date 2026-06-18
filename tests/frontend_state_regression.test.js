@@ -11387,11 +11387,12 @@ test('embedded terminal output keeps tail-follow after a terminal workspace rere
 });
 
 test('embedded terminal output preserves viewport when user has scrolled up', () => {
-  const { sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const { context, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
   const term = terminals[0];
   term.buffer.active.baseY = 42;
   term.buffer.active.viewportY = 30;
   term.writeBaseGrowth = 7;
+  markEmbeddedTerminalUserScrolledUp(context, 'term-1:sess-1');
 
   sockets[0].onmessage({
     data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'new line\r\n' }),
@@ -11404,7 +11405,7 @@ test('embedded terminal output preserves viewport when user has scrolled up', ()
 });
 
 test('embedded terminal output does not refollow when user scrolls up during async write', () => {
-  const { sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const { context, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
   const term = terminals[0];
   term.buffer.active.baseY = 42;
   term.buffer.active.viewportY = 42;
@@ -11418,6 +11419,7 @@ test('embedded terminal output does not refollow when user scrolls up during asy
   assert.equal(term.buffer.active.viewportY, 42);
 
   term.buffer.active.viewportY = 30;
+  markEmbeddedTerminalUserScrolledUp(context, 'term-1:sess-1');
   term.flushWriteCallbacks();
 
   assert.equal(term.buffer.active.viewportY, 30);
@@ -11431,6 +11433,15 @@ function triggerEmbeddedTerminalResize(context, sessionKey) {
       __e.lastObservedWidth = 800;
       __e.lastObservedHeight = 400;
       __e.resizeObserver.callback([{ contentRect: { width: 800, height: 220 } }]);
+    })();
+  `);
+}
+
+function markEmbeddedTerminalUserScrolledUp(context, sessionKey) {
+  runInContext(context, `
+    (function() {
+      var __e = _embeddedTerminalSessions['${sessionKey}'];
+      _embeddedTerminalSetTailPinned(__e, false);
     })();
   `);
 }
@@ -11451,6 +11462,21 @@ test('embedded terminal re-pins the tail when a growing compose box resizes the 
   assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY);
 });
 
+test('embedded terminal resize preserves sticky tail after layout temporarily detaches the viewport', () => {
+  const { context, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  // The user was tailing, but a layout reflow (e.g. compose growth) has already
+  // left xterm's logical viewport above baseY before ResizeObserver runs.
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 30;
+  term.scrollToBottomCount = 0;
+
+  triggerEmbeddedTerminalResize(context, 'term-1:sess-1');
+
+  assert.equal(term.scrollToBottomCount, 1);
+  assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY);
+});
+
 test('embedded terminal resize does not yank a user who scrolled up while composing', () => {
   const { context, terminals } = setupEmbeddedTerminalOutputHarness();
   const term = terminals[0];
@@ -11458,6 +11484,7 @@ test('embedded terminal resize does not yank a user who scrolled up while compos
   term.buffer.active.baseY = 42;
   term.buffer.active.viewportY = 30;
   term.scrollToBottomCount = 0;
+  markEmbeddedTerminalUserScrolledUp(context, 'term-1:sess-1');
 
   triggerEmbeddedTerminalResize(context, 'term-1:sess-1');
 
@@ -11465,19 +11492,67 @@ test('embedded terminal resize does not yank a user who scrolled up while compos
   assert.equal(term.buffer.active.viewportY, 30);
 });
 
+test('embedded terminal tail button appears after manual scroll and re-arms tailing on click', () => {
+  const { context, dom, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  const viewport = new FakeElement('xterm-viewport');
+  viewport.classList.add('xterm-viewport');
+  viewport.scrollHeight = 1000;
+  viewport.clientHeight = 250;
+  viewport.scrollTop = 750;
+  dom.surface.setQuerySelector('.xterm-viewport', viewport);
+  context.__viewport = viewport;
+
+  runInContext(context, `
+    (function() {
+      var __e = _embeddedTerminalSessions['term-1:sess-1'];
+      _attachEmbeddedTerminalTailControls(__e);
+    })();
+  `);
+  const button = runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailButton`);
+  assert.ok(button, 'tail button is created inside the terminal surface');
+
+  term.buffer.active.baseY = 100;
+  term.buffer.active.viewportY = 100;
+  runInContext(context, `_updateEmbeddedTerminalTailButton(_embeddedTerminalSessions['term-1:sess-1']);`);
+  assert.equal(button.hidden, true, 'button stays hidden while tailing at bottom');
+
+  term.buffer.active.viewportY = 80;
+  viewport.scrollTop = 420;
+  viewport.listeners.wheel({ deltaY: -120 });
+  viewport.listeners.scroll({ currentTarget: viewport });
+
+  assert.equal(runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailPinned`), false);
+  assert.equal(button.hidden, false, 'button appears after manual scroll-up detaches tailing');
+
+  button.listeners.click({
+    preventDefault() {},
+    stopPropagation() {},
+  });
+
+  assert.equal(runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailPinned`), true);
+  assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY);
+  assert.equal(viewport.scrollTop, 750);
+  assert.equal(button.hidden, true, 'button hides after click scrolls to bottom and resumes tailing');
+});
+
 test('embedded terminal keeps visual inset on xterm so FitAddon rows match the visible viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const surfaceRule = css.match(/^\.terminal-surface\s*\{[^}]*\}/m);
   const xtermRule = css.match(/^\.terminal-surface \.xterm\s*\{[^}]*\}/m);
+  const tailButtonRule = css.match(/^\.terminal-tail-button\s*\{[^}]*\}/m);
   const runtimeSurfaceRule = css.match(/^body\.runtime-embedded \.terminal-surface\s*\{[^}]*\}/m);
   const runtimeXtermRule = css.match(/^body\.runtime-embedded \.terminal-surface \.xterm\s*\{[^}]*\}/m);
 
   assert.ok(surfaceRule, '.terminal-surface rule exists');
   assert.ok(xtermRule, '.terminal-surface .xterm rule exists');
+  assert.ok(tailButtonRule, '.terminal-tail-button rule exists');
   assert.ok(runtimeSurfaceRule, 'runtime .terminal-surface rule exists');
   assert.ok(runtimeXtermRule, 'runtime .terminal-surface .xterm rule exists');
   assert.match(surfaceRule[0], /padding:\s*0;/);
   assert.match(xtermRule[0], /box-sizing:\s*border-box;/);
+  assert.match(tailButtonRule[0], /position:\s*absolute;/);
+  assert.match(tailButtonRule[0], /opacity:\s*\.72;/);
   assert.match(xtermRule[0], /padding:\s*10px 8px;/);
   assert.match(runtimeSurfaceRule[0], /padding:\s*0;/);
   assert.match(runtimeXtermRule[0], /padding:\s*10px 8px;/);

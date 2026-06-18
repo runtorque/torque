@@ -56,6 +56,8 @@ var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
 var XTERM_SCROLLBACK_DEFAULT = 2000;
 var XTERM_SCROLLBACK_MIN = 100;
 var XTERM_SCROLLBACK_MAX = 100000;
+var EMBEDDED_TERMINAL_TAIL_THRESHOLD_PX = 8;
+var EMBEDDED_TERMINAL_USER_SCROLL_INTENT_MS = 900;
 
 function _xtermScrollbackFromSettings(settings) {
   var raw = settings && settings.xterm_scrollback;
@@ -2210,8 +2212,7 @@ function _terminalComposeScrollToBottom(cellId) {
   const id = String(cellId || '');
   for (const key in _embeddedTerminalSessions) {
     const entry = _embeddedTerminalSessions[key];
-    const term = entry && entry.cellId === id ? entry.terminal : null;
-    if (term && typeof term.scrollToBottom === 'function') term.scrollToBottom();
+    if (entry && entry.cellId === id) _embeddedTerminalScrollToTail(entry);
   }
 }
 
@@ -2418,6 +2419,7 @@ function _disposeEmbeddedTerminalEntry(entry) {
   if (_embeddedTerminalSessions[entry.sessionKey] === entry) {
     delete _embeddedTerminalSessions[entry.sessionKey];
   }
+  _detachEmbeddedTerminalTailControls(entry);
   if (entry.dropSurface && entry.dropHandlers
       && typeof entry.dropSurface.removeEventListener === 'function') {
     entry.dropSurface.removeEventListener('dragenter', entry.dropHandlers.dragenter, true);
@@ -2679,6 +2681,7 @@ function _updateEmbeddedTerminalEntrySession(entry, cell, sessionKey, sessionId)
   entry.cellId = cell.id;
   entry.cell = cell;
   entry.sessionId = sessionId;
+  if (typeof entry.tailPinned !== 'boolean') entry.tailPinned = true;
   _embeddedTerminalSessions[sessionKey] = entry;
   if (entry.surface) {
     if (entry.surface.dataset) entry.surface.dataset.torqueSessionKey = sessionKey;
@@ -2715,20 +2718,190 @@ function _embeddedTerminalViewportAtTail(viewport) {
   const scrollTop = Number(viewport.scrollTop) || 0;
   const clientHeight = Number(viewport.clientHeight) || 0;
   const scrollHeight = Number(viewport.scrollHeight) || 0;
-  return scrollHeight <= clientHeight || (scrollHeight - scrollTop - clientHeight) <= 4;
+  return scrollHeight <= clientHeight
+    || (scrollHeight - scrollTop - clientHeight) <= EMBEDDED_TERMINAL_TAIL_THRESHOLD_PX;
 }
 
 function _embeddedTerminalAtTail(entry) {
   const term = entry && entry.terminal;
   const buffer = term && term.buffer && term.buffer.active;
+  let bufferKnown = false;
+  let bufferAtTail = true;
   if (buffer) {
     const viewportY = Number(buffer.viewportY);
     const baseY = Number(buffer.baseY);
     if (Number.isFinite(viewportY) && Number.isFinite(baseY)) {
-      return baseY <= viewportY;
+      bufferKnown = true;
+      bufferAtTail = baseY <= viewportY;
     }
   }
-  return _embeddedTerminalViewportAtTail(_embeddedTerminalViewport(entry));
+  const viewport = _embeddedTerminalViewport(entry);
+  const viewportAtTail = _embeddedTerminalViewportAtTail(viewport);
+  return bufferKnown ? (bufferAtTail && viewportAtTail) : viewportAtTail;
+}
+
+function _embeddedTerminalTailPinned(entry) {
+  if (!entry) return false;
+  if (typeof entry.tailPinned === 'boolean') return entry.tailPinned;
+  return _embeddedTerminalAtTail(entry);
+}
+
+function _updateEmbeddedTerminalTailButton(entry) {
+  const button = entry && entry.tailButton;
+  if (!button) return;
+  const hidden = _embeddedTerminalTailPinned(entry) && _embeddedTerminalAtTail(entry);
+  button.hidden = !!hidden;
+  if (typeof button.setAttribute === 'function') {
+    button.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+  }
+}
+
+function _embeddedTerminalSetTailPinned(entry, pinned) {
+  if (!entry) return;
+  entry.tailPinned = !!pinned;
+  _updateEmbeddedTerminalTailButton(entry);
+}
+
+function _embeddedTerminalMarkUserScrollIntent(entry) {
+  if (!entry) return;
+  entry.userScrollIntentUntil = Date.now() + EMBEDDED_TERMINAL_USER_SCROLL_INTENT_MS;
+}
+
+function _embeddedTerminalHasUserScrollIntent(entry) {
+  if (!entry) return false;
+  if (entry.userScrollPointerActive) return true;
+  return Number(entry.userScrollIntentUntil || 0) >= Date.now();
+}
+
+function _syncEmbeddedTerminalTailPinnedFromViewport(entry, userInitiated) {
+  if (!entry) return;
+  if (_embeddedTerminalAtTail(entry)) {
+    _embeddedTerminalSetTailPinned(entry, true);
+  } else if (userInitiated || _embeddedTerminalHasUserScrollIntent(entry)) {
+    _embeddedTerminalSetTailPinned(entry, false);
+  } else {
+    _updateEmbeddedTerminalTailButton(entry);
+  }
+}
+
+function _ensureEmbeddedTerminalTailButton(entry) {
+  const surface = entry && entry.surface;
+  if (!surface || !document.createElement) return null;
+  let button = entry.tailButton || null;
+  if (!button || button.parentNode !== surface) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'terminal-tail-button';
+    if (button.classList && typeof button.classList.add === 'function') {
+      button.classList.add('terminal-tail-button');
+    }
+    button.title = 'Scroll to bottom';
+    button.textContent = '↓';
+    if (typeof button.setAttribute === 'function') {
+      button.setAttribute('aria-label', 'Scroll terminal to bottom');
+    }
+    if (typeof button.addEventListener === 'function') {
+      button.addEventListener('click', function(event) {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        _embeddedTerminalScrollToTail(entry);
+        if (entry && entry.sessionKey) _embeddedTerminalPendingFocusKey = entry.sessionKey;
+        focusEmbeddedTerminalWorkspace(false);
+      });
+    }
+    if (typeof surface.appendChild === 'function') surface.appendChild(button);
+    entry.tailButton = button;
+  }
+  _updateEmbeddedTerminalTailButton(entry);
+  return button;
+}
+
+function _detachEmbeddedTerminalTailControls(entry) {
+  const controls = entry && entry.tailControls;
+  if (!controls) return;
+  const viewport = controls.viewport;
+  const surface = controls.surface;
+  const handlers = controls.handlers || {};
+  if (viewport && typeof viewport.removeEventListener === 'function') {
+    viewport.removeEventListener('wheel', handlers.userIntent);
+    viewport.removeEventListener('touchstart', handlers.userIntent);
+    viewport.removeEventListener('pointerdown', handlers.pointerDown);
+    viewport.removeEventListener('scroll', handlers.scroll);
+  }
+  if (surface && typeof surface.removeEventListener === 'function') {
+    surface.removeEventListener('keydown', handlers.userIntentKey);
+  }
+  if (typeof document !== 'undefined' && document && typeof document.removeEventListener === 'function') {
+    document.removeEventListener('pointerup', handlers.pointerUp);
+    document.removeEventListener('pointercancel', handlers.pointerUp);
+  }
+  entry.tailControls = null;
+}
+
+function _attachEmbeddedTerminalTailControls(entry) {
+  if (!entry) return;
+  _ensureEmbeddedTerminalTailButton(entry);
+  const viewport = _embeddedTerminalViewport(entry);
+  if (!viewport || typeof viewport.addEventListener !== 'function') {
+    _updateEmbeddedTerminalTailButton(entry);
+    return;
+  }
+  const surface = entry.surface || null;
+  if (entry.tailControls && entry.tailControls.viewport === viewport
+      && entry.tailControls.surface === surface) {
+    _updateEmbeddedTerminalTailButton(entry);
+    return;
+  }
+  _detachEmbeddedTerminalTailControls(entry);
+  const userIntent = function() {
+    _embeddedTerminalMarkUserScrollIntent(entry);
+    if (typeof setTimeout === 'function') {
+      setTimeout(function() {
+        _syncEmbeddedTerminalTailPinnedFromViewport(entry, false);
+      }, 0);
+    }
+  };
+  const userIntentKey = function(event) {
+    const key = event && (event.key || event.code);
+    if (key === 'PageUp' || key === 'PageDown' || key === 'Home' || key === 'End'
+        || key === 'ArrowUp' || key === 'ArrowDown' || key === 'Up' || key === 'Down') {
+      userIntent();
+    }
+  };
+  const pointerDown = function() {
+    entry.userScrollPointerActive = true;
+    _embeddedTerminalMarkUserScrollIntent(entry);
+  };
+  const pointerUp = function() {
+    entry.userScrollPointerActive = false;
+    _syncEmbeddedTerminalTailPinnedFromViewport(entry, true);
+  };
+  const scroll = function() {
+    _syncEmbeddedTerminalTailPinnedFromViewport(entry, false);
+  };
+  viewport.addEventListener('wheel', userIntent, { passive: true });
+  viewport.addEventListener('touchstart', userIntent, { passive: true });
+  viewport.addEventListener('pointerdown', pointerDown, true);
+  viewport.addEventListener('scroll', scroll);
+  if (surface && typeof surface.addEventListener === 'function') {
+    surface.addEventListener('keydown', userIntentKey, true);
+  }
+  if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+    document.addEventListener('pointerup', pointerUp, true);
+    document.addEventListener('pointercancel', pointerUp, true);
+  }
+  entry.tailControls = {
+    viewport: viewport,
+    surface: surface,
+    handlers: {
+      userIntent: userIntent,
+      userIntentKey: userIntentKey,
+      pointerDown: pointerDown,
+      pointerUp: pointerUp,
+      scroll: scroll,
+    },
+  };
+  _updateEmbeddedTerminalTailButton(entry);
 }
 
 function _embeddedTerminalTailSnapshot(entry) {
@@ -2737,7 +2910,7 @@ function _embeddedTerminalTailSnapshot(entry) {
   const viewportY = buffer ? Number(buffer.viewportY) : NaN;
   const viewport = _embeddedTerminalViewport(entry);
   return {
-    atTail: _embeddedTerminalAtTail(entry),
+    atTail: _embeddedTerminalTailPinned(entry),
     viewportY: Number.isFinite(viewportY) ? viewportY : null,
     scrollTop: viewport ? (Number(viewport.scrollTop) || 0) : null,
   };
@@ -2745,6 +2918,7 @@ function _embeddedTerminalTailSnapshot(entry) {
 
 function _embeddedTerminalStillPinned(entry, snapshot) {
   if (!snapshot || !snapshot.atTail) return false;
+  if (!_embeddedTerminalTailPinned(entry)) return false;
   const term = entry && entry.terminal;
   const buffer = term && term.buffer && term.buffer.active;
   if (buffer && snapshot.viewportY !== null) {
@@ -2762,8 +2936,16 @@ function _embeddedTerminalScrollToTail(entry) {
   const term = entry && entry.terminal;
   if (term && typeof term.scrollToBottom === 'function') {
     term.scrollToBottom();
-    return;
+  } else {
+    const viewport = _embeddedTerminalViewport(entry);
+    if (viewport) {
+      viewport.scrollTop = Math.max(
+        0,
+        (Number(viewport.scrollHeight) || 0) - (Number(viewport.clientHeight) || 0)
+      );
+    }
   }
+  _embeddedTerminalSetTailPinned(entry, true);
   const viewport = _embeddedTerminalViewport(entry);
   if (viewport) {
     viewport.scrollTop = Math.max(
@@ -2771,6 +2953,7 @@ function _embeddedTerminalScrollToTail(entry) {
       (Number(viewport.scrollHeight) || 0) - (Number(viewport.clientHeight) || 0)
     );
   }
+  _updateEmbeddedTerminalTailButton(entry);
 }
 
 function _scheduleEmbeddedTerminalScrollToTail(entry) {
@@ -2798,6 +2981,8 @@ function _writeEmbeddedTerminalData(entry, data) {
     restored = true;
     if (_embeddedTerminalStillPinned(entry, tailSnapshot)) {
       _embeddedTerminalScrollToTail(entry);
+    } else {
+      _updateEmbeddedTerminalTailButton(entry);
     }
   }
   term.write(data, restoreTailIfPinned);
@@ -2829,9 +3014,11 @@ function _scheduleEmbeddedTerminalFit(entry, opts) {
     // the viewport from the bottom and tail/autoscroll silently stops while the
     // user is still typing. Only re-pin when the user was already at the tail so
     // a deliberate scroll-up survives the resize.
-    const wasAtTail = preserveTail && _embeddedTerminalAtTail(entry);
+    const wasAtTail = preserveTail && _embeddedTerminalTailPinned(entry);
     entry.fit.fit();
+    _attachEmbeddedTerminalTailControls(entry);
     if (wasAtTail) _embeddedTerminalScrollToTail(entry);
+    else _updateEmbeddedTerminalTailButton(entry);
     const cols = entry.terminal.cols;
     const rows = entry.terminal.rows;
     if (entry.lastSentCols === cols && entry.lastSentRows === rows) return;
@@ -2902,6 +3089,7 @@ function _connectEmbeddedTerminal(cell, surface) {
     cellId: cell.id,
     sessionId: expectedSessionId,
     surface: surface,
+    tailPinned: true,
   };
   _embeddedTerminalSessions[sessionKey] = entry;
   _embeddedTerminalPendingFocusKey = sessionKey;
@@ -2926,6 +3114,7 @@ function _connectEmbeddedTerminal(cell, surface) {
   entry.terminal.loadAddon(entry.fit);
   entry.terminal.open(surface);
   _setActiveEmbeddedTerminalEntry(entry);
+  _attachEmbeddedTerminalTailControls(entry);
   _attachEmbeddedTerminalDropHandlers(cell, surface, entry);
   try { entry.fit.fit(); } catch (e) { /* container not measurable yet */ }
   // Shift+Enter → send LF so TUIs like Codex and Claude Code treat it as a
@@ -3095,6 +3284,7 @@ function _activateEmbeddedTerminalSurface(stage, sessionKey) {
   }
   _setActiveEmbeddedTerminalEntry(entry);
   if (entry) {
+    _attachEmbeddedTerminalTailControls(entry);
     _scheduleEmbeddedTerminalFit(entry);
     // Switching to an agent's terminal should land at the bottom and resume
     // tailing rather than leaving the viewport pinned to the top (or wherever
