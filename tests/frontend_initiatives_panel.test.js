@@ -161,6 +161,18 @@ function sampleInitiative(overrides = {}) {
   }, overrides);
 }
 
+
+test('Planning CSS supports bottom full-width layout and side-panel responsive treatment', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /body\.runtime-embedded \.standalone-panel-zone-body > #panel-initiatives,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-initiatives[\s\S]*\{[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*min-width:\s*0;/s);
+  assert.match(css, /#panel-initiatives\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*container-type:\s*inline-size;/s);
+  assert.match(css, /\.initiatives-workspace\s*\{[^}]*width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(320px,\s*clamp\(360px,\s*28vw,\s*520px\)\);/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.initiatives-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow:\s*auto;/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.initiative-primary-columns\s*\{[^}]*grid-template-columns:\s*1fr;[^}]*min-height:\s*0;/s);
+  assert.match(css, /@container \(max-width:\s*640px\)\s*\{[\s\S]*?\.initiatives-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[\s\S]*?\.initiative-primary-columns\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+});
+
 test('Planning panel groups initiatives into primary roadmap columns and secondary buckets', () => {
   const { sandbox, document, sendCalls } = createSandbox();
   vm.runInContext(`initiativesReceiveList(${JSON.stringify({
@@ -218,6 +230,45 @@ test('initiative detail rerender preserves selected drawer, draft text, caret, f
   assert.match(document.getElementById('panel-initiatives').innerHTML, /TORQUE-I:1/);
 });
 
+
+test('initiative rerender preserves drafts and scroll after side placement change', () => {
+  const { sandbox, document } = createSandbox();
+  vm.runInContext(`initiativesReceiveList(${JSON.stringify({
+    type: 'initiative_list',
+    group: 'Torque',
+    initiatives: [sampleInitiative(), sampleInitiative({ id: 'I-parked', title: 'Parked', planning_status: 'parked' })],
+  })})`, sandbox);
+  vm.runInContext("initiativesToggleSecondary('parked'); initiativesSelect('TORQUE-I:1')", sandbox);
+
+  const panel = document.getElementById('panel-initiatives');
+  panel.dataset.panelPlacement = 'right';
+  const why = document.getElementById('initiative-field-why');
+  why.value = 'Narrow side-panel draft';
+  why.selectionStart = 7;
+  why.selectionEnd = 11;
+  why.focus();
+  const workspace = document.getElementById('initiatives-workspace');
+  workspace.scrollLeft = 12;
+  workspace.scrollTop = 144;
+  const roadmap = document.getElementById('initiatives-roadmap-scroll');
+  roadmap.scrollLeft = 36;
+  roadmap.scrollTop = 58;
+
+  vm.runInContext(`state.initiatives['TORQUE-I:1'].summary = 'Delta while side panel is open'; renderInitiativesPanel();`, sandbox);
+
+  const restoredWhy = document.getElementById('initiative-field-why');
+  const restoredWorkspace = document.getElementById('initiatives-workspace');
+  const restoredRoadmap = document.getElementById('initiatives-roadmap-scroll');
+  assert.equal(restoredWhy.value, 'Narrow side-panel draft');
+  assert.equal(restoredWhy.selectionStart, 7);
+  assert.equal(restoredWhy.selectionEnd, 11);
+  assert.equal(document.activeElement, restoredWhy);
+  assert.equal(restoredWorkspace.scrollLeft, 12);
+  assert.equal(restoredWorkspace.scrollTop, 144);
+  assert.equal(restoredRoadmap.scrollLeft, 36);
+  assert.equal(restoredRoadmap.scrollTop, 58);
+  assert.match(document.getElementById('panel-initiatives').innerHTML, /Parked/);
+});
 
 test('Planning surface participates in classic active-panel invalidation renders', () => {
   const { sandbox } = createSandbox();
