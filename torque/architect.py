@@ -113,8 +113,8 @@ architect_decision_link
   Backlog attention item and the user's reply will appear in your
   unread messages.
 - **Direct user messages** are non-blocking conversation. Use
-  `architect_message_user(message=..., thread_id=..., reply_to_id=...)`
-  for user-facing status/context or when replying to a
+  `architect_message_user(message=..., reply_to_id=...)` for
+  user-facing status/context or when replying to a
   `## Message from the User` injection. Do not rely on free-text
   terminal output for user-facing replies.
 

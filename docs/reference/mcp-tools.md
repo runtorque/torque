@@ -30,10 +30,15 @@ Available to **every authenticated agent**. These are how Workers report progres
 
 ### Direct user messaging
 
-Use `torque_message_user(message, thread_id='', reply_to_id='', idempotency_key='')`
+Use `torque_message_user(message, reply_to_id='', idempotency_key='')`
 to answer a `## Message from the User` injection or send user-visible context
 without blocking work. Use `torque_ask` only when progress must stop for a
 human decision or approval.
+
+Agents normally omit `thread_id`: Torque derives the single user-facing
+conversation lane from the bound caller identity. When replying to an injected
+user message, pass the prompt's `reply_to_id` so the message is linked while
+still using the caller-derived lane.
 
 Direct messages render in the below-terminal panel for the agent the operator
 is viewing. Replies from that panel are injected back into the agent as a
@@ -306,15 +311,18 @@ Participant kinds in the unified `agent_peer_messages` direct-message store are
 `message_type` as one of `message`, `ask`, `ask_reply`, or `system`; the
 blocking ask badge comes from `blocking=true`.
 
-- `architect_message_user(message: string, thread_id?: string = '', reply_to_id?: string = '', context_task_ids?: string[], context_engineer_ids?: string[], context_decision_ids?: string[], context_summary?: string, idempotency_key?: string = '')`
-- `engineer_message_user(message: string, thread_id?: string = '', reply_to_id?: string = '', context_task_ids?: string[], context_summary?: string, idempotency_key?: string = '')`
-- `torque_message_user(message: string, thread_id?: string = '', reply_to_id?: string = '', idempotency_key?: string = '')`
+- `architect_message_user(message: string, reply_to_id?: string = '', context_task_ids?: string[], context_engineer_ids?: string[], context_decision_ids?: string[], context_summary?: string, idempotency_key?: string = '')`
+- `engineer_message_user(message: string, reply_to_id?: string = '', context_task_ids?: string[], context_summary?: string, idempotency_key?: string = '')`
+- `torque_message_user(message: string, reply_to_id?: string = '', idempotency_key?: string = '')`
 
 All three persist `sender_kind=<calling agent kind>` and `recipient_kind=user`,
 emit a `direct_message_upsert` delta, return `type`, `message_id`, `thread_id`,
 `reply_to_id`, delivery/read metadata, and never create a Backlog ask task.
-V1 normalizes user↔agent messages to one thread per viewed agent. User replies
-from the panel use `user_agent_message(agent_id|cell_id|target_agent_id,
+V1 normalizes user↔agent messages to one thread per viewed agent based on the
+bound caller. The MCP implementations still reject an explicit canonical
+`thread_id` for a different agent as a spoof/stale-binding guard, but callers
+should not pass thread ids in the common path. User replies from the panel use
+`user_agent_message(agent_id|cell_id|target_agent_id,
 message|text, thread_id?, reply_to_id?, idempotency_key?)`; the send is
 persisted first, queued non-interruptively, and buffered for replay when the
 agent is down, dismissed, or temporarily unavailable.

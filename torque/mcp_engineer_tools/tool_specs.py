@@ -1320,16 +1320,12 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description": "Message content for the user.",
                 },
-                "thread_id": {
-                    "type": "string",
-                    "description": (
-                        "Optional direct-message thread id. V1 normalizes "
-                        "user↔agent lanes to one thread per agent."
-                    ),
-                },
                 "reply_to_id": {
                     "type": "string",
-                    "description": "Optional message id this is replying to.",
+                    "description": (
+                        "Optional message id this is replying to. Torque "
+                        "derives the user lane from the calling engineer."
+                    ),
                 },
                 "context_task_ids": {
                     "type": "array",

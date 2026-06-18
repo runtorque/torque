@@ -421,6 +421,22 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 state.direct_messages_by_agent[worker.id][0]["id"],
                 row["id"],
             )
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_message_user",
+                {"message": "No explicit thread is needed."},
+                worker.id,
+                fake_handle_command,
+                state,
+            )
+            self.assertFalse(is_error)
+            omitted_payload = json.loads(text)
+            omitted_row = db.load_direct_message(omitted_payload["message_id"])
+            self.assertEqual(
+                omitted_row["thread_id"],
+                db_mod.canonical_user_agent_thread_id(worker.id),
+            )
+            self.assertEqual(omitted_payload["thread_id"], omitted_row["thread_id"])
             db.close()
 
     async def test_torque_message_user_notifies_user_best_effort(self):
@@ -587,6 +603,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             arch_row = db.load_direct_message(arch_payload["message_id"])
             self.assertEqual(arch_row["sender_kind"], "architect")
             self.assertEqual(arch_row["recipient_kind"], "user")
+            self.assertEqual(
+                arch_row["thread_id"],
+                db_mod.canonical_user_agent_thread_id(architect.id),
+            )
             self.assertEqual(arch_row["context_task_ids"], ["task-1"])
             self.assertEqual(arch_row["delivery_state"], "delivered")
 
@@ -616,6 +636,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             eng_row = db.load_direct_message(eng_payload["message_id"])
             self.assertEqual(eng_row["sender_kind"], "engineer")
             self.assertEqual(eng_row["recipient_kind"], "user")
+            self.assertEqual(
+                eng_row["thread_id"],
+                db_mod.canonical_user_agent_thread_id(engineer.id),
+            )
             self.assertEqual(eng_row["context_task_ids"], ["task-1"])
             self.assertEqual(eng_row["message_type"], "message")
             self.assertFalse(eng_row["blocking"])
@@ -857,6 +881,113 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(torqly.id, state.direct_messages_by_agent)
             db.close()
 
+    async def test_message_user_rejects_other_agent_thread_for_worker_and_engineer(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            worker = self.state_mod.AgentCell(
+                id="worker-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+            )
+            other_worker = self.state_mod.AgentCell(
+                id="worker-2",
+                name="Other Worker",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+            )
+            engineer = self.state_mod.AgentCell(
+                id="eng-1",
+                name="Engineer",
+                group="g",
+                cell_type="agent",
+                kind="engineer",
+            )
+            other_engineer = self.state_mod.AgentCell(
+                id="eng-2",
+                name="Other Engineer",
+                group="g",
+                cell_type="agent",
+                kind="engineer",
+            )
+            for cell in (worker, other_worker, engineer, other_engineer):
+                state.agents[cell.id] = cell
+            state.groups["g"] = [
+                worker.id,
+                other_worker.id,
+                engineer.id,
+                other_engineer.id,
+            ]
+
+            async def fake_handle_command(payload):
+                self.fail(f"message_user should not call command: {payload}")
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_message_user",
+                {
+                    "message": "Do not spoof this worker lane.",
+                    "thread_id": db_mod.canonical_user_agent_thread_id(
+                        other_worker.id
+                    ),
+                },
+                worker.id,
+                fake_handle_command,
+                state,
+            )
+            self.assertTrue(is_error)
+            self.assertIn("thread_id is for a different user-agent lane", text)
+            self.assertIn(db_mod.canonical_user_agent_thread_id(worker.id), text)
+
+            body = {
+                "jsonrpc": "2.0",
+                "id": 301,
+                "method": "tools/call",
+                "params": {
+                    "name": "engineer_message_user",
+                    "arguments": {
+                        "message": "Do not spoof this engineer lane.",
+                        "thread_id": db_mod.canonical_user_agent_thread_id(
+                            other_engineer.id
+                        ),
+                    },
+                },
+            }
+            result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                body,
+                cell_id=engineer.id,
+                handle_command=fake_handle_command,
+                state=state,
+            )
+            self.assertEqual(status, 200)
+            self.assertTrue(result["result"]["isError"])
+            error_text = result["result"]["content"][0]["text"]
+            self.assertIn(
+                "thread_id is for a different user-agent lane",
+                error_text,
+            )
+            self.assertIn(
+                db_mod.canonical_user_agent_thread_id(engineer.id),
+                error_text,
+            )
+            self.assertEqual(
+                db.load_direct_messages_for_thread(
+                    db_mod.canonical_user_agent_thread_id(worker.id)
+                ),
+                [],
+            )
+            self.assertEqual(
+                db.load_direct_messages_for_thread(
+                    db_mod.canonical_user_agent_thread_id(engineer.id)
+                ),
+                [],
+            )
+            db.close()
+
     async def test_message_user_rejects_empty_message(self):
         state = self.state_mod.MatrixState()
         worker = self.state_mod.AgentCell(
@@ -970,6 +1101,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("torque_progress", worker_tool_names)
         self.assertIn("torque_message_user", worker_tool_names)
+        worker_message_tool = next(
+            tool
+            for tool in listed_worker.payload["result"]["tools"]
+            if tool["name"] == "torque_message_user"
+        )
+        self.assertNotIn(
+            "thread_id",
+            worker_message_tool["inputSchema"]["properties"],
+        )
+        self.assertIn(
+            "reply_to_id",
+            worker_message_tool["inputSchema"]["properties"],
+        )
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
@@ -1015,6 +1159,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_engineer_journal_read", architect_tool_names)
         self.assertIn("architect_engineer_pending_question", architect_tool_names)
         self.assertIn("architect_message_user", architect_tool_names)
+        architect_message_tool = next(
+            tool
+            for tool in listed_architect.payload["result"]["tools"]
+            if tool["name"] == "architect_message_user"
+        )
+        self.assertNotIn(
+            "thread_id",
+            architect_message_tool["inputSchema"]["properties"],
+        )
+        self.assertIn(
+            "reply_to_id",
+            architect_message_tool["inputSchema"]["properties"],
+        )
         self.assertIn("architect_ask", architect_tool_names)
         self.assertNotIn("engineer_board_summary", architect_tool_names)
         self.assertNotIn("engineer_board_summary", architect_tool_names)
@@ -1034,6 +1191,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_task_upload_artifact", engineer_tool_names)
         self.assertIn("engineer_message_user", engineer_tool_names)
+        engineer_message_tool = next(
+            tool
+            for tool in listed_engineer.payload["result"]["tools"]
+            if tool["name"] == "engineer_message_user"
+        )
+        self.assertNotIn(
+            "thread_id",
+            engineer_message_tool["inputSchema"]["properties"],
+        )
+        self.assertIn(
+            "reply_to_id",
+            engineer_message_tool["inputSchema"]["properties"],
+        )
         self.assertNotIn("engineer_message_architect", engineer_tool_names)
         self.assertNotIn("engineer_reply", engineer_tool_names)
         self.assertNotIn("engineer_task_reassign", engineer_tool_names)

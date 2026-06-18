@@ -126,7 +126,7 @@ def build_torque_system_prompt(*, include_shared_memory: bool = True,
         - `torque_verify(state="passed", tests_run="...", test_outcome="full_suite_passed", notes="...")` — record tests/deploy/smoke verification details when relevant; use `unrelated_flake_accepted` with isolated rerun evidence for accepted flakes and `live_smoke_pending=true, deploy_attempted=false` when operator smoke remains
         - `torque_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
         - `torque_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
-        - `torque_message_user(message="message", thread_id="thread-id", reply_to_id="message-id")` — send a non-blocking durable message to the user-facing conversation panel
+        - `torque_message_user(message="message", reply_to_id="message-id")` — send a non-blocking durable message to the user-facing conversation panel
         - `torque_context()` — view your current task, agent info, and pipeline state
     """).rstrip()]
 
