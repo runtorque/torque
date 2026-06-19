@@ -238,6 +238,181 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Decision not found", self._error_text(update_other))
 
+    async def test_product_area_show_hides_non_product_task_and_raw_decision_links(self):
+        hidden_task = self.state.board_add_task(
+            "Hidden task",
+            "g",
+            lane="Backlog",
+            labels=["internal"],
+        )
+        product_task = self.state.board_add_task(
+            "Product task",
+            "g",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+        )
+        raw_decision = self.state.save_decision({
+            "id": "decision-raw",
+            "architect_id": self.architect.id,
+            "title": "Accepted secret",
+            "rationale": "Not product-scoped",
+            "status": "accepted",
+        })
+        self.assertIsNotNone(raw_decision)
+        product_decision_resp = await self._call(
+            "architect_product_decision_create",
+            {
+                "title": "Visible product decision",
+                "rationale": "Proposed-only product decision.",
+                "linked_task_ids": [product_task.id],
+            },
+            req_id=2,
+        )
+        product_decision = self._result_payload(product_decision_resp)["decision"]
+        area = self.db.create_area({
+            "group": "g",
+            "title": "PM scoped area",
+            "created_by_kind": "user",
+            "owner_kind": "user",
+        })
+        self.db.save_area_link(area["id"], "task", hidden_task.id)
+        self.db.save_area_link(area["id"], "task", product_task.id)
+        self.db.save_area_link(area["id"], "decision", "decision-raw")
+        self.db.save_area_link(area["id"], "decision", product_decision["id"])
+
+        response = await self._call(
+            "architect_product_area_show",
+            {"area": area["id"]},
+            req_id=3,
+        )
+        response_text = response.payload["result"]["content"][0]["text"]
+        payload = self._result_payload(response)
+
+        self.assertNotIn(hidden_task.id, response_text)
+        self.assertNotIn("Hidden task", response_text)
+        self.assertNotIn("decision-raw", response_text)
+        self.assertNotIn("Accepted secret", response_text)
+        self.assertEqual(payload["links"]["tasks"], [product_task.id])
+        self.assertEqual(payload["hidden_link_counts"]["tasks"], 1)
+        self.assertEqual(payload["linked_tasks"]["count"], 1)
+        self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(
+            [item["title"] for item in payload["linked_tasks"]["items"]],
+            ["Product task"],
+        )
+        self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(payload["hidden_link_counts"]["decisions"], 1)
+        self.assertEqual(payload["linked_decisions"]["count"], 1)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
+        self.assertEqual(payload["linked_decisions"]["ids"], [product_decision["id"]])
+        self.assertEqual(
+            [item["title"] for item in payload["linked_decisions"]["items"]],
+            ["Visible product decision"],
+        )
+
+        list_response = await self._call(
+            "architect_product_area_list",
+            {"include_links": True},
+            req_id=4,
+        )
+        list_text = list_response.payload["result"]["content"][0]["text"]
+        list_payload = self._result_payload(list_response)
+        listed_area = next(item for item in list_payload["areas"] if item["id"] == area["id"])
+        self.assertNotIn(hidden_task.id, list_text)
+        self.assertNotIn("Hidden task", list_text)
+        self.assertNotIn("decision-raw", list_text)
+        self.assertNotIn("Accepted secret", list_text)
+        self.assertEqual(listed_area["links"]["tasks"], [product_task.id])
+        self.assertEqual(listed_area["hidden_link_counts"]["tasks"], 1)
+        self.assertEqual(listed_area["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(listed_area["hidden_link_counts"]["decisions"], 1)
+
+    async def test_product_initiative_show_hides_non_product_task_and_raw_decision_links(self):
+        hidden_task = self.state.board_add_task(
+            "Hidden initiative task",
+            "g",
+            lane="Backlog",
+            labels=["internal"],
+        )
+        product_task = self.state.board_add_task(
+            "Product initiative task",
+            "g",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+        )
+        raw_decision = self.state.save_decision({
+            "id": "decision-raw-initiative",
+            "architect_id": self.architect.id,
+            "title": "Accepted initiative secret",
+            "rationale": "Not product-scoped",
+            "status": "accepted",
+        })
+        self.assertIsNotNone(raw_decision)
+        product_decision_resp = await self._call(
+            "architect_product_decision_create",
+            {
+                "title": "Visible initiative product decision",
+                "rationale": "Proposed-only product decision.",
+                "linked_task_ids": [product_task.id],
+            },
+            req_id=2,
+        )
+        product_decision = self._result_payload(product_decision_resp)["decision"]
+        initiative = self.db.create_initiative({
+            "group": "g",
+            "title": "PM scoped initiative",
+            "created_by_kind": "user",
+            "owner_kind": "user",
+        })
+        self.db.save_initiative_link(initiative["id"], "task", hidden_task.id)
+        self.db.save_initiative_link(initiative["id"], "task", product_task.id)
+        self.db.save_initiative_link(initiative["id"], "decision", "decision-raw-initiative")
+        self.db.save_initiative_link(initiative["id"], "decision", product_decision["id"])
+
+        response = await self._call(
+            "architect_product_initiative_show",
+            {"initiative": initiative["id"]},
+            req_id=3,
+        )
+        response_text = response.payload["result"]["content"][0]["text"]
+        payload = self._result_payload(response)
+
+        self.assertNotIn(hidden_task.id, response_text)
+        self.assertNotIn("Hidden initiative task", response_text)
+        self.assertNotIn("decision-raw-initiative", response_text)
+        self.assertNotIn("Accepted initiative secret", response_text)
+        self.assertEqual(payload["links"]["tasks"], [product_task.id])
+        self.assertEqual(payload["linked_tasks"]["count"], 1)
+        self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(
+            [item["title"] for item in payload["linked_tasks"]["items"]],
+            ["Product initiative task"],
+        )
+        self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(payload["linked_decisions"]["count"], 1)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
+        self.assertEqual(payload["linked_decisions"]["items"], [product_decision["id"]])
+
+        list_response = await self._call(
+            "architect_product_initiative_list",
+            {"include_links": True},
+            req_id=4,
+        )
+        list_text = list_response.payload["result"]["content"][0]["text"]
+        list_payload = self._result_payload(list_response)
+        listed_initiative = next(
+            item for item in list_payload["initiatives"]
+            if item["id"] == initiative["id"]
+        )
+        self.assertNotIn(hidden_task.id, list_text)
+        self.assertNotIn("Hidden initiative task", list_text)
+        self.assertNotIn("decision-raw-initiative", list_text)
+        self.assertNotIn("Accepted initiative secret", list_text)
+        self.assertEqual(listed_initiative["links"]["tasks"], [product_task.id])
+        self.assertEqual(listed_initiative["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(listed_initiative["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(listed_initiative["linked_decisions"]["hidden_count"], 1)
+
     async def test_product_peer_threads_are_marker_filtered_and_ack_requires_anchor(self):
         task_resp = await self._call("architect_product_task_propose", {"title": "Anchor task"})
         task_id = self._result_payload(task_resp)["id"]

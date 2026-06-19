@@ -8417,16 +8417,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return _product_task_show_json(real_state, caller_id, args)
 
     if caller_kind == "architect" and tool_name == "product_area_list":
-        return _area_read_json(real_state, caller_kind, caller_id, args, show=False)
+        return _product_area_read_json(real_state, caller_id, args, show=False)
 
     if caller_kind == "architect" and tool_name == "product_area_show":
-        return _area_read_json(real_state, caller_kind, caller_id, args, show=True)
+        return _product_area_read_json(real_state, caller_id, args, show=True)
 
     if caller_kind == "architect" and tool_name == "product_initiative_list":
-        return _initiative_read_json(real_state, caller_kind, caller_id, args, show=False)
+        return _product_initiative_read_json(real_state, caller_id, args, show=False)
 
     if caller_kind == "architect" and tool_name == "product_initiative_show":
-        return _initiative_read_json(real_state, caller_kind, caller_id, args, show=True)
+        return _product_initiative_read_json(real_state, caller_id, args, show=True)
 
     if caller_kind == "architect" and tool_name == "product_decision_list":
         decisions = _product_decisions_for_architect(
