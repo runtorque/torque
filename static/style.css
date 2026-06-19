@@ -13465,10 +13465,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .areas-filters {
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(145px, 180px) minmax(120px, 180px) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .areas-filters input,
 .areas-filters select,
@@ -13488,12 +13491,20 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .areas-filters input,
 .areas-filters select {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
+}
+.areas-search-input {
+  flex: 1 1 260px;
+  min-width: min(100%, 220px);
 }
 .areas-filters select {
+  flex: 0 1 180px;
+  min-width: min(100%, 130px);
   text-overflow: ellipsis;
 }
-.area-filter-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+#areas-type-filter { flex-basis: 160px; }
+.area-filter-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .areas-list-scroll {
   min-height: 0;
   overflow: auto;
@@ -13585,11 +13596,14 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 #panel-initiatives[data-panel-placement="right"] .areas-list-scroll {
   max-height: 320px;
 }
-#panel-initiatives[data-panel-placement="right"] .areas-filters {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+#panel-initiatives[data-panel-placement="right"] .areas-filters select {
+  flex: 1 1 130px;
 }
 #panel-initiatives[data-panel-placement="right"] .areas-search-input {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
+}
+#panel-initiatives[data-panel-placement="right"] .area-filter-count {
+  margin-left: auto;
 }
 #panel-initiatives[data-panel-placement="right"] .area-detail {
   flex: 0 0 auto;
@@ -13605,8 +13619,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
     overflow: auto;
   }
   .areas-list-scroll { max-height: 320px; }
-  .areas-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
-  .areas-search-input { grid-column: 1 / -1; }
+  .areas-filters select { flex: 1 1 130px; }
+  .areas-search-input { flex-basis: 100%; }
+  .area-filter-count { margin-left: auto; }
   .area-detail { flex: 0 0 auto; overflow: visible; }
   .area-link-related-add select { flex: 1 1 100%; }
 }

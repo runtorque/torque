@@ -182,11 +182,33 @@ test('Planning CSS supports bottom full-width layout and side-panel responsive t
   assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.initiatives-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow:\s*auto;/s);
   assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.initiative-primary-columns\s*\{[^}]*grid-template-columns:\s*1fr;[^}]*min-height:\s*0;/s);
   assert.match(css, /@container \(max-width:\s*640px\)\s*\{[\s\S]*?\.initiatives-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[\s\S]*?\.initiative-primary-columns\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-  assert.match(css, /\.areas-filters\s*\{[^}]*grid-template-columns:\s*minmax\(220px,\s*1fr\)\s+minmax\(145px,\s*180px\)\s+minmax\(120px,\s*180px\)\s+auto;/s);
-  assert.match(css, /\.areas-filters input,\s*\.areas-filters select\s*\{[^}]*width:\s*100%;/s);
-  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-filters\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+auto;/s);
-  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-search-input\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
-  assert.match(css, /@container \(max-width:\s*640px\)\s*\{[\s\S]*?\.areas-filters\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+auto;[\s\S]*?\.areas-search-input\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
+  assert.match(css, /\.areas-filters\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*max-width:\s*100%;[^}]*box-sizing:\s*border-box;/s);
+  assert.match(css, /\.areas-filters input,\s*\.areas-filters select\s*\{[^}]*width:\s*auto;[^}]*max-width:\s*100%;/s);
+  assert.match(css, /\.areas-search-input\s*\{[^}]*flex:\s*1\s+1\s+260px;[^}]*min-width:\s*min\(100%,\s*220px\);/s);
+  assert.match(css, /\.areas-filters select\s*\{[^}]*flex:\s*0\s+1\s+180px;[^}]*min-width:\s*min\(100%,\s*130px\);/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-filters select\s*\{[^}]*flex:\s*1\s+1\s+130px;/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-search-input\s*\{[^}]*flex-basis:\s*100%;/s);
+  assert.match(css, /@container \(max-width:\s*640px\)\s*\{[\s\S]*?\.areas-filters select\s*\{[^}]*flex:\s*1\s+1\s+130px;[\s\S]*?\.areas-search-input\s*\{[^}]*flex-basis:\s*100%;/s);
+});
+
+test('Planning Areas toolbar CSS keeps search and filters contained by wrapping inside list pane', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const filtersBlock = css.match(/\.areas-filters\s*\{([^}]*)\}/s);
+  assert.ok(filtersBlock, 'areas filters CSS block exists');
+  assert.match(filtersBlock[1], /display:\s*flex;/);
+  assert.match(filtersBlock[1], /flex-wrap:\s*wrap;/);
+  assert.match(filtersBlock[1], /min-width:\s*0;/);
+  assert.match(filtersBlock[1], /max-width:\s*100%;/);
+  assert.doesNotMatch(filtersBlock[1], /grid-template-columns/);
+
+  const inputSelectBlock = css.match(/\.areas-filters input,\s*\.areas-filters select\s*\{([^}]*)\}/s);
+  assert.ok(inputSelectBlock, 'areas filter input/select sizing block exists');
+  assert.match(inputSelectBlock[1], /width:\s*auto;/);
+  assert.match(inputSelectBlock[1], /max-width:\s*100%;/);
+  assert.doesNotMatch(inputSelectBlock[1], /(^|\n)\s*width:\s*100%;/);
+
+  assert.match(css, /\.areas-search-input\s*\{[^}]*flex:\s*1\s+1\s+260px;[^}]*min-width:\s*min\(100%,\s*220px\);/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-search-input\s*\{[^}]*flex-basis:\s*100%;/s);
 });
 
 test('Planning panel groups initiatives into primary roadmap columns and secondary buckets', () => {
