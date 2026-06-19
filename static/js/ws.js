@@ -654,6 +654,18 @@ function connect() {
           && typeof specializationLibraryReceiveDetail === 'function') {
         specializationLibraryReceiveDetail(msg);
       }
+    } else if (msg.type === 'agent_profiles') {
+      if (typeof agentPanelReceiveAgentProfiles === 'function') {
+        agentPanelReceiveAgentProfiles(msg);
+      }
+    } else if (msg.type === 'agent_profile_preview') {
+      if (typeof agentPanelReceiveAgentProfilePreview === 'function') {
+        agentPanelReceiveAgentProfilePreview(msg);
+      }
+    } else if (msg.type === 'agent_profile_assignment') {
+      if (typeof agentPanelReceiveAgentProfileAssignment === 'function') {
+        agentPanelReceiveAgentProfileAssignment(msg);
+      }
     } else if (msg.type === 'engineer_specializations') {
       if (typeof agentPanelReceiveEngineerSpecializations === 'function') {
         agentPanelReceiveEngineerSpecializations(msg);
@@ -779,7 +791,13 @@ function connect() {
           && typeof agentPanelHandleEngineerSpecializationsError === 'function') {
         specializationEditorErrorHandled = agentPanelHandleEngineerSpecializationsError(msg);
       }
-      if (!systemPromptErrorHandled && !specializationEditorErrorHandled) {
+      var agentProfileErrorHandled = false;
+      if (!systemPromptErrorHandled
+          && !specializationEditorErrorHandled
+          && typeof agentPanelHandleAgentProfileError === 'function') {
+        agentProfileErrorHandled = agentPanelHandleAgentProfileError(msg);
+      }
+      if (!systemPromptErrorHandled && !specializationEditorErrorHandled && !agentProfileErrorHandled) {
         if (typeof aiSettingsHandleError === 'function' && aiSettingsHandleError(msg)) return;
         if (typeof handleContextError === 'function') handleContextError(msg);
         else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');

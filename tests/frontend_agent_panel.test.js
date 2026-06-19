@@ -3518,3 +3518,220 @@ test('agent panel marks cleared assignment pending default full profile next lau
   assert.match(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
   assert.match(panel.innerHTML, /desired assignment: default full-architect/);
 });
+
+test('agent profile manager lists compatible profiles, previews PM draft, assigns, and clears', () => {
+  const { context, panel, sendCalls } = createHarness();
+
+  setFocusedAgent(context, {
+    id: 'arch-profile-ui',
+    name: 'PM UI',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'stopped',
+    directory: '/repo',
+    agent_profile_id: '',
+    agent_profile_version: '',
+    effective_agent_profile_id: 'full-architect',
+    effective_agent_profile_version: '1',
+    effective_agent_profile_snapshot: {
+      id: 'full-architect',
+      version: '1',
+      base_kind: 'architect',
+      display_name: 'Full Architect',
+      lifecycle: 'stable',
+      status: 'full',
+      warnings: [],
+      denied_high_risk_capabilities: [],
+      communication_policy: { summary: 'full communication' },
+      spawn_policy: { summary: 'full spawn' },
+      scope_policy: { summary: 'full scope' },
+      audit_policy: { summary: 'full audit' },
+    },
+  });
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Agent Profile assignment/);
+  assert.match(panel.innerHTML, /Effective now[\s\S]*Full Architect@1/);
+  assert.match(panel.innerHTML, /Desired next launch[\s\S]*default full-architect/);
+  assert.match(panel.innerHTML, /Profile…/);
+  assert.equal(sendCalls.length, 0, 'collapsed profile summary does not fetch until the operator opens it');
+
+  context.agentPanelToggleProfileAssignment(null, 'arch-profile-ui');
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
+    { cmd: 'agent_profile_list', base_dir: '/repo' },
+    { cmd: 'agent_profile_preview', profile_id: 'full-architect', base_dir: '/repo' },
+  ]);
+
+  context.agentPanelReceiveAgentProfiles({
+    type: 'agent_profiles',
+    profiles: [
+      {
+        id: 'full-architect',
+        version: '1',
+        base_kind: 'architect',
+        display_name: 'Full Architect',
+        lifecycle: 'stable',
+        status: 'full',
+        warnings: [],
+        denied_high_risk_capabilities: [],
+      },
+      {
+        id: 'product-manager-draft',
+        version: '2',
+        base_kind: 'architect',
+        display_name: 'Product Manager (draft)',
+        lifecycle: 'draft',
+        status: 'draft',
+        warnings: ['scratch-only warning from list'],
+        denied_high_risk_capabilities: ['agent.hire_engineer'],
+      },
+      {
+        id: 'full-worker',
+        version: '1',
+        base_kind: 'worker',
+        display_name: 'Full Worker',
+        lifecycle: 'stable',
+        status: 'full',
+      },
+    ],
+    issues: [],
+  });
+  assert.match(panel.innerHTML, /Product Manager \(draft\)@2 · draft/);
+  assert.doesNotMatch(panel.innerHTML, /Full Worker/);
+  assert.match(panel.innerHTML, /Relaunch to apply/);
+
+  context.agentPanelSelectProfile('arch-profile-ui', 'product-manager-draft');
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'agent_profile_preview',
+    profile_id: 'product-manager-draft',
+    base_dir: '/repo',
+  });
+  assert.match(panel.innerHTML, /Wait for preview before assigning\./);
+
+  context.agentPanelReceiveAgentProfilePreview({
+    type: 'agent_profile_preview',
+    profile: {
+      id: 'product-manager-draft',
+      version: '2',
+      base_kind: 'architect',
+      display_name: 'Product Manager (draft)',
+      description: 'Draft product manager profile',
+      lifecycle: 'draft',
+      status: 'draft',
+      warnings: [
+        'product-manager-draft is scratch-only in Wave 4B',
+        'Raw Architect tools are denied',
+      ],
+      denied_high_risk_capabilities: ['agent.hire_engineer', 'task.dispatch'],
+      communication_policy: { summary: 'coordinate through product wrappers' },
+      spawn_policy: { summary: 'dispatch denied' },
+      scope_policy: { summary: 'planning-safe reads/writes only' },
+      audit_policy: { summary: 'profile assignment audit rows' },
+    },
+  });
+  assert.match(panel.innerHTML, /Scratch-only Product Manager draft/);
+  assert.match(panel.innerHTML, /do not use for live PM dogfood/);
+  assert.match(panel.innerHTML, /agent\.hire_engineer/);
+  assert.match(panel.innerHTML, /task\.dispatch/);
+  assert.match(panel.innerHTML, /coordinate through product wrappers/);
+  assert.doesNotMatch(panel.innerHTML, /Wait for preview before assigning\./);
+
+  context.agentPanelAssignSelectedProfile(null, 'arch-profile-ui');
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
+    cmd: 'agent_profile_assign',
+    agent_id: 'arch-profile-ui',
+    profile_id: 'product-manager-draft',
+    actor_label: 'trusted-user-ui',
+  });
+
+  context.agentPanelReceiveAgentProfileAssignment({
+    type: 'agent_profile_assignment',
+    status: {
+      agent_id: 'arch-profile-ui',
+      assigned_profile_id: 'product-manager-draft',
+      assigned_profile_version: '2',
+      assigned_at: 1234,
+      assigned_by: 'trusted-user-ui',
+      pending_next_launch: true,
+    },
+  });
+  assert.equal(context.state.agents['arch-profile-ui'].agent_profile_id, 'product-manager-draft');
+  assert.match(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
+  assert.match(panel.innerHTML, /Desired next launch[\s\S]*product-manager-draft@2/);
+  assert.match(panel.innerHTML, /Pending[\s\S]*Yes — applies on next launch\/relaunch/);
+
+  context.agentPanelClearProfileAssignment(null, 'arch-profile-ui');
+  const clearCall = sendCalls.slice().reverse()
+    .find((call) => call.cmd === 'agent_profile_assign' && call.profile_id === '');
+  assert.deepEqual(JSON.parse(JSON.stringify(clearCall)), {
+    cmd: 'agent_profile_assign',
+    agent_id: 'arch-profile-ui',
+    profile_id: '',
+    actor_label: 'trusted-user-ui',
+  });
+});
+
+test('agent profile manager preserves selected preview state across routine rerenders', () => {
+  const { context, panel, sendCalls, captureCalls, restoreCalls } = createHarness();
+
+  setFocusedAgent(context, {
+    id: 'arch-profile-preserve',
+    name: 'PM Preserve',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+    directory: '/repo',
+    agent_profile_id: '',
+    agent_profile_version: '',
+    effective_agent_profile_id: 'full-architect',
+    effective_agent_profile_version: '1',
+    effective_agent_profile_snapshot: {
+      id: 'full-architect',
+      version: '1',
+      base_kind: 'architect',
+      display_name: 'Full Architect',
+      lifecycle: 'stable',
+      status: 'full',
+    },
+  });
+
+  context.agentPanelToggleProfileAssignment(null, 'arch-profile-preserve');
+  context.agentPanelReceiveAgentProfiles({
+    type: 'agent_profiles',
+    profiles: [
+      { id: 'full-architect', version: '1', base_kind: 'architect', display_name: 'Full Architect', lifecycle: 'stable', status: 'full' },
+      { id: 'product-manager-draft', version: '2', base_kind: 'architect', display_name: 'Product Manager (draft)', lifecycle: 'draft', status: 'draft' },
+    ],
+    issues: [],
+  });
+  context.agentPanelReceiveAgentProfilePreview({
+    type: 'agent_profile_preview',
+    profile: {
+      id: 'product-manager-draft',
+      version: '2',
+      base_kind: 'architect',
+      display_name: 'Product Manager (draft)',
+      lifecycle: 'draft',
+      status: 'draft',
+      warnings: ['product-manager-draft is scratch-only in Wave 4B'],
+      denied_high_risk_capabilities: ['task.dispatch'],
+      scope_policy: { summary: 'planning scope' },
+    },
+  });
+  context.agentPanelSelectProfile('arch-profile-preserve', 'product-manager-draft');
+  const sendsAfterSelect = sendCalls.length;
+  const capturesAfterSelect = captureCalls.length;
+  const restoresAfterSelect = restoreCalls.length;
+
+  context.state.agents['arch-profile-preserve'].activity_detail = 'routine heartbeat delta';
+  context.renderAgentPanel();
+
+  assert.equal(sendCalls.length, sendsAfterSelect, 'routine rerender does not refetch list or preview');
+  assert.ok(captureCalls.length > capturesAfterSelect, 'rerender captures surface state');
+  assert.ok(restoreCalls.length > restoresAfterSelect, 'rerender restores surface state');
+  assert.match(panel.innerHTML, /<option value="product-manager-draft" selected>/);
+  assert.match(panel.innerHTML, /Product Manager \(draft\)@2/);
+  assert.match(panel.innerHTML, /Agent is running; this UI will not stop or relaunch it/);
+});
