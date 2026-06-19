@@ -100,6 +100,32 @@ for _tool in ENGINEER_TOOLS:
         _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
     {
+        "name": "engineer_area_list",
+        "description": "Read-only list of Planning Areas in this engineer's group. Decision links are counted but decision details are hidden.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_archived": {"type": "boolean"},
+                "include_links": {"type": "boolean"},
+                "include_notes": {"type": "boolean"},
+                "limit": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "engineer_area_show",
+        "description": "Read-only show for one same-group Planning Area with links filtered to engineer-visible tasks and decision counts only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "area": {"type": "string"},
+                "area_id": {"type": "string"},
+                "note_limit": {"type": "integer"},
+            },
+            "required": ["area"],
+        },
+    },
+    {
         "name": "engineer_initiative_list",
         "description": "Read-only list of first-class product Initiatives in this engineer's group. Board remains execution source of truth.",
         "inputSchema": {

@@ -202,6 +202,20 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "architect_decision_create",
             "architect_decision_update",
             "architect_decision_link",
+            "architect_area_create",
+            "architect_area_update",
+            "architect_area_archive",
+            "architect_area_link_task",
+            "architect_area_unlink_task",
+            "architect_area_link_decision",
+            "architect_area_unlink_decision",
+            "architect_area_link_initiative",
+            "architect_area_unlink_initiative",
+            "architect_area_link_area",
+            "architect_area_unlink_area",
+            "architect_area_note_create",
+            "architect_area_note_update",
+            "architect_area_note_archive",
             "architect_initiative_create",
             "architect_initiative_update",
             "architect_initiative_archive",
@@ -220,6 +234,12 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_mcp_write_tool("architect_initiative_show"))
         self.assertFalse(is_mcp_write_tool("engineer_initiative_list"))
         self.assertFalse(is_mcp_write_tool("engineer_initiative_show"))
+        self.assertFalse(is_mcp_write_tool("architect_area_list"))
+        self.assertFalse(is_mcp_write_tool("architect_area_show"))
+        self.assertFalse(is_mcp_write_tool("engineer_area_list"))
+        self.assertFalse(is_mcp_write_tool("engineer_area_show"))
+        self.assertFalse(is_mcp_write_tool("torque_area_list"))
+        self.assertFalse(is_mcp_write_tool("torque_area_show"))
 
         lazy_names = {
             tool["name"]

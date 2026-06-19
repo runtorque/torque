@@ -1366,6 +1366,38 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_area_list",
+        "description": "List Planning Areas in this architect's group with compact optional link/note summaries.",
+        "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_area_show",
+        "description": "Show one same-group Planning Area with links and typed notes. Decision links include only decisions visible to this architect.",
+        "inputSchema": {"type": "object", "properties": {"area": {"type": "string", "description": "Area id (for example TORQUE-A:1) or slug."}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}, "required": ["area"]},
+    },
+    {
+        "name": "architect_area_create",
+        "description": "Create an architect-owned Planning Area in this architect's group.",
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "area_type": {"type": "string"}, "lifecycle": {"type": "string", "enum": ["planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"]}, "summary": {"type": "string"}, "user_purpose": {"type": "string"}, "system_purpose": {"type": "string"}, "in_scope": {"type": "string"}, "out_of_scope": {"type": "string"}}, "required": ["title"]},
+    },
+    {
+        "name": "architect_area_update",
+        "description": "Update an Area owned or created by this architect. Owner transfer is not allowed via MCP.",
+        "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "title": {"type": "string"}, "area_type": {"type": "string"}, "lifecycle": {"type": "string", "enum": ["planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"]}, "summary": {"type": "string"}, "user_purpose": {"type": "string"}, "system_purpose": {"type": "string"}, "in_scope": {"type": "string"}, "out_of_scope": {"type": "string"}}, "required": ["area"]},
+    },
+    {"name": "architect_area_archive", "description": "Archive an Area owned or created by this architect.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}}, "required": ["area"]}},
+    {"name": "architect_area_link_task", "description": "Link a visible same-group Board task to an Area without mutating the task.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
+    {"name": "architect_area_unlink_task", "description": "Remove an Area↔task link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
+    {"name": "architect_area_link_decision", "description": "Link one caller-owned architect decision to an Area without mutating the decision.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
+    {"name": "architect_area_unlink_decision", "description": "Remove an Area↔decision link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
+    {"name": "architect_area_link_initiative", "description": "Link a same-group Initiative to an Area without mutating the Initiative.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
+    {"name": "architect_area_unlink_initiative", "description": "Remove an Area↔Initiative link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
+    {"name": "architect_area_link_area", "description": "Link one same-group Area to another with a pure label (related, depends_on, or supports). No graph semantics are inferred.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
+    {"name": "architect_area_unlink_area", "description": "Remove one Area↔Area labeled link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
+    {"name": "architect_area_note_create", "description": "Create a flat typed Area note (caveat, tech_debt, open_question, follow_up, invariant).", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note_type", "title"]}},
+    {"name": "architect_area_note_update", "description": "Update a flat typed Area note owned by an Area this architect can write.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note"]}},
+    {"name": "architect_area_note_archive", "description": "Archive a flat typed Area note.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}}, "required": ["area", "note"]}},
+    {
         "name": "architect_initiative_list",
         "description": "List first-class product Initiatives in this architect's group. Read-only; Board remains execution source of truth.",
         "inputSchema": {

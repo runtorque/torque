@@ -235,6 +235,32 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "torque_area_list",
+        "description": "Read-only list of Planning Areas in this worker's group. Decision links are counted but hidden.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_archived": {"type": "boolean"},
+                "include_links": {"type": "boolean"},
+                "include_notes": {"type": "boolean"},
+                "limit": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "torque_area_show",
+        "description": "Read-only show for one same-group Planning Area with worker-visible task links and decision counts only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "area": {"type": "string"},
+                "area_id": {"type": "string"},
+                "note_limit": {"type": "integer"},
+            },
+            "required": ["area"],
+        },
+    },
+    {
         "name": "torque_task_upload_artifact",
         "description": (
             "Upload and attach an image or other artifact to the agent's "
@@ -836,6 +862,63 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
                  if t.agent_id == cell_id}
         return json.dumps({"agent": asdict(cell), "tasks": tasks},
                           indent=2), False
+
+    if name in {"torque_area_list", "torque_area_show"}:
+        cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+        if not cell:
+            return f"Agent {cell_id} not found", True
+        if state.agent_is_tombstoned(cell):
+            return f"Agent {cell_id} is tombstoned", True
+        group = str(getattr(cell, "group", "") or "").strip()
+        if not group:
+            return "agent is not assigned to a group", True
+        visible_task_ids = {
+            task_id for task_id, task in state.board_tasks.items()
+            if str(getattr(task, "agent_id", "") or "").strip() == str(cell_id or "").strip()
+        }
+        if name == "torque_area_show":
+            ident = str(args.get("area", "") or args.get("area_id", "") or args.get("id", "") or "").strip()
+            if not ident:
+                return "area is required", True
+            area_id = state.resolve_area_id(ident, group=group)
+            area = state.load_area(area_id)
+            if not area or str(area.get("group_name", "") or "").strip() != group:
+                return "Area not found", True
+            try:
+                note_limit = min(max(int(args.get("note_limit", 50) or 50), 1), 100)
+            except (TypeError, ValueError):
+                note_limit = 50
+            payload = state.area_payload(
+                area_id,
+                visible_task_ids=visible_task_ids,
+                visible_decision_ids=set(),
+                decision_details=False,
+                note_limit=note_limit,
+            )
+            if not payload:
+                return "Area not found", True
+            payload["type"] = "area"
+            return json.dumps(payload, separators=(",", ":")), False
+        try:
+            limit = min(max(int(args.get("limit", 50) or 50), 1), 100)
+        except (TypeError, ValueError):
+            limit = 50
+        areas = []
+        for item in state.list_areas(
+                group=group,
+                include_archived=bool(args.get("include_archived", False)),
+                limit=limit):
+            payload = state.area_payload(
+                item["id"],
+                visible_task_ids=visible_task_ids,
+                visible_decision_ids=set(),
+                include_links=bool(args.get("include_links", False)),
+                include_notes=bool(args.get("include_notes", False)),
+                decision_details=False,
+                note_limit=10,
+            ) or item
+            areas.append(payload)
+        return json.dumps({"type": "area_list", "group": group, "areas": areas}, separators=(",", ":")), False
 
     if name == "torque_task_upload_artifact":
         payload = {"cmd": "task_upload_artifact", "cell_id": cell_id}

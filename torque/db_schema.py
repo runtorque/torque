@@ -247,6 +247,93 @@ INITIATIVE_LINK_COLUMNS = {
     "created_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+AREA_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "slug": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "area_type": "TEXT NOT NULL DEFAULT ''",
+    "lifecycle": "TEXT NOT NULL DEFAULT 'planned'",
+    "summary": "TEXT NOT NULL DEFAULT ''",
+    "user_purpose": "TEXT NOT NULL DEFAULT ''",
+    "system_purpose": "TEXT NOT NULL DEFAULT ''",
+    "in_scope": "TEXT NOT NULL DEFAULT ''",
+    "out_of_scope": "TEXT NOT NULL DEFAULT ''",
+    "owner_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "owner_id": "TEXT NOT NULL DEFAULT ''",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+AREA_LINK_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "area_id": "TEXT NOT NULL",
+    "link_type": "TEXT NOT NULL",
+    "target_id": "TEXT NOT NULL",
+    "relation": "TEXT NOT NULL DEFAULT ''",
+    "created_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+AREA_NOTE_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "area_id": "TEXT NOT NULL",
+    "note_type": "TEXT NOT NULL",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "body": "TEXT NOT NULL DEFAULT ''",
+    "target_type": "TEXT NOT NULL DEFAULT ''",
+    "target_id": "TEXT NOT NULL DEFAULT ''",
+    "created_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _ensure_areas_schema(conn: sqlite3.Connection) -> None:
+    """Keep Planning Area tables additive/idempotent across partial migrations."""
+
+    _ensure_columns(conn, "planning_areas", AREA_COLUMNS)
+    _ensure_columns(conn, "planning_area_links", AREA_LINK_COLUMNS)
+    _ensure_columns(conn, "planning_area_notes", AREA_NOTE_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_planning_areas_group_lifecycle "
+        "ON planning_areas(group_name, lifecycle, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_planning_areas_owner "
+        "ON planning_areas(owner_kind, owner_id, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_planning_area_links_area "
+        "ON planning_area_links(area_id, link_type, target_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_planning_area_links_target "
+        "ON planning_area_links(link_type, target_id, area_id)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_planning_area_links_unique "
+        "ON planning_area_links(area_id, link_type, target_id, relation)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_planning_area_notes_area "
+        "ON planning_area_notes(area_id, archived_at, updated_at DESC)"
+    )
+
 
 def _ensure_initiatives_schema(conn: sqlite3.Connection) -> None:
     """Keep Initiative tables additive/idempotent across partial migrations."""
@@ -956,6 +1043,79 @@ CREATE INDEX IF NOT EXISTS idx_initiative_links_initiative
     ON initiative_links(initiative_id, link_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_initiative_links_target
     ON initiative_links(link_type, target_id, initiative_id);
+
+CREATE TABLE IF NOT EXISTS area_id_counters (
+    group_prefix                TEXT PRIMARY KEY,
+    next_area_number            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS planning_areas (
+    id                 TEXT PRIMARY KEY,
+    slug               TEXT NOT NULL DEFAULT '',
+    group_name         TEXT NOT NULL DEFAULT '',
+    title              TEXT NOT NULL DEFAULT '',
+    area_type          TEXT NOT NULL DEFAULT '',
+    lifecycle          TEXT NOT NULL DEFAULT 'planned',
+    summary            TEXT NOT NULL DEFAULT '',
+    user_purpose       TEXT NOT NULL DEFAULT '',
+    system_purpose     TEXT NOT NULL DEFAULT '',
+    in_scope           TEXT NOT NULL DEFAULT '',
+    out_of_scope       TEXT NOT NULL DEFAULT '',
+    owner_kind         TEXT NOT NULL DEFAULT 'user',
+    owner_id           TEXT NOT NULL DEFAULT '',
+    created_by_kind    TEXT NOT NULL DEFAULT 'user',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    archived_by_kind   TEXT NOT NULL DEFAULT '',
+    archived_by_id     TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    archived_at        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_planning_areas_group_lifecycle
+    ON planning_areas(group_name, lifecycle, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_planning_areas_owner
+    ON planning_areas(owner_kind, owner_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS planning_area_links (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    area_id            TEXT NOT NULL,
+    link_type          TEXT NOT NULL,
+    target_id          TEXT NOT NULL,
+    relation           TEXT NOT NULL DEFAULT '',
+    created_by_kind    TEXT NOT NULL DEFAULT '',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    UNIQUE(area_id, link_type, target_id, relation),
+    FOREIGN KEY(area_id) REFERENCES planning_areas(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_planning_area_links_area
+    ON planning_area_links(area_id, link_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_planning_area_links_target
+    ON planning_area_links(link_type, target_id, area_id);
+
+CREATE TABLE IF NOT EXISTS planning_area_notes (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    area_id            TEXT NOT NULL,
+    note_type          TEXT NOT NULL,
+    title              TEXT NOT NULL DEFAULT '',
+    body               TEXT NOT NULL DEFAULT '',
+    target_type        TEXT NOT NULL DEFAULT '',
+    target_id          TEXT NOT NULL DEFAULT '',
+    created_by_kind    TEXT NOT NULL DEFAULT '',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    archived_by_kind   TEXT NOT NULL DEFAULT '',
+    archived_by_id     TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    archived_at        TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY(area_id) REFERENCES planning_areas(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_planning_area_notes_area
+    ON planning_area_notes(area_id, archived_at, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS pipeline_task_counters (
     root_task_id       TEXT PRIMARY KEY,
@@ -1869,6 +2029,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_ai_summary_schema(conn)
     _ensure_mcp_idempotency_schema(conn)
     _ensure_initiatives_schema(conn)
+    _ensure_areas_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads

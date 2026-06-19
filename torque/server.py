@@ -12204,6 +12204,263 @@ async def _handle_initiative_command(data: dict, state: MatrixState) -> dict:
 
     return _initiative_error(f"Unknown initiative command: {cmd}")
 
+
+def _area_error(message: str) -> dict:
+    return {"type": "error", "message": str(message or "")}
+
+
+def _area_actor_from_data(data: dict, *, default_kind: str = "user") -> dict:
+    kind = str(data.get("actor_kind", "") or default_kind).strip().lower() or default_kind
+    actor_id = str(data.get("actor_id", "") or "").strip()
+    return {"kind": kind, "id": actor_id}
+
+
+def _area_note_target_fields(data: dict) -> dict:
+    target_type = str(data.get("target_type", "") or "").strip().lower()
+    target_id = str(data.get("target_id", "") or data.get("target", "") or "").strip()
+    return {"target_type": target_type, "target_id": target_id}
+
+
+def _validate_area_note_target(state: MatrixState, area_group: str,
+                               target_type: str, target_id: str) -> str:
+    if not target_type and not target_id:
+        return ""
+    if target_type not in {"task", "decision", "initiative", "area"}:
+        return "note target_type must be one of: task, decision, initiative, area"
+    if not target_id:
+        return "note target_id is required when target_type is set"
+    if target_type == "task":
+        task_id = state.resolve_board_task_id(target_id)
+        task = state.board_tasks.get(task_id)
+        if not task or str(getattr(task, "group", "") or "").strip() != area_group:
+            return "Task not found"
+        return ""
+    if target_type == "decision":
+        if not _decision_belongs_to_group(state, target_id, area_group):
+            return "Decision not found"
+        return ""
+    if target_type == "initiative":
+        initiative_id = state.resolve_initiative_id(target_id, group=area_group)
+        initiative = state.load_initiative(initiative_id)
+        if not initiative or str(initiative.get("group_name", "") or "").strip() != area_group:
+            return "Initiative not found"
+        return ""
+    target_area_id = state.resolve_area_id(target_id, group=area_group)
+    target_area = state.load_area(target_area_id)
+    if not target_area or str(target_area.get("group_name", "") or "").strip() != area_group:
+        return "Area not found"
+    return ""
+
+
+async def _handle_area_command(data: dict, state: MatrixState) -> dict:
+    cmd = str(data.get("cmd", "") or "").strip()
+    if cmd == "area_list":
+        group = str(data.get("group", "") or "").strip()
+        include_archived = bool(data.get("include_archived", False))
+        try:
+            limit = min(max(int(data.get("limit", 100)), 1), 500)
+        except (TypeError, ValueError):
+            limit = 100
+        areas = [
+            state.area_payload(
+                item["id"],
+                include_links=bool(data.get("include_links", False)),
+                include_notes=bool(data.get("include_notes", False)),
+                decision_details=True,
+            ) or item
+            for item in state.list_areas(
+                group=group,
+                include_archived=include_archived,
+                limit=limit,
+            )
+        ]
+        return {"type": "area_list", "group": group, "areas": areas}
+
+    ident = str(
+        data.get("area", "") or data.get("area_id", "")
+        or data.get("id", "") or ""
+    ).strip()
+    group_hint = str(data.get("group", "") or "").strip()
+    area_id = state.resolve_area_id(ident, group=group_hint)
+
+    if cmd == "area_show":
+        if not area_id:
+            return _area_error("Area not found")
+        payload = state.area_payload(area_id, decision_details=True)
+        if not payload:
+            return _area_error("Area not found")
+        payload["type"] = "area"
+        return payload
+
+    if cmd == "area_create":
+        actor = _area_actor_from_data(data)
+        owner_kind = str(data.get("owner_kind", "") or actor["kind"]).strip()
+        owner_id = str(data.get("owner_id", "") or actor["id"]).strip()
+        try:
+            created = await state.create_area_async({
+                "group": data.get("group", ""),
+                "title": data.get("title", ""),
+                "area_type": data.get("area_type", ""),
+                "lifecycle": data.get("lifecycle", "planned"),
+                "summary": data.get("summary", ""),
+                "user_purpose": data.get("user_purpose", ""),
+                "system_purpose": data.get("system_purpose", ""),
+                "in_scope": data.get("in_scope", ""),
+                "out_of_scope": data.get("out_of_scope", ""),
+                "owner_kind": owner_kind,
+                "owner_id": owner_id,
+                "created_by_kind": actor["kind"],
+                "created_by_id": actor["id"],
+                "updated_by_kind": actor["kind"],
+                "updated_by_id": actor["id"],
+            })
+        except ValueError as exc:
+            return _area_error(str(exc))
+        return {"type": "area_created", "area": created}
+
+    if not area_id:
+        return _area_error("Area not found")
+    area = state.load_area(area_id)
+    if not area:
+        return _area_error("Area not found")
+    area_group = str(area.get("group_name", "") or "").strip()
+
+    if cmd == "area_update":
+        actor = _area_actor_from_data(data)
+        allowed = {
+            "title", "area_type", "lifecycle", "summary", "user_purpose",
+            "system_purpose", "in_scope", "out_of_scope", "owner_kind",
+            "owner_id", "slug",
+        }
+        patch = {key: data[key] for key in allowed if key in data}
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_area_async(area_id, patch)
+        except ValueError as exc:
+            return _area_error(str(exc))
+        return {"type": "area_updated", "area": updated}
+
+    if cmd == "area_archive":
+        actor = _area_actor_from_data(data)
+        archived = await state.archive_area_async(
+            area_id,
+            archived_by_kind=actor["kind"],
+            archived_by_id=actor["id"],
+        )
+        return {"type": "area_archived", "area": archived}
+
+    actor = _area_actor_from_data(data)
+    link_type = str(data.get("link_type", "") or "").strip().lower()
+    if cmd.startswith("area_link_") or cmd.startswith("area_unlink_"):
+        suffix = cmd.split("_", 2)[2]
+        link_type = link_type or suffix
+        if link_type == "task":
+            target_ref = str(data.get("task", "") or data.get("task_id", "") or data.get("target_id", "") or "").strip()
+            target_id = state.resolve_board_task_id(target_ref)
+            task = state.board_tasks.get(target_id)
+            if not task:
+                return _area_error("Task not found")
+            if str(getattr(task, "group", "") or "").strip() != area_group:
+                return _area_error("Task is outside area group")
+        elif link_type == "decision":
+            target_id = str(data.get("decision", "") or data.get("decision_id", "") or data.get("target_id", "") or "").strip()
+            if not target_id or not _decision_belongs_to_group(state, target_id, area_group):
+                return _area_error("Decision not found")
+        elif link_type == "initiative":
+            target_ref = str(data.get("initiative", "") or data.get("initiative_id", "") or data.get("target_id", "") or "").strip()
+            target_id = state.resolve_initiative_id(target_ref, group=area_group)
+            initiative = state.load_initiative(target_id)
+            if not initiative or str(initiative.get("group_name", "") or "").strip() != area_group:
+                return _area_error("Initiative not found")
+        elif link_type == "area":
+            target_ref = str(data.get("target_area", "") or data.get("target_area_id", "") or data.get("target_id", "") or "").strip()
+            target_id = state.resolve_area_id(target_ref, group=area_group)
+            target_area = state.load_area(target_id)
+            if not target_area or str(target_area.get("group_name", "") or "").strip() != area_group:
+                return _area_error("Area not found")
+            if target_id == area_id:
+                return _area_error("Area cannot link to itself")
+        else:
+            return _area_error("link_type must be one of: task, decision, initiative, area")
+        relation = str(data.get("relation", "") or "").strip().lower()
+        if cmd.startswith("area_link_"):
+            try:
+                link = await state.save_area_link_async(
+                    area_id,
+                    link_type,
+                    target_id,
+                    relation=relation,
+                    created_by_kind=actor["kind"],
+                    created_by_id=actor["id"],
+                )
+            except ValueError as exc:
+                return _area_error(str(exc))
+            return {"type": "area_linked", "link": link}
+        try:
+            removed = await state.delete_area_link_async(
+                area_id,
+                link_type,
+                target_id,
+                relation,
+            )
+        except ValueError as exc:
+            return _area_error(str(exc))
+        return {"type": "area_unlinked", "removed": removed}
+
+    if cmd == "area_note_create":
+        actor = _area_actor_from_data(data)
+        target = _area_note_target_fields(data)
+        target_error = _validate_area_note_target(
+            state, area_group, target["target_type"], target["target_id"]
+        )
+        if target_error:
+            return _area_error(target_error)
+        try:
+            note = await state.create_area_note_async(area_id, {
+                "note_type": data.get("note_type", data.get("type", "")),
+                "title": data.get("title", ""),
+                "body": data.get("body", ""),
+                **target,
+                "created_by_kind": actor["kind"],
+                "created_by_id": actor["id"],
+                "updated_by_kind": actor["kind"],
+                "updated_by_id": actor["id"],
+            })
+        except ValueError as exc:
+            return _area_error(str(exc))
+        return {"type": "area_note_created", "note": note}
+
+    if cmd in {"area_note_update", "area_note_archive"}:
+        note_id = data.get("note_id", data.get("note", ""))
+        note = state.load_area_note(note_id)
+        if not note or str(note.get("area_id", "") or "") != area_id:
+            return _area_error("Area note not found")
+        actor = _area_actor_from_data(data)
+        if cmd == "area_note_archive":
+            archived = await state.archive_area_note_async(
+                note_id,
+                archived_by_kind=actor["kind"],
+                archived_by_id=actor["id"],
+            )
+            return {"type": "area_note_archived", "note": archived}
+        allowed = {"note_type", "title", "body", "target_type", "target_id"}
+        patch = {key: data[key] for key in allowed if key in data}
+        target_type = str(patch.get("target_type", note.get("target_type", "")) or "").strip().lower()
+        target_id = str(patch.get("target_id", note.get("target_id", "")) or "").strip()
+        target_error = _validate_area_note_target(state, area_group, target_type, target_id)
+        if target_error:
+            return _area_error(target_error)
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_area_note_async(note_id, patch)
+        except ValueError as exc:
+            return _area_error(str(exc))
+        return {"type": "area_note_updated", "note": updated}
+
+    return _area_error(f"Unknown area command: {cmd}")
+
 def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
     """Return deferred architect decisions for compact snapshot clients."""
     include_archived = bool(data.get("include_archived", False))
@@ -16087,6 +16344,26 @@ async def main(connection=None):
             "initiative_unlink_decision",
         }:
             return await _handle_initiative_command(data, state)
+
+        if cmd in {
+            "area_list",
+            "area_show",
+            "area_create",
+            "area_update",
+            "area_archive",
+            "area_link_task",
+            "area_unlink_task",
+            "area_link_decision",
+            "area_unlink_decision",
+            "area_link_initiative",
+            "area_unlink_initiative",
+            "area_link_area",
+            "area_unlink_area",
+            "area_note_create",
+            "area_note_update",
+            "area_note_archive",
+        }:
+            return await _handle_area_command(data, state)
 
         if cmd == "get_agent_message_history":
             return _handle_agent_message_history_command(data, state)

@@ -429,6 +429,39 @@ For Architect ↔ Engineer threads, `architect_reply` preserves the existing hir
 
 The architect's durable product log. Decisions can be updated and archived but task/engineer links are append-only.
 
+### Planning Areas
+
+Areas are compact durable product/system map records, not wiki pages or a
+second execution tracker. Area IDs use `<GROUP>-A:<n>` (for example
+`TORQUE-A:1`) and intentionally do not parse as Board task or Initiative IDs.
+Durable rows live in `planning_areas`, `planning_area_links`, and
+`planning_area_notes`.
+
+Architects can use `architect_area_list/show/create/update/archive`,
+`architect_area_link/unlink_task`, `architect_area_link/unlink_decision`,
+`architect_area_link/unlink_initiative`, `architect_area_link/unlink_area`, and
+`architect_area_note_create/update/archive`. Architect writes are scoped to
+Areas owned or created by that Architect; MCP does not silently transfer Area
+ownership. Area↔Area relations are labels only: `related`, `depends_on`, or
+`supports`.
+
+Engineers have read-only `engineer_area_list/show`; workers have read-only
+`torque_area_list/show`. Agent reads are compact/bounded and filter linked task
+IDs to caller-visible tasks. Decision links are exposed to engineers/workers as
+counts and hidden counts only — no decision titles or rationale. Linking Areas
+to tasks, decisions, initiatives, or other Areas creates/removes link rows only;
+it does not mutate the linked Board task, Decision, Initiative, or Area.
+
+Typed Area notes are flat table-backed records: `caveat`, `tech_debt`,
+`open_question`, `follow_up`, or `invariant`, with title/body and optional
+single target. They are not comments, checklists, assignments, or threaded docs.
+
+Browser/server command payloads use the same names without the actor prefix:
+`area_list`, `area_show`, `area_create`, `area_update`, `area_archive`,
+`area_link_*`, `area_unlink_*`, `area_note_create`, `area_note_update`, and
+`area_note_archive`. The browser/user path is trusted for same-group writes and
+validates link/note targets before writing.
+
 ### Initiatives
 
 Initiatives are product-intent wrappers above the Board, not a second task
