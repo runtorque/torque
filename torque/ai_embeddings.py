@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from concurrent.futures import Executor, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +16,10 @@ from torque.config import DATA_DIR
 
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 120.0
 DEFAULT_EMBEDDING_BATCH_SIZE = 32
+DEFAULT_EMBEDDING_MAX_TASKS_PER_CHILD = 64
 EMBEDDING_PROBE_TEXT = "dimension probe"
+
+log = logging.getLogger("torque.ai_embeddings")
 
 EmbeddingFailureKind = Literal[
     "invalid_request",
@@ -69,6 +73,7 @@ class LocalEmbeddingService:
         cache_dir: Path | str | None = None,
         timeout_seconds: float = DEFAULT_EMBEDDING_TIMEOUT_SECONDS,
         max_batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+        max_tasks_per_child: int = DEFAULT_EMBEDDING_MAX_TASKS_PER_CHILD,
         executor_factory: ExecutorFactory | None = None,
         worker: EmbeddingWorker = embed_batch_worker,
     ) -> None:
@@ -78,6 +83,7 @@ class LocalEmbeddingService:
         )
         self._timeout_seconds = float(timeout_seconds)
         self._max_batch_size = max(1, int(max_batch_size))
+        self._max_tasks_per_child = max(1, int(max_tasks_per_child))
         self._executor_factory = executor_factory
         self._worker = worker
         self._executor: Executor | None = None
@@ -148,7 +154,14 @@ class LocalEmbeddingService:
                     timeout=self._timeout_seconds,
                 )
             except asyncio.TimeoutError:
-                self._reset_executor(wait=False)
+                log.warning(
+                    "Embedding worker timed out after %.1fs "
+                    "(model=%s texts=%d); terminating process pool",
+                    self._timeout_seconds,
+                    normalized_model_id,
+                    len(normalized_texts),
+                )
+                self._reset_executor(wait=False, terminate=True)
                 return EmbeddingFailure(
                     kind="timeout",
                     message="Embedding worker timed out.",
@@ -187,25 +200,98 @@ class LocalEmbeddingService:
 
     async def shutdown(self) -> None:
         self._closed = True
-        self._reset_executor(wait=False)
+        self._reset_executor(wait=False, terminate=True)
 
     def _ensure_executor(self) -> Executor:
         if self._executor is None:
             if self._executor_factory is not None:
                 self._executor = self._executor_factory()
             else:
-                self._executor = ProcessPoolExecutor(max_workers=1)
+                self._executor = _new_process_pool_executor(
+                    max_workers=1,
+                    max_tasks_per_child=self._max_tasks_per_child,
+                )
         return self._executor
 
-    def _reset_executor(self, *, wait: bool) -> None:
+    def _reset_executor(self, *, wait: bool, terminate: bool = False) -> None:
         executor = self._executor
         self._executor = None
         if executor is None:
             return
+        _shutdown_executor(executor, wait=wait, terminate=terminate)
+
+
+def _new_process_pool_executor(
+    *,
+    max_workers: int,
+    max_tasks_per_child: int,
+) -> ProcessPoolExecutor:
+    """Create the default embedding worker pool with bounded child lifetime.
+
+    SentenceTransformer/torch workloads may retain native allocator state in
+    the subprocess across many batches.  Recycling the single worker after a
+    bounded number of batches prevents an indefinite long-session RSS climb
+    while preserving model-cache reuse for ordinary indexing bursts.
+    """
+
+    try:
+        return ProcessPoolExecutor(
+            max_workers=max_workers,
+            max_tasks_per_child=max_tasks_per_child,
+        )
+    except TypeError:
+        # Python <3.11 compatibility: older ProcessPoolExecutor lacks
+        # max_tasks_per_child, but still benefits from timeout termination below.
+        return ProcessPoolExecutor(max_workers=max_workers)
+
+
+def _shutdown_executor(
+    executor: Executor,
+    *,
+    wait: bool,
+    terminate: bool = False,
+) -> None:
+    """Shut down an executor without leaking stuck multiprocessing children."""
+
+    if terminate:
+        terminator = getattr(executor, "terminate_workers", None)
+        if callable(terminator):
+            try:
+                terminator()
+                return
+            except Exception:
+                log.exception("Failed to terminate embedding process pool")
+        _terminate_private_process_pool_children(executor)
+    try:
+        executor.shutdown(wait=wait, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(cancel_futures=True)
+
+
+def _terminate_private_process_pool_children(executor: Executor) -> None:
+    """Best-effort fallback for Python versions without terminate_workers().
+
+    ``ProcessPoolExecutor.terminate_workers()`` is available on modern Python
+    (including the Python 3.14 runtime from the leak report).  Older runtimes
+    have no public non-blocking way to stop a running worker after an
+    ``asyncio.wait_for`` timeout, so use the private process map only as a
+    compatibility fallback.
+    """
+
+    processes = getattr(executor, "_processes", None)
+    if not processes:
+        return
+    for process in list(processes.values()):
+        terminate = getattr(process, "terminate", None)
+        if not callable(terminate):
+            continue
         try:
-            executor.shutdown(wait=wait, cancel_futures=True)
-        except TypeError:
-            executor.shutdown(cancel_futures=True)
+            terminate()
+        except Exception:
+            log.debug(
+                "Failed to terminate embedding worker process",
+                exc_info=True,
+            )
 
 
 def _coerce_worker_payload(payload: object, fallback_model_id: str) -> EmbeddingResponse:

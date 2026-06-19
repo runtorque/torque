@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from torque.ai_embeddings import (
+    DEFAULT_EMBEDDING_MAX_TASKS_PER_CHILD,
     EMBEDDING_PROBE_TEXT,
     EmbeddingDimsResult,
     EmbeddingFailure,
@@ -24,9 +25,13 @@ ROOT = Path(__file__).resolve().parents[1]
 class RecordingExecutor:
     def __init__(self):
         self.shutdown_calls = []
+        self.terminate_calls = 0
 
     def shutdown(self, **kwargs):
         self.shutdown_calls.append(dict(kwargs))
+
+    def terminate_workers(self):
+        self.terminate_calls += 1
 
 
 class LocalEmbeddingServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -148,10 +153,8 @@ class LocalEmbeddingServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(success, EmbeddingResult)
         self.assertEqual(success.dims, 3)
         self.assertEqual(len(executors), 2)
-        self.assertEqual(
-            executors[0].shutdown_calls,
-            [{"wait": False, "cancel_futures": True}],
-        )
+        self.assertEqual(executors[0].terminate_calls, 1)
+        self.assertEqual(executors[0].shutdown_calls, [])
         await service.shutdown()
 
     async def test_worker_exception_returns_typed_failure_and_service_stays_usable(self):
@@ -228,10 +231,8 @@ class LocalEmbeddingServiceTests(unittest.IsolatedAsyncioTestCase):
         await service.shutdown()
         await service.shutdown()
 
-        self.assertEqual(
-            executor.shutdown_calls,
-            [{"wait": False, "cancel_futures": True}],
-        )
+        self.assertEqual(executor.terminate_calls, 1)
+        self.assertEqual(executor.shutdown_calls, [])
 
     async def test_default_executor_is_single_worker_process_pool(self):
         loop = asyncio.get_running_loop()
@@ -239,11 +240,17 @@ class LocalEmbeddingServiceTests(unittest.IsolatedAsyncioTestCase):
         executor = RecordingExecutor()
 
         class FakeProcessPoolExecutor:
-            def __init__(self, *, max_workers):
-                created.append(max_workers)
+            def __init__(self, *, max_workers, max_tasks_per_child=None):
+                created.append({
+                    "max_workers": max_workers,
+                    "max_tasks_per_child": max_tasks_per_child,
+                })
 
             def shutdown(self, **kwargs):
                 executor.shutdown(**kwargs)
+
+            def terminate_workers(self):
+                executor.terminate_workers()
 
         def fake_run_in_executor(executor_arg, _func, _cache_dir, model_id, _texts):
             self.assertIsInstance(executor_arg, FakeProcessPoolExecutor)
@@ -261,7 +268,13 @@ class LocalEmbeddingServiceTests(unittest.IsolatedAsyncioTestCase):
                 response = await service.embed_texts("fake-model", ["ok"])
 
         self.assertIsInstance(response, EmbeddingResult)
-        self.assertEqual(created, [1])
+        self.assertEqual(
+            created,
+            [{
+                "max_workers": 1,
+                "max_tasks_per_child": DEFAULT_EMBEDDING_MAX_TASKS_PER_CHILD,
+            }],
+        )
         await service.shutdown()
 
 
