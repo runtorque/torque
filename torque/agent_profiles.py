@@ -1100,7 +1100,7 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
     pending_next_launch = bool(
         next_launch_profile_id
         and (next_launch_profile_id != effective_id
-             or (next_launch_profile_version and effective_version
+             or (next_launch_profile_version
                  and next_launch_profile_version != effective_version))
     )
     return {

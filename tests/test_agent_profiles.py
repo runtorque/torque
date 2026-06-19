@@ -161,6 +161,31 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertEqual(status["status"], "full")
         self.assertFalse(status["pending_next_launch"])
 
+    def test_cell_status_requires_effective_version_to_match_desired_assignment(self):
+        class Cell:
+            id = "arch-1"
+            name = "Architect"
+            kind = "architect"
+            agent_profile_id = "product-manager-draft"
+            agent_profile_version = "2"
+            agent_profile_assigned_at = 1
+            agent_profile_assigned_by = "test"
+            effective_agent_profile_id = "product-manager-draft"
+            effective_agent_profile_version = ""
+            effective_agent_profile_snapshot = {
+                "id": "product-manager-draft",
+                "base_kind": "architect",
+                "status": "draft",
+            }
+            effective_agent_profile_applied_at = 2
+
+        status = agent_profile_cell_status(Cell(), base_dir=str(self.project))
+
+        self.assertEqual(status["effective_profile_id"], "product-manager-draft")
+        self.assertEqual(status["effective_profile_version"], "")
+        self.assertEqual(status["next_launch_profile_version"], "2")
+        self.assertTrue(status["pending_next_launch"])
+
     def test_unknown_capability_atom_fails_validation(self):
         _profile, issues = validate_profile_data({
             "id": "bad",
