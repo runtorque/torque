@@ -1113,7 +1113,7 @@ def _collect_agent_profiles_section(base_dir: str = "") -> dict:
         "profiles": [profile.as_preview_dict() for profile in profiles],
         "dry_run_previews": previews,
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
-        "runtime_enforcement": "not_enabled_wave_1_dry_run_only",
+        "runtime_enforcement": "mcp_projection_when_effective_profile_is_set",
     }
 
 

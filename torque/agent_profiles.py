@@ -1,14 +1,16 @@
-"""Agent profile capability registry and dry-run validation.
+"""Agent profile capability registry, validation, and policy evaluation.
 
-Wave 1 agent profiles are deliberately inert: this module loads profile YAML,
-validates it against a small capability taxonomy and base-kind ceilings, and
-produces deterministic dry-run previews for tests, docs, and doctor output. It
-DOES NOT project tools or change runtime behavior.
+Wave 1 loaded and validated profile YAML as a dry-run registry. Wave 2 keeps
+the same registry shape and adds reusable MCP capability evaluation for
+synthetic/effective profile contexts. Production callers without an explicit
+effective profile assignment still default to the existing full base-kind
+behavior; profile policy is only applied when a caller has an effective profile.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 import os
 from typing import Any
@@ -109,6 +111,24 @@ class AgentProfileDefinition:
             "lifecycle": self.lifecycle,
             "builtin": self.builtin,
         }
+
+
+@dataclass(frozen=True)
+class AgentProfilePolicy:
+    """Effective monotonic capability policy for one caller profile."""
+
+    profile_id: str
+    base_kind: str
+    grants: frozenset[str]
+    profile: AgentProfileDefinition | None = None
+
+    @property
+    def is_full_base_kind_profile(self) -> bool:
+        ceiling = BASE_KIND_CEILINGS.get(self.base_kind, frozenset())
+        return bool(ceiling) and self.grants == ceiling
+
+    def allows_all(self, requirements: frozenset[str]) -> bool:
+        return set(requirements).issubset(self.grants)
 
 
 # Small Wave-1 taxonomy. Atoms are intentionally product-level capabilities, not
@@ -313,6 +333,193 @@ TOOL_CATEGORY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "worktree_merge": frozenset({"worktree.merge"}),
     "deploy_admin": frozenset({"deploy.apply", "admin.settings"}),
     "profile_admin": frozenset({"profile.assign", "profile.edit"}),
+}
+
+
+# Raw MCP tool → product capability atoms. Tools with multiple requirements
+# need all listed grants. The mapping intentionally stays product-level: it is
+# used only when an effective restricted profile exists; full/no-assignment
+# surfaces retain the current base-kind behavior by construction.
+MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
+    # Worker/shared Torque reporting surface.
+    "torque_context": frozenset({"observe.self_context"}),
+    "torque_area_list": frozenset({"planning.area_read"}),
+    "torque_area_show": frozenset({"planning.area_read"}),
+    "torque_task_upload_artifact": frozenset({"task.upload_artifact"}),
+    "torque_done": frozenset({"task.complete"}),
+    "torque_blocked": frozenset({"task.complete"}),
+    "torque_error": frozenset({"task.complete"}),
+    "torque_progress": frozenset({"task.complete"}),
+    "torque_verify": frozenset({"task.verify"}),
+    "torque_ready": frozenset({"task.complete"}),
+    "torque_name": frozenset({"task.complete"}),
+    "torque_derive": frozenset({"task.complete"}),
+    "torque_ask": frozenset({"comm.user_ask"}),
+    "torque_message_user": frozenset({"comm.user_message"}),
+    "torque_reply": frozenset({"comm.user_message"}),
+    "torque_memory_publish": frozenset({"memory.publish"}),
+    "torque_memory_list": frozenset({"memory.read"}),
+    "torque_memory_read": frozenset({"memory.read"}),
+    "torque_memory_pin": frozenset({"memory.admin"}),
+    "torque_memory_link": frozenset({"memory.admin"}),
+    "torque_memory_unpin": frozenset({"memory.admin"}),
+
+    # Engineer MCP surface.
+    "engineer_board_summary": frozenset({"observe.board_summary"}),
+    "engineer_boot_summary": frozenset({"observe.events"}),
+    "engineer_session_map": frozenset({"observe.events"}),
+    "engineer_hint_snooze": frozenset({"task.update"}),
+    "engineer_semantic_recall": frozenset({"observe.semantic_recall"}),
+    "engineer_streams_list": frozenset({"observe.events"}),
+    "engineer_stream_show": frozenset({"observe.events"}),
+    "engineer_peer_list": frozenset({"comm.engineer_message"}),
+    "engineer_peer_inbox": frozenset({"comm.engineer_message"}),
+    "engineer_peer_inspect": frozenset({"comm.engineer_message"}),
+    "engineer_peer_notify": frozenset({"comm.engineer_message"}),
+    "engineer_peer_reply": frozenset({"comm.engineer_message"}),
+    "engineer_board_list": frozenset({"observe.board_summary"}),
+    "engineer_task_show": frozenset({"observe.task_detail"}),
+    "engineer_agents_list": frozenset({"observe.board_summary"}),
+    "engineer_agent_show": frozenset({"observe.board_summary"}),
+    "engineer_actions_list": frozenset({"observe.board_summary"}),
+    "engineer_action_show": frozenset({"observe.board_summary"}),
+    "engineer_task_create": frozenset({"task.create"}),
+    "engineer_task_edit": frozenset({"task.update"}),
+    "engineer_task_upload_artifact": frozenset({"task.upload_artifact"}),
+    "engineer_task_mark_covered": frozenset({"task.mark_covered"}),
+    "engineer_task_verify": frozenset({"task.verify"}),
+    "engineer_task_move": frozenset({"task.move"}),
+    "engineer_task_dispatch": frozenset({"agent.dispatch_worker", "task.dispatch"}),
+    "engineer_batch_dispatch": frozenset({"agent.dispatch_worker", "task.dispatch"}),
+    "engineer_task_resolve": frozenset({"task.update"}),
+    "engineer_events": frozenset({"observe.events"}),
+    "engineer_launch_settings": frozenset({"agent.dispatch_worker"}),
+    "engineer_notifications": frozenset({"observe.events"}),
+    "engineer_resume": frozenset({"observe.events"}),
+    "engineer_journal": frozenset({"journal.write"}),
+    "engineer_journal_read": frozenset({"journal.read"}),
+    "engineer_agent_message": frozenset({"comm.worker_message"}),
+    "engineer_ask": frozenset({"comm.user_ask"}),
+    "engineer_message_user": frozenset({"comm.user_message"}),
+    "engineer_note": frozenset({"journal.write"}),
+    "engineer_agent_close": frozenset({"agent.dispatch_worker"}),
+    "engineer_agent_relaunch": frozenset({"agent.dispatch_worker"}),
+    "engineer_merge": frozenset({"worktree.merge"}),
+    "engineer_rebase": frozenset({"worktree.merge"}),
+    "engineer_create_pr": frozenset({"worktree.merge"}),
+    "engineer_diff": frozenset({"worktree.read"}),
+    "engineer_worktree_remove": frozenset({"worktree.merge"}),
+    "engineer_worktree_adopt": frozenset({"worktree.merge"}),
+    "engineer_worktree_advance_boundary": frozenset({"worktree.merge"}),
+    "engineer_worktree_checkpoint": frozenset({"worktree.merge"}),
+    "engineer_specializations_list": frozenset({"agent.manage_engineer_roster"}),
+    "engineer_specialization_show": frozenset({"agent.manage_engineer_roster"}),
+    "engineer_specialization_save": frozenset({"agent.manage_engineer_roster"}),
+    "engineer_specialization_delete": frozenset({"agent.manage_engineer_roster"}),
+    "engineer_area_list": frozenset({"planning.area_read"}),
+    "engineer_area_show": frozenset({"planning.area_read"}),
+    "engineer_initiative_list": frozenset({"planning.initiative_read"}),
+    "engineer_initiative_show": frozenset({"planning.initiative_read"}),
+    "engineer_tool_search": frozenset({"observe.self_context"}),
+    "engineer_behavior_overlay_read": frozenset({"observe.self_context"}),
+    "engineer_behavior_overlay_versions": frozenset({"observe.self_context"}),
+    "engineer_behavior_overlay_diff": frozenset({"observe.self_context"}),
+    "engineer_behavior_overlay_propose": frozenset({"profile.edit"}),
+    "engineer_behavior_overlay_request_rollback": frozenset({"profile.edit"}),
+    "engineer_mcp_calls": frozenset({"observe.mcp_calls"}),
+    "engineer_task_reassign": frozenset({"task.reassign"}),
+    "engineer_message_architect": frozenset({"comm.engineer_message"}),
+    "engineer_reply": frozenset({"comm.engineer_message"}),
+
+    # Architect MCP surface.
+    "architect_tool_search": frozenset({"observe.self_context"}),
+    "architect_attention_digest": frozenset({"observe.board_summary"}),
+    "architect_board_summary": frozenset({"observe.board_summary"}),
+    "architect_wave_summary": frozenset({"observe.task_detail", "decision.list"}),
+    "architect_completion_audit": frozenset({"observe.task_detail", "decision.list"}),
+    "architect_boot_summary": frozenset({"observe.events"}),
+    "architect_semantic_recall": frozenset({"observe.semantic_recall"}),
+    "architect_events_recent": frozenset({"observe.events"}),
+    "architect_mcp_calls": frozenset({"observe.mcp_calls"}),
+    "architect_deploy_state": frozenset({"observe.deploy_state"}),
+    "architect_get_architect_settings": frozenset({"admin.settings"}),
+    "architect_digest_filter": frozenset({"observe.events"}),
+    "architect_task_show": frozenset({"observe.task_detail"}),
+    "architect_task_list": frozenset({"observe.task_detail"}),
+    "architect_task_chain": frozenset({"observe.task_detail"}),
+    "architect_task_create": frozenset({"task.create"}),
+    "architect_task_update": frozenset({"task.update"}),
+    "architect_task_reassign": frozenset({"task.reassign"}),
+    "architect_task_move": frozenset({"task.move"}),
+    "architect_task_mark_covered": frozenset({"task.mark_covered"}),
+    "architect_ask": frozenset({"comm.user_ask"}),
+    "architect_message_user": frozenset({"comm.user_message"}),
+    "architect_engineer_list": frozenset({"agent.engineer_roster_read"}),
+    "architect_engineer_hire": frozenset({"agent.hire_engineer"}),
+    "architect_engineer_set_specializations": frozenset({"agent.manage_engineer_roster"}),
+    "architect_engineer_dismiss": frozenset({"agent.manage_engineer_roster"}),
+    "architect_engineer_rehire": frozenset({"agent.manage_engineer_roster"}),
+    "architect_engineer_restore": frozenset({"agent.manage_engineer_roster"}),
+    "architect_pending_hire_status": frozenset({"agent.hire_engineer"}),
+    "architect_pending_hire_list": frozenset({"agent.hire_engineer"}),
+    "architect_behavior_overlay_read": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_versions": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_diff": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_proposal_list": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_propose": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_propose_for_engineer": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_propose_for_role": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_approve": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_reject": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_rollback": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_rollback_role": frozenset({"profile.edit"}),
+    "architect_engineer_message": frozenset({"comm.engineer_message"}),
+    "architect_engineer_feedback_request": frozenset({"comm.engineer_message"}),
+    "architect_engineer_feedback_status": frozenset({"comm.engineer_message"}),
+    "architect_peer_list": frozenset({"comm.peer_architect_list"}),
+    "architect_peer_message": frozenset({"comm.peer_architect_message"}),
+    # Mixed-purpose inbox/reply surfaces can expose both Architect↔Architect
+    # and Architect↔Engineer threads. Until those tools have per-thread
+    # contextual projection, require engineer messaging too so restricted PM
+    # profiles cannot read/reply to engineer threads through the peer namespace.
+    "architect_peer_inbox": frozenset({"comm.peer_architect_message", "comm.engineer_message"}),
+    "architect_engineer_peer_threads": frozenset({"comm.engineer_message"}),
+    "architect_engineer_peer_inspect": frozenset({"comm.engineer_message"}),
+    "architect_engineer_journal_read": frozenset({"comm.engineer_message"}),
+    "architect_engineer_pending_question": frozenset({"comm.worker_message"}),
+    "architect_engineer_answer": frozenset({"comm.worker_message"}),
+    "architect_reply": frozenset({"comm.peer_architect_message", "comm.engineer_message"}),
+    "architect_area_list": frozenset({"planning.area_read"}),
+    "architect_area_show": frozenset({"planning.area_read"}),
+    "architect_area_create": frozenset({"planning.area_write"}),
+    "architect_area_update": frozenset({"planning.area_write"}),
+    "architect_area_archive": frozenset({"planning.area_write"}),
+    "architect_area_link_task": frozenset({"planning.area_write"}),
+    "architect_area_unlink_task": frozenset({"planning.area_write"}),
+    "architect_area_link_decision": frozenset({"planning.area_write", "decision.link"}),
+    "architect_area_unlink_decision": frozenset({"planning.area_write", "decision.link"}),
+    "architect_area_link_initiative": frozenset({"planning.area_write"}),
+    "architect_area_unlink_initiative": frozenset({"planning.area_write"}),
+    "architect_area_link_area": frozenset({"planning.area_write"}),
+    "architect_area_unlink_area": frozenset({"planning.area_write"}),
+    "architect_area_note_create": frozenset({"planning.area_write"}),
+    "architect_area_note_update": frozenset({"planning.area_write"}),
+    "architect_area_note_archive": frozenset({"planning.area_write"}),
+    "architect_initiative_list": frozenset({"planning.initiative_read"}),
+    "architect_initiative_show": frozenset({"planning.initiative_read"}),
+    "architect_initiative_create": frozenset({"planning.initiative_write"}),
+    "architect_initiative_update": frozenset({"planning.initiative_write"}),
+    "architect_initiative_archive": frozenset({"planning.initiative_write"}),
+    "architect_initiative_link_task": frozenset({"planning.initiative_write"}),
+    "architect_initiative_unlink_task": frozenset({"planning.initiative_write"}),
+    "architect_initiative_link_decision": frozenset({"planning.initiative_write", "decision.link"}),
+    "architect_initiative_unlink_decision": frozenset({"planning.initiative_write", "decision.link"}),
+    "architect_decision_create": frozenset({"decision.create"}),
+    "architect_decision_update": frozenset({"decision.update"}),
+    "architect_decision_link": frozenset({"decision.link"}),
+    "architect_decision_list": frozenset({"decision.list"}),
+    "architect_journal": frozenset({"journal.private"}),
+    "architect_journal_read": frozenset({"journal.private"}),
 }
 
 
@@ -559,6 +766,62 @@ def load_agent_profiles(base_dir: str = "") -> tuple[list[AgentProfileDefinition
     return sorted(profiles, key=lambda item: (item.builtin, item.id)), issues
 
 
+@lru_cache(maxsize=32)
+def _valid_profile_lookup(base_dir: str = "") -> tuple[dict[str, AgentProfileDefinition], tuple[ValidationIssue, ...]]:
+    profiles, issues = load_agent_profiles(base_dir=base_dir)
+    return {profile.id: profile for profile in profiles}, tuple(issues)
+
+
+def profile_policy_from_definition(profile: AgentProfileDefinition | dict[str, Any]) -> AgentProfilePolicy:
+    if isinstance(profile, dict):
+        profile = AgentProfileDefinition.from_dict(profile)
+    ceiling = BASE_KIND_CEILINGS.get(profile.base_kind, frozenset())
+    grants = frozenset(set(profile.grants) & set(ceiling))
+    return AgentProfilePolicy(
+        profile_id=profile.id,
+        base_kind=profile.base_kind,
+        grants=grants,
+        profile=profile,
+    )
+
+
+def profile_policy_by_id(profile_id: str, *, base_dir: str = "") -> AgentProfilePolicy | None:
+    profile_id = str(profile_id or "").strip()
+    if not profile_id:
+        return None
+    profiles_by_id, issues = _valid_profile_lookup(base_dir or "")
+    if any(issue.severity == "error" for issue in issues):
+        return None
+    profile = profiles_by_id.get(profile_id)
+    if not profile:
+        return None
+    return profile_policy_from_definition(profile)
+
+
+def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
+    """Return required capability atoms for a raw MCP tool, if known."""
+
+    return MCP_TOOL_CAPABILITY_REQUIREMENTS.get(str(tool_name or "").strip())
+
+
+def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None) -> bool:
+    """Return whether ``tool_name`` is projected for the effective policy.
+
+    ``None`` policy means no explicit effective profile assignment exists, so
+    callers keep the current unprojected base-kind behavior. Explicit full
+    profiles also keep the current behavior by construction, which avoids
+    accidental regressions from newly added tools before their capability atom
+    mapping is extended.
+    """
+
+    if policy is None or policy.is_full_base_kind_profile:
+        return True
+    requirements = mcp_tool_capability_requirements(tool_name)
+    if not requirements:
+        return False
+    return policy.allows_all(requirements)
+
+
 def dry_run_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) -> dict[str, Any]:
     if isinstance(profile, dict):
         profile = AgentProfileDefinition.from_dict(profile)
@@ -599,7 +862,7 @@ def dry_run_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) ->
         "scope_policy": scope_policy,
         "audit_policy": audit_policy,
         "projected_tool_categories": category_preview,
-        "runtime_enforcement": "not_enabled_wave_1_dry_run_only",
+        "runtime_enforcement": "mcp_projection_when_effective_profile_is_set",
     }
 
 

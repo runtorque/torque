@@ -2,7 +2,7 @@ id: product-manager-draft
 version: "1"
 base_kind: architect
 display_name: Product Manager (draft)
-description: Draft architect-derived Product Manager profile for dry-run validation only; not enforced in Wave 1.
+description: Draft architect-derived Product Manager profile; enforced only when explicitly used as an effective profile.
 lifecycle: draft
 grants:
   - observe.self_context
@@ -64,4 +64,4 @@ policy:
 metadata:
   archetype: product_manager
   trusted_assignment: user_only_v1
-  runtime_enforcement: not_enabled_wave_1_dry_run_only
+  runtime_enforcement: mcp_projection_when_effective_profile_is_set

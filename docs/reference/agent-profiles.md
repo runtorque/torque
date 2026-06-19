@@ -5,10 +5,10 @@ agent kinds. They are **not** new runtime kinds: every profile declares one of
 `architect`, `engineer`, or `worker` as its `base_kind`, and validation requires
 its grants to stay inside that base-kind ceiling.
 
-Wave 1 is dry-run only. Loading and doctor validation do not hide tools, deny
-MCP calls, change dispatch, or alter prompts. Future waves will use the same
-validated profile data for server-side projection/enforcement and auditable
-effective snapshots.
+Wave 2 adds server-side MCP tool projection/denial for explicit effective
+profile contexts. Production agents still behave as full base-kind profiles by
+default because there is not yet a user-facing assignment mechanism or
+persisted effective snapshot.
 
 ## Config paths
 
@@ -28,7 +28,7 @@ Project profile definitions live in:
 The project directory is allow-listed in `.gitignore` like actions, roles, and
 specializations so teams can review profile policy in Git. There is no profile
 assignment UI and no DB assignment/effective-snapshot/audit persistence in Wave
-1.
+2.
 
 ## YAML shape
 
@@ -37,7 +37,7 @@ id: product-manager-draft
 version: "1"
 base_kind: architect
 display_name: Product Manager (draft)
-description: Draft architect-derived profile; dry-run only in Wave 1.
+description: Draft architect-derived profile; enforced only when explicitly used as an effective profile.
 lifecycle: draft
 grants:
   - observe.board_summary
@@ -79,7 +79,8 @@ label and is intentionally separate from future `agent_profile_id` /
   messaging.
 
 The built-in full profiles grant exactly their base-kind ceiling by construction,
-which preserves current behavior until a future assignment/enforcement wave.
+which preserves current behavior for unassigned production agents and for
+explicit full-profile test contexts.
 
 ## Dry-run preview data
 
@@ -92,7 +93,7 @@ for tests and future UI/API surfaces:
   omission;
 - communication/spawn/scope/audit policy summaries;
 - projected tool-category allow/deny summaries;
-- `runtime_enforcement: not_enabled_wave_1_dry_run_only`.
+- `runtime_enforcement: mcp_projection_when_effective_profile_is_set`.
 
 `torque doctor` includes an `[agent_profiles]` section and fails the
 `agent_profiles_valid` check when project or built-in profile definitions are
