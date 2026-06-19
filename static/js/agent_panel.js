@@ -59,6 +59,10 @@ var _agentPanelMcpCallsRequestedKeyByAgent = {};
 var _agentPanelMcpCallsVisibleLimitByAgent = {};
 var _agentPanelMcpCallExpandedByAgent = {};
 var _agentPanelMcpFiltersByAgent = {};
+var _agentPanelProfileManagerByAgent = {};
+var _agentPanelProfileListByKey = {};
+var _agentPanelProfilePreviewById = {};
+var _agentPanelProfileLastRequestedListKey = '';
 var _AGENT_PANEL_MCP_PAGE_SIZE = 50;
 var _AGENT_PANEL_MCP_DEFAULT_HOOK = 'PostToolUse';
 var _agentPanelTabSpecByKind = {
@@ -1381,6 +1385,753 @@ function _agentPanelProfileBadgeHtml(agent) {
   return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
     + _agentPanelEsc(label)
     + '</span>';
+}
+
+function _agentPanelProfileDefaultIdForKind(kind) {
+  kind = String(kind || '').trim();
+  if (kind === 'architect' || kind === 'engineer' || kind === 'worker') {
+    return 'full-' + kind;
+  }
+  return '';
+}
+
+function _agentPanelProfileDisplayName(profile, fallback) {
+  profile = profile || {};
+  return String(profile.display_name || profile.name || profile.id || fallback || '').trim();
+}
+
+function _agentPanelProfileStatusLabel(profile) {
+  profile = profile || {};
+  return String(profile.status || profile.lifecycle || '').trim() || 'full';
+}
+
+function _agentPanelProfileVersionSuffix(version) {
+  version = String(version || '').trim();
+  return version ? ('@' + version) : '';
+}
+
+function _agentPanelProfileBaseDir(agent) {
+  return String(
+    (agent && (agent.worktree_repo_root || agent.directory || agent.current_path)) || ''
+  ).trim();
+}
+
+function _agentPanelProfileListKey(agent) {
+  return _agentPanelProfileBaseDir(agent) || '__default__';
+}
+
+function _agentPanelProfileListCache(agent) {
+  var key = _agentPanelProfileListKey(agent);
+  if (!_agentPanelProfileListByKey[key]) {
+    _agentPanelProfileListByKey[key] = {
+      key: key,
+      baseDir: _agentPanelProfileBaseDir(agent),
+      profiles: [],
+      issues: [],
+      requested: false,
+      loading: false,
+      error: '',
+    };
+  }
+  return _agentPanelProfileListByKey[key];
+}
+
+function _agentPanelProfileAssignmentSignature(agent) {
+  if (!agent) return '';
+  return [
+    agent.kind || '',
+    agent.agent_profile_id || '',
+    agent.agent_profile_version || '',
+    agent.effective_agent_profile_id || '',
+    agent.effective_agent_profile_version || '',
+    agent.status || '',
+  ].join('|');
+}
+
+function _agentPanelProfileUi(agent) {
+  var agentId = String((agent && agent.id) || '').trim();
+  if (!agentId) return {
+    open: false,
+    selectedProfileId: '',
+    dirty: false,
+    saving: false,
+    error: '',
+  };
+  var ui = _agentPanelProfileManagerByAgent[agentId];
+  if (!ui) {
+    ui = {
+      open: false,
+      selectedProfileId: undefined,
+      dirty: false,
+      saving: false,
+      previewLoadingProfileId: '',
+      error: '',
+      message: '',
+      boundSignature: '',
+    };
+    _agentPanelProfileManagerByAgent[agentId] = ui;
+  }
+  var signature = _agentPanelProfileAssignmentSignature(agent);
+  if (ui.selectedProfileId === undefined
+      || (ui.boundSignature !== signature && !ui.dirty && !ui.saving)) {
+    ui.selectedProfileId = String(agent.agent_profile_id || '').trim();
+    ui.boundSignature = signature;
+    ui.error = '';
+  }
+  return ui;
+}
+
+function _agentPanelProfilePreviewTargetId(agent, selectedProfileId) {
+  selectedProfileId = String(selectedProfileId || '').trim();
+  if (selectedProfileId) return selectedProfileId;
+  return _agentPanelProfileDefaultIdForKind(_agentPanelKind(agent));
+}
+
+function _agentPanelProfileFromList(agent, profileId) {
+  profileId = String(profileId || '').trim();
+  if (!profileId) return null;
+  var cache = _agentPanelProfileListCache(agent);
+  var profiles = Array.isArray(cache.profiles) ? cache.profiles : [];
+  for (var i = 0; i < profiles.length; i++) {
+    var profile = profiles[i] || {};
+    if (String(profile.id || '') === profileId) return profile;
+  }
+  return null;
+}
+
+function _agentPanelProfilePreviewFor(agent, profileId) {
+  profileId = String(profileId || '').trim();
+  if (!profileId) return null;
+  return _agentPanelProfilePreviewById[profileId] || _agentPanelProfileFromList(agent, profileId);
+}
+
+function _agentPanelProfileCompatibleProfiles(agent) {
+  var kind = _agentPanelKind(agent);
+  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var cache = _agentPanelProfileListCache(agent);
+  var profiles = Array.isArray(cache.profiles) ? cache.profiles : [];
+  var compatible = [];
+  for (var i = 0; i < profiles.length; i++) {
+    var profile = profiles[i] || {};
+    if (String(profile.base_kind || '') !== kind) continue;
+    if (String(profile.id || '') === defaultId) continue;
+    compatible.push(profile);
+  }
+  compatible.sort(function(a, b) {
+    return _agentPanelProfileDisplayName(a, a && a.id)
+      .localeCompare(_agentPanelProfileDisplayName(b, b && b.id));
+  });
+  return compatible;
+}
+
+function _agentPanelRefreshProfileManagerRender() {
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function _agentPanelRequestProfileList(agent, force) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return;
+  var cache = _agentPanelProfileListCache(agent);
+  if (!force && (cache.loading || cache.requested)) return;
+  cache.loading = true;
+  cache.requested = true;
+  cache.error = '';
+  cache.baseDir = _agentPanelProfileBaseDir(agent);
+  _agentPanelProfileLastRequestedListKey = cache.key;
+  if (typeof send === 'function') {
+    send({
+      cmd: 'agent_profile_list',
+      base_dir: cache.baseDir,
+    });
+  }
+}
+
+function _agentPanelRequestProfilePreview(agent, profileId, force) {
+  profileId = String(profileId || '').trim();
+  if (!agent || !profileId) return;
+  var ui = _agentPanelProfileUi(agent);
+  if (!force && (_agentPanelProfilePreviewById[profileId] || ui.previewLoadingProfileId === profileId)) {
+    return;
+  }
+  ui.previewLoadingProfileId = profileId;
+  ui.error = '';
+  if (typeof send === 'function') {
+    send({
+      cmd: 'agent_profile_preview',
+      profile_id: profileId,
+      base_dir: _agentPanelProfileBaseDir(agent),
+    });
+  }
+}
+
+function _agentPanelEnsureOpenProfileManagerData(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return;
+  var ui = _agentPanelProfileUi(agent);
+  if (!ui.open) return;
+  _agentPanelRequestProfileList(agent, false);
+  var targetId = _agentPanelProfilePreviewTargetId(agent, ui.selectedProfileId);
+  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, false);
+}
+
+function agentPanelToggleProfileAssignment(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return false;
+  var ui = _agentPanelProfileUi(agent);
+  ui.open = !ui.open;
+  ui.error = '';
+  if (ui.open) _agentPanelEnsureOpenProfileManagerData(agent);
+  _agentPanelRefreshProfileManagerRender();
+  return false;
+}
+
+function agentPanelRefreshProfiles(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
+  if (!agent) return false;
+  var ui = _agentPanelProfileUi(agent);
+  ui.open = true;
+  ui.error = '';
+  _agentPanelRequestProfileList(agent, true);
+  var targetId = _agentPanelProfilePreviewTargetId(agent, ui.selectedProfileId);
+  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, true);
+  _agentPanelRefreshProfileManagerRender();
+  return false;
+}
+
+function agentPanelSelectProfile(agentId, profileId) {
+  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
+  if (!agent) return false;
+  var ui = _agentPanelProfileUi(agent);
+  ui.open = true;
+  ui.selectedProfileId = String(profileId || '').trim();
+  ui.dirty = true;
+  ui.error = '';
+  ui.message = '';
+  var targetId = _agentPanelProfilePreviewTargetId(agent, ui.selectedProfileId);
+  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, false);
+  _agentPanelRefreshProfileManagerRender();
+  return false;
+}
+
+function agentPanelAssignSelectedProfile(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
+  if (!agent) return false;
+  var ui = _agentPanelProfileUi(agent);
+  var selected = String(ui.selectedProfileId || '').trim();
+  var targetId = _agentPanelProfilePreviewTargetId(agent, selected);
+  if (selected && !_agentPanelProfilePreviewById[selected]) {
+    ui.error = 'Wait for the profile preview before assigning.';
+    _agentPanelRequestProfilePreview(agent, selected, false);
+    _agentPanelRefreshProfileManagerRender();
+    return false;
+  }
+  ui.open = true;
+  ui.saving = true;
+  ui.error = '';
+  ui.message = '';
+  if (typeof send === 'function') {
+    send({
+      cmd: 'agent_profile_assign',
+      agent_id: String(agent.id || ''),
+      profile_id: selected,
+      actor_label: 'trusted-user-ui',
+    });
+  }
+  // Keep the preview target warm while the assignment request is in flight.
+  if (targetId) _agentPanelRequestProfilePreview(agent, targetId, false);
+  _agentPanelRefreshProfileManagerRender();
+  return false;
+}
+
+function agentPanelClearProfileAssignment(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
+  if (!agent) return false;
+  var ui = _agentPanelProfileUi(agent);
+  ui.selectedProfileId = '';
+  ui.dirty = true;
+  return agentPanelAssignSelectedProfile(evt, agentId);
+}
+
+function agentPanelReceiveAgentProfiles(msg) {
+  msg = msg || {};
+  var profiles = Array.isArray(msg.profiles) ? msg.profiles : [];
+  var issues = Array.isArray(msg.issues) ? msg.issues : [];
+  var updated = false;
+  for (var key in _agentPanelProfileListByKey) {
+    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileListByKey, key)) continue;
+    var cache = _agentPanelProfileListByKey[key];
+    if (!cache || (!cache.loading && key !== _agentPanelProfileLastRequestedListKey)) continue;
+    cache.profiles = profiles.slice();
+    cache.issues = issues.slice();
+    cache.loading = false;
+    cache.requested = true;
+    cache.error = '';
+    updated = true;
+  }
+  if (!updated) {
+    var fallbackKey = _agentPanelProfileLastRequestedListKey || '__default__';
+    var fallback = _agentPanelProfileListByKey[fallbackKey] || {
+      key: fallbackKey,
+      baseDir: '',
+      profiles: [],
+      issues: [],
+      requested: false,
+      loading: false,
+      error: '',
+    };
+    fallback.profiles = profiles.slice();
+    fallback.issues = issues.slice();
+    fallback.loading = false;
+    fallback.requested = true;
+    fallback.error = '';
+    _agentPanelProfileListByKey[fallbackKey] = fallback;
+  }
+  var focused = _resolveFocusedAgent();
+  if (focused) _agentPanelEnsureOpenProfileManagerData(focused);
+  _agentPanelRefreshProfileManagerRender();
+}
+
+function agentPanelReceiveAgentProfilePreview(msg) {
+  msg = msg || {};
+  var profile = msg.profile && typeof msg.profile === 'object' ? msg.profile : null;
+  if (!profile || !profile.id) return;
+  var profileId = String(profile.id || '').trim();
+  if (!profileId) return;
+  _agentPanelProfilePreviewById[profileId] = profile;
+  for (var agentId in _agentPanelProfileManagerByAgent) {
+    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileManagerByAgent, agentId)) continue;
+    var ui = _agentPanelProfileManagerByAgent[agentId];
+    if (ui && ui.previewLoadingProfileId === profileId) ui.previewLoadingProfileId = '';
+  }
+  _agentPanelRefreshProfileManagerRender();
+}
+
+function agentPanelReceiveAgentProfileAssignment(msg) {
+  msg = msg || {};
+  var status = msg.status && typeof msg.status === 'object' ? msg.status : {};
+  var agentId = String(status.agent_id || status.id || '').trim();
+  var agent = agentId ? _agentPanelAgentForId(agentId) : _resolveFocusedAgent();
+  if (agent) {
+    agent.agent_profile_id = String(status.assigned_profile_id || '').trim();
+    agent.agent_profile_version = String(status.assigned_profile_version || '').trim();
+    agent.agent_profile_assigned_at = Number(status.assigned_at || agent.agent_profile_assigned_at || 0) || 0;
+    agent.agent_profile_assigned_by = String(status.assigned_by || agent.agent_profile_assigned_by || '').trim();
+  }
+  var ui = _agentPanelProfileUi(agent);
+  ui.saving = false;
+  ui.dirty = false;
+  ui.error = '';
+  ui.message = status.pending_next_launch
+    ? 'Desired profile updated. It will apply on the next launch or relaunch.'
+    : 'Desired profile updated.';
+  ui.selectedProfileId = String(status.assigned_profile_id || '').trim();
+  ui.boundSignature = agent ? _agentPanelProfileAssignmentSignature(agent) : ui.boundSignature;
+  if (typeof _showToast === 'function') _showToast(ui.message, 'success');
+  _agentPanelRefreshProfileManagerRender();
+}
+
+function agentPanelHandleAgentProfileError(msg) {
+  var message = String((msg && (msg.message || msg.error)) || '').trim();
+  if (!message) return false;
+  var handled = false;
+  for (var agentId in _agentPanelProfileManagerByAgent) {
+    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileManagerByAgent, agentId)) continue;
+    var ui = _agentPanelProfileManagerByAgent[agentId];
+    if (!ui) continue;
+    if (ui.saving || ui.previewLoadingProfileId) {
+      ui.saving = false;
+      ui.previewLoadingProfileId = '';
+      ui.error = message;
+      handled = true;
+    }
+  }
+  for (var key in _agentPanelProfileListByKey) {
+    if (!Object.prototype.hasOwnProperty.call(_agentPanelProfileListByKey, key)) continue;
+    var cache = _agentPanelProfileListByKey[key];
+    if (cache && cache.loading) {
+      cache.loading = false;
+      cache.error = message;
+      handled = true;
+    }
+  }
+  if (!handled) return false;
+  if (typeof _showToast === 'function') _showToast(message, 'error');
+  _agentPanelRefreshProfileManagerRender();
+  return true;
+}
+
+function _agentPanelHeaderProfileControlsHtml(agent) {
+  var badge = _agentPanelProfileBadgeHtml(agent);
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return badge;
+  var agentId = String(agent.id || '');
+  var ui = _agentPanelProfileUi(agent);
+  var expanded = !!ui.open;
+  var label = expanded ? 'Hide profile UI' : 'Profile…';
+  return badge
+    + '<button type="button" class="agent-profile-header-btn"'
+    + ' data-agent-profile-expanded="' + (expanded ? 'true' : 'false') + '"'
+    + ' title="Manage desired Agent Profile assignment"'
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelToggleProfileAssignment(event,'
+      + _agentPanelJsString(agentId) + ')') + '">'
+    + _agentPanelEsc(label) + '</button>';
+}
+
+function _agentPanelProfileMetaLine(label, value, extraClass) {
+  value = String(value || '').trim();
+  if (!value) value = '—';
+  return '<div class="agent-profile-meta-line' + (extraClass ? ' ' + _agentPanelAttr(extraClass) : '') + '">'
+    + '<span class="agent-profile-meta-label">' + _agentPanelEsc(label) + '</span>'
+    + '<span class="agent-profile-meta-value">' + _agentPanelEsc(value) + '</span>'
+    + '</div>';
+}
+
+function _agentPanelProfilePolicySummary(policy) {
+  if (!policy || typeof policy !== 'object') return '';
+  var summary = String(policy.summary || '').trim();
+  if (summary) return summary;
+  var parts = [];
+  for (var key in policy) {
+    if (!Object.prototype.hasOwnProperty.call(policy, key)) continue;
+    var value = policy[key];
+    if (value == null || value === '') continue;
+    if (typeof value === 'object') continue;
+    parts.push(key.replace(/_/g, ' ') + ': ' + String(value));
+    if (parts.length >= 2) break;
+  }
+  return parts.join('; ');
+}
+
+function _agentPanelProfilePolicyHtml(profile) {
+  if (!profile || typeof profile !== 'object') return '';
+  var policies = [
+    ['Scope', profile.scope_policy],
+    ['Communication', profile.communication_policy],
+    ['Spawn', profile.spawn_policy],
+    ['Audit', profile.audit_policy],
+  ];
+  var rows = '';
+  for (var i = 0; i < policies.length; i++) {
+    var summary = _agentPanelProfilePolicySummary(policies[i][1]);
+    if (!summary) continue;
+    rows += '<div class="agent-profile-policy-row">'
+      + '<span class="agent-profile-policy-label">' + _agentPanelEsc(policies[i][0]) + '</span>'
+      + '<span class="agent-profile-policy-copy">' + _agentPanelEsc(summary) + '</span>'
+      + '</div>';
+  }
+  if (!rows) return '';
+  return '<div class="agent-profile-policy-summary">' + rows + '</div>';
+}
+
+function _agentPanelProfileWarningsHtml(profile) {
+  if (!profile || typeof profile !== 'object') return '';
+  var warnings = Array.isArray(profile.warnings) ? profile.warnings : [];
+  var html = '';
+  var profileId = String(profile.id || '').trim();
+  if (profileId === 'product-manager-draft') {
+    html += '<div class="agent-profile-scratch-warning">'
+      + 'Scratch-only Product Manager draft: do not use for live PM dogfood or as a Blueprint replacement.'
+      + '</div>';
+  }
+  if (warnings.length) {
+    html += '<ul class="agent-profile-warning-list">';
+    for (var i = 0; i < warnings.length; i++) {
+      html += '<li>' + _agentPanelEsc(warnings[i]) + '</li>';
+    }
+    html += '</ul>';
+  }
+  return html;
+}
+
+function _agentPanelProfileDeniedHtml(profile) {
+  if (!profile || typeof profile !== 'object') return '';
+  var denied = Array.isArray(profile.denied_high_risk_capabilities)
+    ? profile.denied_high_risk_capabilities
+    : [];
+  if (!denied.length) {
+    return '<div class="agent-profile-denied-empty">No high-risk capability denies reported for this profile.</div>';
+  }
+  var limit = 12;
+  var html = '<div class="agent-profile-denied">';
+  html += '<div class="agent-profile-denied-title">High-risk denied capabilities</div>';
+  html += '<div class="agent-profile-denied-chips">';
+  for (var i = 0; i < Math.min(limit, denied.length); i++) {
+    html += '<span class="agent-profile-denied-chip">' + _agentPanelEsc(denied[i]) + '</span>';
+  }
+  if (denied.length > limit) {
+    html += '<span class="agent-profile-denied-more">+' + (denied.length - limit) + ' more</span>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function _agentPanelProfilePreviewHtml(agent, ui) {
+  var selected = String((ui && ui.selectedProfileId) || '').trim();
+  var targetId = _agentPanelProfilePreviewTargetId(agent, selected);
+  var preview = _agentPanelProfilePreviewFor(agent, targetId);
+  var exactPreview = !!(targetId && _agentPanelProfilePreviewById[targetId]);
+  if (!targetId) {
+    return '<div class="agent-profile-preview agent-profile-preview-empty">'
+      + 'No compatible base-kind profile is available for preview.'
+      + '</div>';
+  }
+  var loading = ui && ui.previewLoadingProfileId === targetId;
+  if (!preview && loading) {
+    return '<div class="agent-profile-preview agent-profile-preview-loading">Loading profile preview…</div>';
+  }
+  if (!preview) {
+    return '<div class="agent-profile-preview agent-profile-preview-empty">'
+      + 'Select a profile to load its preview before assignment.'
+      + '</div>';
+  }
+  var displayName = _agentPanelProfileDisplayName(preview, targetId);
+  var version = String(preview.version || '').trim();
+  var lifecycle = String(preview.lifecycle || '').trim() || 'stable';
+  var status = _agentPanelProfileStatusLabel(preview);
+  var statusClass = status.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
+  var html = '<div class="agent-profile-preview agent-profile-preview-' + _agentPanelAttr(statusClass) + '">';
+  html += '<div class="agent-profile-preview-head">';
+  html += '<div class="agent-profile-preview-title">'
+    + _agentPanelEsc(displayName || targetId)
+    + _agentPanelEsc(_agentPanelProfileVersionSuffix(version))
+    + '</div>';
+  html += '<div class="agent-profile-preview-chips">';
+  html += '<span class="agent-profile-chip">' + _agentPanelEsc(String(preview.base_kind || _agentPanelKind(agent))) + '</span>';
+  html += '<span class="agent-profile-chip agent-profile-chip-' + _agentPanelAttr(statusClass) + '">' + _agentPanelEsc(status) + '</span>';
+  html += '<span class="agent-profile-chip">' + _agentPanelEsc('lifecycle ' + lifecycle) + '</span>';
+  if (!exactPreview && selected) {
+    html += '<span class="agent-profile-chip agent-profile-chip-pending">preview request pending</span>';
+  }
+  html += '</div></div>';
+  if (preview.description) {
+    html += '<div class="agent-profile-preview-description">'
+      + _agentPanelEsc(preview.description) + '</div>';
+  }
+  html += _agentPanelProfileWarningsHtml(preview);
+  html += _agentPanelProfileDeniedHtml(preview);
+  html += _agentPanelProfilePolicyHtml(preview);
+  html += '<div class="agent-profile-next-launch-note">'
+    + 'Assignment changes update the desired profile only; the effective MCP policy changes on next launch or relaunch.'
+    + '</div>';
+  if (loading) {
+    html += '<div class="agent-profile-preview-loading-inline">Refreshing latest preview…</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelProfileOptionsHtml(agent, ui) {
+  var kind = _agentPanelKind(agent);
+  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var selected = String((ui && ui.selectedProfileId) || '').trim();
+  var html = '<option value=""' + (!selected ? ' selected' : '') + '>'
+    + 'Default full ' + _agentPanelEsc(kind || 'agent')
+    + (defaultId ? (' (' + _agentPanelEsc(defaultId) + ')') : '')
+    + '</option>';
+  var profiles = _agentPanelProfileCompatibleProfiles(agent);
+  for (var i = 0; i < profiles.length; i++) {
+    var profile = profiles[i] || {};
+    var profileId = String(profile.id || '').trim();
+    if (!profileId) continue;
+    var label = _agentPanelProfileDisplayName(profile, profileId)
+      + _agentPanelProfileVersionSuffix(profile.version)
+      + ' · ' + _agentPanelProfileStatusLabel(profile);
+    html += '<option value="' + _agentPanelAttr(profileId) + '"'
+      + (selected === profileId ? ' selected' : '') + '>'
+      + _agentPanelEsc(label)
+      + '</option>';
+  }
+  return html;
+}
+
+function _agentPanelProfileAssignmentDisabledReason(agent, ui) {
+  ui = ui || {};
+  var selected = String(ui.selectedProfileId || '').trim();
+  var assigned = String((agent && agent.agent_profile_id) || '').trim();
+  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
+  if (ui.saving) return 'Saving assignment…';
+  if (selected) {
+    var preview = _agentPanelProfilePreviewById[selected] || null;
+    if (!preview) return 'Wait for preview before assigning.';
+    if (String(preview.base_kind || '') !== _agentPanelKind(agent)) {
+      return 'Selected profile is incompatible with this base kind.';
+    }
+    var previewVersion = String(preview.version || '').trim();
+    if (selected === assigned && (!previewVersion || !assignedVersion || previewVersion === assignedVersion)) {
+      return 'Desired profile is already set.';
+    }
+    return '';
+  }
+  if (!assigned) return 'Default full profile is already desired.';
+  return '';
+}
+
+function _agentPanelProfileAssignmentStatusHtml(agent) {
+  var kind = _agentPanelKind(agent);
+  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var snapshot = (agent && agent.effective_agent_profile_snapshot
+      && typeof agent.effective_agent_profile_snapshot === 'object')
+    ? agent.effective_agent_profile_snapshot
+    : {};
+  var effectiveId = String((agent && agent.effective_agent_profile_id) || snapshot.id || defaultId || '').trim();
+  var effectiveVersion = String((agent && agent.effective_agent_profile_version) || snapshot.version || '').trim();
+  var effectiveName = _agentPanelProfileDisplayName(snapshot, effectiveId);
+  var assignedId = String((agent && agent.agent_profile_id) || '').trim();
+  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
+  var desiredId = assignedId || defaultId;
+  var nextLaunchVersion = assignedId ? assignedVersion : '';
+  var pending = !!(desiredId && (desiredId !== effectiveId
+    || (nextLaunchVersion && effectiveVersion && nextLaunchVersion !== effectiveVersion)));
+  var desiredLabel = assignedId
+    ? (assignedId + _agentPanelProfileVersionSuffix(assignedVersion))
+    : ('default ' + (defaultId || ('full-' + kind)));
+  var effectiveLabel = (effectiveName || effectiveId || '—')
+    + _agentPanelProfileVersionSuffix(effectiveVersion);
+  var html = '<div class="agent-profile-status-grid">';
+  html += _agentPanelProfileMetaLine('Effective now', effectiveLabel);
+  html += _agentPanelProfileMetaLine('Desired next launch', desiredLabel);
+  html += _agentPanelProfileMetaLine('Lifecycle/status', _agentPanelProfileStatusLabel(snapshot));
+  html += _agentPanelProfileMetaLine(
+    'Pending',
+    pending ? 'Yes — applies on next launch/relaunch' : 'No — effective profile matches desired',
+    pending ? 'agent-profile-meta-pending' : ''
+  );
+  if (agent && agent.agent_profile_assigned_by) {
+    html += _agentPanelProfileMetaLine('Assigned by', agent.agent_profile_assigned_by);
+  }
+  if (agent && agent.agent_profile_assigned_at) {
+    html += _agentPanelProfileMetaLine('Assigned at', _agentPanelTimestamp(agent.agent_profile_assigned_at));
+  }
+  if (agent && agent.effective_agent_profile_applied_at) {
+    html += _agentPanelProfileMetaLine('Effective frozen', _agentPanelTimestamp(agent.effective_agent_profile_applied_at));
+  }
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelProfileLaunchGuidanceHtml(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
+  var status = String(agent.status || '').trim();
+  var agentId = String(agent.id || '');
+  if (status === 'stopped') {
+    return '<div class="agent-profile-launch-guidance agent-profile-launch-guidance-stopped">'
+      + '<span>Agent is stopped; relaunch when you are ready to apply the desired profile.</span>'
+      + '<button type="button" class="agent-profile-secondary-btn"'
+      + ' onclick="' + _agentPanelEventAttr('event.stopPropagation();relaunchAgent('
+        + _agentPanelJsString(agentId) + ')') + '">Relaunch to apply</button>'
+      + '</div>';
+  }
+  return '<div class="agent-profile-launch-guidance">'
+    + 'Agent is running; this UI will not stop or relaunch it. The desired profile applies on the next natural launch/relaunch.'
+    + '</div>';
+}
+
+function _agentPanelProfileManagerHtml(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
+  var kind = _agentPanelKind(agent);
+  if (kind !== 'architect' && kind !== 'engineer' && kind !== 'worker') return '';
+  var ui = _agentPanelProfileUi(agent);
+  _agentPanelEnsureOpenProfileManagerData(agent);
+  var agentId = String(agent.id || '');
+  var safeId = _agentPanelDomIdToken(agentId);
+  var cache = _agentPanelProfileListCache(agent);
+  var selected = String(ui.selectedProfileId || '').trim();
+  var disabledReason = _agentPanelProfileAssignmentDisabledReason(agent, ui);
+  var primaryLabel = selected ? 'Assign desired profile' : 'Clear desired assignment';
+  var html = '<section class="agent-profile-manager' + (ui.open ? ' open' : ' collapsed') + '"'
+    + ' data-agent-profile-manager="' + _agentPanelAttr(agentId) + '">';
+  html += '<div class="agent-profile-manager-head">';
+  html += '<div>';
+  html += '<div class="agent-profile-manager-title">Agent Profile assignment</div>';
+  html += '<div class="agent-profile-manager-subtitle">'
+    + 'Trusted-operator desired profile; effective policy stays frozen until launch.'
+    + '</div>';
+  html += '</div>';
+  html += '<button type="button" class="agent-profile-secondary-btn"'
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelToggleProfileAssignment(event,'
+      + _agentPanelJsString(agentId) + ')') + '">'
+    + _agentPanelEsc(ui.open ? 'Hide' : 'Manage')
+    + '</button>';
+  html += '</div>';
+  html += _agentPanelProfileAssignmentStatusHtml(agent);
+  if (ui.message) {
+    html += '<div class="agent-profile-message">' + _agentPanelEsc(ui.message) + '</div>';
+  }
+  if (ui.error) {
+    html += '<div class="agent-profile-error">' + _agentPanelEsc(ui.error) + '</div>';
+  }
+  if (!ui.open) {
+    html += '</section>';
+    return html;
+  }
+  html += _agentPanelProfileLaunchGuidanceHtml(agent);
+  if (cache.error) {
+    html += '<div class="agent-profile-error">' + _agentPanelEsc(cache.error) + '</div>';
+  }
+  html += '<div class="agent-profile-controls">';
+  html += '<label for="agent-profile-select-' + _agentPanelAttr(safeId) + '">Desired profile</label>';
+  html += '<select id="agent-profile-select-' + _agentPanelAttr(safeId) + '"'
+    + ' class="agent-profile-select"'
+    + ' onchange="' + _agentPanelEventAttr('agentPanelSelectProfile('
+      + _agentPanelJsString(agentId) + ', this.value)') + '"'
+    + (cache.loading ? ' disabled' : '') + '>';
+  html += _agentPanelProfileOptionsHtml(agent, ui);
+  html += '</select>';
+  if (cache.loading) {
+    html += '<span class="agent-profile-loading">Loading compatible profiles…</span>';
+  } else if (cache.requested && !_agentPanelProfileCompatibleProfiles(agent).length) {
+    html += '<span class="agent-profile-loading">No non-default compatible profiles found for base kind '
+      + _agentPanelEsc(kind) + '.</span>';
+  }
+  html += '</div>';
+  if (Array.isArray(cache.issues) && cache.issues.length) {
+    html += '<div class="agent-profile-issues">';
+    for (var issueIndex = 0; issueIndex < Math.min(cache.issues.length, 4); issueIndex++) {
+      var issue = cache.issues[issueIndex] || {};
+      html += '<div class="agent-profile-issue">'
+        + _agentPanelEsc(String(issue.severity || 'issue') + ': '
+          + (issue.message || issue.code || 'profile validation issue'))
+        + '</div>';
+    }
+    if (cache.issues.length > 4) {
+      html += '<div class="agent-profile-issue">+' + (cache.issues.length - 4) + ' more validation issues</div>';
+    }
+    html += '</div>';
+  }
+  html += _agentPanelProfilePreviewHtml(agent, ui);
+  html += '<div class="agent-profile-actions">';
+  html += '<button type="button" class="agent-profile-primary-btn"'
+    + (disabledReason ? ' disabled title="' + _agentPanelAttr(disabledReason) + '"' : '')
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelAssignSelectedProfile(event,'
+      + _agentPanelJsString(agentId) + ')') + '">'
+    + _agentPanelEsc(ui.saving ? 'Saving…' : primaryLabel)
+    + '</button>';
+  if (String(agent.agent_profile_id || '').trim()) {
+    html += '<button type="button" class="agent-profile-secondary-btn"'
+      + (ui.saving ? ' disabled' : '')
+      + ' onclick="' + _agentPanelEventAttr('return agentPanelClearProfileAssignment(event,'
+        + _agentPanelJsString(agentId) + ')') + '">Clear to default</button>';
+  }
+  html += '<button type="button" class="agent-profile-secondary-btn"'
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelRefreshProfiles(event,'
+      + _agentPanelJsString(agentId) + ')') + '">Refresh profiles</button>';
+  if (disabledReason) {
+    html += '<span class="agent-profile-disabled-reason">' + _agentPanelEsc(disabledReason) + '</span>';
+  }
+  html += '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _agentPanelBodyWithProfileManager(agent, bodyHtml) {
+  return _agentPanelProfileManagerHtml(agent) + (bodyHtml || '');
 }
 
 function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRightHtml, agentId, headerBreadcrumbHtml) {
@@ -3463,15 +4214,17 @@ function _renderEngineerPanel(agent) {
   var group = String((agent && agent.group) || '');
   var activeTab = _agentPanelActiveTab('engineer');
   var parts = _agentPanelTabRenderParts(agent, 'engineer', activeTab);
-  var bodyHtml = _agentPanelEngineerSpecializationsEditorHtml(agent)
-    + (parts.bodyHtml || '');
+  var bodyHtml = _agentPanelBodyWithProfileManager(
+    agent,
+    _agentPanelEngineerSpecializationsEditorHtml(agent) + (parts.bodyHtml || '')
+  );
   return _agentPanelShell(
     'Engineer: ' + ((agent && (agent.name || agent.id)) || 'Unknown') + ' · Group: ' + (group || '—'),
     'Journal, digest queue, assigned tasks, and completed work for this engineer\'s group.',
     'engineer',
     activeTab,
     bodyHtml,
-    (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent),
+    (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -3641,8 +4394,8 @@ function _renderWorkerPanel(agent) {
     'Per-worker event stream and task history.',
     'worker',
     activeTab,
-    parts.bodyHtml,
-    (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent),
+    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml),
+    (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -3915,8 +4668,8 @@ function _renderArchitectPanel(agent) {
     'Journal, decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
-    parts.bodyHtml,
-    (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent),
+    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml),
+    (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -4117,6 +4870,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
     parts.bodyHtml = _agentPanelEngineerSpecializationsEditorHtml(agent)
       + (parts.bodyHtml || '');
   }
+  parts.bodyHtml = _agentPanelBodyWithProfileManager(agent, parts.bodyHtml || '');
   _agentPanelSetShellTab(shell, activeTab);
   _agentPanelSetActiveTabChrome(el, activeTab);
   // TORQUE:264 follow-up: byte-equality memoize the innerHTML clobber. Under
@@ -4125,7 +4879,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   // destroys + recreates every child node, killing :hover state on tooltip
   // pseudo-elements and resetting textarea caret. Same `_torqueLastHtml`
   // pattern as `dom.topbar` / `dom.tabs` from `06611b8`.
-  var newHeaderHtml = (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent);
+  var newHeaderHtml = (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent);
   var newBodyHtml = parts.bodyHtml || '';
   var headerChanged = headerRight._torqueLastHtml !== newHeaderHtml;
   var bodyChanged = content._torqueLastHtml !== newBodyHtml;
