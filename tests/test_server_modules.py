@@ -383,6 +383,35 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertEqual(text, "Implements runtorque/torque#166.")
 
+    def test_pr_closing_issue_collection_uses_nested_board_sync_for_derived_tasks(self):
+        state = self._rewrite_state()
+        root = self._task_with_github_sync(
+            state,
+            "TORQUE:680",
+            repo="acme/repo",
+            number=166,
+        )
+        derived = self._task_with_github_sync(
+            state,
+            "TORQUE:680:1",
+            repo="acme/repo",
+            number=167,
+        )
+        derived.parent_task_id = root.id
+        derived.pipeline_depth = 1
+        derived.pipeline_root_id = root.id
+
+        issues = self.server_worktrees._collect_linked_github_issues(
+            [derived, root],
+            base_repo="acme/repo",
+        )
+
+        self.assertEqual(
+            [(issue["task_id"], issue["issue_number"]) for issue in issues],
+            [("TORQUE:680:1", 167), ("TORQUE:680", 166)],
+        )
+        self.assertEqual(issues[0]["base_repo"], "acme/repo")
+
     def test_pr_task_ref_rewrite_parses_url_only_sync_mapping(self):
         state = self._rewrite_state()
         task = state.board_add_task(
