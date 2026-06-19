@@ -1356,7 +1356,10 @@ function _agentPanelProfileBadgeHtml(agent) {
   }
   var assignedVersion = String(agent.agent_profile_version || '').trim();
   var effectiveVersion = String(agent.effective_agent_profile_version || snapshot.version || '').trim();
-  var pending = !!(assigned && (assigned !== effective || (assignedVersion && effectiveVersion && assignedVersion !== effectiveVersion)));
+  var nextLaunchId = assigned || (kind ? ('full-' + kind) : '');
+  var nextLaunchVersion = assigned ? assignedVersion : '';
+  var pending = !!(nextLaunchId && (nextLaunchId !== displayId
+    || (nextLaunchVersion && effectiveVersion && nextLaunchVersion !== effectiveVersion)));
   var warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings : [];
   var denied = Array.isArray(snapshot.denied_high_risk_capabilities)
     ? snapshot.denied_high_risk_capabilities
@@ -1372,6 +1375,7 @@ function _agentPanelProfileBadgeHtml(agent) {
     'status: ' + (status || 'full'),
   ];
   if (assigned) titleParts.push('desired assignment: ' + assigned + (assignedVersion ? ('@' + assignedVersion) : ''));
+  else if (nextLaunchId) titleParts.push('desired assignment: default ' + nextLaunchId);
   if (denied.length) titleParts.push('high-risk denied: ' + denied.slice(0, 8).join(', '));
   for (var i = 0; i < warnings.length && i < 3; i++) titleParts.push(String(warnings[i] || ''));
   return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'

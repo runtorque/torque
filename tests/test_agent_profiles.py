@@ -18,6 +18,7 @@ from torque.agent_profiles import (
     validate_profile_data,
     mcp_tool_allowed_by_policy,
     profile_policy_by_id,
+    profile_policy_from_definition,
 )
 
 
@@ -81,6 +82,26 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertEqual(categories["pm_queued_tasks"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         self.assertEqual(preview["runtime_enforcement"], "mcp_projection_when_effective_profile_is_set")
+
+    def test_profile_policy_reconstructs_grants_from_frozen_preview_snapshot(self):
+        profiles, issues = load_agent_profiles(base_dir=str(self.project))
+        self.assertFalse(issues)
+        by_id = {profile.id: profile for profile in profiles}
+
+        full_snapshot = enriched_profile_preview(by_id["full-architect"])
+        pm_snapshot = enriched_profile_preview(by_id["product-manager-draft"])
+
+        full_policy = profile_policy_from_definition(full_snapshot)
+        pm_policy = profile_policy_from_definition(pm_snapshot)
+
+        self.assertTrue(full_policy.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_engineer_hire", full_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("torque_context", full_policy))
+        self.assertFalse(pm_policy.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm_policy))
 
     def test_profile_policy_evaluator_allows_full_and_denies_pm_dangerous_tools(self):
         full_architect = profile_policy_by_id("full-architect", base_dir=str(self.project))

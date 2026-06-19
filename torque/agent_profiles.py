@@ -772,9 +772,42 @@ def _valid_profile_lookup(base_dir: str = "") -> tuple[dict[str, AgentProfileDef
     return {profile.id: profile for profile in profiles}, tuple(issues)
 
 
+def _profile_dict_with_preview_grants(data: dict[str, Any]) -> dict[str, Any]:
+    """Return profile-like data with grants reconstructed from preview snapshots.
+
+    Frozen effective launch snapshots intentionally store preview/audit data so a
+    running session is not re-bound to a changed on-disk profile definition.
+    Those previews expose granted atoms as ``capabilities[].atom`` rather than a
+    raw ``grants`` list; reconstruct grants from that frozen list for MCP policy
+    projection without doing a live profile lookup.
+    """
+
+    if data.get("grants"):
+        return data
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, list):
+        return data
+    grants: list[str] = []
+    seen: set[str] = set()
+    for item in capabilities:
+        atom = ""
+        if isinstance(item, dict):
+            atom = str(item.get("atom", "") or "").strip()
+        else:
+            atom = str(item or "").strip()
+        if atom and atom not in seen:
+            grants.append(atom)
+            seen.add(atom)
+    if not grants:
+        return data
+    enriched = dict(data)
+    enriched["grants"] = grants
+    return enriched
+
+
 def profile_policy_from_definition(profile: AgentProfileDefinition | dict[str, Any]) -> AgentProfilePolicy:
     if isinstance(profile, dict):
-        profile = AgentProfileDefinition.from_dict(profile)
+        profile = AgentProfileDefinition.from_dict(_profile_dict_with_preview_grants(profile))
     ceiling = BASE_KIND_CEILINGS.get(profile.base_kind, frozenset())
     grants = frozenset(set(profile.grants) & set(ceiling))
     return AgentProfilePolicy(
@@ -952,10 +985,23 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         assigned_profile = profile_definition_by_id(assigned_id, base_dir=base_dir)
         if assigned_profile:
             assigned_preview = enriched_profile_preview(assigned_profile)
+
+    next_launch_profile_id = assigned_id or default_full_profile_id_for_kind(kind)
+    next_launch_profile_version = str(getattr(cell, "agent_profile_version", "") or "") if assigned_id else ""
+    if next_launch_profile_id and not next_launch_profile_version:
+        next_profile = profile_definition_by_id(next_launch_profile_id, base_dir=base_dir)
+        if next_profile:
+            next_launch_profile_version = next_profile.version
+    effective_version = str(
+        getattr(cell, "effective_agent_profile_version", "")
+        or effective_preview.get("version", "")
+        or ""
+    )
     pending_next_launch = bool(
-        assigned_id
-        and (assigned_id != effective_id
-             or str(getattr(cell, "agent_profile_version", "") or "") != str(getattr(cell, "effective_agent_profile_version", "") or ""))
+        next_launch_profile_id
+        and (next_launch_profile_id != effective_id
+             or (next_launch_profile_version and effective_version
+                 and next_launch_profile_version != effective_version))
     )
     return {
         "agent_id": str(getattr(cell, "id", "") or ""),
@@ -966,10 +1012,12 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         "assigned_at": float(getattr(cell, "agent_profile_assigned_at", 0) or 0),
         "assigned_by": str(getattr(cell, "agent_profile_assigned_by", "") or ""),
         "effective_profile_id": effective_id,
-        "effective_profile_version": str(getattr(cell, "effective_agent_profile_version", "") or effective_preview.get("version", "") or ""),
+        "effective_profile_version": effective_version,
         "effective_applied_at": float(getattr(cell, "effective_agent_profile_applied_at", 0) or 0),
         "effective_profile": effective_preview,
         "assigned_profile": assigned_preview,
+        "next_launch_profile_id": next_launch_profile_id,
+        "next_launch_profile_version": next_launch_profile_version,
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
         "warnings": list(effective_preview.get("warnings", []) or []),

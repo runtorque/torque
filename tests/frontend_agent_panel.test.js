@@ -3489,3 +3489,32 @@ test('agent panel renders Agent Profile badge with draft warnings and pending as
   assert.match(panel.innerHTML, /product-manager-draft@1 \(pending next launch\)/);
   assert.match(panel.innerHTML, /architect_peer_inbox and architect_reply remain denied/);
 });
+
+test('agent panel marks cleared assignment pending default full profile next launch', () => {
+  const { context, panel } = createHarness();
+
+  setFocusedAgent(context, {
+    id: 'arch-profile-clear',
+    name: 'PM Preview Clearing',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    agent_profile_id: '',
+    agent_profile_version: '',
+    effective_agent_profile_id: 'product-manager-draft',
+    effective_agent_profile_version: '1',
+    effective_agent_profile_snapshot: {
+      id: 'product-manager-draft',
+      version: '1',
+      base_kind: 'architect',
+      status: 'draft',
+      warnings: ['cleared assignment should relaunch as full architect'],
+      denied_high_risk_capabilities: ['agent.hire_engineer'],
+    },
+  });
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /product-manager-draft@1 \(pending next launch\)/);
+  assert.match(panel.innerHTML, /desired assignment: default full-architect/);
+});

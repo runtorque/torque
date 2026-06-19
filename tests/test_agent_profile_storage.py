@@ -105,6 +105,32 @@ class AgentProfileStorageTests(unittest.TestCase):
             "product-manager-draft",
         )
 
+    def test_clearing_assignment_marks_default_full_profile_pending_next_launch(self):
+        cell = self._add_architect()
+        self.state.assign_agent_profile(
+            cell.id,
+            "product-manager-draft",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.apply_effective_agent_profile_for_launch(
+            cell,
+            base_dir=str(self.project),
+        )
+
+        status = self.state.assign_agent_profile(
+            cell.id,
+            "",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+
+        self.assertEqual(status["assigned_profile_id"], "")
+        self.assertEqual(status["next_launch_profile_id"], "full-architect")
+        self.assertEqual(status["effective_profile_id"], "product-manager-draft")
+        self.assertTrue(status["pending_next_launch"])
+        self.assertEqual(cell.effective_agent_profile_id, "product-manager-draft")
+
     def test_default_full_profile_snapshot_applies_for_unassigned_launch(self):
         cell = self._add_architect()
 
