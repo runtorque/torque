@@ -16345,6 +16345,26 @@ async def main(connection=None):
         }:
             return await _handle_initiative_command(data, state)
 
+        if cmd in {
+            "area_list",
+            "area_show",
+            "area_create",
+            "area_update",
+            "area_archive",
+            "area_link_task",
+            "area_unlink_task",
+            "area_link_decision",
+            "area_unlink_decision",
+            "area_link_initiative",
+            "area_unlink_initiative",
+            "area_link_area",
+            "area_unlink_area",
+            "area_note_create",
+            "area_note_update",
+            "area_note_archive",
+        }:
+            return await _handle_area_command(data, state)
+
         if cmd == "get_agent_message_history":
             return _handle_agent_message_history_command(data, state)
 

@@ -1,6 +1,7 @@
 import importlib
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -125,6 +126,39 @@ class PlanningAreaStateAndMCPTests(unittest.IsolatedAsyncioTestCase):
 
     async def _handle_command(self, payload):
         raise AssertionError(f"unexpected handle_command call: {payload}")
+
+    @staticmethod
+    def _closure_cell(value):
+        return (lambda x: lambda: x)(value).__closure__[0]
+
+    def _extract_server_handle_command(self):
+        server_mod = importlib.import_module("torque.server")
+        server_mod = importlib.reload(server_mod)
+        main_code = server_mod.main.__code__
+        handle_code = next(
+            const for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "handle_command"
+        )
+        closure_values = {name: None for name in handle_code.co_freevars}
+        closure_values.update({
+            "db": self.db,
+            "state": self.state,
+            "panel_log": None,
+            "bridge": types.SimpleNamespace(),
+            "handle_command": None,
+        })
+        closure = tuple(
+            self._closure_cell(closure_values[name])
+            for name in handle_code.co_freevars
+        )
+        return types.FunctionType(
+            handle_code,
+            server_mod.__dict__,
+            "handle_command",
+            None,
+            closure,
+        )
 
     async def _architect_tool(self, name, args, caller_id="arch-1"):
         text, is_error = await self.mcp_architect._dispatch_architect_tool(
@@ -298,6 +332,31 @@ class PlanningAreaStateAndMCPTests(unittest.IsolatedAsyncioTestCase):
         text, is_error = await self._worker_tool("torque_area_create", {"title": "Nope"})
         self.assertTrue(is_error)
         self.assertIn("Unknown tool", text)
+
+    async def test_main_server_dispatch_routes_area_commands(self):
+        handle_command = self._extract_server_handle_command()
+        created = await handle_command({
+            "cmd": "area_create",
+            "group": "Torque",
+            "title": "Server routed Area",
+            "actor_kind": "user",
+        })
+        self.assertEqual(created["type"], "area_created")
+        area_id = created["area"]["id"]
+        shown = await handle_command({"cmd": "area_show", "area": area_id, "group": "Torque"})
+        self.assertEqual(shown["type"], "area")
+        self.assertEqual(shown["id"], area_id)
+        note = await handle_command({
+            "cmd": "area_note_create",
+            "area": area_id,
+            "note_type": "invariant",
+            "title": "Routed note",
+            "actor_kind": "user",
+        })
+        self.assertEqual(note["type"], "area_note_created")
+        listed = await handle_command({"cmd": "area_list", "group": "Torque"})
+        self.assertEqual(listed["type"], "area_list")
+        self.assertEqual([item["id"] for item in listed["areas"]], [area_id])
 
     async def test_trusted_user_server_area_commands_validate_same_group_and_note_target(self):
         area = await self.state.create_area_async({
