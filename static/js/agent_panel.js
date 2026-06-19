@@ -1346,10 +1346,9 @@ function _agentPanelRenderTabs(kind, activeTab) {
 
 function _agentPanelProfileBadgeHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
-  var effective = String(agent.effective_agent_profile_id || '').trim();
-  var assigned = String(agent.agent_profile_id || '').trim();
-  var kind = String(agent.kind || '').trim();
-  var displayId = effective || (kind ? ('full-' + kind) : '') || assigned;
+  var profileState = _agentPanelProfileState(agent);
+  var displayId = profileState.effectiveId || profileState.desiredId || profileState.assignedId;
+  var kind = profileState.kind;
   if (!displayId) return '';
   var snapshot = (agent.effective_agent_profile_snapshot && typeof agent.effective_agent_profile_snapshot === 'object')
     ? agent.effective_agent_profile_snapshot
@@ -1359,11 +1358,8 @@ function _agentPanelProfileBadgeHtml(agent) {
     status = /^full-/.test(displayId) ? 'full' : 'restricted';
   }
   var assignedVersion = String(agent.agent_profile_version || '').trim();
-  var effectiveVersion = String(agent.effective_agent_profile_version || snapshot.version || '').trim();
-  var nextLaunchId = assigned || (kind ? ('full-' + kind) : '');
-  var nextLaunchVersion = assigned ? assignedVersion : '';
-  var pending = !!(nextLaunchId && (nextLaunchId !== displayId
-    || (nextLaunchVersion && effectiveVersion && nextLaunchVersion !== effectiveVersion)));
+  var effectiveVersion = profileState.effectiveVersion;
+  var pending = profileState.pending;
   var warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings : [];
   var denied = Array.isArray(snapshot.denied_high_risk_capabilities)
     ? snapshot.denied_high_risk_capabilities
@@ -1378,8 +1374,11 @@ function _agentPanelProfileBadgeHtml(agent) {
     'base kind: ' + (kind || '—'),
     'status: ' + (status || 'full'),
   ];
-  if (assigned) titleParts.push('desired assignment: ' + assigned + (assignedVersion ? ('@' + assignedVersion) : ''));
-  else if (nextLaunchId) titleParts.push('desired assignment: default ' + nextLaunchId);
+  if (profileState.assignedId) {
+    titleParts.push('desired assignment: ' + profileState.assignedId + (assignedVersion ? ('@' + assignedVersion) : ''));
+  } else if (profileState.desiredId) {
+    titleParts.push('desired assignment: default ' + profileState.desiredId);
+  }
   if (denied.length) titleParts.push('high-risk denied: ' + denied.slice(0, 8).join(', '));
   for (var i = 0; i < warnings.length && i < 3; i++) titleParts.push(String(warnings[i] || ''));
   return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
@@ -1393,6 +1392,49 @@ function _agentPanelProfileDefaultIdForKind(kind) {
     return 'full-' + kind;
   }
   return '';
+}
+
+function _agentPanelProfileState(agent) {
+  var kind = String((agent && agent.kind) || '').trim();
+  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var snapshot = (agent && agent.effective_agent_profile_snapshot
+      && typeof agent.effective_agent_profile_snapshot === 'object')
+    ? agent.effective_agent_profile_snapshot
+    : {};
+  var assignedId = String((agent && agent.agent_profile_id) || '').trim();
+  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
+  var effectiveId = String(
+    (agent && agent.effective_agent_profile_id)
+    || snapshot.id
+    || defaultId
+    || assignedId
+    || ''
+  ).trim();
+  var effectiveVersion = String(
+    (agent && agent.effective_agent_profile_version)
+    || snapshot.version
+    || ''
+  ).trim();
+  var desiredId = assignedId || defaultId;
+  var desiredVersion = assignedId ? assignedVersion : '';
+  var pending = !!(
+    desiredId
+    && (
+      desiredId !== effectiveId
+      || (desiredVersion && desiredVersion !== effectiveVersion)
+    )
+  );
+  return {
+    kind: kind,
+    defaultId: defaultId,
+    assignedId: assignedId,
+    assignedVersion: assignedVersion,
+    desiredId: desiredId,
+    desiredVersion: desiredVersion,
+    effectiveId: effectiveId,
+    effectiveVersion: effectiveVersion,
+    pending: pending,
+  };
 }
 
 function _agentPanelProfileDisplayName(profile, fallback) {
@@ -1474,9 +1516,13 @@ function _agentPanelProfileUi(agent) {
   var signature = _agentPanelProfileAssignmentSignature(agent);
   if (ui.selectedProfileId === undefined
       || (ui.boundSignature !== signature && !ui.dirty && !ui.saving)) {
+    var signatureChanged = ui.boundSignature !== signature;
     ui.selectedProfileId = String(agent.agent_profile_id || '').trim();
     ui.boundSignature = signature;
     ui.error = '';
+    if (signatureChanged && ui.message && !_agentPanelProfileState(agent).pending) {
+      ui.message = '';
+    }
   }
   return ui;
 }
@@ -1974,21 +2020,19 @@ function _agentPanelProfileAssignmentDisabledReason(agent, ui) {
 }
 
 function _agentPanelProfileAssignmentStatusHtml(agent) {
-  var kind = _agentPanelKind(agent);
-  var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var profileState = _agentPanelProfileState(agent);
+  var kind = profileState.kind;
+  var defaultId = profileState.defaultId;
   var snapshot = (agent && agent.effective_agent_profile_snapshot
       && typeof agent.effective_agent_profile_snapshot === 'object')
     ? agent.effective_agent_profile_snapshot
     : {};
-  var effectiveId = String((agent && agent.effective_agent_profile_id) || snapshot.id || defaultId || '').trim();
-  var effectiveVersion = String((agent && agent.effective_agent_profile_version) || snapshot.version || '').trim();
+  var effectiveId = profileState.effectiveId;
+  var effectiveVersion = profileState.effectiveVersion;
   var effectiveName = _agentPanelProfileDisplayName(snapshot, effectiveId);
-  var assignedId = String((agent && agent.agent_profile_id) || '').trim();
-  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
-  var desiredId = assignedId || defaultId;
-  var nextLaunchVersion = assignedId ? assignedVersion : '';
-  var pending = !!(desiredId && (desiredId !== effectiveId
-    || (nextLaunchVersion && effectiveVersion && nextLaunchVersion !== effectiveVersion)));
+  var assignedId = profileState.assignedId;
+  var assignedVersion = profileState.assignedVersion;
+  var pending = profileState.pending;
   var desiredLabel = assignedId
     ? (assignedId + _agentPanelProfileVersionSuffix(assignedVersion))
     : ('default ' + (defaultId || ('full-' + kind)));
@@ -2000,7 +2044,7 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
   html += _agentPanelProfileMetaLine('Lifecycle/status', _agentPanelProfileStatusLabel(snapshot));
   html += _agentPanelProfileMetaLine(
     'Pending',
-    pending ? 'Yes — applies on next launch/relaunch' : 'No — effective profile matches desired',
+    _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent),
     pending ? 'agent-profile-meta-pending' : ''
   );
   if (agent && agent.agent_profile_assigned_by) {
@@ -2014,6 +2058,28 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
   }
   html += '</div>';
   return html;
+}
+
+function _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent) {
+  profileState = profileState || {};
+  if (!profileState.pending) return 'No — effective profile matches desired';
+  var assignedAt = Number((agent && agent.agent_profile_assigned_at) || 0) || 0;
+  var appliedAt = Number((agent && agent.effective_agent_profile_applied_at) || 0) || 0;
+  var effective = String(effectiveLabel || profileState.effectiveId || '—').trim() || '—';
+  var desired = String(desiredLabel || profileState.desiredId || '—').trim() || '—';
+  if (assignedAt > 0 && appliedAt >= assignedAt) {
+    return 'Yes — last launch froze ' + effective + ', which does not match desired ' + desired;
+  }
+  if (profileState.desiredId && profileState.effectiveId && profileState.desiredId !== profileState.effectiveId) {
+    return 'Yes — effective ' + effective + ' differs from desired ' + desired;
+  }
+  if (profileState.desiredVersion) {
+    return 'Yes — effective version '
+      + (profileState.effectiveVersion || 'unknown')
+      + ' differs from desired version '
+      + profileState.desiredVersion;
+  }
+  return 'Yes — applies on next launch/relaunch';
 }
 
 function _agentPanelProfileLaunchGuidanceHtml(agent) {

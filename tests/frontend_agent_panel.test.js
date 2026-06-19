@@ -3659,7 +3659,7 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
   assert.equal(context.state.agents['arch-profile-ui'].agent_profile_id, 'product-manager-draft');
   assert.match(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
   assert.match(panel.innerHTML, /Desired next launch[\s\S]*product-manager-draft@2/);
-  assert.match(panel.innerHTML, /Pending[\s\S]*Yes — applies on next launch\/relaunch/);
+  assert.match(panel.innerHTML, /Pending[\s\S]*Yes — effective Full Architect@1 differs from desired product-manager-draft@2/);
 
   context.agentPanelClearProfileAssignment(null, 'arch-profile-ui');
   const clearCall = sendCalls.slice().reverse()
@@ -3670,6 +3670,109 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
     profile_id: '',
     actor_label: 'trusted-user-ui',
   });
+});
+
+test('agent profile manager clears stale pending message after relaunch applies desired profile', () => {
+  const { context, panel } = createHarness();
+
+  setFocusedAgent(context, {
+    id: 'arch-profile-relaunch',
+    name: 'PM Relaunch',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'stopped',
+    agent_profile_id: '',
+    agent_profile_version: '',
+    effective_agent_profile_id: 'full-architect',
+    effective_agent_profile_version: '1',
+    effective_agent_profile_snapshot: {
+      id: 'full-architect',
+      version: '1',
+      base_kind: 'architect',
+      display_name: 'Full Architect',
+      lifecycle: 'stable',
+      status: 'full',
+      warnings: [],
+      denied_high_risk_capabilities: [],
+    },
+  });
+
+  context.renderAgentPanel();
+  context.agentPanelReceiveAgentProfileAssignment({
+    type: 'agent_profile_assignment',
+    status: {
+      agent_id: 'arch-profile-relaunch',
+      assigned_profile_id: 'product-manager-draft',
+      assigned_profile_version: '2',
+      assigned_at: 100,
+      assigned_by: 'trusted-user-ui',
+      pending_next_launch: true,
+    },
+  });
+  assert.match(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
+  assert.match(panel.innerHTML, /Pending[\s\S]*Yes/);
+
+  Object.assign(context.state.agents['arch-profile-relaunch'], {
+    status: 'running',
+    effective_agent_profile_id: 'product-manager-draft',
+    effective_agent_profile_version: '2',
+    effective_agent_profile_applied_at: 120,
+    effective_agent_profile_snapshot: {
+      id: 'product-manager-draft',
+      version: '2',
+      base_kind: 'architect',
+      display_name: 'Product Manager (draft)',
+      lifecycle: 'draft',
+      status: 'draft',
+      warnings: ['Raw Architect tools are denied; use architect_product_* wrappers only'],
+      denied_high_risk_capabilities: ['agent.hire_engineer'],
+    },
+  });
+  context.renderAgentPanel();
+
+  assert.doesNotMatch(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
+  assert.doesNotMatch(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
+  assert.match(panel.innerHTML, /Product Manager \(draft\)@2/);
+  assert.match(panel.innerHTML, /Pending[\s\S]*No — effective profile matches desired/);
+});
+
+test('agent profile manager diagnoses launch snapshot that still does not match desired profile', () => {
+  const { context, panel } = createHarness();
+
+  setFocusedAgent(context, {
+    id: 'arch-profile-nonapplied',
+    name: 'PM Nonapplied',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+    agent_profile_id: 'product-manager-draft',
+    agent_profile_version: '2',
+    agent_profile_assigned_at: 100,
+    agent_profile_assigned_by: 'trusted-user-ui',
+    effective_agent_profile_id: 'full-architect',
+    effective_agent_profile_version: '1',
+    effective_agent_profile_applied_at: 120,
+    effective_agent_profile_snapshot: {
+      id: 'full-architect',
+      version: '1',
+      base_kind: 'architect',
+      display_name: 'Full Architect',
+      lifecycle: 'stable',
+      status: 'full',
+      warnings: [],
+      denied_high_risk_capabilities: [],
+    },
+  });
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /full-architect@1 \(pending next launch\)/);
+  assert.match(
+    panel.innerHTML,
+    /Pending[\s\S]*Yes — last launch froze Full Architect@1, which does not match desired product-manager-draft@2/,
+  );
 });
 
 test('agent profile manager preserves selected preview state across routine rerenders', () => {

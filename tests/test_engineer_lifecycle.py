@@ -1500,6 +1500,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             architect.directory = temp_dir
+            assigned_status = state.assign_agent_profile(
+                architect.id,
+                "product-manager-draft",
+                actor_kind="user",
+                base_dir=temp_dir,
+            )
+            self.assertTrue(assigned_status["pending_next_launch"])
             result = await self.server_mod._handle_relaunch_agent_command(
                 {"id": architect.id},
                 state,
@@ -1514,8 +1521,16 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 is_designated_engineer=lambda cell: False,
             )
 
+            applied_status = state.agent_profile_status_for_cell(
+                architect,
+                base_dir=temp_dir,
+            )
+
         self.assertIsNone(result)
         self.assertEqual(architect.kind, "architect")
+        self.assertEqual(architect.effective_agent_profile_id, "product-manager-draft")
+        self.assertEqual(architect.effective_agent_profile_version, "2")
+        self.assertFalse(applied_status["pending_next_launch"])
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
         self.assertEqual(call["env_vars"]["TORQUE_ARCHITECT_ID"], architect.id)
