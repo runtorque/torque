@@ -737,6 +737,16 @@ function connect() {
       if (typeof initiativesReceiveMutation === 'function') initiativesReceiveMutation(msg);
     } else if (msg.type === 'initiative_task_linked' || msg.type === 'initiative_task_unlinked' || msg.type === 'initiative_decision_linked' || msg.type === 'initiative_decision_unlinked') {
       if (typeof initiativesReceiveLinkMutation === 'function') initiativesReceiveLinkMutation(msg);
+    } else if (msg.type === 'area_list' || msg.type === 'planning_area_list') {
+      if (typeof areasReceiveList === 'function') areasReceiveList(msg);
+    } else if (msg.type === 'area' || msg.type === 'planning_area') {
+      if (typeof areasReceiveDetail === 'function') areasReceiveDetail(msg);
+    } else if (msg.type === 'area_created' || msg.type === 'area_updated' || msg.type === 'area_archived' || msg.type === 'planning_area_created' || msg.type === 'planning_area_updated' || msg.type === 'planning_area_archived') {
+      if (typeof areasReceiveMutation === 'function') areasReceiveMutation(msg);
+    } else if (msg.type === 'area_linked' || msg.type === 'area_unlinked' || msg.type === 'planning_area_linked' || msg.type === 'planning_area_unlinked') {
+      if (typeof areasReceiveLinkMutation === 'function') areasReceiveLinkMutation(msg);
+    } else if (msg.type === 'area_note_created' || msg.type === 'area_note_updated' || msg.type === 'area_note_archived' || msg.type === 'planning_area_note_created' || msg.type === 'planning_area_note_updated' || msg.type === 'planning_area_note_archived') {
+      if (typeof areasReceiveNoteMutation === 'function') areasReceiveNoteMutation(msg);
     } else if (msg.type === 'error') {
       if (typeof healthMetricsReceiveHistory === 'function'
           && typeof healthMetricsState !== 'undefined'
@@ -758,6 +768,7 @@ function connect() {
         return;
       }
       if (typeof missionControlHandleError === 'function' && missionControlHandleError(msg)) return;
+      if (typeof areasHandleError === 'function' && areasHandleError(msg)) return;
       if (typeof initiativesHandleError === 'function' && initiativesHandleError(msg)) return;
       var systemPromptErrorHandled = false;
       if (typeof _showSystemPromptPreviewError === 'function') {
@@ -1746,6 +1757,14 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'initiative_upsert':
       case 'initiative_link_upsert':
       case 'initiative_link_remove':
+      case 'area_upsert':
+      case 'area_link_upsert':
+      case 'area_link_remove':
+      case 'area_note_upsert':
+      case 'planning_area_upsert':
+      case 'planning_area_link_upsert':
+      case 'planning_area_link_remove':
+      case 'planning_area_note_upsert':
         _markSurface(flags, 'initiatives');
         break;
       case 'behavior_overlay_version_append':
@@ -3315,6 +3334,33 @@ function _applyDelta(ops) {
       case 'initiative_link_remove': {
         if (typeof initiativesLoadDetail === 'function' && op.initiative_id && typeof _initiativesSelectedId !== 'undefined' && _initiativesSelectedId === op.initiative_id) {
           initiativesLoadDetail(op.initiative_id, { force: true });
+        }
+        break;
+      }
+
+      case 'area_upsert':
+      case 'planning_area_upsert': {
+        if (!state.areas) state.areas = {};
+        var area = Object.assign({}, op);
+        delete area.op;
+        if (area.id) state.areas[area.id] = Object.assign({}, state.areas[area.id] || {}, area);
+        break;
+      }
+
+      case 'area_link_upsert':
+      case 'area_link_remove':
+      case 'planning_area_link_upsert':
+      case 'planning_area_link_remove': {
+        if (typeof areasLoadDetail === 'function' && op.area_id && typeof _areasSelectedId !== 'undefined' && _areasSelectedId === op.area_id) {
+          areasLoadDetail(op.area_id, { force: true });
+        }
+        break;
+      }
+
+      case 'area_note_upsert':
+      case 'planning_area_note_upsert': {
+        if (typeof areasLoadDetail === 'function' && op.area_id && typeof _areasSelectedId !== 'undefined' && _areasSelectedId === op.area_id) {
+          areasLoadDetail(op.area_id, { force: true });
         }
         break;
       }

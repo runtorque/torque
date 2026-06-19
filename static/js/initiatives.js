@@ -15,6 +15,20 @@ var INITIATIVE_SCOPE_FIELDS = [
   'out_of_scope',
   'done_definition',
 ];
+var PLANNING_TABS = ['initiatives', 'areas'];
+var AREA_LIFECYCLES = ['planned', 'experimental', 'active_investment', 'stable', 'maintenance', 'deprecated', 'retired'];
+var AREA_NOTE_TYPES = ['caveat', 'tech_debt', 'open_question', 'follow_up', 'invariant'];
+var AREA_LINK_RELATIONS = ['related', 'depends_on', 'supports'];
+var AREA_SCOPE_FIELDS = [
+  'title',
+  'area_type',
+  'lifecycle',
+  'summary',
+  'user_purpose',
+  'system_purpose',
+  'in_scope',
+  'out_of_scope',
+];
 
 var _initiativesLoadedGroup = null;
 var _initiativesLoadingGroup = null;
@@ -28,6 +42,27 @@ var _initiativesDraftsById = {};
 var _initiativesTaskCreatePending = null;
 var _initiativesTaskCreateLinking = null;
 var _initiativesTaskCreateStatusById = {};
+var _planningActiveTab = 'initiatives';
+var _areasLoadedGroup = null;
+var _areasLoadingGroup = null;
+var _areasSelectedId = '';
+var _areasDetail = null;
+var _areasDetailLoadingId = '';
+var _areasSaving = false;
+var _areasLastError = '';
+var _areasSearch = '';
+var _areasLifecycleFilter = '';
+var _areasTypeFilter = '';
+var _areasDraftsById = {};
+var _areasNoteDraftsByKey = {};
+var _areasEditingNoteId = '';
+var _areasSectionExpanded = {
+  initiatives: true,
+  tasks: true,
+  decisions: true,
+  areas: true,
+  notes: true,
+};
 
 function _initiativesGroup() {
   if (typeof _currentGroup === 'function') return _currentGroup() || '';
@@ -41,9 +76,31 @@ function _initiativesPanelVisible() {
   );
 }
 
+function _planningTabVisible(tab) {
+  if (!_initiativesPanelVisible()) return false;
+  return String(_planningActiveTab || 'initiatives') === String(tab || 'initiatives');
+}
+
+function planningSetTab(tab) {
+  tab = String(tab || 'initiatives');
+  if (PLANNING_TABS.indexOf(tab) < 0) tab = 'initiatives';
+  _initiativesCaptureDrafts();
+  _areasCaptureDrafts();
+  _areasCaptureNoteDrafts();
+  _planningActiveTab = tab;
+  if (tab === 'areas') areasEnsureLoaded();
+  else initiativesEnsureLoaded();
+  if (typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
+}
+
 function _initiativesEnsureState() {
   if (!state) state = {};
   if (!state.initiatives || typeof state.initiatives !== 'object') state.initiatives = {};
+}
+
+function _areasEnsureState() {
+  if (!state) state = {};
+  if (!state.areas || typeof state.areas !== 'object') state.areas = {};
 }
 
 function _initiativesListForGroup(group) {
@@ -106,7 +163,9 @@ function initiativesBeginGroupSwitch() {
     _initiativesDetailLoadingId = '';
     _initiativesLastError = '';
   }
-  initiativesEnsureLoaded({ force: true });
+  if (typeof areasBeginGroupSwitch === 'function') areasBeginGroupSwitch({ render: false });
+  if (_planningActiveTab === 'areas') areasEnsureLoaded({ force: true });
+  else initiativesEnsureLoaded({ force: true });
   renderInitiativesPanel();
 }
 
@@ -724,10 +783,768 @@ function _renderInitiativeDetail() {
   return html;
 }
 
+function _areaNormalizeLifecycle(value) {
+  value = String(value || '').trim().toLowerCase();
+  return AREA_LIFECYCLES.indexOf(value) >= 0 ? value : 'planned';
+}
+
+function _areaLifecycleLabel(value) {
+  return String(value || '').replace(/_/g, ' ');
+}
+
+function _areaNoteTypeLabel(value) {
+  return String(value || '').replace(/_/g, ' ');
+}
+
+function _areasListForGroup(group) {
+  _areasEnsureState();
+  var g = String(group || '');
+  var items = [];
+  for (var id in state.areas) {
+    var item = state.areas[id];
+    if (!item) continue;
+    if (g && String(item.group || item.group_name || '') !== g) continue;
+    if (item.archived || String(item.archived_at || '').trim()) continue;
+    items.push(item);
+  }
+  items.sort(function(a, b) {
+    var al = AREA_LIFECYCLES.indexOf(_areaNormalizeLifecycle(a.lifecycle));
+    var bl = AREA_LIFECYCLES.indexOf(_areaNormalizeLifecycle(b.lifecycle));
+    if (al !== bl) return al - bl;
+    var at = String(a.area_type || '').toLowerCase();
+    var bt = String(b.area_type || '').toLowerCase();
+    if (at !== bt) return at.localeCompare(bt);
+    return String(a.title || a.id || '').localeCompare(String(b.title || b.id || ''));
+  });
+  return items;
+}
+
+function _areasFilteredList(group) {
+  var q = String(_areasSearch || '').trim().toLowerCase();
+  var lifecycle = String(_areasLifecycleFilter || '').trim().toLowerCase();
+  var areaType = String(_areasTypeFilter || '').trim().toLowerCase();
+  return _areasListForGroup(group).filter(function(item) {
+    if (lifecycle && _areaNormalizeLifecycle(item.lifecycle) !== lifecycle) return false;
+    if (areaType && String(item.area_type || '').trim().toLowerCase() !== areaType) return false;
+    if (!q) return true;
+    var haystack = [
+      item.id,
+      item.slug,
+      item.title,
+      item.area_type,
+      item.lifecycle,
+      item.summary,
+      item.user_purpose,
+      item.system_purpose,
+    ].join(' ').toLowerCase();
+    return haystack.indexOf(q) >= 0;
+  });
+}
+
+function _areasTypeOptions(group) {
+  var seen = {};
+  _areasListForGroup(group).forEach(function(item) {
+    var value = String(item.area_type || '').trim();
+    if (value) seen[value] = true;
+  });
+  return Object.keys(seen).sort(function(a, b) { return a.localeCompare(b); });
+}
+
+function areasEnsureLoaded(opts) {
+  opts = opts || {};
+  var group = _initiativesGroup();
+  if (!group && !opts.force) return false;
+  if (!opts.force && (_areasLoadedGroup === group || _areasLoadingGroup === group)) return false;
+  _areasLoadingGroup = group;
+  _areasLastError = '';
+  if (typeof send === 'function') {
+    send({ cmd: 'area_list', group: group, include_archived: false, limit: 500 });
+  }
+  return true;
+}
+
+function areasRefresh() {
+  areasEnsureLoaded({ force: true });
+  if (_areasSelectedId) areasLoadDetail(_areasSelectedId, { force: true });
+}
+
+function areasBeginGroupSwitch(opts) {
+  opts = opts || {};
+  var group = _initiativesGroup() || '';
+  if (_areasLoadedGroup !== group) {
+    _areasSelectedId = '';
+    _areasDetail = null;
+    _areasDetailLoadingId = '';
+    _areasLastError = '';
+    _areasSearch = '';
+    _areasLifecycleFilter = '';
+    _areasTypeFilter = '';
+    _areasEditingNoteId = '';
+  }
+  if (_planningActiveTab === 'areas') areasEnsureLoaded({ force: true });
+  if (opts.render !== false) renderInitiativesPanel();
+}
+
+function areasReceiveList(msg) {
+  _areasEnsureState();
+  var group = (msg && msg.group != null) ? String(msg.group || '') : _initiativesGroup();
+  var areas = (msg && (msg.areas || msg.planning_areas)) || [];
+  for (var existingId in state.areas) {
+    var existing = state.areas[existingId];
+    if (existing && String(existing.group || existing.group_name || '') === group) {
+      delete state.areas[existingId];
+    }
+  }
+  areas.forEach(function(item) {
+    if (!item || !item.id) return;
+    state.areas[item.id] = Object.assign({}, item);
+  });
+  if (_areasLoadingGroup === group) _areasLoadingGroup = null;
+  _areasLoadedGroup = group;
+  if (_areasSelectedId && !state.areas[_areasSelectedId]) {
+    _areasSelectedId = '';
+    _areasDetail = null;
+  }
+  renderInitiativesPanel();
+}
+
+function areasReceiveDetail(msg) {
+  if (!msg) return;
+  _areasEnsureState();
+  var payload = msg.area || msg.planning_area || msg;
+  if (!payload || !payload.id) return;
+  state.areas[payload.id] = Object.assign({}, state.areas[payload.id] || {}, payload);
+  _areasDetailLoadingId = '';
+  _areasDetail = Object.assign({}, payload);
+  if (!_areasSelectedId) _areasSelectedId = payload.id;
+  if (typeof lazyLoadDecisions === 'function') lazyLoadDecisions();
+  if (typeof initiativesEnsureLoaded === 'function') initiativesEnsureLoaded();
+  renderInitiativesPanel();
+}
+
+function areasReceiveMutation(msg) {
+  var area = msg && (msg.area || msg.planning_area || (msg.id ? msg : null));
+  if (area && area.id) {
+    _areasEnsureState();
+    state.areas[area.id] = Object.assign({}, state.areas[area.id] || {}, area);
+    _areasSaving = false;
+    _areasLastError = '';
+    delete _areasDraftsById[area.id];
+    if (_areasSelectedId === area.id) {
+      areasLoadDetail(area.id, { force: true });
+    }
+  }
+  areasEnsureLoaded({ force: true });
+  renderInitiativesPanel();
+}
+
+function areasReceiveLinkMutation(msg) {
+  _areasSaving = false;
+  _areasLastError = '';
+  var areaId = String(
+    (msg && msg.area_id)
+    || (msg && msg.link && msg.link.area_id)
+    || (msg && msg.removed && msg.removed.area_id)
+    || _areasSelectedId
+    || ''
+  );
+  if (areaId) areasLoadDetail(areaId, { force: true });
+  areasEnsureLoaded({ force: true });
+  renderInitiativesPanel();
+}
+
+function areasReceiveNoteMutation(msg) {
+  _areasSaving = false;
+  _areasLastError = '';
+  var note = msg && (msg.note || msg.planning_area_note || null);
+  var areaId = String((note && note.area_id) || _areasSelectedId || '');
+  if (note && note.id) {
+    delete _areasNoteDraftsByKey['note:' + note.id];
+    if (String(_areasEditingNoteId || '') === String(note.id || '')) _areasEditingNoteId = '';
+  }
+  if (areaId) areasLoadDetail(areaId, { force: true });
+  renderInitiativesPanel();
+}
+
+function areasHandleError(msg) {
+  if (!_planningTabVisible('areas')) return false;
+  var text = String((msg && msg.message) || 'Area command failed');
+  if (text.toLowerCase().indexOf('area') < 0
+      && !_areasSaving
+      && !_areasDetailLoadingId
+      && !_areasLoadingGroup) {
+    return false;
+  }
+  _areasSaving = false;
+  _areasDetailLoadingId = '';
+  _areasLoadingGroup = null;
+  _areasLastError = text;
+  renderInitiativesPanel();
+  return true;
+}
+
+function areasLoadDetail(id, opts) {
+  id = String(id || '').trim();
+  if (!id) return false;
+  opts = opts || {};
+  if (!opts.force && _areasDetail && _areasDetail.id === id) return false;
+  if (!opts.force && _areasDetailLoadingId === id) return false;
+  _areasDetailLoadingId = id;
+  _areasLastError = '';
+  if (typeof send === 'function') {
+    send({ cmd: 'area_show', area: id, group: _initiativesGroup() });
+  }
+  return true;
+}
+
+function areasSelect(id) {
+  id = String(id || '').trim();
+  _areasCaptureDrafts();
+  _areasCaptureNoteDrafts();
+  _areasSelectedId = id;
+  _areasDetail = null;
+  _areasLastError = '';
+  _areasEditingNoteId = '';
+  if (id) areasLoadDetail(id, { force: true });
+  renderInitiativesPanel();
+}
+
+function areasCloseDetail() {
+  _areasCaptureDrafts();
+  _areasCaptureNoteDrafts();
+  _areasSelectedId = '';
+  _areasDetail = null;
+  _areasDetailLoadingId = '';
+  _areasEditingNoteId = '';
+  renderInitiativesPanel();
+}
+
+function areasSetSearch(value) {
+  _areasSearch = String(value || '');
+  renderInitiativesPanel();
+}
+
+function areasSetLifecycleFilter(value) {
+  _areasLifecycleFilter = String(value || '');
+  renderInitiativesPanel();
+}
+
+function areasSetTypeFilter(value) {
+  _areasTypeFilter = String(value || '');
+  renderInitiativesPanel();
+}
+
+function _areaFieldElement(field) {
+  return document.getElementById('area-field-' + field.replace(/_/g, '-'));
+}
+
+function _areasCaptureDrafts() {
+  if (!_areasSelectedId || typeof document === 'undefined') return;
+  var panel = document.getElementById('panel-initiatives');
+  if (!panel) return;
+  var draft = {};
+  var found = false;
+  AREA_SCOPE_FIELDS.forEach(function(field) {
+    var el = _areaFieldElement(field);
+    if (!el) return;
+    if ('value' in el) {
+      draft[field] = el.value;
+      found = true;
+    }
+  });
+  if (found) _areasDraftsById[_areasSelectedId] = draft;
+}
+
+function _areaDetailBase() {
+  var base = {};
+  if (_areasSelectedId && state && state.areas && state.areas[_areasSelectedId]) {
+    base = Object.assign({}, state.areas[_areasSelectedId]);
+  }
+  if (_areasDetail && _areasDetail.id === _areasSelectedId) {
+    base = Object.assign(base, _areasDetail);
+  }
+  var draft = _areasDraftsById[_areasSelectedId];
+  if (draft) base = Object.assign(base, draft);
+  return base;
+}
+
+function areasFieldChanged() {
+  _areasCaptureDrafts();
+}
+
+function areasSaveDetail() {
+  if (!_areasSelectedId) return;
+  _areasCaptureDrafts();
+  var draft = _areasDraftsById[_areasSelectedId] || {};
+  var payload = {
+    cmd: 'area_update',
+    area: _areasSelectedId,
+    group: _initiativesGroup(),
+  };
+  AREA_SCOPE_FIELDS.forEach(function(field) {
+    if (Object.prototype.hasOwnProperty.call(draft, field)) payload[field] = draft[field];
+  });
+  _areasSaving = true;
+  _areasLastError = '';
+  if (typeof send === 'function') send(payload);
+  renderInitiativesPanel();
+}
+
+function areasToggleSection(section) {
+  section = String(section || '');
+  _areasSectionExpanded[section] = !_areaSectionOpen(section);
+  renderInitiativesPanel();
+}
+
+function _areaSectionOpen(section) {
+  if (!section) return true;
+  return _areasSectionExpanded[section] !== false;
+}
+
+function _areasNoteKey(noteId) {
+  noteId = String(noteId || '').trim();
+  return noteId ? ('note:' + noteId) : ('new:' + (_areasSelectedId || ''));
+}
+
+function _areasCaptureNoteDrafts() {
+  if (!_areasSelectedId || typeof document === 'undefined') return;
+  var ids = ['new'];
+  if (_areasEditingNoteId) ids.push(String(_areasEditingNoteId));
+  ids.forEach(function(noteId) {
+    var prefix = noteId === 'new' ? 'area-note-new' : 'area-note-edit-' + noteId;
+    var typeEl = document.getElementById(prefix + '-type');
+    var titleEl = document.getElementById(prefix + '-title');
+    var bodyEl = document.getElementById(prefix + '-body');
+    var targetTypeEl = document.getElementById(prefix + '-target-type');
+    var targetIdEl = document.getElementById(prefix + '-target-id');
+    if (!typeEl && !titleEl && !bodyEl && !targetTypeEl && !targetIdEl) return;
+    _areasNoteDraftsByKey[_areasNoteKey(noteId === 'new' ? '' : noteId)] = {
+      note_type: typeEl ? typeEl.value : '',
+      title: titleEl ? titleEl.value : '',
+      body: bodyEl ? bodyEl.value : '',
+      target_type: targetTypeEl ? targetTypeEl.value : '',
+      target_id: targetIdEl ? targetIdEl.value : '',
+    };
+  });
+}
+
+function areasNoteChanged() {
+  _areasCaptureNoteDrafts();
+}
+
+function _areaNoteDraft(note) {
+  note = note || {};
+  var key = _areasNoteKey(note.id || '');
+  var base = {
+    note_type: note.note_type || 'caveat',
+    title: note.title || '',
+    body: note.body || '',
+    target_type: note.target_type || '',
+    target_id: note.target_id || '',
+  };
+  if (_areasNoteDraftsByKey[key]) base = Object.assign(base, _areasNoteDraftsByKey[key]);
+  return base;
+}
+
+function areasEditNote(noteId) {
+  _areasCaptureNoteDrafts();
+  _areasEditingNoteId = String(noteId || '');
+  renderInitiativesPanel();
+}
+
+function areasCancelEditNote() {
+  _areasCaptureNoteDrafts();
+  _areasEditingNoteId = '';
+  renderInitiativesPanel();
+}
+
+function areasCreateNote() {
+  if (!_areasSelectedId) return;
+  _areasCaptureNoteDrafts();
+  var draft = _areasNoteDraftsByKey[_areasNoteKey('')] || {};
+  if (!String(draft.title || '').trim()) {
+    _areasLastError = 'Area note title is required.';
+    renderInitiativesPanel();
+    return;
+  }
+  _areasSaving = true;
+  _areasLastError = '';
+  if (typeof send === 'function') {
+    send({
+      cmd: 'area_note_create',
+      area: _areasSelectedId,
+      group: _initiativesGroup(),
+      note_type: draft.note_type || 'caveat',
+      title: draft.title || '',
+      body: draft.body || '',
+      target_type: draft.target_type || '',
+      target_id: draft.target_id || '',
+    });
+  }
+  renderInitiativesPanel();
+}
+
+function areasSaveNote(noteId) {
+  noteId = String(noteId || '').trim();
+  if (!_areasSelectedId || !noteId) return;
+  _areasCaptureNoteDrafts();
+  var draft = _areasNoteDraftsByKey[_areasNoteKey(noteId)] || {};
+  if (!String(draft.title || '').trim()) {
+    _areasLastError = 'Area note title is required.';
+    renderInitiativesPanel();
+    return;
+  }
+  _areasSaving = true;
+  _areasLastError = '';
+  if (typeof send === 'function') {
+    send({
+      cmd: 'area_note_update',
+      area: _areasSelectedId,
+      note: noteId,
+      group: _initiativesGroup(),
+      note_type: draft.note_type || 'caveat',
+      title: draft.title || '',
+      body: draft.body || '',
+      target_type: draft.target_type || '',
+      target_id: draft.target_id || '',
+    });
+  }
+  renderInitiativesPanel();
+}
+
+function areasArchiveNote(noteId) {
+  noteId = String(noteId || '').trim();
+  if (!_areasSelectedId || !noteId) return;
+  _areasSaving = true;
+  _areasLastError = '';
+  if (typeof send === 'function') {
+    send({ cmd: 'area_note_archive', area: _areasSelectedId, note: noteId, group: _initiativesGroup() });
+  }
+  renderInitiativesPanel();
+}
+
+function areasLinkTarget(linkType) {
+  linkType = String(linkType || '').trim();
+  if (!_areasSelectedId || !linkType) return;
+  var id = 'area-link-' + linkType + '-input';
+  var el = document.getElementById(id);
+  var ref = el ? String(el.value || '').trim() : '';
+  if (!ref) return;
+  var payload = { cmd: 'area_link_' + linkType, area: _areasSelectedId, group: _initiativesGroup() };
+  payload[linkType] = ref;
+  if (linkType === 'area') {
+    payload.target_area = ref;
+    delete payload.area;
+    payload.area = _areasSelectedId;
+    var relEl = document.getElementById('area-link-area-relation');
+    payload.relation = relEl ? String(relEl.value || 'related') : 'related';
+  }
+  _areasSaving = true;
+  if (typeof send === 'function') send(payload);
+  if (el) el.value = '';
+  renderInitiativesPanel();
+}
+
+function areasUnlinkTarget(linkType, targetId, relation) {
+  linkType = String(linkType || '').trim();
+  targetId = String(targetId || '').trim();
+  if (!_areasSelectedId || !linkType || !targetId) return;
+  var payload = { cmd: 'area_unlink_' + linkType, area: _areasSelectedId, group: _initiativesGroup() };
+  payload[linkType] = targetId;
+  if (linkType === 'area') {
+    payload.area = _areasSelectedId;
+    payload.target_area = targetId;
+    payload.relation = String(relation || 'related');
+  }
+  _areasSaving = true;
+  if (typeof send === 'function') send(payload);
+  renderInitiativesPanel();
+}
+
+function _areaInput(field, label, value, opts) {
+  opts = opts || {};
+  var id = 'area-field-' + field.replace(/_/g, '-');
+  var html = '<label for="' + id + '">' + esc(label) + '</label>';
+  if (opts.select) {
+    html += '<select id="' + id + '" data-area-field="' + esc(field) + '" onchange="areasFieldChanged()">';
+    opts.select.forEach(function(option) {
+      html += '<option value="' + esc(option) + '"' + (String(value || '') === option ? ' selected' : '') + '>' + esc(opts.labeler ? opts.labeler(option) : option) + '</option>';
+    });
+    html += '</select>';
+  } else if (opts.textarea) {
+    html += '<textarea id="' + id + '" data-area-field="' + esc(field) + '" rows="' + (opts.rows || 3) + '" oninput="areasFieldChanged()">' + esc(value || '') + '</textarea>';
+  } else {
+    html += '<input id="' + id + '" data-area-field="' + esc(field) + '" value="' + esc(value || '') + '" oninput="areasFieldChanged()" autocomplete="off">';
+  }
+  return html;
+}
+
+function _areaShortText(item) {
+  var text = String((item && (item.summary || item.user_purpose || item.system_purpose)) || '').trim();
+  if (!text) return 'No summary yet.';
+  return text.length > 180 ? text.slice(0, 177) + '...' : text;
+}
+
+function _areaCountLabel(count) {
+  count = Number(count || 0);
+  return count + ' area' + (count === 1 ? '' : 's');
+}
+
+function _areaTitle(areaId) {
+  areaId = String(areaId || '');
+  var area = state && state.areas ? state.areas[areaId] : null;
+  return (area && (area.title || area.slug)) || areaId;
+}
+
+function _initiativeTitle(initiativeId) {
+  initiativeId = String(initiativeId || '');
+  var initiative = state && state.initiatives ? state.initiatives[initiativeId] : null;
+  return (initiative && (initiative.title || initiative.slug)) || initiativeId;
+}
+
+function _areaTaskTitle(taskId) {
+  taskId = String(taskId || '');
+  var task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  return (task && (task.task || task.title || task.name)) || taskId;
+}
+
+function _renderAreaCard(item) {
+  var id = String(item.id || '');
+  var selected = id && id === _areasSelectedId;
+  var lifecycle = _areaNormalizeLifecycle(item.lifecycle);
+  var html = '';
+  html += '<button type="button" class="area-card' + (selected ? ' selected' : '') + '" data-area-id="' + esc(id) + '" onclick="areasSelect(\'' + esc(id) + '\')">';
+  html += '<div class="area-card-top"><span class="area-card-title">' + esc(item.title || id || 'Untitled area') + '</span>';
+  html += '<span class="area-lifecycle">' + esc(_areaLifecycleLabel(lifecycle)) + '</span></div>';
+  html += '<div class="area-card-meta">' + esc((item.area_type || 'untyped') + (item.slug ? ' · ' + item.slug : '')) + '</div>';
+  html += '<div class="area-card-summary">' + esc(_areaShortText(item)) + '</div>';
+  html += '</button>';
+  return html;
+}
+
+function _renderAreasFilters(group, total, filtered) {
+  var typeOptions = _areasTypeOptions(group);
+  var html = '<div class="areas-filters">';
+  html += '<input id="areas-search" value="' + esc(_areasSearch || '') + '" placeholder="Search areas" oninput="areasSetSearch(this.value)" autocomplete="off">';
+  html += '<select id="areas-lifecycle-filter" onchange="areasSetLifecycleFilter(this.value)">';
+  html += '<option value="">All lifecycles</option>';
+  AREA_LIFECYCLES.forEach(function(lifecycle) {
+    html += '<option value="' + esc(lifecycle) + '"' + (_areasLifecycleFilter === lifecycle ? ' selected' : '') + '>' + esc(_areaLifecycleLabel(lifecycle)) + '</option>';
+  });
+  html += '</select>';
+  html += '<select id="areas-type-filter" onchange="areasSetTypeFilter(this.value)">';
+  html += '<option value="">All types</option>';
+  typeOptions.forEach(function(type) {
+    html += '<option value="' + esc(type) + '"' + (_areasTypeFilter === type ? ' selected' : '') + '>' + esc(type) + '</option>';
+  });
+  html += '</select>';
+  html += '<span class="area-filter-count">' + esc(filtered + ' / ' + total) + '</span>';
+  html += '</div>';
+  return html;
+}
+
+function _renderAreasList(group) {
+  var all = _areasListForGroup(group);
+  var items = _areasFilteredList(group);
+  var html = '<div class="areas-list-pane">';
+  html += _renderAreasFilters(group, all.length, items.length);
+  html += '<div class="areas-list-scroll" id="areas-list-scroll">';
+  if (!items.length) {
+    var empty = all.length ? 'No areas match the current search/filter.' : 'No areas yet.';
+    html += '<div class="initiative-empty area-empty">' + esc(empty) + '</div>';
+  } else {
+    items.forEach(function(item) { html += _renderAreaCard(item); });
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function _renderAreaSection(key, title, bodyHtml) {
+  var open = _areaSectionOpen(key);
+  var html = '<section class="initiative-links-section area-section" data-area-section="' + esc(key) + '">';
+  html += '<button type="button" class="area-section-toggle" onclick="areasToggleSection(\'' + esc(key) + '\')">';
+  html += '<span>' + esc(title) + '</span><span>' + (open ? '−' : '+') + '</span></button>';
+  if (open) html += bodyHtml;
+  html += '</section>';
+  return html;
+}
+
+function _renderAreaLinkRows(detail, linkType) {
+  var links = (detail && detail.links) || {};
+  var ids = [];
+  if (linkType === 'task') ids = ((detail && detail.linked_tasks && detail.linked_tasks.items) || []).map(function(task) { return task.id || task.task_id || ''; });
+  else if (linkType === 'decision') ids = ((detail && detail.linked_decisions && (detail.linked_decisions.ids || detail.linked_decisions.items)) || []).map(function(item) { return typeof item === 'string' ? item : (item.id || ''); });
+  else if (linkType === 'initiative') ids = (links.initiatives || []).slice();
+  var html = '<div class="initiative-links-list">';
+  if (!ids.length) html += '<div class="initiative-empty compact">No linked ' + esc(linkType === 'initiative' ? 'initiatives' : linkType + 's') + '.</div>';
+  ids.forEach(function(id) {
+    id = String(id || '');
+    var title = id;
+    var meta = id;
+    if (linkType === 'task') title = _areaTaskTitle(id);
+    if (linkType === 'decision') title = _decisionTitle(id);
+    if (linkType === 'initiative') title = _initiativeTitle(id);
+    html += '<div class="initiative-link-row">';
+    if (linkType === 'task') {
+      html += '<button type="button" class="initiative-link-main" onclick="_initiativesOpenTask(\'' + esc(id) + '\')">';
+    } else {
+      html += '<div class="initiative-link-main readonly">';
+    }
+    html += '<span class="initiative-link-title">' + esc(title) + '</span>';
+    html += '<span class="initiative-link-meta">' + esc(meta) + '</span>';
+    html += linkType === 'task' ? '</button>' : '</div>';
+    html += '<button type="button" class="initiative-unlink" onclick="areasUnlinkTarget(\'' + esc(linkType) + '\',\'' + esc(id) + '\')">Unlink</button>';
+    html += '</div>';
+  });
+  var hidden = (detail && detail.hidden_link_counts) || {};
+  var hiddenCount = hidden[linkType + 's'] || 0;
+  if (hiddenCount) html += '<div class="initiative-empty compact">' + esc(hiddenCount + ' hidden by scope.') + '</div>';
+  html += '</div><div class="initiative-link-add">';
+  html += '<input id="area-link-' + esc(linkType) + '-input" placeholder="Existing ' + esc(linkType) + ' id or slug" autocomplete="off" onkeydown="if(event.key===\'Enter\')areasLinkTarget(\'' + esc(linkType) + '\')">';
+  html += '<button type="button" onclick="areasLinkTarget(\'' + esc(linkType) + '\')">Link</button>';
+  html += '</div>';
+  return html;
+}
+
+function _renderAreaRelatedAreas(detail) {
+  var links = (detail && detail.links && detail.links.areas) || [];
+  var html = '<div class="initiative-links-list">';
+  if (!links.length) html += '<div class="initiative-empty compact">No related areas.</div>';
+  links.forEach(function(link) {
+    var id = String((link && (link.area_id || link.target_id || link.id)) || '');
+    var relation = String((link && link.relation) || 'related');
+    html += '<div class="initiative-link-row">';
+    html += '<button type="button" class="initiative-link-main" onclick="areasSelect(\'' + esc(id) + '\')">';
+    html += '<span class="initiative-link-title">' + esc(_areaTitle(id)) + '</span>';
+    html += '<span class="initiative-link-meta">' + esc(id + ' · ' + relation) + '</span>';
+    html += '</button>';
+    html += '<button type="button" class="initiative-unlink" onclick="areasUnlinkTarget(\'area\',\'' + esc(id) + '\',\'' + esc(relation) + '\')">Unlink</button>';
+    html += '</div>';
+  });
+  html += '</div><div class="initiative-link-add area-link-related-add">';
+  html += '<input id="area-link-area-input" placeholder="Existing area id or slug" autocomplete="off" onkeydown="if(event.key===\'Enter\')areasLinkTarget(\'area\')">';
+  html += '<select id="area-link-area-relation">';
+  AREA_LINK_RELATIONS.forEach(function(relation) { html += '<option value="' + esc(relation) + '">' + esc(relation) + '</option>'; });
+  html += '</select><button type="button" onclick="areasLinkTarget(\'area\')">Link</button></div>';
+  return html;
+}
+
+function _renderAreaNoteEditor(prefix, draft, submitLabel, submitCall, cancelCall) {
+  draft = draft || {};
+  var html = '<div class="area-note-editor">';
+  html += '<div class="initiative-form-grid">';
+  html += '<div><label for="' + esc(prefix) + '-type">Type</label><select id="' + esc(prefix) + '-type" oninput="areasNoteChanged()" onchange="areasNoteChanged()">';
+  AREA_NOTE_TYPES.forEach(function(type) { html += '<option value="' + esc(type) + '"' + (String(draft.note_type || 'caveat') === type ? ' selected' : '') + '>' + esc(_areaNoteTypeLabel(type)) + '</option>'; });
+  html += '</select></div>';
+  html += '<div><label for="' + esc(prefix) + '-title">Title</label><input id="' + esc(prefix) + '-title" value="' + esc(draft.title || '') + '" oninput="areasNoteChanged()" autocomplete="off"></div>';
+  html += '</div>';
+  html += '<label for="' + esc(prefix) + '-body">Body</label><textarea id="' + esc(prefix) + '-body" rows="3" oninput="areasNoteChanged()">' + esc(draft.body || '') + '</textarea>';
+  html += '<div class="initiative-form-grid">';
+  html += '<div><label for="' + esc(prefix) + '-target-type">Target type</label><select id="' + esc(prefix) + '-target-type" onchange="areasNoteChanged()">';
+  ['', 'task', 'decision', 'initiative', 'area'].forEach(function(type) { html += '<option value="' + esc(type) + '"' + (String(draft.target_type || '') === type ? ' selected' : '') + '>' + esc(type || 'none') + '</option>'; });
+  html += '</select></div>';
+  html += '<div><label for="' + esc(prefix) + '-target-id">Target id</label><input id="' + esc(prefix) + '-target-id" value="' + esc(draft.target_id || '') + '" oninput="areasNoteChanged()" autocomplete="off"></div>';
+  html += '</div><div class="initiative-detail-actions">';
+  if (cancelCall) html += '<button type="button" class="btn-secondary" onclick="' + cancelCall + '">Cancel</button>';
+  html += '<button type="button" class="btn-primary" onclick="' + submitCall + '"' + (_areasSaving ? ' disabled' : '') + '>' + esc(submitLabel) + '</button>';
+  html += '</div></div>';
+  return html;
+}
+
+function _renderAreaNotes(detail) {
+  var notes = (detail && detail.notes) || [];
+  var html = '<div class="area-notes-list">';
+  if (!notes.length) html += '<div class="initiative-empty compact">No active notes.</div>';
+  notes.forEach(function(note) {
+    var noteId = String(note.id || '');
+    var editing = noteId && String(_areasEditingNoteId || '') === noteId;
+    if (editing) {
+      html += '<div class="area-note-row editing">' + _renderAreaNoteEditor(
+        'area-note-edit-' + noteId,
+        _areaNoteDraft(note),
+        'Save note',
+        'areasSaveNote(\'' + esc(noteId) + '\')',
+        'areasCancelEditNote()'
+      ) + '</div>';
+      return;
+    }
+    html += '<div class="area-note-row">';
+    html += '<div class="area-note-top"><span class="area-note-type">' + esc(_areaNoteTypeLabel(note.note_type || 'caveat')) + '</span><strong>' + esc(note.title || 'Untitled note') + '</strong></div>';
+    if (note.body) html += '<div class="area-note-body">' + esc(note.body) + '</div>';
+    var target = note.target_hidden ? 'target hidden by scope' : [note.target_type, note.target_id].filter(Boolean).join(':');
+    if (target) html += '<div class="area-note-target">' + esc(target) + '</div>';
+    html += '<div class="area-note-actions"><button type="button" onclick="areasEditNote(\'' + esc(noteId) + '\')">Edit</button><button type="button" onclick="areasArchiveNote(\'' + esc(noteId) + '\')">Archive</button></div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '<div class="area-note-new"><h4>Add note</h4>' + _renderAreaNoteEditor('area-note-new', _areaNoteDraft({}), 'Add note', 'areasCreateNote()', '') + '</div>';
+  return html;
+}
+
+function _renderAreaDetail() {
+  if (!_areasSelectedId) {
+    return '<aside class="initiative-detail area-detail empty"><div class="initiative-empty-detail">Select an area to inspect its brief, links, and typed notes.</div></aside>';
+  }
+  var loading = _areasDetailLoadingId === _areasSelectedId && !_areasDetail;
+  var detail = _areaDetailBase();
+  var html = '<aside class="initiative-detail area-detail" id="area-detail-drawer">';
+  html += '<div class="initiative-detail-head">';
+  html += '<div><div class="initiative-detail-kicker">Area</div><h2>' + esc(detail.title || _areasSelectedId) + '</h2>';
+  html += '<div class="initiative-detail-id">' + esc(_areasSelectedId) + '</div></div>';
+  html += '<button type="button" class="initiative-close" onclick="areasCloseDetail()" title="Close">×</button>';
+  html += '</div>';
+  if (loading) html += '<div class="initiative-loading">Loading area detail...</div>';
+  html += '<div class="initiative-form area-form">';
+  html += _areaInput('title', 'Title', detail.title || '');
+  html += '<div class="initiative-form-grid">';
+  html += '<div>' + _areaInput('area_type', 'Area type', detail.area_type || '') + '</div>';
+  html += '<div>' + _areaInput('lifecycle', 'Lifecycle', _areaNormalizeLifecycle(detail.lifecycle), { select: AREA_LIFECYCLES, labeler: _areaLifecycleLabel }) + '</div>';
+  html += '</div>';
+  html += _areaInput('summary', 'Summary', detail.summary || '', { textarea: true, rows: 3 });
+  html += _areaInput('user_purpose', 'User purpose', detail.user_purpose || '', { textarea: true, rows: 3 });
+  html += _areaInput('system_purpose', 'System purpose', detail.system_purpose || '', { textarea: true, rows: 3 });
+  html += _areaInput('in_scope', 'In scope', detail.in_scope || '', { textarea: true, rows: 4 });
+  html += _areaInput('out_of_scope', 'Out of scope', detail.out_of_scope || '', { textarea: true, rows: 4 });
+  html += '<div class="initiative-detail-actions"><button type="button" class="btn-primary" onclick="areasSaveDetail()"' + (_areasSaving ? ' disabled' : '') + '>' + (_areasSaving ? 'Saving...' : 'Save area') + '</button></div>';
+  html += '</div>';
+  html += _renderAreaSection('initiatives', 'Linked initiatives', _renderAreaLinkRows(detail, 'initiative'));
+  html += _renderAreaSection('tasks', 'Linked tasks', _renderAreaLinkRows(detail, 'task'));
+  html += _renderAreaSection('decisions', 'Linked decisions', _renderAreaLinkRows(detail, 'decision'));
+  html += _renderAreaSection('areas', 'Related areas', _renderAreaRelatedAreas(detail));
+  html += _renderAreaSection('notes', 'Typed notes', _renderAreaNotes(detail));
+  html += '</aside>';
+  return html;
+}
+
+function _renderAreasWorkspace(group) {
+  areasEnsureLoaded();
+  var html = '';
+  if (_areasLastError) html += '<div class="initiative-error">' + esc(_areasLastError) + '</div>';
+  if (_areasLoadingGroup === group && _areasLoadedGroup !== group) {
+    html += '<div class="initiative-loading">Loading areas...</div>';
+  }
+  html += '<div class="areas-workspace" id="areas-workspace">';
+  html += _renderAreasList(group);
+  html += _renderAreaDetail();
+  html += '</div>';
+  return html;
+}
+
+function _renderPlanningTabs(initiativeTotal, areaTotal) {
+  var active = String(_planningActiveTab || 'initiatives');
+  var html = '<div class="planning-tabs" role="tablist" aria-label="Planning sections">';
+  html += '<button type="button" role="tab" class="planning-tab' + (active === 'initiatives' ? ' active' : '') + '" aria-selected="' + (active === 'initiatives' ? 'true' : 'false') + '" onclick="planningSetTab(\'initiatives\')">Initiatives <span>' + esc(initiativeTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="planning-tab' + (active === 'areas' ? ' active' : '') + '" aria-selected="' + (active === 'areas' ? 'true' : 'false') + '" onclick="planningSetTab(\'areas\')">Areas <span>' + esc(areaTotal) + '</span></button>';
+  html += '</div>';
+  return html;
+}
+
 function renderInitiativesPanel() {
   var panel = document.getElementById('panel-initiatives');
   if (!panel) return;
   _initiativesCaptureDrafts();
+  _areasCaptureDrafts();
+  _areasCaptureNoteDrafts();
   var snapshot = null;
   if (typeof _captureSurfaceState === 'function') {
     snapshot = _captureSurfaceState(panel, {
@@ -741,36 +1558,53 @@ function renderInitiativesPanel() {
         '#initiative-col-parked',
         '#initiative-col-shipped',
         '#initiative-detail-drawer',
+        '#areas-workspace',
+        '#areas-list-scroll',
+        '#area-detail-drawer',
       ],
       captureFocusKey: function(active) {
         if (active && active.dataset && active.dataset.field) {
           return '[data-field="' + active.dataset.field + '"]';
+        }
+        if (active && active.dataset && active.dataset.areaField) {
+          return '[data-area-field="' + active.dataset.areaField + '"]';
         }
         return '';
       },
     });
   }
   var group = _initiativesGroup();
-  initiativesEnsureLoaded();
-  var buckets = _initiativesByStatus(group);
-  var total = _initiativesListForGroup(group).length;
+  var activeTab = String(_planningActiveTab || 'initiatives');
+  if (activeTab === 'areas') areasEnsureLoaded();
+  else initiativesEnsureLoaded();
+  var initiativeTotal = _initiativesListForGroup(group).length;
+  var areaTotal = _areasListForGroup(group).length;
   var html = '';
-  html += '<div class="initiatives-panel">';
+  html += '<div class="initiatives-panel planning-panel">';
   html += '<div class="tpled-header initiatives-header">';
   html += '<div class="tpled-header-copy"><div class="tpled-header-title-row"><span class="tpled-header-title">Planning</span></div>';
-  html += '<div class="tpled-header-subtitle">Initiatives grouped by roadmap bucket for ' + esc(group || 'all groups') + '. Linked execution stays on Board tasks.</div></div>';
+  html += '<div class="tpled-header-subtitle">' + (activeTab === 'areas'
+    ? 'Areas capture compact product/system briefs, links, and typed notes for ' + esc(group || 'all groups') + '.'
+    : 'Initiatives grouped by roadmap bucket for ' + esc(group || 'all groups') + '. Linked execution stays on Board tasks.') + '</div></div>';
   html += '<div class="tpled-header-controls">';
-  html += '<span class="initiative-total">' + esc(_initiativeCountLabel(total)) + '</span>';
-  html += '<button class="tpled-new-btn" onclick="initiativesRefresh()" title="Refresh">&#x21BB;</button>';
+  html += '<span class="initiative-total">' + esc(activeTab === 'areas' ? _areaCountLabel(areaTotal) : _initiativeCountLabel(initiativeTotal)) + '</span>';
+  html += '<button class="tpled-new-btn" onclick="' + (activeTab === 'areas' ? 'areasRefresh()' : 'initiativesRefresh()') + '" title="Refresh">&#x21BB;</button>';
   html += '</div></div>';
-  if (_initiativesLastError) html += '<div class="initiative-error">' + esc(_initiativesLastError) + '</div>';
-  if (_initiativesLoadingGroup === group && _initiativesLoadedGroup !== group) {
-    html += '<div class="initiative-loading">Loading initiatives...</div>';
+  html += _renderPlanningTabs(initiativeTotal, areaTotal);
+  if (activeTab === 'areas') {
+    html += _renderAreasWorkspace(group);
+  } else {
+    var buckets = _initiativesByStatus(group);
+    if (_initiativesLastError) html += '<div class="initiative-error">' + esc(_initiativesLastError) + '</div>';
+    if (_initiativesLoadingGroup === group && _initiativesLoadedGroup !== group) {
+      html += '<div class="initiative-loading">Loading initiatives...</div>';
+    }
+    html += '<div class="initiatives-workspace" id="initiatives-workspace">';
+    html += _renderInitiativesRoadmap(group, buckets);
+    html += _renderInitiativeDetail();
+    html += '</div>';
   }
-  html += '<div class="initiatives-workspace" id="initiatives-workspace">';
-  html += _renderInitiativesRoadmap(group, buckets);
-  html += _renderInitiativeDetail();
-  html += '</div></div>';
+  html += '</div>';
   panel.innerHTML = html;
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(panel, snapshot, {

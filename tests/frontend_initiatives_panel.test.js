@@ -44,6 +44,8 @@ class FakeElement {
     if (selector.startsWith('#')) return this.ownerDocument.getElementById(selector.slice(1));
     const dataField = selector.match(/^\[data-field="([^"]+)"\]$/);
     if (dataField) return this.ownerDocument.findByDataField(dataField[1]);
+    const dataAreaField = selector.match(/^\[data-area-field="([^"]+)"\]$/);
+    if (dataAreaField) return this.ownerDocument.findByDataAreaField(dataAreaField[1]);
     return null;
   }
 
@@ -78,6 +80,13 @@ class FakeDocument {
     return null;
   }
 
+  findByDataAreaField(field) {
+    for (const el of this.elements.values()) {
+      if (el.dataset && el.dataset.areaField === field) return el;
+    }
+    return null;
+  }
+
   querySelector() { return null; }
 
   querySelectorAll() { return []; }
@@ -94,6 +103,8 @@ class FakeDocument {
       const el = this.ensure(decodeEntities(idMatch[1]));
       const dataField = attrs.match(/\bdata-field="([^"]+)"/);
       if (dataField) el.dataset.field = decodeEntities(dataField[1]);
+      const dataAreaField = attrs.match(/\bdata-area-field="([^"]+)"/);
+      if (dataAreaField) el.dataset.areaField = decodeEntities(dataAreaField[1]);
       const value = attrs.match(/\bvalue="([^"]*)"/);
       if (value) el.value = decodeEntities(value[1]);
     }
@@ -430,4 +441,208 @@ test('created board task response links back to initiative without dispatching',
     link: { initiative_id: 'TORQUE-I:1', link_type: 'task', linked_id: 'TORQUE:99' }
   })`, sandbox);
   assert.match(document.getElementById('panel-initiatives').innerHTML, /Created and linked Board task TORQUE:99/);
+});
+
+function sampleArea(overrides = {}) {
+  return Object.assign({
+    id: 'TORQUE-A:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    slug: 'operator-console',
+    title: 'Operator console',
+    area_type: 'product',
+    lifecycle: 'active_investment',
+    summary: 'Planning and dispatch surface.',
+    user_purpose: 'Help operators steer work.',
+    system_purpose: 'Coordinate agent state.',
+    in_scope: 'Planning tabs and board links',
+    out_of_scope: 'Graph visualization',
+    links: {
+      initiatives: ['TORQUE-I:1'],
+      tasks: ['TORQUE:99'],
+      decisions: ['decision-abc'],
+      areas: [{ area_id: 'TORQUE-A:2', relation: 'supports' }],
+    },
+    hidden_link_counts: { tasks: 0, decisions: 0, initiatives: 0, areas: 0 },
+    linked_tasks: { count: 1, hidden_count: 0, by_lane: { Done: 1 }, items: [{ id: 'TORQUE:99', title: 'Ship UI', lane: 'Done' }] },
+    linked_decisions: { count: 1, hidden_count: 0, ids: ['decision-abc'], items: [{ id: 'decision-abc', title: 'Use tabs' }] },
+    notes: [{ id: 7, area_id: 'TORQUE-A:1', note_type: 'invariant', title: 'Keep compact', body: 'No wiki scope', target_type: 'initiative', target_id: 'TORQUE-I:1' }],
+  }, overrides);
+}
+
+test('Planning Areas tab renders list, search, lifecycle/type filters, loading and empty states', () => {
+  const { sandbox, document, sendCalls } = createSandbox();
+  vm.runInContext("planningSetTab('areas')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_list');
+  let html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Loading areas/);
+
+  vm.runInContext(`areasReceiveList(${JSON.stringify({
+    type: 'area_list',
+    group: 'Torque',
+    areas: [
+      sampleArea(),
+      sampleArea({ id: 'TORQUE-A:2', title: 'Runtime platform', slug: 'runtime-platform', area_type: 'system', lifecycle: 'stable', summary: 'Daemon and PTY runtime.' }),
+    ],
+  })})`, sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Areas <span>2<\/span>/);
+  assert.match(html, /Operator console/);
+  assert.match(html, /Runtime platform/);
+  assert.match(html, /active investment/);
+
+  document.getElementById('areas-search').value = 'runtime';
+  vm.runInContext("areasSetSearch('runtime')", sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.doesNotMatch(html, /Operator console/);
+  assert.match(html, /Runtime platform/);
+
+  vm.runInContext("areasSetLifecycleFilter('active_investment'); areasSetTypeFilter('product')", sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /No areas match the current search\/filter/);
+
+  vm.runInContext("areasSetSearch('');", sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Operator console/);
+  assert.doesNotMatch(html, /Runtime platform/);
+});
+
+test('area detail preserves active tab, selected area, drafts, caret, filters, sections, and scroll across rerenders', () => {
+  const { sandbox, document } = createSandbox();
+  vm.runInContext(`state.board_tasks['TORQUE:99'] = { id: 'TORQUE:99', task: 'Ship UI', lane: 'Done' }; state.decisions['decision-abc'] = { id: 'decision-abc', title: 'Use tabs' }; initiativesReceiveList(${JSON.stringify({ type: 'initiative_list', group: 'Torque', initiatives: [sampleInitiative()] })}); areasReceiveList(${JSON.stringify({ type: 'area_list', group: 'Torque', areas: [sampleArea(), sampleArea({ id: 'TORQUE-A:2', title: 'Runtime platform', area_type: 'system', lifecycle: 'stable' })] })}); planningSetTab('areas'); areasSelect('TORQUE-A:1'); areasReceiveDetail(${JSON.stringify(Object.assign({ type: 'area' }, sampleArea()))});`, sandbox);
+
+  const summary = document.getElementById('area-field-summary');
+  summary.value = 'Draft area summary while deltas arrive';
+  summary.selectionStart = 6;
+  summary.selectionEnd = 10;
+  summary.focus();
+  const list = document.getElementById('areas-list-scroll');
+  list.scrollTop = 61;
+  const drawer = document.getElementById('area-detail-drawer');
+  drawer.scrollTop = 120;
+  vm.runInContext("areasSetLifecycleFilter('active_investment'); areasToggleSection('tasks'); state.areas['TORQUE-A:1'].area_type = 'platform'; renderInitiativesPanel();", sandbox);
+
+  const restored = document.getElementById('area-field-summary');
+  assert.equal(restored.value, 'Draft area summary while deltas arrive');
+  assert.equal(restored.selectionStart, 6);
+  assert.equal(restored.selectionEnd, 10);
+  assert.equal(document.activeElement, restored);
+  assert.equal(document.getElementById('areas-lifecycle-filter').value, 'active_investment');
+  assert.equal(document.getElementById('areas-list-scroll').scrollTop, 61);
+  assert.equal(document.getElementById('area-detail-drawer').scrollTop, 120);
+  const html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /class="planning-tab active" aria-selected="true" onclick="planningSetTab\('areas'\)"/);
+  assert.match(html, /TORQUE-A:1/);
+  assert.doesNotMatch(html, /No linked tasks/);
+});
+
+test('area save, link, note edit/archive use Wave 1 area commands', () => {
+  const { sandbox, document, sendCalls } = createSandbox();
+  vm.runInContext(`areasReceiveList(${JSON.stringify({ type: 'area_list', group: 'Torque', areas: [sampleArea(), sampleArea({ id: 'TORQUE-A:2', title: 'Runtime platform' })] })}); planningSetTab('areas'); areasSelect('TORQUE-A:1'); areasReceiveDetail(${JSON.stringify(Object.assign({ type: 'area' }, sampleArea()))});`, sandbox);
+
+  document.getElementById('area-field-title').value = 'Edited area';
+  document.getElementById('area-field-lifecycle').value = 'stable';
+  vm.runInContext('areasSaveDetail()', sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
+    cmd: 'area_update',
+    area: 'TORQUE-A:1',
+    group: 'Torque',
+    title: 'Edited area',
+    area_type: 'product',
+    lifecycle: 'stable',
+    summary: 'Planning and dispatch surface.',
+    user_purpose: 'Help operators steer work.',
+    system_purpose: 'Coordinate agent state.',
+    in_scope: 'Planning tabs and board links',
+    out_of_scope: 'Graph visualization',
+  });
+
+  document.getElementById('area-link-initiative-input').value = 'TORQUE-I:1';
+  vm.runInContext("areasLinkTarget('initiative')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_link_initiative');
+  assert.equal(sendCalls.at(-1).initiative, 'TORQUE-I:1');
+
+  document.getElementById('area-link-task-input').value = 'TORQUE:99';
+  vm.runInContext("areasLinkTarget('task')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_link_task');
+  assert.equal(sendCalls.at(-1).task, 'TORQUE:99');
+
+  document.getElementById('area-link-decision-input').value = 'decision-abc';
+  vm.runInContext("areasLinkTarget('decision')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_link_decision');
+  assert.equal(sendCalls.at(-1).decision, 'decision-abc');
+
+  document.getElementById('area-link-area-input').value = 'TORQUE-A:2';
+  document.getElementById('area-link-area-relation').value = 'supports';
+  vm.runInContext("areasLinkTarget('area')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_link_area');
+  assert.equal(sendCalls.at(-1).area, 'TORQUE-A:1');
+  assert.equal(sendCalls.at(-1).target_area, 'TORQUE-A:2');
+  assert.equal(sendCalls.at(-1).relation, 'supports');
+
+  vm.runInContext("areasEditNote('7')", sandbox);
+  document.getElementById('area-note-edit-7-title').value = 'Updated invariant';
+  document.getElementById('area-note-edit-7-body').value = 'Still compact';
+  vm.runInContext("areasSaveNote('7')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_note_update');
+  assert.equal(sendCalls.at(-1).note, '7');
+  assert.equal(sendCalls.at(-1).title, 'Updated invariant');
+
+  vm.runInContext("areasArchiveNote('7')", sandbox);
+  assert.equal(sendCalls.at(-1).cmd, 'area_note_archive');
+  assert.equal(sendCalls.at(-1).note, '7');
+});
+
+test('area note creation preserves draft across rerender and sends typed target command', () => {
+  const { sandbox, document, sendCalls } = createSandbox();
+  vm.runInContext(`areasReceiveList(${JSON.stringify({ type: 'area_list', group: 'Torque', areas: [sampleArea()] })}); planningSetTab('areas'); areasSelect('TORQUE-A:1'); areasReceiveDetail(${JSON.stringify(Object.assign({ type: 'area' }, sampleArea({ notes: [] })))});`, sandbox);
+  const title = document.getElementById('area-note-new-title');
+  title.value = 'Follow up with design';
+  title.selectionStart = 3;
+  title.selectionEnd = 9;
+  title.focus();
+  document.getElementById('area-note-new-type').value = 'follow_up';
+  document.getElementById('area-note-new-body').value = 'Clarify narrow mode copy.';
+  document.getElementById('area-note-new-target-type').value = 'area';
+  document.getElementById('area-note-new-target-id').value = 'TORQUE-A:1';
+
+  vm.runInContext("state.areas['TORQUE-A:1'].summary = 'delta'; renderInitiativesPanel();", sandbox);
+  assert.equal(document.getElementById('area-note-new-title').value, 'Follow up with design');
+  assert.equal(document.activeElement, document.getElementById('area-note-new-title'));
+  assert.equal(document.getElementById('area-note-new-title').selectionStart, 3);
+
+  vm.runInContext('areasCreateNote()', sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
+    cmd: 'area_note_create',
+    area: 'TORQUE-A:1',
+    group: 'Torque',
+    note_type: 'follow_up',
+    title: 'Follow up with design',
+    body: 'Clarify narrow mode copy.',
+    target_type: 'area',
+    target_id: 'TORQUE-A:1',
+  });
+});
+
+test('area websocket responses and deltas update Planning surface without breaking initiative tab behavior', () => {
+  const { sandbox, document } = createSandbox();
+  vm.runInContext(`initiativesReceiveList(${JSON.stringify({ type: 'initiative_list', group: 'Torque', initiatives: [sampleInitiative()] })}); areasReceiveList(${JSON.stringify({ type: 'area_list', group: 'Torque', areas: [sampleArea()] })});`, sandbox);
+  let html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Ship initiatives UI/);
+  assert.match(html, /Areas <span>1<\/span>/);
+
+  vm.runInContext("planningSetTab('areas')", sandbox);
+  vm.runInContext(`areasReceiveMutation(${JSON.stringify({ type: 'area_updated', area: sampleArea({ title: 'Updated operator console' }) })})`, sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Updated operator console/);
+
+  vm.runInContext(`state.areas = {}; _areasLoadedGroup = 'Torque'; _areasSelectedId = ''; _areasDetail = null;`, sandbox);
+  vm.runInContext(`if (!state.areas) state.areas = {}; var op = ${JSON.stringify(Object.assign({ op: 'area_upsert' }, sampleArea({ id: 'TORQUE-A:3', title: 'Delta area' })))}; var area = Object.assign({}, op); delete area.op; state.areas[area.id] = area; renderInitiativesPanel();`, sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Delta area/);
+
+  vm.runInContext("planningSetTab('initiatives')", sandbox);
+  html = document.getElementById('panel-initiatives').innerHTML;
+  assert.match(html, /Ship initiatives UI/);
+  assert.match(html, /Now item|Ship initiatives UI/);
 });
