@@ -478,13 +478,17 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "architect_engineer_feedback_status": frozenset({"comm.engineer_message"}),
     "architect_peer_list": frozenset({"comm.peer_architect_list"}),
     "architect_peer_message": frozenset({"comm.peer_architect_message"}),
-    "architect_peer_inbox": frozenset({"comm.peer_architect_message"}),
+    # Mixed-purpose inbox/reply surfaces can expose both Architect↔Architect
+    # and Architect↔Engineer threads. Until those tools have per-thread
+    # contextual projection, require engineer messaging too so restricted PM
+    # profiles cannot read/reply to engineer threads through the peer namespace.
+    "architect_peer_inbox": frozenset({"comm.peer_architect_message", "comm.engineer_message"}),
     "architect_engineer_peer_threads": frozenset({"comm.engineer_message"}),
     "architect_engineer_peer_inspect": frozenset({"comm.engineer_message"}),
     "architect_engineer_journal_read": frozenset({"comm.engineer_message"}),
     "architect_engineer_pending_question": frozenset({"comm.worker_message"}),
     "architect_engineer_answer": frozenset({"comm.worker_message"}),
-    "architect_reply": frozenset({"comm.peer_architect_message"}),
+    "architect_reply": frozenset({"comm.peer_architect_message", "comm.engineer_message"}),
     "architect_area_list": frozenset({"planning.area_read"}),
     "architect_area_show": frozenset({"planning.area_read"}),
     "architect_area_create": frozenset({"planning.area_write"}),

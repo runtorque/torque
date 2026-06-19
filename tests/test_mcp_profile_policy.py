@@ -123,6 +123,8 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_hire",
             "architect_engineer_set_specializations",
             "architect_engineer_dismiss",
+            "architect_peer_inbox",
+            "architect_reply",
             "architect_task_create",
             "architect_task_update",
             "architect_task_reassign",
@@ -151,7 +153,9 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
                             "query": (
                                 "select:architect_mcp_calls,"
                                 "architect_engineer_dismiss,"
-                                "architect_get_architect_settings"
+                                "architect_get_architect_settings,"
+                                "architect_peer_inbox,"
+                                "architect_reply"
                             ),
                         },
                     },
@@ -180,6 +184,131 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("error", response.payload, tool_name)
             self.assertIn("Unknown tool", response.payload["error"]["message"])
 
+        self.assertEqual(calls, [])
+
+    async def test_product_manager_profile_cannot_use_peer_tools_for_engineer_threads(self):
+        state, architect = self._state_with_architect()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"].append(engineer.id)
+        state.agent_profile_overrides = {architect.id: "product-manager-draft"}
+
+        class FakePeerMessageDB:
+            def __init__(self):
+                self.load_calls = []
+
+            def load_agent_peer_messages_for_agent(self, *args, **kwargs):
+                self.load_calls.append((args, kwargs))
+                return [{
+                    "id": "msg-engineer-thread",
+                    "thread_id": "thread-engineer",
+                    "sender_id": engineer.id,
+                    "sender_kind": "engineer",
+                    "recipient_id": architect.id,
+                    "recipient_kind": "architect",
+                    "message": "restricted engineer thread",
+                    "ack_required": True,
+                    "created_at": 123.0,
+                }]
+
+            def load_agent_peer_message(self, message_id):
+                self.load_calls.append(((message_id,), {"single": True}))
+                return {
+                    "id": "msg-engineer-thread",
+                    "thread_id": "thread-engineer",
+                    "sender_id": engineer.id,
+                    "sender_kind": "engineer",
+                    "recipient_id": architect.id,
+                    "recipient_kind": "architect",
+                    "message": "restricted engineer thread",
+                    "ack_required": True,
+                    "created_at": 123.0,
+                }
+
+        fake_db = FakePeerMessageDB()
+        state.db = fake_db
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        listed = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
+        self.assertIn("architect_peer_message", tool_names)
+        self.assertNotIn("architect_peer_inbox", tool_names)
+        self.assertNotIn("architect_reply", tool_names)
+
+        search = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_tool_search",
+                        "arguments": {
+                            "query": "select:architect_peer_inbox,architect_reply",
+                        },
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        search_payload = self._parse_functions_block(
+            search.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual(search_payload["tools"], [])
+
+        inbox = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "architect_peer_inbox", "arguments": {}},
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        self.assertIn("error", inbox.payload)
+        self.assertIn("Unknown tool", inbox.payload["error"]["message"])
+
+        reply = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_reply",
+                        "arguments": {
+                            "message_id": "msg-engineer-thread",
+                            "message": "should not deliver",
+                        },
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        self.assertIn("error", reply.payload)
+        self.assertIn("Unknown tool", reply.payload["error"]["message"])
+
+        self.assertEqual(fake_db.load_calls, [])
         self.assertEqual(calls, [])
 
     async def test_restricted_engineer_profile_hides_dispatch_worktree_and_specialization_tools(self):

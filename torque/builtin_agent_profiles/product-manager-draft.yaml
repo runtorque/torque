@@ -2,7 +2,7 @@ id: product-manager-draft
 version: "1"
 base_kind: architect
 display_name: Product Manager (draft)
-description: Draft architect-derived Product Manager profile for dry-run validation only; not enforced in Wave 1.
+description: Draft architect-derived Product Manager profile; enforced only when explicitly used as an effective profile.
 lifecycle: draft
 grants:
   - observe.self_context

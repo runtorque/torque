@@ -93,6 +93,8 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(pm.is_full_base_kind_profile)
         self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", pm))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", pm))
