@@ -28,7 +28,7 @@ install-standalone:
 	cp torque.py "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)"
 	cp torque_desktop.py "$(PRIMARY_APP_DIR)/torque_desktop.py"
 	cp webview.html "$(PRIMARY_APP_DIR)/webview.html"
-	@find torque -type f -name '*.py' -print0 | while IFS= read -r -d '' src; do \
+	@find torque -type f \( -name '*.py' -o -name '*.yaml' -o -name '*.yml' \) -print0 | while IFS= read -r -d '' src; do \
 		dest="$(PRIMARY_APP_DIR)/$$src"; \
 		mkdir -p "$$(dirname "$$dest")"; \
 		cp "$$src" "$$dest"; \

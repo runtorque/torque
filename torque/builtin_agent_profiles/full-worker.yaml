@@ -1,0 +1,31 @@
+id: full-worker
+version: "1"
+base_kind: worker
+display_name: Full Worker
+description: Full current behavior by construction for the base runtime kind.
+lifecycle: stable
+grants:
+  - comm.user_ask
+  - comm.user_message
+  - journal.private
+  - memory.publish
+  - memory.read
+  - observe.self_context
+  - observe.task_detail
+  - planning.area_read
+  - task.complete
+  - task.upload_artifact
+  - task.verify
+denies: []
+policy:
+  base_kind: worker
+  scope:
+    summary: full current behavior for the base runtime kind
+  communication:
+    summary: full current communication behavior for the base runtime kind
+  spawn:
+    summary: full current spawning/routing behavior where the base kind already has it
+  audit:
+    summary: no additional Wave 1 persistence; future effective snapshots/audit rows only
+metadata:
+  archetype: full

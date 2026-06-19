@@ -1,0 +1,67 @@
+id: product-manager-draft
+version: "1"
+base_kind: architect
+display_name: Product Manager (draft)
+description: Draft architect-derived Product Manager profile for dry-run validation only; not enforced in Wave 1.
+lifecycle: draft
+grants:
+  - observe.self_context
+  - observe.board_summary
+  - observe.task_detail
+  - planning.area_read
+  - planning.initiative_read
+  - decision.list
+  - decision.create_proposed
+  - decision.link
+  - task.create_queued
+  - task.update_planning_fields
+  - task.move_planning_safe
+  - task.board_sync_read
+  - comm.user_ask
+  - comm.user_message
+  - comm.peer_architect_list
+  - comm.peer_architect_message
+  - comm.product_ack_request
+  - journal.private
+denies:
+  - agent.hire_engineer
+  - agent.manage_engineer_roster
+  - agent.dispatch_worker
+  - task.create
+  - task.update
+  - task.reassign
+  - task.move
+  - task.dispatch
+  - comm.engineer_message
+  - comm.worker_message
+  - worktree.merge
+  - deploy.apply
+  - admin.settings
+  - profile.assign
+  - profile.edit
+  - decision.accept
+policy:
+  base_kind: architect
+  scope:
+    planning_visibility: broad same-group Areas/Initiatives reads; task and decision detail scoped with hidden counts where not visible
+    decisions: PM-owned product decisions; accepted only after explicit user/product-owner approval in scope; no editing or superseding other architects' decisions
+    task_creation: queued/non-dispatched product tasks only; prefer unassigned when the Board model supports it; no arbitrary assignment or dispatch authority
+    task_moves: PM-created/in-scope queued tasks only among planning-safe lanes; no execution-state moves by default
+    task_fields: title, description, labels, suggested specialization, and suggested action only on PM-created/in-scope queued tasks
+    board_sync: read-only on visible task sync state; PM-created tasks use normal sync behavior if they become real Board tasks
+  communication:
+    engineer_worker_messages: deny by default
+    coordinate_with: selected same-group peer architects/product profiles and the user
+    ack_required: selected same-group peer architects/product profiles for product-scope decisions only; deny engineers/workers
+  spawn:
+    dispatch: deny
+    hire: deny
+    merge: deny
+    deploy: deny
+  audit:
+    retention: compact local profile call/denial metadata with bulky args/secrets redacted; no TTL unless DB growth becomes real issue
+    profile_changes: next launch/session only; future waves freeze auditable effective snapshots
+metadata:
+  archetype: product_manager
+  trusted_assignment: user_only_v1
+  runtime_enforcement: not_enabled_wave_1_dry_run_only
