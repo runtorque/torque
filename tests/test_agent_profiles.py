@@ -14,6 +14,8 @@ from torque.agent_profiles import (
     dry_run_profile_preview,
     load_agent_profiles,
     validate_profile_data,
+    mcp_tool_allowed_by_policy,
+    profile_policy_by_id,
 )
 
 
@@ -76,7 +78,25 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertEqual(categories["pm_decisions"]["status"], "allowed")
         self.assertEqual(categories["pm_queued_tasks"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
-        self.assertEqual(preview["runtime_enforcement"], "not_enabled_wave_1_dry_run_only")
+        self.assertEqual(preview["runtime_enforcement"], "mcp_projection_when_effective_profile_is_set")
+
+    def test_profile_policy_evaluator_allows_full_and_denies_pm_dangerous_tools(self):
+        full_architect = profile_policy_by_id("full-architect", base_dir=str(self.project))
+        pm = profile_policy_by_id("product-manager-draft", base_dir=str(self.project))
+
+        self.assertIsNotNone(full_architect)
+        self.assertIsNotNone(pm)
+        self.assertTrue(full_architect.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_engineer_hire", full_architect))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_get_architect_settings", full_architect))
+
+        self.assertFalse(pm.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", pm))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", pm))
 
     def test_unknown_capability_atom_fails_validation(self):
         _profile, issues = validate_profile_data({
@@ -148,7 +168,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertEqual(custom.source, str(self._project_profile_dir() / "custom.yaml"))
         docs = Path("docs/reference/agent-profiles.md").read_text(encoding="utf-8")
         self.assertIn(".torque/agent_profiles/*.yaml", docs)
-        self.assertIn("dry-run only", docs)
+        self.assertIn("explicit effective", docs)
 
     def test_malformed_project_profile_reports_load_issue(self):
         path = self._write_project_profile("broken.yaml", "id: [unterminated\n")

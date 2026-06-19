@@ -18,6 +18,13 @@ from datetime import datetime, timezone
 from aiohttp import web
 
 from . import __version__
+from .agent_profiles import (
+    AgentProfileDefinition,
+    AgentProfilePolicy,
+    mcp_tool_allowed_by_policy,
+    profile_policy_by_id,
+    profile_policy_from_definition,
+)
 from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
 from .mcp_engineer import (
     ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES,
@@ -26,6 +33,7 @@ from .mcp_engineer import (
     engineer_tools_for_cell,
 )
 from .mcp_tool_search import deferred_tool_specs, eager_tool_specs
+from .mcp_tool_search import tool_search_response
 from .mcp_tools_shared import (
     _direct_user_message_response,
     save_agent_user_direct_message_from_mcp,
@@ -805,17 +813,79 @@ ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
 
+def _coerce_effective_profile_policy(raw_profile, *, base_dir: str = ""):
+    if not raw_profile:
+        return None
+    if isinstance(raw_profile, AgentProfilePolicy):
+        return raw_profile
+    if isinstance(raw_profile, AgentProfileDefinition):
+        return profile_policy_from_definition(raw_profile)
+    if isinstance(raw_profile, dict):
+        return profile_policy_from_definition(raw_profile)
+    return profile_policy_by_id(str(raw_profile or "").strip(), base_dir=base_dir)
+
+
+def _effective_profile_policy_for_cell(state, cell):
+    """Return explicit effective profile policy for a caller, if any.
+
+    Wave 2 deliberately avoids user-facing assignment persistence. Tests and
+    future assignment plumbing can inject an effective profile through a narrow
+    hook or in-memory mapping. When nothing is supplied, policy is ``None`` and
+    MCP behavior remains exactly as it was before profile enforcement.
+    """
+
+    if not state or not cell:
+        return None
+    getter = getattr(state, "effective_agent_profile_for_cell", None)
+    if callable(getter):
+        return _coerce_effective_profile_policy(
+            getter(cell),
+            base_dir=str(getattr(state, "project_base_dir", "") or ""),
+        )
+    overrides = getattr(state, "agent_profile_overrides", None)
+    if isinstance(overrides, dict):
+        raw_profile = overrides.get(getattr(cell, "id", ""))
+        if raw_profile:
+            return _coerce_effective_profile_policy(
+                raw_profile,
+                base_dir=str(getattr(state, "project_base_dir", "") or ""),
+            )
+    for attr in ("effective_agent_profile_id", "agent_profile_id"):
+        raw_profile = getattr(cell, attr, "")
+        if raw_profile:
+            return _coerce_effective_profile_policy(
+                raw_profile,
+                base_dir=str(getattr(state, "project_base_dir", "") or ""),
+            )
+    return None
+
+
+def _profile_project_tools(tools: list[dict], policy) -> list[dict]:
+    return [
+        tool for tool in tools
+        if mcp_tool_allowed_by_policy(str(tool.get("name", "") or ""), policy)
+    ]
+
+
 def _visible_tools(state, cell_id: str):
     """Return the MCP tool list visible to the caller."""
     tools = list(TOOLS)
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     if cell and state.agent_is_tombstoned(cell):
         return []
+    policy = _effective_profile_policy_for_cell(state, cell)
+    tools = _profile_project_tools(tools, policy)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        tools.extend(eager_tool_specs(engineer_tools_for_cell(cell, state)))
+        tools.extend(eager_tool_specs(_profile_project_tools(
+            engineer_tools_for_cell(cell, state),
+            policy,
+        )))
     elif caller_kind == "architect":
-        tools.extend(eager_tool_specs(ARCHITECT_TOOLS))
+        tools.extend(eager_tool_specs(_profile_project_tools(
+            ARCHITECT_TOOLS,
+            policy,
+        )))
     return tools
 
 
@@ -824,11 +894,15 @@ def _deferred_tools_for_caller(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     if cell and state.agent_is_tombstoned(cell):
         return []
+    policy = _effective_profile_policy_for_cell(state, cell)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        return deferred_tool_specs(engineer_tools_for_cell(cell, state))
+        return deferred_tool_specs(_profile_project_tools(
+            engineer_tools_for_cell(cell, state),
+            policy,
+        ))
     if caller_kind == "architect":
-        return deferred_tool_specs(ARCHITECT_TOOLS)
+        return deferred_tool_specs(_profile_project_tools(ARCHITECT_TOOLS, policy))
     return []
 
 
@@ -840,6 +914,11 @@ def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bo
             str(getattr(caller_cell, "hired_by_architect_id", "") or "").strip()
         )
     return False
+
+
+def _tool_denied_by_effective_profile(state, tool_name: str, caller_cell) -> bool:
+    policy = _effective_profile_policy_for_cell(state, caller_cell)
+    return not mcp_tool_allowed_by_policy(tool_name, policy)
 
 
 # ---------------------------------------------------------------------------
@@ -1233,7 +1312,10 @@ async def dispatch_mcp_rpc_body(
             caller_kind in {"architect", "engineer"}
             and _claim_session_wake(cell_id, mcp_session_id)
         )
-        if _tool_hidden_for_caller(tool_name, caller_kind, caller_cell):
+        if (
+            _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
+            or _tool_denied_by_effective_profile(state, tool_name, caller_cell)
+        ):
             if session_wake_pending:
                 _queue_session_wake_entry(
                     state,
@@ -1337,6 +1419,23 @@ async def dispatch_mcp_rpc_body(
                     }],
                     "isError": True,
                 }
+            elif tool_name == "engineer_tool_search":
+                result = {
+                    "content": [{
+                        "type": "text",
+                        "text": tool_search_response(
+                            _profile_project_tools(
+                                engineer_tools_for_cell(caller_cell, state),
+                                _effective_profile_policy_for_cell(
+                                    state,
+                                    caller_cell,
+                                ),
+                            ),
+                            arguments,
+                        ),
+                    }],
+                    "isError": False,
+                }
             else:
                 _ret = await _dispatch_engineer_tool(
                     tool_name, arguments, handle_command, state,
@@ -1374,6 +1473,23 @@ async def dispatch_mcp_rpc_body(
                         ),
                     }],
                     "isError": True,
+                }
+            elif tool_name == "architect_tool_search":
+                result = {
+                    "content": [{
+                        "type": "text",
+                        "text": tool_search_response(
+                            _profile_project_tools(
+                                ARCHITECT_TOOLS,
+                                _effective_profile_policy_for_cell(
+                                    state,
+                                    caller_cell,
+                                ),
+                            ),
+                            arguments,
+                        ),
+                    }],
+                    "isError": False,
                 }
             else:
                 _ret = await _dispatch_architect_tool(

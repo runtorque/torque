@@ -1,0 +1,256 @@
+import importlib
+import json
+import unittest
+
+try:
+    from helpers import FakeRequest, install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import FakeRequest, install_aiohttp_stub
+
+
+class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub(include_json_helpers=True)
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.mcp_mod = importlib.import_module("torque.mcp")
+        self.mcp_mod = importlib.reload(self.mcp_mod)
+
+    def _state_with_architect(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"] = [architect.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        return state, architect
+
+    def _parse_functions_block(self, text):
+        prefix = "<functions>"
+        suffix = "</functions>"
+        self.assertTrue(text.startswith(prefix), text)
+        self.assertTrue(text.endswith(suffix), text)
+        return json.loads(text[len(prefix):-len(suffix)])
+
+    async def test_explicit_full_architect_profile_preserves_tool_projection_and_direct_calls(self):
+        baseline_state, baseline_architect = self._state_with_architect()
+        projected_state, projected_architect = self._state_with_architect()
+        projected_state.agent_profile_overrides = {
+            projected_architect.id: "full-architect",
+        }
+        baseline_handler = self.mcp_mod.create_mcp_handler(
+            lambda payload: self.fail(f"Unexpected baseline command: {payload}"),
+            baseline_state,
+        )
+
+        async def fake_handle_command(payload):
+            if payload.get("cmd") == "list_specializations":
+                return {"type": "specializations", "items": []}
+            self.fail(f"Unexpected projected command: {payload}")
+
+        projected_handler = self.mcp_mod.create_mcp_handler(
+            fake_handle_command,
+            projected_state,
+        )
+
+        baseline = await baseline_handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": baseline_architect.id},
+            )
+        )
+        projected = await projected_handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": projected_architect.id},
+            )
+        )
+
+        baseline_names = [tool["name"] for tool in baseline.payload["result"]["tools"]]
+        projected_names = [tool["name"] for tool in projected.payload["result"]["tools"]]
+        self.assertEqual(projected_names, baseline_names)
+        self.assertIn("architect_engineer_hire", projected_names)
+        self.assertIn("architect_peer_message", projected_names)
+
+        settings = await projected_handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_get_architect_settings",
+                        "arguments": {},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": projected_architect.id},
+            )
+        )
+        self.assertFalse(settings.payload["result"]["isError"])
+        payload = json.loads(settings.payload["result"]["content"][0]["text"])
+        self.assertEqual(payload["type"], "architect_settings")
+
+    async def test_product_manager_profile_hides_and_denies_dangerous_architect_tools(self):
+        state, architect = self._state_with_architect()
+        state.agent_profile_overrides = {architect.id: "product-manager-draft"}
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        listed = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
+
+        self.assertIn("architect_tool_search", tool_names)
+        self.assertIn("architect_board_summary", tool_names)
+        self.assertIn("architect_peer_message", tool_names)
+        self.assertIn("architect_decision_list", tool_names)
+
+        denied_tools = {
+            "architect_engineer_hire",
+            "architect_engineer_set_specializations",
+            "architect_engineer_dismiss",
+            "architect_task_create",
+            "architect_task_update",
+            "architect_task_reassign",
+            "architect_task_move",
+            "architect_deploy_state",
+            "architect_get_architect_settings",
+            "architect_engineer_message",
+            "architect_engineer_answer",
+            "architect_decision_create",
+            "architect_decision_update",
+            "architect_area_create",
+            "architect_initiative_create",
+            "architect_mcp_calls",
+        }
+        self.assertFalse(denied_tools & tool_names)
+
+        search = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_tool_search",
+                        "arguments": {
+                            "query": (
+                                "select:architect_mcp_calls,"
+                                "architect_engineer_dismiss,"
+                                "architect_get_architect_settings"
+                            ),
+                        },
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        self.assertFalse(search.payload["result"]["isError"])
+        search_payload = self._parse_functions_block(
+            search.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual(search_payload["tools"], [])
+
+        for tool_name in sorted(denied_tools):
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": tool_name,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": {}},
+                    },
+                    headers={"X-Torque-Cell-Id": architect.id},
+                )
+            )
+            self.assertIn("error", response.payload, tool_name)
+            self.assertIn("Unknown tool", response.payload["error"]["message"])
+
+        self.assertEqual(calls, [])
+
+    async def test_restricted_engineer_profile_hides_dispatch_worktree_and_specialization_tools(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        state.agent_profile_overrides = {
+            engineer.id: {
+                "id": "read-only-engineer-test",
+                "version": "1",
+                "base_kind": "engineer",
+                "grants": [
+                    "observe.self_context",
+                    "observe.board_summary",
+                    "observe.task_detail",
+                    "planning.area_read",
+                    "planning.initiative_read",
+                    "decision.list",
+                ],
+            }
+        }
+
+        async def fake_handle_command(payload):
+            self.fail(f"Denied tool should not reach command layer: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        listed = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+        tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
+
+        self.assertIn("engineer_tool_search", tool_names)
+        self.assertIn("engineer_board_summary", tool_names)
+        self.assertIn("engineer_task_show", tool_names)
+        for tool_name in {
+            "engineer_task_dispatch",
+            "engineer_batch_dispatch",
+            "engineer_merge",
+            "engineer_rebase",
+            "engineer_create_pr",
+            "engineer_worktree_remove",
+            "engineer_specializations_list",
+            "engineer_specialization_save",
+            "engineer_agent_message",
+            "engineer_peer_notify",
+        }:
+            self.assertNotIn(tool_name, tool_names)
+
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_task_dispatch",
+                        "arguments": {"task": "unsafe dispatch"},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+        self.assertIn("error", response.payload)
+        self.assertIn("Unknown tool", response.payload["error"]["message"])

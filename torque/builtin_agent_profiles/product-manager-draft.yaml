@@ -64,4 +64,4 @@ policy:
 metadata:
   archetype: product_manager
   trusted_assignment: user_only_v1
-  runtime_enforcement: not_enabled_wave_1_dry_run_only
+  runtime_enforcement: mcp_projection_when_effective_profile_is_set
