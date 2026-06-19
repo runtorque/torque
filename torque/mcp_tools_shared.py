@@ -2481,6 +2481,8 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "events",
     "events_recent",
     "get_architect_settings",
+    "area_list",
+    "area_show",
     "initiative_list",
     "initiative_show",
     "journal_read",
@@ -3649,6 +3651,161 @@ def _initiative_decision_link_target(state, architect_id: str,
     if not decision:
         return "", error
     return decision_id, ""
+
+
+def _area_scope_group(state, caller_id: str) -> str:
+    return _caller_group(state, caller_id)
+
+
+def _area_from_args(state, caller_id: str, args: dict) -> tuple[dict | None, str]:
+    ident = str(
+        args.get("area", "") or args.get("area_id", "")
+        or args.get("id", "") or ""
+    ).strip()
+    if not ident:
+        return None, "area is required"
+    group = _area_scope_group(state, caller_id)
+    area_id = state.resolve_area_id(ident, group=group)
+    if not area_id:
+        return None, "Area not found"
+    area = state.load_area(area_id)
+    if not area or str(area.get("group_name", "") or "").strip() != group:
+        return None, "Area not found"
+    return area, ""
+
+
+def _architect_can_write_area(area: dict, architect_id: str) -> bool:
+    architect_id = str(architect_id or "").strip()
+    return bool(
+        (str(area.get("owner_kind", "") or "") == "architect"
+         and str(area.get("owner_id", "") or "").strip() == architect_id)
+        or (str(area.get("created_by_kind", "") or "") == "architect"
+            and str(area.get("created_by_id", "") or "").strip() == architect_id)
+    )
+
+
+def _area_read_json(state, caller_kind: str, caller_id: str,
+                    args: dict, *, show: bool) -> tuple[str, bool]:
+    group = _area_scope_group(state, caller_id)
+    visible_task_ids = _initiative_visible_task_ids_for_caller(
+        state, caller_kind, caller_id,
+    )
+    visible_decision_ids = _initiative_visible_decision_ids_for_caller(
+        state, caller_kind, caller_id,
+    )
+    decision_details = caller_kind == "architect"
+    if show:
+        area, error = _area_from_args(state, caller_id, args)
+        if not area:
+            return error, True
+        try:
+            note_limit = min(max(int(args.get("note_limit", 50) or 50), 1), 100)
+        except (TypeError, ValueError):
+            note_limit = 50
+        payload = state.area_payload(
+            area["id"],
+            visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
+            decision_details=decision_details,
+            note_limit=note_limit,
+        )
+        if not payload:
+            return "Area not found", True
+        payload["type"] = "area"
+        return _compact_json(payload), False
+    include_archived = bool(args.get("include_archived", False))
+    include_links = bool(args.get("include_links", False))
+    include_notes = bool(args.get("include_notes", False))
+    try:
+        limit = min(max(int(args.get("limit", 50) or 50), 1), 100)
+    except (TypeError, ValueError):
+        limit = 50
+    areas = []
+    for item in state.list_areas(
+            group=group,
+            include_archived=include_archived,
+            limit=limit):
+        payload = state.area_payload(
+            item["id"],
+            visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
+            include_links=include_links,
+            include_notes=include_notes,
+            decision_details=decision_details,
+            note_limit=10,
+        ) or item
+        areas.append(payload)
+    return _compact_json({
+        "type": "area_list",
+        "group": group,
+        "areas": areas,
+    }), False
+
+
+def _area_task_link_target(state, caller_kind: str, caller_id: str,
+                           task_ref: str) -> tuple[str, str]:
+    return _initiative_task_link_target(state, caller_kind, caller_id, task_ref)
+
+
+def _area_decision_link_target(state, architect_id: str,
+                               decision_ref: str) -> tuple[str, str]:
+    return _initiative_decision_link_target(state, architect_id, decision_ref)
+
+
+def _area_initiative_link_target(state, caller_id: str,
+                                 initiative_ref: str) -> tuple[str, str]:
+    group = _area_scope_group(state, caller_id)
+    initiative_id = state.resolve_initiative_id(initiative_ref, group=group)
+    if not initiative_id:
+        return "", "Initiative not found"
+    initiative = state.load_initiative(initiative_id)
+    if not initiative or str(initiative.get("group_name", "") or "").strip() != group:
+        return "", "Initiative not found"
+    return initiative_id, ""
+
+
+def _area_area_link_target(state, caller_id: str, current_area_id: str,
+                           area_ref: str) -> tuple[str, str]:
+    group = _area_scope_group(state, caller_id)
+    area_id = state.resolve_area_id(area_ref, group=group)
+    if not area_id:
+        return "", "Area not found"
+    area = state.load_area(area_id)
+    if not area or str(area.get("group_name", "") or "").strip() != group:
+        return "", "Area not found"
+    if area_id == str(current_area_id or ""):
+        return "", "Area cannot link to itself"
+    return area_id, ""
+
+
+def _area_note_target_error(state, caller_kind: str, caller_id: str,
+                            area_group: str, target_type: str,
+                            target_id: str) -> str:
+    target_type = str(target_type or "").strip().lower()
+    target_id = str(target_id or "").strip()
+    if not target_type and not target_id:
+        return ""
+    if target_type not in {"task", "decision", "initiative", "area"}:
+        return "note target_type must be one of: task, decision, initiative, area"
+    if not target_id:
+        return "note target_id is required when target_type is set"
+    if target_type == "task":
+        task_id, error = _area_task_link_target(state, caller_kind, caller_id, target_id)
+        if error:
+            return error
+        task = state.board_tasks.get(task_id)
+        if str(getattr(task, "group", "") or "").strip() != area_group:
+            return "Task is outside area group"
+        return ""
+    if target_type == "decision":
+        decision_id, error = _area_decision_link_target(state, caller_id, target_id)
+        return error if not decision_id else ""
+    if target_type == "initiative":
+        initiative_id, error = _area_initiative_link_target(state, caller_id, target_id)
+        return error if not initiative_id else ""
+    area_id, error = _area_area_link_target(state, caller_id, "", target_id)
+    return error if not area_id else ""
+
 
 def _load_architect_pending_hire(state, caller_id: str,
                                  hire_id: str) -> tuple[dict | None, str]:
@@ -7601,6 +7758,24 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             show=True,
         )
 
+    if tool_name == "area_list":
+        return _area_read_json(
+            real_state,
+            caller_kind,
+            caller_id,
+            args,
+            show=False,
+        )
+
+    if tool_name == "area_show":
+        return _area_read_json(
+            real_state,
+            caller_kind,
+            caller_id,
+            args,
+            show=True,
+        )
+
     if tool_name == "hint_snooze" and caller_kind == "engineer":
         fingerprint = str(args.get("fingerprint", "") or "").strip()
         if not fingerprint:
@@ -10442,6 +10617,201 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             initiative["id"], "decision", decision_id,
         )
         return _compact_json({"type": "initiative_decision_unlinked", "removed": removed}), False
+
+
+    if tool_name == "area_create" and caller_kind == "architect":
+        title = str(args.get("title", "") or "").strip()
+        if not title:
+            return "title is required", True
+        lifecycle = str(args.get("lifecycle", "planned") or "planned").strip()
+        if lifecycle not in {"planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"}:
+            return "lifecycle must be one of: planned, experimental, active_investment, stable, maintenance, deprecated, retired", True
+        try:
+            created = await real_state.create_area_async({
+                "group": _engineer_group,
+                "title": title,
+                "area_type": args.get("area_type", ""),
+                "lifecycle": lifecycle,
+                "summary": args.get("summary", ""),
+                "user_purpose": args.get("user_purpose", ""),
+                "system_purpose": args.get("system_purpose", ""),
+                "in_scope": args.get("in_scope", ""),
+                "out_of_scope": args.get("out_of_scope", ""),
+                "owner_kind": "architect",
+                "owner_id": caller_id,
+                "created_by_kind": "architect",
+                "created_by_id": caller_id,
+                "updated_by_kind": "architect",
+                "updated_by_id": caller_id,
+            })
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({"type": "area_created", "area": created}), False
+
+    if tool_name in {
+        "area_update", "area_archive", "area_link_task", "area_unlink_task",
+        "area_link_decision", "area_unlink_decision", "area_link_initiative",
+        "area_unlink_initiative", "area_link_area", "area_unlink_area",
+        "area_note_create", "area_note_update", "area_note_archive",
+    } and caller_kind == "architect":
+        area, error = _area_from_args(real_state, caller_id, args)
+        if not area:
+            return error, True
+        if not _architect_can_write_area(area, caller_id):
+            return "Area not found", True
+        area_group = str(area.get("group_name", "") or "").strip()
+
+        if tool_name == "area_update":
+            allowed = {
+                "title", "area_type", "lifecycle", "summary", "user_purpose",
+                "system_purpose", "in_scope", "out_of_scope", "owner_kind",
+                "owner_id", "slug",
+            }
+            patch = {key: args[key] for key in allowed if key in args}
+            if "owner_kind" in patch or "owner_id" in patch:
+                owner_kind = str(patch.get("owner_kind", area.get("owner_kind", "")) or "").strip()
+                owner_id = str(patch.get("owner_id", area.get("owner_id", "")) or "").strip()
+                if owner_kind != "architect" or owner_id != str(caller_id or "").strip():
+                    return "Architect MCP can only keep areas owned by the caller architect", True
+            patch["updated_by_kind"] = "architect"
+            patch["updated_by_id"] = caller_id
+            try:
+                updated = await real_state.update_area_async(area["id"], patch)
+            except ValueError as exc:
+                return str(exc), True
+            return _compact_json({"type": "area_updated", "area": updated}), False
+
+        if tool_name == "area_archive":
+            archived = await real_state.archive_area_async(
+                area["id"], archived_by_kind="architect", archived_by_id=caller_id,
+            )
+            return _compact_json({"type": "area_archived", "area": archived}), False
+
+        if tool_name in {"area_link_task", "area_unlink_task"}:
+            target_id, target_error = _area_task_link_target(
+                real_state, caller_kind, caller_id,
+                args.get("task", args.get("task_id", args.get("target_id", ""))),
+            )
+            if not target_id:
+                return target_error, True
+            task = real_state.board_tasks.get(target_id)
+            if str(getattr(task, "group", "") or "").strip() != area_group:
+                return "Task is outside area group", True
+            if tool_name == "area_link_task":
+                link = await real_state.save_area_link_async(
+                    area["id"], "task", target_id,
+                    created_by_kind="architect", created_by_id=caller_id,
+                )
+                return _compact_json({"type": "area_linked", "link": link}), False
+            removed = await real_state.delete_area_link_async(area["id"], "task", target_id)
+            return _compact_json({"type": "area_unlinked", "removed": removed}), False
+
+        if tool_name in {"area_link_decision", "area_unlink_decision"}:
+            target_id, target_error = _area_decision_link_target(
+                real_state, caller_id,
+                args.get("decision", args.get("decision_id", args.get("target_id", ""))),
+            )
+            if not target_id:
+                return target_error, True
+            if tool_name == "area_link_decision":
+                link = await real_state.save_area_link_async(
+                    area["id"], "decision", target_id,
+                    created_by_kind="architect", created_by_id=caller_id,
+                )
+                return _compact_json({"type": "area_linked", "link": link}), False
+            removed = await real_state.delete_area_link_async(area["id"], "decision", target_id)
+            return _compact_json({"type": "area_unlinked", "removed": removed}), False
+
+        if tool_name in {"area_link_initiative", "area_unlink_initiative"}:
+            target_id, target_error = _area_initiative_link_target(
+                real_state, caller_id,
+                args.get("initiative", args.get("initiative_id", args.get("target_id", ""))),
+            )
+            if not target_id:
+                return target_error, True
+            if tool_name == "area_link_initiative":
+                link = await real_state.save_area_link_async(
+                    area["id"], "initiative", target_id,
+                    created_by_kind="architect", created_by_id=caller_id,
+                )
+                return _compact_json({"type": "area_linked", "link": link}), False
+            removed = await real_state.delete_area_link_async(area["id"], "initiative", target_id)
+            return _compact_json({"type": "area_unlinked", "removed": removed}), False
+
+        if tool_name in {"area_link_area", "area_unlink_area"}:
+            target_id, target_error = _area_area_link_target(
+                real_state, caller_id, area["id"],
+                args.get("target_area", args.get("target_area_id", args.get("target_id", ""))),
+            )
+            if not target_id:
+                return target_error, True
+            relation = str(args.get("relation", "") or "").strip().lower()
+            if tool_name == "area_link_area":
+                try:
+                    link = await real_state.save_area_link_async(
+                        area["id"], "area", target_id, relation=relation,
+                        created_by_kind="architect", created_by_id=caller_id,
+                    )
+                except ValueError as exc:
+                    return str(exc), True
+                return _compact_json({"type": "area_linked", "link": link}), False
+            try:
+                removed = await real_state.delete_area_link_async(
+                    area["id"], "area", target_id, relation,
+                )
+            except ValueError as exc:
+                return str(exc), True
+            return _compact_json({"type": "area_unlinked", "removed": removed}), False
+
+        if tool_name == "area_note_create":
+            target_type = str(args.get("target_type", "") or "").strip().lower()
+            target_id = str(args.get("target_id", "") or "").strip()
+            target_error = _area_note_target_error(
+                real_state, caller_kind, caller_id, area_group, target_type, target_id,
+            )
+            if target_error:
+                return target_error, True
+            try:
+                note = await real_state.create_area_note_async(area["id"], {
+                    "note_type": args.get("note_type", args.get("type", "")),
+                    "title": args.get("title", ""),
+                    "body": args.get("body", ""),
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "created_by_kind": "architect",
+                    "created_by_id": caller_id,
+                    "updated_by_kind": "architect",
+                    "updated_by_id": caller_id,
+                })
+            except ValueError as exc:
+                return str(exc), True
+            return _compact_json({"type": "area_note_created", "note": note}), False
+
+        note_id = args.get("note", args.get("note_id", ""))
+        note = real_state.load_area_note(note_id)
+        if not note or str(note.get("area_id", "") or "") != str(area["id"]):
+            return "Area note not found", True
+        if tool_name == "area_note_archive":
+            archived = await real_state.archive_area_note_async(
+                note_id, archived_by_kind="architect", archived_by_id=caller_id,
+            )
+            return _compact_json({"type": "area_note_archived", "note": archived}), False
+        allowed = {"note_type", "title", "body", "target_type", "target_id"}
+        patch = {key: args[key] for key in allowed if key in args}
+        target_type = str(patch.get("target_type", note.get("target_type", "")) or "").strip().lower()
+        target_id = str(patch.get("target_id", note.get("target_id", "")) or "").strip()
+        target_error = _area_note_target_error(
+            real_state, caller_kind, caller_id, area_group, target_type, target_id,
+        )
+        if target_error:
+            return target_error, True
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = caller_id
+        try:
+            updated = await real_state.update_area_note_async(note_id, patch)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({"type": "area_note_updated", "note": updated}), False
 
     if tool_name == "decision_create" and caller_kind == "architect":
         title = str(args.get("title", "") or "").strip()
