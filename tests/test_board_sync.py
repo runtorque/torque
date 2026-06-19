@@ -14,6 +14,7 @@ from torque.board_sync.github import (
     GitHubBoardSyncProvider,
     append_closing_refs_to_body,
     compute_outbound_hash,
+    github_issue_close_rule,
     parse_torque_sync_marker,
     render_issue_body,
     strip_torque_sync_footer,
@@ -114,7 +115,13 @@ def github_settings(**overrides):
     )
 
 
-def issue_view(number=123, repo="owner/repo", title="Ship it", body="Body"):
+def issue_view(
+    number=123,
+    repo="owner/repo",
+    title="Ship it",
+    body="Body",
+    state="OPEN",
+):
     return {
         "id": "I_kw123",
         "number": number,
@@ -123,7 +130,7 @@ def issue_view(number=123, repo="owner/repo", title="Ship it", body="Body"):
         "url": f"https://github.com/{repo}/issues/{number}",
         "labels": [{"name": "bug"}],
         "assignees": [],
-        "state": "OPEN",
+        "state": state,
         "updatedAt": "2026-05-20T14:58:00Z",
         "repository": {"nameWithOwner": repo},
     }
@@ -566,6 +573,219 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sync["skipped"])
         self.assertEqual(runner.calls, [])
 
+    async def test_push_done_derived_task_closes_open_issue_even_when_hash_unchanged(self):
+        task = BoardTask(
+            id="T:done-derived",
+            task="Merged workflow child",
+            description="Body",
+            lane="Done",
+            parent_task_id="T:root",
+            pipeline_depth=1,
+            pipeline_root_id="T:root",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {"issue_repo": "owner/repo", "issue_number": 321},
+                "last_synced_hash": "",
+                "sync_state": "idle",
+            },
+        )
+        settings_obj = github_settings(board_sync_github={
+            "github_project_owner": "",
+            "github_project_number": 0,
+        })
+        task.board_sync["last_synced_hash"] = compute_outbound_hash(
+            task,
+            extract_github_settings(settings_obj),
+        )
+        runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(
+                number=321,
+                title="Merged workflow child",
+                body=render_issue_body(task),
+                state="OPEN",
+            )),
+            gh_ok(""),
+            gh_ok(issue_view(
+                number=321,
+                title="Merged workflow child",
+                body=render_issue_body(task),
+                state="CLOSED",
+            )),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(task, settings_obj)
+
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["github"]["issue_state"], "CLOSED")
+        self.assertEqual(
+            sync["github"]["issue_close_reconcile_reason"],
+            "task_done",
+        )
+        self.assertEqual(sync["github"]["issue_close_reconcile_status"], "closed")
+        commands = [call[0] for call in runner.calls]
+        self.assertEqual(commands[0][:2], ["issue", "edit"])
+        self.assertEqual(commands[2][:3], ["issue", "close", "321"])
+        self.assertIn("--reason", commands[2])
+        self.assertNotIn("skipped", sync)
+
+    async def test_push_active_blocked_task_does_not_close_open_issue(self):
+        task = BoardTask(
+            id="T:active",
+            task="Active task",
+            description="Body",
+            lane="In Progress",
+            labels=["torque:blocked"],
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {"issue_repo": "owner/repo", "issue_number": 322},
+                "sync_state": "idle",
+            },
+        )
+        runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(
+                number=322,
+                title="Active task",
+                body=render_issue_body(task),
+                state="OPEN",
+            )),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(
+            task,
+            github_settings(board_sync_github={
+                "github_project_owner": "",
+                "github_project_number": 0,
+            }),
+        )
+
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["github"]["issue_state"], "OPEN")
+        commands = [call[0] for call in runner.calls]
+        self.assertNotIn(["issue", "close"], [cmd[:2] for cmd in commands])
+        self.assertNotIn("issue_close_reconciled_at", sync["github"])
+
+    async def test_push_done_task_already_closed_records_stable_reconciliation(self):
+        task = BoardTask(
+            id="T:already-closed",
+            task="Done task",
+            description="Body",
+            lane="Done",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {"issue_repo": "owner/repo", "issue_number": 323},
+                "sync_state": "idle",
+            },
+        )
+        runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(
+                number=323,
+                title="Done task",
+                body=render_issue_body(task),
+                state="CLOSED",
+            )),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(
+            task,
+            github_settings(board_sync_github={
+                "github_project_owner": "",
+                "github_project_number": 0,
+            }),
+        )
+
+        self.assertEqual(sync["sync_state"], "idle")
+        self.assertEqual(sync["github"]["issue_state"], "CLOSED")
+        self.assertEqual(
+            sync["github"]["issue_close_reconcile_status"],
+            "already_closed",
+        )
+        commands = [call[0] for call in runner.calls]
+        self.assertNotIn(["issue", "close"], [cmd[:2] for cmd in commands])
+
+    async def test_push_done_task_close_error_is_surfaced_safely(self):
+        task = BoardTask(
+            id="T:close-error",
+            task="Close failure",
+            description="Body",
+            lane="Done",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": True,
+                "github": {"issue_repo": "owner/repo", "issue_number": 324},
+                "sync_state": "idle",
+            },
+        )
+        runner = FakeGhRunner([
+            gh_ok(""),
+            gh_ok(issue_view(
+                number=324,
+                title="Close failure",
+                body=render_issue_body(task),
+                state="OPEN",
+            )),
+            gh_fail("permission denied"),
+        ])
+        provider = GitHubBoardSyncProvider(runner)
+
+        sync = await provider.push_task(
+            task,
+            github_settings(board_sync_github={
+                "github_project_owner": "",
+                "github_project_number": 0,
+            }),
+        )
+
+        self.assertEqual(sync["sync_state"], "error")
+        self.assertEqual(sync["phase"], "issue_close")
+        self.assertIn("permission denied", sync["last_error"])
+        commands = [call[0] for call in runner.calls]
+        self.assertEqual(commands[-1][:3], ["issue", "close", "324"])
+
+    async def test_issue_close_rule_sources(self):
+        done = BoardTask(id="T:done", task="Done", lane="Done")
+        archived = BoardTask(
+            id="T:arch",
+            task="Archived",
+            lane="Archived",
+            archived_from_lane="Done",
+        )
+        merged = BoardTask(
+            id="T:merged",
+            task="Merged",
+            lane="In Progress",
+            worktree_boundary={"status": "merged"},
+        )
+        active = BoardTask(
+            id="T:active-rule",
+            task="Active",
+            lane="In Progress",
+            labels=["merged", "blocked"],
+        )
+
+        self.assertEqual(github_issue_close_rule(done), (True, "task_done"))
+        self.assertEqual(
+            github_issue_close_rule(archived),
+            (True, "archived_from_done"),
+        )
+        self.assertEqual(
+            github_issue_close_rule(merged),
+            (True, "worktree_merged"),
+        )
+        self.assertEqual(github_issue_close_rule(active), (False, ""))
+
     async def test_project_status_uses_explicit_task_status_map_then_lane_fallback(self):
         settings = github_settings(board_sync_github={
             "github_lane_status_map": {
@@ -668,6 +888,8 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
                         "issue_number": number,
                         "project_item_id": f"PVTI_{number}",
                         "status_option_id": "opt-done",
+                        "issue_state": "CLOSED",
+                        "issue_close_reconciled_at": "2026-05-20T00:00:00+00:00",
                     },
                     "sync_state": "idle",
                 },

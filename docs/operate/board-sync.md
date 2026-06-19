@@ -85,6 +85,34 @@ linked issues via PR body** is on, `engineer_merge` on the PR path appends a
 requires `engineer_merge_mode=pr` or `engineer-choice` without
 `force_direct=true`; direct-local merges have no PR body to update.
 
+## Issue closure reconciliation
+
+GitHub issue closure is reconciled from local Torque completion state. A linked
+issue closes when the tracked task is in **Done**, is **Archived** from
+**Done**, or has an explicit worktree boundary marked `merged`. The same rule
+applies to derived/review/fix workflow tasks when those tasks are explicitly
+tracked or already linked to a GitHub issue. Active, queued, or blocked tasks do
+not close issues, and board sync does not automatically reopen issues that were
+closed remotely.
+
+For PR merges, Torque still appends GitHub closing references before merge so
+GitHub can close issues through the PR. The post-merge sync path also
+reconciles completed linked issues closed on the next push/manual **Sync now**,
+which covers direct merges, already-merged PR reruns, and older tasks whose PR
+body did not contain a closing reference.
+
+For existing merged-open issues, do a dry run before applying cleanup:
+
+1. List open GitHub issues with the `merged` label, for example
+   `gh issue list --repo OWNER/REPO --state open --label merged --limit 200`.
+2. Cross-check each issue against the Torque task before closing: the local task
+   should be **Done**, **Archived** from **Done**, or have
+   `worktree_boundary.status == "merged"`.
+3. After this fix is deployed, use **Sync now** / `torque board sync push TASK`
+   for individually verified linked tasks, or close the GitHub issue manually if
+   the task is no longer present in the local Torque profile. Do not bulk-close
+   every open issue with a `merged` label without that local-state check.
+
 ## Limits and recovery
 
 - GitHub Issues + Projects v2 only; Projects classic is not supported.

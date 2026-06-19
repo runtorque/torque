@@ -51,6 +51,8 @@ _GITHUB_ISSUE_VIEW_FIELDS = ",".join([
     "state",
     "updatedAt",
 ])
+_GITHUB_CLOSED_STATES = {"CLOSED"}
+_QUEUED_LANES = {"Backlog", "To Do"}
 
 GhRunner = Callable[[Sequence[str], str | None], Awaitable[dict]]
 
@@ -369,6 +371,45 @@ def _outbound_hash_with_lane_status(
 def compute_outbound_hash(task, settings: GitHubSyncSettings | None = None) -> str:
     settings = settings or GitHubSyncSettings()
     return _hash_outbound_payload(_outbound_payload(task, settings))
+
+
+def github_issue_close_rule(task) -> tuple[bool, str]:
+    """Return whether GitHub sync should reconcile the linked issue closed.
+
+    Source of truth is local Torque completion state.  A linked issue should be
+    closed when its task counts as complete in Torque (``Done`` or
+    ``Archived`` from ``Done``).  Branch-boundary workflow tasks also count as
+    complete once their explicit worktree boundary has been marked ``merged``;
+    this covers derived/review/fix workflow cards whose board lane can lag the
+    merge finalization.  Active/queued/blocked tasks never close from labels
+    alone, and this path intentionally does not reopen issues.
+    """
+    if not task:
+        return False, ""
+    lane = str(getattr(task, "lane", "") or "").strip()
+    archived_from = str(getattr(task, "archived_from_lane", "") or "").strip()
+    if lane == "Done":
+        return True, "task_done"
+    if lane == _ARCHIVED_LANE and archived_from == "Done":
+        return True, "archived_from_done"
+    boundary = getattr(task, "worktree_boundary", {}) or {}
+    if (
+            isinstance(boundary, dict)
+            and str(boundary.get("status", "") or "").strip().lower() == "merged"
+            and lane not in _QUEUED_LANES
+            and not (lane == _ARCHIVED_LANE and archived_from != "Done")):
+        return True, "worktree_merged"
+    return False, ""
+
+
+def _remote_issue_state(issue_data: dict | None) -> str:
+    if not isinstance(issue_data, dict):
+        return ""
+    return str(
+        issue_data.get("state", "")
+        or issue_data.get("issue_state", "")
+        or ""
+    ).strip().upper()
 
 
 def issue_ref_for_closing(issue: dict, *, default_repo: str = "") -> str:
@@ -856,8 +897,15 @@ class GitHubBoardSyncProvider:
         outbound_hash = compute_outbound_hash(task, settings)
         github_sync = existing.get("github") if isinstance(existing.get("github"), dict) else {}
         issue_number = int(issue["issue_number"] or github_sync.get("issue_number") or 0)
+        close_issue, close_reason = github_issue_close_rule(task)
+        close_already_reconciled = (
+            close_issue
+            and _remote_issue_state(github_sync) in _GITHUB_CLOSED_STATES
+            and bool(github_sync.get("issue_close_reconciled_at"))
+        )
         if issue_number and existing.get("last_synced_hash") == outbound_hash \
-                and existing.get("sync_state") != "error":
+                and existing.get("sync_state") != "error" \
+                and (not close_issue or close_already_reconciled):
             skipped = dict(existing)
             skipped.update({"sync_state": "idle", "last_error": "", "skipped": True})
             return skipped
@@ -878,13 +926,15 @@ class GitHubBoardSyncProvider:
                         project,
                         status_name,
                     )
-                    if self._archived_status_only_change_from_previous_sync(
-                        task,
-                        settings,
-                        existing,
-                        github_sync,
-                        project,
-                    ):
+                    if (
+                            (not close_issue or close_already_reconciled)
+                            and self._archived_status_only_change_from_previous_sync(
+                                task,
+                                settings,
+                                existing,
+                                github_sync,
+                                project,
+                            )):
                         skipped = dict(existing)
                         skipped.update({
                             "version": 1,
@@ -926,6 +976,22 @@ class GitHubBoardSyncProvider:
                 return self._sync_error(task, project.get("phase", "project"), project.get("error", ""))
             project_payload = project
 
+        issue_reconcile = await self._reconcile_issue_state(
+            repo,
+            issue_number,
+            task,
+            issue_data,
+            close_issue=close_issue,
+            close_reason=close_reason,
+        )
+        if not issue_reconcile.get("ok"):
+            return self._sync_error(
+                task,
+                issue_reconcile.get("phase", "issue_state"),
+                issue_reconcile.get("error", ""),
+            )
+        issue_data = issue_reconcile.get("issue") or issue_data
+
         sync = dict(existing)
         github = dict(github_sync)
         github.update({
@@ -934,6 +1000,19 @@ class GitHubBoardSyncProvider:
             "issue_node_id": issue_node_id,
             "issue_url": issue_url or f"https://github.com/{repo}/issues/{issue_number}",
         })
+        issue_state = _remote_issue_state(issue_data)
+        if issue_state:
+            github["issue_state"] = issue_state
+        if issue_reconcile.get("issue_close_reconciled_at"):
+            github["issue_close_reconciled_at"] = issue_reconcile[
+                "issue_close_reconciled_at"
+            ]
+            github["issue_close_reconcile_reason"] = str(
+                issue_reconcile.get("issue_close_reconcile_reason") or close_reason
+            )
+            github["issue_close_reconcile_status"] = str(
+                issue_reconcile.get("issue_close_reconcile_status") or ""
+            )
         for key in (
             "project_owner",
             "project_number",
@@ -957,6 +1036,77 @@ class GitHubBoardSyncProvider:
         })
         sync.pop("skipped", None)
         return sync
+
+    async def _reconcile_issue_state(
+        self,
+        repo: str,
+        issue_number: int,
+        task,
+        issue_data: dict,
+        *,
+        close_issue: bool | None = None,
+        close_reason: str = "",
+    ) -> dict:
+        """Reconcile the GitHub issue open/closed state after content push.
+
+        This is intentionally one-way: completed/merged Torque tasks close the
+        linked issue, but active Torque tasks never reopen a remotely closed
+        issue.  Reopen remains an explicit operator action outside sync.
+        """
+        if close_issue is None:
+            close_issue, close_reason = github_issue_close_rule(task)
+        if not close_issue:
+            return _ok("issue_state", issue=issue_data or {})
+
+        state = _remote_issue_state(issue_data)
+        if not state:
+            viewed = await self._view_issue(repo, issue_number)
+            if not viewed.get("ok"):
+                return viewed
+            issue_data = viewed.get("issue", {}) or {}
+            state = _remote_issue_state(issue_data)
+
+        now_iso = _now_iso()
+        if state in _GITHUB_CLOSED_STATES:
+            return _ok(
+                "issue_state",
+                issue=issue_data or {},
+                issue_close_reconciled_at=now_iso,
+                issue_close_reconcile_reason=close_reason,
+                issue_close_reconcile_status="already_closed",
+            )
+
+        closed = await self._gh(
+            "issue_close",
+            "issue",
+            "close",
+            str(issue_number),
+            "--repo",
+            repo,
+            "--reason",
+            "completed",
+        )
+        if not closed.get("ok"):
+            return closed
+
+        viewed = await self._view_issue(repo, issue_number)
+        if not viewed.get("ok"):
+            return viewed
+        issue_data = viewed.get("issue", {}) or {}
+        state = _remote_issue_state(issue_data)
+        if state not in _GITHUB_CLOSED_STATES:
+            return _error(
+                "issue_close",
+                "GitHub issue close command completed but issue is still open.",
+                issue_state=state,
+            )
+        return _ok(
+            "issue_state",
+            issue=issue_data,
+            issue_close_reconciled_at=now_iso,
+            issue_close_reconcile_reason=close_reason,
+            issue_close_reconcile_status="closed",
+        )
 
     def _sync_error(self, task, phase: str, error: str) -> dict:
         sync = dict(getattr(task, "board_sync", {}) or {})
@@ -1454,6 +1604,7 @@ __all__ = [
     "append_closing_refs_to_body",
     "compute_outbound_hash",
     "default_gh_runner",
+    "github_issue_close_rule",
     "github_settings",
     "issue_ref_for_closing",
     "parse_github_issue_ref",

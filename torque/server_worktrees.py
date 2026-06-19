@@ -609,16 +609,24 @@ def _rewrite_pr_torque_task_refs_metadata(
 
 def _github_issue_from_linked_task(task, *, base_repo: str = "") -> dict | None:
     """Return GitHub issue metadata for a linked Torque task, if any."""
-    if str(getattr(task, "provider", "") or "").strip().lower() != "github":
-        return None
-
     external_id = str(getattr(task, "external_id", "") or "").strip()
     external_url = str(getattr(task, "external_url", "") or "").strip()
     board_sync = getattr(task, "board_sync", {}) or {}
+    board_sync = board_sync if isinstance(board_sync, dict) else {}
+    github_sync = (
+        board_sync.get("github")
+        if isinstance(board_sync.get("github"), dict)
+        else {}
+    )
+    task_provider = str(getattr(task, "provider", "") or "").strip().lower()
+    sync_provider = str(board_sync.get("provider", "") or "").strip().lower()
+    has_github_sync = bool(github_sync) or sync_provider == "github"
+    if task_provider and task_provider != "github" and not has_github_sync:
+        return None
     parsed = parse_github_issue_ref(
         external_id=external_id,
         external_url=external_url,
-        board_sync=board_sync if isinstance(board_sync, dict) else {},
+        board_sync=board_sync,
     )
     repo = str(parsed.get("issue_repo", "") or "").strip()
     number = parsed.get("issue_number")
@@ -635,7 +643,7 @@ def _github_issue_from_linked_task(task, *, base_repo: str = "") -> dict | None:
         "task_title": str(getattr(task, "task", "") or "").strip(),
         "external_id": external_id,
         "external_url": external_url,
-        "board_sync": board_sync if isinstance(board_sync, dict) else {},
+        "board_sync": board_sync,
         "issue_repo": repo,
         "issue_number": number,
         "issue_url": str(parsed.get("issue_url", "") or "").strip(),

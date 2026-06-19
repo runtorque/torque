@@ -3372,9 +3372,16 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             call for call in worktree_mgr.calls if call[0] == "merge_pr"
         ][-1]
         self.assertEqual(create_call[4], "Refs #123")
-        self.assertEqual(create_call[5], "Plain #123 reference.")
-        self.assertNotIn("close", create_call[5].lower())
-        self.assertNotIn("closes", merge_call[6].lower())
+        self.assertEqual(
+            create_call[5],
+            (
+                "Plain #123 reference.\n\n"
+                "Linked Torque issues:\n"
+                "- Closes #123"
+            ),
+        )
+        self.assertNotIn("Plain closes", create_call[5].lower())
+        self.assertEqual(merge_call[6].count("Closes #123"), 1)
         self.assertNotIn("TORQUE:490", merge_call[6])
 
     async def test_worktree_merge_pr_preserves_author_close_keyword_on_rewrite(self):
