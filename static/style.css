@@ -13466,7 +13466,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .areas-filters {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) minmax(110px, auto) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(145px, 180px) minmax(120px, 180px) auto;
   gap: 6px;
   align-items: center;
 }
@@ -13485,6 +13485,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   font: inherit;
   font-size: 12px;
   padding: 7px 8px;
+}
+.areas-filters input,
+.areas-filters select {
+  width: 100%;
+}
+.areas-filters select {
+  text-overflow: ellipsis;
 }
 .area-filter-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .areas-list-scroll {
@@ -13579,7 +13586,10 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   max-height: 320px;
 }
 #panel-initiatives[data-panel-placement="right"] .areas-filters {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+#panel-initiatives[data-panel-placement="right"] .areas-search-input {
+  grid-column: 1 / -1;
 }
 #panel-initiatives[data-panel-placement="right"] .area-detail {
   flex: 0 0 auto;
@@ -13595,7 +13605,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
     overflow: auto;
   }
   .areas-list-scroll { max-height: 320px; }
-  .areas-filters { grid-template-columns: 1fr; }
+  .areas-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .areas-search-input { grid-column: 1 / -1; }
   .area-detail { flex: 0 0 auto; overflow: visible; }
   .area-link-related-add select { flex: 1 1 100%; }
 }
