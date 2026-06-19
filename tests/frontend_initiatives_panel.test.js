@@ -182,6 +182,11 @@ test('Planning CSS supports bottom full-width layout and side-panel responsive t
   assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.initiatives-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow:\s*auto;/s);
   assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.initiative-primary-columns\s*\{[^}]*grid-template-columns:\s*1fr;[^}]*min-height:\s*0;/s);
   assert.match(css, /@container \(max-width:\s*640px\)\s*\{[\s\S]*?\.initiatives-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[\s\S]*?\.initiative-primary-columns\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(css, /\.areas-filters\s*\{[^}]*grid-template-columns:\s*minmax\(220px,\s*1fr\)\s+minmax\(145px,\s*180px\)\s+minmax\(120px,\s*180px\)\s+auto;/s);
+  assert.match(css, /\.areas-filters input,\s*\.areas-filters select\s*\{[^}]*width:\s*100%;/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-filters\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+auto;/s);
+  assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-search-input\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
+  assert.match(css, /@container \(max-width:\s*640px\)\s*\{[\s\S]*?\.areas-filters\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+auto;[\s\S]*?\.areas-search-input\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
 });
 
 test('Planning panel groups initiatives into primary roadmap columns and secondary buckets', () => {
@@ -489,7 +494,10 @@ test('Planning Areas tab renders list, search, lifecycle/type filters, loading a
   assert.match(html, /Areas <span>2<\/span>/);
   assert.match(html, /Operator console/);
   assert.match(html, /Runtime platform/);
-  assert.match(html, /active investment/);
+  assert.match(html, /Active Investment/);
+  assert.match(html, /<input id="areas-search" class="areas-search-input"/);
+  assert.match(html, /<option value="active_investment"[^>]*>Active Investment<\/option>/);
+  assert.doesNotMatch(html, />active investment</);
 
   document.getElementById('areas-search').value = 'runtime';
   vm.runInContext("areasSetSearch('runtime')", sandbox);

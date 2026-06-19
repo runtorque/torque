@@ -789,7 +789,9 @@ function _areaNormalizeLifecycle(value) {
 }
 
 function _areaLifecycleLabel(value) {
-  return String(value || '').replace(/_/g, ' ');
+  return String(value || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, function(ch) { return ch.toUpperCase(); });
 }
 
 function _areaNoteTypeLabel(value) {
@@ -1325,7 +1327,7 @@ function _renderAreaCard(item) {
 function _renderAreasFilters(group, total, filtered) {
   var typeOptions = _areasTypeOptions(group);
   var html = '<div class="areas-filters">';
-  html += '<input id="areas-search" value="' + esc(_areasSearch || '') + '" placeholder="Search areas" oninput="areasSetSearch(this.value)" autocomplete="off">';
+  html += '<input id="areas-search" class="areas-search-input" value="' + esc(_areasSearch || '') + '" placeholder="Search areas" oninput="areasSetSearch(this.value)" autocomplete="off">';
   html += '<select id="areas-lifecycle-filter" onchange="areasSetLifecycleFilter(this.value)">';
   html += '<option value="">All lifecycles</option>';
   AREA_LIFECYCLES.forEach(function(lifecycle) {
