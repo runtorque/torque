@@ -458,12 +458,10 @@ function newAgentFromTemplate(group, templateName) {
 }
 
 function quickAddTerminal(group, parentId) {
-  const gs = (state.group_settings || {})[group] || {};
-  if (gs.terminal_always_custom_dialog) { openAddTerminal(group, parentId); return; }
-  const prefix = gs.terminal_name_prefix || 'Terminal';
-  const msg = { cmd: 'add_terminal', name: _nextName(prefix), group };
-  if (parentId) msg.parent_id = parentId;
-  send(msg);
+  // Manual terminal creation is no longer an operator UI flow. Keep this
+  // compatibility stub so stale inline handlers or old keybinding overrides do
+  // not throw, but do not send the add_terminal command from the web UI.
+  return false;
 }
 
 async function restartDaemon() {
@@ -609,6 +607,10 @@ function setupDrag() {
   main.addEventListener('dragstart', (e) => {
     const el = e.target.closest('[data-drag-id]');
     if (!el) return;
+    if (el.dataset.dragType === 'terminal') {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      return;
+    }
     _dragId = el.dataset.dragId;
     _dragType = el.dataset.dragType;
     dragInProgress = true;
@@ -981,7 +983,9 @@ function _cellContextMenuItems(id) {
         + ')',
     });
   }
-  if (cell.status === 'stopped' && !isDismissedLifecycleCell) {
+  if (cell.status === 'stopped'
+      && cell.cell_type !== 'terminal'
+      && !isDismissedLifecycleCell) {
     items.push({
       label: isDesignatedEngineer ? 'Restart Engineer\u2026' : 'Relaunch',
       action: `relaunchAgent('${id}')`,

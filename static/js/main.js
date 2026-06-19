@@ -1000,10 +1000,7 @@ function openAddAgentForFocused() {
 }
 
 function openAddTerminalForFocused() {
-  if (selectedAgentId) {
-    const cell = state.agents[selectedAgentId];
-    if (cell) quickAddTerminal(cell.group, selectedAgentId);
-  }
+  return false;
 }
 
 function openAddTaskForFocused() {
@@ -1274,11 +1271,11 @@ document.querySelectorAll('.overlay').forEach(o => {
 });
 
 /* Group settings modal: Escape to close (no Enter-to-submit since many fields) */
-['gs-directory', 'gs-agent-directory', 'gs-terminal-prefix',
- 'gs-terminal-boot-cmd', 'gs-terminal-cmd-args',
- 'gs-terminal-init-script', 'gs-terminal-directory',
+['gs-directory', 'gs-agent-directory',
  'gs-engineer-boot-cmd', 'gs-engineer-custom-instructions'].forEach(id => {
-  document.getElementById(id).addEventListener('keydown', (e) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeModals();
   });
 });

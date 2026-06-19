@@ -554,10 +554,9 @@ function _renderMainGrid(opts, renderMode) {
       html += `  <span class="drawer-label">Group terminals</span>`;
       html += `  <span class="drawer-count">${standaloneTerms.length}</span>`;
       html += `</div>`;
-      html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(gname)}">`;
+      html += `<div class="term-list">`;
       for (const t of standaloneTerms) html += renderTerminalRow(t);
       html += `</div>`;
-      html += renderTermAddBtn(gname, '');
       html += `</div>`;
     }
 

@@ -319,7 +319,12 @@ function openAddAgentAdvanced(group, templateName) {
 function openAddWorkerModal(group, templateName) {
   _openAddModal('worker', group, '', templateName || '', { advanced: false });
 }
-function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId, '', { advanced: true }); }
+function openAddTerminal(group, parentId) {
+  // Manual terminal creation is intentionally hidden from the operator UI.
+  // Retain a harmless stub for stale handlers/extensions that may still call
+  // the old modal entry point.
+  return false;
+}
 
 function submitAdd() {
   const name    = document.getElementById('add-name-input').value.trim();

@@ -1099,15 +1099,7 @@ function _terminalDisplayPath(cell) {
 }
 
 function _terminalPrimaryAction(groupLabel, agentTarget) {
-  if (!groupLabel) return null;
-  return {
-    label: 'New Terminal',
-    onclick: 'quickAddTerminal(\''
-      + esc(groupLabel)
-      + '\',\''
-      + esc(agentTarget && agentTarget.id ? agentTarget.id : '')
-      + '\')',
-  };
+  return null;
 }
 
 function _embeddedTerminalCanTakeFocus(force) {
@@ -1149,13 +1141,23 @@ function _ensureTerminalWorkspaceDom(root) {
     root.innerHTML = ''
       + '<div class="terminal-shell">'
       + '  <div class="terminal-topbar"></div>'
-      + '  <div class="terminal-tabs"></div>'
       + '  <div class="terminal-stage"></div>'
       + '  <div class="terminal-direct-messages-slot"></div>'
       + '  <div class="terminal-compose-slot"></div>'
       + '  <div class="terminal-statusbar"></div>'
       + '</div>';
     shell = root.querySelector('.terminal-shell');
+  }
+  const legacyTabs = shell.querySelector('.terminal-tabs');
+  if (legacyTabs) {
+    legacyTabs.innerHTML = '';
+    legacyTabs._torqueLastHtml = '';
+    if (legacyTabs.classList && typeof legacyTabs.classList.add === 'function') {
+      legacyTabs.classList.add('terminal-tabs-hidden');
+    }
+    if (legacyTabs.parentNode && typeof legacyTabs.remove === 'function') {
+      legacyTabs.remove();
+    }
   }
   let directMessages = shell.querySelector('.terminal-direct-messages-slot');
   if (!directMessages && document.createElement) {
@@ -1185,7 +1187,7 @@ function _ensureTerminalWorkspaceDom(root) {
   return {
     shell: shell,
     topbar: shell.querySelector('.terminal-topbar'),
-    tabs: shell.querySelector('.terminal-tabs'),
+    tabs: null,
     stage: shell.querySelector('.terminal-stage'),
     directMessages: directMessages,
     compose: compose,
@@ -1232,32 +1234,11 @@ function closeTerminalTab(cellId, evt) {
 }
 
 function _renderTerminalTabs(cells, activeId) {
-  if (!cells.length) return '<div class="terminal-tabs-empty">No sessions</div>';
-  let html = '';
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    const active = cell.id === activeId;
-    const stopped = cell.status === 'stopped' || !cell.session_id;
-    html += '<div class="terminal-tab'
-      + (active ? ' active' : '')
-      + (stopped ? ' stopped' : '')
-      + '" data-cell-id="' + esc(cell.id) + '">'
-      + '<button type="button" class="terminal-tab-select" onclick="focusAgent(\'' + esc(cell.id) + '\')">'
-      + '<span class="terminal-tab-dot ' + esc(agentStatusClass(cell)) + '"></span>'
-      + '<span class="terminal-tab-label">' + esc(cell.name) + '</span>'
-      + (cell.cell_type === 'terminal' ? '<span class="terminal-tab-kind">term</span>' : '')
-      + '</button>'
-      + '<button type="button" class="terminal-tab-close" aria-label="Close ' + esc(cell.name || cell.id) + '" onclick="return closeTerminalTab(\'' + esc(cell.id) + '\', event)">×</button>'
-      + '</div>';
-  }
-  return html;
+  return '';
 }
 
 function _terminalShouldShowTabs(cells) {
-  // Keep the tab bar visible even for a single session so New/Close tab
-  // affordances have a stable home and adding a second session does not shift
-  // the terminal layout. With zero live cells there is still nothing to tab.
-  return Array.isArray(cells) && cells.length > 0;
+  return false;
 }
 
 function _terminalComposeDomId(cellId) {
@@ -3342,13 +3323,13 @@ function renderTerminalWorkspace(opts) {
   const cells = _terminalGroupCells(group);
   const cell = _resolveTerminalWorkspaceCell();
   const agentTarget = _terminalTargetAgent(cell);
-  const primaryAction = _terminalPrimaryAction(groupLabel, agentTarget);
   const relaunchAction = cell && !cell.session_id ? {
     label: 'Relaunch',
     onclick: 'relaunchAgent(\'' + esc(cell.id) + '\')',
   } : null;
-  const topbarAction = cell ? (cell.session_id ? primaryAction : relaunchAction) : null;
-  const showTabs = _terminalShouldShowTabs(cells);
+  const topbarAction = cell && cell.cell_type !== 'terminal' && !cell.session_id
+    ? relaunchAction
+    : null;
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);
@@ -3358,11 +3339,11 @@ function renderTerminalWorkspace(opts) {
     workspaceState.focus = null;
   }
   const title = cell && cell.name ? cell.name : 'Terminal';
-  // Idempotent topbar/tabs: skip the innerHTML clobber when the rendered
+  // Idempotent topbar: skip the innerHTML clobber when the rendered
   // HTML hasn't changed. Under multi-agent activity `renderTerminalWorkspace`
   // is called on every grid render (TORQUE:264 firehose) — without this guard
-  // we rewrite the topbar + tabs DOM dozens of times per second even though
-  // nothing visible changed.
+  // we rewrite the topbar DOM dozens of times per second even though nothing
+  // visible changed.
   const topbarHtml = ''
     + '<div class="terminal-topbar-left">'
     + '  <span class="terminal-title">' + esc(title) + '</span>'
@@ -3377,11 +3358,12 @@ function renderTerminalWorkspace(opts) {
     dom.topbar.innerHTML = topbarHtml;
     dom.topbar._torqueLastHtml = topbarHtml;
   }
-  dom.tabs.classList.toggle('terminal-tabs-hidden', !showTabs);
-  const tabsHtml = showTabs ? _renderTerminalTabs(cells, cell ? cell.id : '') : '';
-  if (dom.tabs._torqueLastHtml !== tabsHtml) {
-    dom.tabs.innerHTML = tabsHtml;
-    dom.tabs._torqueLastHtml = tabsHtml;
+  if (dom.tabs) {
+    dom.tabs.classList.toggle('terminal-tabs-hidden', true);
+    if (dom.tabs._torqueLastHtml !== '') {
+      dom.tabs.innerHTML = '';
+      dom.tabs._torqueLastHtml = '';
+    }
   }
 
   if (!cell) {
@@ -3389,12 +3371,9 @@ function renderTerminalWorkspace(opts) {
     _renderTerminalCompose(dom.compose, null);
     const emptyHtml = ''
       + '<div class="terminal-empty">'
-      + '  <div class="terminal-empty-title">Open a shell</div>'
-      + '  <div class="terminal-empty-body">Start a standalone terminal for this workspace and Torque will drop you into it ready to type.</div>'
-      + (primaryAction
-        ? '  <button class="terminal-empty-btn" onclick="' + primaryAction.onclick + '">' + primaryAction.label + '</button>'
-        : '')
-      + '  <div class="terminal-empty-meta">The terminal will take focus automatically when it opens.</div>'
+      + '  <div class="terminal-empty-title">Select an agent</div>'
+      + '  <div class="terminal-empty-body">Choose an agent, worker, engineer, architect, or legacy terminal from the grid to view its session here.</div>'
+      + '  <div class="terminal-empty-meta">Manual terminal creation has moved out of the operator UI.</div>'
       + '</div>';
     if (dom.stage._torqueLastHtml !== emptyHtml) {
       dom.stage.innerHTML = emptyHtml;
@@ -3412,11 +3391,16 @@ function renderTerminalWorkspace(opts) {
   if (!cell.session_id) {
     _renderTerminalDirectMessages(dom.directMessages, cell);
     _renderTerminalCompose(dom.compose, cell);
-    const stoppedHtml = ''
-      + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
-      + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
-      + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
-      + '  <div class="terminal-empty-meta">When it comes back, Torque will focus the terminal automatically.</div>';
+    const stoppedHtml = cell.cell_type === 'terminal'
+      ? ''
+        + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
+        + '  <div class="terminal-empty-body">This legacy terminal remains available in the grid so you can inspect or delete it, but manual terminal relaunch is no longer available from the UI.</div>'
+        + '  <div class="terminal-empty-meta">Select an agent card to switch the workspace to an active session.</div>'
+      : ''
+        + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
+        + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
+        + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
+        + '  <div class="terminal-empty-meta">When it comes back, Torque will focus the terminal automatically.</div>';
     const stoppedEntry = _findEmbeddedTerminalEntryForCell(cell.id);
     if (stoppedEntry) {
       _activateEmbeddedTerminalSurface(dom.stage, stoppedEntry.sessionKey);

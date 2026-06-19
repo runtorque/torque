@@ -774,7 +774,7 @@ function createSelectionHarness() {
       return '';
     };
   `);
-  return { context, document };
+  return { context, document, sandbox };
 }
 
 function createEventsHarness(options = {}) {
@@ -11024,6 +11024,41 @@ test('classic terminal selection keeps the current agent context on the toolbelt
   assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });
 
+test('manual terminal creation shims are inert in the operator UI', () => {
+  const { context, sandbox } = createSelectionHarness();
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: { terminal_name_prefix: 'Shell' } };
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+  };
+
+  assert.equal(runInContext(context, `quickAddTerminal('alpha', 'agent-1');`), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+
+  loadScript(context, 'static/js/modals/add-cell.js');
+  assert.equal(runInContext(context, `openAddTerminal('alpha', 'agent-1');`), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
+test('websocket add_terminal action shim is ignored by the UI', () => {
+  const { sandbox } = createSandbox({
+    location: { protocol: 'http:', host: 'localhost:9000' },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+
+  const calls = runInContext(context, `
+    var __terminalActionCalls = [];
+    quickAddTerminal = function(group, parentId) {
+      __terminalActionCalls.push([group, parentId]);
+    };
+    handleAction({ action: 'add_terminal', group: 'alpha', parent_id: 'agent-1' });
+    JSON.stringify(__terminalActionCalls);
+  `);
+
+  assert.deepEqual(JSON.parse(calls), []);
+});
+
 test('clicking empty main-grid space preserves focused and selected agent state', () => {
   const { sandbox, document } = createSandbox();
   sandbox.renderCalls = { main: 0, agent: 0 };
@@ -11058,7 +11093,7 @@ test('clicking empty main-grid space preserves focused and selected agent state'
   });
 });
 
-test('embedded terminal tabs render select and close controls for every cell', () => {
+test('embedded terminal tab renderer is inert after tab strip removal', () => {
   const { context } = createEmbeddedTerminalHarness();
   context.__cells = [
     {
@@ -11081,14 +11116,10 @@ test('embedded terminal tabs render select and close controls for every cell', (
 
   const html = runInContext(context, `_renderTerminalTabs(__cells, 'agent-a');`);
 
-  assert.equal(htmlClassCount(html, 'terminal-tab'), 2);
-  assert.equal(htmlClassCount(html, 'terminal-tab-select'), 2);
-  assert.equal(htmlClassCount(html, 'terminal-tab-close'), 2);
-  assert.match(html, /<div class="terminal-tab active" data-cell-id="agent-a">/);
-  assert.match(html, /<div class="terminal-tab stopped" data-cell-id="term-b">/);
-  assert.match(html, /onclick="focusAgent\('agent-a'\)"/);
-  assert.match(html, /onclick="return closeTerminalTab\('term-b', event\)"/);
-  assert.match(html, /<span class="terminal-tab-kind">term<\/span>/);
+  assert.equal(html, '');
+  assert.equal(htmlClassCount(html, 'terminal-tab'), 0);
+  assert.equal(htmlClassCount(html, 'terminal-tab-select'), 0);
+  assert.equal(htmlClassCount(html, 'terminal-tab-close'), 0);
 });
 
 test('embedded terminal websocket URL carries the page client id', () => {
@@ -11104,7 +11135,7 @@ test('embedded terminal websocket URL carries the page client id', () => {
   );
 });
 
-test('embedded terminal tab bar stays visible with one session', () => {
+test('embedded terminal workspace removes the legacy tab strip regardless of session count', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
@@ -11129,9 +11160,10 @@ test('embedded terminal tab bar stays visible with one session', () => {
     renderTerminalWorkspace();
   `);
 
-  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
-  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 1);
-  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 1);
+  assert.equal(dom.tabs.removed, true);
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), true);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 0);
 
   sandbox.state.groups.alpha.push('term-b');
   sandbox.state.agents['term-b'] = {
@@ -11143,17 +11175,17 @@ test('embedded terminal tab bar stays visible with one session', () => {
     status: 'running',
   };
   runInContext(context, `renderTerminalWorkspace();`);
-  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
-  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 2);
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), true);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
 
   sandbox.state.groups.alpha = ['term-a'];
   delete sandbox.state.agents['term-b'];
   runInContext(context, `renderTerminalWorkspace();`);
-  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
-  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 1);
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), true);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
 });
 
-test('embedded terminal workspace hides tombstoned cells from tabs', () => {
+test('embedded terminal workspace does not revive tabs for tombstoned cells', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
@@ -11176,6 +11208,7 @@ test('embedded terminal workspace hides tombstoned cells from tabs', () => {
 
   runInContext(context, `renderTerminalWorkspace();`);
 
+  assert.equal(dom.tabs.removed, true);
   assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), true);
   assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
   assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 0);
@@ -24152,8 +24185,14 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.doesNotMatch(main.innerHTML, /ghost-card ghost-card--worker|ghost-card ghost-card--engineer|ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /quickAddAgent\('alpha'\)/);
   assert.doesNotMatch(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
-  assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
-  assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
+  assert.doesNotMatch(main.innerHTML, /quickAddTerminal\(/);
+  assert.doesNotMatch(main.innerHTML, /openAddTerminal\(/);
+  assert.doesNotMatch(main.innerHTML, /New terminal/);
+  assert.doesNotMatch(main.innerHTML, /data-drag-type="terminal"/);
+  assert.doesNotMatch(main.innerHTML, /data-drop-type="terminal"/);
+  assert.doesNotMatch(main.innerHTML, /relaunchAgent\('term-(?:child|root)'\)/);
+  assert.match(main.innerHTML, /removeAgent\('term-child'\)/);
+  assert.match(main.innerHTML, /removeAgent\('term-root'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
 });
 
@@ -27031,7 +27070,7 @@ test('readable text inside draggable cards temporarily opts out of drag startup'
   assert.equal(card.getAttribute('draggable'), 'true');
 });
 
-test('terminal drag moves between an agent drawer and standalone while preserving session and worktree fields', () => {
+test('legacy terminal rows are not draggable or reparentable from the UI', () => {
   const { context, document, sandbox } = createMainGridDragHarness();
   const main = document.getElementById('main');
 
@@ -27077,6 +27116,9 @@ test('terminal drag moves between an agent drawer and standalone while preservin
 
   runInContext(context, `selectedAgentId = 'agent-1'; selectedTerminalId = 'agent-1'; render(); setupDrag();`);
 
+  assert.doesNotMatch(main.innerHTML, /data-drag-type="terminal"/);
+  assert.doesNotMatch(main.innerHTML, /data-drop-type="terminal"/);
+
   const childTerminal = createDragDomElement({
     dragId: 'term-child',
     dragType: 'terminal',
@@ -27092,33 +27134,7 @@ test('terminal drag moves between an agent drawer and standalone while preservin
 
   fireGridDrag(main, childTerminal, standaloneList, { clientX: 40, clientY: 40 });
 
-  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
-    cmd: 'move_agent',
-    id: 'term-child',
-    target_group: 'torque',
-    before: '',
-  });
-
-  applyMoveAgentForDragState(sandbox.state, 'term-child', 'torque', '');
-  runInContext(context, `render();`);
-
-  assert.deepEqual(jsonValue(context, `({
-    parent: state.agents['term-child'].parent_id,
-    group: state.agents['term-child'].group,
-    groups: state.groups.torque,
-    children: state.children['agent-1'],
-    session: state.agents['term-child'].session_id,
-    worktreePath: state.agents['term-child'].worktree_path,
-    worktreeBranch: state.agents['term-child'].worktree_branch
-  })`), {
-    parent: '',
-    group: 'torque',
-    groups: ['agent-1', 'term-standalone', 'term-child'],
-    children: [],
-    session: 'child-session',
-    worktreePath: '/repo/.torque/worktrees/term-child',
-    worktreeBranch: 'torque/term-child',
-  });
+  assert.deepEqual(jsonValue(context, `sendCalls`), []);
 
   const detachedTerminal = createDragDomElement({
     dragId: 'term-child',
@@ -27136,14 +27152,7 @@ test('terminal drag moves between an agent drawer and standalone while preservin
 
   fireGridDrag(main, detachedTerminal, parentDrawerList, { clientX: 40, clientY: 40 });
 
-  assert.deepEqual(jsonValue(context, `sendCalls[1]`), {
-    cmd: 'reparent_terminal',
-    id: 'term-child',
-    parent_id: 'agent-1',
-  });
-
-  applyReparentTerminalForDragState(sandbox.state, 'term-child', 'agent-1');
-  runInContext(context, `render();`);
+  assert.deepEqual(jsonValue(context, `sendCalls`), []);
 
   assert.deepEqual(jsonValue(context, `({
     parent: state.agents['term-child'].parent_id,

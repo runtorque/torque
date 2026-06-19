@@ -44,13 +44,6 @@ var KEYBINDING_ACTIONS = {
         : false;
     },
   },
-  'terminal.create': {
-    order: 40,
-    label: 'Create terminal',
-    description: 'Add a terminal under the selected agent.',
-    defaultBinding: { key: 't', ctrl: false, meta: false, alt: false, shift: false },
-    run: function() { openAddTerminalForFocused(); },
-  },
   'task.create': {
     order: 50,
     label: 'Create task',
