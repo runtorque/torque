@@ -1986,6 +1986,15 @@ function _captureTerminalWorkspaceState(root, cell) {
   return snapshot;
 }
 
+function _terminalWorkspaceFocusedComposeHasDraft(root) {
+  if (!root || typeof document === 'undefined') return false;
+  const active = document.activeElement;
+  if (!active) return false;
+  if (typeof root.contains === 'function' && !root.contains(active)) return false;
+  if (!(active.classList && active.classList.contains('terminal-compose-input'))) return false;
+  return String(active.value || '').length > 0;
+}
+
 function _restoreTerminalWorkspaceState(root, snapshot, cell) {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(root, snapshot);
@@ -3264,7 +3273,8 @@ function _createEmbeddedTerminalSurface(stage, sessionKey) {
   return surface;
 }
 
-function _activateEmbeddedTerminalSurface(stage, sessionKey) {
+function _activateEmbeddedTerminalSurface(stage, sessionKey, opts) {
+  opts = opts || {};
   _clearEmbeddedTerminalStagePlaceholders(stage);
   const entry = _embeddedTerminalSessions[sessionKey] || null;
   // The previously active session, captured before _setActiveEmbeddedTerminalEntry
@@ -3285,7 +3295,7 @@ function _activateEmbeddedTerminalSurface(stage, sessionKey) {
   _setActiveEmbeddedTerminalEntry(entry);
   if (entry) {
     _attachEmbeddedTerminalTailControls(entry);
-    _scheduleEmbeddedTerminalFit(entry);
+    _scheduleEmbeddedTerminalFit(entry, { preserveTail: !!opts.preserveTail });
     // Switching to an agent's terminal should land at the bottom and resume
     // tailing rather than leaving the viewport pinned to the top (or wherever
     // the previous activation left it). Skip same-session rerenders so a
@@ -3342,6 +3352,7 @@ function renderTerminalWorkspace(opts) {
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);
+  const preserveTerminalTailOnFit = _terminalWorkspaceFocusedComposeHasDraft(root);
   if (opts.suppressTerminalFocus && workspaceState && workspaceState.focus
       && _terminalDirectMessageFocusIsTerminal(root)) {
     workspaceState.focus = null;
@@ -3411,7 +3422,9 @@ function renderTerminalWorkspace(opts) {
       _activateEmbeddedTerminalSurface(dom.stage, stoppedEntry.sessionKey);
       dom.stage._torqueLastHtml = null;
     } else {
-      _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
+      _activateEmbeddedTerminalSurface(dom.stage, sessionKey, {
+        preserveTail: preserveTerminalTailOnFit,
+      });
       _renderEmbeddedTerminalStagePlaceholder(dom.stage, stoppedHtml);
     }
     const statusLabel = _terminalStatusLabel(cell);
@@ -3434,7 +3447,9 @@ function renderTerminalWorkspace(opts) {
   } else {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
-  _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
+  _activateEmbeddedTerminalSurface(dom.stage, sessionKey, {
+    preserveTail: preserveTerminalTailOnFit,
+  });
   // The active branch attaches/toggles xterm surfaces directly on the stage
   // rather than rewriting `dom.stage.innerHTML`. Invalidate the empty/stopped
   // HTML cache so the next transition back to a no-cell / stopped-cell state

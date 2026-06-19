@@ -11386,6 +11386,124 @@ test('embedded terminal output keeps tail-follow after a terminal workspace rere
   assert.equal(term.scrollToBottomCount, 1);
 });
 
+test('focused DM compose rerender preserves terminal tail, DM tail, draft, and caret', () => {
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  function makeRows(count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      rows.push({
+        message_id: `dm-type-${String(i).padStart(2, '0')}`,
+        message_type: 'message',
+        message: `Typing tail ${String(i).padStart(2, '0')}`,
+        sender_id: i % 2 ? 'user' : 'agent-1',
+        sender_kind: i % 2 ? 'user' : 'worker',
+        recipient_id: i % 2 ? 'agent-1' : 'user',
+        recipient_kind: i % 2 ? 'worker' : 'user',
+        created_at: 100 + i,
+      });
+    }
+    return rows;
+  }
+  sandbox.state.direct_messages_by_agent = { 'agent-1': makeRows(25) };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const term = terminals[0];
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.scrollToBottomCount = 0;
+
+  const list = new FakeElement('dm-typing-tail-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  list.scrollTop = 780;
+  list.clientHeight = 120;
+  list.scrollHeight = 900;
+  dom.directMessages.appendChild(list);
+  dom.directMessages.setQuerySelector('.terminal-direct-messages-list', list);
+  dom.workspace.setQuerySelector('.terminal-direct-messages-list', list);
+  context.__dmList = list;
+  runInContext(context, `terminalDirectMessagesScroll({ currentTarget: __dmList });`);
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.tagName = 'TEXTAREA';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = 'line one\nline two typing';
+  input.selectionStart = 9;
+  input.selectionEnd = 17;
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__composeInput = input;
+  runInContext(context, `terminalComposeInput(__composeInput);`);
+
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML; },
+    set(value) {
+      this._innerHTML = String(value);
+      // New DM content arrived while the composer was focused.
+      list.scrollHeight = 1040;
+    },
+  });
+
+  runInContext(context, `
+    (function() {
+      var __e = _embeddedTerminalSessions['agent-1:sess-1'];
+      __e.fit.fit = function() {
+        // Simulate xterm fit() temporarily detaching from bottom during the
+        // rerender/layout churn that happens while the DM composer is active.
+        __e.terminal.buffer.active.viewportY = 30;
+      };
+    })();
+  `);
+
+  sandbox.state.direct_messages_by_agent['agent-1'] = makeRows(26);
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY,
+    'same-session rerender should re-pin the xterm tail after fit()');
+  assert.equal(term.scrollToBottomCount, 1);
+  assert.equal(list.scrollTop, 920,
+    'DM list should keep following the newly grown tail');
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'line one\nline two typing');
+  assert.equal(input.selectionStart, 9);
+  assert.equal(input.selectionEnd, 17);
+});
+
 test('embedded terminal output preserves viewport when user has scrolled up', () => {
   const { context, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
   const term = terminals[0];
