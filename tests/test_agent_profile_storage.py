@@ -87,7 +87,7 @@ class AgentProfileStorageTests(unittest.TestCase):
 
         self.assertEqual(snapshot["id"], "product-manager-draft")
         self.assertEqual(cell.effective_agent_profile_id, "product-manager-draft")
-        self.assertIn("architect_peer_inbox", "\n".join(snapshot["warnings"]))
+        self.assertIn("architect_product_* wrappers", "\n".join(snapshot["warnings"]))
         self.state.assign_agent_profile(
             cell.id,
             "full-architect",

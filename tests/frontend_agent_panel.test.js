@@ -3469,15 +3469,15 @@ test('agent panel renders Agent Profile badge with draft warnings and pending as
     agent_profile_id: 'full-architect',
     agent_profile_version: '1',
     effective_agent_profile_id: 'product-manager-draft',
-    effective_agent_profile_version: '1',
+    effective_agent_profile_version: '2',
     effective_agent_profile_snapshot: {
       id: 'product-manager-draft',
-      version: '1',
+      version: '2',
       base_kind: 'architect',
       status: 'draft',
       warnings: [
-        'product-manager-draft is infrastructure-only in Wave 3',
-        'Mixed-purpose architect_peer_inbox and architect_reply remain denied',
+        'product-manager-draft is scratch-only in Wave 4B',
+        'Raw Architect tools are denied; use architect_product_* wrappers only',
       ],
       denied_high_risk_capabilities: ['agent.hire_engineer', 'task.dispatch'],
     },
@@ -3486,8 +3486,8 @@ test('agent panel renders Agent Profile badge with draft warnings and pending as
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /agent-profile-badge/);
-  assert.match(panel.innerHTML, /product-manager-draft@1 \(pending next launch\)/);
-  assert.match(panel.innerHTML, /architect_peer_inbox and architect_reply remain denied/);
+  assert.match(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
+  assert.match(panel.innerHTML, /Raw Architect tools are denied/);
 });
 
 test('agent panel marks cleared assignment pending default full profile next launch', () => {
@@ -3502,10 +3502,10 @@ test('agent panel marks cleared assignment pending default full profile next lau
     agent_profile_id: '',
     agent_profile_version: '',
     effective_agent_profile_id: 'product-manager-draft',
-    effective_agent_profile_version: '1',
+    effective_agent_profile_version: '2',
     effective_agent_profile_snapshot: {
       id: 'product-manager-draft',
-      version: '1',
+      version: '2',
       base_kind: 'architect',
       status: 'draft',
       warnings: ['cleared assignment should relaunch as full architect'],
@@ -3515,6 +3515,6 @@ test('agent panel marks cleared assignment pending default full profile next lau
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /product-manager-draft@1 \(pending next launch\)/);
+  assert.match(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
   assert.match(panel.innerHTML, /desired assignment: default full-architect/);
 });

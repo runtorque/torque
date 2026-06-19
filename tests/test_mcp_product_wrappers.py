@@ -1,0 +1,520 @@
+import importlib
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+try:
+    from helpers import FakeRequest, install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import FakeRequest, install_aiohttp_stub
+
+
+class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub(include_json_helpers=True)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db_mod = importlib.import_module("torque.db")
+        self.state_mod = importlib.import_module("torque.state")
+        self.mcp_mod = importlib.import_module("torque.mcp")
+        self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
+        self.db.init()
+        self.addCleanup(self.db.close)
+        self.state = self.state_mod.MatrixState(db=self.db)
+        self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
+        self.state.groups["g"] = []
+        self.calls = []
+
+        self.architect = self._add_agent("architect-1", "Architect", kind="architect")
+        self.peer = self._add_agent("architect-2", "Peer", kind="architect")
+        self.engineer = self._add_agent(
+            "engineer-1",
+            "Engineer",
+            kind="engineer",
+            hired_by_architect_id=self.architect.id,
+        )
+        self.state.agent_profile_overrides = {
+            self.architect.id: "product-manager-draft",
+            self.peer.id: "product-manager-draft",
+        }
+
+    def _add_agent(self, agent_id, name, *, kind="architect", **kwargs):
+        cell = self.state_mod.AgentCell(
+            id=agent_id,
+            name=name,
+            group="g",
+            cell_type="agent",
+            kind=kind,
+            **kwargs,
+        )
+        self.state.agents[cell.id] = cell
+        self.state.groups.setdefault("g", []).append(cell.id)
+        self.state._db_save_agent(cell)
+        return cell
+
+    async def _handle_command(self, payload):
+        self.calls.append(dict(payload))
+        if payload.get("cmd") == "inject_mcp_message":
+            return {"type": "ok", "delivered": True}
+        return {"type": "ok"}
+
+    def _handler(self):
+        return self.mcp_mod.create_mcp_handler(self._handle_command, self.state)
+
+    async def _call(self, tool_name, arguments=None, *, req_id=1, agent_id=None):
+        handler = self._handler()
+        return await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": arguments or {}},
+                },
+                headers={"X-Torque-Cell-Id": agent_id or self.architect.id},
+            )
+        )
+
+    async def _list_tools(self):
+        handler = self._handler()
+        response = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": self.architect.id},
+            )
+        )
+        return {tool["name"] for tool in response.payload["result"]["tools"]}
+
+    def _result_payload(self, response):
+        self.assertNotIn("error", response.payload)
+        result = response.payload["result"]
+        self.assertFalse(result["isError"], result["content"][0]["text"])
+        return json.loads(result["content"][0]["text"])
+
+    def _error_text(self, response):
+        if "error" in response.payload:
+            return response.payload["error"]["message"]
+        result = response.payload["result"]
+        self.assertTrue(result["isError"], result["content"][0]["text"])
+        return result["content"][0]["text"]
+
+    async def test_pm_profile_projects_product_wrappers_and_denies_raw_tools(self):
+        tool_names = await self._list_tools()
+
+        for name in {
+            "torque_context",
+            "architect_product_task_propose",
+            "architect_product_peer_message",
+            "architect_product_peer_inbox",
+            "architect_product_peer_reply",
+            "architect_product_decision_create",
+            "architect_product_decision_update",
+            "architect_product_decision_link",
+            "architect_product_message_user",
+            "architect_product_ask_user",
+            "architect_product_journal",
+        }:
+            self.assertIn(name, tool_names)
+
+        denied = {
+            "architect_tool_search",
+            "architect_board_summary",
+            "architect_task_list",
+            "architect_task_show",
+            "architect_peer_message",
+            "architect_peer_inbox",
+            "architect_reply",
+            "architect_decision_create",
+            "architect_decision_update",
+            "architect_decision_link",
+            "architect_decision_list",
+            "architect_area_list",
+            "architect_initiative_list",
+            "architect_message_user",
+            "architect_ask",
+            "architect_journal",
+        }
+        self.assertFalse(denied & tool_names)
+
+        response = await self._call("architect_peer_message", {"architect_id": self.peer.id, "message": "raw"})
+        self.assertIn("Unknown tool", self._error_text(response))
+        self.assertEqual([], self.calls)
+
+    async def test_task_proposal_is_queued_unassigned_and_rejects_dispatch_fields(self):
+        response = await self._call(
+            "architect_product_task_propose",
+            {
+                "title": "Draft onboarding problem statement",
+                "description": "Product proposal only.",
+                "labels": ["discovery"],
+                "suggested_action": "feature/implement",
+                "suggested_specialization": "prompts-config",
+            },
+        )
+        payload = self._result_payload(response)
+        task_id = payload["id"]
+        task = self.state.board_tasks[task_id]
+
+        self.assertEqual("queued", task.dispatch_state)
+        self.assertEqual("", task.assigned_engineer_id)
+        self.assertEqual("", task.agent_id)
+        self.assertEqual("", task.action_name)
+        self.assertEqual({}, task.action_vars)
+        self.assertEqual("", task.scheduled_at)
+        self.assertEqual(self.architect.id, task.created_by_architect_id)
+        self.assertEqual("feature/implement", task.suggested_action)
+        self.assertEqual("prompts-config", task.suggested_specialization)
+        self.assertIn("product-proposal", task.labels)
+        self.assertIn("pm-created", task.labels)
+        self.assertIn("normal queued Board task", payload["caveat"])
+        self.assertEqual([], self.calls)
+
+        before = set(self.state.board_tasks)
+        rejected = await self._call(
+            "architect_product_task_propose",
+            {"title": "Unsafe", "assigned_engineer_id": self.engineer.id},
+            req_id=2,
+        )
+        self.assertIn("assigned_engineer_id", self._error_text(rejected))
+        self.assertEqual(before, set(self.state.board_tasks))
+
+    async def test_product_decisions_are_proposed_only_owned_and_no_engineer_links(self):
+        task_resp = await self._call("architect_product_task_propose", {"title": "Proposal task"})
+        task_id = self._result_payload(task_resp)["id"]
+
+        create = await self._call(
+            "architect_product_decision_create",
+            {
+                "title": "Propose prioritization model",
+                "rationale": "Need PM review before acceptance.",
+                "linked_task_ids": [task_id],
+            },
+            req_id=2,
+        )
+        decision = self._result_payload(create)["decision"]
+        self.assertEqual("proposed", decision["status"])
+        self.assertEqual([task_id], decision["linked_task_ids"])
+        self.assertEqual([], decision["linked_engineer_ids"])
+        self.assertEqual(
+            "torque.product_decision.v1",
+            decision["metadata"]["product_manager"]["marker"],
+        )
+
+        accepted = await self._call(
+            "architect_product_decision_create",
+            {"title": "Bad", "rationale": "No", "status": "accepted"},
+            req_id=3,
+        )
+        self.assertIn("must remain proposed", self._error_text(accepted))
+
+        update_bad = await self._call(
+            "architect_product_decision_update",
+            {"id": decision["id"], "status": "accepted"},
+            req_id=4,
+        )
+        self.assertIn("must remain proposed", self._error_text(update_bad))
+
+        link_bad = await self._call(
+            "architect_product_decision_link",
+            {"id": decision["id"], "engineer_id": self.engineer.id, "task_id": task_id},
+            req_id=5,
+        )
+        self.assertIn("cannot link engineers", self._error_text(link_bad))
+
+        other = self.state.save_decision({
+            "id": "decision-other",
+            "architect_id": self.peer.id,
+            "title": "Other",
+            "rationale": "Other architect",
+            "status": "proposed",
+            "metadata": {"product_manager": {"marker": "torque.product_decision.v1"}},
+        })
+        self.assertIsNotNone(other)
+        update_other = await self._call(
+            "architect_product_decision_update",
+            {"id": "decision-other", "title": "steal"},
+            req_id=6,
+        )
+        self.assertIn("Decision not found", self._error_text(update_other))
+
+    async def test_product_area_show_hides_non_product_task_and_raw_decision_links(self):
+        hidden_task = self.state.board_add_task(
+            "Hidden task",
+            "g",
+            lane="Backlog",
+            labels=["internal"],
+        )
+        product_task = self.state.board_add_task(
+            "Product task",
+            "g",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+        )
+        raw_decision = self.state.save_decision({
+            "id": "decision-raw",
+            "architect_id": self.architect.id,
+            "title": "Accepted secret",
+            "rationale": "Not product-scoped",
+            "status": "accepted",
+        })
+        self.assertIsNotNone(raw_decision)
+        product_decision_resp = await self._call(
+            "architect_product_decision_create",
+            {
+                "title": "Visible product decision",
+                "rationale": "Proposed-only product decision.",
+                "linked_task_ids": [product_task.id],
+            },
+            req_id=2,
+        )
+        product_decision = self._result_payload(product_decision_resp)["decision"]
+        area = self.db.create_area({
+            "group": "g",
+            "title": "PM scoped area",
+            "created_by_kind": "user",
+            "owner_kind": "user",
+        })
+        self.db.save_area_link(area["id"], "task", hidden_task.id)
+        self.db.save_area_link(area["id"], "task", product_task.id)
+        self.db.save_area_link(area["id"], "decision", "decision-raw")
+        self.db.save_area_link(area["id"], "decision", product_decision["id"])
+
+        response = await self._call(
+            "architect_product_area_show",
+            {"area": area["id"]},
+            req_id=3,
+        )
+        response_text = response.payload["result"]["content"][0]["text"]
+        payload = self._result_payload(response)
+
+        self.assertNotIn(hidden_task.id, response_text)
+        self.assertNotIn("Hidden task", response_text)
+        self.assertNotIn("decision-raw", response_text)
+        self.assertNotIn("Accepted secret", response_text)
+        self.assertEqual(payload["links"]["tasks"], [product_task.id])
+        self.assertEqual(payload["hidden_link_counts"]["tasks"], 1)
+        self.assertEqual(payload["linked_tasks"]["count"], 1)
+        self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(
+            [item["title"] for item in payload["linked_tasks"]["items"]],
+            ["Product task"],
+        )
+        self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(payload["hidden_link_counts"]["decisions"], 1)
+        self.assertEqual(payload["linked_decisions"]["count"], 1)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
+        self.assertEqual(payload["linked_decisions"]["ids"], [product_decision["id"]])
+        self.assertEqual(
+            [item["title"] for item in payload["linked_decisions"]["items"]],
+            ["Visible product decision"],
+        )
+
+        list_response = await self._call(
+            "architect_product_area_list",
+            {"include_links": True},
+            req_id=4,
+        )
+        list_text = list_response.payload["result"]["content"][0]["text"]
+        list_payload = self._result_payload(list_response)
+        listed_area = next(item for item in list_payload["areas"] if item["id"] == area["id"])
+        self.assertNotIn(hidden_task.id, list_text)
+        self.assertNotIn("Hidden task", list_text)
+        self.assertNotIn("decision-raw", list_text)
+        self.assertNotIn("Accepted secret", list_text)
+        self.assertEqual(listed_area["links"]["tasks"], [product_task.id])
+        self.assertEqual(listed_area["hidden_link_counts"]["tasks"], 1)
+        self.assertEqual(listed_area["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(listed_area["hidden_link_counts"]["decisions"], 1)
+
+    async def test_product_initiative_show_hides_non_product_task_and_raw_decision_links(self):
+        hidden_task = self.state.board_add_task(
+            "Hidden initiative task",
+            "g",
+            lane="Backlog",
+            labels=["internal"],
+        )
+        product_task = self.state.board_add_task(
+            "Product initiative task",
+            "g",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+        )
+        raw_decision = self.state.save_decision({
+            "id": "decision-raw-initiative",
+            "architect_id": self.architect.id,
+            "title": "Accepted initiative secret",
+            "rationale": "Not product-scoped",
+            "status": "accepted",
+        })
+        self.assertIsNotNone(raw_decision)
+        product_decision_resp = await self._call(
+            "architect_product_decision_create",
+            {
+                "title": "Visible initiative product decision",
+                "rationale": "Proposed-only product decision.",
+                "linked_task_ids": [product_task.id],
+            },
+            req_id=2,
+        )
+        product_decision = self._result_payload(product_decision_resp)["decision"]
+        initiative = self.db.create_initiative({
+            "group": "g",
+            "title": "PM scoped initiative",
+            "created_by_kind": "user",
+            "owner_kind": "user",
+        })
+        self.db.save_initiative_link(initiative["id"], "task", hidden_task.id)
+        self.db.save_initiative_link(initiative["id"], "task", product_task.id)
+        self.db.save_initiative_link(initiative["id"], "decision", "decision-raw-initiative")
+        self.db.save_initiative_link(initiative["id"], "decision", product_decision["id"])
+
+        response = await self._call(
+            "architect_product_initiative_show",
+            {"initiative": initiative["id"]},
+            req_id=3,
+        )
+        response_text = response.payload["result"]["content"][0]["text"]
+        payload = self._result_payload(response)
+
+        self.assertNotIn(hidden_task.id, response_text)
+        self.assertNotIn("Hidden initiative task", response_text)
+        self.assertNotIn("decision-raw-initiative", response_text)
+        self.assertNotIn("Accepted initiative secret", response_text)
+        self.assertEqual(payload["links"]["tasks"], [product_task.id])
+        self.assertEqual(payload["linked_tasks"]["count"], 1)
+        self.assertEqual(payload["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(
+            [item["title"] for item in payload["linked_tasks"]["items"]],
+            ["Product initiative task"],
+        )
+        self.assertEqual(payload["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(payload["linked_decisions"]["count"], 1)
+        self.assertEqual(payload["linked_decisions"]["hidden_count"], 1)
+        self.assertEqual(payload["linked_decisions"]["items"], [product_decision["id"]])
+
+        list_response = await self._call(
+            "architect_product_initiative_list",
+            {"include_links": True},
+            req_id=4,
+        )
+        list_text = list_response.payload["result"]["content"][0]["text"]
+        list_payload = self._result_payload(list_response)
+        listed_initiative = next(
+            item for item in list_payload["initiatives"]
+            if item["id"] == initiative["id"]
+        )
+        self.assertNotIn(hidden_task.id, list_text)
+        self.assertNotIn("Hidden initiative task", list_text)
+        self.assertNotIn("decision-raw-initiative", list_text)
+        self.assertNotIn("Accepted initiative secret", list_text)
+        self.assertEqual(listed_initiative["links"]["tasks"], [product_task.id])
+        self.assertEqual(listed_initiative["linked_tasks"]["hidden_count"], 1)
+        self.assertEqual(listed_initiative["links"]["decisions"], [product_decision["id"]])
+        self.assertEqual(listed_initiative["linked_decisions"]["hidden_count"], 1)
+
+    async def test_product_peer_threads_are_marker_filtered_and_ack_requires_anchor(self):
+        task_resp = await self._call("architect_product_task_propose", {"title": "Anchor task"})
+        task_id = self._result_payload(task_resp)["id"]
+
+        no_anchor = await self._call(
+            "architect_product_peer_message",
+            {"architect_id": self.peer.id, "message": "ack?", "ack_required": True},
+            req_id=2,
+        )
+        self.assertIn("product-scope anchor", self._error_text(no_anchor))
+        self.assertEqual([], self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20))
+
+        sent = await self._call(
+            "architect_product_peer_message",
+            {
+                "architect_id": self.peer.id,
+                "message": "Please review this product proposal.",
+                "ack_required": True,
+                "context_task_ids": [task_id],
+            },
+            req_id=3,
+        )
+        sent_payload = self._result_payload(sent)
+        product_message_id = sent_payload["message_id"]
+        saved = self.db.load_agent_peer_message(product_message_id)
+        self.assertEqual("torque.product_peer.v1", saved["context_snapshot"]["product_peer"]["marker"])
+        self.assertTrue(saved["ack_required"])
+
+        # Raw Architect↔Architect row without marker and Architect↔Engineer row stay hidden.
+        self.db.save_agent_peer_message({
+            "id": "msg-raw-peer",
+            "thread_id": "thread-raw-peer",
+            "group_name": "g",
+            "sender_id": self.peer.id,
+            "sender_kind": "architect",
+            "recipient_id": self.architect.id,
+            "recipient_kind": "architect",
+            "message": "raw hidden",
+            "created_at": 2,
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-engineer",
+            "thread_id": "thread-engineer",
+            "group_name": "g",
+            "sender_id": self.engineer.id,
+            "sender_kind": "engineer",
+            "recipient_id": self.architect.id,
+            "recipient_kind": "architect",
+            "message": "engineer hidden",
+            "created_at": 3,
+            "context_snapshot": {"product_peer": {"marker": "torque.product_peer.v1"}},
+        })
+
+        inbox = await self._call("architect_product_peer_inbox", {}, req_id=4)
+        threads = self._result_payload(inbox)["threads"]
+        self.assertEqual([sent_payload["thread_id"]], [thread["thread_id"] for thread in threads])
+        self.assertEqual([product_message_id], [threads[0]["messages"][0]["id"]])
+
+        before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
+        raw_reply = await self._call(
+            "architect_product_peer_reply",
+            {"message_id": "msg-raw-peer", "message": "no"},
+            req_id=5,
+        )
+        self.assertIn("product-peer scope", self._error_text(raw_reply))
+        self.assertEqual(
+            [row["id"] for row in before_rows],
+            [row["id"] for row in self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)],
+        )
+
+        reply = await self._call(
+            "architect_product_peer_reply",
+            {"message_id": product_message_id, "message": "Acknowledged.", "ack_required": True},
+            req_id=6,
+        )
+        reply_payload = self._result_payload(reply)
+        reply_row = self.db.load_agent_peer_message(reply_payload["message_id"])
+        self.assertEqual(sent_payload["thread_id"], reply_row["thread_id"])
+        self.assertEqual("torque.product_peer.v1", reply_row["context_snapshot"]["product_peer"]["marker"])
+
+    async def test_user_message_and_journal_wrappers_validate_product_scope(self):
+        invalid_user = await self._call(
+            "architect_product_message_user",
+            {"message": "Hidden context", "context_task_ids": ["TORQUE:404"]},
+        )
+        self.assertIn("Task not found", self._error_text(invalid_user))
+        self.assertEqual([], self.db.load_direct_messages_for_agent(self.architect.id, limit=20))
+
+        bad_journal = await self._call(
+            "architect_product_journal",
+            {"type": "decision", "entry": "No decision journal rows for PM."},
+            req_id=2,
+        )
+        self.assertIn("observation, checkpoint, plan", self._error_text(bad_journal))
+
+        good_journal = await self._call(
+            "architect_product_journal",
+            {"type": "observation", "entry": "Scratch PM recovery note."},
+            req_id=3,
+        )
+        self._result_payload(good_journal)
+        read = await self._call("architect_product_journal_read", {}, req_id=4)
+        entries = self._result_payload(read)["entries"]
+        self.assertIn("observation", [entry["type"] for entry in entries])
+        self.assertTrue(any("Scratch PM recovery note" in entry.get("entry", "") for entry in entries))

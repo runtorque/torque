@@ -907,6 +907,15 @@ def _decision_json_list(value) -> list[str]:
     return out
 
 
+def _decision_json_dict(value) -> dict:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            value = {}
+    return dict(value or {}) if isinstance(value, dict) else {}
+
+
 def _decision_int(value, default: int = 0) -> int:
     try:
         return int(value)
@@ -966,6 +975,10 @@ def _decode_decision_row(row, cols) -> dict:
     decision["linked_engineer_ids"] = _decision_json_list(
         decision.get("linked_engineer_ids", "[]")
     )
+    decision["metadata"] = _decision_json_dict(
+        decision.get("metadata_json", decision.get("metadata", "{}"))
+    )
+    decision.pop("metadata_json", None)
     decision["archived"] = bool(decision.get("archived", 0))
     decision["created_at"] = _decision_int(decision.get("created_at", 0))
     decision["updated_at"] = _decision_int(decision.get("updated_at", 0))
@@ -1331,6 +1344,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._ensure_agent_engineer_specializations_column()
         self._ensure_agent_profile_columns()
         self._ensure_agent_profile_audit_schema()
+        self._ensure_decision_metadata_column()
         self._ensure_board_task_suggested_specialization_column()
         self._ensure_pending_hire_requested_specializations_column()
         self._backfill_kinds_if_needed()
@@ -1432,6 +1446,16 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "ON agent_profile_audit(agent_id, created_at DESC)"
         )
         self._conn.commit()
+
+    def _ensure_decision_metadata_column(self):
+        try:
+            self._conn.execute("SELECT metadata_json FROM decisions LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE decisions ADD COLUMN metadata_json "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+            self._conn.commit()
 
     def _ensure_pending_hire_requested_specializations_column(self):
         try:
@@ -5911,7 +5935,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return None
         cursor = self._conn.execute(
             "SELECT id, architect_id, title, rationale, status, supersedes, "
-            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at, metadata_json "
             "FROM decisions WHERE id=?",
             (decision_id,),
         )
@@ -5959,12 +5983,15 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
         )
         archived = bool(row.get("archived", existing.get("archived", False)))
+        metadata = _decision_json_dict(
+            row.get("metadata", row.get("metadata_json", existing.get("metadata", {})))
+        )
 
         self._conn.execute(
             "INSERT OR REPLACE INTO decisions "
             "(id, architect_id, title, rationale, status, supersedes, "
-            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at, metadata_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 decision_id,
                 architect_id,
@@ -5977,6 +6004,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 1 if archived else 0,
                 created_at,
                 updated_at,
+                json.dumps(metadata),
             ),
         )
         self._conn.commit()
@@ -6001,7 +6029,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return []
         query = (
             "SELECT id, architect_id, title, rationale, status, supersedes, "
-            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at, metadata_json "
             "FROM decisions WHERE architect_id=?"
         )
         params = [architect_id]
@@ -6017,7 +6045,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Load all persisted architect decisions, newest first."""
         query = (
             "SELECT id, architect_id, title, rationale, status, supersedes, "
-            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at, metadata_json "
             "FROM decisions"
         )
         if not include_archived:
@@ -8685,7 +8713,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 linked_engineer_ids TEXT NOT NULL DEFAULT '[]',
                 archived INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL DEFAULT 0
+                updated_at INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
             )
         """)
         self._conn.execute(

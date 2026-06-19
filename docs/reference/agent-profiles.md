@@ -5,7 +5,7 @@ runtime agent kinds. They are **not** new runtime kinds: every profile declares
 one of `architect`, `engineer`, or `worker` as its `base_kind`, and validation
 requires grants to stay inside that base-kind ceiling.
 
-Wave 3 adds trusted-user assignment storage and frozen launch/session snapshots.
+Waves 3-4 add trusted-user assignment storage, frozen launch/session snapshots, and the Wave 4B Product Manager wrapper surface.
 `AgentCell.profile` remains the legacy terminal/runtime profile label; Agent
 Profile assignment uses separate `agent_profile_id` / `agent_profile_version`
 fields plus `effective_agent_profile_*` launch snapshot fields.
@@ -58,7 +58,7 @@ visibility/direct-call compatibility.
 
 ```yaml
 id: product-manager-draft
-version: "1"
+version: "2"
 base_kind: architect
 display_name: Product Manager (draft)
 description: Draft architect-derived profile; enforced only when explicitly used as an effective profile.
@@ -67,6 +67,7 @@ grants:
   - observe.board_summary
   - planning.area_read
   - decision.create_proposed
+  - decision.update_proposed
 denies:
   - agent.hire_engineer
   - task.dispatch
@@ -96,9 +97,7 @@ dangerous execution/admin capabilities.
 Preview helpers expose base kind, profile id/version, full/draft/restricted
 status, granted capabilities, high-risk denied capabilities, policy summaries,
 projected tool-category allow/deny status, and warnings. `product-manager-draft`
-previews warn that it is Wave 3 infrastructure-only and that
-`architect_peer_inbox` / `architect_reply` remain denied because those surfaces
-are mixed-purpose Architect↔Architect / Architect↔Engineer tools.
+previews warn that it is Wave 4B scratch-only and that raw Architect tools are denied in favor of `architect_product_*` wrappers. The draft PM profile is not a runtime kind and must not be used for live PM dogfood or Blueprint replacement.
 
 `torque doctor` includes `[agent_profiles]` validation plus assignment/audit
 counts and structured assignment/audit data in the JSON report. The frontend
@@ -106,3 +105,26 @@ agent panel shows a compact Agent Profile badge with effective id/version,
 restricted/draft warning color, high-risk denied details in the tooltip, and a
 pending-next-launch marker when the desired assignment differs from the frozen
 effective snapshot.
+
+
+## Product Manager Wave 4B scratch smoke
+
+Wave 4B's Product Manager profile is for scratch validation only. Do not move Blueprint, do not create live PM product decisions, and do not use it for real product work. A safe operator smoke should use a disposable profile/session on a separate port, then verify only the wrapper surface:
+
+```bash
+TORQUE_PORT=18933 TORQUE_PROFILE=pm-wrapper-scratch make standalone-bg
+# In the scratch UI/session only:
+# 1. Create or select a scratch Architect in a scratch group.
+# 2. Assign product-manager-draft and relaunch that scratch Architect.
+# 3. Confirm tools/list exposes architect_product_* wrappers and hides raw
+#    architect_peer_*, architect_decision_*, architect_task_*, dispatch, hire,
+#    merge, deploy, admin, and profile-admin tools.
+# 4. Create a throwaway product task proposal with
+#    architect_product_task_propose and confirm it is queued/unassigned with
+#    product-proposal and pm-created labels.
+# 5. Optionally send a product-peer message only to an explicitly scratch
+#    product-profile peer with a product-scope anchor.
+```
+
+Stop the scratch daemon from the shell that launched it. Workers running inside
+Torque must not run deploy/stop/restart against their parent daemon.

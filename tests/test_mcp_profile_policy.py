@@ -30,13 +30,6 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
         return state, architect
 
-    def _parse_functions_block(self, text):
-        prefix = "<functions>"
-        suffix = "</functions>"
-        self.assertTrue(text.startswith(prefix), text)
-        self.assertTrue(text.endswith(suffix), text)
-        return json.loads(text[len(prefix):-len(suffix)])
-
     async def test_explicit_full_architect_profile_preserves_tool_projection_and_direct_calls(self):
         baseline_state, baseline_architect = self._state_with_architect()
         projected_state, projected_architect = self._state_with_architect()
@@ -114,15 +107,16 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         )
         tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
 
-        self.assertIn("architect_tool_search", tool_names)
-        self.assertIn("architect_board_summary", tool_names)
-        self.assertIn("architect_peer_message", tool_names)
-        self.assertIn("architect_decision_list", tool_names)
+        self.assertIn("architect_product_board_summary", tool_names)
+        self.assertIn("architect_product_peer_message", tool_names)
+        self.assertIn("architect_product_decision_list", tool_names)
 
         denied_tools = {
+            "architect_tool_search",
             "architect_engineer_hire",
             "architect_engineer_set_specializations",
             "architect_engineer_dismiss",
+            "architect_peer_message",
             "architect_peer_inbox",
             "architect_reply",
             "architect_task_create",
@@ -135,39 +129,12 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_answer",
             "architect_decision_create",
             "architect_decision_update",
+            "architect_decision_list",
             "architect_area_create",
             "architect_initiative_create",
             "architect_mcp_calls",
         }
         self.assertFalse(denied_tools & tool_names)
-
-        search = await handler(
-            FakeRequest(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "architect_tool_search",
-                        "arguments": {
-                            "query": (
-                                "select:architect_mcp_calls,"
-                                "architect_engineer_dismiss,"
-                                "architect_get_architect_settings,"
-                                "architect_peer_inbox,"
-                                "architect_reply"
-                            ),
-                        },
-                    },
-                },
-                headers={"X-Torque-Cell-Id": architect.id},
-            )
-        )
-        self.assertFalse(search.payload["result"]["isError"])
-        search_payload = self._parse_functions_block(
-            search.payload["result"]["content"][0]["text"]
-        )
-        self.assertEqual(search_payload["tools"], [])
 
         for tool_name in sorted(denied_tools):
             response = await handler(
@@ -269,8 +236,8 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(architect.effective_agent_profile_id, "product-manager-draft")
         self.assertIn("torque_context", tool_names)
-        self.assertIn("architect_board_summary", tool_names)
-        self.assertIn("architect_peer_message", tool_names)
+        self.assertIn("architect_product_board_summary", tool_names)
+        self.assertIn("architect_product_peer_message", tool_names)
         self.assertNotIn("architect_peer_inbox", tool_names)
         self.assertNotIn("architect_reply", tool_names)
         self.assertNotIn("architect_engineer_hire", tool_names)
@@ -338,7 +305,10 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
-        self.assertIn("architect_peer_message", tool_names)
+        self.assertIn("architect_product_peer_message", tool_names)
+        self.assertIn("architect_product_peer_inbox", tool_names)
+        self.assertIn("architect_product_peer_reply", tool_names)
+        self.assertNotIn("architect_peer_message", tool_names)
         self.assertNotIn("architect_peer_inbox", tool_names)
         self.assertNotIn("architect_reply", tool_names)
 
@@ -358,10 +328,8 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
                 headers={"X-Torque-Cell-Id": architect.id},
             )
         )
-        search_payload = self._parse_functions_block(
-            search.payload["result"]["content"][0]["text"]
-        )
-        self.assertEqual(search_payload["tools"], [])
+        self.assertIn("error", search.payload)
+        self.assertIn("Unknown tool", search.payload["error"]["message"])
 
         inbox = await handler(
             FakeRequest(
