@@ -10633,7 +10633,7 @@ class MatrixState:
             return {}
         from .agent_profiles import (
             default_full_profile_id_for_kind,
-            dry_run_profile_preview,
+            enriched_profile_preview,
             profile_definition_by_id,
         )
 
@@ -10659,7 +10659,7 @@ class MatrixState:
             "profile_id": getattr(cell, "effective_agent_profile_id", "") or "",
             "profile_version": getattr(cell, "effective_agent_profile_version", "") or "",
         }
-        snapshot = dry_run_profile_preview(profile)
+        snapshot = enriched_profile_preview(profile)
         snapshot["assignment_source"] = "assigned" if desired_id else "default_full_base_kind"
         snapshot["frozen_at"] = time.time()
         cell.effective_agent_profile_id = profile.id

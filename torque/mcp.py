@@ -838,10 +838,12 @@ def _effective_profile_policy_for_cell(state, cell):
         return None
     getter = getattr(state, "effective_agent_profile_for_cell", None)
     if callable(getter):
-        return _coerce_effective_profile_policy(
-            getter(cell),
-            base_dir=str(getattr(state, "project_base_dir", "") or ""),
-        )
+        raw_profile = getter(cell)
+        if raw_profile:
+            return _coerce_effective_profile_policy(
+                raw_profile,
+                base_dir=str(getattr(state, "project_base_dir", "") or ""),
+            )
     overrides = getattr(state, "agent_profile_overrides", None)
     if isinstance(overrides, dict):
         raw_profile = overrides.get(getattr(cell, "id", ""))
