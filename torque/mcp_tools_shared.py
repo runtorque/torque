@@ -4551,6 +4551,7 @@ def _product_decisions_for_architect(state, caller_id: str, *,
             include_archived=include_archived,
         )
         if _decision_has_product_marker(decision)
+        and str(decision.get("status", "") or "").strip() == "proposed"
     ]
 
 
@@ -4582,6 +4583,22 @@ def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
     if str(getattr(task, "created_by_architect_id", "") or "").strip() == str(caller_id or "").strip() and _task_has_product_label(task):
         return True
     return task_id in _product_decision_linked_task_ids(state, caller_id)
+
+
+def _product_visible_task_ids_for_architect(state, caller_id: str) -> set[str]:
+    return {
+        str(getattr(task, "id", "") or "").strip()
+        for task in getattr(state, "board_tasks", {}).values()
+        if _product_task_visible_for_architect(state, caller_id, task)
+    }
+
+
+def _product_visible_decision_ids_for_architect(state, caller_id: str) -> set[str]:
+    return {
+        str(decision.get("id", "") or "").strip()
+        for decision in _product_decisions_for_architect(state, caller_id)
+        if str(decision.get("id", "") or "").strip()
+    }
 
 
 def _product_task_summary(state, caller_id: str, task) -> dict:
@@ -4708,6 +4725,105 @@ def _product_initiative_ref(state, caller_id: str,
     if not initiative or str(initiative.get("group_name", "") or "").strip() != group:
         return "", "Initiative not found"
     return initiative_id, ""
+
+
+def _product_initiative_read_json(state, caller_id: str,
+                                  args: dict, *, show: bool) -> tuple[str, bool]:
+    """Read broad same-group initiatives with product-scoped link detail."""
+
+    group = _initiative_scope_group(state, caller_id)
+    visible_task_ids = _product_visible_task_ids_for_architect(state, caller_id)
+    visible_decision_ids = _product_visible_decision_ids_for_architect(
+        state,
+        caller_id,
+    )
+    if show:
+        initiative, error = _initiative_from_args(state, caller_id, args)
+        if not initiative:
+            return error, True
+        payload = state.initiative_payload(
+            initiative["id"],
+            visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
+        )
+        if not payload:
+            return "Initiative not found", True
+        payload["type"] = "initiative"
+        return _compact_json(payload), False
+    include_archived = bool(args.get("include_archived", False))
+    initiatives = []
+    for item in state.list_initiatives(group=group, include_archived=include_archived):
+        payload = state.initiative_payload(
+            item["id"],
+            visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
+            include_links=bool(args.get("include_links", False)),
+        ) or item
+        initiatives.append(payload)
+    return _compact_json({
+        "type": "initiative_list",
+        "group": group,
+        "initiatives": initiatives,
+    }), False
+
+
+def _product_area_read_json(state, caller_id: str,
+                            args: dict, *, show: bool) -> tuple[str, bool]:
+    """Read broad same-group Areas with product-scoped link detail."""
+
+    group = _area_scope_group(state, caller_id)
+    visible_task_ids = _product_visible_task_ids_for_architect(state, caller_id)
+    visible_decision_ids = _product_visible_decision_ids_for_architect(
+        state,
+        caller_id,
+    )
+    decision_details = True
+    if show:
+        area, error = _area_from_args(state, caller_id, args)
+        if not area:
+            return error, True
+        try:
+            note_limit = min(max(int(args.get("note_limit", 50) or 50), 1), 100)
+        except (TypeError, ValueError):
+            note_limit = 50
+        payload = state.area_payload(
+            area["id"],
+            visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
+            decision_details=decision_details,
+            note_limit=note_limit,
+        )
+        if not payload:
+            return "Area not found", True
+        payload["type"] = "area"
+        return _compact_json(payload), False
+    include_archived = bool(args.get("include_archived", False))
+    include_links = bool(args.get("include_links", False))
+    include_notes = bool(args.get("include_notes", False))
+    try:
+        limit = min(max(int(args.get("limit", 50) or 50), 1), 100)
+    except (TypeError, ValueError):
+        limit = 50
+    areas = []
+    for item in state.list_areas(
+            group=group,
+            include_archived=include_archived,
+            limit=limit):
+        payload = state.area_payload(
+            item["id"],
+            visible_task_ids=visible_task_ids,
+            visible_decision_ids=visible_decision_ids,
+            include_links=include_links,
+            include_notes=include_notes,
+            decision_details=decision_details,
+            note_limit=10,
+        ) or item
+        areas.append(payload)
+    return _compact_json({
+        "type": "area_list",
+        "group": group,
+        "areas": areas,
+    }), False
 
 
 def _normalize_product_context(
