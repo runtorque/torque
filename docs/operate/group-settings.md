@@ -97,24 +97,13 @@ When worktrees are enabled, these settings control the execution environment:
 
 See [Agents & Sessions](../team/workers.md) for the end-to-end runtime model.
 
-## Group → Terminals
+## Manual terminal settings
 
-These settings override the group defaults when creating terminals specifically.
-They live under **Group → Terminals**.
-
-| Setting | Description |
-|---------|-------------|
-| **Name prefix** | Auto-naming prefix for terminals (e.g., "Shell" produces "Shell 1", "Shell 2"). Defaults to "Terminal" if empty. |
-| **Boot command** | Command to run when the terminal opens. Unlike agents, terminals don't run a boot command by default. |
-| **Arguments** | Arguments appended to the boot command. |
-| **Init script** | Path to a shell script sourced after `cd` but before the boot command. Supports `~`. |
-| **Directory** | Working directory for terminals. Overrides the group default. |
-| **Shell** | Shell for terminals. |
-| **Additional environment** | Extra environment variables for terminals, merged with the group environment. |
-
-### Always open custom dialog
-
-When enabled, clicking the "+ New terminal" button opens the full terminal creation dialog instead of instantly creating a terminal with defaults.
+Manual terminal creation is no longer an operator-facing Group Settings flow.
+Existing stored terminal defaults remain in state for legacy, CLI, and
+action-driven compatibility, but the web UI does not expose a **Group →
+Terminals** pane or a "+ New terminal" button. Select an agent, worker,
+engineer, architect, or legacy terminal card from the grid to view its session.
 
 ## Engineer tab
 

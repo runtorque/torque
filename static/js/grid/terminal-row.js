@@ -126,14 +126,7 @@ function rejectPendingHireWithNote(hireId, note) {
 }
 
 function renderTermAddBtn(gname, parentId) {
-  const pid = parentId ? esc(parentId) : '';
-  let h = `<div class="term-row term-add" onclick="quickAddTerminal('${esc(gname)}','${pid}')">`;
-  h += `<div class="term-badge" style="background:var(--border)">+</div>`;
-  h += `<div class="term-info"><div class="term-name" style="color:var(--text-dim)">New terminal</div></div>`;
-  h += `<button class="term-action" onclick="event.stopPropagation();toggleMenu(this)" title="Custom">\u25BE</button>`;
-  h += `<div class="split-menu"><button onclick="event.stopPropagation();closeMenus();openAddTerminal('${esc(gname)}','${pid}')">Custom\u2026</button></div>`;
-  h += `</div>`;
-  return h;
+  return '';
 }
 
 function renderTerminalRow(t) {
@@ -151,7 +144,7 @@ function renderTerminalRow(t) {
   const fullPath = t.current_path || t.directory || '';
   const pathDisplay = _formatDisplayPath(fullPath, t.git_root || t.worktree_repo_root || '');
 
-  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${t.id}" data-drag-type="terminal" data-drag-group="${esc(t.group)}" data-nav-id="${esc(t.id)}" onclick="focusAgent('${t.id}')" oncontextmenu="onCellContextMenu(event,'${t.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${t.id}')}">`;
+  let h = `<div class="${cls.join(' ')}" data-nav-id="${esc(t.id)}" onclick="focusAgent('${t.id}')" oncontextmenu="onCellContextMenu(event,'${t.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${t.id}')}">`;
   h += `<div class="term-badge${darkCls}" style="background:${proc.color}">${proc.label}</div>`;
   h += `<div class="term-info">`;
   h += `  <div class="term-name">${esc(t.name)}</div>`;
@@ -161,9 +154,6 @@ function renderTerminalRow(t) {
   h += `</div>`;
   h += `<div class="term-status ${t.status}"></div>`;
   h += `<div class="term-actions">`;
-  if (t.status === 'stopped') {
-    h += `<button class="term-action" onclick="event.stopPropagation();relaunchAgent('${t.id}')" title="Relaunch">\u21BB</button>`;
-  }
   h += `<button class="term-action danger" onclick="event.stopPropagation();removeAgent('${t.id}')" title="Delete">\u2715</button>`;
   h += `</div>`;
   h += `</div>`;

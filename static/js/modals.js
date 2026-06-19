@@ -1614,23 +1614,25 @@ function _normalizeGsSelection(tab, subtab) {
   let nextTab = rawTab;
   let nextSubtab = rawSubtab;
 
-  // Back-compat for any callers or saved links that still use the previous
-  // Agents tab names after the UI split: terminal defaults moved into Group,
+  // Back-compat for callers or saved links that still use previous tab names:
+  // manual terminal defaults are no longer an operator-visible settings pane,
   // while worker execution settings became the Workers tab.
   if (rawTab === 'agents') nextTab = 'workers';
   if (rawTab === 'terminals') {
     nextTab = 'group';
-    nextSubtab = rawSubtab || 'group-terminals';
+    nextSubtab = 'group-general';
   }
   if (rawSubtab === 'agent-terminals') {
     nextTab = 'group';
-    nextSubtab = 'group-terminals';
+    nextSubtab = 'group-general';
   } else if (rawSubtab === 'agent-general') {
     nextSubtab = 'worker-execution';
   } else if (rawSubtab === 'agent-worktree') {
     nextSubtab = 'worker-worktree';
   } else if (rawSubtab === 'agent-notifications') {
     nextSubtab = 'worker-notifications';
+  } else if (rawSubtab === 'group-terminals') {
+    nextSubtab = 'group-general';
   }
 
   if (nextSubtab.indexOf('group-') === 0) nextTab = 'group';
@@ -2770,7 +2772,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-directory').value = s.default_directory || '';
   document.getElementById('gs-shell').value = s.shell || '';
   document.getElementById('gs-max-agents').value = s.max_agents || 0;
-  document.getElementById('gs-auto-terminals').value = s.auto_terminals || 0;
   document.getElementById('gs-collapsed').checked = s.collapsed_default || false;
   document.getElementById('gs-filter-window').checked = s.filter_by_window || false;
   document.getElementById('gs-env-vars').value = _envToText(s.env_vars);
@@ -2814,17 +2815,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
   document.getElementById('gs-agent-env-vars').value = _envToText(s.agent_env_vars);
   document.getElementById('gs-agent-env-file').value = s.agent_env_file || '';
-
-  /* -- Group > Terminals sub-tab -- */
-  document.getElementById('gs-terminal-prefix').value = s.terminal_name_prefix || '';
-  document.getElementById('gs-terminal-boot-cmd').value = s.terminal_boot_command || '';
-  document.getElementById('gs-terminal-cmd-args').value = s.terminal_command_args || '';
-  document.getElementById('gs-terminal-init-script').value = s.terminal_init_script || '';
-  document.getElementById('gs-terminal-directory').value = s.terminal_directory || '';
-  document.getElementById('gs-terminal-shell').value = s.terminal_shell || '';
-  document.getElementById('gs-terminal-always-custom').checked = s.terminal_always_custom_dialog || false;
-  document.getElementById('gs-terminal-env-vars').value = _envToText(s.terminal_env_vars);
-  document.getElementById('gs-terminal-env-file').value = s.terminal_env_file || '';
 
   /* -- Group > Sync provider sub-tab -- */
   const syncProvider = s.board_sync_provider || 'none';
@@ -2978,9 +2968,7 @@ function _showGroupSettings(group, data) {
         ? 'gs-agent-directory'
         : initialSubtab === 'group-worker-defaults'
           ? 'gs-agent-provider'
-      : initialSubtab === 'group-terminals'
-        ? 'gs-terminal-prefix'
-        : initialSubtab === 'group-sync'
+      : initialSubtab === 'group-sync'
           ? 'gs-board-sync-provider'
         : initialSubtab === 'group-advanced'
           ? 'gs-guidance-hint-cadence'
@@ -3019,7 +3007,6 @@ function submitGroupSettings() {
     shell: document.getElementById('gs-shell').value,
     env_vars: _textToEnv('gs-env-vars'),
     env_file: document.getElementById('gs-env-file').value.trim(),
-    auto_terminals: parseInt(document.getElementById('gs-auto-terminals').value) || 0,
     max_agents: parseInt(document.getElementById('gs-max-agents').value) || 0,
     collapsed_default: document.getElementById('gs-collapsed').checked,
     filter_by_window: document.getElementById('gs-filter-window').checked,
@@ -3057,16 +3044,6 @@ function submitGroupSettings() {
     notify_on_finish: document.getElementById('gs-notify-finish').checked,
     notify_on_error: document.getElementById('gs-notify-error').checked,
     notify_on_attention: document.getElementById('gs-notify-attention').checked,
-    /* Terminals */
-    terminal_name_prefix: document.getElementById('gs-terminal-prefix').value.trim(),
-    terminal_boot_command: document.getElementById('gs-terminal-boot-cmd').value.trim(),
-    terminal_command_args: document.getElementById('gs-terminal-cmd-args').value.trim(),
-    terminal_init_script: document.getElementById('gs-terminal-init-script').value.trim(),
-    terminal_directory: document.getElementById('gs-terminal-directory').value.trim(),
-    terminal_shell: document.getElementById('gs-terminal-shell').value,
-    terminal_env_vars: _textToEnv('gs-terminal-env-vars'),
-    terminal_env_file: document.getElementById('gs-terminal-env-file').value.trim(),
-    terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     /* Board sync */
     board_sync_provider: document.getElementById('gs-board-sync-provider').value || 'none',
     board_sync_enabled: document.getElementById('gs-board-sync-enabled').checked,

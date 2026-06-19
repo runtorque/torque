@@ -3619,6 +3619,8 @@ function handleAction(msg) {
   } else if (msg.action === 'add_architect') {
     if (typeof openAddArchitectModal === 'function') openAddArchitectModal(msg.group || '');
   } else if (msg.action === 'add_terminal') {
-    if (msg.group && msg.parent_id) quickAddTerminal(msg.group, msg.parent_id);
+    // Manual terminal creation is no longer exposed in the operator UI. Ignore
+    // stale server-side action shims rather than spawning a terminal.
+    return false;
   }
 }

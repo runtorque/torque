@@ -102,7 +102,7 @@ function createSandbox() {
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
-    group: ['group-general', 'group-worker-defaults', 'group-terminals', 'group-sync', 'group-advanced'],
+    group: ['group-general', 'group-worker-defaults', 'group-sync', 'group-advanced'],
     workers: ['worker-execution', 'worker-worktree', 'worker-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
     architect: ['architect-general', 'architect-behavior', 'architect-system'],
@@ -812,13 +812,16 @@ test('group settings uses Group/Workers split plus scoped Engineer and Architect
 
   assert.match(
     html,
-    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-terminals"[\s\S]*?data-subtab="group-advanced"/,
+    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-sync"[\s\S]*?data-subtab="group-advanced"/,
   );
   assert.match(html, /data-subtab="group-worker-defaults"[^>]*>Agents<\/button>/);
   assert.doesNotMatch(html, /data-subtab="group-worker-defaults"[^>]*>Worker defaults<\/button>/);
   assert.match(html, /data-subpane="group-general"/);
   assert.match(html, /data-subpane="group-worker-defaults"/);
-  assert.match(html, /data-subpane="group-terminals"/);
+  assert.doesNotMatch(html, /data-subtab="group-terminals"/);
+  assert.doesNotMatch(html, /data-subpane="group-terminals"/);
+  assert.doesNotMatch(html, /id="gs-auto-terminals"/);
+  assert.doesNotMatch(html, /id="gs-terminal-prefix"/);
   assert.match(html, /data-subpane="group-advanced"/);
 
   assert.match(
@@ -895,15 +898,16 @@ test('group settings places all-kind defaults under Group and worker overrides u
   const groupPane = html.slice(groupStart, workersStart);
   const workersPane = html.slice(workersStart, engineerStart);
   const workerDefaults = groupPane.indexOf('data-subpane="group-worker-defaults"');
-  const terminals = groupPane.indexOf('data-subpane="group-terminals"');
+  const sync = groupPane.indexOf('data-subpane="group-sync"');
   const advanced = groupPane.indexOf('data-subpane="group-advanced"');
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-provider"'));
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-default-agent-template"'));
   assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-model"'));
-  assert.ok(workerDefaults < terminals);
-  assert.ok(terminals < groupPane.indexOf('id="gs-auto-terminals"'));
-  assert.ok(terminals < groupPane.indexOf('id="gs-terminal-prefix"'));
-  assert.ok(terminals < advanced);
+  assert.ok(workerDefaults < sync);
+  assert.ok(sync < advanced);
+  assert.doesNotMatch(groupPane, /data-subpane="group-terminals"/);
+  assert.doesNotMatch(groupPane, /id="gs-auto-terminals"/);
+  assert.doesNotMatch(groupPane, /id="gs-terminal-prefix"/);
   assert.match(groupPane, /Group-wide defaults for all agents — workers, engineers, and architects — unless overridden per-kind\./);
   assert.match(groupPane, /Default provider/);
   assert.match(groupPane, /Default role/);
@@ -1165,6 +1169,9 @@ test('group settings removes terminal-backend-only profile and tab-color control
     'gs-engineer-color-swatches',
     'gs-architect-color-swatches',
     'gs-terminal-close-on-disconnect',
+    'gs-auto-terminals',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
   ].forEach((id) => {
     assert.equal(modal.indexOf(`id="${id}"`), -1, `${id} should be removed`);
   });
@@ -1208,8 +1215,6 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-worker-boot-command').value = 'codex --worker-kind';
   ensure('gs-worker-model').value = 'gpt-5-worker';
   ensure('gs-worker-reasoning-effort').value = 'high';
-  ensure('gs-terminal-prefix').value = 'Shell';
-  ensure('gs-terminal-boot-cmd').value = 'npm run dev';
   ensure('gs-engineer-merge-mode').value = 'direct';
   ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-wt-merge-preserve-diff').checked = true;
@@ -1270,8 +1275,9 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].settings.worker_boot_command, 'codex --worker-kind');
   assert.equal(sandbox.sendCalls[0].settings.worker_model, 'gpt-5-worker');
   assert.equal(sandbox.sendCalls[0].settings.worker_reasoning_effort, 'high');
-  assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
-  assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'auto_terminals'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'terminal_name_prefix'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sandbox.sendCalls[0].settings, 'terminal_boot_command'), false);
   assert.equal(sandbox.sendCalls[0].settings.engineer_merge_mode, 'direct');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);

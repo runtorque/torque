@@ -39,25 +39,32 @@ Agents can have:
 1. Created: Torque opens a PTY and launches the boot command.
 2. Running: the agent is actively doing work.
 3. Idle: the shell prompt has returned.
-4. Stopped: the tab closed or the session ended, but Torque keeps the record so it can be relaunched.
+4. Stopped: the session ended, but Torque keeps the record. Agents can be relaunched; legacy terminal records stay readable/deleteable.
 
 ## Terminals
 
-Terminals are plain shells managed by Torque.
+Terminals are plain shells managed by Torque for legacy, CLI, and
+action-driven compatibility. The operator UI no longer exposes manual terminal
+creation; choose an existing agent or legacy terminal card from the grid to
+show that live PTY in the workspace.
 
 ### Child terminals
 
-Child terminals belong to an agent. They are the normal place for tests, logs, local servers, and ad hoc shell work that supports that agent.
+Child terminals belong to an agent. Existing child terminals remain
+readable, focusable, and deleteable from the grid.
 
 Removing the parent agent removes its child terminals too.
 
 ### Standalone terminals
 
-Standalone terminals belong to the group rather than an agent. Use them for durable utility shells that should outlive any one task.
+Standalone terminals belong to the group rather than an agent. Existing
+standalone terminals remain visible for back-compat, but the UI no longer
+offers new standalone terminal buttons or relaunch/reparent controls.
 
 ## Custom Creation
 
-Use the dropdown next to **+ New** to open the custom creation dialog. That dialog lets you override defaults for:
+Use the agent grid **+ New** dropdown to create workers, engineers, or
+architects. That dialog lets you override defaults for:
 
 - Name
 - Directory
@@ -70,16 +77,17 @@ Group defaults, agent templates, and action-linked creation all layer into this 
 
 ## Drag and Drop
 
-Torque supports reordering and reparenting from the UI:
+Torque supports limited reordering from the UI:
 
 - Move groups to change workspace order
 - Move agents between groups
-- Reorder terminals within a parent
-- Drop a terminal onto another agent to reparent it
+
+Legacy/manual terminals are not draggable, reorderable, or reparentable in the
+UI.
 
 ## Relaunch and Cleanup
 
-- Relaunch a stopped agent or terminal with the relaunch action or `torque agent relaunch`
+- Relaunch a stopped agent with the relaunch action or `torque agent relaunch`
 - Remove an agent when the task is done; child terminals are cleaned up with it
 - Use worktree checkpoints before risky changes if the agent has a managed worktree
 

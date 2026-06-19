@@ -98,13 +98,13 @@ These answer three different questions:
 
 This usually means the UI is connected to an old daemon instance or the daemon lost contact with PTY state.
 
-## An agent is stopped, missing, or linked to the wrong live tab
+## An agent is stopped, missing, or linked to the wrong live session
 
 ### Symptoms
 
 - An agent shows as stopped even though you expect it to be active.
-- The agent record exists, but its terminal tab is gone.
-- A relaunch created a new tab because Torque could not reuse the prior session.
+- The agent record exists, but its live terminal session is gone.
+- A relaunch created a new session because Torque could not reuse the prior session.
 
 ### Recovery
 
@@ -118,7 +118,7 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 
 - Relaunch creates a fresh PTY session.
 - Resume only happens when the provider adapter supports it and Torque still has a valid provider session ID.
-- A stale tab title or a terminated terminal session can leave a saved agent record behind even though the live tab is gone.
+- A stale title or a terminated terminal session can leave a saved agent record behind even though the live session is gone.
 
 ## Provider session did not resume, or the conversation state is wrong
 

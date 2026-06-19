@@ -1202,10 +1202,9 @@ function _renderSelectedAgentTerminalDrawer(agent) {
   html += `  <span class="drawer-label">${esc(agent.name)} terminals</span>`;
   html += `  <span class="drawer-count">${childTerms.length}</span>`;
   html += `</div>`;
-  html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(agent.group)}" data-drop-parent="${esc(agent.id)}">`;
+  html += `<div class="term-list">`;
   for (const t of childTerms) html += renderTerminalRow(t);
   html += `</div>`;
-  html += renderTermAddBtn(agent.group, agent.id);
   html += `</div>`;
   return html;
 }
