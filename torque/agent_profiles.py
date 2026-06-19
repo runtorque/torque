@@ -772,9 +772,42 @@ def _valid_profile_lookup(base_dir: str = "") -> tuple[dict[str, AgentProfileDef
     return {profile.id: profile for profile in profiles}, tuple(issues)
 
 
+def _profile_dict_with_preview_grants(data: dict[str, Any]) -> dict[str, Any]:
+    """Return profile-like data with grants reconstructed from preview snapshots.
+
+    Frozen effective launch snapshots intentionally store preview/audit data so a
+    running session is not re-bound to a changed on-disk profile definition.
+    Those previews expose granted atoms as ``capabilities[].atom`` rather than a
+    raw ``grants`` list; reconstruct grants from that frozen list for MCP policy
+    projection without doing a live profile lookup.
+    """
+
+    if data.get("grants"):
+        return data
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, list):
+        return data
+    grants: list[str] = []
+    seen: set[str] = set()
+    for item in capabilities:
+        atom = ""
+        if isinstance(item, dict):
+            atom = str(item.get("atom", "") or "").strip()
+        else:
+            atom = str(item or "").strip()
+        if atom and atom not in seen:
+            grants.append(atom)
+            seen.add(atom)
+    if not grants:
+        return data
+    enriched = dict(data)
+    enriched["grants"] = grants
+    return enriched
+
+
 def profile_policy_from_definition(profile: AgentProfileDefinition | dict[str, Any]) -> AgentProfilePolicy:
     if isinstance(profile, dict):
-        profile = AgentProfileDefinition.from_dict(profile)
+        profile = AgentProfileDefinition.from_dict(_profile_dict_with_preview_grants(profile))
     ceiling = BASE_KIND_CEILINGS.get(profile.base_kind, frozenset())
     grants = frozenset(set(profile.grants) & set(ceiling))
     return AgentProfilePolicy(
@@ -865,6 +898,131 @@ def dry_run_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) ->
         "runtime_enforcement": "mcp_projection_when_effective_profile_is_set",
     }
 
+
+
+def profile_definition_by_id(profile_id: str, *, base_dir: str = "") -> AgentProfileDefinition | None:
+    """Return a validated profile definition by id without creating a policy."""
+
+    profile_id = str(profile_id or "").strip()
+    if not profile_id:
+        return None
+    profiles_by_id, issues = _valid_profile_lookup(base_dir or "")
+    if any(issue.severity == "error" for issue in issues):
+        return None
+    return profiles_by_id.get(profile_id)
+
+
+def default_full_profile_id_for_kind(kind: str) -> str:
+    kind = str(kind or "").strip()
+    if kind in BASE_KINDS:
+        return f"full-{kind}"
+    return ""
+
+
+def _profile_status_from_preview(preview: dict[str, Any]) -> str:
+    lifecycle = str(preview.get("lifecycle", "") or "").strip().lower()
+    if lifecycle and lifecycle != "stable":
+        return lifecycle
+    denied = list(preview.get("denied_high_risk_capabilities", []) or [])
+    ceiling = BASE_KIND_CEILINGS.get(str(preview.get("base_kind", "") or ""), frozenset())
+    if denied or int(preview.get("capability_count", 0) or 0) < len(ceiling):
+        return "restricted"
+    return "full"
+
+
+def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    profile_id = str(preview.get("id", "") or "").strip()
+    lifecycle = str(preview.get("lifecycle", "") or "").strip().lower()
+    status = _profile_status_from_preview(preview)
+    if lifecycle and lifecycle != "stable":
+        warnings.append(
+            f"{profile_id or 'profile'} is lifecycle={lifecycle}; use only for preview/testing unless explicitly approved."
+        )
+    if status in {"draft", "restricted"} or preview.get("denied_high_risk_capabilities"):
+        warnings.append(
+            "This profile narrows the base kind and hides/denies MCP tools before side effects."
+        )
+    if profile_id == "product-manager-draft" or str(preview.get("metadata", {}).get("archetype", "") if isinstance(preview.get("metadata"), dict) else "") == "product_manager":
+        warnings.append(
+            "product-manager-draft is infrastructure-only in Wave 3; do not use for live PM dogfood or Blueprint replacement."
+        )
+        warnings.append(
+            "Mixed-purpose architect_peer_inbox and architect_reply remain denied for Product Manager-style profiles."
+        )
+    return warnings
+
+
+def enriched_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) -> dict[str, Any]:
+    preview = dry_run_profile_preview(profile)
+    preview["status"] = _profile_status_from_preview(preview)
+    preview["warnings"] = preview_warnings_for_profile_preview(preview)
+    return preview
+
+
+def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
+    """Return display/audit status for one AgentCell without changing policy."""
+
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    assigned_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
+    effective_id = str(getattr(cell, "effective_agent_profile_id", "") or "").strip()
+    snapshot = getattr(cell, "effective_agent_profile_snapshot", {}) or {}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    effective_preview = dict(snapshot) if snapshot.get("id") else {}
+    if not effective_preview:
+        default_id = default_full_profile_id_for_kind(kind)
+        default_profile = profile_definition_by_id(default_id, base_dir=base_dir) if default_id else None
+        if default_profile:
+            effective_preview = enriched_profile_preview(default_profile)
+            effective_preview["assignment_source"] = "implicit_default_full_base_kind"
+            effective_id = default_profile.id
+    else:
+        effective_preview.setdefault("status", _profile_status_from_preview(effective_preview))
+        effective_preview.setdefault("warnings", preview_warnings_for_profile_preview(effective_preview))
+    assigned_preview = {}
+    if assigned_id:
+        assigned_profile = profile_definition_by_id(assigned_id, base_dir=base_dir)
+        if assigned_profile:
+            assigned_preview = enriched_profile_preview(assigned_profile)
+
+    next_launch_profile_id = assigned_id or default_full_profile_id_for_kind(kind)
+    next_launch_profile_version = str(getattr(cell, "agent_profile_version", "") or "") if assigned_id else ""
+    if next_launch_profile_id and not next_launch_profile_version:
+        next_profile = profile_definition_by_id(next_launch_profile_id, base_dir=base_dir)
+        if next_profile:
+            next_launch_profile_version = next_profile.version
+    effective_version = str(
+        getattr(cell, "effective_agent_profile_version", "")
+        or effective_preview.get("version", "")
+        or ""
+    )
+    pending_next_launch = bool(
+        next_launch_profile_id
+        and (next_launch_profile_id != effective_id
+             or (next_launch_profile_version and effective_version
+                 and next_launch_profile_version != effective_version))
+    )
+    return {
+        "agent_id": str(getattr(cell, "id", "") or ""),
+        "agent_name": str(getattr(cell, "name", "") or ""),
+        "base_kind": kind,
+        "assigned_profile_id": assigned_id,
+        "assigned_profile_version": str(getattr(cell, "agent_profile_version", "") or ""),
+        "assigned_at": float(getattr(cell, "agent_profile_assigned_at", 0) or 0),
+        "assigned_by": str(getattr(cell, "agent_profile_assigned_by", "") or ""),
+        "effective_profile_id": effective_id,
+        "effective_profile_version": effective_version,
+        "effective_applied_at": float(getattr(cell, "effective_agent_profile_applied_at", 0) or 0),
+        "effective_profile": effective_preview,
+        "assigned_profile": assigned_preview,
+        "next_launch_profile_id": next_launch_profile_id,
+        "next_launch_profile_version": next_launch_profile_version,
+        "pending_next_launch": pending_next_launch,
+        "status": str(effective_preview.get("status", "") or "full"),
+        "warnings": list(effective_preview.get("warnings", []) or []),
+        "denied_high_risk_capabilities": list(effective_preview.get("denied_high_risk_capabilities", []) or []),
+    }
 
 def built_in_full_profile_ids() -> list[str]:
     return ["full-architect", "full-engineer", "full-worker"]

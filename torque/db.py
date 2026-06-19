@@ -419,6 +419,10 @@ _AGENT_PERSISTED_COLS = [
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
     "dismissed_at", "deleted_at", "permanent_delete_after", "persistent",
     "engineer_specializations",
+    "agent_profile_id", "agent_profile_version", "agent_profile_assigned_at",
+    "agent_profile_assigned_by", "effective_agent_profile_id",
+    "effective_agent_profile_version", "effective_agent_profile_snapshot",
+    "effective_agent_profile_applied_at",
 ]
 
 _AGENT_INSERT_SQL = """
@@ -754,6 +758,18 @@ def _serialize_agent_cell(cell):
             for n in (d.get("engineer_specializations") or [])
             if str(n or "").strip()
         ]),
+        d.get("agent_profile_id", ""),
+        d.get("agent_profile_version", ""),
+        float(d.get("agent_profile_assigned_at", 0) or 0),
+        d.get("agent_profile_assigned_by", ""),
+        d.get("effective_agent_profile_id", ""),
+        d.get("effective_agent_profile_version", ""),
+        json.dumps(
+            d.get("effective_agent_profile_snapshot")
+            if isinstance(d.get("effective_agent_profile_snapshot"), dict)
+            else {}
+        ),
+        float(d.get("effective_agent_profile_applied_at", 0) or 0),
     )
 
 
@@ -1313,6 +1329,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._ensure_agent_dismissed_at_column()
         self._ensure_agent_tombstone_columns()
         self._ensure_agent_engineer_specializations_column()
+        self._ensure_agent_profile_columns()
+        self._ensure_agent_profile_audit_schema()
         self._ensure_board_task_suggested_specialization_column()
         self._ensure_pending_hire_requested_specializations_column()
         self._backfill_kinds_if_needed()
@@ -1365,6 +1383,55 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "TEXT NOT NULL DEFAULT '[]'"
             )
             self._conn.commit()
+
+    def _ensure_agent_profile_columns(self):
+        for col, col_type, default in [
+            ("agent_profile_id", "TEXT", "''"),
+            ("agent_profile_version", "TEXT", "''"),
+            ("agent_profile_assigned_at", "REAL", "0"),
+            ("agent_profile_assigned_by", "TEXT", "''"),
+            ("effective_agent_profile_id", "TEXT", "''"),
+            ("effective_agent_profile_version", "TEXT", "''"),
+            ("effective_agent_profile_snapshot", "TEXT", "'{}'"),
+            ("effective_agent_profile_applied_at", "REAL", "0"),
+        ]:
+            try:
+                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agents ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}"
+                )
+                self._conn.commit()
+
+    def _ensure_agent_profile_audit_schema(self):
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_profile_audit (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL DEFAULT '',
+                agent_name TEXT NOT NULL DEFAULT '',
+                event TEXT NOT NULL DEFAULT '',
+                actor_kind TEXT NOT NULL DEFAULT 'user',
+                actor_id TEXT NOT NULL DEFAULT '',
+                actor_label TEXT NOT NULL DEFAULT '',
+                previous_profile_id TEXT NOT NULL DEFAULT '',
+                previous_profile_version TEXT NOT NULL DEFAULT '',
+                assigned_profile_id TEXT NOT NULL DEFAULT '',
+                assigned_profile_version TEXT NOT NULL DEFAULT '',
+                effective_profile_id TEXT NOT NULL DEFAULT '',
+                effective_profile_version TEXT NOT NULL DEFAULT '',
+                snapshot_json TEXT NOT NULL DEFAULT '{}',
+                message TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL DEFAULT 0
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_profile_audit_agent_created "
+            "ON agent_profile_audit(agent_id, created_at DESC)"
+        )
+        self._conn.commit()
 
     def _ensure_pending_hire_requested_specializations_column(self):
         try:
@@ -2316,6 +2383,85 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "save_agent",
             _snapshot_db_payload(cell),
         )
+
+    def save_agent_profile_audit(self, record: dict) -> dict:
+        """Persist one trusted Agent Profile assignment/effective snapshot event."""
+        source = dict(record or {})
+        event_id = str(source.get("id", "") or uuid.uuid4().hex).strip()
+        snapshot = source.get("snapshot_json", {})
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        row = {
+            "id": event_id,
+            "agent_id": str(source.get("agent_id", "") or ""),
+            "agent_name": str(source.get("agent_name", "") or ""),
+            "event": str(source.get("event", "") or ""),
+            "actor_kind": str(source.get("actor_kind", "user") or "user"),
+            "actor_id": str(source.get("actor_id", "") or ""),
+            "actor_label": str(source.get("actor_label", "") or ""),
+            "previous_profile_id": str(source.get("previous_profile_id", "") or ""),
+            "previous_profile_version": str(source.get("previous_profile_version", "") or ""),
+            "assigned_profile_id": str(source.get("assigned_profile_id", "") or ""),
+            "assigned_profile_version": str(source.get("assigned_profile_version", "") or ""),
+            "effective_profile_id": str(source.get("effective_profile_id", "") or ""),
+            "effective_profile_version": str(source.get("effective_profile_version", "") or ""),
+            "snapshot_json": json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
+            "message": str(source.get("message", "") or ""),
+            "created_at": float(source.get("created_at", time.time()) or 0),
+        }
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO agent_profile_audit
+            (id, agent_id, agent_name, event, actor_kind, actor_id, actor_label,
+             previous_profile_id, previous_profile_version,
+             assigned_profile_id, assigned_profile_version,
+             effective_profile_id, effective_profile_version,
+             snapshot_json, message, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            tuple(row[key] for key in [
+                "id", "agent_id", "agent_name", "event", "actor_kind",
+                "actor_id", "actor_label", "previous_profile_id",
+                "previous_profile_version", "assigned_profile_id",
+                "assigned_profile_version", "effective_profile_id",
+                "effective_profile_version", "snapshot_json", "message",
+                "created_at",
+            ]),
+        )
+        self._conn.commit()
+        row["snapshot_json"] = snapshot
+        return row
+
+    def list_agent_profile_audit(self, *, agent_id: str = "", limit: int = 50) -> list[dict]:
+        limit = max(1, min(int(limit or 50), 500))
+        params = []
+        where = ""
+        if str(agent_id or "").strip():
+            where = "WHERE agent_id=?"
+            params.append(str(agent_id or "").strip())
+        rows = self._conn.execute(
+            "SELECT id, agent_id, agent_name, event, actor_kind, actor_id, actor_label, "
+            "previous_profile_id, previous_profile_version, assigned_profile_id, "
+            "assigned_profile_version, effective_profile_id, effective_profile_version, "
+            "snapshot_json, message, created_at FROM agent_profile_audit "
+            f"{where} ORDER BY created_at DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        keys = [
+            "id", "agent_id", "agent_name", "event", "actor_kind",
+            "actor_id", "actor_label", "previous_profile_id",
+            "previous_profile_version", "assigned_profile_id",
+            "assigned_profile_version", "effective_profile_id",
+            "effective_profile_version", "snapshot_json", "message",
+            "created_at",
+        ]
+        out = []
+        for row in rows:
+            item = dict(zip(keys, row))
+            item["snapshot_json"] = _json_loads_default(item.get("snapshot_json"), {})
+            item["created_at"] = float(item.get("created_at", 0) or 0)
+            out.append(item)
+        return out
 
     def save_board_task(self, task):
         """Upsert a board task."""
@@ -8052,6 +8198,16 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             d["deleted_at"] = float(d.get("deleted_at", 0) or 0)
             d["permanent_delete_after"] = float(
                 d.get("permanent_delete_after", 0) or 0
+            )
+            d["agent_profile_assigned_at"] = float(
+                d.get("agent_profile_assigned_at", 0) or 0
+            )
+            d["effective_agent_profile_applied_at"] = float(
+                d.get("effective_agent_profile_applied_at", 0) or 0
+            )
+            d["effective_agent_profile_snapshot"] = _json_loads_default(
+                d.get("effective_agent_profile_snapshot", "{}"),
+                {},
             )
             raw_specs = d.get("engineer_specializations", "")
             if isinstance(raw_specs, str):

@@ -828,20 +828,22 @@ def _coerce_effective_profile_policy(raw_profile, *, base_dir: str = ""):
 def _effective_profile_policy_for_cell(state, cell):
     """Return explicit effective profile policy for a caller, if any.
 
-    Wave 2 deliberately avoids user-facing assignment persistence. Tests and
-    future assignment plumbing can inject an effective profile through a narrow
-    hook or in-memory mapping. When nothing is supplied, policy is ``None`` and
-    MCP behavior remains exactly as it was before profile enforcement.
+    Desired assignment (``agent_profile_id``) is intentionally ignored here:
+    only the frozen launch/session snapshot (or Wave 2 test override hook) can
+    affect MCP visibility/denial. When nothing is supplied, policy is ``None``
+    and MCP behavior remains exactly as it was before profile enforcement.
     """
 
     if not state or not cell:
         return None
     getter = getattr(state, "effective_agent_profile_for_cell", None)
     if callable(getter):
-        return _coerce_effective_profile_policy(
-            getter(cell),
-            base_dir=str(getattr(state, "project_base_dir", "") or ""),
-        )
+        raw_profile = getter(cell)
+        if raw_profile:
+            return _coerce_effective_profile_policy(
+                raw_profile,
+                base_dir=str(getattr(state, "project_base_dir", "") or ""),
+            )
     overrides = getattr(state, "agent_profile_overrides", None)
     if isinstance(overrides, dict):
         raw_profile = overrides.get(getattr(cell, "id", ""))
@@ -850,13 +852,12 @@ def _effective_profile_policy_for_cell(state, cell):
                 raw_profile,
                 base_dir=str(getattr(state, "project_base_dir", "") or ""),
             )
-    for attr in ("effective_agent_profile_id", "agent_profile_id"):
-        raw_profile = getattr(cell, attr, "")
-        if raw_profile:
-            return _coerce_effective_profile_policy(
-                raw_profile,
-                base_dir=str(getattr(state, "project_base_dir", "") or ""),
-            )
+    raw_profile = getattr(cell, "effective_agent_profile_id", "")
+    if raw_profile:
+        return _coerce_effective_profile_policy(
+            raw_profile,
+            base_dir=str(getattr(state, "project_base_dir", "") or ""),
+        )
     return None
 
 

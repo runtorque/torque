@@ -10,12 +10,17 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
 from . import ai_deps
 from . import install_locations
-from .agent_profiles import dry_run_profile_preview, validate_all_agent_profiles
+from .agent_profiles import (
+    agent_profile_cell_status,
+    enriched_profile_preview,
+    validate_all_agent_profiles,
+)
 from .mcp_idempotency import collect_mcp_idempotency_storage_stats
 
 DOCTOR_SCHEMA_VERSION = 3
@@ -1099,10 +1104,63 @@ def _collect_roles_section() -> dict:
     }
 
 
-def _collect_agent_profiles_section(base_dir: str = "") -> dict:
+def _collect_agent_profiles_section(conn: sqlite3.Connection | None = None, base_dir: str = "") -> dict:
     validation = validate_all_agent_profiles(base_dir=base_dir)
     profiles = list(validation.get("profiles", []) or [])
-    previews = [dry_run_profile_preview(profile) for profile in profiles]
+    previews = [enriched_profile_preview(profile) for profile in profiles]
+    assignments: list[dict] = []
+    audit_recent: list[dict] = []
+    if conn is not None and _table_exists(conn, "agents"):
+        cols = [
+            "id", "name", "kind", "cell_type", "agent_profile_id",
+            "agent_profile_version", "agent_profile_assigned_at",
+            "agent_profile_assigned_by", "effective_agent_profile_id",
+            "effective_agent_profile_version", "effective_agent_profile_snapshot",
+            "effective_agent_profile_applied_at",
+        ]
+        if all(_column_exists(conn, "agents", col) for col in cols):
+            try:
+                for row in conn.execute(
+                    "SELECT " + ",".join(cols) + " FROM agents "
+                    "WHERE cell_type='agent' ORDER BY name, id"
+                ).fetchall():
+                    item = dict(zip(cols, row))
+                    try:
+                        item["effective_agent_profile_snapshot"] = json.loads(
+                            item.get("effective_agent_profile_snapshot") or "{}"
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        item["effective_agent_profile_snapshot"] = {}
+                    cell = SimpleNamespace(**item)
+                    status = agent_profile_cell_status(cell, base_dir=base_dir)
+                    if status.get("assigned_profile_id") or status.get("effective_profile_id"):
+                        assignments.append(status)
+            except sqlite3.OperationalError:
+                assignments = []
+    if conn is not None and _table_exists(conn, "agent_profile_audit"):
+        try:
+            rows = conn.execute(
+                "SELECT agent_id, agent_name, event, assigned_profile_id, "
+                "assigned_profile_version, effective_profile_id, "
+                "effective_profile_version, message, created_at "
+                "FROM agent_profile_audit ORDER BY created_at DESC LIMIT 20"
+            ).fetchall()
+            audit_recent = [
+                {
+                    "agent_id": str(row[0] or ""),
+                    "agent_name": str(row[1] or ""),
+                    "event": str(row[2] or ""),
+                    "assigned_profile_id": str(row[3] or ""),
+                    "assigned_profile_version": str(row[4] or ""),
+                    "effective_profile_id": str(row[5] or ""),
+                    "effective_profile_version": str(row[6] or ""),
+                    "message": str(row[7] or ""),
+                    "created_at": float(row[8] or 0),
+                }
+                for row in rows
+            ]
+        except sqlite3.OperationalError:
+            audit_recent = []
     return {
         "config_path": ".torque/agent_profiles/",
         "base_dir": str(base_dir or os.getcwd()),
@@ -1112,8 +1170,12 @@ def _collect_agent_profiles_section(base_dir: str = "") -> dict:
         "warning_count": int(validation.get("warning_count", 0) or 0),
         "profiles": [profile.as_preview_dict() for profile in profiles],
         "dry_run_previews": previews,
+        "assignments": assignments,
+        "assignment_count": len(assignments),
+        "audit_recent": audit_recent,
+        "audit_recent_count": len(audit_recent),
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
-        "runtime_enforcement": "mcp_projection_when_effective_profile_is_set",
+        "runtime_enforcement": "frozen_launch_snapshot_mcp_projection",
     }
 
 
@@ -1784,6 +1846,7 @@ def build_doctor_report(
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
         "agent_profiles": _collect_agent_profiles_section(
+            conn,
             str(project_base_dir or os.getcwd())
         ),
         "stage_6_cleanup": _collect_stage_6_cleanup_section(
@@ -2089,6 +2152,10 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_profiles.get('error_count', 0) or 0)}",
         "  runtime_enforcement:            "
         f"{agent_profiles.get('runtime_enforcement', '')}",
+        "  assignment_count:               "
+        f"{int(agent_profiles.get('assignment_count', 0) or 0)}",
+        "  audit_recent_count:             "
+        f"{int(agent_profiles.get('audit_recent_count', 0) or 0)}",
         "",
         "[stage_6_cleanup]",
         "  legacy_template_files_ignored:  "

@@ -11,11 +11,14 @@ except ModuleNotFoundError:
 from torque.agent_profiles import (
     BASE_KIND_CEILINGS,
     PM_DANGEROUS_CAPABILITIES,
+    agent_profile_cell_status,
     dry_run_profile_preview,
+    enriched_profile_preview,
     load_agent_profiles,
     validate_profile_data,
     mcp_tool_allowed_by_policy,
     profile_policy_by_id,
+    profile_policy_from_definition,
 )
 
 
@@ -80,6 +83,26 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         self.assertEqual(preview["runtime_enforcement"], "mcp_projection_when_effective_profile_is_set")
 
+    def test_profile_policy_reconstructs_grants_from_frozen_preview_snapshot(self):
+        profiles, issues = load_agent_profiles(base_dir=str(self.project))
+        self.assertFalse(issues)
+        by_id = {profile.id: profile for profile in profiles}
+
+        full_snapshot = enriched_profile_preview(by_id["full-architect"])
+        pm_snapshot = enriched_profile_preview(by_id["product-manager-draft"])
+
+        full_policy = profile_policy_from_definition(full_snapshot)
+        pm_policy = profile_policy_from_definition(pm_snapshot)
+
+        self.assertTrue(full_policy.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_engineer_hire", full_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("torque_context", full_policy))
+        self.assertFalse(pm_policy.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm_policy))
+
     def test_profile_policy_evaluator_allows_full_and_denies_pm_dangerous_tools(self):
         full_architect = profile_policy_by_id("full-architect", base_dir=str(self.project))
         pm = profile_policy_by_id("product-manager-draft", base_dir=str(self.project))
@@ -99,6 +122,38 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", pm))
+
+
+    def test_enriched_preview_warns_for_product_manager_draft(self):
+        profiles, issues = load_agent_profiles(base_dir=str(self.project))
+        self.assertFalse(issues)
+        pm = next(profile for profile in profiles if profile.id == "product-manager-draft")
+
+        preview = enriched_profile_preview(pm)
+
+        self.assertEqual(preview["status"], "draft")
+        self.assertTrue(any("infrastructure-only" in warning for warning in preview["warnings"]))
+        self.assertTrue(any("architect_peer_inbox" in warning for warning in preview["warnings"]))
+
+    def test_cell_status_defaults_to_full_base_kind_without_assignment(self):
+        class Cell:
+            id = "worker-1"
+            name = "Worker"
+            kind = "worker"
+            agent_profile_id = ""
+            agent_profile_version = ""
+            agent_profile_assigned_at = 0
+            agent_profile_assigned_by = ""
+            effective_agent_profile_id = ""
+            effective_agent_profile_version = ""
+            effective_agent_profile_snapshot = {}
+            effective_agent_profile_applied_at = 0
+
+        status = agent_profile_cell_status(Cell(), base_dir=str(self.project))
+
+        self.assertEqual(status["effective_profile_id"], "full-worker")
+        self.assertEqual(status["status"], "full")
+        self.assertFalse(status["pending_next_launch"])
 
     def test_unknown_capability_atom_fails_validation(self):
         _profile, issues = validate_profile_data({
@@ -226,3 +281,42 @@ class AgentProfileDoctorTests(unittest.TestCase):
         self.assertIn("[agent_profiles]", rendered)
         self.assertIn("agent profile validation failed[dangerous_product_manager_grants]", rendered)
         self.assertIn("agent profile validation failed[agent_cell_profile_confusion]", rendered)
+
+    def test_doctor_reports_assignment_and_audit_surface(self):
+        from torque.state import AgentCell, MatrixState
+        from torque.doctor import build_doctor_report_for_db, format_doctor_report
+
+        state = MatrixState(db=self.db)
+        state.groups["g"] = []
+        cell = AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+        state._db_save_agent(cell)
+        state.assign_agent_profile(
+            cell.id,
+            "product-manager-draft",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        state.apply_effective_agent_profile_for_launch(cell, base_dir=str(self.project))
+
+        report = build_doctor_report_for_db(
+            self.db_path,
+            project_base_dir=str(self.project),
+        )
+        rendered = format_doctor_report(report)
+
+        self.assertGreaterEqual(report["agent_profiles"]["assignment_count"], 1)
+        self.assertGreaterEqual(report["agent_profiles"]["audit_recent_count"], 1)
+        self.assertEqual(
+            report["agent_profiles"]["assignments"][0]["effective_profile_id"],
+            "product-manager-draft",
+        )
+        self.assertIn("assignment_count", rendered)
+        self.assertIn("audit_recent_count", rendered)
