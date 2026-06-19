@@ -15,6 +15,7 @@ import yaml
 
 from . import ai_deps
 from . import install_locations
+from .agent_profiles import dry_run_profile_preview, validate_all_agent_profiles
 from .mcp_idempotency import collect_mcp_idempotency_storage_stats
 
 DOCTOR_SCHEMA_VERSION = 3
@@ -1098,6 +1099,24 @@ def _collect_roles_section() -> dict:
     }
 
 
+def _collect_agent_profiles_section(base_dir: str = "") -> dict:
+    validation = validate_all_agent_profiles(base_dir=base_dir)
+    profiles = list(validation.get("profiles", []) or [])
+    previews = [dry_run_profile_preview(profile) for profile in profiles]
+    return {
+        "config_path": ".torque/agent_profiles/",
+        "base_dir": str(base_dir or os.getcwd()),
+        "profile_count": int(validation.get("profile_count", 0) or 0),
+        "valid": bool(validation.get("valid")),
+        "error_count": int(validation.get("error_count", 0) or 0),
+        "warning_count": int(validation.get("warning_count", 0) or 0),
+        "profiles": [profile.as_preview_dict() for profile in profiles],
+        "dry_run_previews": previews,
+        "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
+        "runtime_enforcement": "not_enabled_wave_1_dry_run_only",
+    }
+
+
 def _collect_stage_6_cleanup_section(
     conn: sqlite3.Connection,
     *,
@@ -1270,6 +1289,19 @@ def _check_stage_6_engineer_tool_aliases_removed(report: dict) -> dict:
         "name": "stage_6_engineer_tool_aliases_removed",
         "status": "pass" if not present else "fail",
         "details": {"present": present},
+    }
+
+
+def _check_agent_profiles_valid(report: dict) -> dict:
+    profiles = report.get("agent_profiles", {}) or {}
+    errors = int(profiles.get("error_count", 0) or 0)
+    return {
+        "name": "agent_profiles_valid",
+        "status": "pass" if errors == 0 else "fail",
+        "details": {
+            "error_count": errors,
+            "issues": list(profiles.get("issues", []) or []),
+        },
     }
 
 
@@ -1696,6 +1728,7 @@ _DOCTOR_CHECKS = [
     _check_invalid_architect_hired_binding,
     _check_stage_6_legacy_columns_removed,
     _check_stage_6_engineer_tool_aliases_removed,
+    _check_agent_profiles_valid,
     _check_pty_supervisor_reachable,
 ]
 
@@ -1726,6 +1759,7 @@ def build_doctor_report(
     db_path: Path | str,
     *,
     runtime_python: str | Path | None = None,
+    project_base_dir: str | Path | None = None,
 ) -> dict:
     db_path = Path(db_path)
     agents = _collect_agents_section(conn)
@@ -1749,6 +1783,9 @@ def build_doctor_report(
         "mcp_idempotency_storage": _collect_mcp_idempotency_storage_section(conn),
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
+        "agent_profiles": _collect_agent_profiles_section(
+            str(project_base_dir or os.getcwd())
+        ),
         "stage_6_cleanup": _collect_stage_6_cleanup_section(
             conn, base_dir=str(db_path.parent)
         ),
@@ -1788,11 +1825,17 @@ def build_doctor_report_for_db(
     db_path: Path | str,
     *,
     runtime_python: str | Path | None = None,
+    project_base_dir: str | Path | None = None,
 ) -> dict:
     db_path = Path(db_path)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        return build_doctor_report(conn, db_path, runtime_python=runtime_python)
+        return build_doctor_report(
+            conn,
+            db_path,
+            runtime_python=runtime_python,
+            project_base_dir=project_base_dir,
+        )
     finally:
         conn.close()
 
@@ -1852,6 +1895,7 @@ def format_doctor_report(report: dict) -> str:
     mcp_idempotency_storage = report.get("mcp_idempotency_storage", {}) or {}
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
+    agent_profiles = report.get("agent_profiles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
     ai = report.get("ai", {}) or {}
     ai_dependency = ai.get("embeddings_dependency", {}) or {}
@@ -2035,6 +2079,16 @@ def format_doctor_report(report: dict) -> str:
         f"{int(roles.get('roles_with_preamble', 0) or 0)}",
         "  roles_with_priorities:          "
         f"{int(roles.get('roles_with_priorities', 0) or 0)}",
+        "",
+        "[agent_profiles]",
+        "  config_path:                    "
+        f"{agent_profiles.get('config_path', '.torque/agent_profiles/')}",
+        "  profile_count:                  "
+        f"{int(agent_profiles.get('profile_count', 0) or 0)}",
+        "  error_count:                    "
+        f"{int(agent_profiles.get('error_count', 0) or 0)}",
+        "  runtime_enforcement:            "
+        f"{agent_profiles.get('runtime_enforcement', '')}",
         "",
         "[stage_6_cleanup]",
         "  legacy_template_files_ignored:  "
@@ -2354,6 +2408,18 @@ def format_doctor_report(report: dict) -> str:
                     "  - engineer_* MCP aliases are still present; "
                     "remove the legacy alias surface"
                 )
+            elif name == "agent_profiles_valid":
+                issues = list(details.get("issues", []) or [])
+                if not issues:
+                    lines.append("  - agent profile definitions are invalid")
+                for issue in issues[:10]:
+                    path = _humanize_path(str(issue.get("path", "") or ""))
+                    location = f" ({path})" if path else ""
+                    lines.append(
+                        "  - agent profile validation failed"
+                        f"[{issue.get('code', '')}]{location}: "
+                        f"{issue.get('message', '')}"
+                    )
             else:
                 lines.append(f"  - {name}")
     return "\n".join(lines)

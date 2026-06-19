@@ -3,6 +3,8 @@ __pycache__/
 .torque/*
 !.torque/actions/
 !.torque/actions/**
+!.torque/agent_profiles/
+!.torque/agent_profiles/**
 !.torque/roles/
 !.torque/roles/**
 !.torque/specializations/

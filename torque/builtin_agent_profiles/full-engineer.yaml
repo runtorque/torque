@@ -1,0 +1,55 @@
+id: full-engineer
+version: "1"
+base_kind: engineer
+display_name: Full Engineer
+description: Full current behavior by construction for the base runtime kind.
+lifecycle: stable
+grants:
+  - agent.dispatch_worker
+  - comm.engineer_message
+  - comm.user_ask
+  - comm.user_message
+  - comm.worker_message
+  - decision.create
+  - decision.link
+  - decision.list
+  - decision.update
+  - journal.private
+  - journal.read
+  - journal.write
+  - memory.admin
+  - memory.publish
+  - memory.read
+  - observe.board_summary
+  - observe.events
+  - observe.mcp_calls
+  - observe.self_context
+  - observe.semantic_recall
+  - observe.task_detail
+  - planning.area_read
+  - planning.initiative_read
+  - task.board_sync_read
+  - task.complete
+  - task.create
+  - task.dispatch
+  - task.mark_covered
+  - task.move
+  - task.reassign
+  - task.update
+  - task.upload_artifact
+  - task.verify
+  - worktree.merge
+  - worktree.read
+denies: []
+policy:
+  base_kind: engineer
+  scope:
+    summary: full current behavior for the base runtime kind
+  communication:
+    summary: full current communication behavior for the base runtime kind
+  spawn:
+    summary: full current spawning/routing behavior where the base kind already has it
+  audit:
+    summary: no additional Wave 1 persistence; future effective snapshots/audit rows only
+metadata:
+  archetype: full

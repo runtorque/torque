@@ -69,6 +69,7 @@ nav:
       - CLI Reference: reference/cli.md
       - MCP tools: reference/mcp-tools.md
       - Roles and specializations: reference/specializations.md
+      - Agent Profiles: reference/agent-profiles.md
       - Action YAML format: reference/action-yaml-format.md
       - Role YAML format: reference/role-yaml-format.md
       - Reference Guide: reference/reference-guide.md

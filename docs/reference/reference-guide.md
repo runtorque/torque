@@ -49,6 +49,7 @@ Torque has a few settings surfaces. The details live in the linked pages; this s
 |---|---|
 | [Group Settings](../operate/group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Engineer behavior |
 | [Agent Templates](../team/workers.md) | Reusable launch presets with provider, model, prompt, worktree, and child terminal defaults |
+| [Agent Profiles](agent-profiles.md) | Dry-run capability policy definitions under `.torque/agent_profiles/`; not runtime-enforced in Wave 1 |
 | [Actions & Templates](../tasks/actions.md) | Prompt rendering, variables, transitions, and pipelines used by dispatch and derive |
 | Top-level README environment variable reference | Runtime defaults like `TORQUE_PORT`, `TORQUE_DEFAULT_CMD`, `TORQUE_STANDALONE`, `TORQUE_BIND_ALL`, and desktop-shell overrides such as `TORQUE_DESKTOP_MODE` |
 
