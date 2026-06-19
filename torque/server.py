@@ -17316,16 +17316,15 @@ async def main(connection=None):
                             # (the reorder in create_session ran too early)
                             await bridge.reorder_tabs()
 
+                        # Only explicit launch config terminals create
+                        # companion terminals. Legacy hidden
+                        # GroupSettings.auto_terminals is intentionally no
+                        # longer an implicit fallback for ordinary agent
+                        # creation.
                         if launch_cfg.get("terminals"):
                             await _create_child_terminals(
                                 group, cell,
                                 terminals=launch_cfg["terminals"])
-                        else:
-                            gs = state.get_group_settings(group)
-                            if gs.auto_terminals > 0:
-                                await _create_child_terminals(
-                                    group, cell,
-                                    count=gs.auto_terminals)
                         if cell.session_id:
                             for prompt_text, send_kwargs in \
                                     _new_agent_prompt_sequence(
