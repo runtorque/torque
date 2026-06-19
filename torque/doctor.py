@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -210,6 +211,85 @@ def _collect_runtime_locations_section(
         "legacy_iterm2_python_samples": [
             str(path) for path in legacy_candidates[:3]
         ],
+    }
+
+
+def _collect_multiprocessing_children_section(
+    *,
+    ps_output: str | None = None,
+    runner=subprocess.check_output,
+) -> dict:
+    """Collect observable Python multiprocessing spawn/resource-tracker rows.
+
+    Torque's local AI embedding service is the only daemon path expected to
+    create ``multiprocessing.spawn`` children.  This section is intentionally
+    diagnostic-only: doctor must not kill or reap these processes from a worker
+    context, but it should make accumulation visible for leak investigations.
+    """
+
+    if ps_output is None:
+        try:
+            ps_output = runner(
+                ["ps", "-axo", "pid=,ppid=,rss=,etime=,command="],
+                text=True,
+                errors="replace",
+            )
+        except Exception as exc:
+            return {
+                "available": False,
+                "error": str(exc),
+                "count": 0,
+                "total_rss_bytes": 0,
+                "max_rss_bytes": 0,
+                "processes": [],
+            }
+    processes = []
+    total_rss_kb = 0
+    max_rss_kb = 0
+    for line in str(ps_output or "").splitlines():
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        pid_raw, ppid_raw, rss_raw, etime, command = parts
+        if (
+            "multiprocessing.spawn" not in command
+            and "spawn_main" not in command
+            and "multiprocessing.resource_tracker" not in command
+        ):
+            continue
+        try:
+            pid = int(pid_raw)
+            ppid = int(ppid_raw)
+            rss_kb = int(rss_raw)
+        except ValueError:
+            continue
+        kind = (
+            "resource_tracker"
+            if "resource_tracker" in command
+            else "spawn_worker"
+        )
+        total_rss_kb += max(0, rss_kb)
+        max_rss_kb = max(max_rss_kb, rss_kb)
+        processes.append({
+            "pid": pid,
+            "ppid": ppid,
+            "rss_bytes": max(0, rss_kb) * 1024,
+            "etime": etime,
+            "kind": kind,
+            "command": command[:500],
+        })
+    return {
+        "available": True,
+        "count": len(processes),
+        "spawn_worker_count": sum(
+            1 for proc in processes if proc.get("kind") == "spawn_worker"
+        ),
+        "resource_tracker_count": sum(
+            1 for proc in processes if proc.get("kind") == "resource_tracker"
+        ),
+        "total_rss_bytes": total_rss_kb * 1024,
+        "max_rss_bytes": max_rss_kb * 1024,
+        "processes": processes[:20],
     }
 
 
@@ -1679,6 +1759,7 @@ def build_doctor_report(
         ),
         "worktrees": _collect_worktrees_section(conn),
         "ai": _collect_ai_section(conn),
+        "multiprocessing_children": _collect_multiprocessing_children_section(),
         "pty_supervisor": _collect_pty_supervisor_section(db_path),
     }
     report["roles_templates"] = {
@@ -1776,6 +1857,7 @@ def format_doctor_report(report: dict) -> str:
     ai_dependency = ai.get("embeddings_dependency", {}) or {}
     ai_index_state = ai.get("index_state", {}) or {}
     ai_index_counts = ai.get("index_counts", {}) or {}
+    multiprocessing_children = report.get("multiprocessing_children", {}) or {}
     pty_supervisor = report.get("pty_supervisor", {}) or {}
     pty_metrics = pty_supervisor.get("metrics", {}) or {}
     pty_health = pty_supervisor.get("health", {}) or {}
@@ -1985,6 +2067,20 @@ def format_doctor_report(report: dict) -> str:
         f"{int(ai_index_counts.get('model_mismatch_chunks', 0) or 0)}",
         "  rebuild_required:               "
         f"{str(bool(ai_index_state.get('rebuild_required'))).lower()}",
+        "",
+        "[multiprocessing_children]",
+        "  available:                      "
+        f"{str(bool(multiprocessing_children.get('available'))).lower()}",
+        "  count:                          "
+        f"{int(multiprocessing_children.get('count', 0) or 0)}",
+        "  spawn_worker_count:             "
+        f"{int(multiprocessing_children.get('spawn_worker_count', 0) or 0)}",
+        "  resource_tracker_count:         "
+        f"{int(multiprocessing_children.get('resource_tracker_count', 0) or 0)}",
+        "  total_rss:                      "
+        f"{_format_size(int(multiprocessing_children.get('total_rss_bytes', 0) or 0))}",
+        "  max_rss:                        "
+        f"{_format_size(int(multiprocessing_children.get('max_rss_bytes', 0) or 0))}",
         "",
         "[pty_supervisor]",
         "  state:                          "

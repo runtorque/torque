@@ -115,6 +115,24 @@ class TorqueDoctorTests(unittest.TestCase):
             self.assertFalse(sec["reachable"])
             self.assertIsNone(sec["pid"])
 
+    def test_multiprocessing_children_section_parses_spawn_rows(self):
+        from torque.doctor import _collect_multiprocessing_children_section
+
+        ps_output = "\n".join([
+            " 123  100  28656  3:22.46 /opt/python -c from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=30, pipe_handle=38) --multiprocessing-fork",
+            " 124  100  18400  3:22.46 /opt/python -c from multiprocessing.resource_tracker import main;main(33)",
+            " 125  100   1024  0:00.01 /bin/zsh",
+        ])
+
+        sec = _collect_multiprocessing_children_section(ps_output=ps_output)
+
+        self.assertTrue(sec["available"])
+        self.assertEqual(sec["count"], 2)
+        self.assertEqual(sec["spawn_worker_count"], 1)
+        self.assertEqual(sec["resource_tracker_count"], 1)
+        self.assertEqual(sec["total_rss_bytes"], (28656 + 18400) * 1024)
+        self.assertEqual(sec["max_rss_bytes"], 28656 * 1024)
+
     def test_stuck_input_sessions_warning_and_render(self):
         from torque.doctor import (
             _warn_stuck_input_sessions,
