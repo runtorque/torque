@@ -12901,6 +12901,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   line-height: 1.4;
 }
 .mc-section {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-bg, rgba(255, 255, 255, 0.025));

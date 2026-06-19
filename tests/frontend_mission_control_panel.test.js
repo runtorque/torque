@@ -208,6 +208,7 @@ test('Mission Control panel app is wired as a Board/Planning/Actions peer with r
   assert.match(css, /body\.runtime-embedded \.standalone-panel-zone-body > #panel-mission-control,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-mission-control[\s\S]*\{[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*min-width:\s*0;/s);
   assert.match(css, /#panel-mission-control\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*container-type:\s*inline-size;/s);
   assert.match(css, /\.mc-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(280px,\s*clamp\(300px,\s*24vw,\s*440px\)\);/s);
+  assert.match(css, /\.mc-section\s*\{[^}]*flex:\s*0\s+0\s+auto;[^}]*overflow:\s*hidden;/s);
   assert.match(css, /#panel-mission-control\[data-panel-placement="right"\] \.mc-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow:\s*auto;/s);
   assert.match(css, /@container \(max-width:\s*720px\)\s*\{[\s\S]*?\.mc-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
 });
@@ -302,3 +303,33 @@ test('Mission Control filter, collapse, selection, and rerender state are preser
   assert.doesNotMatch(html, /Feature stream/);
 });
 
+test('Mission Control side placement preserves workspace scroll and active filter during rerender', () => {
+  const { sandbox, document } = createSandbox();
+  vm.runInContext(`missionControlReceiveSummary(${JSON.stringify(summary())})`, sandbox);
+
+  const panel = document.getElementById('panel-mission-control');
+  panel.dataset.panelPlacement = 'right';
+  const filter = document.getElementById('mission-control-filter');
+  filter.value = 'release';
+  filter.selectionStart = 3;
+  filter.selectionEnd = 6;
+  filter.focus();
+  const workspace = document.getElementById('mission-control-workspace');
+  workspace.scrollTop = 155;
+  workspace.scrollLeft = 9;
+  vm.runInContext("_missionControlFilter = 'release';", sandbox);
+
+  const changed = summary();
+  changed.sections.needs_operator_now.items[0].reason = 'Delta arrived while Mission Control was docked right.';
+  vm.runInContext(`missionControlReceiveSummary(${JSON.stringify(changed)})`, sandbox);
+
+  const restoredFilter = document.getElementById('mission-control-filter');
+  const restoredWorkspace = document.getElementById('mission-control-workspace');
+  assert.equal(restoredFilter.value, 'release');
+  assert.equal(restoredFilter.selectionStart, 3);
+  assert.equal(restoredFilter.selectionEnd, 6);
+  assert.equal(document.activeElement, restoredFilter);
+  assert.equal(restoredWorkspace.scrollTop, 155);
+  assert.equal(restoredWorkspace.scrollLeft, 9);
+  assert.match(document.getElementById('panel-mission-control').innerHTML, /Delta arrived while Mission Control was docked right/);
+});
