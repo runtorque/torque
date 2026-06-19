@@ -162,6 +162,7 @@ CAPABILITIES: dict[str, Capability] = {
     "decision.list": Capability("decision.list", "decision", "List visible decisions."),
     "decision.create": Capability("decision.create", "decision", "Create decisions, including accepted where scoped.", "high"),
     "decision.create_proposed": Capability("decision.create_proposed", "decision", "Create proposed PM-owned decisions."),
+    "decision.update_proposed": Capability("decision.update_proposed", "decision", "Update PM-owned proposed decisions."),
     "decision.accept": Capability("decision.accept", "decision", "Accept/product-owner approve decisions.", "high"),
     "decision.update": Capability("decision.update", "decision", "Edit/supersede decisions.", "high"),
     "decision.link": Capability("decision.link", "decision", "Link visible decisions to tasks/areas/initiatives."),
@@ -250,6 +251,7 @@ ARCHITECT_CEILING = frozenset(ENGINEER_CEILING | {
     "task.update_planning_fields",
     "task.move_planning_safe",
     "decision.create_proposed",
+    "decision.update_proposed",
 })
 
 BASE_KIND_CEILINGS = {
@@ -282,6 +284,65 @@ PM_DANGEROUS_CAPABILITIES = frozenset({
     "profile.assign",
     "profile.edit",
     "decision.accept",
+})
+
+PM_RAW_TOOL_DENYLIST = frozenset({
+    # Wave 4B exposes product-scoped wrappers instead of raw Architect tools.
+    "architect_tool_search",
+    "torque_area_list",
+    "torque_area_show",
+    "torque_ask",
+    "torque_message_user",
+    "torque_reply",
+    "architect_attention_digest",
+    "architect_board_summary",
+    "architect_wave_summary",
+    "architect_completion_audit",
+    "architect_task_show",
+    "architect_task_list",
+    "architect_task_chain",
+    "architect_task_create",
+    "architect_task_update",
+    "architect_task_reassign",
+    "architect_task_move",
+    "architect_task_mark_covered",
+    "architect_ask",
+    "architect_message_user",
+    "architect_peer_list",
+    "architect_peer_message",
+    "architect_peer_inbox",
+    "architect_reply",
+    "architect_area_list",
+    "architect_area_show",
+    "architect_area_create",
+    "architect_area_update",
+    "architect_area_archive",
+    "architect_area_link_task",
+    "architect_area_unlink_task",
+    "architect_area_link_decision",
+    "architect_area_unlink_decision",
+    "architect_area_link_initiative",
+    "architect_area_unlink_initiative",
+    "architect_area_link_area",
+    "architect_area_unlink_area",
+    "architect_area_note_create",
+    "architect_area_note_update",
+    "architect_area_note_archive",
+    "architect_initiative_list",
+    "architect_initiative_show",
+    "architect_initiative_create",
+    "architect_initiative_update",
+    "architect_initiative_archive",
+    "architect_initiative_link_task",
+    "architect_initiative_unlink_task",
+    "architect_initiative_link_decision",
+    "architect_initiative_unlink_decision",
+    "architect_decision_create",
+    "architect_decision_update",
+    "architect_decision_link",
+    "architect_decision_list",
+    "architect_journal",
+    "architect_journal_read",
 })
 
 HIGH_RISK_CAPABILITIES = frozenset(
@@ -319,7 +380,7 @@ TOOL_CATEGORY_REQUIREMENTS: dict[str, frozenset[str]] = {
         "decision.list",
     }),
     "planning_writes": frozenset({"planning.area_write", "planning.initiative_write"}),
-    "pm_decisions": frozenset({"decision.create_proposed", "decision.link", "decision.list"}),
+    "pm_decisions": frozenset({"decision.create_proposed", "decision.update_proposed", "decision.link", "decision.list"}),
     "pm_queued_tasks": frozenset({
         "task.create_queued",
         "task.update_planning_fields",
@@ -520,6 +581,29 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "architect_decision_list": frozenset({"decision.list"}),
     "architect_journal": frozenset({"journal.private"}),
     "architect_journal_read": frozenset({"journal.private"}),
+    # Product Manager Wave 4B wrapper surface. These tools are implemented
+    # under the Architect MCP server but enforce PM-specific context and
+    # proposed-only/product-safe semantics before side effects.
+    "architect_product_board_summary": frozenset({"observe.board_summary"}),
+    "architect_product_task_list": frozenset({"observe.task_detail"}),
+    "architect_product_task_show": frozenset({"observe.task_detail"}),
+    "architect_product_task_propose": frozenset({"task.create_queued"}),
+    "architect_product_area_list": frozenset({"planning.area_read"}),
+    "architect_product_area_show": frozenset({"planning.area_read"}),
+    "architect_product_initiative_list": frozenset({"planning.initiative_read"}),
+    "architect_product_initiative_show": frozenset({"planning.initiative_read"}),
+    "architect_product_decision_list": frozenset({"decision.list"}),
+    "architect_product_decision_create": frozenset({"decision.create_proposed"}),
+    "architect_product_decision_update": frozenset({"decision.update_proposed"}),
+    "architect_product_decision_link": frozenset({"decision.update_proposed", "decision.link"}),
+    "architect_product_peer_list": frozenset({"comm.peer_architect_list"}),
+    "architect_product_peer_message": frozenset({"comm.peer_architect_message"}),
+    "architect_product_peer_inbox": frozenset({"comm.peer_architect_message"}),
+    "architect_product_peer_reply": frozenset({"comm.peer_architect_message"}),
+    "architect_product_message_user": frozenset({"comm.user_message"}),
+    "architect_product_ask_user": frozenset({"comm.user_ask"}),
+    "architect_product_journal": frozenset({"journal.private"}),
+    "architect_product_journal_read": frozenset({"journal.private"}),
 }
 
 
@@ -831,6 +915,19 @@ def profile_policy_by_id(profile_id: str, *, base_dir: str = "") -> AgentProfile
     return profile_policy_from_definition(profile)
 
 
+def _policy_is_product_manager(policy: AgentProfilePolicy | None) -> bool:
+    if not policy:
+        return False
+    profile_id = str(getattr(policy, "profile_id", "") or "").strip()
+    if profile_id == "product-manager-draft" or "product-manager" in profile_id:
+        return True
+    profile = getattr(policy, "profile", None)
+    metadata = getattr(profile, "metadata", {}) if profile is not None else {}
+    if isinstance(metadata, dict) and str(metadata.get("archetype", "") or "").strip() == "product_manager":
+        return True
+    return False
+
+
 def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
     """Return required capability atoms for a raw MCP tool, if known."""
 
@@ -849,7 +946,10 @@ def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None
 
     if policy is None or policy.is_full_base_kind_profile:
         return True
-    requirements = mcp_tool_capability_requirements(tool_name)
+    normalized_name = str(tool_name or "").strip()
+    if _policy_is_product_manager(policy) and normalized_name in PM_RAW_TOOL_DENYLIST:
+        return False
+    requirements = mcp_tool_capability_requirements(normalized_name)
     if not requirements:
         return False
     return policy.allows_all(requirements)
@@ -945,10 +1045,10 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
         )
     if profile_id == "product-manager-draft" or str(preview.get("metadata", {}).get("archetype", "") if isinstance(preview.get("metadata"), dict) else "") == "product_manager":
         warnings.append(
-            "product-manager-draft is infrastructure-only in Wave 3; do not use for live PM dogfood or Blueprint replacement."
+            "product-manager-draft is scratch-only in Wave 4B; do not use for live PM dogfood or Blueprint replacement."
         )
         warnings.append(
-            "Mixed-purpose architect_peer_inbox and architect_reply remain denied for Product Manager-style profiles."
+            "Raw Architect tools are denied for Product Manager-style profiles; use architect_product_* wrappers only."
         )
     return warnings
 

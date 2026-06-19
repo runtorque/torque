@@ -115,6 +115,43 @@ _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
 _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 20
 _ARCHITECT_PEER_INBOX_MAX_LIMIT = 100
 _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT = 1000
+_PRODUCT_PEER_MARKER = "torque.product_peer.v1"
+_PRODUCT_DECISION_MARKER = "torque.product_decision.v1"
+_PRODUCT_CONTEXT_MARKER = "torque.product_context.v1"
+_PRODUCT_TASK_LABELS = frozenset({"product-proposal", "pm-created"})
+_PRODUCT_TASK_DEFAULT_LABELS = ("product-proposal", "pm-created")
+_PRODUCT_TASK_UNSAFE_LANES = frozenset({
+    "To Do",
+    "In Progress",
+    "Done",
+    ARCHIVED_LANE,
+})
+_PRODUCT_JOURNAL_ENTRY_TYPES = {"observation", "checkpoint", "plan"}
+_PRODUCT_TASK_PROPOSAL_FORBIDDEN_ARGS = frozenset({
+    "assigned_engineer_id",
+    "agent_id",
+    "dispatch",
+    "dispatch_message",
+    "scheduled_at",
+    "action_name",
+    "action",
+    "action_vars",
+    "provider",
+    "external_id",
+    "external_url",
+    "worker",
+    "worker_id",
+    "worktree",
+    "worktree_path",
+    "worktree_branch",
+    "branch",
+    "repo_root",
+    "agent_template",
+    "command",
+    "model",
+    "reasoning_effort",
+    "owner_engineer_id",
+})
 _ARCHITECT_FEEDBACK_DEFAULT_CATEGORIES = (
     "What worked well?",
     "What slowed you down?",
@@ -2491,6 +2528,17 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "pending_hire_status",
     "peer_inbox",
     "peer_list",
+    "product_area_list",
+    "product_area_show",
+    "product_board_summary",
+    "product_decision_list",
+    "product_initiative_list",
+    "product_initiative_show",
+    "product_journal_read",
+    "product_peer_inbox",
+    "product_peer_list",
+    "product_task_list",
+    "product_task_show",
     "semantic_recall",
     "session_map",
     "specialization_show",
@@ -4377,6 +4425,594 @@ def _normalize_agent_user_message_context(
             "decisions": [],
         },
     }, ""
+
+
+def _cell_has_product_manager_profile(state, cell) -> bool:
+    if not cell:
+        return False
+    for attr in ("effective_agent_profile_id", "agent_profile_id"):
+        profile_id = str(getattr(cell, attr, "") or "").strip()
+        if profile_id == "product-manager-draft" or "product-manager" in profile_id:
+            return True
+    snapshot = getattr(cell, "effective_agent_profile_snapshot", {}) or {}
+    if isinstance(snapshot, dict):
+        if str(snapshot.get("id", "") or "").strip() == "product-manager-draft":
+            return True
+        metadata = snapshot.get("metadata", {})
+        if isinstance(metadata, dict) and str(
+                metadata.get("archetype", "") or "").strip() == "product_manager":
+            return True
+    overrides = getattr(state, "agent_profile_overrides", None)
+    if isinstance(overrides, dict):
+        raw = overrides.get(str(getattr(cell, "id", "") or "").strip())
+        if isinstance(raw, str):
+            return raw == "product-manager-draft" or "product-manager" in raw
+        if isinstance(raw, dict):
+            if str(raw.get("id", "") or "").strip() == "product-manager-draft":
+                return True
+            metadata = raw.get("metadata", {})
+            if isinstance(metadata, dict) and str(
+                    metadata.get("archetype", "") or "").strip() == "product_manager":
+                return True
+    return False
+
+
+def _product_peer_allowlist_contains(state, caller_id: str, peer_id: str) -> bool:
+    allowlist = getattr(state, "product_peer_allowlist", None)
+    if not allowlist:
+        return False
+    caller_id = str(caller_id or "").strip()
+    peer_id = str(peer_id or "").strip()
+    caller = getattr(state, "agents", {}).get(caller_id)
+    group = str(getattr(caller, "group", "") or "").strip()
+    candidates = []
+    if isinstance(allowlist, dict):
+        for key in (caller_id, group, "*"):
+            value = allowlist.get(key)
+            if value is not None:
+                candidates.extend(value if isinstance(value, (list, tuple, set)) else [value])
+    elif isinstance(allowlist, (list, tuple, set)):
+        candidates.extend(allowlist)
+    return peer_id in {str(item or "").strip() for item in candidates}
+
+
+def _product_peer_eligible(state, caller_id: str, peer) -> bool:
+    if not peer:
+        return False
+    peer_id = str(getattr(peer, "id", "") or "").strip()
+    return (
+        _cell_has_product_manager_profile(state, peer)
+        or _product_peer_allowlist_contains(state, caller_id, peer_id)
+    )
+
+
+def _resolve_product_architect_peer(state, caller_id: str,
+                                    architect_ident: str) -> tuple[object | None, str]:
+    peer, error = _resolve_architect_peer(state, caller_id, architect_ident)
+    if not peer:
+        return None, error
+    if not _product_peer_eligible(state, caller_id, peer):
+        return None, "architect not found in product-peer scope"
+    return peer, ""
+
+
+def _resolve_product_architect_peer_filter(
+        state,
+        caller_id: str,
+        architect_ident: str) -> tuple[str, str]:
+    ident = str(architect_ident or "").strip()
+    if not ident:
+        return "", ""
+    peer, error = _resolve_product_architect_peer(state, caller_id, ident)
+    if not peer:
+        return "", error
+    return str(getattr(peer, "id", "") or "").strip(), ""
+
+
+def _decision_has_product_marker(decision: dict | None) -> bool:
+    metadata = (decision or {}).get("metadata", {})
+    if not isinstance(metadata, dict):
+        return False
+    product = metadata.get("product_manager", {})
+    return (
+        isinstance(product, dict)
+        and str(product.get("marker", "") or "").strip() == _PRODUCT_DECISION_MARKER
+    )
+
+
+def _product_decision_metadata(caller_id: str) -> dict:
+    return {
+        "product_manager": {
+            "marker": _PRODUCT_DECISION_MARKER,
+            "owner_architect_id": str(caller_id or "").strip(),
+            "proposed_only": True,
+            "wave": "4B",
+        }
+    }
+
+
+def _load_product_decision(state, caller_id: str,
+                           decision_id: str) -> tuple[dict | None, str]:
+    decision, error = _load_architect_decision(state, caller_id, decision_id)
+    if not decision:
+        return None, error
+    if not _decision_has_product_marker(decision):
+        return None, "Decision not found"
+    if str(decision.get("status", "") or "").strip() != "proposed":
+        return None, "Decision is not a proposed product decision"
+    return decision, ""
+
+
+def _product_decisions_for_architect(state, caller_id: str, *,
+                                     include_archived: bool = False) -> list[dict]:
+    return [
+        decision for decision in state.load_decisions_for_architect(
+            caller_id,
+            include_archived=include_archived,
+        )
+        if _decision_has_product_marker(decision)
+    ]
+
+
+def _product_decision_linked_task_ids(state, caller_id: str) -> set[str]:
+    linked: set[str] = set()
+    for decision in _product_decisions_for_architect(state, caller_id):
+        linked.update(str(item or "").strip() for item in decision.get("linked_task_ids", []) or [])
+    return {item for item in linked if item}
+
+
+def _task_has_product_label(task) -> bool:
+    labels = {
+        str(label or "").strip()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    return bool(labels & set(_PRODUCT_TASK_LABELS))
+
+
+def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
+    if not task:
+        return False
+    caller = state.agents.get(str(caller_id or "").strip())
+    group = str(getattr(caller, "group", "") or "").strip()
+    if not group or str(getattr(task, "group", "") or "").strip() != group:
+        return False
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if _task_has_product_label(task):
+        return True
+    if str(getattr(task, "created_by_architect_id", "") or "").strip() == str(caller_id or "").strip() and _task_has_product_label(task):
+        return True
+    return task_id in _product_decision_linked_task_ids(state, caller_id)
+
+
+def _product_task_summary(state, caller_id: str, task) -> dict:
+    item = _architect_board_summary_task_item(
+        task,
+        created_by=_task_created_by_classifier(task),
+    )
+    linked_decisions = [
+        decision.get("id")
+        for decision in _product_decisions_for_architect(state, caller_id)
+        if str(getattr(task, "id", "") or "").strip()
+        in {str(tid or "").strip() for tid in decision.get("linked_task_ids", []) or []}
+    ]
+    if linked_decisions:
+        item["linked_product_decision_ids"] = linked_decisions
+    return item
+
+
+def _product_task_items(state, caller_id: str, args: dict) -> tuple[list[dict], str]:
+    labels, label_error = _normalize_architect_task_list_label_filter(
+        args.get("label_filter")
+    )
+    if label_error:
+        return [], label_error
+    lane_filter = str(args.get("lane_filter", "") or "").strip()
+    include_archived = bool(args.get("include_archived", False))
+    tasks = []
+    for task in state.board_tasks.values():
+        if not _product_task_visible_for_architect(state, caller_id, task):
+            continue
+        lane = str(getattr(task, "lane", "") or "").strip()
+        if lane == ARCHIVED_LANE and not include_archived:
+            continue
+        if lane_filter and lane != lane_filter:
+            continue
+        task_labels = set(getattr(task, "labels", []) or [])
+        if labels and not set(labels).issubset(task_labels):
+            continue
+        tasks.append(task)
+    lane_order = {lane: idx for idx, lane in enumerate(getattr(state, "board_lanes", []) or [])}
+    tasks.sort(key=lambda task: (
+        lane_order.get(str(getattr(task, "lane", "") or ""), len(lane_order)),
+        getattr(task, "position", 0),
+        str(getattr(task, "task", "") or "").lower(),
+        str(getattr(task, "id", "") or ""),
+    ))
+    return [_product_task_summary(state, caller_id, task) for task in tasks], ""
+
+
+def _product_task_list_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
+    limit, limit_error = _normalize_architect_task_list_limit(args.get("limit"))
+    if limit_error:
+        return limit_error, True
+    items, error = _product_task_items(state, caller_id, args)
+    if error:
+        return error, True
+    payload_items = items[:limit] if limit else []
+    return _compact_json({
+        "type": "product_task_list",
+        "tasks": payload_items,
+        "count": len(items),
+        "truncated": bool(limit and len(items) > limit),
+    }), False
+
+
+def _product_board_summary_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
+    try:
+        limit = int(args.get("limit", 20) or 20)
+    except (TypeError, ValueError):
+        return "limit must be an integer", True
+    limit = max(0, min(limit, 100))
+    items, error = _product_task_items(state, caller_id, {})
+    if error:
+        return error, True
+    lane_counts: dict[str, int] = {}
+    for item in items:
+        lane = str(item.get("lane", "") or "")
+        lane_counts[lane] = lane_counts.get(lane, 0) + 1
+    return _compact_json({
+        "type": "product_board_summary",
+        "tasks_total": len(items),
+        "lanes": lane_counts,
+        "tasks": items[:limit],
+        "truncated": len(items) > limit,
+        "scope": "pm-linked/product-labeled task summaries only",
+    }), False
+
+
+def _product_task_show_json(state, caller_id: str, args: dict) -> tuple[str, bool]:
+    task_id = _resolve_task(state, args.get("task", ""))
+    if not task_id:
+        return "Task not found", True
+    task = state.board_tasks.get(task_id)
+    if not _product_task_visible_for_architect(state, caller_id, task):
+        return "Task not found", True
+    payload = serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
+    payload.update(_task_health_payload_for_response(state, task))
+    payload["type"] = "product_task"
+    payload["title"] = task.task
+    payload["created_by"] = _task_created_by_classifier(task)
+    _attach_task_board_sync_inline_state(payload, task)
+    _attach_task_review_inline_state(payload, task)
+    return _compact_json(payload), False
+
+
+def _product_area_ref(state, caller_id: str, area_ref: str) -> tuple[str, str]:
+    group = _area_scope_group(state, caller_id)
+    area_id = state.resolve_area_id(area_ref, group=group)
+    if not area_id:
+        return "", "Area not found"
+    area = state.load_area(area_id)
+    if not area or str(area.get("group_name", "") or "").strip() != group:
+        return "", "Area not found"
+    return area_id, ""
+
+
+def _product_initiative_ref(state, caller_id: str,
+                            initiative_ref: str) -> tuple[str, str]:
+    group = _initiative_scope_group(state, caller_id)
+    initiative_id = state.resolve_initiative_id(initiative_ref, group=group)
+    if not initiative_id:
+        return "", "Initiative not found"
+    initiative = state.load_initiative(initiative_id)
+    if not initiative or str(initiative.get("group_name", "") or "").strip() != group:
+        return "", "Initiative not found"
+    return initiative_id, ""
+
+
+def _normalize_product_context(
+        state,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[dict, str]:
+    if _dedupe_strings(args.get("context_engineer_ids", [])):
+        return {}, "context_engineer_ids are not supported for Product Manager wrappers"
+
+    task_ids = []
+    task_snapshots = []
+    for task_ident in _dedupe_strings(args.get("context_task_ids", [])):
+        task_id = _resolve_task(state, task_ident)
+        task = state.board_tasks.get(task_id or "")
+        if not task_id or not _product_task_visible_for_architect(state, caller_id, task):
+            return {}, f"Task not found: {task_ident}"
+        task_ids.append(task_id)
+        task_snapshots.append(_peer_context_task_snapshot(task))
+
+    decision_ids = []
+    decision_snapshots = []
+    for decision_ident in _dedupe_strings(args.get("context_decision_ids", [])):
+        decision_id = str(decision_ident or "").strip()
+        decision, decision_error = _load_product_decision(
+            state,
+            caller_id,
+            decision_id,
+        )
+        if not decision:
+            return {}, decision_error if decision_error != "decision id is required" else f"Decision not found: {decision_ident}"
+        decision_ids.append(decision_id)
+        decision_snapshots.append(_peer_context_decision_snapshot(decision))
+
+    area_ids = []
+    area_snapshots = []
+    for area_ident in _dedupe_strings(args.get("context_area_ids", [])):
+        area_id, area_error = _product_area_ref(state, caller_id, area_ident)
+        if not area_id:
+            return {}, area_error
+        area = state.load_area(area_id)
+        area_ids.append(area_id)
+        area_snapshots.append({
+            "id": area_id,
+            "title": str((area or {}).get("title", "") or ""),
+            "slug": str((area or {}).get("slug", "") or ""),
+        })
+
+    initiative_ids = []
+    initiative_snapshots = []
+    for initiative_ident in _dedupe_strings(args.get("context_initiative_ids", [])):
+        initiative_id, initiative_error = _product_initiative_ref(
+            state,
+            caller_id,
+            initiative_ident,
+        )
+        if not initiative_id:
+            return {}, initiative_error
+        initiative = state.load_initiative(initiative_id)
+        initiative_ids.append(initiative_id)
+        initiative_snapshots.append({
+            "id": initiative_id,
+            "title": str((initiative or {}).get("title", "") or ""),
+            "slug": str((initiative or {}).get("slug", "") or ""),
+        })
+
+    context_summary = str(args.get("context_summary", "") or "").strip()
+    return {
+        "context_task_ids": task_ids,
+        "context_engineer_ids": [],
+        "context_decision_ids": decision_ids,
+        "context_summary": context_summary,
+        "context_snapshot": {
+            "product_context": {
+                "marker": _PRODUCT_CONTEXT_MARKER,
+                "area_ids": area_ids,
+                "initiative_ids": initiative_ids,
+                "scope": "product_manager_wave_4b",
+            },
+            "tasks": task_snapshots,
+            "engineers": [],
+            "decisions": decision_snapshots,
+            "areas": area_snapshots,
+            "initiatives": initiative_snapshots,
+        },
+    }, ""
+
+
+def _product_context_anchor_count(context: dict) -> int:
+    snapshot = dict((context or {}).get("context_snapshot", {}) or {})
+    product = dict(snapshot.get("product_context", {}) or {})
+    return (
+        len(list((context or {}).get("context_task_ids", []) or []))
+        + len(list((context or {}).get("context_decision_ids", []) or []))
+        + len(list(product.get("area_ids", []) or []))
+        + len(list(product.get("initiative_ids", []) or []))
+    )
+
+
+def _require_product_ack_anchor(ack_required: bool, context: dict) -> str:
+    if not ack_required:
+        return ""
+    if _product_context_anchor_count(context) <= 0:
+        return (
+            "ack_required=true requires comm.product_ack_request plus at least "
+            "one product-scope anchor (decision, task proposal, Area, or Initiative)"
+        )
+    return ""
+
+
+def _caller_profile_allows_capability(state, caller_id: str,
+                                      capability: str) -> bool:
+    """Best-effort effective-profile capability check for wrapper refinements.
+
+    No explicit effective profile means the historical full base-kind surface is
+    active, so the refinement allows the call. Restricted profiles must carry
+    the requested atom in their frozen/override policy.
+    """
+    caller = getattr(state, "agents", {}).get(str(caller_id or "").strip())
+    if not caller:
+        return False
+    raw_profile = None
+    getter = getattr(state, "effective_agent_profile_for_cell", None)
+    if callable(getter):
+        raw_profile = getter(caller)
+    if not raw_profile:
+        overrides = getattr(state, "agent_profile_overrides", None)
+        if isinstance(overrides, dict):
+            raw_profile = overrides.get(str(caller_id or "").strip())
+    if not raw_profile:
+        snapshot = getattr(caller, "effective_agent_profile_snapshot", {}) or {}
+        raw_profile = snapshot if isinstance(snapshot, dict) and snapshot.get("id") else ""
+    if not raw_profile:
+        raw_profile = str(getattr(caller, "effective_agent_profile_id", "") or "")
+    if not raw_profile:
+        return True
+    try:
+        from .agent_profiles import (
+            AgentProfileDefinition,
+            AgentProfilePolicy,
+            profile_policy_by_id,
+            profile_policy_from_definition,
+        )
+        if isinstance(raw_profile, AgentProfilePolicy):
+            policy = raw_profile
+        elif isinstance(raw_profile, AgentProfileDefinition):
+            policy = profile_policy_from_definition(raw_profile)
+        elif isinstance(raw_profile, dict):
+            policy = profile_policy_from_definition(raw_profile)
+        else:
+            policy = profile_policy_by_id(
+                str(raw_profile or "").strip(),
+                base_dir=str(getattr(state, "project_base_dir", "") or ""),
+            )
+    except Exception:
+        log.exception("Failed to evaluate caller effective profile capability")
+        return False
+    if policy is None or policy.is_full_base_kind_profile:
+        return True
+    return str(capability or "").strip() in set(policy.grants)
+
+
+def _add_product_peer_marker(context: dict, *, source: str,
+                             caller_id: str) -> dict:
+    enriched = dict(context or {})
+    snapshot = dict(enriched.get("context_snapshot", {}) or {})
+    snapshot["product_peer"] = {
+        "marker": _PRODUCT_PEER_MARKER,
+        "source": source,
+        "caller_id": str(caller_id or "").strip(),
+        "scope": "product_manager_wave_4b",
+    }
+    enriched["context_snapshot"] = snapshot
+    return enriched
+
+
+def _row_has_product_peer_marker(row: dict | None) -> bool:
+    snapshot = dict((row or {}).get("context_snapshot", {}) or {})
+    product_peer = snapshot.get("product_peer", {})
+    return (
+        isinstance(product_peer, dict)
+        and str(product_peer.get("marker", "") or "").strip() == _PRODUCT_PEER_MARKER
+    )
+
+
+def _row_product_context(row: dict | None) -> dict:
+    return {
+        "context_task_ids": list((row or {}).get("context_task_ids", []) or []),
+        "context_engineer_ids": [],
+        "context_decision_ids": list((row or {}).get("context_decision_ids", []) or []),
+        "context_summary": str((row or {}).get("context_summary", "") or ""),
+        "context_snapshot": dict((row or {}).get("context_snapshot", {}) or {}),
+    }
+
+
+def _product_peer_row_visible(state, caller_id: str, row: dict,
+                              peer_id: str = "") -> bool:
+    caller_id = str(caller_id or "").strip()
+    participants = {
+        str((row or {}).get("sender_id", "") or "").strip(),
+        str((row or {}).get("recipient_id", "") or "").strip(),
+    }
+    if caller_id not in participants:
+        return False
+    if peer_id and peer_id not in participants:
+        return False
+    if {
+        str((row or {}).get("sender_kind", "") or "").strip(),
+        str((row or {}).get("recipient_kind", "") or "").strip(),
+    } != {"architect"}:
+        return False
+    if not _row_has_product_peer_marker(row):
+        return False
+    peer_architect_id = next((pid for pid in participants if pid != caller_id), "")
+    peer = state.agents.get(peer_architect_id)
+    if not peer or _agent_is_tombstoned(state, peer):
+        return False
+    caller = state.agents.get(caller_id)
+    if str(getattr(peer, "group", "") or "").strip() != str(
+            getattr(caller, "group", "") or "").strip():
+        return False
+    return _product_peer_eligible(state, caller_id, peer)
+
+
+def _product_peer_inbox_json(state, caller_id: str,
+                             args: dict) -> tuple[str, bool]:
+    try:
+        limit = int(args.get("limit", _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+                    or _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        limit = _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT
+    limit = max(1, min(limit, _ARCHITECT_PEER_INBOX_MAX_LIMIT))
+    try:
+        since_value = float(args.get("since", 0) or 0)
+    except (TypeError, ValueError):
+        return "since must be a number", True
+    requires_reply, requires_reply_error = _optional_bool_arg(
+        args,
+        "requires_reply",
+        False,
+    )
+    if requires_reply_error:
+        return requires_reply_error, True
+    peer_id, peer_error = _resolve_product_architect_peer_filter(
+        state,
+        caller_id,
+        str(args.get("peer_architect_id", "") or "").strip(),
+    )
+    if peer_error:
+        return peer_error, True
+    thread_id = str(args.get("thread_id", "") or "").strip()
+    db = getattr(state, "db", None)
+    if not db:
+        return _compact_json({"type": "product_peer_inbox", "threads": []}), False
+    row_limit = min(max(limit * 20, limit), 1000)
+    rows = db.load_agent_peer_messages_for_agent(
+        caller_id,
+        limit=row_limit,
+        since=since_value,
+        peer_id=peer_id,
+        thread_id=thread_id,
+    )
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        if not _product_peer_row_visible(state, caller_id, row, peer_id=peer_id):
+            continue
+        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    threads = []
+    for group_thread_id, messages in grouped.items():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        requires = _thread_requires_architect_reply(messages, caller_id)
+        if requires_reply and not requires:
+            continue
+        last = messages[-1]
+        entry_for_caller = _agent_peer_message_row_to_entry(last, caller_id)
+        peer_architect_id = entry_for_caller["peer_id"]
+        peer = state.agents.get(peer_architect_id)
+        threads.append({
+            "thread_id": group_thread_id,
+            "peer_architect_id": peer_architect_id,
+            "peer_name": str(getattr(peer, "name", "") or "").strip()
+            or peer_architect_id,
+            "last_message_at": float(last.get("created_at", 0) or 0),
+            "requires_reply": requires,
+            "messages": [
+                _agent_peer_message_row_to_entry(row, caller_id)
+                for row in messages
+            ],
+        })
+    threads.sort(
+        key=lambda item: (
+            float(item.get("last_message_at", 0) or 0),
+            str(item.get("thread_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return _compact_json({
+        "type": "product_peer_inbox",
+        "threads": threads[:limit],
+    }), False
 
 
 def _validate_architect_peer_message_length(
@@ -7652,6 +8288,401 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 command_payload,
             )
         return await _raw_handle_command(command_payload)
+
+    # -- Product Manager wrapper tools ------------------------------------
+
+    if caller_kind == "architect" and tool_name == "product_board_summary":
+        return _product_board_summary_json(real_state, caller_id, args)
+
+    if caller_kind == "architect" and tool_name == "product_task_list":
+        return _product_task_list_json(real_state, caller_id, args)
+
+    if caller_kind == "architect" and tool_name == "product_task_show":
+        return _product_task_show_json(real_state, caller_id, args)
+
+    if caller_kind == "architect" and tool_name == "product_area_list":
+        return _area_read_json(real_state, caller_kind, caller_id, args, show=False)
+
+    if caller_kind == "architect" and tool_name == "product_area_show":
+        return _area_read_json(real_state, caller_kind, caller_id, args, show=True)
+
+    if caller_kind == "architect" and tool_name == "product_initiative_list":
+        return _initiative_read_json(real_state, caller_kind, caller_id, args, show=False)
+
+    if caller_kind == "architect" and tool_name == "product_initiative_show":
+        return _initiative_read_json(real_state, caller_kind, caller_id, args, show=True)
+
+    if caller_kind == "architect" and tool_name == "product_decision_list":
+        decisions = _product_decisions_for_architect(
+            real_state,
+            caller_id,
+            include_archived=bool(args.get("include_archived", False)),
+        )
+        return _compact_json({"type": "product_decision_list", "decisions": decisions}), False
+
+    if caller_kind == "architect" and tool_name == "product_peer_list":
+        include_dismissed, bool_error = _optional_bool_arg(args, "include_dismissed", False)
+        if bool_error:
+            return bool_error, True
+        peers = []
+        for cell in real_state.iter_agents(include_tombstoned=False):
+            if str(getattr(cell, "id", "") or "").strip() == str(caller_id or "").strip():
+                continue
+            if (
+                    getattr(cell, "cell_type", "") != "agent"
+                    or str(getattr(cell, "kind", "") or "").strip() != "architect"
+                    or str(getattr(cell, "group", "") or "").strip() != _engineer_group):
+                continue
+            if _agent_dismissed_at(cell) and not include_dismissed:
+                continue
+            if not _product_peer_eligible(real_state, caller_id, cell):
+                continue
+            item = _architect_peer_item(real_state, cell)
+            item["product_peer_eligible"] = True
+            peers.append(item)
+        peers.sort(key=lambda item: (str(item.get("name", "") or "").lower(), str(item.get("id", "") or "")))
+        return _compact_json({"type": "product_peers", "architect_id": caller_id, "architects": peers}), False
+
+    if caller_kind == "architect" and tool_name == "product_peer_inbox":
+        return _product_peer_inbox_json(real_state, caller_id, args)
+
+    if caller_kind == "architect" and tool_name == "product_task_propose":
+        for forbidden in sorted(_PRODUCT_TASK_PROPOSAL_FORBIDDEN_ARGS):
+            if forbidden not in args:
+                continue
+            value = args.get(forbidden)
+            if value in (None, "", False, [], {}):
+                continue
+            return (
+                f"{forbidden} is not accepted by architect_product_task_propose; "
+                "PM task proposals are always queued, unassigned, and non-dispatched",
+                True,
+            )
+        title = str(args.get("title", "") or "").strip()
+        if not title:
+            return "title is required", True
+        requested_group = str(args.get("group", "") or "").strip()
+        if requested_group and requested_group != _engineer_group:
+            return "group must match the architect's group", True
+        lane = str(args.get("lane", "") or "").strip()
+        if lane:
+            if lane not in real_state.board_lanes:
+                return "lane must already exist", True
+            if lane in _PRODUCT_TASK_UNSAFE_LANES:
+                return (
+                    "PM task proposals must stay in a planning-safe lane; "
+                    "To Do, In Progress, Done, and Archived are rejected",
+                    True,
+                )
+        else:
+            if "Backlog" in real_state.board_lanes:
+                lane = "Backlog"
+            else:
+                lane = next((candidate for candidate in real_state.board_lanes if candidate not in _PRODUCT_TASK_UNSAFE_LANES), "")
+            if not lane:
+                return "No planning-safe lane is available for PM task proposals", True
+        labels = _dedupe_strings(args.get("labels", []))
+        for default_label in _PRODUCT_TASK_DEFAULT_LABELS:
+            if default_label not in labels:
+                labels.append(default_label)
+        task = real_state.board_add_task(
+            title,
+            _engineer_group,
+            lane=lane,
+            description=str(args.get("description", "") or ""),
+            labels=labels,
+            assigned_engineer_id="",
+            agent_id="",
+            dispatch_state="queued",
+            scheduled_at="",
+            action_name="",
+            action_vars={},
+            created_by_architect_id=str(caller_id or "").strip(),
+            suggested_action=str(args.get("suggested_action", "") or "").strip(),
+            suggested_specialization=str(args.get("suggested_specialization", "") or "").strip(),
+        )
+        if not task:
+            return "Failed to create PM task proposal", True
+        persisted = real_state.board_tasks.get(task.id)
+        if (
+                not persisted
+                or str(getattr(persisted, "assigned_engineer_id", "") or "")
+                or str(getattr(persisted, "agent_id", "") or "")
+                or str(getattr(persisted, "dispatch_state", "") or "queued") != "queued"
+                or str(getattr(persisted, "scheduled_at", "") or "")
+                or str(getattr(persisted, "action_name", "") or "")):
+            real_state.board_remove_task(task.id)
+            return "PM task proposal invariant failed; task was not persisted queued/unassigned", True
+        response = serialize_task_for_mcp(persisted, tasks_by_id=real_state.board_tasks)
+        response["type"] = "product_task_proposal_created"
+        response["title"] = persisted.task
+        response["labels"] = list(persisted.labels or [])
+        response["caveat"] = (
+            "Created as a normal queued Board task with product labels. "
+            "The PM wrapper did not add board-sync authority; existing Board "
+            "sync settings may still process normal Board tasks."
+        )
+        return _compact_json(response), False
+
+    if caller_kind == "architect" and tool_name == "product_decision_create":
+        title = str(args.get("title", "") or "").strip()
+        rationale = str(args.get("rationale", "") or "").strip()
+        if not title:
+            return "title is required", True
+        if not rationale:
+            return "rationale is required", True
+        status = str(args.get("status", "") or "proposed").strip() or "proposed"
+        if status != "proposed":
+            return "Product Manager decisions must remain proposed in Wave 4B", True
+        if _dedupe_strings(args.get("linked_engineer_ids", [])):
+            return "Product Manager decisions cannot link engineers by default", True
+        supersedes = str(args.get("supersedes", "") or "").strip() or None
+        if supersedes:
+            prior_decision, decision_error = _load_product_decision(real_state, caller_id, supersedes)
+            if not prior_decision:
+                return decision_error, True
+        linked_task_ids = []
+        for task_ident in _dedupe_strings(args.get("linked_task_ids", [])):
+            task_id = _resolve_task(real_state, task_ident)
+            task = real_state.board_tasks.get(task_id or "")
+            if not task_id or not _product_task_visible_for_architect(real_state, caller_id, task):
+                return f"Task not found: {task_ident}", True
+            linked_task_ids.append(task_id)
+        decision = await real_state.save_decision_async({
+            "id": "decision-" + uuid.uuid4().hex[:12],
+            "architect_id": str(caller_id or "").strip(),
+            "title": title,
+            "rationale": rationale,
+            "status": "proposed",
+            "supersedes": supersedes,
+            "linked_task_ids": linked_task_ids,
+            "linked_engineer_ids": [],
+            "archived": False,
+            "metadata": _product_decision_metadata(caller_id),
+        })
+        if not decision:
+            return "Failed to save decision", True
+        return _compact_json({"type": "product_decision_created", "decision": decision}), False
+
+    if caller_kind == "architect" and tool_name == "product_decision_update":
+        decision, decision_error = _load_product_decision(real_state, caller_id, args.get("id", ""))
+        if not decision:
+            return decision_error, True
+        patch = {"id": decision["id"], "architect_id": str(caller_id or "").strip(), "metadata": decision.get("metadata") or _product_decision_metadata(caller_id)}
+        if "title" in args:
+            title = str(args.get("title", "") or "").strip()
+            if not title:
+                return "title is required", True
+            patch["title"] = title
+        if "rationale" in args:
+            rationale = str(args.get("rationale", "") or "").strip()
+            if not rationale:
+                return "rationale is required", True
+            patch["rationale"] = rationale
+        if "status" in args:
+            status = str(args.get("status", "") or "").strip()
+            if status != "proposed":
+                return "Product Manager decisions must remain proposed in Wave 4B", True
+            patch["status"] = "proposed"
+        if "linked_engineer_ids" in args and _dedupe_strings(args.get("linked_engineer_ids", [])):
+            return "Product Manager decisions cannot link engineers by default", True
+        if "supersedes" in args:
+            supersedes = str(args.get("supersedes", "") or "").strip() or None
+            if supersedes:
+                prior_decision, supersedes_error = _load_product_decision(real_state, caller_id, supersedes)
+                if not prior_decision:
+                    return supersedes_error, True
+            patch["supersedes"] = supersedes
+        if "linked_task_ids" in args:
+            linked_task_ids = []
+            for task_ident in _dedupe_strings(args.get("linked_task_ids", [])):
+                task_id = _resolve_task(real_state, task_ident)
+                task = real_state.board_tasks.get(task_id or "")
+                if not task_id or not _product_task_visible_for_architect(real_state, caller_id, task):
+                    return f"Task not found: {task_ident}", True
+                linked_task_ids.append(task_id)
+            patch["linked_task_ids"] = linked_task_ids
+            patch["linked_engineer_ids"] = []
+        if "archived" in args:
+            patch["archived"] = bool(args.get("archived"))
+        updated = await real_state.save_decision_async(patch)
+        if not updated:
+            return "Failed to save decision", True
+        return _compact_json({"type": "product_decision_updated", "decision": updated}), False
+
+    if caller_kind == "architect" and tool_name == "product_decision_link":
+        if str(args.get("engineer_id", "") or "").strip():
+            return "Product Manager decisions cannot link engineers by default", True
+        decision, decision_error = _load_product_decision(real_state, caller_id, args.get("id", ""))
+        if not decision:
+            return decision_error, True
+        task_ident = str(args.get("task_id", "") or "").strip()
+        if not task_ident:
+            return "task_id is required", True
+        task_id = _resolve_task(real_state, task_ident)
+        task = real_state.board_tasks.get(task_id or "")
+        if not task_id or not _product_task_visible_for_architect(real_state, caller_id, task):
+            return f"Task not found: {task_ident}", True
+        linked_task_ids = _dedupe_strings(list(decision.get("linked_task_ids", []) or []) + [task_id])
+        updated = await real_state.save_decision_async({
+            "id": decision["id"],
+            "architect_id": str(caller_id or "").strip(),
+            "linked_task_ids": linked_task_ids,
+            "linked_engineer_ids": [],
+            "metadata": decision.get("metadata") or _product_decision_metadata(caller_id),
+        })
+        if not updated:
+            return "Failed to save decision", True
+        return _compact_json({"type": "product_decision_linked", "decision": updated}), False
+
+    if caller_kind == "architect" and tool_name == "product_peer_message":
+        recipient, recipient_error = _resolve_product_architect_peer(real_state, caller_id, str(args.get("architect_id", "") or "").strip())
+        if not recipient:
+            return recipient_error, True
+        architect = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+        if ack_error:
+            return ack_error, True
+        if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "comm.product_ack_request"):
+            return "ack_required=true requires comm.product_ack_request", True
+        context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+        if context_error:
+            return context_error, True
+        ack_anchor_error = _require_product_ack_anchor(ack_required, context)
+        if ack_anchor_error:
+            return ack_anchor_error, True
+        context = _add_product_peer_marker(context, source="architect_product_peer_message", caller_id=caller_id)
+        length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = _save_architect_peer_message(real_state, architect, recipient, action="architect_product_peer_message", message=message, ack_required=ack_required, context=context, idempotency_key=idempotency_key)
+        except ValueError as exc:
+            return str(exc), True
+        if created:
+            delivery = await _inject_architect_peer_message(handle_command, real_state, architect, recipient, saved, message)
+            current = real_state.db.load_agent_peer_message(saved["id"])
+            if current:
+                saved = current
+        else:
+            delivery = {"state": str(saved.get("delivery_state", "buffered") or "buffered"), "reason": str(saved.get("delivery_reason", "") or "")}
+        return _compact_json({"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "recipient_architect_id": recipient.id, "ack_required": bool(saved.get("ack_required", False)), "delivery": delivery, "product_peer_marker": _PRODUCT_PEER_MARKER}), False
+
+    if caller_kind == "architect" and tool_name == "product_peer_reply":
+        message_id = str(args.get("message_id", "") or "").strip()
+        if not message_id:
+            return "message_id is required", True
+        db = getattr(real_state, "db", None)
+        row = db.load_agent_peer_message(message_id) if db else None
+        if not row or not _product_peer_row_visible(real_state, caller_id, row):
+            return "thread not found in product-peer scope", True
+        caller = real_state.agents.get(str(caller_id or "").strip())
+        participants = {str(row.get("sender_id", "") or "").strip(), str(row.get("recipient_id", "") or "").strip()}
+        peer_id = next((pid for pid in participants if pid != str(caller_id or "").strip()), "")
+        peer, peer_error = _resolve_product_architect_peer(real_state, caller_id, peer_id)
+        if not peer:
+            return peer_error, True
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+        if ack_error:
+            return ack_error, True
+        if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "comm.product_ack_request"):
+            return "ack_required=true requires comm.product_ack_request", True
+        has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_summary"))
+        if has_explicit_context:
+            context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+            if context_error:
+                return context_error, True
+        else:
+            context = _row_product_context(row)
+        ack_anchor_error = _require_product_ack_anchor(ack_required, context)
+        if ack_anchor_error:
+            return ack_anchor_error, True
+        context = _add_product_peer_marker(context, source="architect_product_peer_reply", caller_id=caller_id)
+        length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = _save_architect_peer_message(real_state, caller, peer, action="architect_product_peer_reply", message=message, reply_to_id=message_id, thread_id=str(row.get("thread_id", "") or "").strip(), ack_required=ack_required, context=context, idempotency_key=idempotency_key)
+        except ValueError as exc:
+            return str(exc), True
+        if created:
+            await _inject_architect_peer_message(handle_command, real_state, caller, peer, saved, message)
+        return _compact_json({"type": "ok", "message_id": saved["id"], "thread_id": saved["thread_id"], "product_peer_marker": _PRODUCT_PEER_MARKER}), False
+
+    if caller_kind == "architect" and tool_name == "product_message_user":
+        sender = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+        if context_error:
+            return context_error, True
+        length_error = _validate_architect_peer_message_length(message, context.get("context_summary", ""))
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = save_agent_user_direct_message_from_mcp(real_state, sender, message=message, thread_id=str(args.get("thread_id", "") or "").strip(), reply_to_id=str(args.get("reply_to_id", "") or "").strip(), context=context, idempotency_key=idempotency_key, notify=True)
+        except ValueError as exc:
+            return str(exc), True
+        payload = _direct_user_message_response(saved, deduped=not created)
+        payload["product_context_marker"] = _PRODUCT_CONTEXT_MARKER
+        return json.dumps(payload), False
+
+    if caller_kind == "architect" and tool_name == "product_ask_user":
+        question = str(args.get("question", "") or "").strip()
+        if not question:
+            return "Question is required", True
+        context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
+        if context_error:
+            return context_error, True
+        architect = real_state.agents.get(str(caller_id or "").strip())
+        description = str(args.get("description", "") or "")
+        if context.get("context_summary"):
+            description = f"{description}\n\nProduct context: {context.get('context_summary')}".strip()
+        lane = "Backlog" if "Backlog" in real_state.board_lanes else (real_state.board_lanes[0] if real_state.board_lanes else "Backlog")
+        task = real_state.board_add_task(
+            question,
+            _engineer_group,
+            lane=lane,
+            description=description,
+            labels=["torque:human", "architect-ask", "product-ask", "pm-created"],
+            created_by_architect_id=str(caller_id or "").strip(),
+            reply_agent_id=str(caller_id or "").strip(),
+            assigned_engineer_id="",
+            agent_id="",
+            action_name="",
+            status="Awaiting Input",
+            dispatch_state="queued",
+        )
+        if not task:
+            return "Failed to create product ask task", True
+        save_direct_ask_mirror(real_state, architect, question, source_task_id=task.id)
+        return _compact_json({"type": "ok", "task_id": task.id, "status": "Awaiting Input", "labels": list(task.labels or []), "product_context_marker": _PRODUCT_CONTEXT_MARKER}), False
+
+    if caller_kind == "architect" and tool_name == "product_journal":
+        entry_type = str(args.get("type", "") or "").strip()
+        if entry_type not in _PRODUCT_JOURNAL_ENTRY_TYPES:
+            return "type must be one of: observation, checkpoint, plan", True
+        entry = str(args.get("entry", "") or "")
+        if not entry:
+            return "entry is required", True
+        if not idempotency_key:
+            return json.dumps(real_state.architect_journal_append(caller_id, entry_type, entry)), False
+        result = await handle_command({"cmd": "architect_journal_append", "architect_id": caller_id, "entry_type": entry_type, "entry": entry})
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if caller_kind == "architect" and tool_name == "product_journal_read":
+        entries = real_state.architect_journal_read(caller_id, since=args.get("since", 0), limit=args.get("limit", 20))
+        entries = [entry for entry in entries if str((entry or {}).get("type", "") or "").strip() in _PRODUCT_JOURNAL_ENTRY_TYPES]
+        return json.dumps({"type": "product_journal", "entries": entries}), False
 
     # -- Read tools ---------------------------------------------------------
 

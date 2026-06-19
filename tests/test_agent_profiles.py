@@ -98,8 +98,11 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertTrue(mcp_tool_allowed_by_policy("architect_engineer_hire", full_policy))
         self.assertTrue(mcp_tool_allowed_by_policy("torque_context", full_policy))
         self.assertFalse(pm_policy.is_full_base_kind_profile)
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", pm_policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_board_summary", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_peer_message", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm_policy))
 
@@ -114,8 +117,11 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertTrue(mcp_tool_allowed_by_policy("architect_get_architect_settings", full_architect))
 
         self.assertFalse(pm.is_full_base_kind_profile)
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", pm))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", pm))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_board_summary", pm))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_peer_message", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", pm))
@@ -132,8 +138,8 @@ class AgentProfileRegistryTests(unittest.TestCase):
         preview = enriched_profile_preview(pm)
 
         self.assertEqual(preview["status"], "draft")
-        self.assertTrue(any("infrastructure-only" in warning for warning in preview["warnings"]))
-        self.assertTrue(any("architect_peer_inbox" in warning for warning in preview["warnings"]))
+        self.assertTrue(any("scratch-only" in warning for warning in preview["warnings"]))
+        self.assertTrue(any("architect_product_*" in warning for warning in preview["warnings"]))
 
     def test_cell_status_defaults_to_full_base_kind_without_assignment(self):
         class Cell:

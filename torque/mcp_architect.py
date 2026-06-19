@@ -1636,6 +1636,110 @@ _ARCHITECT_TOOL_SPECS = [
 ]
 
 
+_ARCHITECT_PRODUCT_TOOL_SPECS = [
+    {
+        "name": "architect_product_board_summary",
+        "description": "Product Manager-safe board summary over PM-linked/product-labeled tasks only; never dispatches or exposes all same-group task detail.",
+        "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_product_task_list",
+        "description": "List PM-linked/product-labeled task summaries visible to this Product Manager wrapper.",
+        "inputSchema": {"type": "object", "properties": {"label_filter": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "lane_filter": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_product_task_show",
+        "description": "Show one PM-linked/product-labeled task; hidden/non-product tasks return the normal not-found style error.",
+        "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]},
+    },
+    {
+        "name": "architect_product_task_propose",
+        "description": "Create an unassigned queued product task proposal with product-proposal/pm-created labels and non-binding suggested_action/suggested_specialization hints only.",
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "group": {"type": "string"}, "description": {"type": "string"}, "lane": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}, "suggested_action": {"type": "string"}, "suggested_specialization": {"type": "string"}}, "required": ["title"]},
+    },
+    {
+        "name": "architect_product_area_list",
+        "description": "Product Manager-safe wrapper for same-group Area reads.",
+        "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_product_area_show",
+        "description": "Product Manager-safe wrapper for one same-group Area read.",
+        "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_product_initiative_list",
+        "description": "Product Manager-safe wrapper for same-group Initiative reads.",
+        "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}}},
+    },
+    {
+        "name": "architect_product_initiative_show",
+        "description": "Product Manager-safe wrapper for one same-group Initiative read.",
+        "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}},
+    },
+    {
+        "name": "architect_product_decision_list",
+        "description": "List PM-owned proposed product decisions only.",
+        "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
+    },
+    {
+        "name": "architect_product_decision_create",
+        "description": "Create a PM-owned proposed product decision. accepted/revised/rejected and engineer links are rejected.",
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "rationale"]},
+    },
+    {
+        "name": "architect_product_decision_update",
+        "description": "Update a PM-owned proposed product decision only. Status must remain proposed and engineer links are rejected.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}, "archived": {"type": "boolean"}}, "required": ["id"]},
+    },
+    {
+        "name": "architect_product_decision_link",
+        "description": "Append a PM-visible product task link to a PM-owned proposed product decision; engineer links are not supported.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "task_id": {"type": "string"}, "engineer_id": {"type": "string"}}, "required": ["id", "task_id"]},
+    },
+    {
+        "name": "architect_product_peer_list",
+        "description": "List selected same-group Architect/product-profile peers eligible for product-peer messages.",
+        "inputSchema": {"type": "object", "properties": {"include_dismissed": {"type": "boolean"}}},
+    },
+    {
+        "name": "architect_product_peer_message",
+        "description": "Send a product-peer marked message to an eligible same-group Architect/product-profile peer. ack_required requires a product-scope anchor.",
+        "inputSchema": {"type": "object", "properties": {"architect_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["architect_id", "message"]},
+    },
+    {
+        "name": "architect_product_peer_inbox",
+        "description": "Read only product-peer marked Architect↔Architect threads involving this caller; raw peer and Architect↔Engineer rows are hidden.",
+        "inputSchema": {"type": "object", "properties": {"peer_architect_id": {"type": "string"}, "thread_id": {"type": "string"}, "requires_reply": {"type": "boolean"}, "since": {"type": "number"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_product_peer_reply",
+        "description": "Reply inside a product-peer marked thread only. ack_required requires a product-scope anchor.",
+        "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message_id", "message"]},
+    },
+    {
+        "name": "architect_product_message_user",
+        "description": "Send a PM-safe direct user message after validating product-scoped context attachments.",
+        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string"}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
+    },
+    {
+        "name": "architect_product_ask_user",
+        "description": "Create a blocking PM-safe user ask after validating product-scoped context attachments.",
+        "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["question"]},
+    },
+    {
+        "name": "architect_product_journal",
+        "description": "Append a private PM recovery journal entry. decision journal entries are intentionally unsupported in Wave 4B.",
+        "inputSchema": {"type": "object", "properties": {"type": {"type": "string", "enum": ["observation", "checkpoint", "plan"]}, "entry": {"type": "string"}}, "required": ["type", "entry"]},
+    },
+    {
+        "name": "architect_product_journal_read",
+        "description": "Read recent private PM recovery journal entries, excluding decision-type journal rows.",
+        "inputSchema": {"type": "object", "properties": {"since": {"type": "number"}, "limit": {"type": "integer"}}},
+    },
+]
+
+
 def _copy_tool_spec(tool: dict) -> dict:
     copied = deepcopy(tool)
     if str(copied.get("name", "") or "").strip() in ARCHITECT_DEFERRED_TOOL_NAMES:
@@ -1643,7 +1747,7 @@ def _copy_tool_spec(tool: dict) -> dict:
     return copied
 
 
-ARCHITECT_TOOLS = [_copy_tool_spec(tool) for tool in _ARCHITECT_TOOL_SPECS]
+ARCHITECT_TOOLS = [_copy_tool_spec(tool) for tool in (_ARCHITECT_TOOL_SPECS + _ARCHITECT_PRODUCT_TOOL_SPECS)]
 _ARCHITECT_TOOL_NAMES = {
     str(tool.get("name", "") or "").strip()
     for tool in ARCHITECT_TOOLS

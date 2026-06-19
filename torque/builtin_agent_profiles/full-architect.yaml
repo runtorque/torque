@@ -20,6 +20,7 @@ grants:
   - decision.accept
   - decision.create
   - decision.create_proposed
+  - decision.update_proposed
   - decision.link
   - decision.list
   - decision.update

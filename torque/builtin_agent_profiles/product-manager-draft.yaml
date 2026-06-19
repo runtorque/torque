@@ -1,5 +1,5 @@
 id: product-manager-draft
-version: "1"
+version: "2"
 base_kind: architect
 display_name: Product Manager (draft)
 description: Draft architect-derived Product Manager profile; enforced only when explicitly used as an effective profile.
@@ -12,6 +12,7 @@ grants:
   - planning.initiative_read
   - decision.list
   - decision.create_proposed
+  - decision.update_proposed
   - decision.link
   - task.create_queued
   - task.update_planning_fields
@@ -44,14 +45,14 @@ policy:
   base_kind: architect
   scope:
     planning_visibility: broad same-group Areas/Initiatives reads; task and decision detail scoped with hidden counts where not visible
-    decisions: PM-owned product decisions; accepted only after explicit user/product-owner approval in scope; no editing or superseding other architects' decisions
+    decisions: PM-owned proposed product decisions only; no accepted/revised/rejected PM-authored decisions in Wave 4B and no editing or superseding other architects' decisions
     task_creation: queued/non-dispatched product tasks only; prefer unassigned when the Board model supports it; no arbitrary assignment or dispatch authority
     task_moves: PM-created/in-scope queued tasks only among planning-safe lanes; no execution-state moves by default
     task_fields: title, description, labels, suggested specialization, and suggested action only on PM-created/in-scope queued tasks
     board_sync: read-only on visible task sync state; PM-created tasks use normal sync behavior if they become real Board tasks
   communication:
     engineer_worker_messages: deny by default
-    coordinate_with: selected same-group peer architects/product profiles and the user
+    coordinate_with: selected same-group Architect/product-profile peers through architect_product_* wrappers and the user
     ack_required: selected same-group peer architects/product profiles for product-scope decisions only; deny engineers/workers
   spawn:
     dispatch: deny
@@ -65,3 +66,4 @@ metadata:
   archetype: product_manager
   trusted_assignment: user_only_v1
   runtime_enforcement: mcp_projection_when_effective_profile_is_set
+  wave_4b_wrapper_surface: architect_product_wrappers_only
