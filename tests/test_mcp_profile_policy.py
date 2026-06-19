@@ -186,6 +186,43 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(calls, [])
 
+    async def test_desired_assignment_alone_does_not_affect_running_session_until_effective_snapshot(self):
+        state, architect = self._state_with_architect()
+        architect.agent_profile_id = "product-manager-draft"
+        architect.agent_profile_version = "1"
+
+        async def fake_handle_command(payload):
+            if payload.get("cmd") == "list_specializations":
+                return {"type": "specializations", "items": []}
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        listed = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
+        self.assertIn("architect_engineer_hire", tool_names)
+        self.assertIn("architect_peer_inbox", tool_names)
+
+        architect.effective_agent_profile_id = "product-manager-draft"
+        architect.effective_agent_profile_version = "1"
+        listed_after_launch = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        tool_names_after_launch = {
+            tool["name"] for tool in listed_after_launch.payload["result"]["tools"]
+        }
+        self.assertNotIn("architect_engineer_hire", tool_names_after_launch)
+        self.assertNotIn("architect_peer_inbox", tool_names_after_launch)
+        self.assertNotIn("architect_reply", tool_names_after_launch)
+
     async def test_product_manager_profile_cannot_use_peer_tools_for_engineer_threads(self):
         state, architect = self._state_with_architect()
         engineer = self.state_mod.AgentCell(

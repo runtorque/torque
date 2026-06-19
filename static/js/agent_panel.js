@@ -1340,6 +1340,45 @@ function _agentPanelRenderTabs(kind, activeTab) {
   return html;
 }
 
+function _agentPanelProfileBadgeHtml(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
+  var effective = String(agent.effective_agent_profile_id || '').trim();
+  var assigned = String(agent.agent_profile_id || '').trim();
+  var kind = String(agent.kind || '').trim();
+  var displayId = effective || (kind ? ('full-' + kind) : '') || assigned;
+  if (!displayId) return '';
+  var snapshot = (agent.effective_agent_profile_snapshot && typeof agent.effective_agent_profile_snapshot === 'object')
+    ? agent.effective_agent_profile_snapshot
+    : {};
+  var status = String(snapshot.status || '').trim();
+  if (!status) {
+    status = /^full-/.test(displayId) ? 'full' : 'restricted';
+  }
+  var assignedVersion = String(agent.agent_profile_version || '').trim();
+  var effectiveVersion = String(agent.effective_agent_profile_version || snapshot.version || '').trim();
+  var pending = !!(assigned && (assigned !== effective || (assignedVersion && effectiveVersion && assignedVersion !== effectiveVersion)));
+  var warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings : [];
+  var denied = Array.isArray(snapshot.denied_high_risk_capabilities)
+    ? snapshot.denied_high_risk_capabilities
+    : [];
+  var classes = 'agent-profile-badge agent-profile-badge-' + _agentPanelEsc(status || 'full');
+  if (pending) classes += ' agent-profile-badge-pending';
+  if (status === 'draft' || status === 'restricted' || denied.length) classes += ' agent-profile-badge-warning';
+  var label = displayId + (effectiveVersion ? ('@' + effectiveVersion) : '');
+  if (pending) label += ' (pending next launch)';
+  var titleParts = [
+    'Agent Profile: ' + label,
+    'base kind: ' + (kind || '—'),
+    'status: ' + (status || 'full'),
+  ];
+  if (assigned) titleParts.push('desired assignment: ' + assigned + (assignedVersion ? ('@' + assignedVersion) : ''));
+  if (denied.length) titleParts.push('high-risk denied: ' + denied.slice(0, 8).join(', '));
+  for (var i = 0; i < warnings.length && i < 3; i++) titleParts.push(String(warnings[i] || ''));
+  return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
+    + _agentPanelEsc(label)
+    + '</span>';
+}
+
 function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRightHtml, agentId, headerBreadcrumbHtml) {
   var html = '<div class="agent-panel-panel"';
   if (kind) html += ' data-agent-panel-kind="' + _agentPanelEsc(kind) + '"';
@@ -3428,7 +3467,7 @@ function _renderEngineerPanel(agent) {
     'engineer',
     activeTab,
     bodyHtml,
-    parts.headerRightHtml,
+    (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -3599,7 +3638,7 @@ function _renderWorkerPanel(agent) {
     'worker',
     activeTab,
     parts.bodyHtml,
-    parts.headerRightHtml,
+    (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -3873,7 +3912,7 @@ function _renderArchitectPanel(agent) {
     'architect',
     activeTab,
     parts.bodyHtml,
-    parts.headerRightHtml,
+    (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
   );
@@ -4082,7 +4121,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   // destroys + recreates every child node, killing :hover state on tooltip
   // pseudo-elements and resetting textarea caret. Same `_torqueLastHtml`
   // pattern as `dom.topbar` / `dom.tabs` from `06611b8`.
-  var newHeaderHtml = parts.headerRightHtml || '';
+  var newHeaderHtml = (parts.headerRightHtml || '') + _agentPanelProfileBadgeHtml(agent);
   var newBodyHtml = parts.bodyHtml || '';
   var headerChanged = headerRight._torqueLastHtml !== newHeaderHtml;
   var bodyChanged = content._torqueLastHtml !== newBodyHtml;

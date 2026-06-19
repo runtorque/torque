@@ -1134,6 +1134,16 @@ class AgentCell:
     owner_engineer_id: str = ""  # owning engineer for worker/terminal agents
     hired_by_architect_id: str = ""  # architect provenance for hires
     engineer_specializations: list[str] = field(default_factory=list)  # ordered, primary first
+    # Custom Agent Profiles (v1): desired assignment is separate from the
+    # frozen effective profile snapshot applied at the next launch/session.
+    agent_profile_id: str = ""
+    agent_profile_version: str = ""
+    agent_profile_assigned_at: float = 0.0
+    agent_profile_assigned_by: str = ""
+    effective_agent_profile_id: str = ""
+    effective_agent_profile_version: str = ""
+    effective_agent_profile_snapshot: dict = field(default_factory=dict)
+    effective_agent_profile_applied_at: float = 0.0
     dismissed_at: int = 0  # unix timestamp when an architect/engineer is paused/dismissed
     deleted_at: float = 0.0  # unix timestamp when the cell entered the restore window
     permanent_delete_after: float = 0.0  # unix timestamp when tombstone is purgeable
@@ -10485,6 +10495,199 @@ class MatrixState:
                  "directory=%r", aid, cell_type, parent_id or "none",
                  cell.tab_color, cell.directory)
         return cell
+
+    def effective_agent_profile_for_cell(self, cell):
+        """Return the frozen effective profile snapshot for MCP policy projection."""
+
+        if not cell:
+            return None
+        snapshot = getattr(cell, "effective_agent_profile_snapshot", None)
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            return snapshot
+        profile_id = str(getattr(cell, "effective_agent_profile_id", "") or "").strip()
+        return profile_id or None
+
+    def _agent_profile_base_dir_for_cell(self, cell=None, base_dir: str = "") -> str:
+        if base_dir:
+            return str(base_dir)
+        if cell is not None:
+            for value in (
+                getattr(cell, "worktree_repo_root", ""),
+                getattr(cell, "directory", ""),
+                getattr(cell, "current_path", ""),
+            ):
+                if str(value or "").strip():
+                    return str(value or "")
+        return str(getattr(self, "project_base_dir", "") or os.getcwd())
+
+    def _record_agent_profile_audit(self, cell, event: str, *, actor_kind: str = "user",
+                                    actor_id: str = "", actor_label: str = "",
+                                    previous: dict | None = None,
+                                    snapshot: dict | None = None,
+                                    message: str = "") -> None:
+        if not self.db or not cell:
+            return
+        saver = getattr(self.db, "save_agent_profile_audit", None)
+        if not callable(saver):
+            return
+        try:
+            saver({
+                "id": uuid.uuid4().hex,
+                "agent_id": cell.id,
+                "agent_name": cell.name,
+                "event": event,
+                "actor_kind": actor_kind or "user",
+                "actor_id": actor_id or "",
+                "actor_label": actor_label or "",
+                "previous_profile_id": str((previous or {}).get("profile_id", "") or ""),
+                "previous_profile_version": str((previous or {}).get("profile_version", "") or ""),
+                "assigned_profile_id": getattr(cell, "agent_profile_id", "") or "",
+                "assigned_profile_version": getattr(cell, "agent_profile_version", "") or "",
+                "effective_profile_id": getattr(cell, "effective_agent_profile_id", "") or "",
+                "effective_profile_version": getattr(cell, "effective_agent_profile_version", "") or "",
+                "snapshot_json": snapshot or {},
+                "message": message or "",
+                "created_at": time.time(),
+            })
+        except Exception:
+            log.exception("Failed to persist agent profile audit event=%s agent=%s", event, getattr(cell, "id", ""))
+
+    def assign_agent_profile(self, aid: str, profile_id: str, *, actor_kind: str = "user",
+                             actor_id: str = "", actor_label: str = "",
+                             base_dir: str = "") -> dict:
+        """Trusted-user assignment of a desired Agent Profile.
+
+        Assignment intentionally does not mutate the frozen effective snapshot;
+        ``apply_effective_agent_profile_for_launch`` is the only launch/session
+        boundary that updates runtime policy.
+        """
+
+        cell = self.agents.get(str(aid or "").strip())
+        if not cell:
+            raise ValueError("Agent not found")
+        if cell.cell_type != "agent":
+            raise ValueError("Agent Profiles can only be assigned to agents")
+        if str(actor_kind or "user").strip() != "user":
+            raise PermissionError("Agent Profile assignment is trusted-user-only")
+        profile_id = str(profile_id or "").strip()
+        previous = {
+            "profile_id": getattr(cell, "agent_profile_id", "") or "",
+            "profile_version": getattr(cell, "agent_profile_version", "") or "",
+        }
+        if not profile_id:
+            cell.agent_profile_id = ""
+            cell.agent_profile_version = ""
+            cell.agent_profile_assigned_at = time.time()
+            cell.agent_profile_assigned_by = actor_label or actor_id or actor_kind or "user"
+            self._emit_agent(cell)
+            self._db_save_agent(cell)
+            self._record_agent_profile_audit(
+                cell,
+                "assignment_cleared",
+                actor_kind="user",
+                actor_id=actor_id,
+                actor_label=actor_label,
+                previous=previous,
+                message="desired assignment cleared; effective launch snapshot unchanged",
+            )
+            return self.agent_profile_status_for_cell(cell, base_dir=base_dir)
+
+        from .agent_profiles import dry_run_profile_preview, profile_definition_by_id
+
+        profile = profile_definition_by_id(
+            profile_id,
+            base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
+        )
+        if not profile:
+            raise ValueError(f"Unknown or invalid Agent Profile: {profile_id}")
+        base_kind = str(getattr(cell, "kind", "") or "").strip()
+        if base_kind and profile.base_kind != base_kind:
+            raise ValueError(
+                f"Profile {profile.id} is for base_kind={profile.base_kind}, "
+                f"but agent kind is {base_kind}"
+            )
+        cell.agent_profile_id = profile.id
+        cell.agent_profile_version = profile.version
+        cell.agent_profile_assigned_at = time.time()
+        cell.agent_profile_assigned_by = actor_label or actor_id or actor_kind or "user"
+        self._emit_agent(cell)
+        self._db_save_agent(cell)
+        self._record_agent_profile_audit(
+            cell,
+            "assignment_set",
+            actor_kind="user",
+            actor_id=actor_id,
+            actor_label=actor_label,
+            previous=previous,
+            snapshot=dry_run_profile_preview(profile),
+            message="desired assignment set; applies at next launch/session",
+        )
+        return self.agent_profile_status_for_cell(cell, base_dir=base_dir)
+
+    def apply_effective_agent_profile_for_launch(self, cell, *, base_dir: str = "",
+                                                 actor_kind: str = "system",
+                                                 actor_id: str = "launch") -> dict:
+        """Freeze the desired/default Agent Profile snapshot for a new session."""
+
+        if not cell or getattr(cell, "cell_type", "") != "agent":
+            return {}
+        from .agent_profiles import (
+            default_full_profile_id_for_kind,
+            dry_run_profile_preview,
+            profile_definition_by_id,
+        )
+
+        base_kind = str(getattr(cell, "kind", "") or "").strip()
+        if not base_kind:
+            return {}
+        desired_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
+        profile_id = desired_id or default_full_profile_id_for_kind(base_kind)
+        if not profile_id:
+            return {}
+        profile = profile_definition_by_id(
+            profile_id,
+            base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
+        )
+        if not profile:
+            raise ValueError(f"Unknown or invalid Agent Profile: {profile_id}")
+        if profile.base_kind != base_kind:
+            raise ValueError(
+                f"Profile {profile.id} is for base_kind={profile.base_kind}, "
+                f"but agent kind is {base_kind}"
+            )
+        previous = {
+            "profile_id": getattr(cell, "effective_agent_profile_id", "") or "",
+            "profile_version": getattr(cell, "effective_agent_profile_version", "") or "",
+        }
+        snapshot = dry_run_profile_preview(profile)
+        snapshot["assignment_source"] = "assigned" if desired_id else "default_full_base_kind"
+        snapshot["frozen_at"] = time.time()
+        cell.effective_agent_profile_id = profile.id
+        cell.effective_agent_profile_version = profile.version
+        cell.effective_agent_profile_snapshot = snapshot
+        cell.effective_agent_profile_applied_at = float(snapshot["frozen_at"])
+        if desired_id and cell.agent_profile_version != profile.version:
+            cell.agent_profile_version = profile.version
+        self._emit_agent(cell)
+        self._db_save_agent(cell)
+        if (previous["profile_id"], previous["profile_version"]) != (profile.id, profile.version):
+            self._record_agent_profile_audit(
+                cell,
+                "effective_snapshot_applied",
+                actor_kind=actor_kind or "system",
+                actor_id=actor_id or "launch",
+                previous=previous,
+                snapshot=snapshot,
+                message="effective Agent Profile frozen for launched session",
+            )
+        return snapshot
+
+    def agent_profile_status_for_cell(self, cell, *, base_dir: str = "") -> dict:
+        from .agent_profiles import agent_profile_cell_status
+        return agent_profile_cell_status(
+            cell,
+            base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
+        )
 
     def update_agent(self, aid: str, **fields):
         """Update mutable fields on an existing cell."""

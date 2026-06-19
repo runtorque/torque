@@ -27,6 +27,11 @@ from .ai_summaries import AISummaryService
 from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
+from .agent_profiles import (
+    enriched_profile_preview,
+    load_agent_profiles,
+    profile_definition_by_id,
+)
 from .behavior_overlay import proposal_summary, version_summary
 from .config import (
     WS_PORT,
@@ -13650,6 +13655,10 @@ async def _handle_relaunch_agent_command(
         launch_cfg.get(
             "worktree_merge_squash",
             cell.worktree_merge_squash))
+    state.apply_effective_agent_profile_for_launch(
+        cell,
+        base_dir=cell.directory or base_dir,
+    )
     state._emit_agent(cell)
     state._db_save_agent(cell)
 
@@ -13848,6 +13857,10 @@ async def _handle_restart_agent_command(
         launch_cfg.get("worktree_base_dir")
         or cell.worktree_base_dir
         or ".torque/worktrees")
+    state.apply_effective_agent_profile_for_launch(
+        cell,
+        base_dir=cell.directory or base_dir,
+    )
     state._emit_agent(cell)
     state._db_save_agent(cell)
 
@@ -16177,6 +16190,55 @@ async def main(connection=None):
 
         if cmd == "doctor":
             return await _handle_doctor_command(db, bridge)
+
+        if cmd == "agent_profile_list":
+            base_dir = str(data.get("base_dir", "") or os.getcwd())
+            profiles, issues = load_agent_profiles(base_dir=base_dir)
+            return {
+                "type": "agent_profiles",
+                "profiles": [enriched_profile_preview(profile) for profile in profiles],
+                "issues": [issue.as_dict() for issue in issues],
+            }
+
+        if cmd == "agent_profile_preview":
+            profile_id = str(data.get("profile_id", "") or "").strip()
+            base_dir = str(data.get("base_dir", "") or os.getcwd())
+            profile = profile_definition_by_id(profile_id, base_dir=base_dir)
+            if not profile:
+                return {"type": "error", "message": f"Unknown Agent Profile: {profile_id}"}
+            return {"type": "agent_profile_preview", "profile": enriched_profile_preview(profile)}
+
+        if cmd == "agent_profile_assign":
+            try:
+                agent_id = str(data.get("agent_id", data.get("id", "")) or "").strip()
+                cell = state.agents.get(agent_id)
+                base_dir = str(data.get("base_dir", "") or "")
+                if not base_dir and cell:
+                    base_dir = cell.worktree_repo_root or cell.directory or await resolve_base_dir(cell.group)
+                status = state.assign_agent_profile(
+                    agent_id,
+                    str(data.get("profile_id", "") or ""),
+                    actor_kind="user",
+                    actor_id=str(data.get("actor_id", "") or ""),
+                    actor_label=str(data.get("actor_label", "trusted-user") or "trusted-user"),
+                    base_dir=base_dir,
+                )
+                return {"type": "agent_profile_assignment", "status": status}
+            except PermissionError as exc:
+                return {"type": "error", "message": str(exc), "code": "trusted_user_required"}
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
+
+        if cmd == "agent_profile_audit":
+            if not db:
+                return {"type": "agent_profile_audit", "events": []}
+            return {
+                "type": "agent_profile_audit",
+                "events": db.list_agent_profile_audit(
+                    agent_id=str(data.get("agent_id", "") or ""),
+                    limit=int(data.get("limit", 50) or 50),
+                ),
+            }
 
         if cmd == "get_metrics_history":
             try:

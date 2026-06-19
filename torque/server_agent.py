@@ -698,6 +698,22 @@ class AgentLaunchService:
         ).strip()
         if launch_cfg.get("agent_type"):
             cell.agent_type = launch_cfg["agent_type"]
+        if launch_cfg.get("agent_profile_id"):
+            cell.agent_profile_id = str(launch_cfg.get("agent_profile_id") or "").strip()
+            cell.agent_profile_version = str(launch_cfg.get("agent_profile_version") or "").strip()
+            cell.agent_profile_assigned_at = time.time()
+            cell.agent_profile_assigned_by = "trusted-user-launch"
+        try:
+            self.state.apply_effective_agent_profile_for_launch(
+                cell,
+                base_dir=cell.directory or launch_cfg.get("directory", ""),
+            )
+        except Exception:
+            log.exception(
+                "Failed to apply Agent Profile launch snapshot for cell=%s",
+                getattr(cell, "id", ""),
+            )
+            raise
         inherited_worktree = _copy_worktree_context(
             cell, inherited_worktree_from
         )
