@@ -14,9 +14,14 @@ from torque.agent_classes import (
     EXTERNAL_CONNECTOR_DRAFT_WARNING,
     agent_class_context_for_cell,
     agent_class_prompt_block_for_cell,
+    agent_class_definition_by_id,
+    archive_custom_agent_class,
+    delete_custom_agent_class,
     enriched_agent_class_preview,
     load_agent_classes,
+    save_custom_agent_class,
     validate_class_data,
+    validate_agent_class_draft,
 )
 from torque.agent_profiles import (
     BASE_KIND_CEILINGS,
@@ -109,6 +114,114 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertIn("invalid_draft_metadata", codes)
         self.assertIn("agent_profile_base_kind_mismatch", codes)
 
+    def test_authoring_validate_save_update_archive_delete_project_yaml(self):
+        draft = {
+            "id": "custom-architect",
+            "version": "1",
+            "base_kind": "architect",
+            "title": "Custom Architect",
+            "description": "Operator-authored class.",
+            "agent_profile_ref": {"id": "full-architect", "version": "1"},
+            "instructions": "Use the custom class prompt.",
+            "icon": "CA",
+            "badge": "custom",
+            "color": "#abcdef",
+        }
+
+        validation = validate_agent_class_draft(
+            draft,
+            base_dir=str(self.project),
+        )
+        self.assertTrue(validation["valid"])
+        self.assertEqual(
+            validation["normalized"]["metadata"]["ui"]["badge"],
+            "custom",
+        )
+        self.assertTrue(validation["agent_class"]["prompt_summary"]["has_prompt"])
+
+        saved = save_custom_agent_class(
+            draft,
+            base_dir=str(self.project),
+            mode="create",
+        )
+        self.assertTrue(saved["ok"], saved)
+        path = Path(saved["storage"]["path"])
+        self.assertEqual(path.name, "custom-architect.yaml")
+        self.assertTrue(path.exists())
+
+        classes, issues = load_agent_classes(base_dir=str(self.project))
+        self.assertFalse([issue.as_dict() for issue in issues])
+        custom = next(item for item in classes if item.id == "custom-architect")
+        preview = enriched_agent_class_preview(custom, base_dir=str(self.project))
+        self.assertEqual(preview["source"], "project")
+        self.assertTrue(preview["custom"])
+        self.assertEqual(preview["status"], "full")
+        self.assertEqual(preview["agent_profile_ref"]["id"], "full-architect")
+
+        updated = dict(draft)
+        updated["description"] = "Updated description."
+        updated["prompt"] = "Updated prompt."
+        updated.pop("instructions", None)
+        update_result = save_custom_agent_class(
+            updated,
+            base_dir=str(self.project),
+            mode="update",
+        )
+        self.assertTrue(update_result["ok"], update_result)
+        self.assertEqual(update_result["operation"], "updated")
+        self.assertIn("Updated prompt", path.read_text(encoding="utf-8"))
+
+        archived = archive_custom_agent_class(
+            "custom-architect",
+            base_dir=str(self.project),
+        )
+        self.assertTrue(archived["ok"], archived)
+        self.assertEqual(archived["agent_class"]["status"], "archived")
+        self.assertIsNone(
+            agent_class_definition_by_id(
+                "custom-architect",
+                base_dir=str(self.project),
+            )
+        )
+        self.assertIsNotNone(
+            agent_class_definition_by_id(
+                "custom-architect",
+                base_dir=str(self.project),
+                include_archived=True,
+            )
+        )
+
+        deleted = delete_custom_agent_class(
+            "custom-architect",
+            base_dir=str(self.project),
+        )
+        self.assertTrue(deleted["ok"], deleted)
+        self.assertFalse(path.exists())
+
+    def test_authoring_rejects_forbidden_fields_before_persistence(self):
+        invalid = {
+            "id": "bad-custom",
+            "version": "1",
+            "base_kind": "architect",
+            "display_name": "Bad Custom",
+            "agent_profile_ref": {"id": "full-worker", "version": "1"},
+            "metadata": {"mcp_tools": ["architect_task_create"]},
+            "profile_id": "Default",
+        }
+
+        result = save_custom_agent_class(
+            invalid,
+            base_dir=str(self.project),
+            mode="create",
+        )
+        codes = {issue["code"] for issue in result["errors"]}
+
+        self.assertFalse(result["ok"])
+        self.assertIn("raw_tool_fields_forbidden", codes)
+        self.assertIn("agent_cell_profile_confusion", codes)
+        self.assertIn("agent_profile_base_kind_mismatch", codes)
+        self.assertFalse((self.root / "repo" / ".torque" / "agent_classes" / "bad-custom.yaml").exists())
+
     def test_project_config_path_duplicate_and_docs(self):
         self._write_project_class(
             "default-worker.yaml",
@@ -116,6 +229,7 @@ class AgentClassRegistryTests(unittest.TestCase):
                 "id: default-worker",
                 'version: "1"',
                 "base_kind: worker",
+                "display_name: Default Worker Override",
                 "agent_profile_ref:",
                 "  id: full-worker",
                 '  version: "1"',
@@ -406,6 +520,33 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
             return str(self.project)
 
         async def run_commands():
+            custom_payload = {
+                "id": "panel-architect",
+                "version": "1",
+                "base_kind": "architect",
+                "display_name": "Panel Architect",
+                "agent_profile_ref": {"id": "full-architect", "version": "1"},
+            }
+            validation = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_validate",
+                    "base_dir": str(self.project),
+                    "agent_class": custom_payload,
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            saved = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_create",
+                    "base_dir": str(self.project),
+                    "agent_class": custom_payload,
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
             listed = await _handle_agent_class_command(
                 {"cmd": "agent_class_list", "base_dir": str(self.project)},
                 self.state,
@@ -442,17 +583,163 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
                 self.db,
                 resolve_base_dir,
             )
-            return listed, preview, assigned, status, audit, cleared
+            archived = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_archive",
+                    "base_dir": str(self.project),
+                    "class_id": "panel-architect",
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            deleted = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_delete",
+                    "base_dir": str(self.project),
+                    "class_id": "panel-architect",
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            return validation, saved, listed, preview, assigned, status, audit, cleared, archived, deleted
 
-        listed, preview, assigned, status, audit, cleared = asyncio.run(run_commands())
+        validation, saved, listed, preview, assigned, status, audit, cleared, archived, deleted = asyncio.run(run_commands())
 
+        self.assertEqual(validation["type"], "agent_class_validation")
+        self.assertTrue(validation["valid"])
+        self.assertEqual(saved["type"], "agent_class_save")
+        self.assertTrue(saved["ok"])
         self.assertEqual(listed["type"], "agent_classes")
         self.assertIn("product-manager", {item["id"] for item in listed["classes"]})
+        self.assertIn("panel-architect", {item["id"] for item in listed["classes"]})
         self.assertEqual(preview["agent_class"]["agent_profile_ref"]["id"], "product-manager-draft")
         self.assertEqual(assigned["status"]["assigned_class_id"], "product-manager")
         self.assertTrue(status["status"]["pending_next_launch"])
         self.assertGreaterEqual(len(audit["events"]), 1)
         self.assertEqual(cleared["status"]["assigned_class_id"], "")
+        self.assertEqual(archived["operation"], "archived")
+        self.assertTrue(deleted["ok"])
+
+    def test_create_agent_from_class_launch_command_freezes_snapshots(self):
+        from torque.server import _handle_agent_class_launch_command
+
+        saved = save_custom_agent_class(
+            {
+                "id": "launch-architect",
+                "version": "1",
+                "base_kind": "architect",
+                "display_name": "Launch Architect",
+                "agent_profile_ref": {"id": "full-architect", "version": "1"},
+                "prompt": "Custom launch prompt.",
+            },
+            base_dir=str(self.project),
+            mode="create",
+        )
+        self.assertTrue(saved["ok"], saved)
+
+        async def resolve_base_dir(_group):
+            return str(self.project)
+
+        def resolve_launch_config(_group, *, base_dir="", explicit_template="", overrides=None):
+            del explicit_template, overrides
+            return {
+                "profile": "Default",
+                "command": "codex",
+                "directory": base_dir or str(self.project),
+                "tab_color": "",
+                "icon": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "",
+                "system_prompt": "",
+                "agent_type": "codex",
+                "session_resume": True,
+                "idle_timeout": 0,
+                "worktree": False,
+                "worktree_base_dir": ".torque/worktrees",
+                "worktree_auto_checkpoint": False,
+                "checkpoint_on_progress": False,
+                "worktree_merge_squash": True,
+                "terminals": [],
+            }
+
+        async def create_agent_with_config(group, name, launch_cfg, **kwargs):
+            kind = kwargs.get("kind", "")
+            cell = AgentCell(
+                id=f"{kind}-created",
+                name=name,
+                group=group,
+                cell_type="agent",
+                kind=kind,
+                directory=launch_cfg.get("directory", ""),
+                profile=launch_cfg.get("profile", ""),
+                command=launch_cfg.get("command", ""),
+            )
+            if launch_cfg.get("agent_class_id"):
+                cell.agent_class_id = launch_cfg["agent_class_id"]
+                cell.agent_class_version = launch_cfg.get("agent_class_version", "")
+            self.state.agents[cell.id] = cell
+            self.state.groups.setdefault(group, []).append(cell.id)
+            self.state.apply_effective_agent_class_for_launch(
+                cell,
+                base_dir=cell.directory,
+            )
+            self.state._db_save_agent(cell)
+            return cell
+
+        async def send_agent_prompt(*_args, **_kwargs):
+            return None
+
+        async def run_launches():
+            launched = await _handle_agent_class_launch_command(
+                {
+                    "cmd": "create_agent_from_class",
+                    "class_id": "launch-architect",
+                    "name": "Custom Launch",
+                    "group": "g",
+                },
+                self.state,
+                resolve_base_dir=resolve_base_dir,
+                resolve_agent_launch_config=resolve_launch_config,
+                resolve_engineer_launch_config=resolve_launch_config,
+                resolve_architect_launch_config=resolve_launch_config,
+                resolve_worker_launch_config=resolve_launch_config,
+                create_agent_with_config=create_agent_with_config,
+                specialization_mgr=None,
+                send_agent_prompt=send_agent_prompt,
+            )
+            mismatch = await _handle_agent_class_launch_command(
+                {
+                    "cmd": "create_agent_from_class",
+                    "class_id": "launch-architect",
+                    "kind": "worker",
+                    "name": "Wrong Kind",
+                    "group": "g",
+                },
+                self.state,
+                resolve_base_dir=resolve_base_dir,
+                resolve_agent_launch_config=resolve_launch_config,
+                resolve_engineer_launch_config=resolve_launch_config,
+                resolve_architect_launch_config=resolve_launch_config,
+                resolve_worker_launch_config=resolve_launch_config,
+                create_agent_with_config=create_agent_with_config,
+                specialization_mgr=None,
+                send_agent_prompt=send_agent_prompt,
+            )
+            return launched, mismatch
+
+        launched, mismatch = asyncio.run(run_launches())
+
+        self.assertEqual(launched["type"], "agent_class_launch")
+        self.assertEqual(launched["agent"]["agent_class_status"]["effective_class_id"], "launch-architect")
+        cell = self.state.agents["architect-created"]
+        self.assertEqual(cell.effective_agent_class_id, "launch-architect")
+        self.assertEqual(cell.effective_agent_profile_id, "full-architect")
+        self.assertEqual(cell.effective_agent_class_snapshot["prompt"], "Custom launch prompt.")
+        self.assertEqual(mismatch["type"], "error")
+        self.assertEqual(mismatch["code"], "agent_class_base_kind_mismatch")
 
 
 if __name__ == "__main__":
