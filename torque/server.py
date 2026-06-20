@@ -33,8 +33,8 @@ from .agent_profiles import (
     profile_definition_by_id,
 )
 from .agent_classes import (
+    append_agent_class_prompt_block,
     agent_class_context_for_cell,
-    agent_class_prompt_block_for_cell,
     enriched_agent_class_preview,
     load_agent_classes,
     agent_class_definition_by_id,
@@ -13977,16 +13977,7 @@ async def _handle_restart_agent_command(
             persistent_prompt_filename(cell),
         )
 
-    # Rebuild and re-apply the persistent prompt the same way creation does.
-    kind = str(getattr(cell, "kind", "") or "").strip()
     persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
-    if kind == "architect":
-        persistent_prompt_text = _architect_persistent_prompt_text(
-            group=cell.group,
-            action_system_prompt=launch_cfg.get("system_prompt", ""),
-            state=state,
-            architect_id=cell.id,
-        )
     apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)
     state._db_save_agent(cell)
@@ -15299,13 +15290,7 @@ async def main(connection=None):
             return ""
 
         def _with_agent_class_prompt(base_prompt: str) -> str:
-            class_block = agent_class_prompt_block_for_cell(cell)
-            if not class_block:
-                return base_prompt
-            base_text = str(base_prompt or "").rstrip()
-            if not base_text:
-                return class_block
-            return base_text + "\n\n" + class_block
+            return append_agent_class_prompt_block(base_prompt, cell)
 
         gs = state.get_group_settings(cell.group)
         if gs.engineer_agent_id == cell.id or cell.kind == "engineer":

@@ -19,6 +19,7 @@ from .artifacts import (
     legacy_image_prompt_block,
     upstream_artifact_prompt_block,
 )
+from .agent_classes import append_agent_class_prompt_block
 from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
 from .identity import prepend_agent_identity_anchor
@@ -773,6 +774,10 @@ class AgentLaunchService:
                     log.warning("worktree create failed silently for cell=%s repo=%s",
                                 cell.slug or cell.name or cell.id, repo_root)
 
+        persistent_prompt_text = append_agent_class_prompt_block(
+            persistent_prompt_text,
+            cell,
+        )
         self.apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)

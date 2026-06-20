@@ -214,6 +214,67 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertEqual(loaded["effective_agent_class_snapshot"]["id"], "product-manager")
         self.assertEqual(loaded["effective_agent_profile_snapshot"]["id"], "product-manager-draft")
 
+    def test_direct_profile_launch_after_class_clear_clears_effective_class(self):
+        cell = self._add_agent(kind="architect")
+        self.state.assign_agent_class(
+            cell.id,
+            "product-manager",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            cell,
+            base_dir=str(self.project),
+        )
+        self.assertEqual(cell.effective_agent_class_id, "product-manager")
+
+        self.state.assign_agent_class(
+            cell.id,
+            "",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.assign_agent_profile(
+            cell.id,
+            "full-architect",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        pre_launch_status = self.state.agent_class_status_for_cell(
+            cell,
+            base_dir=str(self.project),
+        )
+        self.assertTrue(pre_launch_status["pending_next_launch"])
+
+        self.state.apply_effective_agent_class_for_launch(
+            cell,
+            base_dir=str(self.project),
+        )
+
+        self.assertEqual(cell.agent_class_id, "")
+        self.assertEqual(cell.agent_profile_id, "full-architect")
+        self.assertEqual(cell.effective_agent_profile_id, "full-architect")
+        self.assertEqual(cell.effective_agent_class_id, "")
+        self.assertEqual(cell.effective_agent_class_version, "")
+        self.assertEqual(cell.effective_agent_class_snapshot, {})
+        self.assertEqual(agent_class_prompt_block_for_cell(cell), "")
+        status = self.state.agent_class_status_for_cell(
+            cell,
+            base_dir=str(self.project),
+        )
+        self.assertEqual(status["effective_class_id"], "")
+        self.assertEqual(status["next_launch_class_id"], "")
+        self.assertEqual(status["next_launch_profile_id"], "full-architect")
+        self.assertFalse(status["pending_next_launch"])
+        loaded = self.db.load_all()["agents"][cell.id]
+        self.assertEqual(loaded["effective_agent_class_id"], "")
+        self.assertEqual(loaded["effective_agent_class_snapshot"], {})
+        audit_events = [
+            event["event"]
+            for event in self.db.list_agent_class_audit(agent_id=cell.id)
+        ]
+        self.assertIn("effective_snapshot_cleared", audit_events)
+
     def test_class_driven_profile_projection_denies_raw_pm_dangerous_tools(self):
         cell = self._add_agent(kind="architect")
         self.state.assign_agent_class(

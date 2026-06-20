@@ -690,16 +690,37 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def append_agent_class_prompt_block(base_prompt: str, cell: Any) -> str:
+    """Append the frozen Agent Class prompt block to a base prompt.
+
+    Default/full classes intentionally produce no block, preserving existing
+    base-kind prompt behavior.  Callers should invoke this only after
+    ``apply_effective_agent_class_for_launch`` has frozen the launch snapshot.
+    """
+
+    class_block = agent_class_prompt_block_for_cell(cell)
+    if not class_block:
+        return base_prompt
+    base_text = str(base_prompt or "").rstrip()
+    if not base_text:
+        return class_block
+    if class_block.strip() in base_text:
+        return base_text + ("\n" if not base_text.endswith("\n") else "")
+    return base_text + "\n\n" + class_block
+
+
 def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
     kind = str(getattr(cell, "kind", "") or "").strip()
     assigned_id = str(getattr(cell, "agent_class_id", "") or "").strip()
+    direct_profile_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
+    direct_profile_without_class = bool(direct_profile_id and not assigned_id)
     effective_id = str(getattr(cell, "effective_agent_class_id", "") or "").strip()
     snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
     if not isinstance(snapshot, dict):
         snapshot = {}
 
     effective_preview = dict(snapshot) if snapshot.get("id") else {}
-    if not effective_preview:
+    if not effective_preview and not direct_profile_without_class:
         default_id = default_agent_class_id_for_kind(kind)
         default_class = agent_class_definition_by_id(default_id, base_dir=base_dir) if default_id else None
         if default_class:
@@ -719,11 +740,14 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         if assigned_class:
             assigned_preview = enriched_agent_class_preview(assigned_class, base_dir=base_dir)
 
-    next_launch_class_id = assigned_id or default_agent_class_id_for_kind(kind)
+    next_launch_class_id = "" if direct_profile_without_class else assigned_id or default_agent_class_id_for_kind(kind)
     next_launch_class_version = str(getattr(cell, "agent_class_version", "") or "") if assigned_id else ""
     next_launch_profile_id = ""
     next_launch_profile_version = ""
-    if next_launch_class_id:
+    if direct_profile_without_class:
+        next_launch_profile_id = direct_profile_id
+        next_launch_profile_version = str(getattr(cell, "agent_profile_version", "") or "")
+    elif next_launch_class_id:
         next_class = agent_class_definition_by_id(next_launch_class_id, base_dir=base_dir)
         if next_class:
             if not next_launch_class_version:
@@ -739,15 +763,26 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
     effective_profile = effective_preview.get("agent_profile") if isinstance(effective_preview.get("agent_profile"), dict) else {}
     effective_profile_id = str(effective_profile.get("id", "") or "")
     effective_profile_version = str(effective_profile.get("version", "") or "")
-    pending_next_launch = bool(
-        next_launch_class_id
-        and (
+    if not effective_profile_id:
+        effective_profile_id = str(getattr(cell, "effective_agent_profile_id", "") or "")
+    if not effective_profile_version:
+        effective_profile_version = str(getattr(cell, "effective_agent_profile_version", "") or "")
+    if direct_profile_without_class:
+        pending_next_launch = bool(
+            effective_id
+            or (next_launch_profile_id and next_launch_profile_id != effective_profile_id)
+            or (next_launch_profile_version and next_launch_profile_version != effective_profile_version)
+        )
+    else:
+        pending_next_launch = bool(
+            next_launch_class_id
+            and (
             next_launch_class_id != effective_id
             or (next_launch_class_version and next_launch_class_version != effective_version)
             or (next_launch_profile_id and next_launch_profile_id != effective_profile_id)
             or (next_launch_profile_version and next_launch_profile_version != effective_profile_version)
+            )
         )
-    )
     return {
         "agent_id": str(getattr(cell, "id", "") or ""),
         "agent_name": str(getattr(cell, "name", "") or ""),
@@ -767,6 +802,7 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         "next_launch_profile_version": next_launch_profile_version,
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
+        "direct_agent_profile_assignment": direct_profile_without_class,
         "warnings": list(effective_preview.get("warnings", []) or []),
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }

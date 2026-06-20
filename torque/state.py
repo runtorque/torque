@@ -10736,6 +10736,45 @@ class MatrixState:
             base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
         )
 
+    def _clear_effective_agent_class_for_direct_profile_launch(
+            self, cell, *, actor_kind: str = "system",
+            actor_id: str = "launch") -> bool:
+        """Clear stale effective Agent Class state for direct profile launches."""
+
+        snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
+        snapshot_id = ""
+        if isinstance(snapshot, dict):
+            snapshot_id = str(snapshot.get("id", "") or "").strip()
+        previous = {
+            "class_id": getattr(cell, "effective_agent_class_id", "") or "",
+            "class_version": getattr(cell, "effective_agent_class_version", "") or "",
+        }
+        if not (
+                previous["class_id"]
+                or previous["class_version"]
+                or snapshot_id
+                or float(getattr(cell, "effective_agent_class_applied_at", 0) or 0)
+        ):
+            return False
+        cell.effective_agent_class_id = ""
+        cell.effective_agent_class_version = ""
+        cell.effective_agent_class_snapshot = {}
+        cell.effective_agent_class_applied_at = 0.0
+        self._emit_agent(cell)
+        self._db_save_agent(cell)
+        self._record_agent_class_audit(
+            cell,
+            "effective_snapshot_cleared",
+            actor_kind=actor_kind or "system",
+            actor_id=actor_id or "launch",
+            previous=previous,
+            message=(
+                "effective Agent Class snapshot cleared for direct "
+                "Agent Profile launch"
+            ),
+        )
+        return True
+
     def _agent_class_base_dir_for_cell(self, cell=None, base_dir: str = "") -> str:
         return self._agent_profile_base_dir_for_cell(cell, base_dir)
 
@@ -10882,12 +10921,18 @@ class MatrixState:
             # Preserve legacy/direct Agent Profile assignment behavior when no
             # Agent Class has been explicitly assigned. Agent Class defaults are
             # only behavior-compatible for otherwise unassigned base kinds.
-            return self.apply_effective_agent_profile_for_launch(
+            profile_snapshot = self.apply_effective_agent_profile_for_launch(
                 cell,
                 base_dir=base_dir,
                 actor_kind=actor_kind,
                 actor_id=actor_id,
             )
+            self._clear_effective_agent_class_for_direct_profile_launch(
+                cell,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+            return profile_snapshot
         class_id = desired_id or default_agent_class_id_for_kind(base_kind)
         if not class_id:
             # Terminal/legacy unknown kinds fall back to the existing Agent
