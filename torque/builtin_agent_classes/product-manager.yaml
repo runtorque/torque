@@ -1,0 +1,21 @@
+id: product-manager
+version: "1"
+base_kind: architect
+display_name: Product Manager (draft)
+description: Draft Agent Class over the Architect runtime kind; scratch-only until Wave 6C UI/scratch smoke and explicit approval.
+lifecycle: draft
+agent_profile_ref:
+  id: product-manager-draft
+  version: "2"
+prompt: |
+  You are using the draft Product Manager Agent Class. Stay in scratch/preview mode: propose planning-safe product work, use Product Manager wrapper surfaces when available, and do not claim live task authority, Blueprint replacement authority, dispatch/hire/merge/deploy power, or connector safety.
+draft:
+  scratch_only: true
+  approved_for_live_dogfood: false
+  next_step: Wave 6C UI and scratch smoke requires explicit Torqly/Blueprint approval.
+metadata:
+  archetype: product_manager
+  trusted_assignment: user_only_v1
+  referenced_profile: product-manager-draft@2
+  wrapper_surface: architect_product_wrappers_only
+  external_connector_governance: not_enforced_wave_6b

@@ -411,7 +411,15 @@ CREATE TABLE IF NOT EXISTS agents (
     effective_agent_profile_id TEXT NOT NULL DEFAULT '',
     effective_agent_profile_version TEXT NOT NULL DEFAULT '',
     effective_agent_profile_snapshot TEXT NOT NULL DEFAULT '{}',
-    effective_agent_profile_applied_at REAL NOT NULL DEFAULT 0
+    effective_agent_profile_applied_at REAL NOT NULL DEFAULT 0,
+    agent_class_id TEXT NOT NULL DEFAULT '',
+    agent_class_version TEXT NOT NULL DEFAULT '',
+    agent_class_assigned_at REAL NOT NULL DEFAULT 0,
+    agent_class_assigned_by TEXT NOT NULL DEFAULT '',
+    effective_agent_class_id TEXT NOT NULL DEFAULT '',
+    effective_agent_class_version TEXT NOT NULL DEFAULT '',
+    effective_agent_class_snapshot TEXT NOT NULL DEFAULT '{}',
+    effective_agent_class_applied_at REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS agent_profile_audit (
@@ -435,6 +443,33 @@ CREATE TABLE IF NOT EXISTS agent_profile_audit (
 
 CREATE INDEX IF NOT EXISTS idx_agent_profile_audit_agent_created
 ON agent_profile_audit(agent_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_class_audit (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL DEFAULT '',
+    agent_name TEXT NOT NULL DEFAULT '',
+    event TEXT NOT NULL DEFAULT '',
+    actor_kind TEXT NOT NULL DEFAULT 'user',
+    actor_id TEXT NOT NULL DEFAULT '',
+    actor_label TEXT NOT NULL DEFAULT '',
+    previous_class_id TEXT NOT NULL DEFAULT '',
+    previous_class_version TEXT NOT NULL DEFAULT '',
+    assigned_class_id TEXT NOT NULL DEFAULT '',
+    assigned_class_version TEXT NOT NULL DEFAULT '',
+    effective_class_id TEXT NOT NULL DEFAULT '',
+    effective_class_version TEXT NOT NULL DEFAULT '',
+    assigned_profile_id TEXT NOT NULL DEFAULT '',
+    assigned_profile_version TEXT NOT NULL DEFAULT '',
+    effective_profile_id TEXT NOT NULL DEFAULT '',
+    effective_profile_version TEXT NOT NULL DEFAULT '',
+    snapshot_hash TEXT NOT NULL DEFAULT '',
+    snapshot_json TEXT NOT NULL DEFAULT '{}',
+    message TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_class_audit_agent_created
+ON agent_class_audit(agent_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS groups (
     name     TEXT PRIMARY KEY,
@@ -2378,6 +2413,14 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         ("effective_agent_profile_version", "TEXT", "''"),
         ("effective_agent_profile_snapshot", "TEXT", "'{}'"),
         ("effective_agent_profile_applied_at", "REAL", "0"),
+        ("agent_class_id", "TEXT", "''"),
+        ("agent_class_version", "TEXT", "''"),
+        ("agent_class_assigned_at", "REAL", "0"),
+        ("agent_class_assigned_by", "TEXT", "''"),
+        ("effective_agent_class_id", "TEXT", "''"),
+        ("effective_agent_class_version", "TEXT", "''"),
+        ("effective_agent_class_snapshot", "TEXT", "'{}'"),
+        ("effective_agent_class_applied_at", "REAL", "0"),
     ]:
         try:
             conn.execute(f"SELECT {col} FROM agents LIMIT 0")

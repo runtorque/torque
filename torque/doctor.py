@@ -21,6 +21,11 @@ from .agent_profiles import (
     enriched_profile_preview,
     validate_all_agent_profiles,
 )
+from .agent_classes import (
+    agent_class_cell_status,
+    enriched_agent_class_preview,
+    validate_all_agent_classes,
+)
 from .mcp_idempotency import collect_mcp_idempotency_storage_stats
 
 DOCTOR_SCHEMA_VERSION = 3
@@ -1179,6 +1184,92 @@ def _collect_agent_profiles_section(conn: sqlite3.Connection | None = None, base
     }
 
 
+def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_dir: str = "") -> dict:
+    validation = validate_all_agent_classes(base_dir=base_dir)
+    classes = list(validation.get("classes", []) or [])
+    previews = [enriched_agent_class_preview(definition, base_dir=base_dir) for definition in classes]
+    assignments: list[dict] = []
+    audit_recent: list[dict] = []
+    if conn is not None and _table_exists(conn, "agents"):
+        cols = [
+            "id", "name", "kind", "cell_type", "agent_class_id",
+            "agent_class_version", "agent_class_assigned_at",
+            "agent_class_assigned_by", "effective_agent_class_id",
+            "effective_agent_class_version", "effective_agent_class_snapshot",
+            "effective_agent_class_applied_at",
+        ]
+        if all(_column_exists(conn, "agents", col) for col in cols):
+            try:
+                for row in conn.execute(
+                    "SELECT " + ",".join(cols) + " FROM agents "
+                    "WHERE cell_type='agent' ORDER BY name, id"
+                ).fetchall():
+                    item = dict(zip(cols, row))
+                    try:
+                        item["effective_agent_class_snapshot"] = json.loads(
+                            item.get("effective_agent_class_snapshot") or "{}"
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        item["effective_agent_class_snapshot"] = {}
+                    cell = SimpleNamespace(**item)
+                    status = agent_class_cell_status(cell, base_dir=base_dir)
+                    if status.get("assigned_class_id") or status.get("effective_class_id"):
+                        assignments.append(status)
+            except sqlite3.OperationalError:
+                assignments = []
+    if conn is not None and _table_exists(conn, "agent_class_audit"):
+        try:
+            rows = conn.execute(
+                "SELECT agent_id, agent_name, event, assigned_class_id, "
+                "assigned_class_version, effective_class_id, "
+                "effective_class_version, assigned_profile_id, "
+                "assigned_profile_version, effective_profile_id, "
+                "effective_profile_version, snapshot_hash, message, created_at "
+                "FROM agent_class_audit ORDER BY created_at DESC LIMIT 20"
+            ).fetchall()
+            audit_recent = [
+                {
+                    "agent_id": str(row[0] or ""),
+                    "agent_name": str(row[1] or ""),
+                    "event": str(row[2] or ""),
+                    "assigned_class_id": str(row[3] or ""),
+                    "assigned_class_version": str(row[4] or ""),
+                    "effective_class_id": str(row[5] or ""),
+                    "effective_class_version": str(row[6] or ""),
+                    "assigned_profile_id": str(row[7] or ""),
+                    "assigned_profile_version": str(row[8] or ""),
+                    "effective_profile_id": str(row[9] or ""),
+                    "effective_profile_version": str(row[10] or ""),
+                    "snapshot_hash": str(row[11] or ""),
+                    "message": str(row[12] or ""),
+                    "created_at": float(row[13] or 0),
+                }
+                for row in rows
+            ]
+        except sqlite3.OperationalError:
+            audit_recent = []
+    return {
+        "config_path": ".torque/agent_classes/",
+        "base_dir": str(base_dir or os.getcwd()),
+        "class_count": int(validation.get("class_count", 0) or 0),
+        "valid": bool(validation.get("valid")),
+        "error_count": int(validation.get("error_count", 0) or 0),
+        "warning_count": int(validation.get("warning_count", 0) or 0),
+        "classes": [definition.as_preview_dict() for definition in classes],
+        "dry_run_previews": previews,
+        "assignments": assignments,
+        "assignment_count": len(assignments),
+        "audit_recent": audit_recent,
+        "audit_recent_count": len(audit_recent),
+        "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
+        "runtime_enforcement": "launch_frozen_agent_class_profile_pairing",
+        "external_connector_caveat": (
+            "External connector exposure is informational only in Wave 6B; "
+            "Agent Classes do not enforce connector governance."
+        ),
+    }
+
+
 def _collect_stage_6_cleanup_section(
     conn: sqlite3.Connection,
     *,
@@ -1363,6 +1454,19 @@ def _check_agent_profiles_valid(report: dict) -> dict:
         "details": {
             "error_count": errors,
             "issues": list(profiles.get("issues", []) or []),
+        },
+    }
+
+
+def _check_agent_classes_valid(report: dict) -> dict:
+    classes = report.get("agent_classes", {}) or {}
+    errors = int(classes.get("error_count", 0) or 0)
+    return {
+        "name": "agent_classes_valid",
+        "status": "pass" if errors == 0 else "fail",
+        "details": {
+            "error_count": errors,
+            "issues": list(classes.get("issues", []) or []),
         },
     }
 
@@ -1791,6 +1895,7 @@ _DOCTOR_CHECKS = [
     _check_stage_6_legacy_columns_removed,
     _check_stage_6_engineer_tool_aliases_removed,
     _check_agent_profiles_valid,
+    _check_agent_classes_valid,
     _check_pty_supervisor_reachable,
 ]
 
@@ -1846,6 +1951,10 @@ def build_doctor_report(
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
         "agent_profiles": _collect_agent_profiles_section(
+            conn,
+            str(project_base_dir or os.getcwd())
+        ),
+        "agent_classes": _collect_agent_classes_section(
             conn,
             str(project_base_dir or os.getcwd())
         ),
@@ -1959,6 +2068,7 @@ def format_doctor_report(report: dict) -> str:
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
     agent_profiles = report.get("agent_profiles", {}) or {}
+    agent_classes = report.get("agent_classes", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
     ai = report.get("ai", {}) or {}
     ai_dependency = ai.get("embeddings_dependency", {}) or {}
@@ -2156,6 +2266,22 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_profiles.get('assignment_count', 0) or 0)}",
         "  audit_recent_count:             "
         f"{int(agent_profiles.get('audit_recent_count', 0) or 0)}",
+        "",
+        "[agent_classes]",
+        "  config_path:                    "
+        f"{agent_classes.get('config_path', '.torque/agent_classes/')}",
+        "  class_count:                    "
+        f"{int(agent_classes.get('class_count', 0) or 0)}",
+        "  error_count:                    "
+        f"{int(agent_classes.get('error_count', 0) or 0)}",
+        "  runtime_enforcement:            "
+        f"{agent_classes.get('runtime_enforcement', '')}",
+        "  assignment_count:               "
+        f"{int(agent_classes.get('assignment_count', 0) or 0)}",
+        "  audit_recent_count:             "
+        f"{int(agent_classes.get('audit_recent_count', 0) or 0)}",
+        "  external_connector_caveat:      "
+        f"{agent_classes.get('external_connector_caveat', '')}",
         "",
         "[stage_6_cleanup]",
         "  legacy_template_files_ignored:  "
@@ -2484,6 +2610,18 @@ def format_doctor_report(report: dict) -> str:
                     location = f" ({path})" if path else ""
                     lines.append(
                         "  - agent profile validation failed"
+                        f"[{issue.get('code', '')}]{location}: "
+                        f"{issue.get('message', '')}"
+                    )
+            elif name == "agent_classes_valid":
+                issues = list(details.get("issues", []) or [])
+                if not issues:
+                    lines.append("  - Agent Class definitions are invalid")
+                for issue in issues[:10]:
+                    path = _humanize_path(str(issue.get("path", "") or ""))
+                    location = f" ({path})" if path else ""
+                    lines.append(
+                        "  - Agent Class validation failed"
                         f"[{issue.get('code', '')}]{location}: "
                         f"{issue.get('message', '')}"
                     )

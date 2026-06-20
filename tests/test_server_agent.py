@@ -735,6 +735,81 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
+    async def test_create_agent_with_config_appends_explicit_agent_class_prompt(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        service = self._launch_service(state, bridge)
+        captured_prompts = []
+
+        def capture_persistent_prompt(cell, launch_cfg, prompt_text):
+            del cell, launch_cfg
+            captured_prompts.append(prompt_text)
+
+        service.apply_persistent_prompt = capture_persistent_prompt
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "Product Manager",
+            {
+                "profile": "Default",
+                "command": "codex",
+                "directory": "/tmp/project",
+                "tab_color": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "zsh",
+                "system_prompt": "",
+                "agent_type": "codex",
+                "agent_class_id": "product-manager",
+            },
+            persistent_prompt_text="BASE PROMPT",
+            kind="architect",
+        )
+
+        self.assertIsNotNone(cell)
+        self.assertEqual(cell.effective_agent_class_id, "product-manager")
+        self.assertEqual(len(captured_prompts), 1)
+        self.assertIn("BASE PROMPT", captured_prompts[0])
+        self.assertIn("## Agent Class", captured_prompts[0])
+        self.assertIn(
+            "Referenced Agent Profile: product-manager-draft@2",
+            captured_prompts[0],
+        )
+
+    async def test_create_agent_with_config_default_class_does_not_append_prompt(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        service = self._launch_service(state, bridge)
+        captured_prompts = []
+        service.apply_persistent_prompt = (
+            lambda _cell, _launch_cfg, prompt_text:
+            captured_prompts.append(prompt_text)
+        )
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "Architect",
+            {
+                "profile": "Default",
+                "command": "codex",
+                "directory": "/tmp/project",
+                "tab_color": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "zsh",
+                "system_prompt": "",
+                "agent_type": "codex",
+            },
+            persistent_prompt_text="BASE PROMPT",
+            kind="architect",
+        )
+
+        self.assertIsNotNone(cell)
+        self.assertEqual(cell.effective_agent_class_id, "default-architect")
+        self.assertEqual(captured_prompts, ["BASE PROMPT"])
+
     async def test_create_agent_with_config_stamps_created_by_engineer_id(self):
         state = self.state_mod.MatrixState()
         state.add_group("backend")

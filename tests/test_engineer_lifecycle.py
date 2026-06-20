@@ -1613,6 +1613,77 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             prompts,
         )
 
+    async def test_restart_architect_preserves_agent_class_prompt_block(self):
+        from torque.agent_classes import append_agent_class_prompt_block
+
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Product")
+        architect.status = "idle"
+        architect.agent_type = "codex"
+        architect.session_id = "active-session"
+        bridge = _CapturingBridge()
+        applied_prompts = []
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_architect_launch_config(group, *, base_dir="",
+                                                 explicit_template="",
+                                                 overrides=None):
+            del group, base_dir, explicit_template, overrides
+            return self._launch_config(temp_dir)
+
+        def fake_apply_persistent_prompt(cell, launch_cfg, prompt_text):
+            del cell, launch_cfg
+            applied_prompts.append(prompt_text)
+
+        def fake_build_cell_persistent_prompt(cell, launch_cfg):
+            del launch_cfg
+            return append_agent_class_prompt_block("ARCH BASE", cell)
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            architect.directory = temp_dir
+            state.assign_agent_class(
+                architect.id,
+                "product-manager",
+                actor_kind="user",
+                base_dir=temp_dir,
+            )
+            state.apply_effective_agent_class_for_launch(
+                architect,
+                base_dir=temp_dir,
+            )
+            result = await self.server_mod._handle_restart_agent_command(
+                {"id": architect.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=lambda *a, **k: {},
+                resolve_architect_launch_config=fake_resolve_architect_launch_config,
+                apply_persistent_prompt=fake_apply_persistent_prompt,
+                build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(len(applied_prompts), 1)
+        self.assertIn("ARCH BASE", applied_prompts[0])
+        self.assertIn("## Agent Class", applied_prompts[0])
+        self.assertIn(
+            "Referenced Agent Profile: product-manager-draft@2",
+            applied_prompts[0],
+        )
+        self.assertEqual(architect.effective_agent_class_id, "product-manager")
+
     async def test_restart_agent_clears_stale_digest_before_session_start(self):
         state = self._make_state()
         engineer = self._add_engineer_cell(state, "eng-alice", "Alice")

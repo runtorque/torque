@@ -10,6 +10,20 @@ Waves 3-4 add trusted-user assignment storage, frozen launch/session snapshots, 
 Profile assignment uses separate `agent_profile_id` / `agent_profile_version`
 fields plus `effective_agent_profile_*` launch snapshot fields.
 
+
+## Relationship to Agent Classes
+
+Agent Classes are the user-facing template layer added above Agent Profiles. A
+class declares the same base runtime kind and references one Agent Profile by
+`agent_profile_ref.id` / `agent_profile_ref.version`; the referenced profile is
+still what enforces MCP/capability projection. Agent Class config lives in
+`.torque/agent_classes/*.yaml`; Agent Profile config remains in
+`.torque/agent_profiles/*.yaml`.
+
+Direct Agent Profile assignment remains trusted-user-only. Agent Class
+assignment is also trusted-user-only and freezes a class/profile pair on the next
+launch, without mutating running sessions.
+
 ## Config paths
 
 Torque ships built-in definitions in `torque/builtin_agent_profiles/`:

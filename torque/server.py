@@ -32,6 +32,13 @@ from .agent_profiles import (
     load_agent_profiles,
     profile_definition_by_id,
 )
+from .agent_classes import (
+    append_agent_class_prompt_block,
+    agent_class_context_for_cell,
+    enriched_agent_class_preview,
+    load_agent_classes,
+    agent_class_definition_by_id,
+)
 from .behavior_overlay import proposal_summary, version_summary
 from .config import (
     WS_PORT,
@@ -9414,6 +9421,92 @@ async def _handle_doctor_command(db: TorqueDB, bridge=None) -> dict:
     return report
 
 
+async def _handle_agent_class_command(data: dict, state: MatrixState,
+                                      db: TorqueDB | None,
+                                      resolve_base_dir) -> dict | None:
+    """Handle trusted browser/server Agent Class commands.
+
+    Returns ``None`` when ``data.cmd`` is not an Agent Class command.
+    """
+
+    cmd = str(data.get("cmd", "") or "").strip()
+    if cmd == "agent_class_list":
+        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        classes, issues = load_agent_classes(base_dir=base_dir)
+        return {
+            "type": "agent_classes",
+            "classes": [
+                enriched_agent_class_preview(definition, base_dir=base_dir)
+                for definition in classes
+            ],
+            "issues": [issue.as_dict() for issue in issues],
+        }
+
+    if cmd == "agent_class_preview":
+        class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
+        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        definition = agent_class_definition_by_id(class_id, base_dir=base_dir)
+        if not definition:
+            return {"type": "error", "message": f"Unknown Agent Class: {class_id}"}
+        return {
+            "type": "agent_class_preview",
+            "agent_class": enriched_agent_class_preview(
+                definition,
+                base_dir=base_dir,
+            ),
+        }
+
+    if cmd in {"agent_class_assign", "agent_class_clear"}:
+        try:
+            agent_id = str(data.get("agent_id", data.get("id", "")) or "").strip()
+            cell = state.agents.get(agent_id)
+            base_dir = str(data.get("base_dir", "") or "")
+            if not base_dir and cell:
+                base_dir = cell.worktree_repo_root or cell.directory or await resolve_base_dir(cell.group)
+            class_id = "" if cmd == "agent_class_clear" else str(
+                data.get("class_id", data.get("agent_class_id", "")) or ""
+            )
+            status = state.assign_agent_class(
+                agent_id,
+                class_id,
+                actor_kind="user",
+                actor_id=str(data.get("actor_id", "") or ""),
+                actor_label=str(data.get("actor_label", "trusted-user") or "trusted-user"),
+                base_dir=base_dir,
+            )
+            return {"type": "agent_class_assignment", "status": status}
+        except PermissionError as exc:
+            return {"type": "error", "message": str(exc), "code": "trusted_user_required"}
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
+
+    if cmd == "agent_class_status":
+        agent_id = str(data.get("agent_id", data.get("id", "")) or "").strip()
+        cell = state.agents.get(agent_id)
+        if not cell:
+            return {"type": "error", "message": "Agent not found"}
+        base_dir = str(data.get("base_dir", "") or "")
+        if not base_dir:
+            base_dir = cell.worktree_repo_root or cell.directory or await resolve_base_dir(cell.group)
+        return {
+            "type": "agent_class_status",
+            "status": state.agent_class_status_for_cell(cell, base_dir=base_dir),
+        }
+
+    if cmd == "agent_class_audit":
+        if not db:
+            return {"type": "agent_class_audit", "events": []}
+        return {
+            "type": "agent_class_audit",
+            "events": db.list_agent_class_audit(
+                agent_id=str(data.get("agent_id", "") or ""),
+                limit=int(data.get("limit", 50) or 50),
+            ),
+        }
+
+    return None
+
+
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"
 _NO_COMMAND_RECEIPT = object()
 _CRITICAL_BOARD_COMMANDS = {
@@ -9844,6 +9937,7 @@ def _build_torque_context(state: MatrixState, cell, task) -> dict:
         "role": _agent_role_slug(cell) if workerish else "",
         "owner_engineer": _agent_owner_engineer_name(
             state, cell) if workerish else "",
+        "agent_class": agent_class_context_for_cell(cell),
     }
 
     linked = sorted(
@@ -13655,7 +13749,7 @@ async def _handle_relaunch_agent_command(
         launch_cfg.get(
             "worktree_merge_squash",
             cell.worktree_merge_squash))
-    state.apply_effective_agent_profile_for_launch(
+    state.apply_effective_agent_class_for_launch(
         cell,
         base_dir=cell.directory or base_dir,
     )
@@ -13857,7 +13951,7 @@ async def _handle_restart_agent_command(
         launch_cfg.get("worktree_base_dir")
         or cell.worktree_base_dir
         or ".torque/worktrees")
-    state.apply_effective_agent_profile_for_launch(
+    state.apply_effective_agent_class_for_launch(
         cell,
         base_dir=cell.directory or base_dir,
     )
@@ -13883,16 +13977,7 @@ async def _handle_restart_agent_command(
             persistent_prompt_filename(cell),
         )
 
-    # Rebuild and re-apply the persistent prompt the same way creation does.
-    kind = str(getattr(cell, "kind", "") or "").strip()
     persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
-    if kind == "architect":
-        persistent_prompt_text = _architect_persistent_prompt_text(
-            group=cell.group,
-            action_system_prompt=launch_cfg.get("system_prompt", ""),
-            state=state,
-            architect_id=cell.id,
-        )
     apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)
     state._db_save_agent(cell)
@@ -15203,12 +15288,16 @@ async def main(connection=None):
     def _build_cell_persistent_prompt(cell, launch_cfg: dict) -> str:
         if cell.cell_type != "agent" or not launch_cfg.get("agent_type"):
             return ""
+
+        def _with_agent_class_prompt(base_prompt: str) -> str:
+            return append_agent_class_prompt_block(base_prompt, cell)
+
         gs = state.get_group_settings(cell.group)
         if gs.engineer_agent_id == cell.id or cell.kind == "engineer":
             from .engineer import build_engineer_system_prompt
             ws = state.get_engineer_settings(cell.group)
             spec_preamble = _resolve_engineer_specializations_preamble(cell)
-            return build_engineer_system_prompt(
+            return _with_agent_class_prompt(build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs,
                 specializations_preamble=spec_preamble,
@@ -15216,17 +15305,17 @@ async def main(connection=None):
                 behavior_overlay_block=_behavior_overlay_prompt_block_for_cell(
                     state,
                     cell,
-                ))
+                )))
         if cell.kind == "architect":
-            return _architect_persistent_prompt_text(
+            return _with_agent_class_prompt(_architect_persistent_prompt_text(
                 group=cell.group,
                 action_system_prompt=launch_cfg.get("system_prompt", ""),
                 state=state,
                 architect_id=cell.id,
-            )
-        return _build_dispatch_persistent_prompt(
+            ))
+        return _with_agent_class_prompt(_build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""),
-            owner_is_user=_agent_owner_is_user(cell))
+            owner_is_user=_agent_owner_is_user(cell)))
 
     def _is_designated_engineer(cell) -> bool:
         if not cell or cell.cell_type != "agent":
@@ -16214,7 +16303,7 @@ async def main(connection=None):
                 cell = state.agents.get(agent_id)
                 base_dir = str(data.get("base_dir", "") or "")
                 if not base_dir and cell:
-                    base_dir = cell.worktree_repo_root or cell.directory or await resolve_base_dir(cell.group)
+                    base_dir = cell.worktree_repo_root or cell.directory or await _resolve_base_dir(cell.group)
                 status = state.assign_agent_profile(
                     agent_id,
                     str(data.get("profile_id", "") or ""),
@@ -16239,6 +16328,15 @@ async def main(connection=None):
                     limit=int(data.get("limit", 50) or 50),
                 ),
             }
+
+        agent_class_response = await _handle_agent_class_command(
+            data,
+            state,
+            db,
+            _resolve_base_dir,
+        )
+        if agent_class_response is not None:
+            return agent_class_response
 
         if cmd == "get_metrics_history":
             try:
