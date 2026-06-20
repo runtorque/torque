@@ -11135,6 +11135,27 @@ test('embedded terminal websocket URL carries the page client id', () => {
   );
 });
 
+test('embedded terminal shell keeps terminal stage on the flexible row after tab strip removal', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const baseRule = css.match(/\.terminal-shell\s*\{[^}]+\}/);
+  const runtimeRule = css.match(/body\.runtime-embedded \.terminal-shell\s*\{[^}]+\}/);
+  assert.ok(baseRule, 'base terminal shell CSS rule exists');
+  assert.ok(runtimeRule, 'embedded terminal shell CSS rule exists');
+
+  for (const rule of [baseRule[0], runtimeRule[0]]) {
+    assert.match(
+      rule,
+      /grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto\s+auto;/,
+      'grid rows should be topbar, flexible stage, DM, composer, status',
+    );
+    assert.doesNotMatch(
+      rule,
+      /grid-template-rows:\s*auto\s+auto\s+(?:minmax\(0,\s*)?1fr/,
+      'removed tab row must not push the terminal stage out of the flexible row',
+    );
+  }
+});
+
 test('embedded terminal workspace removes the legacy tab strip regardless of session count', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
