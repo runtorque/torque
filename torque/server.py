@@ -35,9 +35,13 @@ from .agent_profiles import (
 from .agent_classes import (
     append_agent_class_prompt_block,
     agent_class_context_for_cell,
+    archive_custom_agent_class,
+    delete_custom_agent_class,
     enriched_agent_class_preview,
     load_agent_classes,
     agent_class_definition_by_id,
+    save_custom_agent_class,
+    validate_agent_class_draft,
 )
 from .behavior_overlay import proposal_summary, version_summary
 from .config import (
@@ -9421,6 +9425,18 @@ async def _handle_doctor_command(db: TorqueDB, bridge=None) -> dict:
     return report
 
 
+def _agent_class_authoring_payload_from_command(data: dict) -> dict:
+    for key in ("agent_class", "definition"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            return dict(value)
+    return {
+        key: value
+        for key, value in dict(data or {}).items()
+        if key not in {"cmd", "request_id", "_client_id", "base_dir", "mode"}
+    }
+
+
 async def _handle_agent_class_command(data: dict, state: MatrixState,
                                       db: TorqueDB | None,
                                       resolve_base_dir) -> dict | None:
@@ -9435,21 +9451,91 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         classes, issues = load_agent_classes(base_dir=base_dir)
         return {
             "type": "agent_classes",
+            "schema_version": 2,
             "classes": [
                 enriched_agent_class_preview(definition, base_dir=base_dir)
                 for definition in classes
             ],
             "issues": [issue.as_dict() for issue in issues],
+            "storage": {
+                "kind": "project_yaml",
+                "config_glob": ".torque/agent_classes/*.yaml",
+                "mutates_running_sessions": False,
+            },
         }
+
+    if cmd in {"agent_class_validate", "agent_class_draft_validate"}:
+        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        payload = _agent_class_authoring_payload_from_command(data)
+        result = validate_agent_class_draft(payload, base_dir=base_dir)
+        result["type"] = "agent_class_validation"
+        result["schema_version"] = 2
+        result["request_id"] = str(data.get("request_id", "") or "")
+        return result
+
+    if cmd in {"agent_class_create", "agent_class_save", "agent_class_update"}:
+        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        payload = _agent_class_authoring_payload_from_command(data)
+        mode = {
+            "agent_class_create": "create",
+            "agent_class_update": "update",
+        }.get(cmd, str(data.get("mode", "save") or "save"))
+        result = save_custom_agent_class(payload, base_dir=base_dir, mode=mode)
+        result["type"] = "agent_class_save"
+        result["schema_version"] = 2
+        result["request_id"] = str(data.get("request_id", "") or "")
+        if result.get("ok"):
+            classes, issues = load_agent_classes(base_dir=base_dir)
+            result["classes"] = [
+                enriched_agent_class_preview(definition, base_dir=base_dir)
+                for definition in classes
+            ]
+            result["registry_issues"] = [issue.as_dict() for issue in issues]
+        return result
+
+    if cmd in {"agent_class_archive", "agent_class_disable"}:
+        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
+        result = archive_custom_agent_class(class_id, base_dir=base_dir)
+        result["schema_version"] = 2
+        result["request_id"] = str(data.get("request_id", "") or "")
+        if result.get("ok"):
+            classes, issues = load_agent_classes(base_dir=base_dir)
+            result["classes"] = [
+                enriched_agent_class_preview(definition, base_dir=base_dir)
+                for definition in classes
+            ]
+            result["registry_issues"] = [issue.as_dict() for issue in issues]
+        return result
+
+    if cmd == "agent_class_delete":
+        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
+        result = delete_custom_agent_class(class_id, base_dir=base_dir)
+        result["schema_version"] = 2
+        result["request_id"] = str(data.get("request_id", "") or "")
+        if result.get("ok"):
+            classes, issues = load_agent_classes(base_dir=base_dir)
+            result["classes"] = [
+                enriched_agent_class_preview(definition, base_dir=base_dir)
+                for definition in classes
+            ]
+            result["registry_issues"] = [issue.as_dict() for issue in issues]
+        return result
 
     if cmd == "agent_class_preview":
         class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
         base_dir = str(data.get("base_dir", "") or os.getcwd())
-        definition = agent_class_definition_by_id(class_id, base_dir=base_dir)
+        definition = agent_class_definition_by_id(
+            class_id,
+            base_dir=base_dir,
+            include_archived=True,
+        )
         if not definition:
             return {"type": "error", "message": f"Unknown Agent Class: {class_id}"}
         return {
             "type": "agent_class_preview",
+            "schema_version": 2,
             "agent_class": enriched_agent_class_preview(
                 definition,
                 base_dir=base_dir,
@@ -11332,6 +11418,78 @@ def _agent_overrides_from_role_settings(kind: str, settings) -> dict:
     return out
 
 
+def _requested_agent_class_id(data: dict) -> str:
+    return str(
+        data.get("agent_class_id", data.get("class_id", "")) or ""
+    ).strip()
+
+
+def _apply_agent_class_launch_selection(
+        data: dict,
+        launch_cfg: dict,
+        *,
+        base_kind: str,
+        base_dir: str) -> dict:
+    """Validate a requested Agent Class and stamp the launch config.
+
+    Absence of a class id is intentionally a no-op so default
+    Architect/Engineer/Worker launch behavior remains unchanged.
+    """
+
+    class_id = _requested_agent_class_id(data)
+    if not class_id:
+        return {"ok": True, "agent_class": None}
+    if str(data.get("agent_profile_id", "") or "").strip() or str(data.get("profile_id", "") or "").strip():
+        return {
+            "ok": False,
+            "error": {
+                "type": "error",
+                "code": "ambiguous_agent_class_profile_launch",
+                "message": (
+                    "Launch from Agent Class cannot also specify direct "
+                    "Agent Profile assignment fields"
+                ),
+            },
+        }
+    definition = agent_class_definition_by_id(class_id, base_dir=base_dir)
+    if not definition:
+        archived = agent_class_definition_by_id(
+            class_id,
+            base_dir=base_dir,
+            include_archived=True,
+        )
+        suffix = " (archived/disabled)" if archived else ""
+        return {
+            "ok": False,
+            "error": {
+                "type": "error",
+                "code": "invalid_agent_class",
+                "message": f"Unknown or invalid Agent Class for launch: {class_id}{suffix}",
+            },
+        }
+    if definition.base_kind != base_kind:
+        return {
+            "ok": False,
+            "error": {
+                "type": "error",
+                "code": "agent_class_base_kind_mismatch",
+                "message": (
+                    f"Agent Class {definition.id} is for base_kind={definition.base_kind}, "
+                    f"but launch kind is {base_kind}"
+                ),
+            },
+        }
+    launch_cfg["agent_class_id"] = definition.id
+    launch_cfg["agent_class_version"] = definition.version
+    return {
+        "ok": True,
+        "agent_class": enriched_agent_class_preview(
+            definition,
+            base_dir=base_dir,
+        ),
+    }
+
+
 async def _handle_add_engineer_command(
         data: dict,
         state: MatrixState, *,
@@ -11367,6 +11525,14 @@ async def _handle_add_engineer_command(
         explicit_template="",
         overrides=overrides,
     )
+    class_launch = _apply_agent_class_launch_selection(
+        data,
+        launch_cfg,
+        base_kind="engineer",
+        base_dir=base_dir,
+    )
+    if not class_launch.get("ok"):
+        return class_launch["error"]
 
     from .engineer import build_engineer_system_prompt
 
@@ -11435,6 +11601,15 @@ async def _handle_add_engineer_command(
         "slug": cell.slug,
         "name": cell.name,
         "kind": "engineer",
+        "agent_class": class_launch.get("agent_class"),
+        "agent_class_status": state.agent_class_status_for_cell(
+            cell,
+            base_dir=base_dir,
+        ),
+        "agent_profile_status": state.agent_profile_status_for_cell(
+            cell,
+            base_dir=base_dir,
+        ),
         "specializations": list(
             getattr(cell, "engineer_specializations", []) or []
         ),
@@ -11475,6 +11650,14 @@ async def _handle_add_architect_command(
         explicit_template="",
         overrides=overrides,
     )
+    class_launch = _apply_agent_class_launch_selection(
+        data,
+        launch_cfg,
+        base_kind="architect",
+        base_dir=base_dir,
+    )
+    if not class_launch.get("ok"):
+        return class_launch["error"]
     if torque_config.ARCHITECT_USES_WORKTREE:
         launch_cfg["worktree"] = bool(
             launch_cfg.get("worktree")
@@ -11525,6 +11708,15 @@ async def _handle_add_architect_command(
         "slug": cell.slug,
         "name": cell.name,
         "kind": "architect",
+        "agent_class": class_launch.get("agent_class"),
+        "agent_class_status": state.agent_class_status_for_cell(
+            cell,
+            base_dir=base_dir,
+        ),
+        "agent_profile_status": state.agent_profile_status_for_cell(
+            cell,
+            base_dir=base_dir,
+        ),
     }
 
 
@@ -11580,6 +11772,14 @@ async def _handle_add_worker_command(
         explicit_template=explicit_template,
         overrides=overrides,
     )
+    class_launch = _apply_agent_class_launch_selection(
+        data,
+        launch_cfg,
+        base_kind="worker",
+        base_dir=base_dir,
+    )
+    if not class_launch.get("ok"):
+        return class_launch["error"]
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text="",
@@ -11610,6 +11810,116 @@ async def _handle_add_worker_command(
         "slug": cell.slug,
         "name": cell.name,
         "kind": "worker",
+        "agent_class": class_launch.get("agent_class"),
+        "agent_class_status": state.agent_class_status_for_cell(
+            cell,
+            base_dir=base_dir,
+        ),
+        "agent_profile_status": state.agent_profile_status_for_cell(
+            cell,
+            base_dir=base_dir,
+        ),
+    }
+
+
+async def _handle_agent_class_launch_command(
+        data: dict,
+        state: MatrixState, *,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        resolve_engineer_launch_config,
+        resolve_architect_launch_config=None,
+        resolve_worker_launch_config=None,
+        create_agent_with_config,
+        specialization_mgr=None,
+        send_agent_prompt) -> dict:
+    """Create a new Architect/Engineer/Worker from a saved Agent Class."""
+
+    class_id = _requested_agent_class_id(data)
+    if not class_id:
+        return {"type": "error", "message": "Agent Class id is required"}
+    group = str(data.get("group", "") or "").strip() or _resolve_engineer_group(state)
+    if group not in state.groups:
+        state.add_group(group)
+    base_dir = str(data.get("base_dir", "") or "").strip() or await resolve_base_dir(group)
+    definition = agent_class_definition_by_id(class_id, base_dir=base_dir)
+    if not definition:
+        archived = agent_class_definition_by_id(
+            class_id,
+            base_dir=base_dir,
+            include_archived=True,
+        )
+        suffix = " (archived/disabled)" if archived else ""
+        return {
+            "type": "error",
+            "code": "invalid_agent_class",
+            "message": f"Unknown or invalid Agent Class for launch: {class_id}{suffix}",
+        }
+    requested_kind = str(data.get("kind", "") or "").strip()
+    if requested_kind and requested_kind != definition.base_kind:
+        return {
+            "type": "error",
+            "code": "agent_class_base_kind_mismatch",
+            "message": (
+                f"Agent Class {definition.id} is for base_kind={definition.base_kind}, "
+                f"but requested kind is {requested_kind}"
+            ),
+        }
+    payload = dict(data)
+    payload["group"] = group
+    payload["agent_class_id"] = definition.id
+    payload.pop("class_id", None)
+    if definition.base_kind == "architect":
+        created = await _handle_add_architect_command(
+            payload,
+            state,
+            resolve_base_dir=resolve_base_dir,
+            resolve_engineer_launch_config=resolve_engineer_launch_config,
+            resolve_architect_launch_config=resolve_architect_launch_config,
+            create_agent_with_config=create_agent_with_config,
+            send_agent_prompt=send_agent_prompt,
+        )
+    elif definition.base_kind == "engineer":
+        created = await _handle_add_engineer_command(
+            payload,
+            state,
+            resolve_base_dir=resolve_base_dir,
+            resolve_engineer_launch_config=resolve_engineer_launch_config,
+            create_agent_with_config=create_agent_with_config,
+            specialization_mgr=specialization_mgr,
+            send_agent_prompt=send_agent_prompt,
+        )
+    elif definition.base_kind == "worker":
+        created = await _handle_add_worker_command(
+            payload,
+            state,
+            resolve_base_dir=resolve_base_dir,
+            resolve_agent_launch_config=resolve_agent_launch_config,
+            resolve_worker_launch_config=resolve_worker_launch_config,
+            create_agent_with_config=create_agent_with_config,
+            send_agent_prompt=send_agent_prompt,
+        )
+    else:
+        return {
+            "type": "error",
+            "code": "invalid_base_kind",
+            "message": f"Unsupported Agent Class base_kind: {definition.base_kind}",
+        }
+    if isinstance(created, dict) and created.get("type") == "error":
+        return created
+    return {
+        "type": "agent_class_launch",
+        "schema_version": 1,
+        "agent": created,
+        "agent_class": enriched_agent_class_preview(
+            definition,
+            base_dir=base_dir,
+        ),
+        "base_kind": definition.base_kind,
+        "storage": {
+            "mutates_running_sessions": False,
+            "launch_boundary": "new_agent",
+        },
     }
 
 
@@ -17137,6 +17447,20 @@ async def main(connection=None):
                     send_agent_prompt=_send_agent_prompt,
                 )
 
+            elif cmd in {"agent_class_launch", "create_agent_from_class"}:
+                result = await _handle_agent_class_launch_command(
+                    data,
+                    state,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                    resolve_architect_launch_config=_resolve_architect_launch_config,
+                    resolve_worker_launch_config=_resolve_worker_launch_config,
+                    create_agent_with_config=_create_agent_with_config,
+                    specialization_mgr=specialization_mgr,
+                    send_agent_prompt=_send_agent_prompt,
+                )
+
             elif cmd == "architect_engineer_hire":
                 result = await _handle_architect_engineer_hire_command(
                     data,
@@ -20040,8 +20364,17 @@ async def main(connection=None):
                                 explicit_template=explicit_template,
                                 overrides=launch_overrides,
                             )
+                            class_launch = _apply_agent_class_launch_selection(
+                                data,
+                                launch_cfg,
+                                base_kind="worker",
+                                base_dir=base_dir,
+                            )
+                            if not class_launch.get("ok"):
+                                result = class_launch["error"]
+                                cell = None
                             adopt_path = str(data.get("adopt_worktree_path", "") or "").strip()
-                            if adopt_path:
+                            if adopt_path and not result:
                                 adopt_payload = {
                                     "worktree_path": adopt_path,
                                     "branch": str(data.get("adopt_branch", "") or "").strip(),

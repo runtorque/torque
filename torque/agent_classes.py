@@ -15,6 +15,8 @@ import hashlib
 import json
 import os
 import re
+import tempfile
+import time
 from typing import Any
 
 import yaml
@@ -32,7 +34,16 @@ BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
 PROJECT_CLASS_LEAF = "agent_classes"
 
 CLASS_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+CLASS_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ALLOWED_LIFECYCLES = {"stable", "draft"}
+SAFE_UI_METADATA_KEYS = {"label", "icon", "badge", "color"}
+AUTHORING_DISPLAY_ALIASES = {"title", "display_title"}
+AUTHORING_PROMPT_ALIASES = {"instructions", "class_instructions", "class_prompt"}
+CUSTOM_CLASS_ARCHIVED_KEY = "archived"
+MAX_DISPLAY_NAME_LEN = 120
+MAX_DESCRIPTION_LEN = 2000
+MAX_PROMPT_LEN = 30000
+MAX_METADATA_JSON_BYTES = 65536
 
 DEFAULT_CLASS_BY_KIND = {
     "architect": "default-architect",
@@ -71,7 +82,10 @@ KNOWN_CLASS_KEYS = {
 # class-local raw capability/tool semantics. Wave 6B deliberately forbids them.
 AMBIGUOUS_CLASS_PROFILE_KEYS = {
     "profile",
+    "profile_id",
     "agent_profile",
+    "agent_profile_id",
+    "agent_profile_version",
     "runtime_profile",
     "agent_cell_profile",
 }
@@ -168,6 +182,8 @@ class AgentClassDefinition:
         )
 
     def as_preview_dict(self) -> dict[str, Any]:
+        source_kind = "builtin" if self.builtin else "project"
+        archived = agent_class_is_archived(self)
         return {
             "id": self.id,
             "version": self.version,
@@ -177,7 +193,46 @@ class AgentClassDefinition:
             "lifecycle": self.lifecycle,
             "agent_profile_ref": self.agent_profile_ref.as_dict(),
             "builtin": self.builtin,
+            "custom": not self.builtin,
+            "source": source_kind,
+            "source_path": self.source,
+            "archived": archived,
+            "disabled": archived,
+            "scratch_only": bool((self.draft or {}).get("scratch_only") is True),
         }
+
+
+def agent_class_is_archived(definition_or_preview: AgentClassDefinition | dict[str, Any]) -> bool:
+    """Return whether a class has been disabled/archived in project metadata."""
+
+    if isinstance(definition_or_preview, AgentClassDefinition):
+        metadata = definition_or_preview.metadata
+    else:
+        metadata = definition_or_preview.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return False
+    return bool(
+        metadata.get(CUSTOM_CLASS_ARCHIVED_KEY)
+        or metadata.get("disabled")
+        or metadata.get("archived_at")
+    )
+
+
+def _issue(
+    severity: str,
+    code: str,
+    message: str,
+    *,
+    path: str = "",
+    profile_id: str = "",
+) -> ValidationIssue:
+    return ValidationIssue(
+        severity=severity,
+        code=code,
+        message=message,
+        path=path,
+        profile_id=profile_id,
+    )
 
 
 def _find_project_dir(base_dir: str = "") -> Path | None:
@@ -193,6 +248,42 @@ def _find_project_dir(base_dir: str = "") -> Path | None:
             break
         d = parent
     return None
+
+
+def _find_project_root_for_authoring(base_dir: str = "") -> Path:
+    """Resolve the project root used for trusted YAML authoring.
+
+    Readers only discover an existing ``.torque/agent_classes`` directory so
+    they do not create files as a side effect.  Authoring is an explicit trusted
+    operator action, so it may create the project config directory.  Prefer the
+    nearest existing class dir, then the nearest repo/project marker, and finally
+    the supplied directory itself.
+    """
+
+    existing = _find_project_dir(base_dir)
+    if existing:
+        return existing.parent.parent
+    d = Path(os.path.expanduser(base_dir) if base_dir else os.getcwd())
+    if not d.is_dir():
+        d = d.parent if d.parent != d else Path(os.getcwd())
+    d = d.resolve()
+    fallback = d
+    for _ in range(20):
+        if (d / ".git").exists() or (d / ".torque").exists():
+            return d
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return fallback
+
+
+def project_agent_class_dir(base_dir: str = "", *, create: bool = False) -> Path:
+    root = _find_project_root_for_authoring(base_dir)
+    path = root / ".torque" / PROJECT_CLASS_LEAF
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def find_agent_class_dirs(base_dir: str = "", *, include_builtin: bool = True) -> list[tuple[Path, bool]]:
@@ -234,6 +325,30 @@ def load_class_yaml(path: Path) -> tuple[dict[str, Any] | None, ValidationIssue 
     return data, None
 
 
+def _nested_forbidden_key_paths(raw: Any, forbidden: set[str], *,
+                                prefix: str = "") -> list[str]:
+    paths: list[str] = []
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            key_text = str(key)
+            child = f"{prefix}.{key_text}" if prefix else key_text
+            if key_text in forbidden:
+                paths.append(child)
+            paths.extend(_nested_forbidden_key_paths(value, forbidden, prefix=child))
+    elif isinstance(raw, list):
+        for index, value in enumerate(raw):
+            child = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            paths.extend(_nested_forbidden_key_paths(value, forbidden, prefix=child))
+    return paths
+
+
+def _metadata_json_size(metadata: dict[str, Any]) -> int:
+    try:
+        return len(json.dumps(metadata, sort_keys=True, default=str).encode("utf-8"))
+    except Exception:
+        return MAX_METADATA_JSON_BYTES + 1
+
+
 def _profile_by_id_for_validation(base_dir: str = "") -> dict[str, AgentProfileDefinition]:
     profiles, issues = load_agent_profiles(base_dir=base_dir)
     if any(issue.severity == "error" for issue in issues):
@@ -256,6 +371,8 @@ def validate_class_data(
 
     unknown_keys = sorted(set(data) - KNOWN_CLASS_KEYS)
     ambiguous = sorted(set(data) & AMBIGUOUS_CLASS_PROFILE_KEYS)
+    nested_ambiguous = sorted(set(_nested_forbidden_key_paths(data, AMBIGUOUS_CLASS_PROFILE_KEYS)))
+    nested_raw_tool_fields = sorted(set(_nested_forbidden_key_paths(data, RAW_TOOL_OR_CAPABILITY_FIELDS)))
     raw_tool_fields = sorted(set(data) & RAW_TOOL_OR_CAPABILITY_FIELDS)
     if ambiguous:
         issues.append(ValidationIssue(
@@ -266,12 +383,32 @@ def validate_class_data(
             path=source,
             profile_id=class_id,
         ))
+    extra_ambiguous = [path for path in nested_ambiguous if path not in ambiguous]
+    if extra_ambiguous:
+        issues.append(ValidationIssue(
+            "error",
+            "agent_cell_profile_confusion",
+            "Agent Class definitions must not contain AgentCell/profile-like fields: "
+            + ", ".join(extra_ambiguous),
+            path=source,
+            profile_id=class_id,
+        ))
     if raw_tool_fields:
         issues.append(ValidationIssue(
             "error",
             "raw_tool_fields_forbidden",
             "Agent Class definitions must not contain raw MCP/tool/capability fields: "
             + ", ".join(raw_tool_fields),
+            path=source,
+            profile_id=class_id,
+        ))
+    extra_raw_tool_fields = [path for path in nested_raw_tool_fields if path not in raw_tool_fields]
+    if extra_raw_tool_fields:
+        issues.append(ValidationIssue(
+            "error",
+            "raw_tool_fields_forbidden",
+            "Agent Class definitions must not contain nested raw MCP/tool/capability fields: "
+            + ", ".join(extra_raw_tool_fields),
             path=source,
             profile_id=class_id,
         ))
@@ -303,6 +440,55 @@ def validate_class_data(
         issues.append(ValidationIssue(
             "error", "missing_class_version", "Agent Class version is required", path=source, profile_id=class_id
         ))
+    elif not CLASS_VERSION_RE.match(version):
+        issues.append(ValidationIssue(
+            "error",
+            "invalid_class_version",
+            "Agent Class version must be a safe non-empty token",
+            path=source,
+            profile_id=class_id,
+        ))
+    display_name = data.get("display_name", "")
+    if not isinstance(display_name, str):
+        issues.append(ValidationIssue(
+            "error",
+            "display_name_not_string",
+            "display_name must be a string",
+            path=source,
+            profile_id=class_id,
+        ))
+    else:
+        display_name_text = display_name.strip()
+        if not display_name_text:
+            issues.append(ValidationIssue(
+                "error",
+                "missing_display_name",
+                "Agent Class display_name is required",
+                path=source,
+                profile_id=class_id,
+            ))
+        elif len(display_name_text) > MAX_DISPLAY_NAME_LEN or "\n" in display_name_text or "\r" in display_name_text:
+            issues.append(ValidationIssue(
+                "error",
+                "invalid_display_name",
+                f"display_name must be one line and at most {MAX_DISPLAY_NAME_LEN} characters",
+                path=source,
+                profile_id=class_id,
+            ))
+    if "description" in data:
+        description = data.get("description", "")
+        if not isinstance(description, str):
+            issues.append(ValidationIssue(
+                "error", "description_not_string", "description must be a string", path=source, profile_id=class_id
+            ))
+        elif len(description) > MAX_DESCRIPTION_LEN:
+            issues.append(ValidationIssue(
+                "error",
+                "description_too_long",
+                f"description must be at most {MAX_DESCRIPTION_LEN} characters",
+                path=source,
+                profile_id=class_id,
+            ))
     base_kind = str(data.get("base_kind", "") or "").strip()
     if base_kind not in BASE_KINDS:
         issues.append(ValidationIssue(
@@ -325,6 +511,25 @@ def validate_class_data(
         issues.append(ValidationIssue(
             "error", "metadata_not_mapping", "metadata must be a mapping", path=source, profile_id=class_id
         ))
+    elif isinstance(data.get("metadata"), dict):
+        metadata = data.get("metadata") or {}
+        if _metadata_json_size(metadata) > MAX_METADATA_JSON_BYTES:
+            issues.append(ValidationIssue(
+                "error",
+                "metadata_too_large",
+                f"metadata must serialize to at most {MAX_METADATA_JSON_BYTES} bytes",
+                path=source,
+                profile_id=class_id,
+            ))
+        for bool_key in (CUSTOM_CLASS_ARCHIVED_KEY, "disabled"):
+            if bool_key in metadata and not isinstance(metadata.get(bool_key), bool):
+                issues.append(ValidationIssue(
+                    "error",
+                    "metadata_lifecycle_flag_not_bool",
+                    f"metadata.{bool_key} must be a boolean when present",
+                    path=source,
+                    profile_id=class_id,
+                ))
     if "draft" in data and not isinstance(data.get("draft"), dict):
         issues.append(ValidationIssue(
             "error", "draft_not_mapping", "draft must be a mapping", path=source, profile_id=class_id
@@ -332,6 +537,14 @@ def validate_class_data(
     if "prompt" in data and not isinstance(data.get("prompt"), str):
         issues.append(ValidationIssue(
             "error", "prompt_not_string", "prompt must be a string", path=source, profile_id=class_id
+        ))
+    elif isinstance(data.get("prompt"), str) and len(data.get("prompt", "")) > MAX_PROMPT_LEN:
+        issues.append(ValidationIssue(
+            "error",
+            "prompt_too_long",
+            f"prompt must be at most {MAX_PROMPT_LEN} characters",
+            path=source,
+            profile_id=class_id,
         ))
 
     ref_data = data.get("agent_profile_ref")
@@ -490,14 +703,18 @@ def _valid_class_lookup(base_dir: str = "") -> tuple[dict[str, AgentClassDefinit
     return {definition.id: definition for definition in classes}, tuple(issues)
 
 
-def agent_class_definition_by_id(class_id: str, *, base_dir: str = "") -> AgentClassDefinition | None:
+def agent_class_definition_by_id(class_id: str, *, base_dir: str = "",
+                                 include_archived: bool = False) -> AgentClassDefinition | None:
     class_id = str(class_id or "").strip()
     if not class_id:
         return None
     classes_by_id, issues = _valid_class_lookup(base_dir or "")
     if any(issue.severity == "error" for issue in issues):
         return None
-    return classes_by_id.get(class_id)
+    definition = classes_by_id.get(class_id)
+    if definition and agent_class_is_archived(definition) and not include_archived:
+        return None
+    return definition
 
 
 def default_agent_class_id_for_kind(kind: str) -> str:
@@ -505,6 +722,8 @@ def default_agent_class_id_for_kind(kind: str) -> str:
 
 
 def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: dict[str, Any]) -> str:
+    if agent_class_is_archived(class_preview):
+        return "archived"
     lifecycle = str(class_preview.get("lifecycle", "") or "").strip().lower()
     profile_status = str(profile_preview.get("status", "") or "").strip().lower()
     if lifecycle and lifecycle != "stable":
@@ -533,6 +752,10 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
     class_id = str(class_preview.get("id", "") or "").strip()
     lifecycle = str(class_preview.get("lifecycle", "") or "").strip().lower()
     status = _class_status_from_previews(class_preview, profile_preview)
+    if agent_class_is_archived(class_preview):
+        warnings.append(
+            f"{class_id or 'Agent Class'} is archived/disabled and cannot be assigned or launched until re-enabled."
+        )
     if lifecycle and lifecycle != "stable":
         warnings.append(
             f"{class_id or 'Agent Class'} is lifecycle={lifecycle}; use only for scratch/preview unless explicitly approved."
@@ -579,6 +802,19 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["warnings"] = class_warnings_for_preview(preview, profile_preview)
     preview["external_connector_caveat"] = EXTERNAL_CONNECTOR_CAVEAT
     preview["runtime_enforcement"] = "launch_frozen_agent_class_profile_pairing"
+    prompt = str(definition.prompt or "")
+    preview["prompt_summary"] = {
+        "has_prompt": bool(prompt.strip()),
+        "char_count": len(prompt),
+        "preview": prompt.strip()[:240],
+    }
+    preview["restrictions"] = [
+        "Agent Class can reference exactly one Agent Profile.",
+        "Agent Profile remains the MCP/capability enforcement layer.",
+        "Agent Class definitions do not mutate running sessions; changes apply only at launch/relaunch boundaries.",
+        "Raw MCP tools, capability grants/denies, connector governance, and arbitrary runtime kinds are not part of Agent Class YAML/API.",
+    ]
+    preview["launchable"] = not agent_class_is_archived(preview)
     return preview
 
 
@@ -736,7 +972,11 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             effective_id = default_class.id
     assigned_preview = {}
     if assigned_id:
-        assigned_class = agent_class_definition_by_id(assigned_id, base_dir=base_dir)
+        assigned_class = agent_class_definition_by_id(
+            assigned_id,
+            base_dir=base_dir,
+            include_archived=True,
+        )
         if assigned_class:
             assigned_preview = enriched_agent_class_preview(assigned_class, base_dir=base_dir)
 
@@ -748,7 +988,11 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         next_launch_profile_id = direct_profile_id
         next_launch_profile_version = str(getattr(cell, "agent_profile_version", "") or "")
     elif next_launch_class_id:
-        next_class = agent_class_definition_by_id(next_launch_class_id, base_dir=base_dir)
+        next_class = agent_class_definition_by_id(
+            next_launch_class_id,
+            base_dir=base_dir,
+            include_archived=True,
+        )
         if next_class:
             if not next_launch_class_version:
                 next_launch_class_version = next_class.version
@@ -803,6 +1047,7 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
         "direct_agent_profile_assignment": direct_profile_without_class,
+        "next_launch_class_disabled": bool(agent_class_is_archived(assigned_preview)) if assigned_preview else False,
         "warnings": list(effective_preview.get("warnings", []) or []),
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }
@@ -810,6 +1055,398 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
 
 def built_in_agent_class_ids() -> list[str]:
     return ["default-architect", "default-engineer", "default-worker", "product-manager"]
+
+
+def _extract_project_class_paths_by_id(base_dir: str = "") -> dict[str, Path]:
+    out: dict[str, Path] = {}
+    project_dir = project_agent_class_dir(base_dir, create=False)
+    for path in _iter_yaml_paths(project_dir):
+        data, _load_issue = load_class_yaml(path)
+        if not isinstance(data, dict):
+            continue
+        class_id = str(data.get("id", "") or "").strip()
+        if class_id and class_id not in out:
+            out[class_id] = path
+    return out
+
+
+def project_agent_class_path_for_id(class_id: str, *, base_dir: str = "") -> Path | None:
+    class_id = str(class_id or "").strip()
+    if not class_id:
+        return None
+    existing = _extract_project_class_paths_by_id(base_dir)
+    if class_id in existing:
+        return existing[class_id]
+    if not CLASS_ID_RE.match(class_id):
+        return None
+    return project_agent_class_dir(base_dir, create=False) / f"{class_id}.yaml"
+
+
+def _class_authoring_storage(base_dir: str = "", *, path: Path | None = None) -> dict[str, Any]:
+    directory = project_agent_class_dir(base_dir, create=False)
+    return {
+        "kind": "project_yaml",
+        "directory": str(directory),
+        "path": str(path or ""),
+        "config_glob": ".torque/agent_classes/*.yaml",
+        "atomic_writes": True,
+        "mutates_running_sessions": False,
+    }
+
+
+def normalize_agent_class_authoring_data(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize trusted UI/API authoring aliases into the YAML contract.
+
+    The persisted model intentionally stays narrow.  This function accepts a few
+    user-facing aliases (``title`` and safe UI metadata fields) and stores them
+    under existing fields so raw capability/tool data is still rejected by the
+    validator instead of being silently dropped.
+    """
+
+    data = dict(raw or {})
+    for alias in AUTHORING_DISPLAY_ALIASES:
+        if alias in data and not str(data.get("display_name", "") or "").strip():
+            data["display_name"] = data.get(alias)
+        data.pop(alias, None)
+    for alias in AUTHORING_PROMPT_ALIASES:
+        if alias in data and not str(data.get("prompt", "") or "").strip():
+            data["prompt"] = data.get(alias)
+        data.pop(alias, None)
+
+    ui_metadata: dict[str, str] = {}
+    for key in sorted(SAFE_UI_METADATA_KEYS):
+        if key not in data:
+            continue
+        value = data.pop(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            ui_metadata[key] = text[:200]
+    if ui_metadata:
+        metadata = data.get("metadata", {})
+        if isinstance(metadata, dict):
+            metadata = dict(metadata)
+            existing_ui = metadata.get("ui", {})
+            if not isinstance(existing_ui, dict):
+                existing_ui = {}
+            metadata["ui"] = {**existing_ui, **ui_metadata}
+            data["metadata"] = metadata
+    return data
+
+
+def _canonical_agent_class_data(data: dict[str, Any]) -> dict[str, Any]:
+    ref = data.get("agent_profile_ref") if isinstance(data.get("agent_profile_ref"), dict) else {}
+    out: dict[str, Any] = {
+        "id": str(data.get("id", "") or "").strip(),
+        "version": str(data.get("version", "") or "").strip(),
+        "base_kind": str(data.get("base_kind", "") or "").strip(),
+        "display_name": str(data.get("display_name", "") or "").strip(),
+    }
+    description = str(data.get("description", "") or "").strip()
+    if description:
+        out["description"] = description
+    out["lifecycle"] = str(data.get("lifecycle", "stable") or "stable").strip()
+    out["agent_profile_ref"] = {
+        "id": str(ref.get("id", "") or "").strip(),
+        "version": str(ref.get("version", "") or "").strip(),
+    }
+    prompt = str(data.get("prompt", "") or "").strip()
+    if prompt:
+        out["prompt"] = prompt
+    draft = data.get("draft")
+    if isinstance(draft, dict) and draft:
+        out["draft"] = dict(draft)
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        out["metadata"] = dict(metadata)
+    return out
+
+
+def validate_agent_class_draft(
+    raw_data: dict[str, Any],
+    *,
+    base_dir: str = "",
+    source: str = "agent_class_draft",
+) -> dict[str, Any]:
+    data = normalize_agent_class_authoring_data(raw_data)
+    definition, issues = validate_class_data(
+        data,
+        source=source,
+        builtin=False,
+        base_dir=base_dir,
+    )
+    preview = enriched_agent_class_preview(definition, base_dir=base_dir) if definition else None
+    return {
+        "ok": not any(issue.severity == "error" for issue in issues),
+        "valid": not any(issue.severity == "error" for issue in issues),
+        "agent_class": preview,
+        "normalized": _canonical_agent_class_data(data) if definition else data,
+        "issues": [issue.as_dict() for issue in issues],
+        "errors": [issue.as_dict() for issue in issues if issue.severity == "error"],
+        "warnings": (
+            list(preview.get("warnings", []) or []) if isinstance(preview, dict) else []
+        ) + [
+            issue.as_dict() for issue in issues if issue.severity == "warn"
+        ],
+        "storage": _class_authoring_storage(base_dir),
+    }
+
+
+def _write_agent_class_yaml_atomic(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+        text=True,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(
+                data,
+                fh,
+                sort_keys=False,
+                allow_unicode=True,
+                default_flow_style=False,
+            )
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+def save_custom_agent_class(
+    raw_data: dict[str, Any],
+    *,
+    base_dir: str = "",
+    mode: str = "save",
+) -> dict[str, Any]:
+    """Validate and atomically persist a custom project Agent Class YAML file."""
+
+    normalized = normalize_agent_class_authoring_data(raw_data)
+    class_id = str(normalized.get("id", "") or "").strip()
+    validation = validate_agent_class_draft(
+        normalized,
+        base_dir=base_dir,
+        source="agent_class_save",
+    )
+    if not validation["valid"]:
+        validation["type"] = "agent_class_save"
+        validation["operation"] = mode
+        return validation
+    if class_id in built_in_agent_class_ids():
+        issue = _issue(
+            "error",
+            "builtin_class_id_reserved",
+            f"{class_id} is a built-in Agent Class id and cannot be overwritten by custom YAML",
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_save",
+            "ok": False,
+            "valid": False,
+            "operation": mode,
+            "agent_class": None,
+            "normalized": normalized,
+            "issues": [issue],
+            "errors": [issue],
+            "warnings": [],
+            "storage": _class_authoring_storage(base_dir),
+        }
+
+    project_dir = project_agent_class_dir(base_dir, create=True)
+    existing_by_id = _extract_project_class_paths_by_id(base_dir)
+    existing_path = existing_by_id.get(class_id)
+    canonical_path = project_dir / f"{class_id}.yaml"
+    path = existing_path or canonical_path
+    mode = str(mode or "save").strip().lower()
+    if mode == "create" and (existing_path or canonical_path.exists()):
+        issue = _issue(
+            "error",
+            "custom_class_already_exists",
+            f"Custom Agent Class already exists: {class_id}",
+            path=str(existing_path or canonical_path),
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_save",
+            "ok": False,
+            "valid": False,
+            "operation": "create",
+            "agent_class": None,
+            "normalized": normalized,
+            "issues": [issue],
+            "errors": [issue],
+            "warnings": [],
+            "storage": _class_authoring_storage(base_dir, path=path),
+        }
+    if mode == "update" and not existing_path:
+        issue = _issue(
+            "error",
+            "custom_class_not_found",
+            f"Custom Agent Class not found for update: {class_id}",
+            path=str(canonical_path),
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_save",
+            "ok": False,
+            "valid": False,
+            "operation": "update",
+            "agent_class": None,
+            "normalized": normalized,
+            "issues": [issue],
+            "errors": [issue],
+            "warnings": [],
+            "storage": _class_authoring_storage(base_dir, path=path),
+        }
+
+    canonical = _canonical_agent_class_data(normalized)
+    _write_agent_class_yaml_atomic(path, canonical)
+    _valid_class_lookup.cache_clear()
+    definition = agent_class_definition_by_id(
+        class_id,
+        base_dir=base_dir,
+        include_archived=True,
+    )
+    preview = enriched_agent_class_preview(definition, base_dir=base_dir) if definition else None
+    operation = "updated" if existing_path else "created"
+    return {
+        "type": "agent_class_save",
+        "ok": True,
+        "valid": True,
+        "operation": operation,
+        "agent_class": preview,
+        "normalized": canonical,
+        "issues": [],
+        "errors": [],
+        "warnings": list(preview.get("warnings", []) or []) if isinstance(preview, dict) else [],
+        "storage": _class_authoring_storage(base_dir, path=path),
+        "audit": {
+            "event": f"custom_class_{operation}",
+            "mutates_running_sessions": False,
+        },
+    }
+
+
+def archive_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str, Any]:
+    class_id = str(class_id or "").strip()
+    path = _extract_project_class_paths_by_id(base_dir).get(class_id)
+    if class_id in built_in_agent_class_ids():
+        issue = _issue(
+            "error",
+            "builtin_class_read_only",
+            f"{class_id} is built-in and cannot be archived from project config",
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_archive",
+            "ok": False,
+            "valid": False,
+            "issues": [issue],
+            "errors": [issue],
+            "storage": _class_authoring_storage(base_dir),
+        }
+    if not path or not path.exists():
+        issue = _issue(
+            "error",
+            "custom_class_not_found",
+            f"Custom Agent Class not found: {class_id}",
+            path=str(path or ""),
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_archive",
+            "ok": False,
+            "valid": False,
+            "issues": [issue],
+            "errors": [issue],
+            "storage": _class_authoring_storage(base_dir, path=path),
+        }
+    data, load_issue = load_class_yaml(path)
+    if load_issue or not isinstance(data, dict):
+        issue = (load_issue.as_dict() if load_issue else _issue(
+            "error",
+            "class_not_mapping",
+            "Agent Class YAML must be a mapping",
+            path=str(path),
+            profile_id=class_id,
+        ).as_dict())
+        return {
+            "type": "agent_class_archive",
+            "ok": False,
+            "valid": False,
+            "issues": [issue],
+            "errors": [issue],
+            "storage": _class_authoring_storage(base_dir, path=path),
+        }
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata = dict(metadata)
+    metadata[CUSTOM_CLASS_ARCHIVED_KEY] = True
+    metadata["archived_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    data["metadata"] = metadata
+    save_result = save_custom_agent_class(data, base_dir=base_dir, mode="update")
+    save_result["type"] = "agent_class_archive"
+    save_result["operation"] = "archived"
+    if save_result.get("audit"):
+        save_result["audit"]["event"] = "custom_class_archived"
+    return save_result
+
+
+def delete_custom_agent_class(class_id: str, *, base_dir: str = "") -> dict[str, Any]:
+    class_id = str(class_id or "").strip()
+    path = _extract_project_class_paths_by_id(base_dir).get(class_id)
+    if class_id in built_in_agent_class_ids():
+        issue = _issue(
+            "error",
+            "builtin_class_read_only",
+            f"{class_id} is built-in and cannot be deleted from project config",
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_delete",
+            "ok": False,
+            "issues": [issue],
+            "errors": [issue],
+            "storage": _class_authoring_storage(base_dir),
+        }
+    if not path or not path.exists():
+        issue = _issue(
+            "error",
+            "custom_class_not_found",
+            f"Custom Agent Class not found: {class_id}",
+            path=str(path or ""),
+            profile_id=class_id,
+        ).as_dict()
+        return {
+            "type": "agent_class_delete",
+            "ok": False,
+            "issues": [issue],
+            "errors": [issue],
+            "storage": _class_authoring_storage(base_dir, path=path),
+        }
+    path.unlink()
+    _valid_class_lookup.cache_clear()
+    return {
+        "type": "agent_class_delete",
+        "ok": True,
+        "operation": "deleted",
+        "class_id": class_id,
+        "issues": [],
+        "errors": [],
+        "storage": _class_authoring_storage(base_dir, path=path),
+        "audit": {
+            "event": "custom_class_deleted",
+            "mutates_running_sessions": False,
+        },
+    }
 
 
 def validate_all_agent_classes(base_dir: str = "") -> dict[str, Any]:

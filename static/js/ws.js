@@ -671,6 +671,22 @@ function connect() {
       state.agent_class_issues = Array.isArray(msg.issues) ? msg.issues : [];
     } else if (msg.type === 'agent_class_preview') {
       state.agent_class_preview = msg.agent_class || null;
+    } else if (msg.type === 'agent_class_validation') {
+      state.agent_class_validation = msg || null;
+      state.agent_class_draft_preview = msg.agent_class || null;
+    } else if (msg.type === 'agent_class_save' || msg.type === 'agent_class_archive' || msg.type === 'agent_class_delete') {
+      state.agent_class_authoring_result = msg || null;
+      if (Array.isArray(msg.classes)) {
+        state.agent_classes = msg.classes;
+      }
+      if (Array.isArray(msg.registry_issues)) {
+        state.agent_class_issues = msg.registry_issues;
+      }
+      if (msg.agent_class) {
+        state.agent_class_preview = msg.agent_class;
+      }
+    } else if (msg.type === 'agent_class_launch') {
+      state.agent_class_launch_result = msg || null;
     } else if (msg.type === 'agent_class_assignment') {
       state.agent_class_assignment = msg.status || null;
       var classStatus = msg.status || {};
