@@ -16318,7 +16318,7 @@ async def main(connection=None):
                 cell = state.agents.get(agent_id)
                 base_dir = str(data.get("base_dir", "") or "")
                 if not base_dir and cell:
-                    base_dir = cell.worktree_repo_root or cell.directory or await resolve_base_dir(cell.group)
+                    base_dir = cell.worktree_repo_root or cell.directory or await _resolve_base_dir(cell.group)
                 status = state.assign_agent_profile(
                     agent_id,
                     str(data.get("profile_id", "") or ""),
@@ -16348,7 +16348,7 @@ async def main(connection=None):
             data,
             state,
             db,
-            resolve_base_dir,
+            _resolve_base_dir,
         )
         if agent_class_response is not None:
             return agent_class_response
