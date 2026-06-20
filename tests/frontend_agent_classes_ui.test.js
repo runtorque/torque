@@ -63,6 +63,9 @@ class FakeDocument {
     this.elements[id] = el;
     return el;
   }
+  createElement(tagName) {
+    return new FakeElement('', this);
+  }
   getElementById(id) { return this.elements[id] || null; }
   querySelectorAll() { return []; }
 }
@@ -75,6 +78,7 @@ function loadScript(context, relPath) {
 function createHarness({ loadModals = false } = {}) {
   const document = new FakeDocument();
   const panel = document.register('panel-templates');
+  document.register('agent-class-editor');
   const sendCalls = [];
   const toasts = [];
   const confirms = [];
@@ -131,6 +135,10 @@ function createHarness({ loadModals = false } = {}) {
 
 function run(context, code) { return vm.runInContext(code, context); }
 function json(context, expr) { return JSON.parse(run(context, `JSON.stringify(${expr})`)); }
+function classUi(document, panel) {
+  const editor = document.getElementById('agent-class-editor');
+  return (panel.innerHTML || '') + '\n' + (editor ? editor.innerHTML || '' : '');
+}
 
 function registerClassForm(document) {
   [
@@ -195,21 +203,21 @@ test('Agent Class manager renders class list, PM caveat, archived disabled previ
   assert.deepEqual(sendCalls[0], { cmd: 'agent_class_list', base_dir: '/repo' });
 
   run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
-  assert.match(panel.innerHTML, /Default Worker/);
-  assert.match(panel.innerHTML, /Review Worker/);
-  assert.match(panel.innerHTML, /Old Worker/);
-  assert.match(panel.innerHTML, /Product Manager/);
+  assert.match(classUi(document, panel), /Default Worker/);
+  assert.match(classUi(document, panel), /Review Worker/);
+  assert.match(classUi(document, panel), /Old Worker/);
+  assert.match(classUi(document, panel), /Product Manager/);
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
-  assert.match(panel.innerHTML, /Product Manager \(draft\)/);
-  assert.match(panel.innerHTML, /draft/);
-  assert.match(panel.innerHTML, /External connector caveat/);
-  assert.match(panel.innerHTML, /Do not use for live PM dogfood/);
+  assert.match(classUi(document, panel), /Product Manager \(draft\)/);
+  assert.match(classUi(document, panel), /draft/);
+  assert.match(classUi(document, panel), /External connector caveat/);
+  assert.match(classUi(document, panel), /Do not use for live PM dogfood/);
 
   run(context, `agentClassManagerSelect('old-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[2])} })`);
-  assert.match(panel.innerHTML, /Archived\/disabled Agent Classes cannot launch/);
+  assert.match(classUi(document, panel), /Archived\/disabled Agent Classes cannot launch/);
 
   run(context, `agentClassManagerSelect('review-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[1])} })`);
@@ -247,7 +255,7 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   assert.equal(sendCalls.at(-1).agent_class.id, 'qa-worker');
 
   run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: false, ok: false, errors: [{ severity: 'error', code: 'bad', message: 'Display name is unsafe' }], warnings: [], agent_class: null })`);
-  assert.match(panel.innerHTML, /Display name is unsafe/);
+  assert.match(classUi(document, panel), /Display name is unsafe/);
   run(context, `agentClassManagerSave()`);
   assert.notEqual(sendCalls.at(-1).cmd, 'agent_class_create');
 
@@ -276,6 +284,14 @@ test('Agent Class manager preserves focused draft, caret, and scroll across rere
   run(context, `agentClassManagerSelect('review-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[1])} })`);
 
+  document.getElementById('agent-class-id').value = 'review-worker';
+  document.getElementById('agent-class-version').value = '1';
+  document.getElementById('agent-class-base-kind').value = 'worker';
+  document.getElementById('agent-class-display-name').value = 'Review Worker';
+  document.getElementById('agent-class-description').value = 'Reviews patches.';
+  document.getElementById('agent-class-lifecycle').value = 'stable';
+  document.getElementById('agent-class-profile-id').value = 'restricted-worker';
+  document.getElementById('agent-class-profile-version').value = '2';
   const prompt = document.getElementById('agent-class-prompt');
   prompt.value = 'operator draft that must survive';
   prompt.selectionStart = 9;
@@ -283,9 +299,9 @@ test('Agent Class manager preserves focused draft, caret, and scroll across rere
   prompt.scrollTop = 33;
   prompt.focus();
   document.getElementById('agent-class-editor').scrollTop = 77;
-  run(context, `_agentClassEditorDirty = true; renderAgentClassesPanel();`);
+  run(context, `_agentClassEditorDirty = true; _agentClassSkipNextDraftCapture = false; renderAgentClassesPanel();`);
 
-  assert.match(panel.innerHTML, /operator draft that must survive/);
+  assert.match(classUi(document, panel), /operator draft that must survive/);
   assert.equal(document.activeElement.id, 'agent-class-prompt');
   assert.equal(prompt.selectionStart, 9);
   assert.equal(prompt.selectionEnd, 14);
@@ -318,7 +334,7 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   const { context, document, sendCalls } = createHarness({ loadModals: true });
   registerAddWorkerDom(document);
   registerEngineerArchitectDom(document);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }]))}, issues: [] })`);
 
   run(context, `agentClassPickerPrepare('worker', 'alpha', '/repo', 'add-worker')`);
   assert.match(document.getElementById('add-agent-class-select').innerHTML, /Review Worker/);
@@ -337,17 +353,19 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   assert.equal(sendCalls.at(-1).cmd, 'add_worker');
   assert.equal(sendCalls.at(-1).agent_class_id, 'review-worker');
 
+  run(context, `openAddEngineerModal({ group: 'alpha' }); agentClassPickerSelect('add-engineer', '');`);
   document.getElementById('engineer-name-input').value = 'Builder';
-  run(context, `openAddEngineerModal({ group: 'alpha' }); agentClassPickerSelect('add-engineer', ''); submitAddEngineer();`);
+  run(context, `submitAddEngineer();`);
   assert.deepEqual(sendCalls.at(-1), { cmd: 'add_engineer', name: 'Builder', group: 'alpha' });
 
   document.getElementById('engineer-name-input').value = 'Builder PM';
-  run(context, `agentClassPickerSelect('add-engineer', 'product-manager'); submitAddEngineer();`);
+  run(context, `agentClassPickerSelect('add-engineer', 'team-engineer'); submitAddEngineer();`);
   assert.equal(sendCalls.at(-1).cmd, 'add_engineer');
-  assert.equal(sendCalls.at(-1).agent_class_id, 'product-manager');
+  assert.equal(sendCalls.at(-1).agent_class_id, 'team-engineer');
 
+  run(context, `openAddArchitectModal({ group: 'alpha' }); agentClassPickerSelect('add-architect', 'product-manager');`);
   document.getElementById('architect-name-input').value = 'Planner';
-  run(context, `openAddArchitectModal({ group: 'alpha' }); agentClassPickerSelect('add-architect', 'product-manager'); submitAddArchitect();`);
+  run(context, `submitAddArchitect();`);
   assert.equal(sendCalls.at(-1).cmd, 'add_architect');
   assert.equal(sendCalls.at(-1).agent_class_id, 'product-manager');
 });

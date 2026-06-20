@@ -1074,6 +1074,7 @@ function agentClassManagerRequestProfiles(baseDir, force) {
 
 function agentClassManagerReceiveProfiles(msg) {
   msg = msg || {};
+  if (_agentClassProfileLoadingBaseDir == null) return;
   _agentClassProfileList = Array.isArray(msg.profiles) ? msg.profiles.slice() : [];
   _agentClassProfileIssues = Array.isArray(msg.issues) ? msg.issues.slice() : [];
   _agentClassProfileLoadedBaseDir = _agentClassProfileLoadingBaseDir || _agentClassCurrentBaseDir();
@@ -1874,7 +1875,8 @@ function _agentClassCaptureEditorUiState() {
     var el = document.getElementById(formIds[i]);
     if (!el) continue;
     hasForm = true;
-    form[formIds[i]] = ('checked' in el) ? !!el.checked : (('value' in el) ? el.value : '');
+    var isCheckbox = String(el.type || '').toLowerCase() === 'checkbox' || formIds[i] === 'agent-class-scratch-only';
+    form[formIds[i]] = isCheckbox ? !!el.checked : (('value' in el) ? el.value : '');
   }
   snapshot.form = hasForm ? form : null;
   var active = document.activeElement;
@@ -1934,7 +1936,8 @@ function _agentClassRestoreEditorUiState(root, snapshot) {
     Object.keys(form).forEach(function(id) {
       var el = document.getElementById(id);
       if (!el) return;
-      if ('checked' in el) el.checked = !!form[id];
+      var isCheckbox = String(el.type || '').toLowerCase() === 'checkbox' || id === 'agent-class-scratch-only';
+      if (isCheckbox) el.checked = !!form[id];
       else if ('value' in el) el.value = form[id];
     });
   }
@@ -1969,7 +1972,13 @@ function agentClassPickerPrepare(kind, group, baseDir, contextKey) {
 
 function agentClassPickerSelected(contextKey) {
   contextKey = String(contextKey || '').trim();
-  return String(_agentClassPickerSelections[contextKey] || '').trim();
+  var selected = String(_agentClassPickerSelections[contextKey] || '').trim();
+  if (!selected) return '';
+  var ctx = _agentClassPickerContexts[contextKey] || {};
+  var item = _agentClassById(selected);
+  if (!item) return '';
+  if (_agentClassLaunchDisabledReason(item, ctx.kind || item.base_kind)) return '';
+  return selected;
 }
 
 function agentClassPickerSelect(contextKey, value) {
