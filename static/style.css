@@ -13915,3 +13915,246 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .agent-profile-actions {
   margin-top: 8px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Agent Class trusted UI                                              */
+/* ------------------------------------------------------------------ */
+.tpled-form select {
+  width: 100%; box-sizing: border-box;
+  font-size: 10px; padding: 4px 6px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.agent-class-badge {
+  border-color: rgba(88, 166, 255, 0.35);
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.10);
+}
+.agent-class-picker-row {
+  margin: 6px 0;
+}
+.agent-class-picker-hint {
+  margin-top: 3px;
+  line-height: 1.35;
+}
+.agent-class-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.agent-class-card-list-empty {
+  display: block;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.agent-class-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px;
+  background: rgba(139, 148, 158, 0.06);
+  min-width: 0;
+}
+.agent-class-card:hover,
+.agent-class-card.active {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.10);
+}
+.agent-class-card.disabled {
+  border-style: dashed;
+  opacity: 0.74;
+}
+.agent-class-card-title,
+.agent-class-card-id,
+.agent-class-card-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-class-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+.agent-class-card-id,
+.agent-class-card-path {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.agent-class-card-chips,
+.agent-class-preview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.agent-class-card-chips span,
+.agent-class-preview-chips span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-size: 8px;
+  color: var(--text-dim);
+  background: rgba(139, 148, 158, 0.08);
+}
+.agent-class-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.95fr) minmax(260px, 1.05fr);
+  gap: 10px;
+  align-items: start;
+}
+.agent-class-form,
+.agent-class-preview {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(139, 148, 158, 0.05);
+}
+.agent-class-preview {
+  background: var(--bg);
+}
+.agent-class-form-title,
+.agent-class-preview-title,
+.agent-class-block-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+.agent-class-form-subtitle,
+.agent-class-preview-subtitle,
+.agent-class-preview-description,
+.agent-class-hint,
+.agent-class-disabled-reason,
+.agent-class-storage {
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+.agent-class-readonly-note,
+.agent-class-message,
+.agent-class-error,
+.agent-class-issues,
+.agent-class-caveat {
+  margin: 8px 0;
+  padding: 7px;
+  border-radius: 7px;
+  font-size: 9px;
+  line-height: 1.35;
+}
+.agent-class-readonly-note,
+.agent-class-caveat {
+  border: 1px solid rgba(210, 153, 34, 0.30);
+  background: rgba(210, 153, 34, 0.10);
+  color: var(--amber);
+}
+.agent-class-message {
+  border: 1px solid rgba(63, 185, 80, 0.30);
+  background: rgba(63, 185, 80, 0.10);
+  color: var(--green);
+}
+.agent-class-error {
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.10);
+  color: var(--red);
+}
+.agent-class-issues {
+  border: 1px solid rgba(210, 153, 34, 0.28);
+  background: rgba(210, 153, 34, 0.08);
+  color: var(--amber);
+}
+.agent-class-issues ul,
+.agent-class-restrictions ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+.agent-class-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+.agent-class-pairing,
+.agent-class-summary-grid,
+.agent-class-launch-result {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.agent-class-pairing div,
+.agent-class-summary-grid div,
+.agent-class-launch-result div {
+  min-width: 0;
+}
+.agent-class-pairing span,
+.agent-class-summary-grid span,
+.agent-class-launch-result span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.agent-class-pairing strong,
+.agent-class-summary-grid strong,
+.agent-class-launch-result strong {
+  display: block;
+  color: var(--text);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.agent-class-prompt-preview,
+.agent-class-normalized pre {
+  margin-top: 8px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(139, 148, 158, 0.07);
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-class-restrictions {
+  margin-top: 8px;
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+.agent-class-launch-box {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 5px;
+}
+.agent-class-launch-box label {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.agent-class-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.agent-class-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.agent-class-preview-draft,
+.agent-class-preview-restricted,
+.agent-class-preview-archived,
+.agent-class-status-draft,
+.agent-class-status-restricted,
+.agent-class-status-archived {
+  border-color: rgba(210, 153, 34, 0.35);
+}
+@media (max-width: 980px) {
+  .agent-class-workspace {
+    grid-template-columns: 1fr;
+  }
+}

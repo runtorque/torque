@@ -1205,6 +1205,11 @@ function openAddEngineerModal(options, architectId) {
   }
   if (nameInput) nameInput.value = '';
   if (commandInput) commandInput.value = '';
+  const classRow = document.getElementById('engineer-agent-class-row');
+  if (classRow) classRow.classList.toggle('hidden', !!_addEngineerArchitectId);
+  if (!_addEngineerArchitectId && typeof agentClassPickerPrepare === 'function') {
+    agentClassPickerPrepare('engineer', _addEngineerGroup, agentClassBaseDirForGroup(_addEngineerGroup), 'add-engineer');
+  }
   if (_addEngineerArchitectId && typeof send === 'function') {
     send({ cmd: 'list_specializations', group: _addEngineerSpecializationsGroup || '' });
   }
@@ -1229,6 +1234,10 @@ function submitAddEngineer() {
     }
     : { cmd: 'add_engineer', name };
   if (!_addEngineerArchitectId && _addEngineerGroup) payload.group = _addEngineerGroup;
+  if (!_addEngineerArchitectId && typeof agentClassPickerSelected === 'function') {
+    const agentClassId = agentClassPickerSelected('add-engineer');
+    if (agentClassId) payload.agent_class_id = agentClassId;
+  }
   if (command) payload.command = command;
   send(payload);
   if (_addEngineerArchitectId && typeof _showToast === 'function') {
@@ -1270,6 +1279,9 @@ function openAddArchitectModal(group) {
   }
   if (nameInput) nameInput.value = '';
   if (commandInput) commandInput.value = '';
+  if (typeof agentClassPickerPrepare === 'function') {
+    agentClassPickerPrepare('architect', _addArchitectGroup, agentClassBaseDirForGroup(_addArchitectGroup), 'add-architect');
+  }
   modal.classList.add('visible');
   if (nameInput && typeof nameInput.focus === 'function') nameInput.focus();
   if (nameInput && typeof nameInput.select === 'function') nameInput.select();
@@ -1283,6 +1295,10 @@ function submitAddArchitect() {
   if (!name) return;
   const payload = { cmd: 'add_architect', name };
   if (_addArchitectGroup) payload.group = _addArchitectGroup;
+  if (typeof agentClassPickerSelected === 'function') {
+    const agentClassId = agentClassPickerSelected('add-architect');
+    if (agentClassId) payload.agent_class_id = agentClassId;
+  }
   if (command) payload.command = command;
   send(payload);
   if (typeof _showToast === 'function') {

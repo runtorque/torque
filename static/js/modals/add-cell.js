@@ -87,6 +87,7 @@ function _showAddModal(mode, group, config) {
   const iconRow = document.getElementById('add-icon-row');
   const providerRow = document.getElementById('add-provider-row');
   const templateRow = document.getElementById('add-template-row');
+  const agentClassRow = document.getElementById('add-agent-class-row');
   if (isTerminal) {
     cmdRow.classList.remove('hidden');
     modelRow.classList.add('hidden');
@@ -96,6 +97,7 @@ function _showAddModal(mode, group, config) {
     iconRow.classList.add('hidden');
     providerRow.classList.add('hidden');
     templateRow.classList.add('hidden');
+    if (agentClassRow) agentClassRow.classList.add('hidden');
   } else {
     cmdRow.classList.add('hidden');
     modelRow.classList.add('hidden');
@@ -105,6 +107,7 @@ function _showAddModal(mode, group, config) {
     iconRow.classList.remove('hidden');
     providerRow.classList.remove('hidden');
     templateRow.classList.remove('hidden');
+    if (agentClassRow) agentClassRow.classList.toggle('hidden', !isWorker);
     _renderIconPicker('add-icon-picker', '', 'selectIcon');
   }
   _setAddAdvancedState(mode);
@@ -219,6 +222,10 @@ function _showAddModal(mode, group, config) {
     document.getElementById('add-wt-squash').checked = resolved.worktree_merge_squash !== false;
     if (resolved.icon) selectIcon(resolved.icon);
     _toggleAddWorktreeFields();
+  }
+
+  if (isWorker && typeof agentClassPickerPrepare === 'function') {
+    agentClassPickerPrepare('worker', group, agentClassBaseDirForGroup(group, config), 'add-worker');
   }
 
   document.getElementById('modal-add').classList.add('visible');
@@ -361,6 +368,10 @@ function submitAdd() {
   } else {
     const tpl = document.getElementById('add-template-select').value;
     if (tpl) msg.template = tpl;
+    if (addCellMode === 'worker' && typeof agentClassPickerSelected === 'function') {
+      const agentClassId = agentClassPickerSelected('add-worker');
+      if (agentClassId) msg.agent_class_id = agentClassId;
+    }
     const prov = document.getElementById('add-provider-select').value;
     if (prov && prov !== '__custom__') msg.provider = prov;
     if (command) msg.command = command;
