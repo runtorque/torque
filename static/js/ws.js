@@ -666,6 +666,24 @@ function connect() {
       if (typeof agentPanelReceiveAgentProfileAssignment === 'function') {
         agentPanelReceiveAgentProfileAssignment(msg);
       }
+    } else if (msg.type === 'agent_classes') {
+      state.agent_classes = Array.isArray(msg.classes) ? msg.classes : [];
+      state.agent_class_issues = Array.isArray(msg.issues) ? msg.issues : [];
+    } else if (msg.type === 'agent_class_preview') {
+      state.agent_class_preview = msg.agent_class || null;
+    } else if (msg.type === 'agent_class_assignment') {
+      state.agent_class_assignment = msg.status || null;
+      var classStatus = msg.status || {};
+      var classAgentId = classStatus.agent_id || '';
+      var classCell = classAgentId && state.agents ? state.agents[classAgentId] : null;
+      if (classCell) {
+        classCell.agent_class_id = String(classStatus.assigned_class_id || '').trim();
+        classCell.agent_class_version = String(classStatus.assigned_class_version || '').trim();
+        classCell.agent_class_assigned_at = Number(classStatus.assigned_at || classCell.agent_class_assigned_at || 0) || 0;
+        classCell.agent_class_assigned_by = String(classStatus.assigned_by || classCell.agent_class_assigned_by || '').trim();
+      }
+    } else if (msg.type === 'agent_class_status') {
+      state.agent_class_status = msg.status || null;
     } else if (msg.type === 'engineer_specializations') {
       if (typeof agentPanelReceiveEngineerSpecializations === 'function') {
         agentPanelReceiveEngineerSpecializations(msg);

@@ -1144,6 +1144,18 @@ class AgentCell:
     effective_agent_profile_version: str = ""
     effective_agent_profile_snapshot: dict = field(default_factory=dict)
     effective_agent_profile_applied_at: float = 0.0
+    # Custom Agent Classes (Wave 6B): desired assignment is separate from the
+    # frozen effective class/profile pairing applied at launch. Agent Classes
+    # are user-facing templates over base runtime kinds; Agent Profiles remain
+    # the enforcement layer.
+    agent_class_id: str = ""
+    agent_class_version: str = ""
+    agent_class_assigned_at: float = 0.0
+    agent_class_assigned_by: str = ""
+    effective_agent_class_id: str = ""
+    effective_agent_class_version: str = ""
+    effective_agent_class_snapshot: dict = field(default_factory=dict)
+    effective_agent_class_applied_at: float = 0.0
     dismissed_at: int = 0  # unix timestamp when an architect/engineer is paused/dismissed
     deleted_at: float = 0.0  # unix timestamp when the cell entered the restore window
     permanent_delete_after: float = 0.0  # unix timestamp when tombstone is purgeable
@@ -10624,15 +10636,23 @@ class MatrixState:
         )
         return self.agent_profile_status_for_cell(cell, base_dir=base_dir)
 
-    def apply_effective_agent_profile_for_launch(self, cell, *, base_dir: str = "",
-                                                 actor_kind: str = "system",
-                                                 actor_id: str = "launch") -> dict:
-        """Freeze the desired/default Agent Profile snapshot for a new session."""
+    def _apply_effective_agent_profile_snapshot(self, cell, *, profile_id: str,
+                                                base_dir: str = "",
+                                                actor_kind: str = "system",
+                                                actor_id: str = "launch",
+                                                assignment_source: str = "",
+                                                update_desired_version: bool = True,
+                                                audit_message: str = "") -> dict:
+        """Freeze a specific Agent Profile snapshot for a new session.
+
+        This private helper preserves the public Agent Profile launch semantics
+        while letting Agent Classes freeze their referenced profile without
+        copying profile preview/audit logic.
+        """
 
         if not cell or getattr(cell, "cell_type", "") != "agent":
             return {}
         from .agent_profiles import (
-            default_full_profile_id_for_kind,
             enriched_profile_preview,
             profile_definition_by_id,
         )
@@ -10640,8 +10660,7 @@ class MatrixState:
         base_kind = str(getattr(cell, "kind", "") or "").strip()
         if not base_kind:
             return {}
-        desired_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
-        profile_id = desired_id or default_full_profile_id_for_kind(base_kind)
+        profile_id = str(profile_id or "").strip()
         if not profile_id:
             return {}
         profile = profile_definition_by_id(
@@ -10660,13 +10679,14 @@ class MatrixState:
             "profile_version": getattr(cell, "effective_agent_profile_version", "") or "",
         }
         snapshot = enriched_profile_preview(profile)
-        snapshot["assignment_source"] = "assigned" if desired_id else "default_full_base_kind"
+        snapshot["assignment_source"] = assignment_source or "assigned"
         snapshot["frozen_at"] = time.time()
         cell.effective_agent_profile_id = profile.id
         cell.effective_agent_profile_version = profile.version
         cell.effective_agent_profile_snapshot = snapshot
         cell.effective_agent_profile_applied_at = float(snapshot["frozen_at"])
-        if desired_id and cell.agent_profile_version != profile.version:
+        desired_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
+        if update_desired_version and desired_id and cell.agent_profile_version != profile.version:
             cell.agent_profile_version = profile.version
         self._emit_agent(cell)
         self._db_save_agent(cell)
@@ -10678,15 +10698,291 @@ class MatrixState:
                 actor_id=actor_id or "launch",
                 previous=previous,
                 snapshot=snapshot,
-                message="effective Agent Profile frozen for launched session",
+                message=audit_message or "effective Agent Profile frozen for launched session",
             )
         return snapshot
+
+    def apply_effective_agent_profile_for_launch(self, cell, *, base_dir: str = "",
+                                                 actor_kind: str = "system",
+                                                 actor_id: str = "launch") -> dict:
+        """Freeze the desired/default Agent Profile snapshot for a new session."""
+
+        if not cell or getattr(cell, "cell_type", "") != "agent":
+            return {}
+        from .agent_profiles import default_full_profile_id_for_kind
+
+        base_kind = str(getattr(cell, "kind", "") or "").strip()
+        if not base_kind:
+            return {}
+        desired_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
+        profile_id = desired_id or default_full_profile_id_for_kind(base_kind)
+        if not profile_id:
+            return {}
+        return self._apply_effective_agent_profile_snapshot(
+            cell,
+            profile_id=profile_id,
+            base_dir=base_dir,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            assignment_source="assigned" if desired_id else "default_full_base_kind",
+            update_desired_version=True,
+            audit_message="effective Agent Profile frozen for launched session",
+        )
 
     def agent_profile_status_for_cell(self, cell, *, base_dir: str = "") -> dict:
         from .agent_profiles import agent_profile_cell_status
         return agent_profile_cell_status(
             cell,
             base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
+        )
+
+    def _agent_class_base_dir_for_cell(self, cell=None, base_dir: str = "") -> str:
+        return self._agent_profile_base_dir_for_cell(cell, base_dir)
+
+    def _record_agent_class_audit(self, cell, event: str, *, actor_kind: str = "user",
+                                  actor_id: str = "", actor_label: str = "",
+                                  previous: dict | None = None,
+                                  snapshot: dict | None = None,
+                                  profile_snapshot: dict | None = None,
+                                  message: str = "") -> None:
+        if not self.db or not cell:
+            return
+        saver = getattr(self.db, "save_agent_class_audit", None)
+        if not callable(saver):
+            return
+        try:
+            class_snapshot = snapshot or {}
+            profile = {}
+            if isinstance(class_snapshot, dict):
+                profile = dict(class_snapshot.get("agent_profile") or {})
+            if profile_snapshot and isinstance(profile_snapshot, dict):
+                profile = dict(profile or {})
+                profile.setdefault("id", str(profile_snapshot.get("id", "") or ""))
+                profile.setdefault("version", str(profile_snapshot.get("version", "") or ""))
+            saver({
+                "id": uuid.uuid4().hex,
+                "agent_id": cell.id,
+                "agent_name": cell.name,
+                "event": event,
+                "actor_kind": actor_kind or "user",
+                "actor_id": actor_id or "",
+                "actor_label": actor_label or "",
+                "previous_class_id": str((previous or {}).get("class_id", "") or ""),
+                "previous_class_version": str((previous or {}).get("class_version", "") or ""),
+                "assigned_class_id": getattr(cell, "agent_class_id", "") or "",
+                "assigned_class_version": getattr(cell, "agent_class_version", "") or "",
+                "effective_class_id": getattr(cell, "effective_agent_class_id", "") or "",
+                "effective_class_version": getattr(cell, "effective_agent_class_version", "") or "",
+                "assigned_profile_id": str((profile or {}).get("id", "") or ""),
+                "assigned_profile_version": str((profile or {}).get("version", "") or ""),
+                "effective_profile_id": getattr(cell, "effective_agent_profile_id", "") or "",
+                "effective_profile_version": getattr(cell, "effective_agent_profile_version", "") or "",
+                "snapshot_hash": str((class_snapshot or {}).get("snapshot_hash", "") or ""),
+                "snapshot_json": class_snapshot or {},
+                "message": message or "",
+                "created_at": time.time(),
+            })
+        except Exception:
+            log.exception("Failed to persist agent class audit event=%s agent=%s", event, getattr(cell, "id", ""))
+
+    def assign_agent_class(self, aid: str, class_id: str, *, actor_kind: str = "user",
+                           actor_id: str = "", actor_label: str = "",
+                           base_dir: str = "") -> dict:
+        """Trusted-user assignment of a desired Agent Class.
+
+        Assignment intentionally does not mutate frozen effective class/profile
+        snapshots; ``apply_effective_agent_class_for_launch`` is the launch
+        boundary that updates runtime policy.
+        """
+
+        cell = self.agents.get(str(aid or "").strip())
+        if not cell:
+            raise ValueError("Agent not found")
+        if cell.cell_type != "agent":
+            raise ValueError("Agent Classes can only be assigned to agents")
+        if str(actor_kind or "user").strip() != "user":
+            raise PermissionError("Agent Class assignment is trusted-user-only")
+        class_id = str(class_id or "").strip()
+        previous = {
+            "class_id": getattr(cell, "agent_class_id", "") or "",
+            "class_version": getattr(cell, "agent_class_version", "") or "",
+        }
+        if not class_id:
+            cell.agent_class_id = ""
+            cell.agent_class_version = ""
+            cell.agent_class_assigned_at = time.time()
+            cell.agent_class_assigned_by = actor_label or actor_id or actor_kind or "user"
+            self._emit_agent(cell)
+            self._db_save_agent(cell)
+            self._record_agent_class_audit(
+                cell,
+                "assignment_cleared",
+                actor_kind="user",
+                actor_id=actor_id,
+                actor_label=actor_label,
+                previous=previous,
+                message="desired Agent Class assignment cleared; effective launch snapshots unchanged",
+            )
+            return self.agent_class_status_for_cell(cell, base_dir=base_dir)
+
+        from .agent_classes import agent_class_definition_by_id, enriched_agent_class_preview
+
+        definition = agent_class_definition_by_id(
+            class_id,
+            base_dir=self._agent_class_base_dir_for_cell(cell, base_dir),
+        )
+        if not definition:
+            raise ValueError(f"Unknown or invalid Agent Class: {class_id}")
+        base_kind = str(getattr(cell, "kind", "") or "").strip()
+        if base_kind and definition.base_kind != base_kind:
+            raise ValueError(
+                f"Agent Class {definition.id} is for base_kind={definition.base_kind}, "
+                f"but agent kind is {base_kind}"
+            )
+        cell.agent_class_id = definition.id
+        cell.agent_class_version = definition.version
+        cell.agent_class_assigned_at = time.time()
+        cell.agent_class_assigned_by = actor_label or actor_id or actor_kind or "user"
+        self._emit_agent(cell)
+        self._db_save_agent(cell)
+        self._record_agent_class_audit(
+            cell,
+            "assignment_set",
+            actor_kind="user",
+            actor_id=actor_id,
+            actor_label=actor_label,
+            previous=previous,
+            snapshot=enriched_agent_class_preview(
+                definition,
+                base_dir=self._agent_class_base_dir_for_cell(cell, base_dir),
+            ),
+            message="desired Agent Class assignment set; applies at next launch/session",
+        )
+        return self.agent_class_status_for_cell(cell, base_dir=base_dir)
+
+    def apply_effective_agent_class_for_launch(self, cell, *, base_dir: str = "",
+                                               actor_kind: str = "system",
+                                               actor_id: str = "launch") -> dict:
+        """Freeze the desired/default Agent Class and referenced profile."""
+
+        if not cell or getattr(cell, "cell_type", "") != "agent":
+            return {}
+        from .agent_classes import (
+            agent_class_definition_by_id,
+            default_agent_class_id_for_kind,
+            freeze_agent_class_snapshot,
+        )
+        from .agent_profiles import enriched_profile_preview, profile_definition_by_id
+
+        base_kind = str(getattr(cell, "kind", "") or "").strip()
+        if not base_kind:
+            return {}
+        desired_id = str(getattr(cell, "agent_class_id", "") or "").strip()
+        if not desired_id and str(getattr(cell, "agent_profile_id", "") or "").strip():
+            # Preserve legacy/direct Agent Profile assignment behavior when no
+            # Agent Class has been explicitly assigned. Agent Class defaults are
+            # only behavior-compatible for otherwise unassigned base kinds.
+            return self.apply_effective_agent_profile_for_launch(
+                cell,
+                base_dir=base_dir,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+        class_id = desired_id or default_agent_class_id_for_kind(base_kind)
+        if not class_id:
+            # Terminal/legacy unknown kinds fall back to the existing Agent
+            # Profile launch path when possible.
+            return self.apply_effective_agent_profile_for_launch(
+                cell,
+                base_dir=base_dir,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
+        base_dir_resolved = self._agent_class_base_dir_for_cell(cell, base_dir)
+        definition = agent_class_definition_by_id(class_id, base_dir=base_dir_resolved)
+        if not definition:
+            if desired_id:
+                raise ValueError(f"Unknown or invalid Agent Class: {class_id}")
+            # A broken default registry should fail truthfully instead of
+            # silently masking with a profile fallback.
+            raise ValueError(f"Unknown or invalid default Agent Class: {class_id}")
+        if definition.base_kind != base_kind:
+            raise ValueError(
+                f"Agent Class {definition.id} is for base_kind={definition.base_kind}, "
+                f"but agent kind is {base_kind}"
+            )
+        profile = profile_definition_by_id(
+            definition.agent_profile_ref.id,
+            base_dir=base_dir_resolved,
+        )
+        if not profile:
+            raise ValueError(
+                f"Agent Class {definition.id} references unknown or invalid Agent Profile: "
+                f"{definition.agent_profile_ref.id}"
+            )
+        if definition.agent_profile_ref.version and profile.version != definition.agent_profile_ref.version:
+            raise ValueError(
+                f"Agent Class {definition.id} references Agent Profile "
+                f"{definition.agent_profile_ref.id}@{definition.agent_profile_ref.version}, "
+                f"but registry has version {profile.version}"
+            )
+        if profile.base_kind != base_kind:
+            raise ValueError(
+                f"Agent Class {definition.id} references Agent Profile "
+                f"{profile.id} for base_kind={profile.base_kind}, but agent kind is {base_kind}"
+            )
+
+        previous = {
+            "class_id": getattr(cell, "effective_agent_class_id", "") or "",
+            "class_version": getattr(cell, "effective_agent_class_version", "") or "",
+        }
+        profile_snapshot = self._apply_effective_agent_profile_snapshot(
+            cell,
+            profile_id=profile.id,
+            base_dir=base_dir_resolved,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            assignment_source="agent_class_assigned" if desired_id else "agent_class_default",
+            update_desired_version=False,
+            audit_message=(
+                "effective Agent Profile frozen from Agent Class "
+                f"{definition.id}@{definition.version}"
+            ),
+        )
+        frozen_at = float(profile_snapshot.get("frozen_at", time.time()) or time.time())
+        class_snapshot = freeze_agent_class_snapshot(
+            definition,
+            enriched_profile_preview(profile),
+            assignment_source="assigned" if desired_id else "default_base_kind_class",
+            frozen_at=frozen_at,
+            base_dir=base_dir_resolved,
+        )
+        cell.effective_agent_class_id = definition.id
+        cell.effective_agent_class_version = definition.version
+        cell.effective_agent_class_snapshot = class_snapshot
+        cell.effective_agent_class_applied_at = frozen_at
+        if desired_id and cell.agent_class_version != definition.version:
+            cell.agent_class_version = definition.version
+        self._emit_agent(cell)
+        self._db_save_agent(cell)
+        if (previous["class_id"], previous["class_version"]) != (definition.id, definition.version):
+            self._record_agent_class_audit(
+                cell,
+                "effective_snapshot_applied",
+                actor_kind=actor_kind or "system",
+                actor_id=actor_id or "launch",
+                previous=previous,
+                snapshot=class_snapshot,
+                profile_snapshot=profile_snapshot,
+                message="effective Agent Class and referenced Agent Profile frozen for launched session",
+            )
+        return class_snapshot
+
+    def agent_class_status_for_cell(self, cell, *, base_dir: str = "") -> dict:
+        from .agent_classes import agent_class_cell_status
+        return agent_class_cell_status(
+            cell,
+            base_dir=self._agent_class_base_dir_for_cell(cell, base_dir),
         )
 
     def update_agent(self, aid: str, **fields):

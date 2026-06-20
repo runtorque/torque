@@ -1086,8 +1086,28 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         if assigned_profile:
             assigned_preview = enriched_profile_preview(assigned_profile)
 
-    next_launch_profile_id = assigned_id or default_full_profile_id_for_kind(kind)
-    next_launch_profile_version = str(getattr(cell, "agent_profile_version", "") or "") if assigned_id else ""
+    class_assigned_id = str(getattr(cell, "agent_class_id", "") or "").strip()
+    class_next_profile_id = ""
+    class_next_profile_version = ""
+    if class_assigned_id:
+        try:
+            from .agent_classes import agent_class_definition_by_id
+            definition = agent_class_definition_by_id(class_assigned_id, base_dir=base_dir)
+            if definition:
+                class_next_profile_id = definition.agent_profile_ref.id
+                class_next_profile_version = definition.agent_profile_ref.version
+        except Exception:
+            class_next_profile_id = ""
+            class_next_profile_version = ""
+    next_launch_profile_id = (
+        class_next_profile_id
+        or assigned_id
+        or default_full_profile_id_for_kind(kind)
+    )
+    next_launch_profile_version = (
+        class_next_profile_version
+        or (str(getattr(cell, "agent_profile_version", "") or "") if assigned_id else "")
+    )
     if next_launch_profile_id and not next_launch_profile_version:
         next_profile = profile_definition_by_id(next_launch_profile_id, base_dir=base_dir)
         if next_profile:

@@ -1,0 +1,12 @@
+id: default-worker
+version: "1"
+base_kind: worker
+display_name: Default Worker
+description: Default Worker class; preserves current full Worker behavior through full-worker@1.
+lifecycle: stable
+agent_profile_ref:
+  id: full-worker
+  version: "1"
+metadata:
+  archetype: default
+  compatibility: full current base-kind behavior by construction

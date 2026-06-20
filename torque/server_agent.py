@@ -703,14 +703,19 @@ class AgentLaunchService:
             cell.agent_profile_version = str(launch_cfg.get("agent_profile_version") or "").strip()
             cell.agent_profile_assigned_at = time.time()
             cell.agent_profile_assigned_by = "trusted-user-launch"
+        if launch_cfg.get("agent_class_id"):
+            cell.agent_class_id = str(launch_cfg.get("agent_class_id") or "").strip()
+            cell.agent_class_version = str(launch_cfg.get("agent_class_version") or "").strip()
+            cell.agent_class_assigned_at = time.time()
+            cell.agent_class_assigned_by = "trusted-user-launch"
         try:
-            self.state.apply_effective_agent_profile_for_launch(
+            self.state.apply_effective_agent_class_for_launch(
                 cell,
                 base_dir=cell.directory or launch_cfg.get("directory", ""),
             )
         except Exception:
             log.exception(
-                "Failed to apply Agent Profile launch snapshot for cell=%s",
+                "Failed to apply Agent Class/Profile launch snapshot for cell=%s",
                 getattr(cell, "id", ""),
             )
             raise

@@ -1,0 +1,12 @@
+id: default-engineer
+version: "1"
+base_kind: engineer
+display_name: Default Engineer
+description: Default Engineer class; preserves current full Engineer behavior through full-engineer@1.
+lifecycle: stable
+agent_profile_ref:
+  id: full-engineer
+  version: "1"
+metadata:
+  archetype: default
+  compatibility: full current base-kind behavior by construction
