@@ -434,7 +434,10 @@ body.runtime-embedded .group-body-inner {
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr auto auto auto;
+  /* Rows: topbar, terminal stage, DM, composer, status.  Terminal tabs were
+     removed; keep the stage on the flexible row so DM resizing moves the
+     terminal/DM split instead of consuming all free space in the DM area. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   grid-template-columns: minmax(0, 1fr);
 }
 .terminal-topbar,
@@ -1106,7 +1109,7 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
 body.runtime-embedded .terminal-shell {
   padding: 10px 12px 0;
   gap: 8px;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
 }
 body.runtime-embedded .terminal-topbar,
 body.runtime-embedded .terminal-statusbar {
