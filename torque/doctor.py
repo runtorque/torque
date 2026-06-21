@@ -1122,6 +1122,7 @@ def _collect_agent_profiles_section(conn: sqlite3.Connection | None = None, base
             "agent_profile_assigned_by", "effective_agent_profile_id",
             "effective_agent_profile_version", "effective_agent_profile_snapshot",
             "effective_agent_profile_applied_at",
+            "agent_class_id", "effective_agent_class_id",
         ]
         if all(_column_exists(conn, "agents", col) for col in cols):
             try:
@@ -1181,6 +1182,10 @@ def _collect_agent_profiles_section(conn: sqlite3.Connection | None = None, base
         "audit_recent_count": len(audit_recent),
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
         "runtime_enforcement": "frozen_launch_snapshot_mcp_projection",
+        "legacy_direct_product_manager_profile_count": sum(
+            1 for item in assignments
+            if item.get("legacy_direct_product_manager_profile")
+        ),
     }
 
 
@@ -1197,6 +1202,8 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
             "agent_class_assigned_by", "effective_agent_class_id",
             "effective_agent_class_version", "effective_agent_class_snapshot",
             "effective_agent_class_applied_at",
+            "agent_profile_id", "agent_profile_version",
+            "effective_agent_profile_id", "effective_agent_profile_version",
         ]
         if all(_column_exists(conn, "agents", col) for col in cols):
             try:
@@ -1263,9 +1270,14 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
         "audit_recent_count": len(audit_recent),
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
         "runtime_enforcement": "launch_frozen_agent_class_profile_pairing",
+        "schema_version": 3,
+        "legacy_direct_product_manager_profile_count": sum(
+            1 for item in assignments
+            if item.get("legacy_direct_product_manager_profile")
+        ),
         "external_connector_caveat": (
-            "External connector exposure is informational only in Wave 6B; "
-            "Agent Classes do not enforce connector governance."
+            "External connector exposure is informational only in Wave 7; "
+            "Agent Classes and Agent Profiles do not enforce connector governance."
         ),
     }
 
@@ -1885,6 +1897,40 @@ def _warn_stuck_input_sessions(report: dict) -> dict | None:
     }
 
 
+def _warn_legacy_direct_product_manager_profile(report: dict) -> dict | None:
+    profiles = report.get("agent_profiles", {}) or {}
+    classes = report.get("agent_classes", {}) or {}
+    count = max(
+        int(profiles.get("legacy_direct_product_manager_profile_count", 0) or 0),
+        int(classes.get("legacy_direct_product_manager_profile_count", 0) or 0),
+    )
+    if count <= 0:
+        return None
+    assignments = [
+        {
+            "agent_id": item.get("agent_id", ""),
+            "agent_name": item.get("agent_name", ""),
+            "assigned_profile_id": item.get("assigned_profile_id", ""),
+            "effective_profile_id": item.get("effective_profile_id", ""),
+        }
+        for item in list(profiles.get("assignments", []) or [])
+        if item.get("legacy_direct_product_manager_profile")
+    ]
+    return {
+        "name": "legacy_direct_product_manager_profile",
+        "status": "warn",
+        "details": {
+            "count": count,
+            "assignments": assignments,
+            "hint": (
+                "legacy direct product-manager-draft profile assignments are preserved "
+                "for backcompat; set desired Agent Class to product-manager for the "
+                "class-first next-relaunch flow. Torque does not silently migrate them."
+            ),
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -1918,6 +1964,7 @@ _DOCTOR_WARNINGS = [
     _warn_ai_index_chunk_model_mismatch,
     _warn_mcp_idempotency_storage,
     _warn_stuck_input_sessions,
+    _warn_legacy_direct_product_manager_profile,
 ]
 
 
@@ -2266,12 +2313,16 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_profiles.get('assignment_count', 0) or 0)}",
         "  audit_recent_count:             "
         f"{int(agent_profiles.get('audit_recent_count', 0) or 0)}",
+        "  legacy_direct_pm_profiles:      "
+        f"{int(agent_profiles.get('legacy_direct_product_manager_profile_count', 0) or 0)}",
         "",
         "[agent_classes]",
         "  config_path:                    "
         f"{agent_classes.get('config_path', '.torque/agent_classes/')}",
         "  class_count:                    "
         f"{int(agent_classes.get('class_count', 0) or 0)}",
+        "  schema_version:                 "
+        f"{int(agent_classes.get('schema_version', 0) or 0)}",
         "  error_count:                    "
         f"{int(agent_classes.get('error_count', 0) or 0)}",
         "  runtime_enforcement:            "
@@ -2282,6 +2333,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_classes.get('audit_recent_count', 0) or 0)}",
         "  external_connector_caveat:      "
         f"{agent_classes.get('external_connector_caveat', '')}",
+        "  legacy_direct_pm_profiles:      "
+        f"{int(agent_classes.get('legacy_direct_product_manager_profile_count', 0) or 0)}",
         "",
         "[stage_6_cleanup]",
         "  legacy_template_files_ignored:  "
@@ -2625,6 +2678,12 @@ def format_doctor_report(report: dict) -> str:
                         f"[{issue.get('code', '')}]{location}: "
                         f"{issue.get('message', '')}"
                     )
+            elif name == "legacy_direct_product_manager_profile":
+                lines.append(
+                    "  - legacy direct Product Manager profile assignments detected; "
+                    "set desired Agent Class to product-manager for class-first next relaunch "
+                    "(no silent migration is performed)"
+                )
             else:
                 lines.append(f"  - {name}")
     return "\n".join(lines)

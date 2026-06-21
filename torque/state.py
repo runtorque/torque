@@ -10638,6 +10638,7 @@ class MatrixState:
 
     def _apply_effective_agent_profile_snapshot(self, cell, *, profile_id: str,
                                                 base_dir: str = "",
+                                                profile_definition=None,
                                                 actor_kind: str = "system",
                                                 actor_id: str = "launch",
                                                 assignment_source: str = "",
@@ -10663,10 +10664,12 @@ class MatrixState:
         profile_id = str(profile_id or "").strip()
         if not profile_id:
             return {}
-        profile = profile_definition_by_id(
-            profile_id,
-            base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
-        )
+        profile = profile_definition
+        if profile is None:
+            profile = profile_definition_by_id(
+                profile_id,
+                base_dir=self._agent_profile_base_dir_for_cell(cell, base_dir),
+            )
         if not profile:
             raise ValueError(f"Unknown or invalid Agent Profile: {profile_id}")
         if profile.base_kind != base_kind:
@@ -10910,8 +10913,9 @@ class MatrixState:
             agent_class_definition_by_id,
             default_agent_class_id_for_kind,
             freeze_agent_class_snapshot,
+            resolve_agent_class_profile_definition,
         )
-        from .agent_profiles import enriched_profile_preview, profile_definition_by_id
+        from .agent_profiles import enriched_profile_preview
 
         base_kind = str(getattr(cell, "kind", "") or "").strip()
         if not base_kind:
@@ -10956,13 +10960,13 @@ class MatrixState:
                 f"Agent Class {definition.id} is for base_kind={definition.base_kind}, "
                 f"but agent kind is {base_kind}"
             )
-        profile = profile_definition_by_id(
-            definition.agent_profile_ref.id,
+        profile = resolve_agent_class_profile_definition(
+            definition,
             base_dir=base_dir_resolved,
         )
         if not profile:
             raise ValueError(
-                f"Agent Class {definition.id} references unknown or invalid Agent Profile: "
+                f"Agent Class {definition.id} references or compiles unknown/invalid internal Agent Profile policy: "
                 f"{definition.agent_profile_ref.id}"
             )
         if definition.agent_profile_ref.version and profile.version != definition.agent_profile_ref.version:
@@ -10985,6 +10989,7 @@ class MatrixState:
             cell,
             profile_id=profile.id,
             base_dir=base_dir_resolved,
+            profile_definition=profile,
             actor_kind=actor_kind,
             actor_id=actor_id,
             assignment_source="agent_class_assigned" if desired_id else "agent_class_default",

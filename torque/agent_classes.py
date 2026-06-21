@@ -23,11 +23,15 @@ import yaml
 
 from .agent_profiles import (
     BASE_KINDS,
+    BASE_KIND_CEILINGS,
+    CAPABILITIES,
     AgentProfileDefinition,
+    PM_DANGEROUS_CAPABILITIES,
     ValidationIssue,
     enriched_profile_preview,
     load_agent_profiles,
     profile_definition_by_id,
+    validate_profile_data,
 )
 
 BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
@@ -36,6 +40,11 @@ PROJECT_CLASS_LEAF = "agent_classes"
 CLASS_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 CLASS_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ALLOWED_LIFECYCLES = {"stable", "draft"}
+AGENT_CLASS_SCHEMA_VERSION = 3
+DEFAULT_AGENT_CLASS_SCHEMA_VERSION = 2
+POLICY_SCHEMA_VERSION = 1
+POLICY_COMPILER_VERSION = "agent_class_policy_compiler_v1"
+ALLOWED_POLICY_MODES = {"wrap_profile", "compile"}
 SAFE_UI_METADATA_KEYS = {"label", "icon", "badge", "color"}
 AUTHORING_DISPLAY_ALIASES = {"title", "display_title"}
 AUTHORING_PROMPT_ALIASES = {"instructions", "class_instructions", "class_prompt"}
@@ -62,18 +71,32 @@ BUILTIN_CLASS_PROFILE_REF = {
     "default-architect": ("full-architect", "1"),
     "default-engineer": ("full-engineer", "1"),
     "default-worker": ("full-worker", "1"),
-    "product-manager": ("product-manager-draft", "2"),
+}
+
+BUILTIN_CLASS_POLICY_MODE = {
+    "default-architect": "wrap_profile",
+    "default-engineer": "wrap_profile",
+    "default-worker": "wrap_profile",
+    "product-manager": "compile",
 }
 
 KNOWN_CLASS_KEYS = {
+    "agent_class_schema_version",
     "id",
     "version",
     "base_kind",
     "display_name",
     "description",
     "lifecycle",
+    "identity",
+    "runtime",
     "agent_profile_ref",
     "prompt",
+    "policy",
+    "capabilities",
+    "communication",
+    "delegation",
+    "warnings",
     "metadata",
     "draft",
 }
@@ -113,15 +136,15 @@ RAW_TOOL_OR_CAPABILITY_FIELDS = {
 
 EXTERNAL_CONNECTOR_CAVEAT = (
     "External connector exposure is not governed or enforced by Agent Classes "
-    "in Wave 6B; manage connector access separately."
+    "or Agent Profiles in Wave 7; manage connector access separately."
 )
 EXTERNAL_CONNECTOR_DRAFT_WARNING = (
-    "External connector exposure is not enforced by Agent Classes in Wave 6B; "
+    "External connector exposure is not enforced by Agent Classes or Agent Profiles in Wave 7; "
     "do not treat draft/restricted classes as live-safe for external connectors."
 )
 PM_DRAFT_WARNING = (
-    "Product Manager is draft/scratch-only in Wave 6B; do not use it for live "
-    "PM dogfood, Blueprint replacement, or production product authority without "
+    "Product Manager is draft/restricted until explicit live-dogfood approval; "
+    "do not use it for Blueprint replacement or production product authority without "
     "explicit future approval."
 )
 
@@ -141,10 +164,18 @@ class AgentClassDefinition:
     version: str
     base_kind: str
     agent_profile_ref: AgentClassProfileRef
+    agent_class_schema_version: int = DEFAULT_AGENT_CLASS_SCHEMA_VERSION
     display_name: str = ""
     description: str = ""
     lifecycle: str = "stable"
     prompt: str = ""
+    identity: dict[str, Any] = field(default_factory=dict)
+    runtime: dict[str, Any] = field(default_factory=dict)
+    policy: dict[str, Any] = field(default_factory=dict)
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    communication: dict[str, Any] = field(default_factory=dict)
+    delegation: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     draft: dict[str, Any] = field(default_factory=dict)
     source: str = ""
@@ -158,6 +189,7 @@ class AgentClassDefinition:
         source: str = "",
         builtin: bool = False,
     ) -> "AgentClassDefinition":
+        data = _normalized_class_data(data)
         ref_data = data.get("agent_profile_ref")
         if isinstance(ref_data, dict):
             ref = AgentClassProfileRef(
@@ -170,11 +202,19 @@ class AgentClassDefinition:
             id=str(data.get("id", "") or "").strip(),
             version=str(data.get("version", "") or "").strip(),
             base_kind=str(data.get("base_kind", "") or "").strip(),
+            agent_class_schema_version=_agent_class_schema_version(data),
             display_name=str(data.get("display_name", "") or "").strip(),
             description=str(data.get("description", "") or "").strip(),
             lifecycle=str(data.get("lifecycle", "stable") or "stable").strip(),
             agent_profile_ref=ref,
             prompt=str(data.get("prompt", "") or "").strip(),
+            identity=(dict(data.get("identity") or {}) if isinstance(data.get("identity"), dict) else {}),
+            runtime=(dict(data.get("runtime") or {}) if isinstance(data.get("runtime"), dict) else {}),
+            policy=(dict(data.get("policy") or {}) if isinstance(data.get("policy"), dict) else {}),
+            capabilities=(dict(data.get("capabilities") or {}) if isinstance(data.get("capabilities"), dict) else {}),
+            communication=(dict(data.get("communication") or {}) if isinstance(data.get("communication"), dict) else {}),
+            delegation=(dict(data.get("delegation") or {}) if isinstance(data.get("delegation"), dict) else {}),
+            warnings=_string_list(data.get("warnings")),
             metadata=(dict(data.get("metadata") or {}) if isinstance(data.get("metadata"), dict) else {}),
             draft=(dict(data.get("draft") or {}) if isinstance(data.get("draft"), dict) else {}),
             source=source,
@@ -187,11 +227,18 @@ class AgentClassDefinition:
         return {
             "id": self.id,
             "version": self.version,
+            "agent_class_schema_version": self.agent_class_schema_version,
             "base_kind": self.base_kind,
             "display_name": self.display_name,
+            "primary_display_name": primary_identity_label_for_class(self),
+            "primary_identity_label": primary_identity_label_for_class(self),
+            "secondary_base_kind_label": secondary_base_kind_label_for_class(self),
             "description": self.description,
             "lifecycle": self.lifecycle,
             "agent_profile_ref": self.agent_profile_ref.as_dict(),
+            "policy": compact_agent_class_policy_preview(self),
+            "identity": dict(self.identity or {}),
+            "runtime": agent_class_runtime_preview(self),
             "builtin": self.builtin,
             "custom": not self.builtin,
             "source": source_kind,
@@ -233,6 +280,194 @@ def _issue(
         path=path,
         profile_id=profile_id,
     )
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _agent_class_schema_version(data: dict[str, Any]) -> int:
+    raw = data.get("agent_class_schema_version", "")
+    if raw not in ("", None):
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return -1
+        return value
+    if any(key in data for key in ("identity", "runtime", "policy", "capabilities", "communication", "delegation", "warnings")):
+        return AGENT_CLASS_SCHEMA_VERSION
+    return DEFAULT_AGENT_CLASS_SCHEMA_VERSION
+
+
+def _prompt_addendum_from_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("addendum", "text", "instructions"):
+            text = str(value.get(key, "") or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _policy_mode_from_data(data: dict[str, Any]) -> str:
+    policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
+    mode = str(policy.get("mode", "") or "").strip()
+    if mode:
+        return mode
+    if isinstance(policy, dict) and (
+            policy.get("grants") is not None
+            or policy.get("denies") is not None
+            or policy.get("generated_profile_id") is not None):
+        return "compile"
+    return "wrap_profile"
+
+
+def _generated_profile_ref_for_data(data: dict[str, Any]) -> AgentClassProfileRef:
+    policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
+    class_id = str(data.get("id", "") or "").strip()
+    class_version = str(data.get("version", "") or "").strip()
+    profile_id = str(policy.get("generated_profile_id", "") or "").strip()
+    if not profile_id and class_id:
+        profile_id = f"class-policy-{class_id}"
+    profile_version = str(policy.get("generated_profile_version", "") or "").strip() or class_version
+    return AgentClassProfileRef(profile_id, profile_version)
+
+
+def _normalized_class_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize v2/v3 class shapes into a common in-memory contract."""
+
+    out = dict(data or {})
+    schema_version = _agent_class_schema_version(out)
+    out["agent_class_schema_version"] = schema_version
+    runtime = out.get("runtime") if isinstance(out.get("runtime"), dict) else {}
+    runtime_base_kind = str(runtime.get("base_kind", "") or "").strip()
+    if runtime_base_kind and not str(out.get("base_kind", "") or "").strip():
+        out["base_kind"] = runtime_base_kind
+    if runtime_base_kind:
+        runtime = dict(runtime)
+        runtime["base_kind"] = runtime_base_kind
+        out["runtime"] = runtime
+    prompt_text = _prompt_addendum_from_value(out.get("prompt", ""))
+    out["prompt"] = prompt_text
+    mode = _policy_mode_from_data(out)
+    policy = out.get("policy") if isinstance(out.get("policy"), dict) else {}
+    if mode == "compile":
+        policy = dict(policy)
+        policy.setdefault("mode", "compile")
+        policy.setdefault("policy_schema_version", POLICY_SCHEMA_VERSION)
+        out["policy"] = policy
+        ref = _generated_profile_ref_for_data(out)
+        out["agent_profile_ref"] = ref.as_dict()
+    elif isinstance(policy, dict) and policy:
+        policy = dict(policy)
+        policy.setdefault("mode", "wrap_profile")
+        out["policy"] = policy
+    if "runtime" not in out or not isinstance(out.get("runtime"), dict):
+        out["runtime"] = {
+            "base_kind": str(out.get("base_kind", "") or "").strip(),
+        }
+    else:
+        runtime = dict(out.get("runtime") or {})
+        runtime.setdefault("base_kind", str(out.get("base_kind", "") or "").strip())
+        out["runtime"] = runtime
+    return out
+
+
+def agent_class_policy_mode(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> str:
+    if isinstance(definition_or_data, AgentClassDefinition):
+        policy = definition_or_data.policy
+        if isinstance(policy, dict):
+            mode = str(policy.get("mode", "") or "").strip()
+            if mode:
+                return mode
+        return "wrap_profile"
+    return _policy_mode_from_data(_normalized_class_data(definition_or_data))
+
+
+def primary_identity_label_for_class(definition_or_preview: "AgentClassDefinition | dict[str, Any]") -> str:
+    if isinstance(definition_or_preview, AgentClassDefinition):
+        identity = definition_or_preview.identity or {}
+        display_name = definition_or_preview.display_name
+        class_id = definition_or_preview.id
+    else:
+        identity = definition_or_preview.get("identity", {}) if isinstance(definition_or_preview.get("identity"), dict) else {}
+        display_name = str(definition_or_preview.get("display_name", "") or "")
+        class_id = str(definition_or_preview.get("id", "") or "")
+    for key in ("primary_ui_label", "label", "name"):
+        text = str(identity.get(key, "") or "").strip()
+        if text:
+            return text
+    return str(display_name or class_id).strip()
+
+
+def secondary_base_kind_label_for_class(definition_or_preview: "AgentClassDefinition | dict[str, Any]") -> str:
+    if isinstance(definition_or_preview, AgentClassDefinition):
+        runtime = definition_or_preview.runtime or {}
+        base_kind = definition_or_preview.base_kind
+        class_id = definition_or_preview.id
+    else:
+        runtime = definition_or_preview.get("runtime", {}) if isinstance(definition_or_preview.get("runtime"), dict) else {}
+        base_kind = str(definition_or_preview.get("base_kind", "") or "")
+        class_id = str(definition_or_preview.get("id", "") or "")
+    explicit = str(runtime.get("base_kind_label", "") or "").strip()
+    if explicit:
+        return explicit
+    if class_id.startswith("default-"):
+        return base_kind.title() if base_kind else ""
+    return f"{base_kind.title()}-derived" if base_kind else ""
+
+
+def agent_class_runtime_preview(definition_or_preview: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
+    if isinstance(definition_or_preview, AgentClassDefinition):
+        runtime = dict(definition_or_preview.runtime or {})
+        base_kind = definition_or_preview.base_kind
+    else:
+        runtime = dict(definition_or_preview.get("runtime") or {}) if isinstance(definition_or_preview.get("runtime"), dict) else {}
+        base_kind = str(definition_or_preview.get("base_kind", "") or "")
+    runtime["base_kind"] = base_kind
+    runtime.setdefault("base_kind_label", secondary_base_kind_label_for_class(definition_or_preview))
+    runtime.setdefault("arbitrary_runtime_kind", False)
+    return runtime
+
+
+def compact_agent_class_policy_preview(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
+    if isinstance(definition_or_data, AgentClassDefinition):
+        policy = dict(definition_or_data.policy or {})
+        ref = definition_or_data.agent_profile_ref
+        schema_version = definition_or_data.agent_class_schema_version
+    else:
+        normalized = _normalized_class_data(definition_or_data)
+        policy = dict(normalized.get("policy") or {}) if isinstance(normalized.get("policy"), dict) else {}
+        ref_data = normalized.get("agent_profile_ref") if isinstance(normalized.get("agent_profile_ref"), dict) else {}
+        ref = AgentClassProfileRef(
+            str(ref_data.get("id", "") or "").strip(),
+            str(ref_data.get("version", "") or "").strip(),
+        )
+        schema_version = _agent_class_schema_version(normalized)
+    mode = str(policy.get("mode", "") or "").strip() or "wrap_profile"
+    summary = {
+        "mode": mode,
+        "agent_class_schema_version": schema_version,
+        "policy_schema_version": int(policy.get("policy_schema_version", POLICY_SCHEMA_VERSION) or POLICY_SCHEMA_VERSION)
+        if str(policy.get("policy_schema_version", POLICY_SCHEMA_VERSION) or "").isdigit()
+        else policy.get("policy_schema_version", POLICY_SCHEMA_VERSION),
+        "internal_profile_id": ref.id,
+        "internal_profile_version": ref.version,
+        "profile_source": "compiled_from_agent_class" if mode == "compile" else "wrapped_agent_profile",
+    }
+    if mode == "compile":
+        summary["policy_compiler_version"] = POLICY_COMPILER_VERSION
+        summary["grant_count"] = len(_string_list(policy.get("grants")))
+        summary["deny_count"] = len(_string_list(policy.get("denies")))
+    return summary
 
 
 def _find_project_dir(base_dir: str = "") -> Path | None:
@@ -326,19 +561,31 @@ def load_class_yaml(path: Path) -> tuple[dict[str, Any] | None, ValidationIssue 
 
 
 def _nested_forbidden_key_paths(raw: Any, forbidden: set[str], *,
-                                prefix: str = "") -> list[str]:
+                                prefix: str = "",
+                                allowed_paths: set[str] | frozenset[str] | None = None) -> list[str]:
+    allowed_paths = allowed_paths or set()
     paths: list[str] = []
     if isinstance(raw, dict):
         for key, value in raw.items():
             key_text = str(key)
             child = f"{prefix}.{key_text}" if prefix else key_text
-            if key_text in forbidden:
+            if key_text in forbidden and child not in allowed_paths:
                 paths.append(child)
-            paths.extend(_nested_forbidden_key_paths(value, forbidden, prefix=child))
+            paths.extend(_nested_forbidden_key_paths(
+                value,
+                forbidden,
+                prefix=child,
+                allowed_paths=allowed_paths,
+            ))
     elif isinstance(raw, list):
         for index, value in enumerate(raw):
             child = f"{prefix}[{index}]" if prefix else f"[{index}]"
-            paths.extend(_nested_forbidden_key_paths(value, forbidden, prefix=child))
+            paths.extend(_nested_forbidden_key_paths(
+                value,
+                forbidden,
+                prefix=child,
+                allowed_paths=allowed_paths,
+            ))
     return paths
 
 
@@ -358,6 +605,88 @@ def _profile_by_id_for_validation(base_dir: str = "") -> dict[str, AgentProfileD
     return {profile.id: profile for profile in profiles}
 
 
+def _allowed_raw_field_paths_for_schema(schema_version: int) -> set[str]:
+    if schema_version >= AGENT_CLASS_SCHEMA_VERSION:
+        return {"capabilities", "policy.grants", "policy.denies"}
+    return set()
+
+
+def _validate_mapping_field(data: dict[str, Any], key: str, issues: list[ValidationIssue], *,
+                            source: str, class_id: str, required: bool = False) -> dict[str, Any]:
+    if key not in data:
+        if required:
+            issues.append(ValidationIssue(
+                "error",
+                f"missing_{key}",
+                f"{key} is required",
+                path=source,
+                profile_id=class_id,
+            ))
+        return {}
+    value = data.get(key)
+    if not isinstance(value, dict):
+        issues.append(ValidationIssue(
+            "error",
+            f"{key}_not_mapping",
+            f"{key} must be a mapping",
+            path=source,
+            profile_id=class_id,
+        ))
+        return {}
+    return dict(value or {})
+
+
+def _validate_string_list_field(value: Any, field_path: str, issues: list[ValidationIssue], *,
+                                source: str, class_id: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        issues.append(ValidationIssue(
+            "error",
+            "string_list_not_list",
+            f"{field_path} must be a list of strings",
+            path=source,
+            profile_id=class_id,
+        ))
+        return []
+    out: list[str] = []
+    for index, item in enumerate(value):
+        text = str(item or "").strip()
+        if not text:
+            issues.append(ValidationIssue(
+                "error",
+                "string_list_item_empty",
+                f"{field_path}[{index}] must be a non-empty string",
+                path=source,
+                profile_id=class_id,
+            ))
+            continue
+        out.append(text)
+    return out
+
+
+def _validate_compiled_agent_class_profile(definition: "AgentClassDefinition", *,
+                                           source: str, base_dir: str = "") -> list[ValidationIssue]:
+    del base_dir
+    profile_data = _compiled_profile_data_for_class(definition)
+    _profile, profile_issues = validate_profile_data(
+        profile_data,
+        source=f"{source or definition.source or definition.id}#compiled_profile",
+        builtin=False,
+    )
+    out: list[ValidationIssue] = []
+    for issue in profile_issues:
+        if issue.severity == "error":
+            out.append(ValidationIssue(
+                issue.severity,
+                f"compiled_profile_{issue.code}",
+                issue.message,
+                path=issue.path or source,
+                profile_id=definition.id,
+            ))
+    return out
+
+
 def validate_class_data(
     data: dict[str, Any],
     *,
@@ -366,19 +695,40 @@ def validate_class_data(
     base_dir: str = "",
     profiles_by_id: dict[str, AgentProfileDefinition] | None = None,
 ) -> tuple[AgentClassDefinition | None, list[ValidationIssue]]:
+    raw_data = dict(data or {})
+    normalized = _normalized_class_data(raw_data)
     issues: list[ValidationIssue] = []
-    class_id = str(data.get("id", "") or "").strip()
+    class_id = str(normalized.get("id", "") or "").strip()
+    schema_version = _agent_class_schema_version(raw_data)
+    policy_mode = _policy_mode_from_data(normalized)
+    allowed_raw_paths = _allowed_raw_field_paths_for_schema(schema_version)
 
-    unknown_keys = sorted(set(data) - KNOWN_CLASS_KEYS)
-    ambiguous = sorted(set(data) & AMBIGUOUS_CLASS_PROFILE_KEYS)
-    nested_ambiguous = sorted(set(_nested_forbidden_key_paths(data, AMBIGUOUS_CLASS_PROFILE_KEYS)))
-    nested_raw_tool_fields = sorted(set(_nested_forbidden_key_paths(data, RAW_TOOL_OR_CAPABILITY_FIELDS)))
-    raw_tool_fields = sorted(set(data) & RAW_TOOL_OR_CAPABILITY_FIELDS)
+    if schema_version not in {DEFAULT_AGENT_CLASS_SCHEMA_VERSION, AGENT_CLASS_SCHEMA_VERSION}:
+        issues.append(ValidationIssue(
+            "error",
+            "invalid_agent_class_schema_version",
+            f"agent_class_schema_version must be {DEFAULT_AGENT_CLASS_SCHEMA_VERSION} or {AGENT_CLASS_SCHEMA_VERSION}",
+            path=source,
+            profile_id=class_id,
+        ))
+
+    unknown_keys = sorted(set(raw_data) - KNOWN_CLASS_KEYS)
+    ambiguous = sorted(set(raw_data) & AMBIGUOUS_CLASS_PROFILE_KEYS)
+    nested_ambiguous = sorted(set(_nested_forbidden_key_paths(raw_data, AMBIGUOUS_CLASS_PROFILE_KEYS)))
+    nested_raw_tool_fields = sorted(set(_nested_forbidden_key_paths(
+        raw_data,
+        RAW_TOOL_OR_CAPABILITY_FIELDS,
+        allowed_paths=allowed_raw_paths,
+    )))
+    raw_tool_fields = sorted(
+        path for path in nested_raw_tool_fields
+        if "." not in path and "[" not in path
+    )
     if ambiguous:
         issues.append(ValidationIssue(
             "error",
             "agent_cell_profile_confusion",
-            "Agent Class definitions must use agent_profile_ref, not legacy AgentCell.profile/runtime profile fields: "
+            "Agent Class definitions must use agent_profile_ref or policy.mode, not legacy AgentCell.profile/runtime profile fields: "
             + ", ".join(ambiguous),
             path=source,
             profile_id=class_id,
@@ -397,7 +747,7 @@ def validate_class_data(
         issues.append(ValidationIssue(
             "error",
             "raw_tool_fields_forbidden",
-            "Agent Class definitions must not contain raw MCP/tool/capability fields: "
+            "Agent Class definitions must not contain raw MCP/tool fields or top-level grants/denies: "
             + ", ".join(raw_tool_fields),
             path=source,
             profile_id=class_id,
@@ -407,7 +757,7 @@ def validate_class_data(
         issues.append(ValidationIssue(
             "error",
             "raw_tool_fields_forbidden",
-            "Agent Class definitions must not contain nested raw MCP/tool/capability fields: "
+            "Agent Class definitions must not contain nested raw MCP/tool fields outside policy.grants/policy.denies: "
             + ", ".join(extra_raw_tool_fields),
             path=source,
             profile_id=class_id,
@@ -435,7 +785,7 @@ def validate_class_data(
             path=source,
             profile_id=class_id,
         ))
-    version = str(data.get("version", "") or "").strip()
+    version = str(normalized.get("version", "") or "").strip()
     if not version:
         issues.append(ValidationIssue(
             "error", "missing_class_version", "Agent Class version is required", path=source, profile_id=class_id
@@ -448,7 +798,7 @@ def validate_class_data(
             path=source,
             profile_id=class_id,
         ))
-    display_name = data.get("display_name", "")
+    display_name = normalized.get("display_name", "")
     if not isinstance(display_name, str):
         issues.append(ValidationIssue(
             "error",
@@ -475,8 +825,8 @@ def validate_class_data(
                 path=source,
                 profile_id=class_id,
             ))
-    if "description" in data:
-        description = data.get("description", "")
+    if "description" in normalized:
+        description = normalized.get("description", "")
         if not isinstance(description, str):
             issues.append(ValidationIssue(
                 "error", "description_not_string", "description must be a string", path=source, profile_id=class_id
@@ -489,16 +839,26 @@ def validate_class_data(
                 path=source,
                 profile_id=class_id,
             ))
-    base_kind = str(data.get("base_kind", "") or "").strip()
+    base_kind = str(normalized.get("base_kind", "") or "").strip()
+    runtime_data = raw_data.get("runtime") if isinstance(raw_data.get("runtime"), dict) else {}
+    runtime_base_kind = str(runtime_data.get("base_kind", "") or "").strip()
+    if runtime_base_kind and str(raw_data.get("base_kind", "") or "").strip() and runtime_base_kind != str(raw_data.get("base_kind", "") or "").strip():
+        issues.append(ValidationIssue(
+            "error",
+            "runtime_base_kind_mismatch",
+            f"runtime.base_kind={runtime_base_kind} does not match base_kind={raw_data.get('base_kind')}",
+            path=source,
+            profile_id=class_id,
+        ))
     if base_kind not in BASE_KINDS:
         issues.append(ValidationIssue(
             "error",
             "invalid_base_kind",
-            f"base_kind must be one of {', '.join(sorted(BASE_KINDS))}",
+            f"base_kind/runtime.base_kind must be one of {', '.join(sorted(BASE_KINDS))}",
             path=source,
             profile_id=class_id,
         ))
-    lifecycle = str(data.get("lifecycle", "stable") or "stable").strip()
+    lifecycle = str(normalized.get("lifecycle", "stable") or "stable").strip()
     if lifecycle not in ALLOWED_LIFECYCLES:
         issues.append(ValidationIssue(
             "error",
@@ -507,12 +867,28 @@ def validate_class_data(
             path=source,
             profile_id=class_id,
         ))
-    if "metadata" in data and not isinstance(data.get("metadata"), dict):
+
+    for mapping_key in ("identity", "runtime", "metadata", "draft", "policy", "capabilities", "communication", "delegation"):
+        if mapping_key in raw_data and not isinstance(raw_data.get(mapping_key), dict):
+            issues.append(ValidationIssue(
+                "error",
+                f"{mapping_key}_not_mapping",
+                f"{mapping_key} must be a mapping",
+                path=source,
+                profile_id=class_id,
+            ))
+    if "warnings" in raw_data and not isinstance(raw_data.get("warnings"), list):
         issues.append(ValidationIssue(
-            "error", "metadata_not_mapping", "metadata must be a mapping", path=source, profile_id=class_id
+            "error",
+            "warnings_not_list",
+            "warnings must be a list of strings",
+            path=source,
+            profile_id=class_id,
         ))
-    elif isinstance(data.get("metadata"), dict):
-        metadata = data.get("metadata") or {}
+    _validate_string_list_field(raw_data.get("warnings"), "warnings", issues, source=source, class_id=class_id)
+
+    metadata = raw_data.get("metadata") if isinstance(raw_data.get("metadata"), dict) else {}
+    if metadata:
         if _metadata_json_size(metadata) > MAX_METADATA_JSON_BYTES:
             issues.append(ValidationIssue(
                 "error",
@@ -530,34 +906,42 @@ def validate_class_data(
                     path=source,
                     profile_id=class_id,
                 ))
-    if "draft" in data and not isinstance(data.get("draft"), dict):
+
+    prompt_value = raw_data.get("prompt", "")
+    if "prompt" in raw_data and not isinstance(prompt_value, (str, dict)):
         issues.append(ValidationIssue(
-            "error", "draft_not_mapping", "draft must be a mapping", path=source, profile_id=class_id
+            "error", "prompt_not_string_or_mapping", "prompt must be a string or mapping with addendum", path=source, profile_id=class_id
         ))
-    if "prompt" in data and not isinstance(data.get("prompt"), str):
-        issues.append(ValidationIssue(
-            "error", "prompt_not_string", "prompt must be a string", path=source, profile_id=class_id
-        ))
-    elif isinstance(data.get("prompt"), str) and len(data.get("prompt", "")) > MAX_PROMPT_LEN:
+    prompt_text = str(normalized.get("prompt", "") or "")
+    if len(prompt_text) > MAX_PROMPT_LEN:
         issues.append(ValidationIssue(
             "error",
             "prompt_too_long",
-            f"prompt must be at most {MAX_PROMPT_LEN} characters",
+            f"prompt addendum must be at most {MAX_PROMPT_LEN} characters",
             path=source,
             profile_id=class_id,
         ))
 
-    ref_data = data.get("agent_profile_ref")
+    ref_data = normalized.get("agent_profile_ref")
     ref_id = ""
     ref_version = ""
-    if not isinstance(ref_data, dict):
+    if policy_mode not in ALLOWED_POLICY_MODES:
         issues.append(ValidationIssue(
             "error",
-            "missing_agent_profile_ref",
-            "Agent Class must reference exactly one Agent Profile via agent_profile_ref.id/version",
+            "invalid_policy_mode",
+            "policy.mode must be compile or wrap_profile",
             path=source,
             profile_id=class_id,
         ))
+    if not isinstance(ref_data, dict):
+        if policy_mode == "wrap_profile":
+            issues.append(ValidationIssue(
+                "error",
+                "missing_agent_profile_ref",
+                "Agent Class wrap_profile policy must reference exactly one Agent Profile via agent_profile_ref.id/version",
+                path=source,
+                profile_id=class_id,
+            ))
     else:
         ref_id = str(ref_data.get("id", "") or "").strip()
         ref_version = str(ref_data.get("version", "") or "").strip()
@@ -589,6 +973,15 @@ def validate_class_data(
             path=source,
             profile_id=class_id,
         ))
+    expected_mode = BUILTIN_CLASS_POLICY_MODE.get(class_id)
+    if expected_mode and policy_mode and policy_mode != expected_mode:
+        issues.append(ValidationIssue(
+            "error",
+            "class_policy_mode_mismatch",
+            f"Agent Class {class_id} must use policy.mode={expected_mode}",
+            path=source,
+            profile_id=class_id,
+        ))
     expected_ref = BUILTIN_CLASS_PROFILE_REF.get(class_id)
     if expected_ref and ref_id and (ref_id, ref_version) != expected_ref:
         issues.append(ValidationIssue(
@@ -599,7 +992,7 @@ def validate_class_data(
             profile_id=class_id,
         ))
 
-    draft_data = data.get("draft") if isinstance(data.get("draft"), dict) else {}
+    draft_data = normalized.get("draft") if isinstance(normalized.get("draft"), dict) else {}
     if lifecycle == "draft":
         if draft_data.get("scratch_only") is not True:
             issues.append(ValidationIssue(
@@ -613,7 +1006,7 @@ def validate_class_data(
             issues.append(ValidationIssue(
                 "error",
                 "invalid_draft_metadata",
-                "draft Agent Classes must not claim live dogfood approval in Wave 6B",
+                "draft Agent Classes must not claim live dogfood approval in Wave 7",
                 path=source,
                 profile_id=class_id,
             ))
@@ -626,36 +1019,100 @@ def validate_class_data(
             profile_id=class_id,
         ))
 
-    profiles_lookup = profiles_by_id if profiles_by_id is not None else _profile_by_id_for_validation(base_dir or os.getcwd())
-    if ref_id:
-        profile = profiles_lookup.get(ref_id)
-        if not profile:
+    policy_data = normalized.get("policy") if isinstance(normalized.get("policy"), dict) else {}
+    if policy_mode == "compile":
+        grants = _validate_string_list_field(policy_data.get("grants"), "policy.grants", issues, source=source, class_id=class_id)
+        denies = _validate_string_list_field(policy_data.get("denies"), "policy.denies", issues, source=source, class_id=class_id)
+        unknown_atoms = sorted((set(grants) | set(denies)) - set(CAPABILITIES))
+        if unknown_atoms:
             issues.append(ValidationIssue(
                 "error",
-                "missing_agent_profile_ref",
-                f"Agent Class references unknown or invalid Agent Profile: {ref_id}",
+                "unknown_policy_capability_atoms",
+                "unknown policy capability atoms: " + ", ".join(unknown_atoms),
                 path=source,
                 profile_id=class_id,
             ))
-        else:
-            if ref_version and profile.version != ref_version:
+        if base_kind in BASE_KIND_CEILINGS:
+            outside = sorted(set(grants) - BASE_KIND_CEILINGS[base_kind])
+            if outside:
                 issues.append(ValidationIssue(
                     "error",
-                    "agent_profile_ref_version_mismatch",
-                    f"Agent Class references {ref_id}@{ref_version}, but registry has version {profile.version}",
+                    "policy_grants_outside_base_kind_ceiling",
+                    f"policy.grants outside {base_kind} ceiling: " + ", ".join(outside),
                     path=source,
                     profile_id=class_id,
                 ))
-            if base_kind and profile.base_kind != base_kind:
+        archetype = str((metadata or {}).get("archetype", "") or "").strip()
+        is_pm_class = class_id == "product-manager" or archetype == "product_manager" or "product-manager" in class_id
+        dangerous = sorted(set(grants) & PM_DANGEROUS_CAPABILITIES)
+        if is_pm_class and dangerous:
+            issues.append(ValidationIssue(
+                "error",
+                "dangerous_product_manager_policy_grants",
+                "Product Manager Agent Classes must not grant dangerous execution/admin capabilities: "
+                + ", ".join(dangerous),
+                path=source,
+                profile_id=class_id,
+            ))
+        generated_ref = _generated_profile_ref_for_data(normalized)
+        if not generated_ref.id or not CLASS_ID_RE.match(generated_ref.id):
+            issues.append(ValidationIssue(
+                "error",
+                "invalid_generated_profile_id",
+                "policy.generated_profile_id must be lowercase kebab-case alphanumerics",
+                path=source,
+                profile_id=class_id,
+            ))
+        if not generated_ref.version or not CLASS_VERSION_RE.match(generated_ref.version):
+            issues.append(ValidationIssue(
+                "error",
+                "invalid_generated_profile_version",
+                "policy.generated_profile_version must be a safe non-empty token",
+                path=source,
+                profile_id=class_id,
+            ))
+        for map_key in ("scope", "communication", "spawn", "audit"):
+            if map_key in policy_data and not isinstance(policy_data.get(map_key), dict):
                 issues.append(ValidationIssue(
                     "error",
-                    "agent_profile_base_kind_mismatch",
-                    f"Agent Class base_kind={base_kind} cannot reference Agent Profile {ref_id} base_kind={profile.base_kind}",
+                    f"policy_{map_key}_not_mapping",
+                    f"policy.{map_key} must be a mapping",
                     path=source,
                     profile_id=class_id,
                 ))
+    elif policy_mode == "wrap_profile":
+        profiles_lookup = profiles_by_id if profiles_by_id is not None else _profile_by_id_for_validation(base_dir or os.getcwd())
+        if ref_id:
+            profile = profiles_lookup.get(ref_id)
+            if not profile:
+                issues.append(ValidationIssue(
+                    "error",
+                    "missing_agent_profile_ref",
+                    f"Agent Class references unknown or invalid Agent Profile: {ref_id}",
+                    path=source,
+                    profile_id=class_id,
+                ))
+            else:
+                if ref_version and profile.version != ref_version:
+                    issues.append(ValidationIssue(
+                        "error",
+                        "agent_profile_ref_version_mismatch",
+                        f"Agent Class references {ref_id}@{ref_version}, but registry has version {profile.version}",
+                        path=source,
+                        profile_id=class_id,
+                    ))
+                if base_kind and profile.base_kind != base_kind:
+                    issues.append(ValidationIssue(
+                        "error",
+                        "agent_profile_base_kind_mismatch",
+                        f"Agent Class base_kind={base_kind} cannot reference Agent Profile {ref_id} base_kind={profile.base_kind}",
+                        path=source,
+                        profile_id=class_id,
+                    ))
 
-    definition = AgentClassDefinition.from_dict(data, source=source, builtin=builtin)
+    definition = AgentClassDefinition.from_dict(normalized, source=source, builtin=builtin)
+    if policy_mode == "compile" and not any(issue.severity == "error" for issue in issues):
+        issues.extend(_validate_compiled_agent_class_profile(definition, source=source, base_dir=base_dir))
     if any(issue.severity == "error" for issue in issues):
         return None, issues
     return definition, issues
@@ -721,6 +1178,117 @@ def default_agent_class_id_for_kind(kind: str) -> str:
     return DEFAULT_CLASS_BY_KIND.get(str(kind or "").strip(), "")
 
 
+def _compiled_profile_data_for_class(definition: AgentClassDefinition) -> dict[str, Any]:
+    policy = dict(definition.policy or {})
+    generated_ref = definition.agent_profile_ref
+    grants = _string_list(policy.get("grants"))
+    denies = _string_list(policy.get("denies"))
+    profile_policy = {
+        "base_kind": definition.base_kind,
+        "scope": dict(policy.get("scope") or {}) if isinstance(policy.get("scope"), dict) else {},
+        "communication": dict(policy.get("communication") or {}) if isinstance(policy.get("communication"), dict) else {},
+        "spawn": dict(policy.get("spawn") or {}) if isinstance(policy.get("spawn"), dict) else {},
+        "audit": dict(policy.get("audit") or {}) if isinstance(policy.get("audit"), dict) else {},
+    }
+    if definition.communication:
+        profile_policy.setdefault("communication", {}).update(dict(definition.communication or {}))
+    metadata = dict(definition.metadata or {})
+    metadata.setdefault("archetype", metadata.get("archetype", ""))
+    metadata["generated_by_agent_class"] = {
+        "id": definition.id,
+        "version": definition.version,
+        "display_name": definition.display_name,
+        "schema_version": definition.agent_class_schema_version,
+        "policy_schema_version": policy.get("policy_schema_version", POLICY_SCHEMA_VERSION),
+        "compiler_version": POLICY_COMPILER_VERSION,
+    }
+    metadata["internal_policy_source"] = "compiled_from_agent_class"
+    metadata["generated_profile"] = True
+    return {
+        "id": generated_ref.id,
+        "version": generated_ref.version,
+        "base_kind": definition.base_kind,
+        "display_name": f"{primary_identity_label_for_class(definition)} internal policy",
+        "description": (
+            "Generated internal Agent Profile-compatible policy compiled from "
+            f"Agent Class {definition.id}@{definition.version}. It is not written as project YAML."
+        ),
+        "lifecycle": definition.lifecycle,
+        "grants": grants,
+        "denies": denies,
+        "policy": profile_policy,
+        "metadata": metadata,
+        "tool_categories": {},
+    }
+
+
+def compile_agent_class_profile(definition: AgentClassDefinition | dict[str, Any]) -> AgentProfileDefinition:
+    """Compile a class-owned policy into an internal Agent Profile definition."""
+
+    if isinstance(definition, dict):
+        definition = AgentClassDefinition.from_dict(definition)
+    data = _compiled_profile_data_for_class(definition)
+    profile, issues = validate_profile_data(
+        data,
+        source=f"{definition.source or definition.id}#compiled_profile",
+        builtin=False,
+    )
+    errors = [issue for issue in issues if issue.severity == "error"]
+    if errors:
+        raise ValueError(
+            "compiled Agent Class policy is invalid: "
+            + "; ".join(issue.message for issue in errors[:3])
+        )
+    assert profile is not None
+    profile.source = "generated_internal_agent_class_policy"
+    profile.builtin = bool(definition.builtin)
+    return profile
+
+
+def resolve_agent_class_profile_definition(
+    definition: AgentClassDefinition | dict[str, Any],
+    *,
+    base_dir: str = "",
+) -> AgentProfileDefinition | None:
+    """Return the Agent Profile-compatible policy for a class.
+
+    ``wrap_profile`` classes return a registry profile. ``compile`` classes
+    return an in-memory/generated definition that is frozen into SQLite
+    snapshots but never written as project YAML in Wave 7B.
+    """
+
+    if isinstance(definition, dict):
+        definition = AgentClassDefinition.from_dict(definition)
+    if agent_class_policy_mode(definition) == "compile":
+        return compile_agent_class_profile(definition)
+    return profile_definition_by_id(definition.agent_profile_ref.id, base_dir=base_dir)
+
+
+def internal_policy_preview_for_class(
+    definition: AgentClassDefinition,
+    profile_preview: dict[str, Any],
+) -> dict[str, Any]:
+    policy_summary = compact_agent_class_policy_preview(definition)
+    denied = list(profile_preview.get("denied_high_risk_capabilities", []) or [])
+    out = {
+        **policy_summary,
+        "display_name": str(profile_preview.get("display_name", "") or ""),
+        "base_kind": definition.base_kind,
+        "lifecycle": str(profile_preview.get("lifecycle", "") or definition.lifecycle),
+        "status": str(profile_preview.get("status", "") or ""),
+        "capability_count": int(profile_preview.get("capability_count", 0) or 0),
+        "denied_high_risk_count": len(denied),
+        "denied_high_risk_capabilities": denied[:24],
+        "projected_tool_categories": list(profile_preview.get("projected_tool_categories", []) or []),
+        "runtime_enforcement": str(profile_preview.get("runtime_enforcement", "") or ""),
+        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
+    }
+    if policy_summary.get("mode") == "compile":
+        out["snapshot_source"] = "sqlite_effective_snapshot_only"
+        out["generated_profile_written_to_project_yaml"] = False
+    return out
+
+
 def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: dict[str, Any]) -> str:
     if agent_class_is_archived(class_preview):
         return "archived"
@@ -774,6 +1342,8 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
 
 def compact_agent_profile_preview(profile_preview: dict[str, Any]) -> dict[str, Any]:
     denied = list(profile_preview.get("denied_high_risk_capabilities", []) or [])
+    metadata = profile_preview.get("metadata", {}) if isinstance(profile_preview.get("metadata"), dict) else {}
+    generated_by = metadata.get("generated_by_agent_class", {}) if isinstance(metadata, dict) else {}
     return {
         "id": str(profile_preview.get("id", "") or ""),
         "version": str(profile_preview.get("version", "") or ""),
@@ -781,6 +1351,10 @@ def compact_agent_profile_preview(profile_preview: dict[str, Any]) -> dict[str, 
         "display_name": str(profile_preview.get("display_name", "") or ""),
         "lifecycle": str(profile_preview.get("lifecycle", "") or ""),
         "status": str(profile_preview.get("status", "") or ""),
+        "generated": bool(metadata.get("generated_profile")) if isinstance(metadata, dict) else False,
+        "source_class_id": str(generated_by.get("id", "") or "") if isinstance(generated_by, dict) else "",
+        "source_class_version": str(generated_by.get("version", "") or "") if isinstance(generated_by, dict) else "",
+        "policy_compiler_version": str(generated_by.get("compiler_version", "") or "") if isinstance(generated_by, dict) else "",
         "capability_count": int(profile_preview.get("capability_count", 0) or 0),
         "denied_high_risk_count": len(denied),
         "denied_high_risk_capabilities": denied[:24],
@@ -791,15 +1365,31 @@ def compact_agent_profile_preview(profile_preview: dict[str, Any]) -> dict[str, 
 def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, Any], *, base_dir: str = "") -> dict[str, Any]:
     if isinstance(definition, dict):
         definition = AgentClassDefinition.from_dict(definition)
-    profile = profile_definition_by_id(definition.agent_profile_ref.id, base_dir=base_dir)
+    profile = resolve_agent_class_profile_definition(definition, base_dir=base_dir)
     profile_preview = enriched_profile_preview(profile) if profile else {}
     preview = definition.as_preview_dict()
     preview["metadata"] = dict(definition.metadata or {})
     preview["draft"] = dict(definition.draft or {})
     preview["prompt"] = definition.prompt
+    preview["capabilities"] = dict(definition.capabilities or {})
+    preview["communication"] = dict(definition.communication or {})
+    preview["delegation"] = dict(definition.delegation or {})
+    preview["class_warnings"] = list(definition.warnings or [])
     preview["agent_profile"] = profile_preview
+    preview["compiled_profile"] = profile_preview if agent_class_policy_mode(definition) == "compile" else {}
+    preview["internal_profile"] = profile_preview
+    preview["internal_policy"] = internal_policy_preview_for_class(definition, profile_preview)
+    preview["primary_display_name"] = primary_identity_label_for_class(definition)
+    preview["primary_identity_label"] = primary_identity_label_for_class(definition)
+    preview["secondary_base_kind_label"] = secondary_base_kind_label_for_class(definition)
+    preview["secondary_base_kind_metadata"] = agent_class_runtime_preview(definition)
     preview["status"] = _class_status_from_previews(preview, profile_preview)
-    preview["warnings"] = class_warnings_for_preview(preview, profile_preview)
+    warnings = class_warnings_for_preview(preview, profile_preview)
+    for warning in definition.warnings or []:
+        text = str(warning or "").strip()
+        if text and text not in warnings:
+            warnings.append(text)
+    preview["warnings"] = warnings
     preview["external_connector_caveat"] = EXTERNAL_CONNECTOR_CAVEAT
     preview["runtime_enforcement"] = "launch_frozen_agent_class_profile_pairing"
     prompt = str(definition.prompt or "")
@@ -809,10 +1399,10 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
         "preview": prompt.strip()[:240],
     }
     preview["restrictions"] = [
-        "Agent Class can reference exactly one Agent Profile.",
-        "Agent Profile remains the MCP/capability enforcement layer.",
+        "Agent Class is the operator-facing identity and policy intent.",
+        "Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.",
         "Agent Class definitions do not mutate running sessions; changes apply only at launch/relaunch boundaries.",
-        "Raw MCP tools, capability grants/denies, connector governance, and arbitrary runtime kinds are not part of Agent Class YAML/API.",
+        "Raw MCP tools, connector governance, and arbitrary runtime kinds are not part of Agent Class YAML/API.",
     ]
     preview["launchable"] = not agent_class_is_archived(preview)
     return preview
@@ -839,14 +1429,26 @@ def freeze_agent_class_snapshot(
     snapshot = {
         "id": definition.id,
         "version": definition.version,
+        "agent_class_schema_version": definition.agent_class_schema_version,
         "base_kind": definition.base_kind,
         "display_name": definition.display_name,
+        "primary_display_name": primary_identity_label_for_class(definition),
+        "primary_identity_label": primary_identity_label_for_class(definition),
+        "secondary_base_kind_label": secondary_base_kind_label_for_class(definition),
+        "secondary_base_kind_metadata": agent_class_runtime_preview(definition),
         "description": definition.description,
         "lifecycle": definition.lifecycle,
         "builtin": bool(definition.builtin),
         "status": str(full_preview.get("status", "") or "full"),
         "agent_profile_ref": definition.agent_profile_ref.as_dict(),
         "agent_profile": compact_agent_profile_preview(profile_preview),
+        "internal_policy": internal_policy_preview_for_class(definition, profile_preview),
+        "compiled_profile": compact_agent_profile_preview(profile_preview) if agent_class_policy_mode(definition) == "compile" else {},
+        "identity": dict(definition.identity or {}),
+        "runtime": agent_class_runtime_preview(definition),
+        "capabilities": dict(definition.capabilities or {}),
+        "communication": dict(definition.communication or {}),
+        "delegation": dict(definition.delegation or {}),
         "prompt": definition.prompt,
         "metadata": dict(definition.metadata or {}),
         "draft": dict(definition.draft or {}),
@@ -867,10 +1469,13 @@ def compact_agent_class_audit_preview(snapshot: dict[str, Any]) -> dict[str, Any
         "id": str(snapshot.get("id", "") or ""),
         "version": str(snapshot.get("version", "") or ""),
         "base_kind": str(snapshot.get("base_kind", "") or ""),
+        "primary_identity_label": str(snapshot.get("primary_identity_label", snapshot.get("display_name", "")) or ""),
+        "secondary_base_kind_label": str(snapshot.get("secondary_base_kind_label", "") or ""),
         "status": str(snapshot.get("status", "") or ""),
         "lifecycle": str(snapshot.get("lifecycle", "") or ""),
         "agent_profile_ref": dict(snapshot.get("agent_profile_ref") or {}),
         "agent_profile": dict(snapshot.get("agent_profile") or {}),
+        "internal_policy": dict(snapshot.get("internal_policy") or {}),
         "snapshot_hash": str(snapshot.get("snapshot_hash", "") or ""),
         "warnings": list(snapshot.get("warnings", []) or [])[:6],
     }
@@ -886,10 +1491,13 @@ def agent_class_context_for_cell(cell: Any) -> dict[str, Any]:
         "version": str(snapshot.get("version", "") or ""),
         "base_kind": str(snapshot.get("base_kind", "") or ""),
         "display_name": str(snapshot.get("display_name", "") or ""),
+        "primary_identity_label": str(snapshot.get("primary_identity_label", snapshot.get("display_name", "")) or ""),
+        "secondary_base_kind_label": str(snapshot.get("secondary_base_kind_label", "") or ""),
         "lifecycle": str(snapshot.get("lifecycle", "") or ""),
         "status": str(snapshot.get("status", "") or ""),
         "agent_profile_id": str(profile.get("id", "") or ""),
         "agent_profile_version": str(profile.get("version", "") or ""),
+        "internal_policy": dict(snapshot.get("internal_policy") or {}),
         "warnings": list(snapshot.get("warnings", []) or [])[:6],
         "external_connector_caveat": str(snapshot.get("external_connector_caveat", "") or ""),
     }
@@ -911,10 +1519,11 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
     ref = snapshot.get("agent_profile_ref") if isinstance(snapshot.get("agent_profile_ref"), dict) else {}
     lines = [
         "## Agent Class",
-        f"Class: {class_id}@{snapshot.get('version', '')} ({snapshot.get('display_name', '') or class_id})",
+        f"Class: {class_id}@{snapshot.get('version', '')} ({snapshot.get('primary_identity_label', snapshot.get('display_name', '')) or class_id})",
         f"Lifecycle/status: {lifecycle or '-'} / {status or '-'}",
-        f"Referenced Agent Profile: {ref.get('id', profile.get('id', ''))}@{ref.get('version', profile.get('version', ''))}",
-        "Agent Class is additive identity/context only; Agent Profile remains the enforcement layer.",
+        f"Internal Agent Profile policy: {ref.get('id', profile.get('id', ''))}@{ref.get('version', profile.get('version', ''))}",
+        f"Internal base kind: {snapshot.get('secondary_base_kind_label', snapshot.get('base_kind', '')) or '-'}",
+        "Agent Class is the primary operator-facing identity; Agent Profile-compatible policy remains the enforcement layer.",
     ]
     if prompt:
         lines.extend(["", prompt])
@@ -1027,10 +1636,53 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             or (next_launch_profile_version and next_launch_profile_version != effective_profile_version)
             )
         )
+    warnings = list(effective_preview.get("warnings", []) or [])
+    legacy_direct_profile_warning = ""
+    if direct_profile_without_class and next_launch_profile_id == "product-manager-draft":
+        legacy_direct_profile_warning = (
+            "Legacy direct Product Manager Agent Profile assignment is pending; "
+            "set desired Agent Class to product-manager for class-first next relaunch. "
+            "No silent migration is performed."
+        )
+        warnings.append(legacy_direct_profile_warning)
+    if not direct_profile_without_class and next_launch_class_id == "product-manager":
+        if EXTERNAL_CONNECTOR_DRAFT_WARNING not in warnings:
+            warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
+    deduped_warnings: list[str] = []
+    seen_warnings: set[str] = set()
+    for warning in warnings:
+        text = str(warning or "").strip()
+        if text and text not in seen_warnings:
+            deduped_warnings.append(text)
+            seen_warnings.add(text)
+    next_launch_label = ""
+    if direct_profile_without_class:
+        next_launch_label = "Internal policy: " + next_launch_profile_id if next_launch_profile_id else ""
+    elif next_launch_class_id:
+        if assigned_preview and assigned_preview.get("id") == next_launch_class_id:
+            next_launch_label = str(assigned_preview.get("primary_identity_label", "") or "")
+        elif effective_preview and effective_preview.get("id") == next_launch_class_id:
+            next_launch_label = str(effective_preview.get("primary_identity_label", "") or "")
+        else:
+            next_class = agent_class_definition_by_id(
+                next_launch_class_id,
+                base_dir=base_dir,
+                include_archived=True,
+            )
+            next_launch_label = primary_identity_label_for_class(next_class) if next_class else next_launch_class_id
+    effective_label = str(effective_preview.get("primary_identity_label", effective_preview.get("display_name", "")) or "")
+    assigned_label = str(assigned_preview.get("primary_identity_label", assigned_preview.get("display_name", "")) or "")
     return {
         "agent_id": str(getattr(cell, "id", "") or ""),
         "agent_name": str(getattr(cell, "name", "") or ""),
         "base_kind": kind,
+        "primary_class_display_label": effective_label,
+        "primary_identity_label": effective_label,
+        "effective_primary_identity_label": effective_label,
+        "assigned_primary_identity_label": assigned_label,
+        "next_launch_primary_identity_label": next_launch_label,
+        "secondary_base_kind_label": str(effective_preview.get("secondary_base_kind_label", "") or ""),
+        "secondary_base_kind_metadata": dict(effective_preview.get("secondary_base_kind_metadata") or {}),
         "assigned_class_id": assigned_id,
         "assigned_class_version": str(getattr(cell, "agent_class_version", "") or ""),
         "assigned_at": float(getattr(cell, "agent_class_assigned_at", 0) or 0),
@@ -1047,8 +1699,18 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
         "direct_agent_profile_assignment": direct_profile_without_class,
+        "legacy_direct_product_manager_profile": bool(legacy_direct_profile_warning),
+        "legacy_direct_profile_warning": legacy_direct_profile_warning,
+        "internal_policy": dict(effective_preview.get("internal_policy") or {}),
+        "next_launch_internal_policy": (
+            dict(assigned_preview.get("internal_policy") or {})
+            if assigned_preview and assigned_preview.get("id") == next_launch_class_id
+            else dict(effective_preview.get("internal_policy") or {})
+            if effective_preview and effective_preview.get("id") == next_launch_class_id
+            else {}
+        ),
         "next_launch_class_disabled": bool(agent_class_is_archived(assigned_preview)) if assigned_preview else False,
-        "warnings": list(effective_preview.get("warnings", []) or []),
+        "warnings": deduped_warnings,
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }
 
@@ -1136,24 +1798,43 @@ def normalize_agent_class_authoring_data(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_agent_class_data(data: dict[str, Any]) -> dict[str, Any]:
+    data = _normalized_class_data(data)
     ref = data.get("agent_profile_ref") if isinstance(data.get("agent_profile_ref"), dict) else {}
+    schema_version = _agent_class_schema_version(data)
     out: dict[str, Any] = {
         "id": str(data.get("id", "") or "").strip(),
         "version": str(data.get("version", "") or "").strip(),
-        "base_kind": str(data.get("base_kind", "") or "").strip(),
         "display_name": str(data.get("display_name", "") or "").strip(),
     }
+    if schema_version >= AGENT_CLASS_SCHEMA_VERSION:
+        out["agent_class_schema_version"] = schema_version
+        runtime = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
+        if runtime:
+            out["runtime"] = dict(runtime)
+        else:
+            out["base_kind"] = str(data.get("base_kind", "") or "").strip()
+    else:
+        out["base_kind"] = str(data.get("base_kind", "") or "").strip()
     description = str(data.get("description", "") or "").strip()
     if description:
         out["description"] = description
     out["lifecycle"] = str(data.get("lifecycle", "stable") or "stable").strip()
-    out["agent_profile_ref"] = {
-        "id": str(ref.get("id", "") or "").strip(),
-        "version": str(ref.get("version", "") or "").strip(),
-    }
+    policy_mode = _policy_mode_from_data(data)
+    if policy_mode == "wrap_profile":
+        out["agent_profile_ref"] = {
+            "id": str(ref.get("id", "") or "").strip(),
+            "version": str(ref.get("version", "") or "").strip(),
+        }
     prompt = str(data.get("prompt", "") or "").strip()
     if prompt:
-        out["prompt"] = prompt
+        out["prompt"] = {"addendum": prompt} if schema_version >= AGENT_CLASS_SCHEMA_VERSION else prompt
+    for key in ("identity", "policy", "capabilities", "communication", "delegation"):
+        value = data.get(key)
+        if isinstance(value, dict) and value:
+            out[key] = dict(value)
+    warnings = _string_list(data.get("warnings"))
+    if warnings:
+        out["warnings"] = warnings
     draft = data.get("draft")
     if isinstance(draft, dict) and draft:
         out["draft"] = dict(draft)

@@ -16,6 +16,7 @@ from torque.agent_classes import (
     agent_class_prompt_block_for_cell,
     agent_class_definition_by_id,
     archive_custom_agent_class,
+    compile_agent_class_profile,
     delete_custom_agent_class,
     enriched_agent_class_preview,
     load_agent_classes,
@@ -59,7 +60,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "default-architect": ("architect", "full-architect", "1"),
             "default-engineer": ("engineer", "full-engineer", "1"),
             "default-worker": ("worker", "full-worker", "1"),
-            "product-manager": ("architect", "product-manager-draft", "2"),
+            "product-manager": ("architect", "class-policy-product-manager", "2"),
         }
         self.assertEqual(set(expected), set(by_id))
         for class_id, (base_kind, profile_id, profile_version) in expected.items():
@@ -69,7 +70,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             self.assertEqual(definition.agent_profile_ref.id, profile_id)
             self.assertEqual(definition.agent_profile_ref.version, profile_version)
 
-    def test_product_manager_preview_is_draft_pm_profile_pairing_with_caveat(self):
+    def test_product_manager_preview_is_class_first_compiled_pm_policy_with_caveat(self):
         classes, issues = load_agent_classes(base_dir=str(self.project))
         self.assertFalse(issues)
         pm = next(definition for definition in classes if definition.id == "product-manager")
@@ -77,12 +78,18 @@ class AgentClassRegistryTests(unittest.TestCase):
         preview = enriched_agent_class_preview(pm, base_dir=str(self.project))
 
         self.assertEqual(preview["status"], "draft")
-        self.assertEqual(preview["agent_profile_ref"], {"id": "product-manager-draft", "version": "2"})
-        self.assertEqual(preview["agent_profile"]["id"], "product-manager-draft")
+        self.assertEqual(preview["display_name"], "Product Manager")
+        self.assertEqual(preview["primary_identity_label"], "Product Manager")
+        self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
+        self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "2"})
+        self.assertEqual(preview["agent_profile"]["id"], "class-policy-product-manager")
+        self.assertEqual(preview["internal_policy"]["mode"], "compile")
+        self.assertEqual(preview["internal_policy"]["profile_source"], "compiled_from_agent_class")
+        self.assertFalse(preview["internal_policy"]["generated_profile_written_to_project_yaml"])
         self.assertTrue(preview["draft"]["scratch_only"])
         self.assertIn("external_connector_caveat", preview)
         warnings = "\n".join(preview["warnings"])
-        self.assertIn("scratch-only", warnings)
+        self.assertIn("draft/restricted", warnings)
         self.assertIn("architect_product_*", warnings)
         self.assertIn(EXTERNAL_CONNECTOR_DRAFT_WARNING, preview["warnings"])
         categories = {
@@ -91,6 +98,60 @@ class AgentClassRegistryTests(unittest.TestCase):
         }
         self.assertEqual(categories["pm_decisions"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
+        compiled = compile_agent_class_profile(pm)
+        self.assertEqual(compiled.id, "class-policy-product-manager")
+        self.assertEqual(set(compiled.grants) & {
+            "agent.hire_engineer",
+            "agent.dispatch_worker",
+            "task.dispatch",
+            "worktree.merge",
+            "deploy.apply",
+            "admin.settings",
+            "profile.assign",
+            "profile.edit",
+        }, set())
+
+    def test_schema_v3_compile_accepts_class_policy_sections_and_rejects_raw_tools(self):
+        valid = {
+            "agent_class_schema_version": 3,
+            "id": "planning-architect",
+            "version": "1",
+            "display_name": "Planning Architect",
+            "identity": {"label": "Planning Architect", "primary_ui_label": "Planning Architect"},
+            "runtime": {"base_kind": "architect", "base_kind_label": "Architect-derived"},
+            "prompt": {"addendum": "Use planning-safe surfaces only."},
+            "policy": {
+                "mode": "compile",
+                "generated_profile_id": "class-policy-planning-architect",
+                "grants": ["observe.self_context", "planning.area_read", "comm.user_message"],
+                "denies": ["task.dispatch"],
+                "scope": {"summary": "planning read-only"},
+                "communication": {"user": "message"},
+                "spawn": {"dispatch": "deny"},
+                "audit": {"profile_changes": "next_launch_only"},
+            },
+            "capabilities": {"domains": ["planning"]},
+            "delegation": {"dispatch_workers": "denied"},
+            "warnings": ["External connectors are separate."],
+        }
+
+        definition, issues = validate_class_data(valid, base_dir=str(self.project))
+
+        self.assertIsNotNone(definition, [issue.as_dict() for issue in issues])
+        self.assertEqual(definition.agent_class_schema_version, 3)
+        self.assertEqual(definition.base_kind, "architect")
+        self.assertEqual(definition.agent_profile_ref.id, "class-policy-planning-architect")
+        compiled = compile_agent_class_profile(definition)
+        self.assertEqual(compiled.id, "class-policy-planning-architect")
+        self.assertEqual(set(compiled.grants), {"observe.self_context", "planning.area_read", "comm.user_message"})
+
+        invalid = dict(valid)
+        invalid["id"] = "bad-planning"
+        invalid["policy"] = dict(valid["policy"], tools=["architect_task_create"])
+        invalid["capabilities"] = {"tools": ["architect_task_create"]}
+        _definition, invalid_issues = validate_class_data(invalid, base_dir=str(self.project))
+        codes = {issue.code for issue in invalid_issues}
+        self.assertIn("raw_tool_fields_forbidden", codes)
 
     def test_invalid_config_rejects_raw_tools_profile_confusion_and_bad_draft(self):
         _definition, issues = validate_class_data(
@@ -292,7 +353,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertEqual(loaded["agent_class_id"], "product-manager")
         audit = self.db.list_agent_class_audit(agent_id=cell.id)
         self.assertEqual(audit[0]["event"], "assignment_set")
-        self.assertEqual(audit[0]["assigned_profile_id"], "product-manager-draft")
+        self.assertEqual(audit[0]["assigned_profile_id"], "class-policy-product-manager")
 
     def test_launch_freezes_class_and_referenced_profile_snapshot(self):
         cell = self._add_agent(kind="architect")
@@ -309,11 +370,18 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot["id"], "product-manager")
-        self.assertEqual(snapshot["agent_profile_ref"], {"id": "product-manager-draft", "version": "2"})
-        self.assertEqual(snapshot["agent_profile"]["id"], "product-manager-draft")
+        self.assertEqual(snapshot["display_name"], "Product Manager")
+        self.assertEqual(snapshot["primary_identity_label"], "Product Manager")
+        self.assertEqual(snapshot["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "2"})
+        self.assertEqual(snapshot["agent_profile"]["id"], "class-policy-product-manager")
+        self.assertEqual(snapshot["internal_policy"]["mode"], "compile")
         self.assertEqual(cell.effective_agent_class_id, "product-manager")
-        self.assertEqual(cell.effective_agent_profile_id, "product-manager-draft")
+        self.assertEqual(cell.effective_agent_profile_id, "class-policy-product-manager")
         self.assertEqual(cell.effective_agent_profile_version, "2")
+        self.assertEqual(
+            cell.effective_agent_profile_snapshot["metadata"]["generated_by_agent_class"]["id"],
+            "product-manager",
+        )
         self.assertTrue(snapshot["snapshot_hash"])
         self.assertFalse(
             self.state.agent_class_status_for_cell(cell, base_dir=str(self.project))["pending_next_launch"]
@@ -326,7 +394,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertTrue(audit[0]["snapshot_hash"])
         loaded = self.db.load_all()["agents"][cell.id]
         self.assertEqual(loaded["effective_agent_class_snapshot"]["id"], "product-manager")
-        self.assertEqual(loaded["effective_agent_profile_snapshot"]["id"], "product-manager-draft")
+        self.assertEqual(loaded["effective_agent_profile_snapshot"]["id"], "class-policy-product-manager")
 
     def test_direct_profile_launch_after_class_clear_clears_effective_class(self):
         cell = self._add_agent(kind="architect")
@@ -438,9 +506,10 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
 
         self.assertIn("## Agent Class", prompt_block)
         self.assertIn("Product Manager", prompt_block)
-        self.assertIn("Referenced Agent Profile: product-manager-draft@2", prompt_block)
+        self.assertIn("Internal Agent Profile policy: class-policy-product-manager@2", prompt_block)
         self.assertEqual(context["id"], "product-manager")
-        self.assertEqual(context["agent_profile_id"], "product-manager-draft")
+        self.assertEqual(context["primary_identity_label"], "Product Manager")
+        self.assertEqual(context["agent_profile_id"], "class-policy-product-manager")
         self.assertLessEqual(len(context["warnings"]), 6)
 
     def test_cross_kind_class_assignment_and_non_user_assignment_are_rejected(self):
@@ -512,6 +581,36 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertIn("[agent_classes]", rendered)
         self.assertIn("Agent Class validation failed[agent_cell_profile_confusion]", rendered)
         self.assertIn("External connector", rendered)
+
+    def test_doctor_warns_for_legacy_direct_product_manager_profile_assignment(self):
+        self.state.assign_agent_profile(
+            self.cell.id,
+            "product-manager-draft",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            self.cell,
+            base_dir=str(self.project),
+        )
+        from torque.doctor import build_doctor_report_for_db, format_doctor_report
+
+        report = build_doctor_report_for_db(
+            self.db.db_path,
+            project_base_dir=str(self.project),
+        )
+        rendered = format_doctor_report(report)
+
+        self.assertEqual(
+            report["agent_profiles"]["legacy_direct_product_manager_profile_count"],
+            1,
+        )
+        self.assertEqual(
+            report["agent_classes"]["legacy_direct_product_manager_profile_count"],
+            1,
+        )
+        self.assertIn("legacy_direct_product_manager_profile", rendered)
+        self.assertIn("no silent migration", rendered)
 
     def test_trusted_server_agent_class_commands(self):
         from torque.server import _handle_agent_class_command
@@ -614,7 +713,8 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(listed["type"], "agent_classes")
         self.assertIn("product-manager", {item["id"] for item in listed["classes"]})
         self.assertIn("panel-architect", {item["id"] for item in listed["classes"]})
-        self.assertEqual(preview["agent_class"]["agent_profile_ref"]["id"], "product-manager-draft")
+        self.assertEqual(preview["agent_class"]["primary_identity_label"], "Product Manager")
+        self.assertEqual(preview["agent_class"]["agent_profile_ref"]["id"], "class-policy-product-manager")
         self.assertEqual(assigned["status"]["assigned_class_id"], "product-manager")
         self.assertTrue(status["status"]["pending_next_launch"])
         self.assertGreaterEqual(len(audit["events"]), 1)
