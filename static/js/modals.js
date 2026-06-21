@@ -1234,9 +1234,15 @@ function submitAddEngineer() {
     }
     : { cmd: 'add_engineer', name };
   if (!_addEngineerArchitectId && _addEngineerGroup) payload.group = _addEngineerGroup;
-  if (!_addEngineerArchitectId && typeof agentClassPickerSelected === 'function') {
-    const agentClassId = agentClassPickerSelected('add-engineer');
-    if (agentClassId) payload.agent_class_id = agentClassId;
+  if (!_addEngineerArchitectId) {
+    if (typeof agentClassPickerSubmitSelection === 'function') {
+      const agentClassState = agentClassPickerSubmitSelection('add-engineer');
+      if (!agentClassState) return;
+      if (!agentClassState.defaultSelected) payload.agent_class_id = agentClassState.selectedId;
+    } else if (typeof agentClassPickerSelected === 'function') {
+      const agentClassId = agentClassPickerSelected('add-engineer');
+      if (agentClassId) payload.agent_class_id = agentClassId;
+    }
   }
   if (command) payload.command = command;
   send(payload);
@@ -1295,7 +1301,11 @@ function submitAddArchitect() {
   if (!name) return;
   const payload = { cmd: 'add_architect', name };
   if (_addArchitectGroup) payload.group = _addArchitectGroup;
-  if (typeof agentClassPickerSelected === 'function') {
+  if (typeof agentClassPickerSubmitSelection === 'function') {
+    const agentClassState = agentClassPickerSubmitSelection('add-architect');
+    if (!agentClassState) return;
+    if (!agentClassState.defaultSelected) payload.agent_class_id = agentClassState.selectedId;
+  } else if (typeof agentClassPickerSelected === 'function') {
     const agentClassId = agentClassPickerSelected('add-architect');
     if (agentClassId) payload.agent_class_id = agentClassId;
   }

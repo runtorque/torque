@@ -1971,14 +1971,55 @@ function agentClassPickerPrepare(kind, group, baseDir, contextKey) {
 }
 
 function agentClassPickerSelected(contextKey) {
+  var state = agentClassPickerSelectionState(contextKey);
+  return state.ok && !state.defaultSelected ? state.selectedId : '';
+}
+
+function agentClassPickerSelectionState(contextKey) {
   contextKey = String(contextKey || '').trim();
   var selected = String(_agentClassPickerSelections[contextKey] || '').trim();
-  if (!selected) return '';
   var ctx = _agentClassPickerContexts[contextKey] || {};
+  var kind = String(ctx.kind || '').trim();
+  if (!selected) {
+    return {
+      ok: true,
+      defaultSelected: true,
+      selectedId: '',
+      kind: kind,
+      reason: '',
+      item: null,
+    };
+  }
   var item = _agentClassById(selected);
-  if (!item) return '';
-  if (_agentClassLaunchDisabledReason(item, ctx.kind || item.base_kind)) return '';
-  return selected;
+  if (!item) {
+    return {
+      ok: false,
+      defaultSelected: false,
+      selectedId: selected,
+      kind: kind,
+      reason: 'Selected Agent Class is no longer available. Choose another class or Default (no explicit Agent Class).',
+      item: null,
+    };
+  }
+  var reason = _agentClassLaunchDisabledReason(item, kind || item.base_kind);
+  return {
+    ok: !reason,
+    defaultSelected: false,
+    selectedId: selected,
+    kind: kind || String(item.base_kind || ''),
+    reason: reason || '',
+    item: item,
+  };
+}
+
+function agentClassPickerSubmitSelection(contextKey) {
+  var state = agentClassPickerSelectionState(contextKey);
+  if (state.ok) return state;
+  agentClassRenderOpenPickers();
+  if (typeof _showToast === 'function') {
+    _showToast(state.reason || 'Choose a launchable Agent Class or Default (no explicit Agent Class).', 'error');
+  }
+  return null;
 }
 
 function agentClassPickerSelect(contextKey, value) {
@@ -1994,15 +2035,16 @@ function _agentClassPickerCompatible(kind) {
   });
 }
 
-function _agentClassPickerOptionHtml(kind, selected) {
+function _agentClassPickerOptionHtml(kind, selected, state) {
   var defaultLabel = 'Default (no explicit Agent Class)';
   var html = '<option value=""' + (!selected ? ' selected' : '') + '>' + esc(defaultLabel) + '</option>';
   var list = _agentClassPickerCompatible(kind);
-  if (!list.length) return html;
+  var sawSelected = false;
   for (var i = 0; i < list.length; i++) {
     var item = list[i] || {};
     var id = String(item.id || '').trim();
     if (!id) continue;
+    if (selected === id) sawSelected = true;
     var reason = _agentClassLaunchDisabledReason(item, kind);
     var label = _agentClassDisplayName(item, id) + _agentClassVersionSuffix(item.version)
       + ' · ' + (item.source || (item.builtin ? 'builtin' : 'project'))
@@ -2010,16 +2052,21 @@ function _agentClassPickerOptionHtml(kind, selected) {
     if (reason) label += ' (disabled)';
     html += '<option value="' + esc(id) + '"' + (selected === id ? ' selected' : '') + (reason ? ' disabled' : '') + '>' + esc(label) + '</option>';
   }
+  if (selected && !sawSelected) {
+    var staleReason = state && state.reason ? (' — ' + state.reason) : '';
+    html += '<option value="' + esc(selected) + '" selected disabled>Previously selected: ' + esc(selected + staleReason) + '</option>';
+  }
   return html;
 }
 
-function _agentClassPickerHint(kind, selected) {
-  selected = String(selected || '').trim();
+function _agentClassPickerHint(kind, state) {
+  if (!state || typeof state !== 'object') state = agentClassPickerSelectionState('');
+  var selected = String(state.selectedId || '').trim();
   if (_agentClassPickerLoading) return 'Loading Agent Classes…';
   if (!selected) return 'No class selected: existing default launch behavior is preserved and Torque freezes default-' + kind + ' at launch.';
-  var item = _agentClassById(selected);
-  if (!item) return 'Selected Agent Class is not loaded yet.';
-  var reason = _agentClassLaunchDisabledReason(item, kind);
+  var item = state.item || _agentClassById(selected);
+  if (!item) return state.reason || 'Selected Agent Class is not loaded yet.';
+  var reason = state.reason || _agentClassLaunchDisabledReason(item, kind);
   var ref = item.agent_profile_ref || {};
   if (reason) return reason;
   return 'Launch freezes ' + selected + _agentClassVersionSuffix(item.version) + ' with Agent Profile ' + (ref.id || '—') + _agentClassVersionSuffix(ref.version) + '.';
@@ -2031,11 +2078,13 @@ function _agentClassRenderPicker(rowId, selectId, hintId, kind, contextKey) {
   var hint = document.getElementById(hintId);
   if (!row || !select) return;
   row.classList.remove('hidden');
-  var selected = agentClassPickerSelected(contextKey);
-  select.innerHTML = _agentClassPickerOptionHtml(kind, selected);
+  var state = agentClassPickerSelectionState(contextKey);
+  var selected = state.selectedId || '';
+  select.innerHTML = _agentClassPickerOptionHtml(kind, selected, state);
   select.value = selected;
   select.onchange = function() { agentClassPickerSelect(contextKey, select.value); };
-  if (hint) hint.textContent = _agentClassPickerHint(kind, selected);
+  select.classList.toggle('invalid', !state.ok);
+  if (hint) hint.textContent = _agentClassPickerHint(kind, state);
 }
 
 function agentClassRenderOpenPickers() {

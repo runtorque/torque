@@ -340,6 +340,10 @@ function openEngineerLaunchDialog(group, agentId) {
 function submitEngineerLaunchDialog() {
   if (!_engineerLaunchContext) return;
   const group = _engineerLaunchContext.group;
+  const createClassState = _engineerLaunchContext.mode === 'create' && typeof agentClassPickerSubmitSelection === 'function'
+    ? agentClassPickerSubmitSelection('engineer-launch')
+    : null;
+  if (_engineerLaunchContext.mode === 'create' && typeof agentClassPickerSubmitSelection === 'function' && !createClassState) return;
   const notificationSettings = _getEngineerLaunchNotificationSettings();
   send({
     cmd: 'engineer_update_settings',
@@ -365,9 +369,9 @@ function submitEngineerLaunchDialog() {
   const engineerId = _engineerLaunchContext.agent_id;
 
   if (_engineerLaunchContext.mode === 'create') {
-    const selectedClassId = typeof agentClassPickerSelected === 'function'
-      ? agentClassPickerSelected('engineer-launch')
-      : '';
+    const selectedClassId = createClassState && !createClassState.defaultSelected
+      ? createClassState.selectedId
+      : (typeof agentClassPickerSelected === 'function' ? agentClassPickerSelected('engineer-launch') : '');
     const payload = selectedClassId
       ? {
         cmd: 'create_agent_from_class',

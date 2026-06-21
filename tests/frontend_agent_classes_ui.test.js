@@ -370,6 +370,36 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   assert.equal(sendCalls.at(-1).agent_class_id, 'product-manager');
 });
 
+test('Agent Class add-worker picker blocks stale archived selections instead of defaulting', () => {
+  const { context, document, sendCalls, toasts } = createHarness({ loadModals: true });
+  registerAddWorkerDom(document);
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassPickerPrepare('worker', 'alpha', '/repo', 'add-worker'); agentClassPickerSelect('add-worker', 'review-worker');`);
+
+  const archivedReviewWorker = sampleClasses().map((item) => item.id === 'review-worker'
+    ? { ...item, status: 'archived', archived: true, disabled: true, launchable: false, metadata: { archived: true } }
+    : item);
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(archivedReviewWorker)}, issues: [] })`);
+  const staleState = json(context, `agentClassPickerSelectionState('add-worker')`);
+  assert.equal(staleState.ok, false);
+  assert.equal(staleState.selectedId, 'review-worker');
+  assert.match(staleState.reason, /Archived\/disabled/);
+  assert.match(document.getElementById('add-agent-class-hint').textContent, /Archived\/disabled/);
+
+  const before = sendCalls.length;
+  run(context, `addCellMode = 'worker'; submitAdd();`);
+  assert.equal(sendCalls.length, before);
+  assert.match(toasts.at(-1).message, /Archived\/disabled/);
+
+  run(context, `agentClassPickerSelect('add-worker', ''); submitAdd();`);
+  assert.deepEqual(sendCalls.at(-1), {
+    cmd: 'add_worker',
+    name: 'Standalone Worker',
+    group: 'alpha',
+    worktree: false,
+  });
+});
+
 test('Engineer launch modal uses explicit launch-from-class only when a class is selected', () => {
   const { context, document, sendCalls } = createHarness({ loadModals: true });
   [
@@ -392,4 +422,38 @@ test('Engineer launch modal uses explicit launch-from-class only when a class is
   assert.equal(sendCalls.at(-1).cmd, 'create_agent_from_class');
   assert.equal(sendCalls.at(-1).class_id, 'team-engineer');
   assert.equal(sendCalls.at(-1).kind, 'engineer');
+});
+
+test('Engineer launch picker blocks stale incompatible selections instead of defaulting', () => {
+  const { context, document, sendCalls, toasts } = createHarness({ loadModals: true });
+  [
+    'modal-engineer-launch', 'engineer-launch-title', 'engineer-launch-group', 'engineer-launch-submit-btn',
+    'engineer-launch-provider', 'engineer-launch-boot-cmd', 'engineer-launch-model', 'engineer-launch-reasoning-effort',
+    'engineer-launch-custom-instructions', 'engineer-launch-autonomy-mode', 'engineer-launch-default-worker-concurrency',
+    'engineer-launch-wave-size-preference', 'engineer-launch-same-agent-follow-up-preference', 'engineer-launch-digest-verbosity',
+    'engineer-launch-escalation-style', 'engineer-launch-notification-preset', 'engineer-launch-notification-preset-hint',
+    'engineer-launch-specializations-selected', 'engineer-launch-specializations-available', 'engineer-launch-specializations-reset',
+    'engineer-launch-agent-class-row', 'engineer-launch-agent-class-select', 'engineer-launch-agent-class-hint'
+  ].forEach((id) => document.register(id));
+  const validEngineer = { id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } };
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([validEngineer]))}, issues: [] })`);
+  run(context, `openEngineerLaunchDialog('alpha', ''); agentClassPickerSelect('engineer-launch', 'team-engineer');`);
+
+  const incompatibleEngineer = { ...validEngineer, base_kind: 'worker', agent_profile_ref: { id: 'full-worker', version: '1' } };
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([incompatibleEngineer]))}, issues: [] })`);
+  const staleState = json(context, `agentClassPickerSelectionState('engineer-launch')`);
+  assert.equal(staleState.ok, false);
+  assert.equal(staleState.selectedId, 'team-engineer');
+  assert.match(staleState.reason, /base kind does not match/);
+  assert.match(document.getElementById('engineer-launch-agent-class-hint').textContent, /base kind does not match/);
+
+  const before = sendCalls.length;
+  run(context, `submitEngineerLaunchDialog()`);
+  assert.equal(sendCalls.length, before);
+  assert.match(toasts.at(-1).message, /base kind does not match/);
+
+  run(context, `agentClassPickerSelect('engineer-launch', ''); submitEngineerLaunchDialog()`);
+  assert.equal(sendCalls.at(-1).cmd, 'add_agent');
+  assert.equal(sendCalls.at(-1).is_engineer, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sendCalls.at(-1), 'agent_class_id'), false);
 });

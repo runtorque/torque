@@ -368,9 +368,15 @@ function submitAdd() {
   } else {
     const tpl = document.getElementById('add-template-select').value;
     if (tpl) msg.template = tpl;
-    if (addCellMode === 'worker' && typeof agentClassPickerSelected === 'function') {
-      const agentClassId = agentClassPickerSelected('add-worker');
-      if (agentClassId) msg.agent_class_id = agentClassId;
+    if (addCellMode === 'worker') {
+      if (typeof agentClassPickerSubmitSelection === 'function') {
+        const agentClassState = agentClassPickerSubmitSelection('add-worker');
+        if (!agentClassState) return;
+        if (!agentClassState.defaultSelected) msg.agent_class_id = agentClassState.selectedId;
+      } else if (typeof agentClassPickerSelected === 'function') {
+        const agentClassId = agentClassPickerSelected('add-worker');
+        if (agentClassId) msg.agent_class_id = agentClassId;
+      }
     }
     const prov = document.getElementById('add-provider-select').value;
     if (prov && prov !== '__custom__') msg.provider = prov;
