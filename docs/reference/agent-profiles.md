@@ -13,16 +13,18 @@ fields plus `effective_agent_profile_*` launch snapshot fields.
 
 ## Relationship to Agent Classes
 
-Agent Classes are the user-facing template layer added above Agent Profiles. A
-class declares the same base runtime kind and references one Agent Profile by
-`agent_profile_ref.id` / `agent_profile_ref.version`; the referenced profile is
-still what enforces MCP/capability projection. Agent Class config lives in
-`.torque/agent_classes/*.yaml`; Agent Profile config remains in
-`.torque/agent_profiles/*.yaml`.
+Agent Classes are now the normal operator-facing template/selection layer.
+Agent Profiles remain the internal Agent Profile-compatible enforcement layer.
+A class may either wrap an existing profile (`policy.mode: wrap_profile`) or
+compile class-owned capability policy into a generated/internal profile snapshot
+(`policy.mode: compile`). Class config lives in `.torque/agent_classes/*.yaml`;
+reviewed authored profile config remains in `.torque/agent_profiles/*.yaml`.
+Wave 7B does not write generated internal profiles as project YAML.
 
-Direct Agent Profile assignment remains trusted-user-only. Agent Class
-assignment is also trusted-user-only and freezes a class/profile pair on the next
-launch, without mutating running sessions.
+Direct Agent Profile assignment remains trusted-user-only for
+Advanced/Internal policy backcompat. Agent Class assignment is also
+trusted-user-only and freezes a class/profile-policy pair on the next launch,
+without mutating running sessions.
 
 ## Config paths
 
@@ -111,14 +113,17 @@ dangerous execution/admin capabilities.
 Preview helpers expose base kind, profile id/version, full/draft/restricted
 status, granted capabilities, high-risk denied capabilities, policy summaries,
 projected tool-category allow/deny status, and warnings. `product-manager-draft`
-previews warn that it is Wave 4B scratch-only and that raw Architect tools are denied in favor of `architect_product_*` wrappers. The draft PM profile is not a runtime kind and must not be used for live PM dogfood or Blueprint replacement.
+previews warn that it is a legacy/internal scratch-only Product Manager profile,
+that raw Architect tools are denied in favor of `architect_product_*` wrappers,
+and that the class-first Product Manager assignment should use the Product
+Manager Agent Class. The draft PM profile is not a runtime kind and must not be
+used for live PM dogfood or Blueprint replacement.
 
 `torque doctor` includes `[agent_profiles]` validation plus assignment/audit
-counts and structured assignment/audit data in the JSON report. The frontend
-agent panel shows a compact Agent Profile badge with effective id/version,
-restricted/draft warning color, high-risk denied details in the tooltip, and a
-pending-next-launch marker when the desired assignment differs from the frozen
-effective snapshot.
+counts and structured assignment/audit data in the JSON report. It warns for
+legacy direct `product-manager-draft` assignments and does not silently migrate
+them to the Product Manager class. UI should render profile data as
+Advanced/Internal policy detail behind Agent Class identity.
 
 
 ## Product Manager Wave 4B scratch smoke

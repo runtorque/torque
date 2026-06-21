@@ -1067,7 +1067,7 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
     if profile_preview_is_product_manager(preview):
         if profile_id == "product-manager-draft":
             warnings.append(
-                "product-manager-draft is a legacy/internal Product Manager profile; prefer the Product Manager Agent Class for next-launch assignment."
+                "product-manager-draft is a legacy/internal scratch-only Product Manager profile; prefer the Product Manager Agent Class for next-launch assignment."
             )
         warnings.append(
             "Product Manager policy is draft/restricted until explicit live-dogfood approval; do not use it for Blueprint replacement."

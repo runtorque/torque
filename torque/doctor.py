@@ -1220,7 +1220,11 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
                         item["effective_agent_class_snapshot"] = {}
                     cell = SimpleNamespace(**item)
                     status = agent_class_cell_status(cell, base_dir=base_dir)
-                    if status.get("assigned_class_id") or status.get("effective_class_id"):
+                    if (
+                        status.get("assigned_class_id")
+                        or status.get("effective_class_id")
+                        or status.get("direct_agent_profile_assignment")
+                    ):
                         assignments.append(status)
             except sqlite3.OperationalError:
                 assignments = []
@@ -2544,6 +2548,12 @@ def format_doctor_report(report: dict) -> str:
                 if summary:
                     base += f": {summary}"
                 lines.append(base)
+            elif name == "legacy_direct_product_manager_profile":
+                lines.append(
+                    "  - legacy_direct_product_manager_profile: legacy direct Product Manager profile assignments detected; "
+                    "set desired Agent Class to product-manager for class-first next relaunch "
+                    "(no silent migration is performed)"
+                )
             elif name == "legacy_toolbelt_data_dir":
                 lines.append(
                     "  - doctor is reading legacy Toolbelt data under "

@@ -18,6 +18,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.db_mod = importlib.import_module("torque.db")
         self.state_mod = importlib.import_module("torque.state")
         self.mcp_mod = importlib.import_module("torque.mcp")
+        self.mcp_mod = importlib.reload(self.mcp_mod)
         self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
