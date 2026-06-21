@@ -110,6 +110,7 @@ class AgentProfileDefinition:
             "description": self.description,
             "lifecycle": self.lifecycle,
             "builtin": self.builtin,
+            "metadata": dict(self.metadata or {}),
         }
 
 
@@ -928,6 +929,24 @@ def _policy_is_product_manager(policy: AgentProfilePolicy | None) -> bool:
     return False
 
 
+def profile_preview_is_product_manager(preview: dict[str, Any]) -> bool:
+    """Return whether a preview/snapshot represents Product Manager policy."""
+
+    if not isinstance(preview, dict):
+        return False
+    profile_id = str(preview.get("id", "") or "").strip()
+    if profile_id == "product-manager-draft" or "product-manager" in profile_id:
+        return True
+    metadata = preview.get("metadata", {})
+    if isinstance(metadata, dict) and str(
+            metadata.get("archetype", "") or "").strip() == "product_manager":
+        return True
+    generated_by = metadata.get("generated_by_agent_class", {}) if isinstance(metadata, dict) else {}
+    if isinstance(generated_by, dict) and str(generated_by.get("id", "") or "").strip() == "product-manager":
+        return True
+    return False
+
+
 def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
     """Return required capability atoms for a raw MCP tool, if known."""
 
@@ -988,6 +1007,8 @@ def dry_run_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) ->
     return {
         **profile.as_preview_dict(),
         "capability_count": len(capabilities),
+        "grants": sorted(atom for atom in grants if atom in CAPABILITIES),
+        "denies": sorted(atom for atom in set(profile.denies) if atom in CAPABILITIES),
         "capabilities": capabilities,
         "denied_high_risk_capabilities": denied_high_risk,
         "communication_policy": communication_policy,
@@ -1043,9 +1064,13 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
         warnings.append(
             "This profile narrows the base kind and hides/denies MCP tools before side effects."
         )
-    if profile_id == "product-manager-draft" or str(preview.get("metadata", {}).get("archetype", "") if isinstance(preview.get("metadata"), dict) else "") == "product_manager":
+    if profile_preview_is_product_manager(preview):
+        if profile_id == "product-manager-draft":
+            warnings.append(
+                "product-manager-draft is a legacy/internal scratch-only Product Manager profile; prefer the Product Manager Agent Class for next-launch assignment."
+            )
         warnings.append(
-            "product-manager-draft is scratch-only in Wave 4B; do not use for live PM dogfood or Blueprint replacement."
+            "Product Manager policy is draft/restricted until explicit live-dogfood approval; do not use it for Blueprint replacement."
         )
         warnings.append(
             "Raw Architect tools are denied for Product Manager-style profiles; use architect_product_* wrappers only."
@@ -1087,6 +1112,7 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
             assigned_preview = enriched_profile_preview(assigned_profile)
 
     class_assigned_id = str(getattr(cell, "agent_class_id", "") or "").strip()
+    effective_class_id = str(getattr(cell, "effective_agent_class_id", "") or "").strip()
     class_next_profile_id = ""
     class_next_profile_version = ""
     if class_assigned_id:
@@ -1123,6 +1149,23 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
              or (next_launch_profile_version
                  and next_launch_profile_version != effective_version))
     )
+    warnings = list(effective_preview.get("warnings", []) or [])
+    if assigned_id == "product-manager-draft" and not class_assigned_id:
+        warnings.append(
+            "Legacy direct Product Manager profile assignment is active for next launch; set desired Agent Class to product-manager instead when using the class-first flow."
+        )
+    if effective_id == "product-manager-draft" and not effective_class_id:
+        warnings.append(
+            "Effective Product Manager policy came from a legacy direct Agent Profile assignment; no Agent Class was silently migrated."
+        )
+    # Deduplicate while preserving order.
+    deduped_warnings: list[str] = []
+    seen_warnings: set[str] = set()
+    for warning in warnings:
+        text = str(warning or "").strip()
+        if text and text not in seen_warnings:
+            deduped_warnings.append(text)
+            seen_warnings.add(text)
     return {
         "agent_id": str(getattr(cell, "id", "") or ""),
         "agent_name": str(getattr(cell, "name", "") or ""),
@@ -1140,7 +1183,11 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         "next_launch_profile_version": next_launch_profile_version,
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
-        "warnings": list(effective_preview.get("warnings", []) or []),
+        "warnings": deduped_warnings,
+        "legacy_direct_product_manager_profile": bool(
+            (assigned_id == "product-manager-draft" or effective_id == "product-manager-draft")
+            and not (class_assigned_id or effective_class_id)
+        ),
         "denied_high_risk_capabilities": list(effective_preview.get("denied_high_risk_capabilities", []) or []),
     }
 

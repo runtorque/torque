@@ -773,7 +773,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("BASE PROMPT", captured_prompts[0])
         self.assertIn("## Agent Class", captured_prompts[0])
         self.assertIn(
-            "Referenced Agent Profile: product-manager-draft@2",
+            "Internal Agent Profile policy: class-policy-product-manager@2",
             captured_prompts[0],
         )
 

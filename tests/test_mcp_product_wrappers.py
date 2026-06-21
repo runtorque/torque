@@ -18,6 +18,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.db_mod = importlib.import_module("torque.db")
         self.state_mod = importlib.import_module("torque.state")
         self.mcp_mod = importlib.import_module("torque.mcp")
+        self.mcp_mod = importlib.reload(self.mcp_mod)
         self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
@@ -34,8 +35,17 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             kind="engineer",
             hired_by_architect_id=self.architect.id,
         )
+        self.state.assign_agent_class(
+            self.architect.id,
+            "product-manager",
+            actor_kind="user",
+            base_dir=self.tmp.name,
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            self.architect,
+            base_dir=self.tmp.name,
+        )
         self.state.agent_profile_overrides = {
-            self.architect.id: "product-manager-draft",
             self.peer.id: "product-manager-draft",
         }
 
@@ -100,6 +110,8 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         return result["content"][0]["text"]
 
     async def test_pm_profile_projects_product_wrappers_and_denies_raw_tools(self):
+        self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
+        self.assertEqual(self.architect.effective_agent_profile_id, "class-policy-product-manager")
         tool_names = await self._list_tools()
 
         for name in {
@@ -119,6 +131,15 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
         denied = {
             "architect_tool_search",
+            "architect_engineer_hire",
+            "architect_pending_hire_list",
+            "architect_task_create",
+            "architect_task_update",
+            "architect_task_move",
+            "architect_engineer_message",
+            "architect_engineer_feedback_request",
+            "architect_behavior_overlay_read",
+            "architect_behavior_overlay_approve",
             "architect_board_summary",
             "architect_task_list",
             "architect_task_show",
@@ -137,8 +158,13 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertFalse(denied & tool_names)
 
-        response = await self._call("architect_peer_message", {"architect_id": self.peer.id, "message": "raw"})
-        self.assertIn("Unknown tool", self._error_text(response))
+        for index, tool_name in enumerate(sorted(denied), start=10):
+            response = await self._call(
+                tool_name,
+                {"architect_id": self.peer.id, "message": "raw", "title": "raw"},
+                req_id=index,
+            )
+            self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual([], self.calls)
 
     async def test_task_proposal_is_queued_unassigned_and_rejects_dispatch_fields(self):

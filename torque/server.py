@@ -9451,7 +9451,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         classes, issues = load_agent_classes(base_dir=base_dir)
         return {
             "type": "agent_classes",
-            "schema_version": 2,
+            "schema_version": 3,
             "classes": [
                 enriched_agent_class_preview(definition, base_dir=base_dir)
                 for definition in classes
@@ -9469,7 +9469,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         payload = _agent_class_authoring_payload_from_command(data)
         result = validate_agent_class_draft(payload, base_dir=base_dir)
         result["type"] = "agent_class_validation"
-        result["schema_version"] = 2
+        result["schema_version"] = 3
         result["request_id"] = str(data.get("request_id", "") or "")
         return result
 
@@ -9482,7 +9482,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         }.get(cmd, str(data.get("mode", "save") or "save"))
         result = save_custom_agent_class(payload, base_dir=base_dir, mode=mode)
         result["type"] = "agent_class_save"
-        result["schema_version"] = 2
+        result["schema_version"] = 3
         result["request_id"] = str(data.get("request_id", "") or "")
         if result.get("ok"):
             classes, issues = load_agent_classes(base_dir=base_dir)
@@ -9497,7 +9497,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         base_dir = str(data.get("base_dir", "") or os.getcwd())
         class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
         result = archive_custom_agent_class(class_id, base_dir=base_dir)
-        result["schema_version"] = 2
+        result["schema_version"] = 3
         result["request_id"] = str(data.get("request_id", "") or "")
         if result.get("ok"):
             classes, issues = load_agent_classes(base_dir=base_dir)
@@ -9512,7 +9512,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         base_dir = str(data.get("base_dir", "") or os.getcwd())
         class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
         result = delete_custom_agent_class(class_id, base_dir=base_dir)
-        result["schema_version"] = 2
+        result["schema_version"] = 3
         result["request_id"] = str(data.get("request_id", "") or "")
         if result.get("ok"):
             classes, issues = load_agent_classes(base_dir=base_dir)
@@ -9535,7 +9535,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
             return {"type": "error", "message": f"Unknown Agent Class: {class_id}"}
         return {
             "type": "agent_class_preview",
-            "schema_version": 2,
+            "schema_version": 3,
             "agent_class": enriched_agent_class_preview(
                 definition,
                 base_dir=base_dir,
@@ -11909,7 +11909,7 @@ async def _handle_agent_class_launch_command(
         return created
     return {
         "type": "agent_class_launch",
-        "schema_version": 1,
+        "schema_version": 3,
         "agent": created,
         "agent_class": enriched_agent_class_preview(
             definition,
