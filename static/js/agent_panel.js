@@ -1344,6 +1344,51 @@ function _agentPanelRenderTabs(kind, activeTab) {
   return html;
 }
 
+
+function _agentPanelClassDefaultIdForKind(kind) {
+  kind = String(kind || '').trim();
+  if (kind === 'architect' || kind === 'engineer' || kind === 'worker') {
+    return 'default-' + kind;
+  }
+  return '';
+}
+
+function _agentPanelClassBadgeHtml(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
+  var kind = _agentPanelKind(agent);
+  var snapshot = (agent.effective_agent_class_snapshot && typeof agent.effective_agent_class_snapshot === 'object')
+    ? agent.effective_agent_class_snapshot
+    : {};
+  var assignedId = String(agent.agent_class_id || '').trim();
+  var effectiveId = String(agent.effective_agent_class_id || snapshot.id || assignedId || '').trim();
+  if (!effectiveId && !assignedId) return '';
+  var version = String(agent.effective_agent_class_version || snapshot.version || agent.agent_class_version || '').trim();
+  var status = String(snapshot.status || snapshot.lifecycle || '').trim() || (/^default-/.test(effectiveId) ? 'full' : 'restricted');
+  var statusClass = status.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
+  var desiredId = assignedId || _agentPanelClassDefaultIdForKind(kind);
+  var pending = !!(assignedId && effectiveId && assignedId !== effectiveId);
+  var classes = 'agent-profile-badge agent-class-badge agent-profile-badge-' + _agentPanelEsc(statusClass);
+  if (pending) classes += ' agent-profile-badge-pending';
+  if (status === 'draft' || status === 'restricted' || status === 'archived') classes += ' agent-profile-badge-warning';
+  var label = 'Class: ' + effectiveId + (version ? ('@' + version) : '');
+  if (pending) label += ' (pending next launch)';
+  var titleParts = [
+    'Agent Class: ' + effectiveId + (version ? ('@' + version) : ''),
+    'base kind: ' + (kind || '—'),
+    'status: ' + status,
+  ];
+  if (desiredId) titleParts.push('desired next launch: ' + desiredId + (agent.agent_class_version ? ('@' + agent.agent_class_version) : ''));
+  if (snapshot.agent_profile_ref && snapshot.agent_profile_ref.id) {
+    titleParts.push('profile pairing: ' + snapshot.agent_profile_ref.id + (snapshot.agent_profile_ref.version ? ('@' + snapshot.agent_profile_ref.version) : ''));
+  }
+  if (Array.isArray(snapshot.warnings)) {
+    for (var i = 0; i < snapshot.warnings.length && i < 3; i++) titleParts.push(String(snapshot.warnings[i] || ''));
+  }
+  return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
+    + _agentPanelEsc(label)
+    + '</span>';
+}
+
 function _agentPanelProfileBadgeHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
   var profileState = _agentPanelProfileState(agent);
@@ -1821,7 +1866,7 @@ function _agentPanelHeaderProfileControlsHtml(agent) {
   var ui = _agentPanelProfileUi(agent);
   var expanded = !!ui.open;
   var label = expanded ? 'Hide profile UI' : 'Profile…';
-  return badge
+  return _agentPanelClassBadgeHtml(agent) + badge
     + '<button type="button" class="agent-profile-header-btn"'
     + ' data-agent-profile-expanded="' + (expanded ? 'true' : 'false') + '"'
     + ' title="Manage desired Agent Profile assignment"'

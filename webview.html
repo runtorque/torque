@@ -82,6 +82,11 @@
           <option value="">None</option>
         </select>
       </div>
+      <div id="add-agent-class-row" class="hidden agent-class-picker-row">
+        <label>Agent Class</label>
+        <select id="add-agent-class-select"></select>
+        <div id="add-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
+      </div>
       <details id="add-advanced-details" class="add-advanced-details" open>
         <summary id="add-advanced-summary">Advanced options</summary>
         <div class="add-advanced-body">
@@ -167,6 +172,11 @@
     <input id="engineer-name-input" placeholder="e.g. Alice" autocomplete="off">
     <label>Boot command <span class="label-hint">(optional)</span></label>
     <input id="engineer-command-input" placeholder="Use default engineer command" autocomplete="off">
+    <div id="engineer-agent-class-row" class="hidden agent-class-picker-row">
+      <label>Agent Class</label>
+      <select id="engineer-agent-class-select"></select>
+      <div id="engineer-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
+    </div>
     <div id="engineer-specializations-row" class="hidden">
       <label>Specializations <span class="label-hint">(optional)</span>
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered project specialization slugs for this architect hire. The first selected specialization is primary.">?</span>
@@ -197,6 +207,11 @@
     <label>Boot command <span class="label-hint">(optional)</span></label>
     <input id="architect-command-input" placeholder="Use default architect command" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitAddArchitect();if(event.key==='Escape')closeModals();">
+    <div id="architect-agent-class-row" class="hidden agent-class-picker-row">
+      <label>Agent Class</label>
+      <select id="architect-agent-class-select"></select>
+      <div id="architect-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="architect-submit-btn" onclick="submitAddArchitect()">Create Architect</button>
@@ -254,6 +269,11 @@
     </div>
     <div class="task-modal-section">
       <div class="task-modal-section-body">
+        <div id="engineer-launch-agent-class-row" class="hidden agent-class-picker-row">
+          <label>Agent Class</label>
+          <select id="engineer-launch-agent-class-select"></select>
+          <div id="engineer-launch-agent-class-hint" class="label-hint agent-class-picker-hint"></div>
+        </div>
         <label>Provider</label>
         <select id="engineer-launch-provider" onchange="onEngineerLaunchProviderChange()"></select>
         <label>Boot command</label>

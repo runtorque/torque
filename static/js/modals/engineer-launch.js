@@ -271,6 +271,12 @@ function openEngineerLaunchDialog(group, agentId) {
     },
   };
   send({ cmd: 'list_specializations', group: group });
+  if (!cell && typeof agentClassPickerPrepare === 'function') {
+    agentClassPickerPrepare('engineer', group, agentClassBaseDirForGroup(group), 'engineer-launch');
+  } else {
+    const classRow = document.getElementById('engineer-launch-agent-class-row');
+    if (classRow) classRow.classList.add('hidden');
+  }
   renderEngineerLaunchSpecializations();
 
   document.getElementById('engineer-launch-title').textContent =
@@ -334,6 +340,10 @@ function openEngineerLaunchDialog(group, agentId) {
 function submitEngineerLaunchDialog() {
   if (!_engineerLaunchContext) return;
   const group = _engineerLaunchContext.group;
+  const createClassState = _engineerLaunchContext.mode === 'create' && typeof agentClassPickerSubmitSelection === 'function'
+    ? agentClassPickerSubmitSelection('engineer-launch')
+    : null;
+  if (_engineerLaunchContext.mode === 'create' && typeof agentClassPickerSubmitSelection === 'function' && !createClassState) return;
   const notificationSettings = _getEngineerLaunchNotificationSettings();
   send({
     cmd: 'engineer_update_settings',
@@ -359,12 +369,23 @@ function submitEngineerLaunchDialog() {
   const engineerId = _engineerLaunchContext.agent_id;
 
   if (_engineerLaunchContext.mode === 'create') {
-    const payload = {
-      cmd: 'add_agent',
-      name: 'Engineer',
-      group: group,
-      is_engineer: true,
-    };
+    const selectedClassId = createClassState && !createClassState.defaultSelected
+      ? createClassState.selectedId
+      : (typeof agentClassPickerSelected === 'function' ? agentClassPickerSelected('engineer-launch') : '');
+    const payload = selectedClassId
+      ? {
+        cmd: 'create_agent_from_class',
+        class_id: selectedClassId,
+        kind: 'engineer',
+        name: 'Engineer',
+        group: group,
+      }
+      : {
+        cmd: 'add_agent',
+        name: 'Engineer',
+        group: group,
+        is_engineer: true,
+      };
     // Always include specializations so an explicit empty pick doesn't
     // get re-populated from the group default on the server. If the user
     // never touched the picker, this still sends the previewed group

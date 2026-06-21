@@ -476,6 +476,12 @@ function connect() {
         && behaviorOverlayReceiveMessage(msg)) {
       return;
     }
+    if (!msg.type && msg.agent_class_status && msg.agent_profile_status) {
+      if (typeof agentClassManagerReceiveLaunchResult === 'function') {
+        agentClassManagerReceiveLaunchResult(msg);
+      }
+      return;
+    }
     if (msg.type === 'state') {
       _handleFullState(msg);
     } else if (msg.type === 'delta') {
@@ -658,6 +664,9 @@ function connect() {
       if (typeof agentPanelReceiveAgentProfiles === 'function') {
         agentPanelReceiveAgentProfiles(msg);
       }
+      if (typeof agentClassManagerReceiveProfiles === 'function') {
+        agentClassManagerReceiveProfiles(msg);
+      }
     } else if (msg.type === 'agent_profile_preview') {
       if (typeof agentPanelReceiveAgentProfilePreview === 'function') {
         agentPanelReceiveAgentProfilePreview(msg);
@@ -669,11 +678,20 @@ function connect() {
     } else if (msg.type === 'agent_classes') {
       state.agent_classes = Array.isArray(msg.classes) ? msg.classes : [];
       state.agent_class_issues = Array.isArray(msg.issues) ? msg.issues : [];
+      if (typeof agentClassManagerReceiveList === 'function') {
+        agentClassManagerReceiveList(msg);
+      }
     } else if (msg.type === 'agent_class_preview') {
       state.agent_class_preview = msg.agent_class || null;
+      if (typeof agentClassManagerReceivePreview === 'function') {
+        agentClassManagerReceivePreview(msg);
+      }
     } else if (msg.type === 'agent_class_validation') {
       state.agent_class_validation = msg || null;
       state.agent_class_draft_preview = msg.agent_class || null;
+      if (typeof agentClassManagerReceiveValidation === 'function') {
+        agentClassManagerReceiveValidation(msg);
+      }
     } else if (msg.type === 'agent_class_save' || msg.type === 'agent_class_archive' || msg.type === 'agent_class_delete') {
       state.agent_class_authoring_result = msg || null;
       if (Array.isArray(msg.classes)) {
@@ -685,8 +703,14 @@ function connect() {
       if (msg.agent_class) {
         state.agent_class_preview = msg.agent_class;
       }
+      if (typeof agentClassManagerReceiveMutation === 'function') {
+        agentClassManagerReceiveMutation(msg);
+      }
     } else if (msg.type === 'agent_class_launch') {
       state.agent_class_launch_result = msg || null;
+      if (typeof agentClassManagerReceiveLaunchResult === 'function') {
+        agentClassManagerReceiveLaunchResult(msg);
+      }
     } else if (msg.type === 'agent_class_assignment') {
       state.agent_class_assignment = msg.status || null;
       var classStatus = msg.status || {};
@@ -831,7 +855,14 @@ function connect() {
           && typeof agentPanelHandleAgentProfileError === 'function') {
         agentProfileErrorHandled = agentPanelHandleAgentProfileError(msg);
       }
-      if (!systemPromptErrorHandled && !specializationEditorErrorHandled && !agentProfileErrorHandled) {
+      var agentClassErrorHandled = false;
+      if (!systemPromptErrorHandled
+          && !specializationEditorErrorHandled
+          && !agentProfileErrorHandled
+          && typeof agentClassManagerHandleError === 'function') {
+        agentClassErrorHandled = agentClassManagerHandleError(msg);
+      }
+      if (!systemPromptErrorHandled && !specializationEditorErrorHandled && !agentProfileErrorHandled && !agentClassErrorHandled) {
         if (typeof aiSettingsHandleError === 'function' && aiSettingsHandleError(msg)) return;
         if (typeof handleContextError === 'function') handleContextError(msg);
         else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
