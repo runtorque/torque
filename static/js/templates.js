@@ -1107,7 +1107,16 @@ function _agentClassById(classId) {
 
 function _agentClassDisplayName(item, fallback) {
   item = item || {};
-  return String(item.display_name || item.title || item.name || item.id || fallback || '').trim();
+  return String(
+    item.primary_identity_label
+    || item.primary_display_name
+    || item.display_name
+    || item.title
+    || item.name
+    || item.id
+    || fallback
+    || ''
+  ).trim();
 }
 
 function _agentClassStatus(item) {
@@ -1263,7 +1272,7 @@ function agentClassManagerReceiveLaunchResult(msg) {
   var profileStatus = (agent && agent.agent_profile_status) || {};
   var profileId = profileStatus.effective_profile_id || status.next_launch_profile_id || '';
   if (typeof _showToast === 'function' && classId) {
-    _showToast('Launched ' + (agent.kind || msg.base_kind || 'agent') + ' with ' + classId + (profileId ? (' → ' + profileId) : '') + '.', 'success');
+    _showToast('Launched ' + (agent.kind || msg.base_kind || 'agent') + ' with Agent Class ' + classId + (profileId ? (' (internal policy ' + profileId + ')') : '') + '.', 'success');
   }
   if (_libraryActiveTab === 'agent_classes') renderAgentClassesPanel();
 }
@@ -1297,7 +1306,7 @@ function renderAgentClassesPanel() {
   html += '<div class="tpled-header agent-class-header">';
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row"><span class="tpled-header-title">Agent Classes</span>' + _libraryTabsHtml() + '</div>';
-  html += '<div class="tpled-header-subtitle">Trusted class templates for Architect, Engineer, and Worker launch. Runtime kind stays fixed; Agent Profile remains enforcement.</div>';
+  html += '<div class="tpled-header-subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Internal Agent Profile policy is shown only in Advanced/Internal enforcement details.</div>';
   html += '</div>';
   html += '<div class="tpled-header-controls">';
   html += '<select class="tpled-select" id="agent-class-select" onchange="agentClassManagerSelect(this.value)">';
@@ -1467,7 +1476,7 @@ function _agentClassEditorFormHtml(preview) {
   var title = _agentClassEditorNew ? 'Create project Agent Class' : (isBuiltin ? 'Built-in Agent Class' : (archived ? 'Archived Agent Class' : 'Edit project Agent Class'));
   var html = '<div class="agent-class-form tpled-form">';
   html += '<div class="agent-class-form-head"><div><div class="agent-class-form-title">' + esc(title) + '</div>';
-  html += '<div class="agent-class-form-subtitle">Safe YAML-backed fields only; raw tools, grants, denies, and class-local capability deltas are intentionally not exposed.</div></div></div>';
+  html += '<div class="agent-class-form-subtitle">Class-first YAML-backed fields only; raw tools, grants, denies, and class-local capability deltas are intentionally not exposed.</div></div></div>';
   if (readOnly) {
     html += '<div class="agent-class-readonly-note">' + esc(isBuiltin ? 'Built-in classes are read-only. Duplicate into a project class to customize.' : 'Archived classes stay visible for audit/preview but cannot be edited or launched here.') + '</div>';
   }
@@ -1486,12 +1495,15 @@ function _agentClassEditorFormHtml(preview) {
     html += '<option value="' + value + '"' + (String(preview.lifecycle || 'stable') === value ? ' selected' : '') + '>' + value + '</option>';
   });
   html += '</select>';
-  html += '<label>Agent Profile</label><select id="agent-class-profile-id" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerProfileChanged()">' + _agentClassProfileOptionsHtml(preview.base_kind, ref.id) + '</select>';
-  html += '<input id="agent-class-profile-version" value="' + esc(ref.version || _agentClassProfileVersion(ref.id, '')) + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="profile version">';
-  if (_agentClassProfileLoadingBaseDir) html += '<div class="agent-class-hint">Loading Agent Profiles…</div>';
-  if (_agentClassProfileIssues.length) html += _agentClassIssuesHtml(_agentClassProfileIssues.slice(0, 3), 'Profile registry issues');
   html += '<details class="tpled-section" open><summary>Class instructions</summary>';
   html += '<label>Additive prompt/class instructions</label><textarea id="agent-class-prompt" rows="6" ' + (readOnly ? 'readonly ' : '') + 'oninput="_tplAutoResize(this);agentClassManagerMarkDirty()" placeholder="Optional additive context appended after the base-kind prompt.">' + esc(preview.prompt || '') + '</textarea>';
+  html += '</details>';
+  html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal enforcement policy</summary>';
+  html += '<div class="agent-class-hint">Agent Profile is the generated/internal MCP-capability enforcement detail. Normal operators select Agent Classes; use this only when authoring or troubleshooting policy pairing.</div>';
+  html += '<label>Internal Agent Profile</label><select id="agent-class-profile-id" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerProfileChanged()">' + _agentClassProfileOptionsHtml(preview.base_kind, ref.id) + '</select>';
+  html += '<input id="agent-class-profile-version" value="' + esc(ref.version || _agentClassProfileVersion(ref.id, '')) + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="profile version">';
+  if (_agentClassProfileLoadingBaseDir) html += '<div class="agent-class-hint">Loading internal Agent Profiles…</div>';
+  if (_agentClassProfileIssues.length) html += _agentClassIssuesHtml(_agentClassProfileIssues.slice(0, 3), 'Internal profile registry issues');
   html += '</details>';
   html += '<details class="tpled-section"><summary>UI metadata</summary>';
   html += '<label>Label</label><input id="agent-class-ui-label" value="' + esc(ui.label || '') + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off">';
@@ -1549,29 +1561,29 @@ function _agentClassPreviewHtml(preview, validation) {
   var ref = preview.agent_profile_ref || {};
   var profile = preview.agent_profile || _agentClassProfileById(ref.id) || {};
   var disabledReason = _agentClassLaunchDisabledReason(preview, preview.base_kind);
+  var primaryLabel = String(preview.primary_identity_label || preview.primary_display_name || _agentClassDisplayName(preview, preview.id || 'Agent Class')).trim();
+  var secondaryLabel = String(preview.secondary_base_kind_label
+    || (preview.secondary_base_kind_metadata && preview.secondary_base_kind_metadata.base_kind_label)
+    || preview.base_kind
+    || 'agent').trim();
   var html = '<div class="agent-class-preview agent-class-preview-' + esc(status.replace(/[^a-z0-9_-]/gi, '-').toLowerCase()) + '">';
-  html += '<div class="agent-class-preview-head"><div><div class="agent-class-preview-title">' + esc(_agentClassDisplayName(preview, preview.id || 'Agent Class')) + esc(_agentClassVersionSuffix(preview.version)) + '</div>';
-  html += '<div class="agent-class-preview-subtitle">' + esc(preview.id || 'unsaved') + '</div></div>';
+  html += '<div class="agent-class-preview-head"><div><div class="agent-class-preview-title">' + esc(primaryLabel || 'Agent Class') + esc(_agentClassVersionSuffix(preview.version)) + '</div>';
+  html += '<div class="agent-class-preview-subtitle">' + esc((preview.id || 'unsaved') + ' · ' + secondaryLabel + ' base metadata') + '</div></div>';
   html += '<div class="agent-class-preview-chips">';
   html += '<span>' + esc(preview.source || (preview.builtin ? 'builtin' : 'project')) + '</span>';
-  html += '<span>' + esc(preview.base_kind || 'agent') + '</span>';
+  html += '<span>' + esc(secondaryLabel) + '</span>';
   html += '<span>' + esc(preview.lifecycle || 'stable') + '</span>';
   html += '<span>' + esc(status) + '</span>';
   if (preview.scratch_only || (preview.draft && preview.draft.scratch_only)) html += '<span>scratch-only</span>';
   if (_agentClassIsArchived(preview)) html += '<span>archived</span>';
+  if (preview.external_connector_caveat) html += '<span>external connector caveat</span>';
   html += '</div></div>';
   if (preview.description) html += '<div class="agent-class-preview-description">' + esc(preview.description) + '</div>';
-  html += '<div class="agent-class-pairing"><div><span>Class → Profile</span><strong>'
-    + esc((preview.id || 'unsaved') + _agentClassVersionSuffix(preview.version))
-    + ' → ' + esc((ref.id || '—') + _agentClassVersionSuffix(ref.version || profile.version))
-    + '</strong></div>';
-  html += '<div><span>Profile status</span><strong>' + esc(profile.status || profile.lifecycle || '—') + '</strong></div>';
-  if (profile.capability_count != null) html += '<div><span>Profile capabilities</span><strong>' + esc(profile.capability_count) + '</strong></div>';
-  html += '</div>';
   var prompt = preview.prompt_summary || {};
   html += '<div class="agent-class-summary-grid">';
+  html += '<div><span>Primary identity</span><strong>' + esc(primaryLabel || '—') + '</strong></div>';
+  html += '<div><span>Secondary/base metadata</span><strong>' + esc(secondaryLabel || '—') + '</strong></div>';
   html += '<div><span>Prompt</span><strong>' + esc(prompt.has_prompt ? ((prompt.char_count || 0) + ' chars') : 'No class prompt') + '</strong></div>';
-  html += '<div><span>Runtime enforcement</span><strong>' + esc(preview.runtime_enforcement || 'launch_frozen_agent_class_profile_pairing') + '</strong></div>';
   html += '<div><span>Launchable</span><strong>' + esc(disabledReason ? 'No' : 'Yes') + '</strong></div>';
   html += '</div>';
   if (prompt.preview) html += '<div class="agent-class-prompt-preview">' + esc(prompt.preview) + '</div>';
@@ -1591,8 +1603,32 @@ function _agentClassPreviewHtml(preview, validation) {
   if (validation && validation.normalized) {
     html += '<details class="agent-class-normalized"><summary>Normalized preview</summary><pre>' + esc(JSON.stringify(validation.normalized, null, 2)) + '</pre></details>';
   }
+  html += _agentClassInternalPolicyPreviewHtml(preview, profile, ref);
   html += _agentClassLaunchBoxHtml(preview, disabledReason);
   html += '</div>';
+  return html;
+}
+
+function _agentClassInternalPolicyPreviewHtml(preview, profile, ref) {
+  preview = preview || {};
+  profile = profile || {};
+  ref = ref || {};
+  var policy = preview.internal_policy && typeof preview.internal_policy === 'object' ? preview.internal_policy : {};
+  var html = '<details class="agent-class-normalized agent-class-internal-policy-preview"><summary>Advanced/Internal enforcement details</summary>';
+  html += '<div class="agent-class-pairing"><div><span>Internal Agent Profile</span><strong>'
+    + esc((ref.id || profile.id || '—') + _agentClassVersionSuffix(ref.version || profile.version))
+    + '</strong></div>';
+  html += '<div><span>Profile status</span><strong>' + esc(profile.status || profile.lifecycle || '—') + '</strong></div>';
+  if (profile.capability_count != null) html += '<div><span>Profile capabilities</span><strong>' + esc(profile.capability_count) + '</strong></div>';
+  html += '<div><span>Runtime enforcement</span><strong>' + esc(preview.runtime_enforcement || 'launch_frozen_agent_class_profile_pairing') + '</strong></div>';
+  if (policy.mode) html += '<div><span>Policy mode</span><strong>' + esc(policy.mode) + '</strong></div>';
+  if (policy.profile_source) html += '<div><span>Policy source</span><strong>' + esc(policy.profile_source) + '</strong></div>';
+  if (policy.generated_profile_written_to_project_yaml !== undefined) {
+    html += '<div><span>Generated profile YAML</span><strong>'
+      + esc(policy.generated_profile_written_to_project_yaml ? 'yes' : 'no')
+      + '</strong></div>';
+  }
+  html += '</div></details>';
   return html;
 }
 
@@ -1628,7 +1664,7 @@ function _agentClassLaunchResultHtml(msg) {
   var html = '<div class="agent-class-launch-result">';
   html += '<div><span>Launched</span><strong>' + esc((agent.kind || msg.base_kind || 'agent') + ' ' + (agent.name || agent.id || '')) + '</strong></div>';
   html += '<div><span>Frozen class</span><strong>' + esc((classStatus.effective_class_id || '—') + _agentClassVersionSuffix(classStatus.effective_class_version)) + '</strong></div>';
-  html += '<div><span>Frozen profile</span><strong>' + esc((profileStatus.effective_profile_id || classStatus.next_launch_profile_id || '—') + _agentClassVersionSuffix(profileStatus.effective_profile_version)) + '</strong></div>';
+  html += '<div><span>Frozen internal policy</span><strong>' + esc((profileStatus.effective_profile_id || classStatus.next_launch_profile_id || '—') + _agentClassVersionSuffix(profileStatus.effective_profile_version)) + '</strong></div>';
   html += '</div>';
   return html;
 }
@@ -1859,9 +1895,15 @@ function agentClassManagerLaunchSelected() {
 }
 
 function _agentClassCaptureEditorUiState() {
-  var snapshot = { form: null, focus: null, scrollTop: null };
+  var snapshot = { form: null, focus: null, scrollTop: null, detailsOpen: {} };
   var root = document.getElementById('agent-class-editor') || document.getElementById('panel-templates');
   if (root && typeof root.scrollTop === 'number') snapshot.scrollTop = root.scrollTop;
+  if (root && typeof root.querySelectorAll === 'function') {
+    var details = root.querySelectorAll('details[id]') || [];
+    for (var d = 0; d < details.length; d++) {
+      if (details[d] && details[d].id) snapshot.detailsOpen[details[d].id] = !!details[d].open;
+    }
+  }
   var formIds = [
     'agent-class-id', 'agent-class-version', 'agent-class-base-kind', 'agent-class-display-name',
     'agent-class-description', 'agent-class-lifecycle', 'agent-class-profile-id', 'agent-class-profile-version',
@@ -1931,6 +1973,12 @@ function _agentClassFormObjectFromSnapshot(form) {
 
 function _agentClassRestoreEditorUiState(root, snapshot) {
   if (!root || !snapshot) return;
+  if (snapshot.detailsOpen && typeof snapshot.detailsOpen === 'object') {
+    Object.keys(snapshot.detailsOpen).forEach(function(id) {
+      var detail = document.getElementById(id);
+      if (detail && 'open' in detail) detail.open = !!snapshot.detailsOpen[id];
+    });
+  }
   var form = snapshot.form || null;
   if (form) {
     Object.keys(form).forEach(function(id) {
@@ -2069,7 +2117,10 @@ function _agentClassPickerHint(kind, state) {
   var reason = state.reason || _agentClassLaunchDisabledReason(item, kind);
   var ref = item.agent_profile_ref || {};
   if (reason) return reason;
-  return 'Launch freezes ' + selected + _agentClassVersionSuffix(item.version) + ' with Agent Profile ' + (ref.id || '—') + _agentClassVersionSuffix(ref.version) + '.';
+  return 'Launch freezes ' + _agentClassDisplayName(item, selected) + _agentClassVersionSuffix(item.version)
+    + ' as the primary Agent Class identity'
+    + (ref.id ? (' with internal policy ' + ref.id + _agentClassVersionSuffix(ref.version)) : '')
+    + '.';
 }
 
 function _agentClassRenderPicker(rowId, selectId, hintId, kind, contextKey) {

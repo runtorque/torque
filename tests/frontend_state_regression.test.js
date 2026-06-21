@@ -16686,6 +16686,65 @@ test('agent_upsert for non-focused agent does NOT invalidate engineer panel (TOR
     'agent_upsert for unrelated agent should not refresh engineer panel');
 });
 
+test('agent_upsert with fresh Agent Class fields clears stale client-only class status', () => {
+  const { context } = createStandaloneDeltaBatchHarness(['board']);
+  runInContext(context, `
+    if (!state.agents) state.agents = {};
+    state.agents['blueprint'] = {
+      id: 'blueprint',
+      name: 'Blueprint',
+      group: 'alpha',
+      kind: 'architect',
+      cell_type: 'agent',
+      agent_class_id: 'product-manager',
+      agent_class_version: '2',
+      effective_agent_class_id: 'default-architect',
+      effective_agent_class_version: '1',
+      agent_class_status: {
+        assigned_class_id: 'product-manager',
+        assigned_class_version: '2',
+        effective_class_id: 'default-architect',
+        effective_class_version: '1',
+        pending_next_launch: true
+      }
+    };
+  `);
+
+  runInContext(context, `
+    _applyDelta([{
+      op: 'agent_upsert',
+      id: 'blueprint',
+      name: 'Blueprint',
+      group: 'alpha',
+      kind: 'architect',
+      cell_type: 'agent',
+      agent_class_id: 'product-manager',
+      agent_class_version: '2',
+      effective_agent_class_id: 'product-manager',
+      effective_agent_class_version: '2',
+      effective_agent_class_snapshot: {
+        id: 'product-manager',
+        version: '2',
+        base_kind: 'architect',
+        display_name: 'Product Manager',
+        primary_identity_label: 'Product Manager',
+        secondary_base_kind_label: 'Architect-derived',
+        status: 'draft',
+      },
+    }]);
+  `);
+
+  assert.equal(
+    runInContext(context, `state.agents['blueprint'] && state.agents['blueprint'].effective_agent_class_id`),
+    'product-manager'
+  );
+  assert.equal(
+    runInContext(context, `Object.prototype.hasOwnProperty.call(state.agents['blueprint'] || {}, 'agent_class_status')`),
+    false,
+    'fresh dataclass Agent Class fields should evict stale client-only status from assignment/status response'
+  );
+});
+
 test('agent_upsert for engineer-owned worker DOES invalidate focused engineer panel (TORQUE:236 v5)', () => {
   // Workers owned by the focused engineer must still refresh — workers list
   // / worklog views in the engineer panel read those workers' status.

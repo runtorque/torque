@@ -678,11 +678,17 @@ function connect() {
     } else if (msg.type === 'agent_classes') {
       state.agent_classes = Array.isArray(msg.classes) ? msg.classes : [];
       state.agent_class_issues = Array.isArray(msg.issues) ? msg.issues : [];
+      if (typeof agentPanelReceiveAgentClasses === 'function') {
+        agentPanelReceiveAgentClasses(msg);
+      }
       if (typeof agentClassManagerReceiveList === 'function') {
         agentClassManagerReceiveList(msg);
       }
     } else if (msg.type === 'agent_class_preview') {
       state.agent_class_preview = msg.agent_class || null;
+      if (typeof agentPanelReceiveAgentClassPreview === 'function') {
+        agentPanelReceiveAgentClassPreview(msg);
+      }
       if (typeof agentClassManagerReceivePreview === 'function') {
         agentClassManagerReceivePreview(msg);
       }
@@ -721,9 +727,16 @@ function connect() {
         classCell.agent_class_version = String(classStatus.assigned_class_version || '').trim();
         classCell.agent_class_assigned_at = Number(classStatus.assigned_at || classCell.agent_class_assigned_at || 0) || 0;
         classCell.agent_class_assigned_by = String(classStatus.assigned_by || classCell.agent_class_assigned_by || '').trim();
+        classCell.agent_class_status = classStatus;
+      }
+      if (typeof agentPanelReceiveAgentClassAssignment === 'function') {
+        agentPanelReceiveAgentClassAssignment(msg);
       }
     } else if (msg.type === 'agent_class_status') {
       state.agent_class_status = msg.status || null;
+      if (typeof agentPanelReceiveAgentClassStatus === 'function') {
+        agentPanelReceiveAgentClassStatus(msg);
+      }
     } else if (msg.type === 'engineer_specializations') {
       if (typeof agentPanelReceiveEngineerSpecializations === 'function') {
         agentPanelReceiveEngineerSpecializations(msg);
@@ -859,6 +872,13 @@ function connect() {
       if (!systemPromptErrorHandled
           && !specializationEditorErrorHandled
           && !agentProfileErrorHandled
+          && typeof agentPanelHandleAgentClassError === 'function') {
+        agentClassErrorHandled = agentPanelHandleAgentClassError(msg);
+      }
+      if (!systemPromptErrorHandled
+          && !specializationEditorErrorHandled
+          && !agentProfileErrorHandled
+          && !agentClassErrorHandled
           && typeof agentClassManagerHandleError === 'function') {
         agentClassErrorHandled = agentClassManagerHandleError(msg);
       }
@@ -2769,6 +2789,15 @@ function _applyDelta(ops) {
         }
         // Clean the 'op' key from the agent data
         delete state.agents[id].op;
+        if (!Object.prototype.hasOwnProperty.call(op, 'agent_class_status')) {
+          const carriesAgentClassFields = Object.prototype.hasOwnProperty.call(op, 'agent_class_id')
+            || Object.prototype.hasOwnProperty.call(op, 'agent_class_version')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_id')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_version')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_snapshot')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_applied_at');
+          if (carriesAgentClassFields) delete state.agents[id].agent_class_status;
+        }
         if (Object.prototype.hasOwnProperty.call(op, 'mcp_messages')
             && typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
           _agentPanelInvalidateArchitectMessageCache(id);

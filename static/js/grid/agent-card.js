@@ -482,12 +482,105 @@ function _agentKindBadgeLabel(kind, dismissed) {
   return 'Agent';
 }
 
+function _agentCardDefaultClassId(kind) {
+  kind = String(kind || '').trim();
+  if (kind === 'architect' || kind === 'engineer' || kind === 'worker') return 'default-' + kind;
+  return '';
+}
+
+function _agentCardKindDisplayLabel(kind) {
+  return _agentKindBadgeLabel(kind, false);
+}
+
+function _agentCardEffectiveClassSnapshot(agent) {
+  if (agent && agent.effective_agent_class_snapshot
+      && typeof agent.effective_agent_class_snapshot === 'object') {
+    return agent.effective_agent_class_snapshot;
+  }
+  const status = agent && agent.agent_class_status && typeof agent.agent_class_status === 'object'
+    ? agent.agent_class_status
+    : {};
+  return status.effective_class && typeof status.effective_class === 'object'
+    ? status.effective_class
+    : {};
+}
+
+function _agentCardPrimaryClassIdentity(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return null;
+  const kind = String(agent.kind || '').trim();
+  const defaultId = _agentCardDefaultClassId(kind);
+  const snapshot = _agentCardEffectiveClassSnapshot(agent);
+  const status = agent.agent_class_status && typeof agent.agent_class_status === 'object'
+    ? agent.agent_class_status
+    : {};
+  const id = String(
+    agent.effective_agent_class_id
+    || snapshot.id
+    || status.effective_class_id
+    || ''
+  ).trim();
+  if (!id || id === defaultId) return null;
+  const snapshotLabel = String(
+    snapshot.primary_identity_label
+    || snapshot.primary_display_name
+    || snapshot.display_name
+    || ''
+  ).trim();
+  const label = String(
+    snapshotLabel
+    || status.effective_primary_identity_label
+    || status.primary_identity_label
+    || id
+  ).trim();
+  if (!label) return null;
+  return {
+    id,
+    label,
+    version: String(agent.effective_agent_class_version || snapshot.version || status.effective_class_version || '').trim(),
+    baseKind: kind,
+    baseKindLabel: _agentCardKindDisplayLabel(kind),
+    secondary: String(
+      status.secondary_base_kind_label
+      || snapshot.secondary_base_kind_label
+      || (snapshot.secondary_base_kind_metadata && snapshot.secondary_base_kind_metadata.base_kind_label)
+      || _agentCardKindDisplayLabel(kind)
+    ).trim(),
+    status: String(snapshot.status || snapshot.lifecycle || status.status || '').trim() || 'full',
+  };
+}
+
+function _agentCardPrimaryDisplayName(agent) {
+  const identity = _agentCardPrimaryClassIdentity(agent);
+  return identity ? identity.label : _agentDisplayName(agent);
+}
+
 function _agentKindBadgeClass(kind, dismissed) {
   if (dismissed) return 'cell-dismissed-badge';
   if (kind === 'architect') return 'cell-architect-badge';
   if (kind === 'engineer') return 'cell-engineer-badge';
   if (kind === 'worker') return 'cell-worker-badge';
   return 'cell-agent-badge';
+}
+
+function _agentCardKindBadge(agent, dismissed) {
+  const kind = String((agent && agent.kind) || '');
+  const identity = _agentCardPrimaryClassIdentity(agent);
+  if (identity && !dismissed) {
+    return {
+      label: identity.label,
+      cls: _agentKindBadgeClass(kind, dismissed) + ' cell-agent-class-badge',
+      title: 'Agent Class: ' + identity.label
+        + (identity.version ? ('@' + identity.version) : '')
+        + '\nBase kind: ' + (identity.baseKindLabel || kind || 'agent')
+        + '\nSecondary metadata: ' + (identity.secondary || '—')
+        + '\nStatus: ' + (identity.status || 'full'),
+    };
+  }
+  return {
+    label: _agentKindBadgeLabel(kind, dismissed),
+    cls: _agentKindBadgeClass(kind, dismissed),
+    title: dismissed ? ('Dismissed ' + (kind || 'agent')) : '',
+  };
 }
 
 function _agentDisplayName(agent) {
@@ -800,8 +893,11 @@ function _renderEngineerCardBody(a, askingText) {
   const queueDepth = _engineerQueueDepth(a.id);
   const actionLabel = _agentCardCurrentOrLastActionLabel(a);
   const workerLabel = workers.length === 1 ? 'worker' : 'workers';
+  const identity = _agentCardPrimaryClassIdentity(a);
   let html = '<div class="agent-card-body cell-body cell-body--engineer">';
-  html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
+  html += '<div class="agent-card-line cell-name"'
+    + (identity ? (' title="' + esc((_agentDisplayName(a) || '') + ' · base kind ' + (identity.baseKindLabel || 'Engineer')) + '"') : '')
+    + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-engineer-workers">'
     + '<span class="agent-card-state-mix">' + _agentStatusMixDots(workers) + '</span>'
     + '<span class="agent-card-state-count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
@@ -822,8 +918,11 @@ function _renderEngineerCardBody(a, askingText) {
 function _renderArchitectCellBody(a) {
   const stats = _architectStatsForCard(a, null);
   const actionLabel = _agentCardCurrentOrLastActionLabel(a);
+  const identity = _agentCardPrimaryClassIdentity(a);
   let html = '<div class="agent-card-body cell-body cell-body--architect">';
-  html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
+  html += '<div class="agent-card-line cell-name"'
+    + (identity ? (' title="' + esc((_agentDisplayName(a) || '') + ' · base kind ' + (identity.baseKindLabel || 'Architect')) + '"') : '')
+    + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-architect-stats">'
     + esc(stats.engineerCount + ' engineers')
     + '</div>';
@@ -834,8 +933,11 @@ function _renderArchitectCellBody(a) {
 
 function _renderGenericAgentCardBody(a) {
   const subtitle = _agentCellSubtitle(a);
+  const identity = _agentCardPrimaryClassIdentity(a);
   let html = '<div class="agent-card-body cell-body cell-body--generic">';
-  html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
+  html += '<div class="agent-card-line cell-name"'
+    + (identity ? (' title="' + esc((_agentDisplayName(a) || '') + ' · base kind ' + (identity.baseKindLabel || 'Agent')) + '"') : '')
+    + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   if (subtitle) {
     html += '<div class="agent-card-line cell-task" title="' + esc(subtitle) + '">' + formatCode(subtitle) + '</div>';
   } else {
@@ -929,11 +1031,10 @@ function renderAgentCell(a, options) {
   else h += _renderGenericAgentCardBody(a);
   h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
   h += _renderAgentContextMeter(a);
-  const badgeLabel = _agentKindBadgeLabel(a.kind || '', _isDismissed);
-  const badgeClass = _agentKindBadgeClass(a.kind || '', _isDismissed);
-  h += '<div class="agent-card-kind ' + esc(badgeClass) + '"'
-    + (_isDismissed ? ' title="Dismissed ' + esc(a.kind || 'agent') + '"' : '')
-    + '>' + esc(badgeLabel) + '</div>';
+  const badge = _agentCardKindBadge(a, _isDismissed);
+  h += '<div class="agent-card-kind ' + esc(badge.cls) + '"'
+    + (badge.title ? ' title="' + esc(badge.title) + '"' : '')
+    + '>' + esc(badge.label) + '</div>';
   if (childCount > 0) {
     h += `<div class="cell-term-count">${childCount}</div>`;
   }

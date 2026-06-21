@@ -2294,6 +2294,12 @@ body.runtime-embedded .agent-focus-header {
   padding: 0 4px;
   line-height: 1.4;
 }
+.cell-agent-class-badge {
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cell-worker-badge {
   position: absolute;
   bottom: 2px;
@@ -13699,6 +13705,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: rgba(88, 166, 255, 0.06);
   border-color: rgba(88, 166, 255, 0.28);
 }
+.agent-class-manager.open {
+  background: rgba(88, 166, 255, 0.07);
+}
+.agent-profile-manager-internal {
+  margin-top: 8px;
+  background: rgba(139, 148, 158, 0.04);
+}
 .agent-profile-manager-head {
   display: flex;
   align-items: flex-start;
@@ -13715,10 +13728,20 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .agent-profile-disabled-reason,
 .agent-profile-next-launch-note,
 .agent-profile-preview-loading-inline,
-.agent-profile-denied-empty {
+.agent-profile-denied-empty,
+.agent-profile-internal-note {
   font-size: 9px;
   line-height: 1.35;
   color: var(--text-dim);
+}
+.agent-profile-internal-note {
+  margin-top: 6px;
+}
+.agent-profile-internal-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
 }
 .agent-profile-status-grid {
   display: grid;
@@ -13914,6 +13937,31 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .agent-profile-actions {
   margin-top: 8px;
+}
+.agent-profile-advanced-details {
+  margin-top: 8px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.agent-profile-advanced-details > summary,
+.agent-profile-internal-policy-details > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+.agent-class-controls,
+.agent-class-actions {
+  margin-top: 8px;
+}
+.agent-class-preview {
+  border-color: rgba(88, 166, 255, 0.24);
+}
+.agent-class-preview-draft,
+.agent-class-preview-restricted,
+.agent-class-preview-archived {
+  border-color: rgba(210, 153, 34, 0.35);
+}
+.agent-class-internal-policy-grid {
+  margin-top: 6px;
 }
 
 /* ------------------------------------------------------------------ */
