@@ -514,25 +514,29 @@ function _agentCardPrimaryClassIdentity(agent) {
     ? agent.agent_class_status
     : {};
   const id = String(
-    status.effective_class_id
-    || agent.effective_agent_class_id
+    agent.effective_agent_class_id
     || snapshot.id
+    || status.effective_class_id
     || ''
   ).trim();
   if (!id || id === defaultId) return null;
-  const label = String(
-    status.effective_primary_identity_label
-    || status.primary_identity_label
-    || snapshot.primary_identity_label
+  const snapshotLabel = String(
+    snapshot.primary_identity_label
     || snapshot.primary_display_name
     || snapshot.display_name
+    || ''
+  ).trim();
+  const label = String(
+    snapshotLabel
+    || status.effective_primary_identity_label
+    || status.primary_identity_label
     || id
   ).trim();
   if (!label) return null;
   return {
     id,
     label,
-    version: String(status.effective_class_version || agent.effective_agent_class_version || snapshot.version || '').trim(),
+    version: String(agent.effective_agent_class_version || snapshot.version || status.effective_class_version || '').trim(),
     baseKind: kind,
     baseKindLabel: _agentCardKindDisplayLabel(kind),
     secondary: String(
@@ -541,7 +545,7 @@ function _agentCardPrimaryClassIdentity(agent) {
       || (snapshot.secondary_base_kind_metadata && snapshot.secondary_base_kind_metadata.base_kind_label)
       || _agentCardKindDisplayLabel(kind)
     ).trim(),
-    status: String(status.status || snapshot.status || snapshot.lifecycle || '').trim() || 'full',
+    status: String(snapshot.status || snapshot.lifecycle || status.status || '').trim() || 'full',
   };
 }
 

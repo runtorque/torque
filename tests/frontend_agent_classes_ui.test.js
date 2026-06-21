@@ -75,7 +75,7 @@ function loadScript(context, relPath) {
   vm.runInContext(source, context, { filename: relPath });
 }
 
-function createHarness({ loadModals = false } = {}) {
+function createHarness({ loadModals = false, loadAgentPanel = false } = {}) {
   const document = new FakeDocument();
   const panel = document.register('panel-templates');
   document.register('agent-class-editor');
@@ -130,6 +130,10 @@ function createHarness({ loadModals = false } = {}) {
     loadScript(context, 'static/js/modals/add-cell.js');
   }
   loadScript(context, 'static/js/templates.js');
+  if (loadAgentPanel) {
+    loadScript(context, 'static/js/behavior_overlay.js');
+    loadScript(context, 'static/js/agent_panel.js');
+  }
   return { context, document, panel, sendCalls, toasts, confirms, sandbox };
 }
 
@@ -279,6 +283,36 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_delete');
   assert.equal(sendCalls.at(-1).class_id, 'qa-worker');
+});
+
+test('Agent Class editor errors are not swallowed by inactive agent-panel class handler', () => {
+  const { context, document, panel } = createHarness({ loadAgentPanel: true });
+  registerClassForm(document);
+  run(context, `librarySwitchTab('agent_classes')`);
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerNew('worker')`);
+  run(context, `
+    _agentClassValidationInFlight = true;
+    _agentClassLastMutationRequestId = 'agent-class-save-1';
+    _agentClassEditorError = '';
+    _agentClassEditorMessage = 'Saving Agent Class…';
+  `);
+
+  const panelHandled = run(context, `agentPanelHandleAgentClassError({
+    message: 'Unknown Agent Class: product-manager',
+    code: 'agent_class_preview_failed'
+  })`);
+  assert.equal(panelHandled, false);
+
+  const managerHandled = run(context, `agentClassManagerHandleError({
+    message: 'Unknown Agent Class: product-manager',
+    code: 'agent_class_preview_failed'
+  })`);
+  assert.equal(managerHandled, true);
+  assert.equal(run(context, `_agentClassValidationInFlight`), false);
+  assert.equal(run(context, `_agentClassLastMutationRequestId`), '');
+  assert.equal(run(context, `_agentClassEditorError`), 'Unknown Agent Class: product-manager');
+  assert.match(classUi(document, panel), /Unknown Agent Class: product-manager/);
 });
 
 test('Agent Class manager preserves focused draft, caret, and scroll across rerenders', () => {

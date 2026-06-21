@@ -3644,21 +3644,12 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     effective_agent_class_version: '2',
     effective_agent_class_applied_at: 200,
     effective_agent_class_snapshot: productManagerClass,
-    agent_class_status: {
-      agent_id: 'blueprint',
-      assigned_class_id: 'product-manager',
-      assigned_class_version: '2',
-      effective_class_id: 'product-manager',
-      effective_class_version: '2',
-      effective_class: productManagerClass,
-      assigned_class: productManagerClass,
-      effective_primary_identity_label: 'Product Manager',
-      next_launch_primary_identity_label: 'Product Manager',
-      pending_next_launch: false,
-      status: 'draft',
-      external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
-    },
   });
+  assert.equal(
+    context.state.agents.blueprint.agent_class_status.effective_class_id,
+    'default-architect',
+    'real relaunch upsert leaves the prior client-only status stale when it omits agent_class_status'
+  );
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /Product Manager/);
@@ -3666,6 +3657,66 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — effective Agent Class snapshot matches desired/);
   assert.doesNotMatch(panel.innerHTML, /Desired Agent Class updated\. It will freeze/);
+});
+
+test('agent class manager assignment errors remain routed to active panel operation', () => {
+  const { context, panel, sendCalls } = createHarness();
+  const defaultArchitectClass = {
+    id: 'default-architect',
+    version: '1',
+    base_kind: 'architect',
+    display_name: 'Default Architect',
+    primary_identity_label: 'Default Architect',
+    secondary_base_kind_label: 'Architect',
+    lifecycle: 'stable',
+    status: 'full',
+    launchable: true,
+    builtin: true,
+  };
+  const productManagerClass = {
+    id: 'product-manager',
+    version: '2',
+    base_kind: 'architect',
+    display_name: 'Product Manager',
+    primary_identity_label: 'Product Manager',
+    secondary_base_kind_label: 'Architect-derived',
+    lifecycle: 'draft',
+    status: 'draft',
+    launchable: true,
+    builtin: true,
+  };
+
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'stopped',
+    directory: '/repo',
+    effective_agent_class_id: 'default-architect',
+    effective_agent_class_version: '1',
+    effective_agent_class_snapshot: defaultArchitectClass,
+  });
+
+  context.renderAgentPanel();
+  context.agentPanelToggleClassAssignment(null, 'blueprint');
+  context.agentPanelReceiveAgentClasses({
+    type: 'agent_classes',
+    classes: [defaultArchitectClass, productManagerClass],
+    issues: [],
+  });
+  context.agentPanelSelectClass('blueprint', 'product-manager');
+  context.agentPanelAssignSelectedClass(null, 'blueprint');
+  assert.equal(sendCalls.at(-1).cmd, 'agent_class_assign');
+
+  const handled = context.agentPanelHandleAgentClassError({
+    message: 'Unknown Agent Class: product-manager',
+    code: 'agent_class_assign_failed',
+  });
+  assert.equal(handled, true);
+  assert.match(panel.innerHTML, /Unknown Agent Class: product-manager/);
+  assert.doesNotMatch(panel.innerHTML, /Saving…/);
 });
 
 test('agent profile manager lists compatible profiles, previews PM draft, assigns, and clears', () => {

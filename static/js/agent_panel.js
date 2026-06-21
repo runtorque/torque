@@ -1513,36 +1513,38 @@ function _agentPanelClassState(agent) {
     : {};
   var snapshot = _agentPanelClassSnapshot(agent);
   var assignedId = String(
-    status.assigned_class_id
-    || agent.agent_class_id
+    agent.agent_class_id
+    || status.assigned_class_id
     || ''
   ).trim();
   var assignedVersion = String(
-    status.assigned_class_version
-    || agent.agent_class_version
+    agent.agent_class_version
+    || status.assigned_class_version
     || ''
   ).trim();
   var directProfileId = !assignedId ? String(agent.agent_profile_id || '').trim() : '';
   var directProfileVersion = !assignedId ? String(agent.agent_profile_version || '').trim() : '';
   var effectiveId = String(
-    status.effective_class_id
-    || agent.effective_agent_class_id
+    agent.effective_agent_class_id
     || snapshot.id
+    || status.effective_class_id
     || (!directProfileId ? defaultId : '')
     || ''
   ).trim();
   var effectiveVersion = String(
-    status.effective_class_version
-    || agent.effective_agent_class_version
+    agent.effective_agent_class_version
     || snapshot.version
+    || status.effective_class_version
     || ''
   ).trim();
   var assignedPreview = (status.assigned_class && typeof status.assigned_class === 'object')
     ? status.assigned_class
     : _agentPanelClassPreviewFor(agent, assignedId);
-  var effectivePreview = (status.effective_class && typeof status.effective_class === 'object')
-    ? status.effective_class
-    : (snapshot.id ? snapshot : _agentPanelClassPreviewFor(agent, effectiveId));
+  var effectivePreview = snapshot.id
+    ? snapshot
+    : ((status.effective_class && typeof status.effective_class === 'object')
+      ? status.effective_class
+      : _agentPanelClassPreviewFor(agent, effectiveId));
   if (assignedPreview && assignedPreview.id) {
     _agentPanelClassPreviewById[String(assignedPreview.id || '')] = assignedPreview;
   }
@@ -1554,10 +1556,12 @@ function _agentPanelClassState(agent) {
   var desiredPreview = assignedId
     ? (assignedPreview || _agentPanelClassPreviewFor(agent, assignedId))
     : _agentPanelClassPreviewFor(agent, defaultId);
+  var effectivePreviewLabel = _agentPanelClassDisplayName(effectivePreview, '');
   var effectiveLabel = String(
-    status.effective_primary_identity_label
+    effectivePreviewLabel
+    || status.effective_primary_identity_label
     || status.primary_identity_label
-    || _agentPanelClassDisplayName(effectivePreview, effectiveId)
+    || effectiveId
     || ''
   ).trim();
   if (effectiveId === defaultId && (!effectivePreview || !effectivePreview.id || effectiveLabel === effectiveId)) {
@@ -1586,20 +1590,19 @@ function _agentPanelClassState(agent) {
     }
   }
   var secondaryLabel = _agentPanelClassSecondaryLabel(effectivePreview || {}, kind);
-  var pending;
-  if (typeof status.pending_next_launch === 'boolean') {
-    pending = status.pending_next_launch;
-  } else if (directProfileId) {
-    pending = true;
-  } else {
-    pending = !!(
-      desiredId
-      && (
-        desiredId !== effectiveId
-        || (desiredVersion && desiredVersion !== effectiveVersion)
-      )
-    );
-  }
+  var computedPending = directProfileId ? true : !!(
+    desiredId
+    && (
+      desiredId !== effectiveId
+      || (desiredVersion && desiredVersion !== effectiveVersion)
+    )
+  );
+  var pending = typeof status.pending_next_launch === 'boolean'
+    ? !!(status.pending_next_launch && computedPending)
+    : computedPending;
+  var effectiveStatus = (effectivePreview && effectivePreview.id)
+    ? _agentPanelClassStatusLabel(effectivePreview || {})
+    : '';
   return {
     kind: kind,
     defaultId: defaultId,
@@ -1617,9 +1620,9 @@ function _agentPanelClassState(agent) {
     assignedPreview: assignedPreview || {},
     desiredPreview: desiredPreview || {},
     secondaryLabel: secondaryLabel,
-    status: String(status.status || _agentPanelClassStatusLabel(effectivePreview || {}) || '').trim() || 'full',
-    warnings: Array.isArray(status.warnings) ? status.warnings : (Array.isArray((effectivePreview || {}).warnings) ? effectivePreview.warnings : []),
-    externalConnectorCaveat: String(status.external_connector_caveat || (effectivePreview || {}).external_connector_caveat || '').trim(),
+    status: String(effectiveStatus || status.status || '').trim() || 'full',
+    warnings: Array.isArray((effectivePreview || {}).warnings) ? effectivePreview.warnings : (Array.isArray(status.warnings) ? status.warnings : []),
+    externalConnectorCaveat: String((effectivePreview || {}).external_connector_caveat || status.external_connector_caveat || '').trim(),
     pending: pending,
     statusObject: status,
   };
@@ -2506,14 +2509,12 @@ function agentPanelReceiveAgentClassAssignment(msg) {
 function agentPanelHandleAgentClassError(msg) {
   var message = String((msg && (msg.message || msg.error)) || '').trim();
   if (!message) return false;
-  var code = String((msg && msg.code) || '');
-  var looksClass = /Agent Class|agent class|class_id|invalid_agent_class|agent_class/.test(message + ' ' + code);
   var handled = false;
   for (var agentId in _agentPanelClassManagerByAgent) {
     if (!Object.prototype.hasOwnProperty.call(_agentPanelClassManagerByAgent, agentId)) continue;
     var ui = _agentPanelClassManagerByAgent[agentId];
     if (!ui) continue;
-    if (ui.saving || ui.statusLoading || looksClass) {
+    if (ui.saving || ui.statusLoading) {
       ui.saving = false;
       ui.statusLoading = false;
       ui.error = message;
@@ -2529,7 +2530,7 @@ function agentPanelHandleAgentClassError(msg) {
       handled = true;
     }
   }
-  if (!handled && !looksClass) return false;
+  if (!handled) return false;
   if (typeof _showToast === 'function') _showToast(message, 'error');
   _agentPanelRefreshClassManagerRender();
   return true;

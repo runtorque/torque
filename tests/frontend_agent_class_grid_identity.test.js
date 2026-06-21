@@ -94,6 +94,55 @@ test('agent grid card promotes effective Product Manager Agent Class identity ov
   assert.doesNotMatch(html, /agent-card-kind[^>]*>Architect</);
 });
 
+test('agent grid card ignores stale assignment status after relaunch effective Product Manager snapshot', () => {
+  const context = createHarness();
+  const html = vm.runInContext(`renderAgentCell({
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    cell_type: 'agent',
+    group: 'alpha',
+    status: 'running',
+    agent_class_id: 'product-manager',
+    agent_class_version: '2',
+    effective_agent_class_id: 'product-manager',
+    effective_agent_class_version: '2',
+    effective_agent_class_snapshot: {
+      id: 'product-manager',
+      version: '2',
+      base_kind: 'architect',
+      display_name: 'Product Manager',
+      primary_identity_label: 'Product Manager',
+      secondary_base_kind_label: 'Architect-derived',
+      status: 'draft'
+    },
+    agent_class_status: {
+      assigned_class_id: 'product-manager',
+      assigned_class_version: '2',
+      effective_class_id: 'default-architect',
+      effective_class_version: '1',
+      effective_primary_identity_label: 'Default Architect',
+      pending_next_launch: true,
+      effective_class: {
+        id: 'default-architect',
+        version: '1',
+        base_kind: 'architect',
+        display_name: 'Default Architect',
+        primary_identity_label: 'Default Architect',
+        secondary_base_kind_label: 'Architect',
+        status: 'full'
+      }
+    }
+  })`, context);
+
+  assert.match(html, /cell-name[^>]*>Product Manager</);
+  assert.match(html, /cell-agent-class-badge[^>]*>Product Manager</);
+  assert.match(html, /Base kind: Architect/);
+  assert.match(html, /Secondary metadata: Architect-derived/);
+  assert.doesNotMatch(html, /cell-name[^>]*>Blueprint</);
+  assert.doesNotMatch(html, /agent-card-kind[^>]*>Architect</);
+});
+
 test('agent grid card preserves default Architect identity when no non-default Agent Class is effective', () => {
   const context = createHarness();
   const html = vm.runInContext(`renderAgentCell({

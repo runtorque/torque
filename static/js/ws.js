@@ -2789,6 +2789,15 @@ function _applyDelta(ops) {
         }
         // Clean the 'op' key from the agent data
         delete state.agents[id].op;
+        if (!Object.prototype.hasOwnProperty.call(op, 'agent_class_status')) {
+          const carriesAgentClassFields = Object.prototype.hasOwnProperty.call(op, 'agent_class_id')
+            || Object.prototype.hasOwnProperty.call(op, 'agent_class_version')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_id')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_version')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_snapshot')
+            || Object.prototype.hasOwnProperty.call(op, 'effective_agent_class_applied_at');
+          if (carriesAgentClassFields) delete state.agents[id].agent_class_status;
+        }
         if (Object.prototype.hasOwnProperty.call(op, 'mcp_messages')
             && typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
           _agentPanelInvalidateArchitectMessageCache(id);
