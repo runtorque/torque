@@ -3519,6 +3519,155 @@ test('agent panel marks cleared assignment pending default full profile next lau
   assert.match(panel.innerHTML, /desired assignment: default full-architect/);
 });
 
+test('agent class manager assigns Product Manager as desired and renders effective class identity after relaunch', () => {
+  const { context, panel, sendCalls } = createHarness();
+  const defaultArchitectClass = {
+    id: 'default-architect',
+    version: '1',
+    base_kind: 'architect',
+    display_name: 'Default Architect',
+    primary_identity_label: 'Default Architect',
+    secondary_base_kind_label: 'Architect',
+    lifecycle: 'stable',
+    status: 'full',
+    launchable: true,
+    builtin: true,
+    agent_profile_ref: { id: 'full-architect', version: '1' },
+    agent_profile: { id: 'full-architect', version: '1', status: 'full', capability_count: 12 },
+    runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
+  };
+  const productManagerClass = {
+    id: 'product-manager',
+    version: '2',
+    base_kind: 'architect',
+    display_name: 'Product Manager',
+    primary_identity_label: 'Product Manager',
+    secondary_base_kind_label: 'Architect-derived',
+    lifecycle: 'draft',
+    status: 'draft',
+    launchable: true,
+    builtin: true,
+    draft: { scratch_only: true },
+    agent_profile_ref: { id: 'class-policy-product-manager', version: '2' },
+    agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'draft', capability_count: 7 },
+    internal_policy: {
+      mode: 'compile',
+      profile_source: 'compiled_from_agent_class',
+      generated_profile_written_to_project_yaml: false,
+    },
+    warnings: ['Product Manager is draft/restricted; use architect_product_* wrappers only.'],
+    external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
+    runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
+  };
+
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'stopped',
+    directory: '/repo',
+    agent_class_id: '',
+    agent_class_version: '',
+    effective_agent_class_id: 'default-architect',
+    effective_agent_class_version: '1',
+    effective_agent_class_snapshot: defaultArchitectClass,
+    effective_agent_profile_id: 'full-architect',
+    effective_agent_profile_version: '1',
+    effective_agent_profile_snapshot: {
+      id: 'full-architect',
+      version: '1',
+      base_kind: 'architect',
+      display_name: 'Full Architect',
+      lifecycle: 'stable',
+      status: 'full',
+    },
+  });
+
+  context.renderAgentPanel();
+  context.agentPanelToggleClassAssignment(null, 'blueprint');
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
+    { cmd: 'agent_class_list', base_dir: '/repo' },
+    { cmd: 'agent_class_status', agent_id: 'blueprint', base_dir: '/repo' },
+  ]);
+
+  context.agentPanelReceiveAgentClasses({
+    type: 'agent_classes',
+    classes: [defaultArchitectClass, productManagerClass],
+    issues: [],
+  });
+  assert.match(panel.innerHTML, /Product Manager@2 · Architect-derived · draft/);
+
+  context.agentPanelSelectClass('blueprint', 'product-manager');
+  assert.match(panel.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
+  assert.match(panel.innerHTML, /external connector caveat/);
+  context.agentPanelAssignSelectedClass(null, 'blueprint');
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
+    cmd: 'agent_class_assign',
+    agent_id: 'blueprint',
+    actor_label: 'trusted-user-ui',
+    base_dir: '/repo',
+    class_id: 'product-manager',
+  });
+
+  context.agentPanelReceiveAgentClassAssignment({
+    type: 'agent_class_assignment',
+    status: {
+      agent_id: 'blueprint',
+      assigned_class_id: 'product-manager',
+      assigned_class_version: '2',
+      assigned_at: 100,
+      assigned_by: 'trusted-user-ui',
+      effective_class_id: 'default-architect',
+      effective_class_version: '1',
+      effective_class: defaultArchitectClass,
+      assigned_class: productManagerClass,
+      next_launch_class_id: 'product-manager',
+      next_launch_class_version: '2',
+      next_launch_primary_identity_label: 'Product Manager',
+      pending_next_launch: true,
+      warnings: ['External connector exposure is not governed by Agent Classes.'],
+      external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
+    },
+  });
+  assert.match(panel.innerHTML, /Desired Agent Class updated\. It will freeze on the next launch or relaunch\./);
+  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Product Manager@2/);
+  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Product Manager@2/);
+  assert.match(panel.innerHTML, /Advanced\/Internal Agent Profile policy/);
+
+  Object.assign(context.state.agents.blueprint, {
+    status: 'running',
+    agent_class_id: 'product-manager',
+    agent_class_version: '2',
+    effective_agent_class_id: 'product-manager',
+    effective_agent_class_version: '2',
+    effective_agent_class_applied_at: 200,
+    effective_agent_class_snapshot: productManagerClass,
+    agent_class_status: {
+      agent_id: 'blueprint',
+      assigned_class_id: 'product-manager',
+      assigned_class_version: '2',
+      effective_class_id: 'product-manager',
+      effective_class_version: '2',
+      effective_class: productManagerClass,
+      assigned_class: productManagerClass,
+      effective_primary_identity_label: 'Product Manager',
+      next_launch_primary_identity_label: 'Product Manager',
+      pending_next_launch: false,
+      status: 'draft',
+      external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
+    },
+  });
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Product Manager/);
+  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+  assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
+  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — effective Agent Class snapshot matches desired/);
+  assert.doesNotMatch(panel.innerHTML, /Desired Agent Class updated\. It will freeze/);
+});
+
 test('agent profile manager lists compatible profiles, previews PM draft, assigns, and clears', () => {
   const { context, panel, sendCalls } = createHarness();
 
@@ -3551,11 +3700,12 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
   });
 
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /Agent Profile assignment/);
-  assert.match(panel.innerHTML, /Effective now[\s\S]*Full Architect@1/);
-  assert.match(panel.innerHTML, /Desired next launch[\s\S]*default full-architect/);
-  assert.match(panel.innerHTML, /Profile…/);
-  assert.equal(sendCalls.length, 0, 'collapsed profile summary does not fetch until the operator opens it');
+  assert.match(panel.innerHTML, /Agent Class assignment/);
+  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Default Architect/);
+  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Default Architect/);
+  assert.match(panel.innerHTML, /Advanced\/Internal Agent Profile assignment/);
+  assert.match(panel.innerHTML, /Class…/);
+  assert.equal(sendCalls.length, 0, 'collapsed class/profile summaries do not fetch until the operator opens them');
 
   context.agentPanelToggleProfileAssignment(null, 'arch-profile-ui');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [

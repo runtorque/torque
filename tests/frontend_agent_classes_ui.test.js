@@ -186,9 +186,11 @@ function sampleClasses() {
       warnings: ['old-worker is archived/disabled and cannot be assigned or launched until re-enabled.'], external_connector_caveat: 'External connector caveat.',
     },
     {
-      id: 'product-manager', version: '1', base_kind: 'architect', display_name: 'Product Manager (draft)',
+      id: 'product-manager', version: '2', base_kind: 'architect', display_name: 'Product Manager',
+      primary_identity_label: 'Product Manager', secondary_base_kind_label: 'Architect-derived',
       lifecycle: 'draft', builtin: true, custom: false, source: 'builtin', status: 'draft', scratch_only: true, launchable: true,
-      agent_profile_ref: { id: 'product-manager-draft', version: '2' }, agent_profile: { id: 'product-manager-draft', version: '2', status: 'draft', capability_count: 3 },
+      agent_profile_ref: { id: 'class-policy-product-manager', version: '2' }, agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'draft', capability_count: 3 },
+      internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
       prompt_summary: { has_prompt: true, char_count: 64, preview: 'PM draft instructions.' }, draft: { scratch_only: true },
       warnings: ['Product Manager is draft/scratch-only in Wave 6B.'], external_connector_caveat: 'External connector caveat.',
       restrictions: ['Do not use for live PM dogfood.'],
@@ -210,7 +212,10 @@ test('Agent Class manager renders class list, PM caveat, archived disabled previ
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
-  assert.match(classUi(document, panel), /Product Manager \(draft\)/);
+  assert.match(classUi(document, panel), /Product Manager@2/);
+  assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
+  assert.match(classUi(document, panel), /Advanced\/Internal enforcement details/);
+  assert.match(classUi(document, panel), /class-policy-product-manager@2/);
   assert.match(classUi(document, panel), /draft/);
   assert.match(classUi(document, panel), /External connector caveat/);
   assert.match(classUi(document, panel), /Do not use for live PM dogfood/);
