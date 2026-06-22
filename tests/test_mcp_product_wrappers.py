@@ -523,6 +523,29 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("inject_mcp_message", self.calls[0]["cmd"])
         self.assertEqual("a5a7fc9e", self.calls[0]["agent_id"])
 
+        reply = await self._call(
+            "architect_product_peer_reply",
+            {
+                "message_id": payload["message_id"],
+                "message": "Adding a product-scoped follow-up for Torqly.",
+                "context_task_ids": ["TORQUE:909"],
+                "context_decision_ids": ["decision-54e82d9a220f"],
+            },
+            req_id=4,
+        )
+        reply_payload = self._result_payload(reply)
+        reply_row = self.db.load_agent_peer_message(reply_payload["message_id"])
+        self.assertEqual(payload["thread_id"], reply_payload["thread_id"])
+        self.assertEqual(payload["thread_id"], reply_row["thread_id"])
+        self.assertEqual(
+            "torque.product_peer.v1",
+            reply_row["context_snapshot"]["product_peer"]["marker"],
+        )
+        self.assertEqual(["TORQUE:909"], reply_row["context_task_ids"])
+        self.assertEqual(["decision-54e82d9a220f"], reply_row["context_decision_ids"])
+        self.assertEqual(2, len(self.calls))
+        self.assertEqual("a5a7fc9e", self.calls[1]["agent_id"])
+
     async def test_product_peer_message_denies_cross_group_non_architect_and_mixed_context_before_side_effects(self):
         product_task = self.state.board_add_task(
             "PM anchor",
