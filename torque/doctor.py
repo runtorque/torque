@@ -22,6 +22,7 @@ from .agent_profiles import (
     validate_all_agent_profiles,
 )
 from .agent_classes import (
+    agent_class_authoring_contract,
     agent_class_cell_status,
     enriched_agent_class_preview,
     validate_all_agent_classes,
@@ -1259,6 +1260,7 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
             ]
         except sqlite3.OperationalError:
             audit_recent = []
+    authoring_contract = agent_class_authoring_contract()
     return {
         "config_path": ".torque/agent_classes/",
         "base_dir": str(base_dir or os.getcwd()),
@@ -1275,6 +1277,9 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
         "runtime_enforcement": "launch_frozen_agent_class_profile_pairing",
         "schema_version": 3,
+        "authoring_contract": authoring_contract,
+        "capability_bucket_count": len(authoring_contract.get("capability_bucket_catalog", []) or []),
+        "restriction_bucket_count": len(authoring_contract.get("restriction_bucket_catalog", []) or []),
         "legacy_direct_product_manager_profile_count": sum(
             1 for item in assignments
             if item.get("legacy_direct_product_manager_profile")
@@ -2331,6 +2336,10 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_classes.get('error_count', 0) or 0)}",
         "  runtime_enforcement:            "
         f"{agent_classes.get('runtime_enforcement', '')}",
+        "  capability_buckets:             "
+        f"{int(agent_classes.get('capability_bucket_count', 0) or 0)}",
+        "  restriction_buckets:            "
+        f"{int(agent_classes.get('restriction_bucket_count', 0) or 0)}",
         "  assignment_count:               "
         f"{int(agent_classes.get('assignment_count', 0) or 0)}",
         "  audit_recent_count:             "

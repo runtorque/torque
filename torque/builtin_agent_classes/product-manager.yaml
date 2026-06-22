@@ -18,45 +18,6 @@ prompt:
 policy:
   mode: compile
   policy_schema_version: 1
-  generated_profile_id: class-policy-product-manager
-  generated_profile_version: "2"
-  grants:
-    - observe.self_context
-    - observe.board_summary
-    - observe.task_detail
-    - planning.area_read
-    - planning.initiative_read
-    - decision.list
-    - decision.create_proposed
-    - decision.update_proposed
-    - decision.link
-    - task.create_queued
-    - task.update_planning_fields
-    - task.move_planning_safe
-    - task.board_sync_read
-    - comm.user_ask
-    - comm.user_message
-    - comm.peer_architect_list
-    - comm.peer_architect_message
-    - comm.product_ack_request
-    - journal.private
-  denies:
-    - agent.hire_engineer
-    - agent.manage_engineer_roster
-    - agent.dispatch_worker
-    - task.create
-    - task.update
-    - task.reassign
-    - task.move
-    - task.dispatch
-    - comm.engineer_message
-    - comm.worker_message
-    - worktree.merge
-    - deploy.apply
-    - admin.settings
-    - profile.assign
-    - profile.edit
-    - decision.accept
   scope:
     planning_visibility: broad same-group Areas/Initiatives reads; task and decision detail scoped with hidden counts where not visible
     decisions: PM-owned proposed product decisions only; no accepted/revised/rejected PM-authored decisions and no editing or superseding other architects' decisions
@@ -77,6 +38,24 @@ policy:
     retention: compact local profile call/denial metadata with bulky args/secrets redacted; no TTL unless DB growth becomes real issue
     profile_changes: next launch/session only; generated internal profile snapshots are frozen from class YAML
 capabilities:
+  buckets:
+    - self_context
+    - planning_reads
+    - proposed_decisions
+    - board_task_proposals
+    - user_messages
+    - product_peer_messages
+    - private_journal
+  restrictions:
+    - deny_engineer_management
+    - deny_worker_dispatch
+    - deny_execution_task_control
+    - deny_engineer_worker_messages
+    - deny_worktree_merge
+    - deny_deploy_admin
+    - deny_class_profile_admin
+    - deny_decision_acceptance
+    - deny_raw_tool_picker
   domains:
     - product_planning
     - areas

@@ -16,10 +16,12 @@ fields plus `effective_agent_profile_*` launch snapshot fields.
 Agent Classes are now the normal operator-facing template/selection layer.
 Agent Profiles remain the internal Agent Profile-compatible enforcement layer.
 A class may either wrap an existing profile (`policy.mode: wrap_profile`) or
-compile class-owned capability policy into a generated/internal profile snapshot
+compile class-owned operator capability buckets (`capabilities.buckets` plus
+`capabilities.restrictions`) into a generated/internal profile snapshot
 (`policy.mode: compile`). Class config lives in `.torque/agent_classes/*.yaml`;
 reviewed authored profile config remains in `.torque/agent_profiles/*.yaml`.
-Wave 7B does not write generated internal profiles as project YAML.
+Wave 7B does not write generated internal profiles as project YAML, and Agent
+Class normal authoring does not expose raw Agent Profile atom grants/denies.
 
 Direct Agent Profile assignment remains trusted-user-only for
 Advanced/Internal policy backcompat. Agent Class assignment is also
@@ -123,7 +125,8 @@ used for live PM dogfood or Blueprint replacement.
 counts and structured assignment/audit data in the JSON report. It warns for
 legacy direct `product-manager-draft` assignments and does not silently migrate
 them to the Product Manager class. UI should render profile data as
-Advanced/Internal policy detail behind Agent Class identity.
+Advanced/Internal policy detail behind Agent Class identity; Agent Class create/edit
+flows should use the Agent Class bucket catalog rather than raw profile atoms.
 
 
 ## Product Manager Wave 4B scratch smoke
