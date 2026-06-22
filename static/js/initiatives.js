@@ -30,6 +30,7 @@ var AREA_SCOPE_FIELDS = [
   'out_of_scope',
 ];
 
+var _planningStateRef = null;
 var _initiativesLoadedGroup = null;
 var _initiativesLoadingGroup = null;
 var _initiativesSelectedId = '';
@@ -64,7 +65,18 @@ var _areasSectionExpanded = {
   notes: true,
 };
 
+function _planningSyncStateReference() {
+  if (typeof state === 'undefined' || !state) return;
+  if (_planningStateRef === state) return;
+  _planningStateRef = state;
+  _initiativesLoadedGroup = null;
+  _initiativesLoadingGroup = null;
+  _areasLoadedGroup = null;
+  _areasLoadingGroup = null;
+}
+
 function _initiativesGroup() {
+  _planningSyncStateReference();
   if (typeof _currentGroup === 'function') return _currentGroup() || '';
   return (state && state.active_group) || '';
 }
@@ -94,11 +106,13 @@ function planningSetTab(tab) {
 }
 
 function _initiativesEnsureState() {
+  _planningSyncStateReference();
   if (!state) state = {};
   if (!state.initiatives || typeof state.initiatives !== 'object') state.initiatives = {};
 }
 
 function _areasEnsureState() {
+  _planningSyncStateReference();
   if (!state) state = {};
   if (!state.areas || typeof state.areas !== 'object') state.areas = {};
 }
@@ -150,9 +164,31 @@ function initiativesEnsureLoaded(opts) {
   return true;
 }
 
-function initiativesRefresh() {
+function planningEnsureLoaded(opts) {
+  opts = opts || {};
+  var includeInactive = !!(opts.includeInactive || opts.all);
+  var active = String(_planningActiveTab || 'initiatives');
+  var loaded = false;
+  if (active === 'areas') {
+    loaded = areasEnsureLoaded(opts) || loaded;
+    if (includeInactive) loaded = initiativesEnsureLoaded(opts) || loaded;
+  } else {
+    loaded = initiativesEnsureLoaded(opts) || loaded;
+    if (includeInactive) loaded = areasEnsureLoaded(opts) || loaded;
+  }
+  return loaded;
+}
+
+function planningRefresh() {
   initiativesEnsureLoaded({ force: true });
+  areasEnsureLoaded({ force: true });
   if (_initiativesSelectedId) initiativesLoadDetail(_initiativesSelectedId, { force: true });
+  if (_areasSelectedId) areasLoadDetail(_areasSelectedId, { force: true });
+  if (typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
+}
+
+function initiativesRefresh() {
+  planningRefresh();
 }
 
 function initiativesBeginGroupSwitch() {
@@ -163,9 +199,8 @@ function initiativesBeginGroupSwitch() {
     _initiativesDetailLoadingId = '';
     _initiativesLastError = '';
   }
-  if (typeof areasBeginGroupSwitch === 'function') areasBeginGroupSwitch({ render: false });
-  if (_planningActiveTab === 'areas') areasEnsureLoaded({ force: true });
-  else initiativesEnsureLoaded({ force: true });
+  if (typeof areasBeginGroupSwitch === 'function') areasBeginGroupSwitch({ render: false, load: false });
+  planningEnsureLoaded({ force: true, includeInactive: true });
   renderInitiativesPanel();
 }
 
@@ -866,8 +901,7 @@ function areasEnsureLoaded(opts) {
 }
 
 function areasRefresh() {
-  areasEnsureLoaded({ force: true });
-  if (_areasSelectedId) areasLoadDetail(_areasSelectedId, { force: true });
+  planningRefresh();
 }
 
 function areasBeginGroupSwitch(opts) {
@@ -883,7 +917,7 @@ function areasBeginGroupSwitch(opts) {
     _areasTypeFilter = '';
     _areasEditingNoteId = '';
   }
-  if (_planningActiveTab === 'areas') areasEnsureLoaded({ force: true });
+  if (opts.load !== false && _planningActiveTab === 'areas') areasEnsureLoaded({ force: true });
   if (opts.render !== false) renderInitiativesPanel();
 }
 
@@ -1590,7 +1624,7 @@ function renderInitiativesPanel() {
     : 'Initiatives grouped by roadmap bucket for ' + esc(group || 'all groups') + '. Linked execution stays on Board tasks.') + '</div></div>';
   html += '<div class="tpled-header-controls">';
   html += '<span class="initiative-total">' + esc(activeTab === 'areas' ? _areaCountLabel(areaTotal) : _initiativeCountLabel(initiativeTotal)) + '</span>';
-  html += '<button class="tpled-new-btn" onclick="' + (activeTab === 'areas' ? 'areasRefresh()' : 'initiativesRefresh()') + '" title="Refresh">&#x21BB;</button>';
+  html += '<button class="tpled-new-btn" onclick="planningRefresh()" title="Refresh planning data">&#x21BB;</button>';
   html += '</div></div>';
   html += _renderPlanningTabs(initiativeTotal, areaTotal);
   if (activeTab === 'areas') {

@@ -111,8 +111,12 @@ function _loadPanelApp(appName) {
       agentTemplateEditorLoad();
     }
   }
-  if (appName === 'initiatives' && typeof initiativesEnsureLoaded === 'function') {
-    initiativesEnsureLoaded();
+  if (appName === 'initiatives') {
+    if (typeof planningEnsureLoaded === 'function') {
+      planningEnsureLoaded({ includeInactive: true });
+    } else if (typeof initiativesEnsureLoaded === 'function') {
+      initiativesEnsureLoaded();
+    }
   }
   if (appName === 'mission-control' && typeof missionControlEnsureLoaded === 'function') {
     missionControlEnsureLoaded();

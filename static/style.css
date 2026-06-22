@@ -13151,27 +13151,35 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   flex-direction: column;
   color: var(--fg);
 }
+.planning-panel {
+  font-size: 11px;
+  line-height: 1.35;
+}
+.planning-panel .tpled-new-btn {
+  font-size: 12px;
+  padding: 1px 7px;
+}
 
 .initiatives-header { flex: 0 0 auto; }
-.initiative-total { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.initiative-total { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .initiative-error {
   margin: 8px 12px 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
   border: 1px solid var(--danger, #9f3a3a);
   color: var(--danger-fg, #ffb4b4);
   background: rgba(160, 48, 48, 0.12);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
 }
-.initiative-loading { padding: 10px 12px; color: var(--muted); font-size: 12px; }
+.initiative-loading { padding: 9px 12px; color: var(--muted); font-size: 11px; }
 .initiative-status {
-  margin: 8px 0 10px;
-  padding: 8px 10px;
+  margin: 7px 0 9px;
+  padding: 7px 9px;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.04);
-  font-size: 12px;
+  font-size: 11px;
 }
 .initiative-status-success { border-color: var(--success, #3a8f5a); color: var(--success-fg, #9ee6b4); background: rgba(58, 143, 90, 0.12); }
 .initiative-status-error { border-color: var(--danger, #9f3a3a); color: var(--danger-fg, #ffb4b4); background: rgba(160, 48, 48, 0.12); }
@@ -13224,19 +13232,19 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 10px;
+  padding: 8px 9px;
   border-bottom: 1px solid var(--border);
 }
 
-.initiative-column-title { font-weight: 700; font-size: 13px; }
-.initiative-column-count { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.initiative-column-title { font-weight: 700; font-size: 12px; }
+.initiative-column-count { color: var(--muted); font-size: 10px; margin-top: 2px; }
 .initiative-column-body {
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 7px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 
 .initiative-card {
@@ -13245,7 +13253,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   text-align: left;
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 9px;
+  padding: 8px;
   color: var(--fg);
   background: var(--card-bg, rgba(255, 255, 255, 0.04));
   cursor: pointer;
@@ -13266,27 +13274,27 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   padding: 1px 6px;
   font-size: 10px;
 }
-.initiative-card-summary { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
-.initiative-card-linked { margin-top: 8px; color: var(--muted); font-size: 11px; }
-.initiative-empty { color: var(--muted); font-size: 12px; padding: 10px; border: 1px dashed var(--border); border-radius: 7px; }
-.initiative-empty.compact { padding: 8px; }
+.initiative-card-summary { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.initiative-card-linked { margin-top: 7px; color: var(--muted); font-size: 10px; }
+.initiative-empty { color: var(--muted); font-size: 11px; padding: 9px; border: 1px dashed var(--border); border-radius: 7px; }
+.initiative-empty.compact { padding: 7px; }
 
 .initiative-secondary-wrap {
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px;
+  padding: 7px;
   background: rgba(255, 255, 255, 0.02);
 }
-.initiative-secondary-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 7px; }
-.initiative-secondary-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.initiative-secondary-head { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+.initiative-secondary-toggles { display: flex; flex-wrap: wrap; gap: 5px; }
 .initiative-secondary-toggle {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: transparent;
   color: var(--fg);
-  padding: 4px 8px;
+  padding: 3px 7px;
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 .initiative-secondary-toggle span { color: var(--muted); }
@@ -13300,25 +13308,25 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-bg, rgba(255, 255, 255, 0.03));
-  padding: 12px;
+  padding: 10px;
 }
 .initiative-detail.empty { display: flex; align-items: center; justify-content: center; }
 .initiative-empty-detail { color: var(--muted); text-align: center; max-width: 240px; line-height: 1.4; }
-.initiative-detail-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
-.initiative-detail-kicker { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-.initiative-detail h2 { margin: 2px 0 2px; font-size: 16px; line-height: 1.25; }
-.initiative-detail-id { color: var(--muted); font-size: 11px; }
+.initiative-detail-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 9px; }
+.initiative-detail-kicker { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.initiative-detail h2 { margin: 2px 0 2px; font-size: 14px; line-height: 1.25; }
+.initiative-detail-id { color: var(--muted); font-size: 10px; }
 .initiative-close {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
   cursor: pointer;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
 }
 .initiative-form label,
-.initiative-links-section h3 { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.initiative-links-section h3 { display: block; margin: 8px 0 3px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .initiative-form input,
 .initiative-form select,
 .initiative-form textarea,
@@ -13330,14 +13338,14 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: var(--input-bg, rgba(0, 0, 0, 0.18));
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
-  padding: 7px 8px;
+  font-size: 11px;
+  padding: 5px 7px;
 }
-.initiative-form textarea { resize: vertical; min-height: 54px; }
+.initiative-form textarea { resize: vertical; min-height: 50px; }
 .initiative-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.initiative-detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
-.initiative-links-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
-.initiative-links-list { display: flex; flex-direction: column; gap: 6px; }
+.initiative-detail-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 9px; }
+.initiative-links-section { margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--border); }
+.initiative-links-list { display: flex; flex-direction: column; gap: 5px; }
 .initiative-link-row { display: flex; gap: 6px; align-items: stretch; }
 .initiative-link-main {
   flex: 1 1 auto;
@@ -13347,13 +13355,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: rgba(255, 255, 255, 0.03);
   color: var(--fg);
   text-align: left;
-  padding: 7px 8px;
+  padding: 6px 7px;
   font: inherit;
   cursor: pointer;
 }
 .initiative-link-main.readonly { cursor: default; }
-.initiative-link-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.initiative-link-meta { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.initiative-link-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.initiative-link-meta { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
 .initiative-unlink,
 .initiative-link-add button {
   flex: 0 0 auto;
@@ -13362,13 +13370,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   padding: 0 8px;
   cursor: pointer;
 }
-.initiative-link-add { display: flex; gap: 6px; margin-top: 8px; }
+.initiative-link-add { display: flex; gap: 6px; margin-top: 7px; }
 .initiative-link-add input { flex: 1 1 auto; }
-.initiative-link-add button { min-height: 31px; }
+.initiative-link-add button { min-height: 28px; }
 
 #panel-initiatives[data-panel-placement="right"] .initiatives-workspace {
   display: flex;
@@ -13396,7 +13404,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 #panel-initiatives[data-panel-placement="right"] .initiative-unlink,
 #panel-initiatives[data-panel-placement="right"] .initiative-link-add button {
-  min-height: 31px;
+  min-height: 28px;
 }
 
 @container (max-width: 640px) {
@@ -13433,8 +13441,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .planning-tabs {
   flex: 0 0 auto;
   display: flex;
-  gap: 6px;
-  padding: 8px 12px 0;
+  gap: 5px;
+  padding: 7px 12px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 .planning-tab {
@@ -13443,8 +13451,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
-  padding: 5px 10px;
+  font-size: 11px;
+  padding: 4px 8px;
   cursor: pointer;
 }
 .planning-tab span { color: var(--muted); margin-left: 4px; }
@@ -13476,7 +13484,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
   min-width: 0;
   max-width: 100%;
@@ -13495,8 +13503,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: var(--input-bg, rgba(0, 0, 0, 0.18));
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
-  padding: 7px 8px;
+  font-size: 11px;
+  padding: 5px 7px;
 }
 .areas-filters input,
 .areas-filters select {
@@ -13513,13 +13521,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   text-overflow: ellipsis;
 }
 #areas-type-filter { flex-basis: 160px; }
-.area-filter-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.area-filter-count { flex: 0 0 auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .areas-list-scroll {
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 .area-card {
   display: block;
@@ -13527,7 +13535,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   text-align: left;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px;
+  padding: 8px;
   color: var(--fg);
   background: var(--card-bg, rgba(255, 255, 255, 0.04));
   cursor: pointer;
@@ -13550,8 +13558,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   font-size: 10px;
   text-transform: capitalize;
 }
-.area-card-meta { margin-top: 5px; color: var(--muted); font-size: 11px; }
-.area-card-summary { margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.area-card-meta { margin-top: 5px; color: var(--muted); font-size: 10px; }
+.area-card-summary { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .area-detail { overflow: auto; }
 .area-section-toggle {
   width: 100%;
@@ -13563,40 +13571,40 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: transparent;
   color: var(--muted);
   padding: 0;
-  margin: 10px 0 6px;
+  margin: 9px 0 5px;
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: .06em;
   cursor: pointer;
 }
-.area-notes-list { display: flex; flex-direction: column; gap: 8px; }
+.area-notes-list { display: flex; flex-direction: column; gap: 7px; }
 .area-note-row {
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 8px;
+  padding: 7px;
   background: rgba(255, 255, 255, 0.03);
 }
 .area-note-row.editing { background: rgba(100, 160, 255, 0.06); }
-.area-note-top { display: flex; align-items: center; gap: 7px; font-size: 12px; }
-.area-note-body { margin-top: 6px; color: var(--fg); font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
-.area-note-target { margin-top: 6px; color: var(--muted); font-size: 11px; }
-.area-note-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.area-note-top { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.area-note-body { margin-top: 5px; color: var(--fg); font-size: 11px; line-height: 1.4; white-space: pre-wrap; }
+.area-note-target { margin-top: 5px; color: var(--muted); font-size: 10px; }
+.area-note-actions { display: flex; justify-content: flex-end; gap: 5px; margin-top: 7px; }
 .area-note-actions button {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: 11px;
+  padding: 3px 7px;
   cursor: pointer;
 }
-.area-note-new { margin-top: 10px; }
-.area-note-new h4 { margin: 0 0 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-.area-note-editor label { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-.area-note-editor textarea { width: 100%; resize: vertical; min-height: 54px; }
-.area-link-related-add select { flex: 0 0 110px; min-height: 31px; }
+.area-note-new { margin-top: 9px; }
+.area-note-new h4 { margin: 0 0 5px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.area-note-editor label { display: block; margin: 7px 0 3px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.area-note-editor textarea { width: 100%; resize: vertical; min-height: 50px; }
+.area-link-related-add select { flex: 0 0 110px; min-height: 28px; }
 #panel-initiatives[data-panel-placement="right"] .areas-workspace {
   display: flex;
   flex-direction: column;

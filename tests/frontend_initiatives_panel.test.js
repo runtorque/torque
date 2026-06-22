@@ -211,6 +211,82 @@ test('Planning Areas toolbar CSS keeps search and filters contained by wrapping 
   assert.match(css, /#panel-initiatives\[data-panel-placement="right"\] \.areas-search-input\s*\{[^}]*flex-basis:\s*100%;/s);
 });
 
+test('Planning CSS uses compact panel typography and control density', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.planning-panel\s*\{[^}]*font-size:\s*11px;[^}]*line-height:\s*1\.35;/s);
+  assert.match(css, /\.planning-panel \.tpled-new-btn\s*\{[^}]*font-size:\s*12px;[^}]*padding:\s*1px\s+7px;/s);
+  assert.match(css, /\.planning-tab\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*4px\s+8px;/s);
+  assert.match(css, /\.initiative-column-title\s*\{[^}]*font-size:\s*12px;/s);
+  assert.match(css, /\.initiative-detail h2\s*\{[^}]*font-size:\s*14px;/s);
+  assert.match(css, /\.initiative-form input,\s*\.initiative-form select,\s*\.initiative-form textarea,\s*\.initiative-link-add input\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*5px\s+7px;/s);
+  assert.match(css, /\.areas-filters input,\s*\.areas-filters select,\s*\.area-note-editor input,\s*\.area-note-editor select,\s*\.area-note-editor textarea,\s*\.area-link-related-add select\s*\{[^}]*font-size:\s*11px;[^}]*padding:\s*5px\s+7px;/s);
+});
+
+test('Planning initial load requests Initiatives and Areas when opened', () => {
+  const { sandbox, sendCalls } = createSandbox();
+
+  vm.runInContext("planningEnsureLoaded({ includeInactive: true })", sandbox);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'initiative_list', group: 'Torque', include_archived: false },
+    { cmd: 'area_list', group: 'Torque', include_archived: false, limit: 500 },
+  ]);
+});
+
+test('Planning render refetches after full-state replacement instead of trusting stale loaded markers', () => {
+  const { sandbox, sendCalls } = createSandbox();
+  vm.runInContext(`initiativesReceiveList(${JSON.stringify({
+    type: 'initiative_list',
+    group: 'Torque',
+    initiatives: [sampleInitiative()],
+  })}); areasReceiveList(${JSON.stringify({
+    type: 'area_list',
+    group: 'Torque',
+    areas: [sampleArea()],
+  })});`, sandbox);
+  sendCalls.length = 0;
+
+  vm.runInContext(`
+    _initiativesLoadedGroup = 'Torque';
+    _areasLoadedGroup = 'Torque';
+    state = { active_group: 'Torque', initiatives: {}, areas: {}, board_tasks: {}, decisions: {} };
+    renderInitiativesPanel();
+  `, sandbox);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'initiative_list', group: 'Torque', include_archived: false },
+  ]);
+
+  sendCalls.length = 0;
+  vm.runInContext("planningSetTab('areas')", sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'area_list', group: 'Torque', include_archived: false, limit: 500 },
+  ]);
+});
+
+test('Planning refresh button and API refresh all Planning tab resources', () => {
+  const { sandbox, document, sendCalls } = createSandbox();
+  vm.runInContext(`initiativesReceiveList(${JSON.stringify({
+    type: 'initiative_list',
+    group: 'Torque',
+    initiatives: [sampleInitiative()],
+  })}); areasReceiveList(${JSON.stringify({
+    type: 'area_list',
+    group: 'Torque',
+    areas: [sampleArea()],
+  })});`, sandbox);
+  sendCalls.length = 0;
+
+  assert.match(document.getElementById('panel-initiatives').innerHTML, /onclick="planningRefresh\(\)"/);
+  vm.runInContext('planningRefresh()', sandbox);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'initiative_list', group: 'Torque', include_archived: false },
+    { cmd: 'area_list', group: 'Torque', include_archived: false, limit: 500 },
+  ]);
+});
+
 test('Planning panel groups initiatives into primary roadmap columns and secondary buckets', () => {
   const { sandbox, document, sendCalls } = createSandbox();
   vm.runInContext(`initiativesReceiveList(${JSON.stringify({
