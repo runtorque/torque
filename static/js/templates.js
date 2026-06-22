@@ -1306,7 +1306,7 @@ function renderAgentClassesPanel() {
   html += '<div class="tpled-header agent-class-header">';
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row"><span class="tpled-header-title">Agent Classes</span>' + _libraryTabsHtml() + '</div>';
-  html += '<div class="tpled-header-subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Internal Agent Profile policy is shown only in Advanced/Internal enforcement details.</div>';
+  html += '<div class="tpled-header-subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Internal Agent Profile policy is shown only in Advanced/Internal Agent Profile policy sections.</div>';
   html += '</div>';
   html += '<div class="tpled-header-controls">';
   html += '<select class="tpled-select" id="agent-class-select" onchange="agentClassManagerSelect(this.value)">';
@@ -1498,7 +1498,7 @@ function _agentClassEditorFormHtml(preview) {
   html += '<details class="tpled-section" open><summary>Class instructions</summary>';
   html += '<label>Additive prompt/class instructions</label><textarea id="agent-class-prompt" rows="6" ' + (readOnly ? 'readonly ' : '') + 'oninput="_tplAutoResize(this);agentClassManagerMarkDirty()" placeholder="Optional additive context appended after the base-kind prompt.">' + esc(preview.prompt || '') + '</textarea>';
   html += '</details>';
-  html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal enforcement policy</summary>';
+  html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal Agent Profile policy</summary>';
   html += '<div class="agent-class-hint">Agent Profile is the generated/internal MCP-capability enforcement detail. Normal operators select Agent Classes; use this only when authoring or troubleshooting policy pairing.</div>';
   html += '<label>Internal Agent Profile</label><select id="agent-class-profile-id" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerProfileChanged()">' + _agentClassProfileOptionsHtml(preview.base_kind, ref.id) + '</select>';
   html += '<input id="agent-class-profile-version" value="' + esc(ref.version || _agentClassProfileVersion(ref.id, '')) + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="profile version">';
@@ -1561,6 +1561,7 @@ function _agentClassPreviewHtml(preview, validation) {
   var ref = preview.agent_profile_ref || {};
   var profile = preview.agent_profile || _agentClassProfileById(ref.id) || {};
   var disabledReason = _agentClassLaunchDisabledReason(preview, preview.base_kind);
+  var isProductManager = _agentClassIsProductManager(preview);
   var primaryLabel = String(preview.primary_identity_label || preview.primary_display_name || _agentClassDisplayName(preview, preview.id || 'Agent Class')).trim();
   var secondaryLabel = String(preview.secondary_base_kind_label
     || (preview.secondary_base_kind_metadata && preview.secondary_base_kind_metadata.base_kind_label)
@@ -1576,7 +1577,7 @@ function _agentClassPreviewHtml(preview, validation) {
   html += '<span>' + esc(status) + '</span>';
   if (preview.scratch_only || (preview.draft && preview.draft.scratch_only)) html += '<span>scratch-only</span>';
   if (_agentClassIsArchived(preview)) html += '<span>archived</span>';
-  if (preview.external_connector_caveat) html += '<span>external connector caveat</span>';
+  if (preview.external_connector_caveat && !isProductManager) html += '<span>external connector caveat</span>';
   html += '</div></div>';
   if (preview.description) html += '<div class="agent-class-preview-description">' + esc(preview.description) + '</div>';
   var prompt = preview.prompt_summary || {};
@@ -1590,15 +1591,22 @@ function _agentClassPreviewHtml(preview, validation) {
   var issues = [];
   if (validation && Array.isArray(validation.errors)) issues = issues.concat(validation.errors);
   if (validation && Array.isArray(validation.warnings)) issues = issues.concat(validation.warnings);
-  if (Array.isArray(preview.warnings)) issues = issues.concat(preview.warnings);
+  if (!isProductManager && Array.isArray(preview.warnings)) {
+    issues = issues.concat(_agentClassUniqueWarnings(preview));
+  }
   if (issues.length) html += _agentClassIssuesHtml(issues, 'Warnings / validation');
   if (disabledReason) html += '<div class="agent-class-error">' + esc(disabledReason) + '</div>';
-  if (Array.isArray(preview.restrictions) && preview.restrictions.length) {
+  if (isProductManager) {
+    html += _agentClassProductManagerCompactPolicyHtml(preview);
+  }
+  if (!isProductManager && Array.isArray(preview.restrictions) && preview.restrictions.length) {
     html += '<div class="agent-class-restrictions"><div class="agent-class-block-title">Restrictions</div><ul>';
     for (var i = 0; i < preview.restrictions.length; i++) html += '<li>' + esc(preview.restrictions[i]) + '</li>';
     html += '</ul></div>';
   }
-  if (preview.external_connector_caveat) html += '<div class="agent-class-caveat">' + esc(preview.external_connector_caveat) + '</div>';
+  if (preview.external_connector_caveat && !isProductManager) {
+    html += '<div class="agent-class-caveat">' + esc(_agentClassConnectorCaveat(preview)) + '</div>';
+  }
   if (preview.source_path) html += '<div class="agent-class-storage">Source: <code>' + esc(preview.source_path) + '</code></div>';
   if (validation && validation.normalized) {
     html += '<details class="agent-class-normalized"><summary>Normalized preview</summary><pre>' + esc(JSON.stringify(validation.normalized, null, 2)) + '</pre></details>';
@@ -1609,12 +1617,116 @@ function _agentClassPreviewHtml(preview, validation) {
   return html;
 }
 
+function _agentClassNoticeKey(value) {
+  return String(value == null ? '' : value)
+    .trim()
+    .toLowerCase()
+    .replace(/&amp;/g, '&')
+    .replace(/\bagent classes?\b/g, 'agent class')
+    .replace(/\bagent profiles?\b/g, 'agent profile')
+    .replace(/[^\w]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _agentClassIsExternalConnectorNotice(value) {
+  var key = _agentClassNoticeKey(value);
+  return !!(
+    key
+    && (
+      key.indexOf('external connector') >= 0
+      || key.indexOf('connector exposure') >= 0
+    )
+    && (
+      key.indexOf('not govern') >= 0
+      || key.indexOf('not enforced') >= 0
+      || key.indexOf('separate') >= 0
+      || key.indexOf('manage connector access separately') >= 0
+    )
+  );
+}
+
+function _agentClassIsProductManager(item) {
+  item = item || {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  var draft = item.draft && typeof item.draft === 'object' ? item.draft : {};
+  var label = _agentClassDisplayName(item, '');
+  return String(item.id || '') === 'product-manager'
+    || String(metadata.archetype || '') === 'product_manager'
+    || String(metadata.migration_from_profile || '').indexOf('product-manager') === 0
+    || String(draft.product_manager || '') === 'true'
+    || label === 'Product Manager';
+}
+
+function _agentClassDogfoodApproved(item) {
+  item = item || {};
+  var draft = item.draft && typeof item.draft === 'object' ? item.draft : {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  return draft.approved_for_live_dogfood === true
+    || item.approved_for_live_dogfood === true
+    || metadata.approved_for_live_dogfood === true
+    || String(metadata.dogfood_state || metadata.dogfood_status || '').toLowerCase() === 'approved'
+    || String(item.dogfood_state || item.dogfood_status || '').toLowerCase() === 'approved';
+}
+
+function _agentClassConnectorCaveat(item) {
+  item = item || {};
+  if (item.external_connector_caveat || _agentClassIsProductManager(item)) {
+    return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+  }
+  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
+  for (var i = 0; i < warnings.length; i++) {
+    if (_agentClassIsExternalConnectorNotice(warnings[i])) {
+      return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+    }
+  }
+  return '';
+}
+
+function _agentClassUniqueWarnings(item) {
+  item = item || {};
+  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
+  var hasCaveat = !!_agentClassConnectorCaveat(item);
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < warnings.length; i++) {
+    var text = String(warnings[i] || '').trim();
+    if (!text) continue;
+    if (hasCaveat && _agentClassIsExternalConnectorNotice(text)) continue;
+    var key = _agentClassNoticeKey(text);
+    if (!key || seen[key]) continue;
+    seen[key] = true;
+    out.push(text);
+  }
+  return out;
+}
+
+function _agentClassProductManagerCompactPolicyHtml(item) {
+  item = item || {};
+  var approved = _agentClassDogfoodApproved(item);
+  var caveat = _agentClassConnectorCaveat(item);
+  var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="product-manager">';
+  html += '<div class="agent-class-compact-chips">';
+  html += '<span>Product Manager</span>';
+  html += '<span class="' + esc(approved ? 'agent-profile-chip-full' : 'agent-profile-chip-pending') + '">'
+    + esc(approved ? 'approved dogfood' : 'dogfood approval pending') + '</span>';
+  html += '<span>PM-safe authority</span>';
+  html += '<span>Architect base metadata only</span>';
+  html += '</div>';
+  html += '<div class="agent-class-compact-note">'
+    + 'PM authority excludes hire/dispatch/merge/deploy/admin/raw tools and direct engineer/worker messaging.'
+    + '</div>';
+  if (caveat) html += '<div class="agent-class-compact-caveat">' + esc(caveat) + '</div>';
+  html += '</div>';
+  return html;
+}
+
 function _agentClassInternalPolicyPreviewHtml(preview, profile, ref) {
   preview = preview || {};
   profile = profile || {};
   ref = ref || {};
   var policy = preview.internal_policy && typeof preview.internal_policy === 'object' ? preview.internal_policy : {};
-  var html = '<details class="agent-class-normalized agent-class-internal-policy-preview"><summary>Advanced/Internal enforcement details</summary>';
+  var html = '<details class="agent-class-normalized agent-class-internal-policy-preview"><summary>Advanced/Internal Agent Profile policy</summary>';
   html += '<div class="agent-class-pairing"><div><span>Internal Agent Profile</span><strong>'
     + esc((ref.id || profile.id || '—') + _agentClassVersionSuffix(ref.version || profile.version))
     + '</strong></div>';

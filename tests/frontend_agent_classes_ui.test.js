@@ -143,6 +143,9 @@ function classUi(document, panel) {
   const editor = document.getElementById('agent-class-editor');
   return (panel.innerHTML || '') + '\n' + (editor ? editor.innerHTML || '' : '');
 }
+function countText(haystack, needle) {
+  return String(haystack || '').split(needle).length - 1;
+}
 
 function registerClassForm(document) {
   [
@@ -218,11 +221,12 @@ test('Agent Class manager renders class list, PM caveat, archived disabled previ
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
   assert.match(classUi(document, panel), /Product Manager@2/);
   assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
-  assert.match(classUi(document, panel), /Advanced\/Internal enforcement details/);
+  assert.match(classUi(document, panel), /Advanced\/Internal Agent Profile policy/);
   assert.match(classUi(document, panel), /class-policy-product-manager@2/);
   assert.match(classUi(document, panel), /draft/);
-  assert.match(classUi(document, panel), /External connector caveat/);
-  assert.match(classUi(document, panel), /Do not use for live PM dogfood/);
+  assert.match(classUi(document, panel), /External connectors are separate; Agent Class\/Profile policy does not govern them/);
+  assert.match(classUi(document, panel), /PM authority excludes hire\/dispatch\/merge\/deploy\/admin\/raw tools and direct engineer\/worker messaging/);
+  assert.doesNotMatch(classUi(document, panel), /agent-class-restrictions[\s\S]*Do not use for live PM dogfood/);
 
   run(context, `agentClassManagerSelect('old-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[2])} })`);
@@ -241,6 +245,45 @@ test('Agent Class manager renders class list, PM caveat, archived disabled previ
     group: 'alpha',
     base_dir: '/repo',
   });
+});
+
+test('Agent Class manager presents approved Product Manager dogfood state with compact deduped caveat', () => {
+  const { context, document, panel } = createHarness();
+  registerClassForm(document);
+  const classes = sampleClasses();
+  const pm = Object.assign({}, classes[3], {
+    lifecycle: 'stable',
+    status: 'restricted',
+    scratch_only: false,
+    draft: { scratch_only: false, approved_for_live_dogfood: true },
+    warnings: [
+      'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
+      'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+      'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
+    ],
+    external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+    restrictions: [
+      'Cannot dispatch workers.',
+      'Cannot deploy.',
+    ],
+  });
+  classes[3] = pm;
+
+  run(context, `librarySwitchTab('agent_classes')`);
+  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(classes)}, issues: [] })`);
+  run(context, `agentClassManagerSelect('product-manager')`);
+  run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(pm)} })`);
+
+  const html = classUi(document, panel);
+  assert.match(html, /Product Manager@2/);
+  assert.match(html, /approved dogfood/);
+  assert.match(html, /PM-safe authority/);
+  assert.match(html, /PM authority excludes hire\/dispatch\/merge\/deploy\/admin\/raw tools and direct engineer\/worker messaging/);
+  const caveat = 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+  assert.equal(countText(html, caveat), 1);
+  assert.doesNotMatch(html, /agent-class-issues[\s\S]*External connector exposure/);
+  assert.doesNotMatch(html, /agent-class-restrictions/);
+  assert.match(html, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
 });
 
 test('Agent Class authoring validates before save, shows validation issues, and archives/deletes custom classes', async () => {
