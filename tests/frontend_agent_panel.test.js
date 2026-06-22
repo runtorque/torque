@@ -3880,6 +3880,87 @@ test('agent panel shows Agent Class summary only on Behavior tab and opens modal
   assert.doesNotMatch(panel.innerHTML, /Change Class/);
 });
 
+test('agent panel in-place Behavior tab render includes Agent Class summary only on Behavior', () => {
+  const { context, panel } = createHarness();
+  const content = {
+    innerHTML: '',
+    _torqueLastHtml: '',
+    scrollTop: 0,
+    clientHeight: 400,
+    scrollHeight: 800,
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    getBoundingClientRect() { return { top: 0, bottom: 400 }; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const headerRight = {
+    innerHTML: '',
+    _torqueLastHtml: '',
+  };
+  const shell = {
+    dataset: {
+      agentPanelAgentId: 'blueprint',
+      agentPanelKind: 'architect',
+      agentPanelTab: 'decisions',
+    },
+    setAttribute(name, value) {
+      if (name === 'data-agent-panel-tab') this.dataset.agentPanelTab = String(value || '');
+    },
+  };
+  const tabButtons = ['decisions', 'behavior', 'messages'].map((tab) => ({
+    dataset: { agentPanelTabKey: tab },
+    classList: { add() {}, remove() {} },
+  }));
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-panel') return shell;
+    if (selector === '.agent-panel-content') return content;
+    if (selector === '[data-agent-panel-header-right]' || selector === '.agent-panel-header-right') return headerRight;
+    return null;
+  };
+  panel.querySelectorAll = function(selector) {
+    if (selector === '.agent-panel-tab') return tabButtons;
+    return [];
+  };
+  const productManagerClass = {
+    id: 'product-manager',
+    version: '2',
+    base_kind: 'architect',
+    display_name: 'Product Manager',
+    primary_identity_label: 'Product Manager',
+    secondary_base_kind_label: 'Architect-derived',
+    lifecycle: 'stable',
+    status: 'restricted',
+    launchable: true,
+    builtin: true,
+  };
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+    directory: '/repo',
+    effective_agent_class_id: 'product-manager',
+    effective_agent_class_version: '2',
+    effective_agent_class_snapshot: productManagerClass,
+    mcp_messages: [],
+  });
+
+  context._agentPanelLastSelectedTabByKind.architect = 'decisions';
+  context.agentPanelSelectTab('behavior');
+  assert.equal(shell.dataset.agentPanelTab, 'behavior');
+  assert.match(content.innerHTML, /data-agent-class-manager=/);
+  assert.match(content.innerHTML, /Change Class/);
+  assert.match(content.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+
+  context.agentPanelSelectTab('messages');
+  assert.equal(shell.dataset.agentPanelTab, 'messages');
+  assert.doesNotMatch(content.innerHTML, /data-agent-class-manager=/);
+  assert.doesNotMatch(content.innerHTML, /Change Class/);
+});
+
 test('agent class manager assignment errors remain routed to active panel operation', () => {
   const { context, panel, classModal, classModalBody, sendCalls } = createHarness();
   const defaultArchitectClass = {

@@ -6300,7 +6300,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
     parts.bodyHtml = _agentPanelEngineerSpecializationsEditorHtml(agent)
       + (parts.bodyHtml || '');
   }
-  parts.bodyHtml = _agentPanelBodyWithProfileManager(agent, parts.bodyHtml || '');
+  parts.bodyHtml = _agentPanelBodyWithProfileManager(agent, parts.bodyHtml || '', activeTab === 'behavior');
   _agentPanelSetShellTab(shell, activeTab);
   _agentPanelSetActiveTabChrome(el, activeTab);
   // TORQUE:264 follow-up: byte-equality memoize the innerHTML clobber. Under
