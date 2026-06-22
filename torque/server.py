@@ -34,6 +34,7 @@ from .agent_profiles import (
 )
 from .agent_classes import (
     append_agent_class_prompt_block,
+    agent_class_authoring_contract,
     agent_class_context_for_cell,
     archive_custom_agent_class,
     delete_custom_agent_class,
@@ -9457,6 +9458,9 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
                 for definition in classes
             ],
             "issues": [issue.as_dict() for issue in issues],
+            "authoring_contract": agent_class_authoring_contract(),
+            "capability_bucket_catalog": agent_class_authoring_contract()["capability_bucket_catalog"],
+            "restriction_bucket_catalog": agent_class_authoring_contract()["restriction_bucket_catalog"],
             "storage": {
                 "kind": "project_yaml",
                 "config_glob": ".torque/agent_classes/*.yaml",

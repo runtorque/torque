@@ -25,6 +25,7 @@ from .agent_profiles import (
     BASE_KINDS,
     BASE_KIND_CEILINGS,
     CAPABILITIES,
+    HIGH_RISK_CAPABILITIES,
     AgentProfileDefinition,
     PM_DANGEROUS_CAPABILITIES,
     ValidationIssue,
@@ -48,6 +49,7 @@ ALLOWED_POLICY_MODES = {"wrap_profile", "compile"}
 SAFE_UI_METADATA_KEYS = {"label", "icon", "badge", "color"}
 AUTHORING_DISPLAY_ALIASES = {"title", "display_title"}
 AUTHORING_PROMPT_ALIASES = {"instructions", "class_instructions", "class_prompt"}
+AUTHORING_DESCRIPTION_ALIASES = {"purpose"}
 CUSTOM_CLASS_ARCHIVED_KEY = "archived"
 MAX_DISPLAY_NAME_LEN = 120
 MAX_DESCRIPTION_LEN = 2000
@@ -93,6 +95,8 @@ KNOWN_CLASS_KEYS = {
     "agent_profile_ref",
     "prompt",
     "policy",
+    "capability_buckets",
+    "restriction_buckets",
     "capabilities",
     "communication",
     "delegation",
@@ -153,6 +157,377 @@ PM_DOGFOOD_AUTHORITY_CAVEAT = (
     "admin, raw tool picker, accepted-decision authority, connector governance, "
     "or direct Engineer/Worker messaging."
 )
+
+@dataclass(frozen=True)
+class AgentClassCapabilityBucket:
+    """Operator-facing class capability bucket.
+
+    Buckets are deliberately coarser than Agent Profile capability atoms.  They
+    are the normal Agent Class authoring contract; the generated/internal Agent
+    Profile policy is derived from these buckets and exposed only as diagnostics.
+    """
+
+    id: str
+    label: str
+    summary: str
+    grants: frozenset[str] = frozenset()
+    denies: frozenset[str] = frozenset()
+    base_kinds: frozenset[str] = frozenset(BASE_KINDS)
+    category: str = "general"
+    risk: str = "normal"
+
+    def as_catalog_dict(self, *, base_kind: str = "", restriction: bool = False) -> dict[str, Any]:
+        base_kind = str(base_kind or "").strip()
+        available = not base_kind or base_kind in self.base_kinds
+        data = {
+            "id": self.id,
+            "label": self.label,
+            "summary": self.summary,
+            "description": self.summary,
+            "category": self.category,
+            "risk": self.risk,
+            "base_kinds": sorted(self.base_kinds),
+            "available": available,
+            "unavailable_reason": "" if available else f"Only available to {', '.join(sorted(self.base_kinds))} base classes.",
+            "grant_count": len(self.grants),
+            "deny_count": len(self.denies),
+            "kind": "restriction" if restriction else "capability",
+        }
+        if self.grants:
+            data["advanced_internal_grants"] = sorted(self.grants)
+        if self.denies:
+            data["advanced_internal_denies"] = sorted(self.denies)
+        return data
+
+
+def _bucket(
+    bucket_id: str,
+    label: str,
+    summary: str,
+    grants: list[str] | tuple[str, ...] | set[str] | frozenset[str] = (),
+    *,
+    denies: list[str] | tuple[str, ...] | set[str] | frozenset[str] = (),
+    base_kinds: list[str] | tuple[str, ...] | set[str] | frozenset[str] = BASE_KINDS,
+    category: str = "general",
+    risk: str = "normal",
+) -> AgentClassCapabilityBucket:
+    return AgentClassCapabilityBucket(
+        id=bucket_id,
+        label=label,
+        summary=summary,
+        grants=frozenset(grants),
+        denies=frozenset(denies),
+        base_kinds=frozenset(base_kinds),
+        category=category,
+        risk=risk,
+    )
+
+
+# Operator-language buckets.  IDs are stable API/YAML tokens; labels/summaries
+# are what Panelsmith should show.  The internal grants are diagnostics only.
+CAPABILITY_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
+    bucket.id: bucket for bucket in [
+        _bucket(
+            "self_context",
+            "Self and assigned task context",
+            "Read own agent/session context and visible assigned task details.",
+            {"observe.self_context", "observe.task_detail"},
+            category="read",
+        ),
+        _bucket(
+            "task_reporting",
+            "Task reporting and verification",
+            "Report progress/completion, record verification, and attach task artifacts.",
+            {"task.complete", "task.verify", "task.upload_artifact"},
+            base_kinds={"worker", "engineer", "architect"},
+            category="task",
+        ),
+        _bucket(
+            "planning_area_reads",
+            "Area reads",
+            "Read visible Areas and area context.",
+            {"planning.area_read"},
+            category="planning",
+        ),
+        _bucket(
+            "planning_reads",
+            "Planning reads",
+            "Read same-group board/task planning summaries, Areas, Initiatives, and Decisions.",
+            {"observe.board_summary", "observe.task_detail", "planning.area_read", "planning.initiative_read", "decision.list"},
+            base_kinds={"engineer", "architect"},
+            category="planning",
+        ),
+        _bucket(
+            "planning_writes",
+            "Planning writes",
+            "Create/update/archive Areas and Initiatives and link visible decisions where supported.",
+            {"planning.area_write", "planning.initiative_write", "decision.link"},
+            base_kinds={"architect"},
+            category="planning",
+            risk="high",
+        ),
+        _bucket(
+            "board_task_reads",
+            "Board/task reads",
+            "Read board/task detail, events, MCP call telemetry, and board-sync status.",
+            {"observe.board_summary", "observe.task_detail", "observe.events", "observe.mcp_calls", "task.board_sync_read"},
+            base_kinds={"engineer", "architect"},
+            category="task",
+        ),
+        _bucket(
+            "board_task_proposals",
+            "Board/task proposals",
+            "Create and maintain queued, planning-safe product task proposals without dispatch authority.",
+            {"task.create_queued", "task.update_planning_fields", "task.move_planning_safe", "task.board_sync_read"},
+            base_kinds={"architect"},
+            category="task",
+        ),
+        _bucket(
+            "execution_task_control",
+            "Execution task control",
+            "Create, update, reassign, move, and dispatch executable Board tasks.",
+            {"task.create", "task.update", "task.reassign", "task.move", "task.dispatch", "task.mark_covered"},
+            base_kinds={"engineer", "architect"},
+            category="task",
+            risk="critical",
+        ),
+        _bucket(
+            "proposed_decisions",
+            "Proposed decisions",
+            "Create/update/link proposed product decisions; does not accept or supersede decisions.",
+            {"decision.list", "decision.create_proposed", "decision.update_proposed", "decision.link"},
+            base_kinds={"architect"},
+            category="decision",
+        ),
+        _bucket(
+            "decision_authority",
+            "Accepted decision authority",
+            "Create, update, and accept product/architecture decisions.",
+            {"decision.list", "decision.create", "decision.update", "decision.accept", "decision.link"},
+            base_kinds={"architect"},
+            category="decision",
+            risk="high",
+        ),
+        _bucket(
+            "user_messages",
+            "User messages",
+            "Ask the user for blocking decisions and send non-blocking user-facing messages.",
+            {"comm.user_ask", "comm.user_message"},
+            category="communication",
+        ),
+        _bucket(
+            "product_peer_messages",
+            "Product peer Architect messages",
+            "Coordinate with same-group Architect/product peers through product-scoped peer wrappers.",
+            {"comm.peer_architect_list", "comm.peer_architect_message", "comm.product_ack_request"},
+            base_kinds={"architect"},
+            category="communication",
+        ),
+        _bucket(
+            "engineer_worker_messages",
+            "Engineer/Worker messages",
+            "Message Engineers and Workers through the base-kind communication surface.",
+            {"comm.engineer_message", "comm.worker_message"},
+            base_kinds={"engineer", "architect"},
+            category="communication",
+            risk="high",
+        ),
+        _bucket(
+            "private_journal",
+            "Private journal",
+            "Use the private recovery journal for the running agent.",
+            {"journal.private"},
+            category="journal",
+        ),
+        _bucket(
+            "scoped_journals",
+            "Scoped journals",
+            "Read/write scoped Engineer or Architect journals where the base kind already permits it.",
+            {"journal.read", "journal.write"},
+            base_kinds={"engineer", "architect"},
+            category="journal",
+        ),
+        _bucket(
+            "shared_memory",
+            "Shared memory",
+            "Read and publish shared memory entries.",
+            {"memory.read", "memory.publish"},
+            category="memory",
+        ),
+        _bucket(
+            "shared_memory_admin",
+            "Shared memory admin",
+            "Pin, unpin, and link shared memory entries.",
+            {"memory.admin"},
+            base_kinds={"engineer", "architect"},
+            category="memory",
+            risk="high",
+        ),
+        _bucket(
+            "engineer_management",
+            "Engineer roster and hiring",
+            "Read/manage the Engineer roster and request/create Engineer hires.",
+            {"agent.engineer_roster_read", "agent.hire_engineer", "agent.manage_engineer_roster"},
+            base_kinds={"architect"},
+            category="agent_management",
+            risk="critical",
+        ),
+        _bucket(
+            "worker_dispatch",
+            "Worker dispatch",
+            "Launch or route work to Workers and dispatch Board tasks.",
+            {"agent.dispatch_worker", "task.dispatch"},
+            base_kinds={"engineer", "architect"},
+            category="agent_management",
+            risk="critical",
+        ),
+        _bucket(
+            "worktree_merge",
+            "Worktree and merge",
+            "Read worktree metadata and merge/apply/checkpoint worktree changes.",
+            {"worktree.read", "worktree.merge"},
+            base_kinds={"engineer", "architect"},
+            category="worktree",
+            risk="critical",
+        ),
+        _bucket(
+            "deploy_admin",
+            "Deploy and admin",
+            "Read deploy state and deploy/restart/change live runtime settings.",
+            {"observe.deploy_state", "deploy.apply", "admin.settings"},
+            base_kinds={"architect"},
+            category="admin",
+            risk="critical",
+        ),
+        _bucket(
+            "class_profile_admin",
+            "Class/Profile admin",
+            "Assign or edit Agent Profile-compatible policy definitions.",
+            {"profile.assign", "profile.edit"},
+            base_kinds={"architect"},
+            category="admin",
+            risk="critical",
+        ),
+    ]
+}
+
+RESTRICTION_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
+    bucket.id: bucket for bucket in [
+        _bucket(
+            "deny_execution_task_control",
+            "Deny execution task control",
+            "Explicitly deny executable task create/update/reassign/move/dispatch authority.",
+            denies={"task.create", "task.update", "task.reassign", "task.move", "task.dispatch", "task.mark_covered"},
+            category="task",
+            risk="high",
+        ),
+        _bucket(
+            "deny_worker_dispatch",
+            "Deny Worker dispatch",
+            "Explicitly deny Worker launch/routing and task dispatch authority.",
+            denies={"agent.dispatch_worker", "task.dispatch"},
+            category="agent_management",
+            risk="critical",
+        ),
+        _bucket(
+            "deny_engineer_management",
+            "Deny Engineer management",
+            "Explicitly deny Engineer roster management and hire authority.",
+            denies={"agent.engineer_roster_read", "agent.hire_engineer", "agent.manage_engineer_roster"},
+            category="agent_management",
+            risk="critical",
+        ),
+        _bucket(
+            "deny_engineer_worker_messages",
+            "Deny Engineer/Worker messages",
+            "Explicitly deny direct Engineer/Worker messaging.",
+            denies={"comm.engineer_message", "comm.worker_message"},
+            category="communication",
+            risk="high",
+        ),
+        _bucket(
+            "deny_worktree_merge",
+            "Deny worktree/merge",
+            "Explicitly deny merge/apply/checkpoint worktree authority.",
+            denies={"worktree.merge"},
+            category="worktree",
+            risk="critical",
+        ),
+        _bucket(
+            "deny_deploy_admin",
+            "Deny deploy/admin",
+            "Explicitly deny deploy/restart/live-settings authority.",
+            denies={"observe.deploy_state", "deploy.apply", "admin.settings"},
+            category="admin",
+            risk="critical",
+        ),
+        _bucket(
+            "deny_class_profile_admin",
+            "Deny Class/Profile admin",
+            "Explicitly deny Agent Profile assignment/edit authority.",
+            denies={"profile.assign", "profile.edit"},
+            category="admin",
+            risk="critical",
+        ),
+        _bucket(
+            "deny_decision_acceptance",
+            "Deny accepted-decision authority",
+            "Explicitly deny accepting decisions or creating accepted decisions.",
+            denies={"decision.accept", "decision.create", "decision.update"},
+            category="decision",
+            risk="high",
+        ),
+        _bucket(
+            "deny_raw_tool_picker",
+            "Deny raw tool picker",
+            "Explicitly records that arbitrary MCP/raw tool picker authority is outside the class contract.",
+            denies=set(),
+            category="admin",
+            risk="critical",
+        ),
+        _bucket(
+            "deny_high_risk_operations",
+            "Deny remaining high-risk operations",
+            "Explicitly deny high-risk/critical operations not selected by capability buckets.",
+            denies=HIGH_RISK_CAPABILITIES,
+            category="safety",
+            risk="critical",
+        ),
+    ]
+}
+
+
+def agent_class_capability_bucket_catalog(*, base_kind: str = "") -> list[dict[str, Any]]:
+    """Return operator-facing capability bucket choices for UI authoring."""
+
+    return [
+        bucket.as_catalog_dict(base_kind=base_kind, restriction=False)
+        for bucket in sorted(CAPABILITY_BUCKETS.values(), key=lambda item: (item.category, item.label, item.id))
+    ]
+
+
+def agent_class_restriction_bucket_catalog(*, base_kind: str = "") -> list[dict[str, Any]]:
+    """Return operator-facing explicit restriction choices for UI authoring."""
+
+    return [
+        bucket.as_catalog_dict(base_kind=base_kind, restriction=True)
+        for bucket in sorted(RESTRICTION_BUCKETS.values(), key=lambda item: (item.category, item.label, item.id))
+    ]
+
+
+def agent_class_authoring_contract(*, base_kind: str = "") -> dict[str, Any]:
+    return {
+        "schema_version": AGENT_CLASS_SCHEMA_VERSION,
+        "normal_authoring_mode": "capability_buckets",
+        "policy_modes": sorted(ALLOWED_POLICY_MODES),
+        "capability_bucket_field": "capabilities.buckets",
+        "restriction_bucket_field": "capabilities.restrictions",
+        "capability_bucket_catalog": agent_class_capability_bucket_catalog(base_kind=base_kind),
+        "restriction_bucket_catalog": agent_class_restriction_bucket_catalog(base_kind=base_kind),
+        "advanced_internal_policy_details": "Agent Profile-compatible generated policy appears in internal_policy/agent_profile diagnostics only.",
+        "apply_model": "Agent Class saves/assignments do not mutate running sessions; policy changes apply at next launch/relaunch.",
+        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
+    }
 
 
 @dataclass(frozen=True)
@@ -240,6 +615,7 @@ class AgentClassDefinition:
             "primary_identity_label": primary_identity_label_for_class(self),
             "secondary_base_kind_label": secondary_base_kind_label_for_class(self),
             "description": self.description,
+            "purpose": self.description,
             "lifecycle": self.lifecycle,
             "agent_profile_ref": self.agent_profile_ref.as_dict(),
             "policy": compact_agent_class_policy_preview(self),
@@ -298,6 +674,148 @@ def _string_list(value: Any) -> list[str]:
             out.append(text)
     return out
 
+def _dedupe_string_list(values: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    if values is None:
+        return out
+    raw_values = values if isinstance(values, list) else [values]
+    for item in raw_values:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            out.append(text)
+            seen.add(text)
+    return out
+
+
+def _capabilities_mapping(data: dict[str, Any]) -> dict[str, Any]:
+    value = data.get("capabilities")
+    return dict(value or {}) if isinstance(value, dict) else {}
+
+
+def _policy_mapping(data: dict[str, Any]) -> dict[str, Any]:
+    value = data.get("policy")
+    return dict(value or {}) if isinstance(value, dict) else {}
+
+
+def _bucket_selection_from_data(data: dict[str, Any]) -> list[str]:
+    capabilities = _capabilities_mapping(data)
+    policy = _policy_mapping(data)
+    for value in (
+        data.get("capability_buckets"),
+        capabilities.get("buckets"),
+        capabilities.get("capability_buckets"),
+        policy.get("capability_buckets"),
+        policy.get("buckets"),
+    ):
+        selected = _dedupe_string_list(value)
+        if selected:
+            return selected
+    return []
+
+
+def _restriction_selection_from_data(data: dict[str, Any]) -> list[str]:
+    capabilities = _capabilities_mapping(data)
+    policy = _policy_mapping(data)
+    for value in (
+        data.get("restriction_buckets"),
+        capabilities.get("restrictions"),
+        capabilities.get("restriction_buckets"),
+        capabilities.get("denied_buckets"),
+        policy.get("restriction_buckets"),
+        policy.get("restrictions"),
+    ):
+        selected = _dedupe_string_list(value)
+        if selected:
+            return selected
+    return []
+
+
+def _has_operator_bucket_selection(data: dict[str, Any]) -> bool:
+    return bool(_bucket_selection_from_data(data) or _restriction_selection_from_data(data))
+
+
+def _normalize_bucket_fields(out: dict[str, Any]) -> dict[str, Any]:
+    """Fold authoring aliases into capabilities.buckets/restrictions."""
+
+    capabilities = _capabilities_mapping(out)
+    selected = _bucket_selection_from_data(out)
+    restrictions = _restriction_selection_from_data(out)
+    if selected:
+        capabilities["buckets"] = selected
+    if restrictions:
+        capabilities["restrictions"] = restrictions
+    out.pop("capability_buckets", None)
+    out.pop("restriction_buckets", None)
+    if capabilities:
+        out["capabilities"] = capabilities
+    return out
+
+
+def _compiled_bucket_policy_for_data(data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
+    if isinstance(data, AgentClassDefinition):
+        base_kind = data.base_kind
+        raw = {
+            "capabilities": dict(data.capabilities or {}),
+            "policy": dict(data.policy or {}),
+        }
+    else:
+        normalized = _normalize_bucket_fields(_normalized_class_data(dict(data or {})))
+        base_kind = str(normalized.get("base_kind", "") or "").strip()
+        raw = normalized
+    selected = _bucket_selection_from_data(raw)
+    restrictions = _restriction_selection_from_data(raw)
+    grants: set[str] = set()
+    denies: set[str] = set()
+    bucket_previews: list[dict[str, Any]] = []
+    restriction_previews: list[dict[str, Any]] = []
+    for bucket_id in selected:
+        bucket = CAPABILITY_BUCKETS.get(bucket_id)
+        if not bucket:
+            continue
+        grants.update(bucket.grants)
+        denies.update(bucket.denies)
+        bucket_previews.append(bucket.as_catalog_dict(base_kind=base_kind, restriction=False))
+    for restriction_id in restrictions:
+        bucket = RESTRICTION_BUCKETS.get(restriction_id)
+        if not bucket:
+            continue
+        denies.update(bucket.denies)
+        restriction_previews.append(bucket.as_catalog_dict(base_kind=base_kind, restriction=True))
+    ceiling = BASE_KIND_CEILINGS.get(base_kind, frozenset())
+    if ceiling:
+        grants &= set(ceiling)
+        denies &= set(ceiling)
+    # Denies are audit/restriction evidence; selected grants remain authoritative.
+    denies -= grants
+    return {
+        "bucket_ids": selected,
+        "restriction_ids": restrictions,
+        "grants": sorted(grants),
+        "denies": sorted(denies),
+        "bucket_previews": bucket_previews,
+        "restriction_previews": restriction_previews,
+    }
+
+
+def _compiled_bucket_policy_for_definition(definition: "AgentClassDefinition") -> dict[str, Any]:
+    return _compiled_bucket_policy_for_data(definition)
+
+
+def _operator_access_summary(compiled_policy: dict[str, Any]) -> dict[str, Any]:
+    buckets = list(compiled_policy.get("bucket_previews", []) or [])
+    restrictions = list(compiled_policy.get("restriction_previews", []) or [])
+    allowed_labels = [str(item.get("label", item.get("id", "")) or "") for item in buckets]
+    denied_labels = [str(item.get("label", item.get("id", "")) or "") for item in restrictions]
+    return {
+        "allowed": allowed_labels,
+        "denied": denied_labels,
+        "allowed_summary": "; ".join(label for label in allowed_labels if label),
+        "denied_summary": "; ".join(label for label in denied_labels if label),
+        "bucket_count": len(allowed_labels),
+        "restriction_count": len(denied_labels),
+    }
+
 
 def _agent_class_schema_version(data: dict[str, Any]) -> int:
     raw = data.get("agent_class_schema_version", "")
@@ -307,7 +825,7 @@ def _agent_class_schema_version(data: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return -1
         return value
-    if any(key in data for key in ("identity", "runtime", "policy", "capabilities", "communication", "delegation", "warnings")):
+    if any(key in data for key in ("identity", "runtime", "policy", "capabilities", "capability_buckets", "restriction_buckets", "communication", "delegation", "warnings")):
         return AGENT_CLASS_SCHEMA_VERSION
     return DEFAULT_AGENT_CLASS_SCHEMA_VERSION
 
@@ -328,10 +846,9 @@ def _policy_mode_from_data(data: dict[str, Any]) -> str:
     mode = str(policy.get("mode", "") or "").strip()
     if mode:
         return mode
-    if isinstance(policy, dict) and (
-            policy.get("grants") is not None
-            or policy.get("denies") is not None
-            or policy.get("generated_profile_id") is not None):
+    if _has_operator_bucket_selection(data):
+        return "compile"
+    if isinstance(policy, dict) and policy.get("generated_profile_id") is not None:
         return "compile"
     return "wrap_profile"
 
@@ -351,6 +868,7 @@ def _normalized_class_data(data: dict[str, Any]) -> dict[str, Any]:
     """Normalize v2/v3 class shapes into a common in-memory contract."""
 
     out = dict(data or {})
+    out = _normalize_bucket_fields(out)
     schema_version = _agent_class_schema_version(out)
     out["agent_class_schema_version"] = schema_version
     runtime = out.get("runtime") if isinstance(out.get("runtime"), dict) else {}
@@ -470,9 +988,12 @@ def compact_agent_class_policy_preview(definition_or_data: "AgentClassDefinition
         "profile_source": "compiled_from_agent_class" if mode == "compile" else "wrapped_agent_profile",
     }
     if mode == "compile":
+        compiled = _compiled_bucket_policy_for_data(definition_or_data)
         summary["policy_compiler_version"] = POLICY_COMPILER_VERSION
-        summary["grant_count"] = len(_string_list(policy.get("grants")))
-        summary["deny_count"] = len(_string_list(policy.get("denies")))
+        summary["grant_count"] = len(compiled.get("grants", []) or [])
+        summary["deny_count"] = len(compiled.get("denies", []) or [])
+        summary["capability_buckets"] = list(compiled.get("bucket_ids", []) or [])
+        summary["restriction_buckets"] = list(compiled.get("restriction_ids", []) or [])
     return summary
 
 
@@ -613,7 +1134,10 @@ def _profile_by_id_for_validation(base_dir: str = "") -> dict[str, AgentProfileD
 
 def _allowed_raw_field_paths_for_schema(schema_version: int) -> set[str]:
     if schema_version >= AGENT_CLASS_SCHEMA_VERSION:
-        return {"capabilities", "policy.grants", "policy.denies"}
+        # The top-level ``capabilities`` section is operator-facing metadata plus
+        # bucket selection.  Raw Atom grants/denies remain forbidden for Agent
+        # Classes; generated Agent Profile-compatible atoms are diagnostics.
+        return {"capabilities"}
     return set()
 
 
@@ -669,6 +1193,141 @@ def _validate_string_list_field(value: Any, field_path: str, issues: list[Valida
             continue
         out.append(text)
     return out
+
+def _bucket_field_entries(raw_data: dict[str, Any], *, restriction: bool = False) -> list[tuple[str, Any]]:
+    capabilities = raw_data.get("capabilities") if isinstance(raw_data.get("capabilities"), dict) else {}
+    policy = raw_data.get("policy") if isinstance(raw_data.get("policy"), dict) else {}
+    if restriction:
+        candidates = [
+            ("restriction_buckets", raw_data.get("restriction_buckets")),
+            ("capabilities.restrictions", capabilities.get("restrictions") if isinstance(capabilities, dict) else None),
+            ("capabilities.restriction_buckets", capabilities.get("restriction_buckets") if isinstance(capabilities, dict) else None),
+            ("capabilities.denied_buckets", capabilities.get("denied_buckets") if isinstance(capabilities, dict) else None),
+            ("policy.restriction_buckets", policy.get("restriction_buckets") if isinstance(policy, dict) else None),
+            ("policy.restrictions", policy.get("restrictions") if isinstance(policy, dict) else None),
+        ]
+    else:
+        candidates = [
+            ("capability_buckets", raw_data.get("capability_buckets")),
+            ("capabilities.buckets", capabilities.get("buckets") if isinstance(capabilities, dict) else None),
+            ("capabilities.capability_buckets", capabilities.get("capability_buckets") if isinstance(capabilities, dict) else None),
+            ("policy.capability_buckets", policy.get("capability_buckets") if isinstance(policy, dict) else None),
+            ("policy.buckets", policy.get("buckets") if isinstance(policy, dict) else None),
+        ]
+    return [(path, value) for path, value in candidates if value is not None]
+
+
+def _validate_bucket_alias_fields(raw_data: dict[str, Any], issues: list[ValidationIssue], *,
+                                  source: str, class_id: str, restriction: bool = False) -> list[str]:
+    registry = RESTRICTION_BUCKETS if restriction else CAPABILITY_BUCKETS
+    entries = _bucket_field_entries(raw_data, restriction=restriction)
+    selected: list[str] = []
+    seen: set[str] = set()
+    for path, value in entries:
+        values = _validate_string_list_field(value, path, issues, source=source, class_id=class_id)
+        for item in values:
+            if item not in seen:
+                selected.append(item)
+                seen.add(item)
+    unknown = sorted(set(selected) - set(registry))
+    if unknown:
+        issues.append(ValidationIssue(
+            "error",
+            "unknown_restriction_buckets" if restriction else "unknown_capability_buckets",
+            ("unknown restriction buckets: " if restriction else "unknown capability buckets: ") + ", ".join(unknown),
+            path=source,
+            profile_id=class_id,
+        ))
+    if len(entries) > 1:
+        # Multiple aliases are accepted after de-duping, but warn because the UI
+        # should use the canonical capabilities.* field to avoid drift.
+        issues.append(ValidationIssue(
+            "warn",
+            "duplicate_restriction_bucket_fields" if restriction else "duplicate_capability_bucket_fields",
+            ("multiple restriction bucket fields supplied; canonical field is capabilities.restrictions" if restriction
+             else "multiple capability bucket fields supplied; canonical field is capabilities.buckets"),
+            path=source,
+            profile_id=class_id,
+        ))
+    return selected
+
+
+def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict[str, Any],
+                                      issues: list[ValidationIssue], *,
+                                      source: str, class_id: str, base_kind: str,
+                                      policy_mode: str) -> None:
+    selected = _validate_bucket_alias_fields(raw_data, issues, source=source, class_id=class_id, restriction=False)
+    restrictions = _validate_bucket_alias_fields(raw_data, issues, source=source, class_id=class_id, restriction=True)
+    if policy_mode != "compile":
+        return
+    if not selected:
+        issues.append(ValidationIssue(
+            "error",
+            "missing_capability_buckets",
+            "Agent Class compile policy must select operator capability buckets in capabilities.buckets",
+            path=source,
+            profile_id=class_id,
+        ))
+        return
+    for bucket_id in selected:
+        bucket = CAPABILITY_BUCKETS.get(bucket_id)
+        if not bucket:
+            continue
+        if base_kind and base_kind not in bucket.base_kinds:
+            issues.append(ValidationIssue(
+                "error",
+                "capability_bucket_unavailable_for_base_kind",
+                f"capability bucket {bucket_id} is not available for base_kind={base_kind}",
+                path=source,
+                profile_id=class_id,
+            ))
+        if base_kind in BASE_KIND_CEILINGS:
+            outside = sorted(set(bucket.grants) - BASE_KIND_CEILINGS[base_kind])
+            if outside:
+                issues.append(ValidationIssue(
+                    "error",
+                    "capability_bucket_outside_base_kind_ceiling",
+                    f"capability bucket {bucket_id} grants atoms outside {base_kind} ceiling: " + ", ".join(outside),
+                    path=source,
+                    profile_id=class_id,
+                ))
+    for restriction_id in restrictions:
+        bucket = RESTRICTION_BUCKETS.get(restriction_id)
+        if not bucket:
+            continue
+        if base_kind and base_kind not in bucket.base_kinds:
+            issues.append(ValidationIssue(
+                "error",
+                "restriction_bucket_unavailable_for_base_kind",
+                f"restriction bucket {restriction_id} is not available for base_kind={base_kind}",
+                path=source,
+                profile_id=class_id,
+            ))
+    compiled = _compiled_bucket_policy_for_data(normalized)
+    grants = set(compiled.get("grants", []) or [])
+    if base_kind in BASE_KIND_CEILINGS:
+        outside = sorted(grants - BASE_KIND_CEILINGS[base_kind])
+        if outside:
+            issues.append(ValidationIssue(
+                "error",
+                "compiled_policy_outside_base_kind_ceiling",
+                f"compiled bucket policy outside {base_kind} ceiling: " + ", ".join(outside),
+                path=source,
+                profile_id=class_id,
+            ))
+    metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+    archetype = str((metadata or {}).get("archetype", "") or "").strip()
+    is_pm_class = class_id == "product-manager" or archetype == "product_manager" or "product-manager" in class_id
+    dangerous = sorted(grants & PM_DANGEROUS_CAPABILITIES)
+    if is_pm_class and dangerous:
+        issues.append(ValidationIssue(
+            "error",
+            "dangerous_product_manager_capability_buckets",
+            "Product Manager Agent Classes must not select buckets that grant dangerous execution/admin capabilities: "
+            + ", ".join(dangerous),
+            path=source,
+            profile_id=class_id,
+        ))
 
 
 def _validate_compiled_agent_class_profile(definition: "AgentClassDefinition", *,
@@ -763,7 +1422,7 @@ def validate_class_data(
         issues.append(ValidationIssue(
             "error",
             "raw_tool_fields_forbidden",
-            "Agent Class definitions must not contain nested raw MCP/tool fields outside policy.grants/policy.denies: "
+            "Agent Class definitions must not contain raw MCP/tool fields or raw capability atom grants/denies; use capabilities.buckets/restrictions instead: "
             + ", ".join(extra_raw_tool_fields),
             path=source,
             profile_id=class_id,
@@ -928,6 +1587,16 @@ def validate_class_data(
             profile_id=class_id,
         ))
 
+    _validate_bucket_policy_semantics(
+        raw_data,
+        normalized,
+        issues,
+        source=source,
+        class_id=class_id,
+        base_kind=base_kind,
+        policy_mode=policy_mode,
+    )
+
     ref_data = normalized.get("agent_profile_ref")
     ref_id = ""
     ref_version = ""
@@ -1027,36 +1696,17 @@ def validate_class_data(
 
     policy_data = normalized.get("policy") if isinstance(normalized.get("policy"), dict) else {}
     if policy_mode == "compile":
-        grants = _validate_string_list_field(policy_data.get("grants"), "policy.grants", issues, source=source, class_id=class_id)
-        denies = _validate_string_list_field(policy_data.get("denies"), "policy.denies", issues, source=source, class_id=class_id)
-        unknown_atoms = sorted((set(grants) | set(denies)) - set(CAPABILITIES))
+        compiled_bucket_policy = _compiled_bucket_policy_for_data(normalized)
+        unknown_atoms = sorted(
+            (set(compiled_bucket_policy.get("grants", []) or [])
+             | set(compiled_bucket_policy.get("denies", []) or []))
+            - set(CAPABILITIES)
+        )
         if unknown_atoms:
             issues.append(ValidationIssue(
                 "error",
-                "unknown_policy_capability_atoms",
-                "unknown policy capability atoms: " + ", ".join(unknown_atoms),
-                path=source,
-                profile_id=class_id,
-            ))
-        if base_kind in BASE_KIND_CEILINGS:
-            outside = sorted(set(grants) - BASE_KIND_CEILINGS[base_kind])
-            if outside:
-                issues.append(ValidationIssue(
-                    "error",
-                    "policy_grants_outside_base_kind_ceiling",
-                    f"policy.grants outside {base_kind} ceiling: " + ", ".join(outside),
-                    path=source,
-                    profile_id=class_id,
-                ))
-        archetype = str((metadata or {}).get("archetype", "") or "").strip()
-        is_pm_class = class_id == "product-manager" or archetype == "product_manager" or "product-manager" in class_id
-        dangerous = sorted(set(grants) & PM_DANGEROUS_CAPABILITIES)
-        if is_pm_class and dangerous:
-            issues.append(ValidationIssue(
-                "error",
-                "dangerous_product_manager_policy_grants",
-                "Product Manager Agent Classes must not grant dangerous execution/admin capabilities: "
-                + ", ".join(dangerous),
+                "unknown_compiled_policy_capability_atoms",
+                "compiled bucket policy emitted unknown capability atoms: " + ", ".join(unknown_atoms),
                 path=source,
                 profile_id=class_id,
             ))
@@ -1187,8 +1837,9 @@ def default_agent_class_id_for_kind(kind: str) -> str:
 def _compiled_profile_data_for_class(definition: AgentClassDefinition) -> dict[str, Any]:
     policy = dict(definition.policy or {})
     generated_ref = definition.agent_profile_ref
-    grants = _string_list(policy.get("grants"))
-    denies = _string_list(policy.get("denies"))
+    compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition)
+    grants = list(compiled_bucket_policy.get("grants", []) or [])
+    denies = list(compiled_bucket_policy.get("denies", []) or [])
     profile_policy = {
         "base_kind": definition.base_kind,
         "scope": dict(policy.get("scope") or {}) if isinstance(policy.get("scope"), dict) else {},
@@ -1207,8 +1858,12 @@ def _compiled_profile_data_for_class(definition: AgentClassDefinition) -> dict[s
         "schema_version": definition.agent_class_schema_version,
         "policy_schema_version": policy.get("policy_schema_version", POLICY_SCHEMA_VERSION),
         "compiler_version": POLICY_COMPILER_VERSION,
+        "capability_buckets": list(compiled_bucket_policy.get("bucket_ids", []) or []),
+        "restriction_buckets": list(compiled_bucket_policy.get("restriction_ids", []) or []),
     }
     metadata["internal_policy_source"] = "compiled_from_agent_class"
+    metadata["capability_bucket_count"] = len(compiled_bucket_policy.get("bucket_ids", []) or [])
+    metadata["restriction_bucket_count"] = len(compiled_bucket_policy.get("restriction_ids", []) or [])
     metadata["generated_profile"] = True
     return {
         "id": generated_ref.id,
@@ -1276,6 +1931,7 @@ def internal_policy_preview_for_class(
 ) -> dict[str, Any]:
     policy_summary = compact_agent_class_policy_preview(definition)
     denied = list(profile_preview.get("denied_high_risk_capabilities", []) or [])
+    compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition) if policy_summary.get("mode") == "compile" else {}
     out = {
         **policy_summary,
         "display_name": str(profile_preview.get("display_name", "") or ""),
@@ -1292,6 +1948,11 @@ def internal_policy_preview_for_class(
     if policy_summary.get("mode") == "compile":
         out["snapshot_source"] = "sqlite_effective_snapshot_only"
         out["generated_profile_written_to_project_yaml"] = False
+        out["capability_bucket_selection"] = list(compiled_bucket_policy.get("bucket_ids", []) or [])
+        out["restriction_bucket_selection"] = list(compiled_bucket_policy.get("restriction_ids", []) or [])
+        out["operator_access_summary"] = _operator_access_summary(compiled_bucket_policy)
+        out["advanced_internal_grants"] = list(compiled_bucket_policy.get("grants", []) or [])
+        out["advanced_internal_denies"] = list(compiled_bucket_policy.get("denies", []) or [])
     return out
 
 
@@ -1402,6 +2063,8 @@ def compact_agent_profile_preview(profile_preview: dict[str, Any]) -> dict[str, 
         "source_class_id": str(generated_by.get("id", "") or "") if isinstance(generated_by, dict) else "",
         "source_class_version": str(generated_by.get("version", "") or "") if isinstance(generated_by, dict) else "",
         "policy_compiler_version": str(generated_by.get("compiler_version", "") or "") if isinstance(generated_by, dict) else "",
+        "capability_bucket_selection": list(generated_by.get("capability_buckets", []) or []) if isinstance(generated_by, dict) else [],
+        "restriction_bucket_selection": list(generated_by.get("restriction_buckets", []) or []) if isinstance(generated_by, dict) else [],
         "capability_count": int(profile_preview.get("capability_count", 0) or 0),
         "denied_high_risk_count": len(denied),
         "denied_high_risk_capabilities": denied[:24],
@@ -1422,6 +2085,21 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["communication"] = dict(definition.communication or {})
     preview["delegation"] = dict(definition.delegation or {})
     preview["class_warnings"] = list(definition.warnings or [])
+    compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition) if agent_class_policy_mode(definition) == "compile" else {}
+    preview["purpose"] = definition.description
+    preview["capability_bucket_selection"] = list(compiled_bucket_policy.get("bucket_ids", []) or [])
+    preview["restriction_bucket_selection"] = list(compiled_bucket_policy.get("restriction_ids", []) or [])
+    preview["capability_bucket_summary"] = _operator_access_summary(compiled_bucket_policy) if compiled_bucket_policy else {
+        "allowed": [],
+        "denied": [],
+        "allowed_summary": "Wrapped internal Agent Profile policy",
+        "denied_summary": "",
+        "bucket_count": 0,
+        "restriction_count": 0,
+    }
+    preview["capability_buckets"] = list(compiled_bucket_policy.get("bucket_previews", []) or [])
+    preview["restriction_buckets"] = list(compiled_bucket_policy.get("restriction_previews", []) or [])
+    preview["operator_access_summary"] = preview["capability_bucket_summary"]
     preview["agent_profile"] = profile_preview
     preview["compiled_profile"] = profile_preview if agent_class_policy_mode(definition) == "compile" else {}
     preview["internal_profile"] = profile_preview
@@ -1452,8 +2130,14 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
         "Agent Class is the operator-facing identity and policy intent.",
         "Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.",
         "Agent Class definitions do not mutate running sessions; changes apply only at launch/relaunch boundaries.",
-        "Raw MCP tools, connector governance, and arbitrary runtime kinds are not part of Agent Class YAML/API.",
+        "Raw MCP tools, connector governance, generated profile IDs, and arbitrary runtime kinds are not part of normal Agent Class authoring.",
     ]
+    preview["apply_state"] = {
+        "mutates_running_sessions": False,
+        "applies_at": "next_launch_or_relaunch",
+        "relaunch_required_after_assignment": True,
+    }
+    preview["authoring_contract"] = agent_class_authoring_contract(base_kind=definition.base_kind)
     preview["launchable"] = not agent_class_is_archived(preview)
     return preview
 
@@ -1476,6 +2160,7 @@ def freeze_agent_class_snapshot(
 ) -> dict[str, Any]:
     full_preview = enriched_agent_class_preview(definition, base_dir=base_dir)
     warnings = list(full_preview.get("warnings", []) or [])
+    compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition) if agent_class_policy_mode(definition) == "compile" else {}
     snapshot = {
         "id": definition.id,
         "version": definition.version,
@@ -1487,6 +2172,7 @@ def freeze_agent_class_snapshot(
         "secondary_base_kind_label": secondary_base_kind_label_for_class(definition),
         "secondary_base_kind_metadata": agent_class_runtime_preview(definition),
         "description": definition.description,
+        "purpose": definition.description,
         "lifecycle": definition.lifecycle,
         "builtin": bool(definition.builtin),
         "status": str(full_preview.get("status", "") or "full"),
@@ -1497,6 +2183,16 @@ def freeze_agent_class_snapshot(
         "identity": dict(definition.identity or {}),
         "runtime": agent_class_runtime_preview(definition),
         "capabilities": dict(definition.capabilities or {}),
+        "capability_bucket_selection": list(compiled_bucket_policy.get("bucket_ids", []) or []),
+        "restriction_bucket_selection": list(compiled_bucket_policy.get("restriction_ids", []) or []),
+        "capability_bucket_summary": _operator_access_summary(compiled_bucket_policy) if compiled_bucket_policy else {
+            "allowed": [],
+            "denied": [],
+            "allowed_summary": "Wrapped internal Agent Profile policy",
+            "denied_summary": "",
+            "bucket_count": 0,
+            "restriction_count": 0,
+        },
         "communication": dict(definition.communication or {}),
         "delegation": dict(definition.delegation or {}),
         "prompt": definition.prompt,
@@ -1505,6 +2201,10 @@ def freeze_agent_class_snapshot(
         "warnings": warnings[:12],
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
         "runtime_enforcement": "launch_frozen_agent_class_profile_pairing",
+        "apply_state": {
+            "mutates_running_sessions": False,
+            "applies_at": "next_launch_or_relaunch",
+        },
         "assignment_source": assignment_source,
         "frozen_at": float(frozen_at),
     }
@@ -1551,6 +2251,9 @@ def agent_class_context_for_cell(cell: Any) -> dict[str, Any]:
         "agent_profile_id": str(profile.get("id", "") or ""),
         "agent_profile_version": str(profile.get("version", "") or ""),
         "internal_policy": dict(snapshot.get("internal_policy") or {}),
+        "capability_bucket_selection": list(snapshot.get("capability_bucket_selection", []) or []),
+        "restriction_bucket_selection": list(snapshot.get("restriction_bucket_selection", []) or []),
+        "capability_bucket_summary": dict(snapshot.get("capability_bucket_summary") or {}),
         "warnings": list(snapshot.get("warnings", []) or [])[:6],
         "external_connector_caveat": str(snapshot.get("external_connector_caveat", "") or ""),
     }
@@ -1774,6 +2477,15 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             else {}
         ),
         "next_launch_class_disabled": bool(agent_class_is_archived(assigned_preview)) if assigned_preview else False,
+        "apply_state": {
+            "pending_next_launch": pending_next_launch,
+            "relaunch_required": pending_next_launch,
+            "mutates_running_sessions": False,
+            "applies_at": "next_launch_or_relaunch",
+            "effective_class_id": effective_id,
+            "next_launch_class_id": next_launch_class_id,
+            "direct_agent_profile_assignment": direct_profile_without_class,
+        },
         "warnings": deduped_warnings,
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }
@@ -1838,6 +2550,11 @@ def normalize_agent_class_authoring_data(raw: dict[str, Any]) -> dict[str, Any]:
         if alias in data and not str(data.get("prompt", "") or "").strip():
             data["prompt"] = data.get(alias)
         data.pop(alias, None)
+    for alias in AUTHORING_DESCRIPTION_ALIASES:
+        if alias in data and not str(data.get("description", "") or "").strip():
+            data["description"] = data.get(alias)
+        data.pop(alias, None)
+    data = _normalize_bucket_fields(data)
 
     ui_metadata: dict[str, str] = {}
     for key in sorted(SAFE_UI_METADATA_KEYS):
@@ -1922,6 +2639,8 @@ def validate_agent_class_draft(
         base_dir=base_dir,
     )
     preview = enriched_agent_class_preview(definition, base_dir=base_dir) if definition else None
+    runtime_for_contract = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
+    contract_base_kind = str(data.get("base_kind", "") or runtime_for_contract.get("base_kind", "") or "").strip()
     return {
         "ok": not any(issue.severity == "error" for issue in issues),
         "valid": not any(issue.severity == "error" for issue in issues),
@@ -1935,6 +2654,7 @@ def validate_agent_class_draft(
             issue.as_dict() for issue in issues if issue.severity == "warn"
         ],
         "storage": _class_authoring_storage(base_dir),
+        "authoring_contract": agent_class_authoring_contract(base_kind=contract_base_kind),
     }
 
 

@@ -14,6 +14,7 @@ from torque.agent_classes import (
     agent_class_context_for_cell,
     agent_class_prompt_block_for_cell,
     agent_class_definition_by_id,
+    agent_class_authoring_contract,
     archive_custom_agent_class,
     compile_agent_class_profile,
     delete_custom_agent_class,
@@ -87,6 +88,17 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(preview["internal_policy"]["mode"], "compile")
         self.assertEqual(preview["internal_policy"]["profile_source"], "compiled_from_agent_class")
         self.assertFalse(preview["internal_policy"]["generated_profile_written_to_project_yaml"])
+        self.assertEqual(preview["capability_bucket_selection"], [
+            "self_context",
+            "planning_reads",
+            "proposed_decisions",
+            "board_task_proposals",
+            "user_messages",
+            "product_peer_messages",
+            "private_journal",
+        ])
+        self.assertIn("deny_worker_dispatch", preview["restriction_bucket_selection"])
+        self.assertIn("capability_bucket_catalog", preview["authoring_contract"])
         self.assertEqual(preview["draft"], {})
         self.assertTrue(preview["metadata"]["approved_for_live_dogfood"])
         self.assertEqual(preview["metadata"]["permanence_state"], "dogfood_permanent")
@@ -122,7 +134,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "profile.edit",
         }, set())
 
-    def test_schema_v3_compile_accepts_class_policy_sections_and_rejects_raw_tools(self):
+    def test_schema_v3_compile_accepts_capability_buckets_and_rejects_raw_tools(self):
         valid = {
             "agent_class_schema_version": 3,
             "id": "planning-architect",
@@ -133,15 +145,16 @@ class AgentClassRegistryTests(unittest.TestCase):
             "prompt": {"addendum": "Use planning-safe surfaces only."},
             "policy": {
                 "mode": "compile",
-                "generated_profile_id": "class-policy-planning-architect",
-                "grants": ["observe.self_context", "planning.area_read", "comm.user_message"],
-                "denies": ["task.dispatch"],
                 "scope": {"summary": "planning read-only"},
                 "communication": {"user": "message"},
                 "spawn": {"dispatch": "deny"},
                 "audit": {"profile_changes": "next_launch_only"},
             },
-            "capabilities": {"domains": ["planning"]},
+            "capabilities": {
+                "buckets": ["self_context", "planning_area_reads", "user_messages"],
+                "restrictions": ["deny_worker_dispatch"],
+                "domains": ["planning"],
+            },
             "delegation": {"dispatch_workers": "denied"},
             "warnings": ["External connectors are separate."],
         }
@@ -154,15 +167,56 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(definition.agent_profile_ref.id, "class-policy-planning-architect")
         compiled = compile_agent_class_profile(definition)
         self.assertEqual(compiled.id, "class-policy-planning-architect")
-        self.assertEqual(set(compiled.grants), {"observe.self_context", "planning.area_read", "comm.user_message"})
+        self.assertEqual(set(compiled.grants), {
+            "observe.self_context",
+            "observe.task_detail",
+            "planning.area_read",
+            "comm.user_ask",
+            "comm.user_message",
+        })
+        self.assertIn("agent.dispatch_worker", compiled.denies)
+        preview = enriched_agent_class_preview(definition, base_dir=str(self.project))
+        self.assertEqual(preview["capability_bucket_selection"], ["self_context", "planning_area_reads", "user_messages"])
+        self.assertIn("Planning Architect internal policy", preview["compiled_profile"]["display_name"])
+        self.assertIn("Self and assigned task context", preview["capability_bucket_summary"]["allowed"])
+        self.assertFalse(preview["internal_policy"]["generated_profile_written_to_project_yaml"])
 
         invalid = dict(valid)
         invalid["id"] = "bad-planning"
-        invalid["policy"] = dict(valid["policy"], tools=["architect_task_create"])
+        invalid["policy"] = dict(valid["policy"], grants=["observe.self_context"], tools=["architect_task_create"])
         invalid["capabilities"] = {"tools": ["architect_task_create"]}
         _definition, invalid_issues = validate_class_data(invalid, base_dir=str(self.project))
         codes = {issue.code for issue in invalid_issues}
         self.assertIn("raw_tool_fields_forbidden", codes)
+
+    def test_bucket_validation_rejects_cross_base_and_pm_broadening(self):
+        worker_with_architect_bucket = {
+            "agent_class_schema_version": 3,
+            "id": "overwide-worker",
+            "version": "1",
+            "display_name": "Overwide Worker",
+            "runtime": {"base_kind": "worker"},
+            "policy": {"mode": "compile"},
+            "capabilities": {"buckets": ["planning_reads"]},
+        }
+
+        _definition, issues = validate_class_data(worker_with_architect_bucket, base_dir=str(self.project))
+        codes = {issue.code for issue in issues}
+        self.assertIn("capability_bucket_unavailable_for_base_kind", codes)
+        self.assertIn("capability_bucket_outside_base_kind_ceiling", codes)
+
+        pm_with_dispatch = {
+            "agent_class_schema_version": 3,
+            "id": "custom-product-manager",
+            "version": "1",
+            "display_name": "Custom Product Manager",
+            "runtime": {"base_kind": "architect"},
+            "policy": {"mode": "compile"},
+            "capabilities": {"buckets": ["self_context", "worker_dispatch"]},
+            "metadata": {"archetype": "product_manager"},
+        }
+        _definition, pm_issues = validate_class_data(pm_with_dispatch, base_dir=str(self.project))
+        self.assertIn("dangerous_product_manager_capability_buckets", {issue.code for issue in pm_issues})
 
     def test_invalid_config_rejects_raw_tools_profile_confusion_and_bad_draft(self):
         _definition, issues = validate_class_data(
@@ -269,6 +323,41 @@ class AgentClassRegistryTests(unittest.TestCase):
         )
         self.assertTrue(deleted["ok"], deleted)
         self.assertFalse(path.exists())
+
+    def test_authoring_bucket_compile_contract_hides_generated_profile_authoring(self):
+        draft = {
+            "id": "pm-lite",
+            "version": "1",
+            "title": "PM Lite",
+            "purpose": "Product planning readout and user updates.",
+            "runtime": {"base_kind": "architect", "base_kind_label": "Architect-derived"},
+            "capability_buckets": ["self_context", "planning_reads", "user_messages"],
+            "restriction_buckets": ["deny_worker_dispatch", "deny_deploy_admin"],
+        }
+
+        validation = validate_agent_class_draft(draft, base_dir=str(self.project))
+
+        self.assertTrue(validation["valid"], validation)
+        normalized = validation["normalized"]
+        self.assertEqual(normalized["description"], "Product planning readout and user updates.")
+        self.assertEqual(normalized["policy"]["mode"], "compile")
+        self.assertNotIn("agent_profile_ref", normalized)
+        self.assertEqual(normalized["capabilities"]["buckets"], ["self_context", "planning_reads", "user_messages"])
+        self.assertIn("capability_bucket_catalog", validation["authoring_contract"])
+        preview = validation["agent_class"]
+        self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-pm-lite", "version": "1"})
+        self.assertEqual(preview["internal_policy"]["profile_source"], "compiled_from_agent_class")
+        self.assertEqual(preview["capability_bucket_selection"], ["self_context", "planning_reads", "user_messages"])
+        self.assertTrue(preview["apply_state"]["relaunch_required_after_assignment"])
+        self.assertEqual(preview["internal_policy"]["snapshot_source"], "sqlite_effective_snapshot_only")
+
+        saved = save_custom_agent_class(draft, base_dir=str(self.project), mode="create")
+        self.assertTrue(saved["ok"], saved)
+        path = Path(saved["storage"]["path"])
+        saved_yaml = path.read_text(encoding="utf-8")
+        self.assertIn("buckets:", saved_yaml)
+        self.assertNotIn("agent_profile_ref:", saved_yaml)
+        self.assertNotIn("generated_profile_id", saved_yaml)
 
     def test_authoring_rejects_forbidden_fields_before_persistence(self):
         invalid = {
@@ -725,6 +814,8 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(saved["type"], "agent_class_save")
         self.assertTrue(saved["ok"])
         self.assertEqual(listed["type"], "agent_classes")
+        self.assertIn("capability_bucket_catalog", listed)
+        self.assertIn("self_context", {item["id"] for item in listed["capability_bucket_catalog"]})
         self.assertIn("product-manager", {item["id"] for item in listed["classes"]})
         self.assertIn("panel-architect", {item["id"] for item in listed["classes"]})
         self.assertEqual(preview["agent_class"]["primary_identity_label"], "Product Manager")

@@ -25,7 +25,8 @@ Torque ships built-in Agent Classes in `torque/builtin_agent_classes/`:
 - `default-engineer.yaml` → wraps `full-engineer@1`
 - `default-worker.yaml` → wraps `full-worker@1`
 - `product-manager.yaml` → primary label **Product Manager**, schema v3,
-  compiles to generated/internal `class-policy-product-manager@2`
+  uses operator capability buckets, and compiles to generated/internal
+  `class-policy-product-manager@2`
 
 Project Agent Class definitions live in:
 
@@ -65,19 +66,21 @@ prompt:
 policy:
   mode: compile              # compile | wrap_profile
   policy_schema_version: 1
-  generated_profile_id: class-policy-product-manager
-  generated_profile_version: "2"
-  grants:
-    - observe.self_context
-    - planning.area_read
-  denies:
-    - task.dispatch
-    - worktree.merge
-  scope: {}
-  communication: {}
-  spawn: {}
-  audit: {}
+  scope: {}                  # operator-readable policy notes
+  communication: {}          # operator-readable communication notes
+  spawn: {}                  # operator-readable delegation/spawn notes
+  audit: {}                  # operator-readable audit notes
 capabilities:
+  buckets:
+    - self_context
+    - planning_reads
+    - proposed_decisions
+    - board_task_proposals
+    - user_messages
+  restrictions:
+    - deny_worker_dispatch
+    - deny_deploy_admin
+    - deny_class_profile_admin
   domains: [product_planning]
 delegation:
   dispatch_workers: denied
@@ -92,12 +95,17 @@ metadata:
 
 Validation rejects unknown base kinds, missing/unsafe ids, unsafe version tokens,
 missing/unsafe display names, profile refs whose base kind/version do not match,
-raw MCP/tool fields (`tools`, `mcp_tools`, `tool_picker`, etc.) anywhere, and
+raw MCP/tool fields (`tools`, `mcp_tools`, `tool_picker`, etc.) anywhere, raw
+Agent Profile capability-atom grants/denies in Agent Class YAML/API, and
 ambiguous `profile` / `profile_id` / `agent_profile_id` fields. For schema v3,
-`policy.grants` and `policy.denies` are capability atoms, not raw tool names;
-grants must stay inside the declared base-kind ceiling. Product Manager-style
-classes cannot grant dangerous execution/admin capabilities such as hire,
-dispatch, merge, deploy, settings, or profile-admin.
+`capabilities.buckets` and `capabilities.restrictions` are the normal
+operator-facing policy input. The server compiles selected buckets into an
+internal Agent Profile-compatible policy, validates the result against the
+declared base-kind ceiling, and exposes raw atoms only as Advanced/Internal
+diagnostics. Product Manager-style classes cannot select buckets that grant
+dangerous execution/admin capabilities such as hire, dispatch, merge, deploy,
+settings, accepted-decision authority, direct Engineer/Worker messaging, or
+profile-admin.
 
 Draft classes must set `draft.scratch_only: true` and must not claim live dogfood
 approval.
@@ -119,14 +127,24 @@ fields needed by Wave 7C:
   label (for example `Product Manager`);
 - `secondary_base_kind_label` / `secondary_base_kind_metadata` — internal base
   kind metadata (for example `Architect-derived`);
+- `purpose` / `description` — operator-language class purpose;
+- `capability_bucket_selection`, `restriction_bucket_selection`,
+  `capability_bucket_summary`, `operator_access_summary`, `capability_buckets`,
+  and `restriction_buckets` — bucket selections plus user-readable allowed and
+  explicitly denied access summaries;
+- `authoring_contract`, `capability_bucket_catalog`, and
+  `restriction_bucket_catalog` — trusted API data Panelsmith should use for
+  bucket create/edit/validate flows;
 - `policy.mode` and `internal_policy` — compile/wrap mode, generated/internal
   profile id/version, compiler version, capability counts, projected tool
-  categories, denied high-risk capabilities, and snapshot source;
+  categories, denied high-risk capabilities, snapshot source, and
+  Advanced/Internal generated grants/denies diagnostics;
 - `agent_profile` / `internal_profile` / `compiled_profile` — advanced internal
   Agent Profile-compatible policy preview; retained for backcompat;
 - desired/effective/pending status fields:
-  `assigned_*`, `effective_*`, `next_launch_*`, `pending_next_launch`, and
-  `next_launch_primary_identity_label`;
+  `assigned_*`, `effective_*`, `next_launch_*`, `pending_next_launch`,
+  `next_launch_primary_identity_label`, and `apply_state` / relaunch-required
+  state;
 - `warnings` plus `external_connector_caveat`.
 
 Successful `create_agent_from_class` responses use `schema_version: 3`, return
@@ -162,13 +180,14 @@ The built-in Product Manager class has primary identity label **Product Manager*
 (even while lifecycle/status remains draft/restricted). Draft/restricted is a
 warning/chip, not part of the name.
 
-Product Manager compiles PM-safe policy from class YAML to the internal generated
-profile `class-policy-product-manager@2`. The grants match the existing PM-safe
-wrapper surface: planning reads, PM-owned proposed decisions, queued product task
-intake, selected product-peer wrappers, PM-safe user communication, and private
-journal. It does not grant raw Architect task/decision/peer tools, hire,
-dispatch, merge, deploy, settings/admin, profile-admin, raw tool picker
-authority, or direct engineer/worker messaging.
+Product Manager compiles PM-safe policy from class-owned operator buckets to the
+internal generated profile `class-policy-product-manager@2`. The selected
+buckets match the existing PM-safe wrapper surface: planning reads, PM-owned
+proposed decisions, queued product task intake, selected product-peer wrappers,
+PM-safe user communication, and private journal. Explicit restriction buckets
+record no hire, dispatch, merge, deploy, settings/admin, profile-admin, raw tool
+picker authority, accepted-decision authority, or direct engineer/worker
+messaging.
 
 External connector exposure is a known limitation: Agent Classes and Agent
 Profiles do **not** enforce external connector governance in Wave 7. Previews,
@@ -188,7 +207,8 @@ Action templates can inspect compact class context via
 ## Doctor
 
 `torque doctor` includes an `[agent_classes]` section with config path, schema
-version, validation counts, assignment/audit counts, launch-pairing enforcement
-mode, the external connector caveat, and legacy direct PM-profile warning counts.
-The JSON report includes class previews, assignment status, recent audit rows,
-compiled/internal policy details, and no-silent-migration warnings.
+version, validation counts, capability/restriction bucket catalog counts,
+assignment/audit counts, launch-pairing enforcement mode, the external connector
+caveat, and legacy direct PM-profile warning counts. The JSON report includes
+class previews, assignment status, recent audit rows, compiled/internal policy
+details, bucket authoring contract data, and no-silent-migration warnings.
