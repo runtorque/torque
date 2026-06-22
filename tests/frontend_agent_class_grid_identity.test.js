@@ -65,7 +65,7 @@ function createHarness() {
   return context;
 }
 
-test('agent grid card promotes effective Product Manager Agent Class identity over Architect base kind', () => {
+test('agent grid card keeps agent name while showing effective Product Manager Agent Class badge', () => {
   const context = createHarness();
   const html = vm.runInContext(`renderAgentCell({
     id: 'blueprint',
@@ -87,7 +87,7 @@ test('agent grid card promotes effective Product Manager Agent Class identity ov
     }
   })`, context);
 
-  assert.match(html, /cell-name[^>]*>Product Manager</);
+  assert.match(html, /cell-name[^>]*>Blueprint</);
   assert.match(html, /cell-agent-class-badge[^>]*>Product Manager</);
   assert.match(html, /Base kind: Architect/);
   assert.match(html, /Secondary metadata: Architect-derived/);
@@ -135,11 +135,10 @@ test('agent grid card ignores stale assignment status after relaunch effective P
     }
   })`, context);
 
-  assert.match(html, /cell-name[^>]*>Product Manager</);
+  assert.match(html, /cell-name[^>]*>Blueprint</);
   assert.match(html, /cell-agent-class-badge[^>]*>Product Manager</);
   assert.match(html, /Base kind: Architect/);
   assert.match(html, /Secondary metadata: Architect-derived/);
-  assert.doesNotMatch(html, /cell-name[^>]*>Blueprint</);
   assert.doesNotMatch(html, /agent-card-kind[^>]*>Architect</);
 });
 

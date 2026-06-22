@@ -67,6 +67,7 @@ var _agentPanelClassManagerByAgent = {};
 var _agentPanelClassListByKey = {};
 var _agentPanelClassPreviewById = {};
 var _agentPanelClassLastRequestedListKey = '';
+var _agentPanelClassModalAgentId = '';
 var _AGENT_PANEL_MCP_PAGE_SIZE = 50;
 var _AGENT_PANEL_MCP_DEFAULT_HOOK = 'PostToolUse';
 var _agentPanelTabSpecByKind = {
@@ -469,9 +470,9 @@ function _agentPanelMessageAttributionHtml(agent, message, direction, senderKind
   ).trim();
   var peer = _agentPanelAgentForId(peerId);
   var peerKind = _agentPanelMessagePeerKind(agent, message, direction, senderKind);
-  var name = peerId
+  var name = peer
     ? _agentPanelAgentDisplayName(peer, peerId)
-    : (explicitName || (peerKind ? _agentPanelMessageKindLabel(peerKind) : ''));
+    : (explicitName || peerId || (peerKind ? _agentPanelMessageKindLabel(peerKind) : ''));
   if (!name) return '';
   var label = direction === 'out' ? 'To' : 'From';
   var cls = 'agent-panel-message-attribution agent-panel-message-attribution-' + direction;
@@ -628,15 +629,20 @@ function _agentPanelRenderContextChips(kind, values, labelFn) {
 
 function _agentPanelPeerNameGroup(agent, message) {
   message = message || {};
+  var direction = _agentPanelMessageDirection(agent, message);
   var peerId = String(message.peer_id || '').trim();
   if (!peerId) {
-    var direction = _agentPanelMessageDirection(agent, message);
     peerId = direction === 'out'
       ? String(message.recipient_id || '').trim()
       : String(message.sender_id || '').trim();
   }
   var peer = _agentPanelAgentForId(peerId);
-  var name = peer ? _agentPanelAgentDisplayName(peer, peerId) : peerId;
+  var explicitName = String(
+    (direction === 'out'
+      ? (message.recipient_name || message.peer_name)
+      : (message.sender_name || message.peer_name)) || ''
+  ).trim();
+  var name = peer ? _agentPanelAgentDisplayName(peer, peerId) : (explicitName || peerId);
   var group = String(
     (peer && peer.group) || message.group || (agent && agent.group) || ''
   ).trim();
@@ -2024,9 +2030,22 @@ function _agentPanelProfileCompatibleProfiles(agent) {
 }
 
 function _agentPanelRefreshProfileManagerRender() {
+  _agentPanelRenderClassModal();
   if (typeof _agentPanelRefreshCurrentTab === 'function'
       && _agentPanelRefreshCurrentTab()) return;
   if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function _agentPanelEnsureClassModalForProfileManager(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return;
+  var agentId = String(agent.id || '');
+  if (!agentId) return;
+  if (_agentPanelClassModalAgentId !== agentId) {
+    _agentPanelOpenClassAssignmentModal(agent);
+  } else {
+    var classUi = _agentPanelClassUi(agent);
+    classUi.open = true;
+  }
 }
 
 function _agentPanelRequestProfileList(agent, force) {
@@ -2080,6 +2099,7 @@ function agentPanelToggleProfileAssignment(evt, agentId) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return false;
   var classUi = _agentPanelClassUi(agent);
   classUi.profileAdvancedOpen = true;
+  _agentPanelEnsureClassModalForProfileManager(agent);
   var ui = _agentPanelProfileUi(agent);
   ui.open = !ui.open;
   ui.error = '';
@@ -2094,6 +2114,7 @@ function agentPanelRefreshProfiles(evt, agentId) {
   var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
   if (!agent) return false;
   _agentPanelClassUi(agent).profileAdvancedOpen = true;
+  _agentPanelEnsureClassModalForProfileManager(agent);
   var ui = _agentPanelProfileUi(agent);
   ui.open = true;
   ui.error = '';
@@ -2108,6 +2129,7 @@ function agentPanelSelectProfile(agentId, profileId) {
   var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
   if (!agent) return false;
   _agentPanelClassUi(agent).profileAdvancedOpen = true;
+  _agentPanelEnsureClassModalForProfileManager(agent);
   var ui = _agentPanelProfileUi(agent);
   ui.open = true;
   ui.selectedProfileId = String(profileId || '').trim();
@@ -2126,6 +2148,7 @@ function agentPanelAssignSelectedProfile(evt, agentId) {
   var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
   if (!agent) return false;
   _agentPanelClassUi(agent).profileAdvancedOpen = true;
+  _agentPanelEnsureClassModalForProfileManager(agent);
   var ui = _agentPanelProfileUi(agent);
   var selected = String(ui.selectedProfileId || '').trim();
   var targetId = _agentPanelProfilePreviewTargetId(agent, selected);
@@ -2334,6 +2357,7 @@ function _agentPanelClassUi(agent) {
 }
 
 function _agentPanelRefreshClassManagerRender() {
+  _agentPanelRenderClassModal();
   if (typeof _agentPanelRefreshCurrentTab === 'function'
       && _agentPanelRefreshCurrentTab()) return;
   if (typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -2379,15 +2403,98 @@ function _agentPanelEnsureOpenClassManagerData(agent) {
   _agentPanelRequestClassStatus(agent, false);
 }
 
-function agentPanelToggleClassAssignment(evt, agentId) {
+function _agentPanelClassModalOverlay() {
+  if (typeof document === 'undefined' || !document || typeof document.getElementById !== 'function') return null;
+  return document.getElementById('modal-agent-class');
+}
+
+function _agentPanelClassModalBodyEl() {
+  if (typeof document === 'undefined' || !document || typeof document.getElementById !== 'function') return null;
+  return document.getElementById('agent-class-modal-body');
+}
+
+function _agentPanelClassModalSummaryEl() {
+  if (typeof document === 'undefined' || !document || typeof document.getElementById !== 'function') return null;
+  return document.getElementById('agent-class-modal-summary');
+}
+
+function _agentPanelClassModalTitle(agent) {
+  var name = _agentPanelAgentDisplayName(agent, 'Agent');
+  var state = _agentPanelClassState(agent);
+  var effective = _agentPanelClassEffectiveLabelWithVersion(state);
+  return name + ' · ' + effective;
+}
+
+function _agentPanelRenderClassModal() {
+  if (!_agentPanelClassModalAgentId) return false;
+  var agent = _agentPanelAgentForId(_agentPanelClassModalAgentId);
+  if (!agent) {
+    _agentPanelClassModalAgentId = '';
+    return false;
+  }
+  var body = _agentPanelClassModalBodyEl();
+  if (!body) return false;
+  body.innerHTML = _agentPanelClassModalBodyHtml(agent);
+  var summary = _agentPanelClassModalSummaryEl();
+  if (summary) summary.textContent = _agentPanelClassModalTitle(agent);
+  return true;
+}
+
+function _agentPanelOpenClassAssignmentModal(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return false;
+  var agentId = String(agent.id || '');
+  if (!agentId) return false;
+  _agentPanelClassModalAgentId = agentId;
+  var ui = _agentPanelClassUi(agent);
+  ui.open = true;
+  ui.error = '';
+  _agentPanelEnsureOpenClassManagerData(agent);
+  _agentPanelRenderClassModal();
+  var modal = _agentPanelClassModalOverlay();
+  if (modal) {
+    if (typeof openModalDialog === 'function') {
+      openModalDialog(modal, {
+        label: 'Change Agent Class',
+        initialFocus: '#agent-class-select-' + _agentPanelDomIdToken(agentId),
+      });
+    } else if (modal.classList && typeof modal.classList.add === 'function') {
+      modal.classList.add('visible');
+    }
+  }
+  return true;
+}
+
+function agentPanelOpenClassAssignment(evt, agentId) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
   var agent = _agentPanelAgentForId(agentId) || _resolveFocusedAgent();
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return false;
-  var ui = _agentPanelClassUi(agent);
-  ui.open = !ui.open;
-  ui.error = '';
-  if (ui.open) _agentPanelEnsureOpenClassManagerData(agent);
+  _agentPanelOpenClassAssignmentModal(agent);
+  _agentPanelRefreshClassManagerRender();
+  return false;
+}
+
+function agentPanelToggleClassAssignment(evt, agentId) {
+  return agentPanelOpenClassAssignment(evt, agentId);
+}
+
+function agentPanelCloseClassAssignmentModal(evt) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var agent = _agentPanelAgentForId(_agentPanelClassModalAgentId);
+  if (agent) {
+    var ui = _agentPanelClassUi(agent);
+    ui.open = false;
+  }
+  _agentPanelClassModalAgentId = '';
+  var modal = _agentPanelClassModalOverlay();
+  if (modal) {
+    if (typeof closeModalDialog === 'function') {
+      closeModalDialog(modal, { restoreFocus: true });
+    } else if (modal.classList && typeof modal.classList.remove === 'function') {
+      modal.classList.remove('visible');
+    }
+  }
   _agentPanelRefreshClassManagerRender();
   return false;
 }
@@ -2670,19 +2777,7 @@ function agentPanelHandleAgentClassError(msg) {
 }
 
 function _agentPanelHeaderProfileControlsHtml(agent) {
-  var badge = _agentPanelClassBadgeHtml(agent);
-  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return badge;
-  var agentId = String(agent.id || '');
-  var ui = _agentPanelClassUi(agent);
-  var expanded = !!ui.open;
-  var label = expanded ? 'Hide class UI' : 'Class…';
-  return badge
-    + '<button type="button" class="agent-profile-header-btn"'
-    + ' data-agent-class-expanded="' + (expanded ? 'true' : 'false') + '"'
-    + ' title="Manage desired Agent Class assignment"'
-    + ' onclick="' + _agentPanelEventAttr('return agentPanelToggleClassAssignment(event,'
-      + _agentPanelJsString(agentId) + ')') + '">'
-    + _agentPanelEsc(label) + '</button>';
+  return '';
 }
 
 function _agentPanelProfileMetaLine(label, value, extraClass) {
@@ -3325,22 +3420,74 @@ function _agentPanelClassPreviewHtml(agent, ui) {
   return html + '</div>';
 }
 
+function _agentPanelClassEffectiveNoticeSource(state) {
+  state = state || {};
+  var effectiveNoticeSource = state.effectivePreview && state.effectivePreview.id
+    ? state.effectivePreview
+    : {};
+  if (state.warnings && state.warnings.length) {
+    effectiveNoticeSource = Object.assign({}, effectiveNoticeSource, { warnings: state.warnings });
+  }
+  if (state.externalConnectorCaveat) {
+    effectiveNoticeSource = Object.assign({}, effectiveNoticeSource, {
+      external_connector_caveat: state.externalConnectorCaveat,
+    });
+  }
+  return effectiveNoticeSource;
+}
+
 function _agentPanelClassManagerHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
   var kind = _agentPanelKind(agent);
   if (kind !== 'architect' && kind !== 'engineer' && kind !== 'worker') return '';
+  var agentId = String(agent.id || '');
+  var state = _agentPanelClassState(agent);
+  var effectiveLabel = _agentPanelClassEffectiveLabelWithVersion(state);
+  var desiredLabel = _agentPanelClassDesiredLabelWithVersion(state);
+  var pendingLabel = _agentPanelClassPendingLabel(state, effectiveLabel, desiredLabel, agent);
   var ui = _agentPanelClassUi(agent);
+  var html = '<section class="agent-profile-manager agent-class-manager agent-class-manager-compact collapsed"'
+    + ' data-agent-class-manager="' + _agentPanelAttr(agentId) + '"'
+    + ' data-agent-class-modal-open="' + (_agentPanelClassModalAgentId === agentId ? 'true' : 'false') + '">';
+  html += '<div class="agent-profile-manager-head agent-class-manager-compact-head">';
+  html += '<div>';
+  html += '<div class="agent-profile-manager-title">Agent Class</div>';
+  html += '<div class="agent-profile-manager-subtitle">Operator-facing identity and launch policy; detailed changes open in a modal.</div>';
+  html += '</div>';
+  html += '<button type="button" class="agent-profile-secondary-btn agent-class-change-btn"'
+    + ' title="Change desired Agent Class assignment"'
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelOpenClassAssignment(event,'
+      + _agentPanelJsString(agentId) + ')') + '">Change Class</button>';
+  html += '</div>';
+  html += '<div class="agent-profile-status-grid agent-class-status-grid agent-class-status-grid-compact">';
+  html += _agentPanelClassMetaLine('Primary identity now', effectiveLabel);
+  html += _agentPanelClassMetaLine('Desired Agent Class next launch', desiredLabel);
+  html += _agentPanelClassMetaLine('Base kind metadata', state.secondaryLabel || _agentPanelKindDisplayLabel(state.kind));
+  html += _agentPanelClassMetaLine('Pending relaunch', pendingLabel, state.pending ? 'agent-profile-meta-pending' : '');
+  html += '</div>';
+  html += _agentPanelClassWarningsHtml(_agentPanelClassEffectiveNoticeSource(state));
+  if (ui.message) html += '<div class="agent-profile-message">' + _agentPanelEsc(ui.message) + '</div>';
+  if (ui.error) html += '<div class="agent-profile-error">' + _agentPanelEsc(ui.error) + '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _agentPanelClassModalBodyHtml(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
+  var kind = _agentPanelKind(agent);
+  if (kind !== 'architect' && kind !== 'engineer' && kind !== 'worker') return '';
+  var ui = _agentPanelClassUi(agent);
+  ui.open = true;
   _agentPanelEnsureOpenClassManagerData(agent);
   var agentId = String(agent.id || '');
   var safeId = _agentPanelDomIdToken(agentId);
   var cache = _agentPanelClassListCache(agent);
-  var state = _agentPanelClassState(agent);
   var selection = _agentPanelClassSelectionState(agent, ui);
   var disabledReason = _agentPanelClassAssignmentDisabledReason(agent, ui);
   var primaryLabel = String(ui.selectedClassId || '').trim()
     ? 'Set desired Agent Class'
     : 'Clear to default/no class';
-  var html = '<section class="agent-profile-manager agent-class-manager' + (ui.open ? ' open' : ' collapsed') + '"'
+  var html = '<section class="agent-profile-manager agent-class-manager agent-class-manager-modal open"'
     + ' data-agent-class-manager="' + _agentPanelAttr(agentId) + '">';
   html += '<div class="agent-profile-manager-head">';
   html += '<div>';
@@ -3350,73 +3497,54 @@ function _agentPanelClassManagerHtml(agent) {
     + '</div>';
   html += '</div>';
   html += '<button type="button" class="agent-profile-secondary-btn"'
-    + ' onclick="' + _agentPanelEventAttr('return agentPanelToggleClassAssignment(event,'
-      + _agentPanelJsString(agentId) + ')') + '">'
-    + _agentPanelEsc(ui.open ? 'Hide' : 'Change class')
-    + '</button>';
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelCloseClassAssignmentModal(event)') + '">Close</button>';
   html += '</div>';
   html += _agentPanelClassAssignmentStatusHtml(agent);
-  if (!ui.open) {
-    var effectiveNoticeSource = state.effectivePreview && state.effectivePreview.id
-      ? state.effectivePreview
-      : {};
-    if (state.warnings && state.warnings.length) {
-      effectiveNoticeSource = Object.assign({}, effectiveNoticeSource, { warnings: state.warnings });
-    }
-    if (state.externalConnectorCaveat) {
-      effectiveNoticeSource = Object.assign({}, effectiveNoticeSource, {
-        external_connector_caveat: state.externalConnectorCaveat,
-      });
-    }
-    html += _agentPanelClassWarningsHtml(effectiveNoticeSource);
-  }
   if (ui.message) html += '<div class="agent-profile-message">' + _agentPanelEsc(ui.message) + '</div>';
   if (ui.error) html += '<div class="agent-profile-error">' + _agentPanelEsc(ui.error) + '</div>';
-  if (ui.open) {
-    html += _agentPanelClassLaunchGuidanceHtml(agent);
-    if (cache.error) html += '<div class="agent-profile-error">' + _agentPanelEsc(cache.error) + '</div>';
-    html += '<div class="agent-profile-controls agent-class-controls">';
-    html += '<label for="agent-class-select-' + _agentPanelAttr(safeId) + '">Desired Agent Class</label>';
-    html += '<select id="agent-class-select-' + _agentPanelAttr(safeId) + '"'
-      + ' class="agent-profile-select agent-class-select"'
-      + ' onchange="' + _agentPanelEventAttr('agentPanelSelectClass('
-        + _agentPanelJsString(agentId) + ', this.value)') + '"'
-      + (cache.loading ? ' disabled' : '') + '>';
-    html += _agentPanelClassOptionsHtml(agent, ui);
-    html += '</select>';
-    if (cache.loading) {
-      html += '<span class="agent-profile-loading">Loading Agent Classes…</span>';
-    } else if (cache.requested && !_agentPanelClassCompatibleClasses(agent).length) {
-      html += '<span class="agent-profile-loading">No compatible Agent Classes found for base kind '
-        + _agentPanelEsc(kind) + '.</span>';
-    }
-    html += '<div class="agent-profile-next-launch-note">'
-      + _agentPanelEsc(_agentPanelClassSelectionHint(agent, selection))
-      + '</div>';
-    html += '</div>';
-    if (Array.isArray(cache.issues) && cache.issues.length) html += _agentPanelClassIssuesHtml(cache.issues);
-    html += _agentPanelClassPreviewHtml(agent, ui);
-    html += '<div class="agent-profile-actions agent-class-actions">';
-    html += '<button type="button" class="agent-profile-primary-btn"'
-      + (disabledReason ? ' disabled title="' + _agentPanelAttr(disabledReason) + '"' : '')
-      + ' onclick="' + _agentPanelEventAttr('return agentPanelAssignSelectedClass(event,'
-        + _agentPanelJsString(agentId) + ')') + '">'
-      + _agentPanelEsc(ui.saving ? 'Saving…' : primaryLabel)
-      + '</button>';
-    if (String(agent.agent_class_id || '').trim()) {
-      html += '<button type="button" class="agent-profile-secondary-btn"'
-        + (ui.saving ? ' disabled' : '')
-        + ' onclick="' + _agentPanelEventAttr('return agentPanelClearClassAssignment(event,'
-          + _agentPanelJsString(agentId) + ')') + '">Default / no explicit class</button>';
-    }
-    html += '<button type="button" class="agent-profile-secondary-btn"'
-      + ' onclick="' + _agentPanelEventAttr('return agentPanelRefreshClasses(event,'
-      + _agentPanelJsString(agentId) + ')') + '">Refresh classes</button>';
-    if (disabledReason) {
-      html += '<span class="agent-profile-disabled-reason">' + _agentPanelEsc(disabledReason) + '</span>';
-    }
-    html += '</div>';
+  html += _agentPanelClassLaunchGuidanceHtml(agent);
+  if (cache.error) html += '<div class="agent-profile-error">' + _agentPanelEsc(cache.error) + '</div>';
+  html += '<div class="agent-profile-controls agent-class-controls">';
+  html += '<label for="agent-class-select-' + _agentPanelAttr(safeId) + '">Desired Agent Class</label>';
+  html += '<select id="agent-class-select-' + _agentPanelAttr(safeId) + '"'
+    + ' class="agent-profile-select agent-class-select"'
+    + ' onchange="' + _agentPanelEventAttr('agentPanelSelectClass('
+      + _agentPanelJsString(agentId) + ', this.value)') + '"'
+    + (cache.loading ? ' disabled' : '') + '>';
+  html += _agentPanelClassOptionsHtml(agent, ui);
+  html += '</select>';
+  if (cache.loading) {
+    html += '<span class="agent-profile-loading">Loading Agent Classes…</span>';
+  } else if (cache.requested && !_agentPanelClassCompatibleClasses(agent).length) {
+    html += '<span class="agent-profile-loading">No compatible Agent Classes found for base kind '
+      + _agentPanelEsc(kind) + '.</span>';
   }
+  html += '<div class="agent-profile-next-launch-note">'
+    + _agentPanelEsc(_agentPanelClassSelectionHint(agent, selection))
+    + '</div>';
+  html += '</div>';
+  if (Array.isArray(cache.issues) && cache.issues.length) html += _agentPanelClassIssuesHtml(cache.issues);
+  html += _agentPanelClassPreviewHtml(agent, ui);
+  html += '<div class="agent-profile-actions agent-class-actions">';
+  html += '<button type="button" class="agent-profile-primary-btn"'
+    + (disabledReason ? ' disabled title="' + _agentPanelAttr(disabledReason) + '"' : '')
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelAssignSelectedClass(event,'
+      + _agentPanelJsString(agentId) + ')') + '">'
+    + _agentPanelEsc(ui.saving ? 'Saving…' : primaryLabel)
+    + '</button>';
+  if (String(agent.agent_class_id || '').trim()) {
+    html += '<button type="button" class="agent-profile-secondary-btn"'
+      + (ui.saving ? ' disabled' : '')
+      + ' onclick="' + _agentPanelEventAttr('return agentPanelClearClassAssignment(event,'
+        + _agentPanelJsString(agentId) + ')') + '">Default / no explicit class</button>';
+  }
+  html += '<button type="button" class="agent-profile-secondary-btn"'
+    + ' onclick="' + _agentPanelEventAttr('return agentPanelRefreshClasses(event,'
+    + _agentPanelJsString(agentId) + ')') + '">Refresh classes</button>';
+  if (disabledReason) {
+    html += '<span class="agent-profile-disabled-reason">' + _agentPanelEsc(disabledReason) + '</span>';
+  }
+  html += '</div>';
   html += '<details class="agent-profile-advanced-details agent-class-advanced-details"'
     + (ui.profileAdvancedOpen ? ' open' : '')
     + ' ontoggle="' + _agentPanelEventAttr('agentPanelSetClassAdvancedOpen('
@@ -3433,8 +3561,9 @@ function _agentPanelClassManagerHtml(agent) {
   return html;
 }
 
-function _agentPanelBodyWithProfileManager(agent, bodyHtml) {
-  return _agentPanelClassManagerHtml(agent) + (bodyHtml || '');
+
+function _agentPanelBodyWithProfileManager(agent, bodyHtml, includeClassManager) {
+  return (includeClassManager ? _agentPanelClassManagerHtml(agent) : '') + (bodyHtml || '');
 }
 
 function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRightHtml, agentId, headerBreadcrumbHtml) {
@@ -5518,7 +5647,8 @@ function _renderEngineerPanel(agent) {
   var parts = _agentPanelTabRenderParts(agent, 'engineer', activeTab);
   var bodyHtml = _agentPanelBodyWithProfileManager(
     agent,
-    _agentPanelEngineerSpecializationsEditorHtml(agent) + (parts.bodyHtml || '')
+    _agentPanelEngineerSpecializationsEditorHtml(agent) + (parts.bodyHtml || ''),
+    activeTab === 'behavior'
   );
   return _agentPanelShell(
     _agentPanelRoleTitle(agent, 'Engineer'),
@@ -5695,7 +5825,7 @@ function _renderWorkerPanel(agent) {
     'Per-worker event stream and task history.',
     'worker',
     activeTab,
-    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml),
+    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml, activeTab === 'behavior'),
     (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
@@ -5968,7 +6098,7 @@ function _renderArchitectPanel(agent) {
     'Journal, decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
-    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml),
+    _agentPanelBodyWithProfileManager(agent, parts.bodyHtml, activeTab === 'behavior'),
     (parts.headerRightHtml || '') + _agentPanelHeaderProfileControlsHtml(agent),
     (agent && agent.id) || '',
     _agentPanelUpwardBreadcrumbHtml(agent)
@@ -6170,7 +6300,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
     parts.bodyHtml = _agentPanelEngineerSpecializationsEditorHtml(agent)
       + (parts.bodyHtml || '');
   }
-  parts.bodyHtml = _agentPanelBodyWithProfileManager(agent, parts.bodyHtml || '');
+  parts.bodyHtml = _agentPanelBodyWithProfileManager(agent, parts.bodyHtml || '', activeTab === 'behavior');
   _agentPanelSetShellTab(shell, activeTab);
   _agentPanelSetActiveTabChrome(el, activeTab);
   // TORQUE:264 follow-up: byte-equality memoize the innerHTML clobber. Under
@@ -6214,6 +6344,7 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   _agentPanelDetachEventsScroll(el);
   _agentPanelAttachVirtualScrolls(el);
   _agentPanelAttachEventsScroll(el, agent);
+  _agentPanelRenderClassModal();
   _agentPanelEventsPreRenderAtLiveTail = false;
   if (agent
       && (kind === 'engineer' || kind === 'architect')
@@ -6318,6 +6449,7 @@ function renderAgentPanel() {
   _agentPanelDetachEventsScroll(el);
   _agentPanelAttachVirtualScrolls(el);
   _agentPanelAttachEventsScroll(el, agent);
+  _agentPanelRenderClassModal();
   _agentPanelEventsPreRenderAtLiveTail = false;
   var agentKind = agent ? _agentPanelKind(agent) : '';
   if (agent

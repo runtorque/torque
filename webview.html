@@ -1884,6 +1884,20 @@
   </div>
 </div>
 
+<!-- Agent Class assignment modal -->
+<div class="overlay agent-class-assignment-modal" id="modal-agent-class">
+  <div class="modal modal-tall agent-class-modal-panel" role="dialog" aria-modal="true" aria-labelledby="agent-class-modal-title" aria-describedby="agent-class-modal-summary">
+    <h3 id="agent-class-modal-title">Change Agent Class</h3>
+    <div id="agent-class-modal-summary" class="modal-summary"></div>
+    <div id="agent-class-modal-body" class="agent-class-modal-body">
+      <div class="agent-panel-empty">Loading Agent Class assignment…</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="agentPanelCloseClassAssignmentModal(event)">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- JS (order matters: constants → compact → ws → keybindings → render → commands/native/markdown → modals → board core/modules → main) -->
 <!-- Enterprise frontend injection seam. Community builds keep this manifest
      empty, so remote/EE panels fail closed unless enterprise assets replace or

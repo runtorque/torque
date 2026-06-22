@@ -550,8 +550,7 @@ function _agentCardPrimaryClassIdentity(agent) {
 }
 
 function _agentCardPrimaryDisplayName(agent) {
-  const identity = _agentCardPrimaryClassIdentity(agent);
-  return identity ? identity.label : _agentDisplayName(agent);
+  return _agentDisplayName(agent);
 }
 
 function _agentKindBadgeClass(kind, dismissed) {
@@ -896,7 +895,7 @@ function _renderEngineerCardBody(a, askingText) {
   const identity = _agentCardPrimaryClassIdentity(a);
   let html = '<div class="agent-card-body cell-body cell-body--engineer">';
   html += '<div class="agent-card-line cell-name"'
-    + (identity ? (' title="' + esc((_agentDisplayName(a) || '') + ' · base kind ' + (identity.baseKindLabel || 'Engineer')) + '"') : '')
+    + (identity ? (' title="' + esc('Agent Class: ' + identity.label + ' · base kind ' + (identity.baseKindLabel || 'Engineer')) + '"') : '')
     + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-engineer-workers">'
     + '<span class="agent-card-state-mix">' + _agentStatusMixDots(workers) + '</span>'
@@ -921,7 +920,7 @@ function _renderArchitectCellBody(a) {
   const identity = _agentCardPrimaryClassIdentity(a);
   let html = '<div class="agent-card-body cell-body cell-body--architect">';
   html += '<div class="agent-card-line cell-name"'
-    + (identity ? (' title="' + esc((_agentDisplayName(a) || '') + ' · base kind ' + (identity.baseKindLabel || 'Architect')) + '"') : '')
+    + (identity ? (' title="' + esc('Agent Class: ' + identity.label + ' · base kind ' + (identity.baseKindLabel || 'Architect')) + '"') : '')
     + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-architect-stats">'
     + esc(stats.engineerCount + ' engineers')
@@ -936,7 +935,7 @@ function _renderGenericAgentCardBody(a) {
   const identity = _agentCardPrimaryClassIdentity(a);
   let html = '<div class="agent-card-body cell-body cell-body--generic">';
   html += '<div class="agent-card-line cell-name"'
-    + (identity ? (' title="' + esc((_agentDisplayName(a) || '') + ' · base kind ' + (identity.baseKindLabel || 'Agent')) + '"') : '')
+    + (identity ? (' title="' + esc('Agent Class: ' + identity.label + ' · base kind ' + (identity.baseKindLabel || 'Agent')) + '"') : '')
     + '>' + esc(_agentCardPrimaryDisplayName(a)) + '</div>';
   if (subtitle) {
     html += '<div class="agent-card-line cell-task" title="' + esc(subtitle) + '">' + formatCode(subtitle) + '</div>';
