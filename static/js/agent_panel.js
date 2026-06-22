@@ -3466,6 +3466,133 @@ function _agentPanelClassWarningsHtml(item) {
   return html;
 }
 
+function _agentPanelClassBucketLabel(bucket, fallback) {
+  bucket = bucket || {};
+  return String(bucket.label || bucket.display_name || bucket.name || bucket.id || fallback || '').trim();
+}
+
+function _agentPanelClassBucketSummary(bucket) {
+  bucket = bucket || {};
+  return String(bucket.summary || bucket.description || '').trim();
+}
+
+function _agentPanelClassDedupeStrings(values) {
+  var out = [];
+  var seen = {};
+  values = Array.isArray(values) ? values : [];
+  for (var i = 0; i < values.length; i++) {
+    var text = String(values[i] || '').trim();
+    if (!text || seen[text]) continue;
+    seen[text] = true;
+    out.push(text);
+  }
+  return out;
+}
+
+function _agentPanelClassSelectedBucketIds(item, restriction) {
+  item = item || {};
+  var direct = restriction ? item.restriction_bucket_selection : item.capability_bucket_selection;
+  var selected = _agentPanelClassDedupeStrings(Array.isArray(direct) ? direct : []);
+  if (selected.length) return selected;
+  var capabilities = item.capabilities && typeof item.capabilities === 'object' ? item.capabilities : {};
+  var values = restriction
+    ? (capabilities.restrictions || capabilities.restriction_buckets || capabilities.denied_buckets)
+    : (capabilities.buckets || capabilities.capability_buckets);
+  return _agentPanelClassDedupeStrings(Array.isArray(values) ? values : []);
+}
+
+function _agentPanelClassBucketPreviews(item, restriction) {
+  item = item || {};
+  var direct = restriction ? item.restriction_buckets : item.capability_buckets;
+  if (Array.isArray(direct) && direct.length) return direct;
+  return _agentPanelClassSelectedBucketIds(item, restriction).map(function(id) {
+    return { id: id, label: id, summary: '' };
+  });
+}
+
+function _agentPanelClassPolicyMode(item) {
+  item = item || {};
+  var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
+  var mode = String(policy.mode || '').trim();
+  if (mode) return mode;
+  if (_agentPanelClassSelectedBucketIds(item, false).length
+      || _agentPanelClassSelectedBucketIds(item, true).length) return 'compile';
+  var internal = item.internal_policy && typeof item.internal_policy === 'object' ? item.internal_policy : {};
+  if (String(internal.mode || '').trim() === 'compile') return 'compile';
+  if (item.compiled_profile && typeof item.compiled_profile === 'object' && item.compiled_profile.id) return 'compile';
+  return 'wrap_profile';
+}
+
+function _agentPanelClassOperatorSummaryText(value, fallback) {
+  var text = String(value || '').trim();
+  if (!text || /wrapped internal agent profile policy/i.test(text)) return fallback || '';
+  return text;
+}
+
+function _agentPanelClassBucketPreviewListHtml(buckets, emptyText) {
+  buckets = Array.isArray(buckets) ? buckets : [];
+  if (!buckets.length) {
+    return '<div class="agent-class-access-empty">' + _agentPanelEsc(emptyText || 'None selected') + '</div>';
+  }
+  var html = '<div class="agent-class-access-list">';
+  for (var i = 0; i < buckets.length; i++) {
+    var bucket = buckets[i] || {};
+    html += '<div class="agent-class-access-item">';
+    html += '<strong>' + _agentPanelEsc(_agentPanelClassBucketLabel(bucket, bucket.id || 'Bucket')) + '</strong>';
+    var summary = _agentPanelClassBucketSummary(bucket);
+    if (summary) html += '<span>' + _agentPanelEsc(summary) + '</span>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelClassOperatorAccessHtml(item) {
+  item = item || {};
+  if (_agentPanelClassIsProductManager(item)) return _agentPanelProductManagerCompactPolicyHtml(item);
+  var summary = (item.operator_access_summary && typeof item.operator_access_summary === 'object')
+    ? item.operator_access_summary
+    : ((item.capability_bucket_summary && typeof item.capability_bucket_summary === 'object') ? item.capability_bucket_summary : {});
+  var allowedBuckets = _agentPanelClassBucketPreviews(item, false);
+  var restrictionBuckets = _agentPanelClassBucketPreviews(item, true);
+  var isCompile = _agentPanelClassPolicyMode(item) === 'compile';
+  var fallbackAllowed = isCompile
+    ? 'No capability buckets selected yet.'
+    : 'Default access for this base kind.';
+  var allowedSummary = _agentPanelClassOperatorSummaryText(summary.allowed_summary, fallbackAllowed);
+  var deniedSummary = _agentPanelClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No explicit restriction buckets selected.');
+  var html = '<div class="agent-class-operator-access">';
+  html += '<div class="agent-class-block-title">Operator access preview</div>';
+  html += '<div class="agent-class-access-summary-grid">';
+  html += '<div><span>Capability access</span><strong>' + _agentPanelEsc(allowedSummary || fallbackAllowed) + '</strong></div>';
+  html += '<div><span>Explicit restrictions</span><strong>' + _agentPanelEsc(deniedSummary || (restrictionBuckets.length ? 'See restriction buckets below.' : 'None selected')) + '</strong></div>';
+  html += '</div>';
+  html += '<div class="agent-class-access-columns">';
+  html += '<div><div class="agent-class-block-title">Allowed buckets</div>'
+    + _agentPanelClassBucketPreviewListHtml(allowedBuckets, fallbackAllowed) + '</div>';
+  html += '<div><div class="agent-class-block-title">Restriction buckets</div>'
+    + _agentPanelClassBucketPreviewListHtml(restrictionBuckets, 'No explicit restriction buckets selected.') + '</div>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelClassApplyStateHtml(item) {
+  item = item || {};
+  var apply = item.apply_state && typeof item.apply_state === 'object' ? item.apply_state : {};
+  var mutatesRunning = apply.mutates_running_sessions === true;
+  var relaunchRequired = apply.relaunch_required_after_assignment !== false;
+  var appliesAt = String(apply.applies_at || '').trim();
+  var status = mutatesRunning ? 'May affect running sessions immediately.' : 'Does not change running sessions.';
+  var when = appliesAt === 'next_launch_or_relaunch' || relaunchRequired
+    ? 'Access freezes on the next launch or relaunch.'
+    : (appliesAt ? appliesAt.replace(/_/g, ' ') : 'Next launch/relaunch.');
+  return '<div class="agent-class-apply-state">'
+    + '<div><span>Apply state</span><strong>' + _agentPanelEsc(status) + '</strong></div>'
+    + '<div><span>Relaunch behavior</span><strong>' + _agentPanelEsc(when) + '</strong></div>'
+    + '</div>';
+}
+
 function _agentPanelClassPreviewHtml(agent, ui) {
   var selection = _agentPanelClassSelectionState(agent, ui);
   var state = _agentPanelClassState(agent);
@@ -3488,7 +3615,7 @@ function _agentPanelClassPreviewHtml(agent, ui) {
     + _agentPanelEsc(_agentPanelClassVersionSuffix(item.version))
     + '</div>';
   html += '<div class="agent-profile-preview-description">'
-    + _agentPanelEsc(item.description || item.id || '')
+    + _agentPanelEsc(item.purpose || item.description || item.id || '')
     + '</div>';
   html += '</div><div class="agent-profile-preview-chips agent-class-preview-chips">';
   html += '<span class="agent-profile-chip">' + _agentPanelEsc(_agentPanelClassSecondaryLabel(item, _agentPanelKind(agent))) + '</span>';
@@ -3501,7 +3628,9 @@ function _agentPanelClassPreviewHtml(agent, ui) {
   html += '<div class="agent-profile-next-launch-note">'
     + _agentPanelEsc(_agentPanelClassSelectionHint(agent, selection))
     + '</div>';
-  html += _agentPanelClassWarningsHtml(item);
+  html += _agentPanelClassOperatorAccessHtml(item);
+  html += _agentPanelClassApplyStateHtml(item);
+  if (!_agentPanelClassIsProductManager(item)) html += _agentPanelClassWarningsHtml(item);
   return html + '</div>';
 }
 

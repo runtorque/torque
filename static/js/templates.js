@@ -30,6 +30,9 @@ var _agentClassProfileList = [];
 var _agentClassProfileIssues = [];
 var _agentClassProfileLoadedBaseDir = null;
 var _agentClassProfileLoadingBaseDir = null;
+var _agentClassAuthoringContract = null;
+var _agentClassCapabilityBucketCatalog = [];
+var _agentClassRestrictionBucketCatalog = [];
 var _agentClassSkipNextDraftCapture = false;
 var _agentClassLaunchDrafts = {};
 var _agentClassLaunchResult = null;
@@ -38,6 +41,33 @@ var _agentClassPickerContexts = {};
 var _agentClassPickerLoading = false;
 var _agentClassPickerRequestedBaseDir = '';
 var _agentClassLastMutationRequestId = '';
+
+var AGENT_CLASS_REVIEWED_SAFE_CAPABILITY_BUCKET_IDS = {
+  self_context: true,
+  task_reporting: true,
+  planning_area_reads: true,
+  planning_reads: true,
+  board_task_reads: true,
+  user_messages: true,
+  private_journal: true,
+  shared_memory: true,
+};
+
+var AGENT_CLASS_ADVANCED_ONLY_CAPABILITY_BUCKET_IDS = {
+  planning_writes: true,
+  board_task_proposals: true,
+  proposed_decisions: true,
+  decision_authority: true,
+  product_peer_messages: true,
+  engineer_worker_messages: true,
+  scoped_journals: true,
+  shared_memory_admin: true,
+  engineer_management: true,
+  worker_dispatch: true,
+  worktree_merge: true,
+  deploy_admin: true,
+  class_profile_admin: true,
+};
 
 
 var _specializationList = [];
@@ -136,6 +166,9 @@ function agentTemplateBeginGroupSwitch() {
   _agentClassLoadingBaseDir = null;
   _agentClassList = [];
   _agentClassIssues = [];
+  _agentClassAuthoringContract = null;
+  _agentClassCapabilityBucketCatalog = [];
+  _agentClassRestrictionBucketCatalog = [];
   _agentClassSelected = '';
   _agentClassPreview = null;
   agentTemplateEditorLoad();
@@ -1135,11 +1168,176 @@ function _agentClassLaunchDisabledReason(item, expectedKind) {
   item = item || {};
   expectedKind = String(expectedKind || '').trim();
   if (!item.id) return 'Select an Agent Class first.';
-  if (expectedKind && String(item.base_kind || '') !== expectedKind) return 'Agent Class base kind does not match this launch flow.';
+  var itemKind = String(item.base_kind || (item.runtime && item.runtime.base_kind) || '').trim();
+  if (expectedKind && itemKind !== expectedKind) return 'Agent Class base kind does not match this launch flow.';
   if (_agentClassIsArchived(item)) return 'Archived/disabled Agent Classes cannot launch.';
   if (item.launchable === false) return 'Backend reports this Agent Class is not launchable.';
   if (_agentClassStatus(item) === 'invalid') return 'Invalid Agent Classes cannot launch.';
   return '';
+}
+
+function _agentClassDedupeStrings(values) {
+  var out = [];
+  var seen = {};
+  values = Array.isArray(values) ? values : [];
+  for (var i = 0; i < values.length; i++) {
+    var text = String(values[i] || '').trim();
+    if (!text || seen[text]) continue;
+    seen[text] = true;
+    out.push(text);
+  }
+  return out;
+}
+
+function _agentClassKindLabel(kind) {
+  kind = String(kind || '').trim();
+  if (kind === 'architect') return 'Architect';
+  if (kind === 'engineer') return 'Engineer';
+  if (kind === 'worker') return 'Worker';
+  return kind ? kind.replace(/[-_]+/g, ' ') : 'Agent';
+}
+
+function _agentClassPolicyMode(item) {
+  item = item || {};
+  var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
+  var mode = String(policy.mode || '').trim();
+  if (mode) return mode;
+  if (_agentClassSelectedBucketIds(item, false).length || _agentClassSelectedBucketIds(item, true).length) return 'compile';
+  if (item.compiled_profile && typeof item.compiled_profile === 'object' && item.compiled_profile.id) return 'compile';
+  var internal = item.internal_policy && typeof item.internal_policy === 'object' ? item.internal_policy : {};
+  if (String(internal.mode || '').trim() === 'compile') return 'compile';
+  return 'wrap_profile';
+}
+
+function _agentClassCatalogFromContract(restriction) {
+  var key = restriction ? 'restriction_bucket_catalog' : 'capability_bucket_catalog';
+  var direct = restriction ? _agentClassRestrictionBucketCatalog : _agentClassCapabilityBucketCatalog;
+  if (Array.isArray(direct) && direct.length) return direct;
+  if (_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract[key])) {
+    return _agentClassAuthoringContract[key];
+  }
+  return [];
+}
+
+function _agentClassBucketDomToken(bucketId) {
+  return String(bucketId || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function _agentClassBucketById(bucketId, restriction) {
+  bucketId = String(bucketId || '').trim();
+  var catalog = _agentClassCatalogFromContract(!!restriction);
+  for (var i = 0; i < catalog.length; i++) {
+    var item = catalog[i] || {};
+    if (String(item.id || '').trim() === bucketId) return item;
+  }
+  return null;
+}
+
+function _agentClassBucketAvailableForKind(bucket, kind) {
+  bucket = bucket || {};
+  kind = String(kind || '').trim();
+  if (bucket.available === false) return false;
+  var baseKinds = Array.isArray(bucket.base_kinds) ? bucket.base_kinds : [];
+  if (!kind || !baseKinds.length) return true;
+  return baseKinds.map(function(value) { return String(value || '').trim(); }).indexOf(kind) >= 0;
+}
+
+function _agentClassCapabilityBucketSafeForNormalUi(bucket) {
+  bucket = bucket || {};
+  var id = String(bucket.id || '').trim();
+  var risk = String(bucket.risk || '').toLowerCase();
+  if (!id) return false;
+  if (AGENT_CLASS_ADVANCED_ONLY_CAPABILITY_BUCKET_IDS[id]) return false;
+  if (!AGENT_CLASS_REVIEWED_SAFE_CAPABILITY_BUCKET_IDS[id]) return false;
+  return !risk || risk === 'normal' || risk === 'low';
+}
+
+function _agentClassBucketLabel(bucket, fallback) {
+  bucket = bucket || {};
+  return String(bucket.label || bucket.display_name || bucket.name || bucket.id || fallback || '').trim();
+}
+
+function _agentClassBucketSummary(bucket) {
+  bucket = bucket || {};
+  return String(bucket.summary || bucket.description || '').trim();
+}
+
+function _agentClassBucketIdsFromCapabilities(capabilities, restriction) {
+  capabilities = capabilities && typeof capabilities === 'object' ? capabilities : {};
+  var values = restriction
+    ? (capabilities.restrictions || capabilities.restriction_buckets || capabilities.denied_buckets)
+    : (capabilities.buckets || capabilities.capability_buckets);
+  return _agentClassDedupeStrings(Array.isArray(values) ? values : []);
+}
+
+function _agentClassSelectedBucketIds(item, restriction) {
+  item = item || {};
+  var direct = restriction ? item.restriction_bucket_selection : item.capability_bucket_selection;
+  var selected = _agentClassDedupeStrings(Array.isArray(direct) ? direct : []);
+  if (selected.length) return selected;
+  selected = _agentClassBucketIdsFromCapabilities(item.capabilities, restriction);
+  if (selected.length) return selected;
+  var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
+  var policyValues = restriction
+    ? (policy.restrictions || policy.restriction_buckets)
+    : (policy.buckets || policy.capability_buckets);
+  return _agentClassDedupeStrings(Array.isArray(policyValues) ? policyValues : []);
+}
+
+function _agentClassDefaultCapabilityBucketsForKind(kind) {
+  kind = String(kind || 'worker').trim();
+  var defaults = ['self_context', 'task_reporting'];
+  if (kind === 'architect' || kind === 'engineer') defaults.push('planning_reads', 'board_task_reads');
+  else defaults.push('planning_area_reads');
+  defaults.push('user_messages', 'private_journal', 'shared_memory');
+  return _agentClassDedupeStrings(defaults);
+}
+
+function _agentClassDefaultRestrictionBucketsForKind(_kind) {
+  return ['deny_high_risk_operations', 'deny_raw_tool_picker'];
+}
+
+function _agentClassVisibleCapabilityBuckets(kind) {
+  var catalog = _agentClassCatalogFromContract(false);
+  var out = [];
+  for (var i = 0; i < catalog.length; i++) {
+    var bucket = catalog[i] || {};
+    if (!_agentClassBucketAvailableForKind(bucket, kind)) continue;
+    if (!_agentClassCapabilityBucketSafeForNormalUi(bucket)) continue;
+    out.push(bucket);
+  }
+  out.sort(function(a, b) {
+    var ac = String(a.category || '');
+    var bc = String(b.category || '');
+    if (ac !== bc) return ac.localeCompare(bc);
+    return _agentClassBucketLabel(a, a.id).localeCompare(_agentClassBucketLabel(b, b.id));
+  });
+  return out;
+}
+
+function _agentClassVisibleRestrictionBuckets(kind) {
+  var catalog = _agentClassCatalogFromContract(true);
+  var out = [];
+  for (var i = 0; i < catalog.length; i++) {
+    var bucket = catalog[i] || {};
+    if (!_agentClassBucketAvailableForKind(bucket, kind)) continue;
+    out.push(bucket);
+  }
+  out.sort(function(a, b) {
+    var ac = String(a.category || '');
+    var bc = String(b.category || '');
+    if (ac !== bc) return ac.localeCompare(bc);
+    return _agentClassBucketLabel(a, a.id).localeCompare(_agentClassBucketLabel(b, b.id));
+  });
+  return out;
+}
+
+function _agentClassHiddenSelectedBucketIds(item, kind, restriction) {
+  var selected = _agentClassSelectedBucketIds(item, restriction);
+  var visible = restriction ? _agentClassVisibleRestrictionBuckets(kind) : _agentClassVisibleCapabilityBuckets(kind);
+  var visibleSet = {};
+  for (var i = 0; i < visible.length; i++) visibleSet[String(visible[i].id || '')] = true;
+  return selected.filter(function(id) { return !visibleSet[id]; });
 }
 
 function _agentClassDefaultProfileId(kind) {
@@ -1191,6 +1389,19 @@ function agentClassManagerReceiveList(msg) {
   msg = msg || {};
   _agentClassList = _agentClassSort(Array.isArray(msg.classes) ? msg.classes : []);
   _agentClassIssues = Array.isArray(msg.issues) ? msg.issues.slice() : [];
+  _agentClassAuthoringContract = (msg.authoring_contract && typeof msg.authoring_contract === 'object')
+    ? msg.authoring_contract
+    : _agentClassAuthoringContract;
+  _agentClassCapabilityBucketCatalog = Array.isArray(msg.capability_bucket_catalog)
+    ? msg.capability_bucket_catalog.slice()
+    : ((_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract.capability_bucket_catalog))
+      ? _agentClassAuthoringContract.capability_bucket_catalog.slice()
+      : _agentClassCapabilityBucketCatalog);
+  _agentClassRestrictionBucketCatalog = Array.isArray(msg.restriction_bucket_catalog)
+    ? msg.restriction_bucket_catalog.slice()
+    : ((_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract.restriction_bucket_catalog))
+      ? _agentClassAuthoringContract.restriction_bucket_catalog.slice()
+      : _agentClassRestrictionBucketCatalog);
   _agentClassLoadedBaseDir = _agentClassLoadingBaseDir || _agentClassCurrentBaseDir();
   _agentClassLoadingBaseDir = null;
   _agentClassPickerLoading = false;
@@ -1224,10 +1435,21 @@ function agentClassManagerReceiveValidation(msg) {
   if (_agentClassValidationRequestId && requestId && requestId !== _agentClassValidationRequestId) return;
   _agentClassValidationInFlight = false;
   _agentClassValidation = msg;
-  _agentClassValidationSignature = _agentClassDraftSignature(_agentClassReadFormSafe());
+  if (msg.authoring_contract && typeof msg.authoring_contract === 'object') {
+    _agentClassAuthoringContract = msg.authoring_contract;
+    if (Array.isArray(msg.authoring_contract.capability_bucket_catalog)) {
+      _agentClassCapabilityBucketCatalog = msg.authoring_contract.capability_bucket_catalog.slice();
+    }
+    if (Array.isArray(msg.authoring_contract.restriction_bucket_catalog)) {
+      _agentClassRestrictionBucketCatalog = msg.authoring_contract.restriction_bucket_catalog.slice();
+    }
+  }
   _agentClassPreview = msg.agent_class || _agentClassPreview;
+  if (msg.agent_class) _agentClassSyncBucketCheckboxesFromPreview(msg.agent_class);
+  _agentClassValidationSignature = _agentClassDraftSignature(_agentClassReadFormSafe());
   _agentClassEditorError = '';
   _agentClassEditorMessage = msg.valid ? 'Validation passed. Review the normalized preview before saving.' : 'Validation found errors; fix them before saving.';
+  if (msg.agent_class) _agentClassSkipNextDraftCapture = true;
   if (_libraryActiveTab === 'agent_classes') renderAgentClassesPanel();
 }
 
@@ -1377,13 +1599,23 @@ function agentClassManagerNew(baseKind) {
 
 function _agentClassDefaultDraft(kind) {
   var profileId = _agentClassDefaultProfileId(kind);
+  var label = _agentClassKindLabel(kind);
   return {
     id: '',
     version: '1',
     base_kind: kind,
+    agent_class_schema_version: 3,
     display_name: '',
     description: '',
     lifecycle: 'stable',
+    runtime: { base_kind: kind, base_kind_label: label, arbitrary_runtime_kind: false },
+    policy: { mode: 'compile', policy_schema_version: 1 },
+    capabilities: {
+      buckets: _agentClassDefaultCapabilityBucketsForKind(kind),
+      restrictions: _agentClassDefaultRestrictionBucketsForKind(kind),
+    },
+    capability_bucket_selection: _agentClassDefaultCapabilityBucketsForKind(kind),
+    restriction_bucket_selection: _agentClassDefaultRestrictionBucketsForKind(kind),
     agent_profile_ref: { id: profileId, version: _agentClassProfileVersion(profileId, '1') },
     agent_profile: _agentClassProfileById(profileId) || {},
     prompt: '',
@@ -1427,6 +1659,7 @@ function renderAgentClassManagerEditor(restoreState) {
   html += _agentClassPreviewHtml(preview, _agentClassValidation);
   html += '</div>';
   el.innerHTML = html;
+  _agentClassSyncBucketCheckboxesFromPreview(preview);
   _agentClassRestoreEditorUiState(el, restoreState);
   el.querySelectorAll('textarea').forEach(_tplAutoResize);
 }
@@ -1462,6 +1695,124 @@ function _agentClassCardsHtml() {
   return html;
 }
 
+function _agentClassBucketCheckboxHtml(bucket, selectedSet, readOnly, restriction) {
+  var id = String(bucket.id || '').trim();
+  if (!id) return '';
+  var domId = 'agent-class-' + (restriction ? 'restriction' : 'capability') + '-bucket-' + _agentClassBucketDomToken(id);
+  var label = _agentClassBucketLabel(bucket, id);
+  var summary = _agentClassBucketSummary(bucket);
+  var risk = String(bucket.risk || '').trim();
+  var category = String(bucket.category || '').trim();
+  var checked = !!selectedSet[id];
+  var html = '<label class="agent-class-bucket-option agent-class-bucket-option-' + esc(restriction ? 'restriction' : 'capability') + '">';
+  html += '<input id="' + esc(domId) + '" type="checkbox" value="' + esc(id) + '"'
+    + (checked ? ' checked' : '')
+    + (readOnly ? ' disabled' : '')
+    + ' onchange="agentClassManagerBucketChanged()">';
+  html += '<span class="agent-class-bucket-copy"><span class="agent-class-bucket-title">' + esc(label) + '</span>';
+  if (summary) html += '<span class="agent-class-bucket-summary">' + esc(summary) + '</span>';
+  html += '<span class="agent-class-bucket-meta">';
+  if (category) html += '<span>' + esc(category) + '</span>';
+  if (risk) html += '<span>' + esc(risk) + '</span>';
+  html += '</span></span></label>';
+  return html;
+}
+
+function _agentClassBucketAuthoringHtml(preview, kind, readOnly) {
+  preview = preview || {};
+  kind = String(kind || preview.base_kind || 'worker').trim() || 'worker';
+  var selected = {};
+  _agentClassSelectedBucketIds(preview, false).forEach(function(id) { selected[id] = true; });
+  var selectedRestrictions = {};
+  _agentClassSelectedBucketIds(preview, true).forEach(function(id) { selectedRestrictions[id] = true; });
+  var capabilityBuckets = _agentClassVisibleCapabilityBuckets(kind);
+  var restrictionBuckets = _agentClassVisibleRestrictionBuckets(kind);
+  var hiddenSelected = _agentClassHiddenSelectedBucketIds(preview, kind, false);
+  var html = '<details class="tpled-section agent-class-bucket-section" id="agent-class-bucket-section" open><summary>Purpose and reviewed access buckets</summary>';
+  html += '<div class="agent-class-hint">Only reviewed safe buckets are selectable here. Higher-risk or unconfirmed catalog entries stay disabled in Advanced/Internal until their semantics are separately approved.</div>';
+  if (!capabilityBuckets.length) {
+    html += '<div class="agent-class-caveat">No safe reviewed capability buckets were returned for this base kind. Refresh Agent Classes or use Advanced/Internal only for troubleshooting existing classes.</div>';
+  } else {
+    html += '<div class="agent-class-bucket-list agent-class-safe-bucket-list">';
+    for (var i = 0; i < capabilityBuckets.length; i++) {
+      html += _agentClassBucketCheckboxHtml(capabilityBuckets[i], selected, readOnly, false);
+    }
+    html += '</div>';
+  }
+  if (hiddenSelected.length) {
+    html += '<div class="agent-class-caveat agent-class-hidden-selected-buckets">'
+      + 'This class already contains non-normal bucket selections preserved for compatibility. They are not selectable in the normal UI: '
+      + esc(hiddenSelected.join(', '))
+      + '</div>';
+  }
+  html += '<div class="agent-class-block-title agent-class-restriction-title">Safety restrictions</div>';
+  if (!restrictionBuckets.length) {
+    html += '<div class="agent-class-hint">No explicit restriction buckets are available for this base kind.</div>';
+  } else {
+    html += '<div class="agent-class-bucket-list agent-class-restriction-bucket-list">';
+    for (var r = 0; r < restrictionBuckets.length; r++) {
+      html += _agentClassBucketCheckboxHtml(restrictionBuckets[r], selectedRestrictions, readOnly, true);
+    }
+    html += '</div>';
+  }
+  html += '</details>';
+  return html;
+}
+
+function _agentClassAdvancedBucketDiagnosticsHtml(preview, kind) {
+  var catalog = _agentClassCatalogFromContract(false);
+  if (!catalog.length) return '<div class="agent-class-hint">Capability bucket catalog not loaded.</div>';
+  var visible = {};
+  _agentClassVisibleCapabilityBuckets(kind).forEach(function(bucket) { visible[String(bucket.id || '')] = true; });
+  var selected = {};
+  _agentClassSelectedBucketIds(preview || {}, false).forEach(function(id) { selected[id] = true; });
+  var hidden = [];
+  for (var i = 0; i < catalog.length; i++) {
+    var bucket = catalog[i] || {};
+    var id = String(bucket.id || '').trim();
+    if (!id || visible[id]) continue;
+    if (!_agentClassBucketAvailableForKind(bucket, kind) && !selected[id]) continue;
+    hidden.push(bucket);
+  }
+  if (!hidden.length) return '';
+  var html = '<div class="agent-class-advanced-bucket-list">';
+  html += '<div class="agent-class-block-title">Advanced/Internal bucket catalog (not normal-selectable)</div>';
+  html += '<div class="agent-class-hint">Shown for audit only. These buckets are disabled here because they are high-risk, Product-Manager-specific, or not yet reviewed for broad operator authoring.</div>';
+  for (var j = 0; j < hidden.length; j++) {
+    var item = hidden[j] || {};
+    var itemId = String(item.id || '').trim();
+    html += '<div class="agent-class-advanced-bucket' + (selected[itemId] ? ' selected' : '') + '">';
+    html += '<span>' + esc(_agentClassBucketLabel(item, itemId)) + '</span>';
+    html += '<code>' + esc(itemId) + '</code>';
+    html += '<em>' + esc(String(item.risk || 'normal')) + '</em>';
+    if (selected[itemId]) html += '<strong>selected in saved class</strong>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _agentClassSyncBucketCheckboxesFromPreview(preview) {
+  preview = preview || {};
+  var kind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || 'worker').trim() || 'worker';
+  var selected = {};
+  _agentClassSelectedBucketIds(preview, false).forEach(function(id) { selected[id] = true; });
+  _agentClassVisibleCapabilityBuckets(kind).forEach(function(bucket) {
+    var id = String((bucket && bucket.id) || '').trim();
+    if (!id) return;
+    var el = document.getElementById('agent-class-capability-bucket-' + _agentClassBucketDomToken(id));
+    if (el && 'checked' in el) el.checked = !!selected[id];
+  });
+  var selectedRestrictions = {};
+  _agentClassSelectedBucketIds(preview, true).forEach(function(id) { selectedRestrictions[id] = true; });
+  _agentClassVisibleRestrictionBuckets(kind).forEach(function(bucket) {
+    var id = String((bucket && bucket.id) || '').trim();
+    if (!id) return;
+    var el = document.getElementById('agent-class-restriction-bucket-' + _agentClassBucketDomToken(id));
+    if (el && 'checked' in el) el.checked = !!selectedRestrictions[id];
+  });
+}
+
 function _agentClassEditorFormHtml(preview) {
   preview = preview || {};
   var isBuiltin = !!preview.builtin;
@@ -1471,10 +1822,11 @@ function _agentClassEditorFormHtml(preview) {
   var metadata = preview.metadata && typeof preview.metadata === 'object' ? preview.metadata : {};
   var ui = metadata.ui && typeof metadata.ui === 'object' ? metadata.ui : {};
   var draft = preview.draft && typeof preview.draft === 'object' ? preview.draft : {};
+  var kind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || 'worker').trim() || 'worker';
   var title = _agentClassEditorNew ? 'Create project Agent Class' : (isBuiltin ? 'Built-in Agent Class' : (archived ? 'Archived Agent Class' : 'Edit project Agent Class'));
   var html = '<div class="agent-class-form tpled-form">';
   html += '<div class="agent-class-form-head"><div><div class="agent-class-form-title">' + esc(title) + '</div>';
-  html += '<div class="agent-class-form-subtitle">Class-first YAML-backed fields only; raw tools, grants, denies, and class-local capability deltas are intentionally not exposed.</div></div></div>';
+  html += '<div class="agent-class-form-subtitle">Class-first authoring: describe the purpose, then choose reviewed operator-language access buckets. Internal policy details stay in Advanced/Internal.</div></div></div>';
   if (readOnly) {
     html += '<div class="agent-class-readonly-note">' + esc(isBuiltin ? 'Built-in classes are read-only. Duplicate into a project class to customize.' : 'Archived classes stay visible for audit/preview but cannot be edited or launched here.') + '</div>';
   }
@@ -1482,23 +1834,26 @@ function _agentClassEditorFormHtml(preview) {
   html += '<input id="agent-class-id" value="' + esc(preview.id || '') + '" ' + (readOnly || !_agentClassEditorNew ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="release-architect">';
   html += '<label>Version</label><input id="agent-class-version" value="' + esc(preview.version || '1') + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off">';
   html += '<label>Base kind</label><select id="agent-class-base-kind" ' + (readOnly || (!_agentClassEditorNew && preview.id) ? 'disabled ' : '') + 'onchange="agentClassManagerBaseKindChanged()">';
-  ['architect', 'engineer', 'worker'].forEach(function(kind) {
-    html += '<option value="' + kind + '"' + (String(preview.base_kind || '') === kind ? ' selected' : '') + '>' + kind + '</option>';
+  ['architect', 'engineer', 'worker'].forEach(function(optionKind) {
+    html += '<option value="' + optionKind + '"' + (kind === optionKind ? ' selected' : '') + '>' + optionKind + '</option>';
   });
   html += '</select>';
   html += '<label>Display name <span class="label-req">*</span></label><input id="agent-class-display-name" value="' + esc(preview.display_name || '') + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off">';
-  html += '<label>Description</label><input id="agent-class-description" value="' + esc(preview.description || '') + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off">';
+  html += '<label>Purpose / description</label><input id="agent-class-description" value="' + esc(preview.purpose || preview.description || '') + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="What this class is for, in operator language">';
   html += '<label>Lifecycle</label><select id="agent-class-lifecycle" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerMarkDirty()">';
   ['stable', 'draft', 'experimental'].forEach(function(value) {
     html += '<option value="' + value + '"' + (String(preview.lifecycle || 'stable') === value ? ' selected' : '') + '>' + value + '</option>';
   });
   html += '</select>';
+  html += _agentClassBucketAuthoringHtml(preview, kind, readOnly);
   html += '<details class="tpled-section" open><summary>Class instructions</summary>';
   html += '<label>Additive prompt/class instructions</label><textarea id="agent-class-prompt" rows="6" ' + (readOnly ? 'readonly ' : '') + 'oninput="_tplAutoResize(this);agentClassManagerMarkDirty()" placeholder="Optional additive context appended after the base-kind prompt.">' + esc(preview.prompt || '') + '</textarea>';
   html += '</details>';
-  html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal Agent Profile policy</summary>';
-  html += '<div class="agent-class-hint">Agent Profile is the generated/internal MCP-capability enforcement detail. Normal operators select Agent Classes; use this only when authoring or troubleshooting policy pairing.</div>';
-  html += '<label>Internal Agent Profile</label><select id="agent-class-profile-id" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerProfileChanged()">' + _agentClassProfileOptionsHtml(preview.base_kind, ref.id) + '</select>';
+  html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal diagnostics and backcompat policy</summary>';
+  html += '<div class="agent-class-hint">Advanced/backcompat only: direct internal policy pairing is for troubleshooting existing classes. Normal authoring uses the reviewed buckets above.</div>';
+  html += _agentClassAdvancedBucketDiagnosticsHtml(preview, kind);
+  html += '<div class="agent-class-hint">Internal Agent Profile pairing for legacy/wrapped classes:</div>';
+  html += '<label>Internal Agent Profile</label><select id="agent-class-profile-id" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerProfileChanged()">' + _agentClassProfileOptionsHtml(kind, ref.id) + '</select>';
   html += '<input id="agent-class-profile-version" value="' + esc(ref.version || _agentClassProfileVersion(ref.id, '')) + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="profile version">';
   if (_agentClassProfileLoadingBaseDir) html += '<div class="agent-class-hint">Loading internal Agent Profiles…</div>';
   if (_agentClassProfileIssues.length) html += _agentClassIssuesHtml(_agentClassProfileIssues.slice(0, 3), 'Internal profile registry issues');
@@ -1553,16 +1908,134 @@ function _agentClassProfileOptionsHtml(kind, selectedId) {
   return html;
 }
 
+function _agentClassOperatorSummaryText(value, fallback) {
+  var text = String(value || '').trim();
+  if (!text || /wrapped internal agent profile policy/i.test(text)) return fallback || '';
+  return text;
+}
+
+function _agentClassBucketPreviewsFor(preview, restriction) {
+  preview = preview || {};
+  var direct = restriction ? preview.restriction_buckets : preview.capability_buckets;
+  if (Array.isArray(direct) && direct.length) return direct;
+  var ids = _agentClassSelectedBucketIds(preview, !!restriction);
+  var out = [];
+  for (var i = 0; i < ids.length; i++) {
+    var bucket = _agentClassBucketById(ids[i], !!restriction) || { id: ids[i], label: ids[i], summary: '' };
+    out.push(bucket);
+  }
+  return out;
+}
+
+function _agentClassBucketPreviewListHtml(buckets, emptyText) {
+  buckets = Array.isArray(buckets) ? buckets : [];
+  if (!buckets.length) return '<div class="agent-class-access-empty">' + esc(emptyText || 'None selected') + '</div>';
+  var html = '<div class="agent-class-access-list">';
+  for (var i = 0; i < buckets.length; i++) {
+    var bucket = buckets[i] || {};
+    html += '<div class="agent-class-access-item">';
+    html += '<strong>' + esc(_agentClassBucketLabel(bucket, bucket.id || 'Bucket')) + '</strong>';
+    var summary = _agentClassBucketSummary(bucket);
+    if (summary) html += '<span>' + esc(summary) + '</span>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _agentClassOperatorAccessHtml(preview) {
+  preview = preview || {};
+  if (_agentClassIsProductManager(preview)) return _agentClassProductManagerCompactPolicyHtml(preview);
+  var summary = (preview.operator_access_summary && typeof preview.operator_access_summary === 'object')
+    ? preview.operator_access_summary
+    : ((preview.capability_bucket_summary && typeof preview.capability_bucket_summary === 'object') ? preview.capability_bucket_summary : {});
+  var allowedBuckets = _agentClassBucketPreviewsFor(preview, false);
+  var restrictionBuckets = _agentClassBucketPreviewsFor(preview, true);
+  var isCompile = _agentClassPolicyMode(preview) === 'compile';
+  var fallbackAllowed = isCompile
+    ? 'No capability buckets selected yet.'
+    : 'Default access for this base kind (legacy wrapped policy).';
+  var allowedSummary = _agentClassOperatorSummaryText(summary.allowed_summary, fallbackAllowed);
+  var deniedSummary = _agentClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No explicit restriction buckets selected.');
+  var html = '<div class="agent-class-operator-access">';
+  html += '<div class="agent-class-block-title">Operator access preview</div>';
+  html += '<div class="agent-class-access-summary-grid">';
+  html += '<div><span>Capability access</span><strong>' + esc(allowedSummary || fallbackAllowed) + '</strong></div>';
+  html += '<div><span>Explicit restrictions</span><strong>' + esc(deniedSummary || (restrictionBuckets.length ? 'See restriction buckets below.' : 'None selected')) + '</strong></div>';
+  html += '</div>';
+  html += '<div class="agent-class-access-columns">';
+  html += '<div><div class="agent-class-block-title">Allowed buckets</div>'
+    + _agentClassBucketPreviewListHtml(allowedBuckets, fallbackAllowed) + '</div>';
+  html += '<div><div class="agent-class-block-title">Restriction buckets</div>'
+    + _agentClassBucketPreviewListHtml(restrictionBuckets, 'No explicit restriction buckets selected.') + '</div>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentClassApplyStateHtml(preview, disabledReason) {
+  preview = preview || {};
+  var apply = preview.apply_state && typeof preview.apply_state === 'object' ? preview.apply_state : {};
+  var appliesAt = String(apply.applies_at || '').trim();
+  var mutatesRunning = apply.mutates_running_sessions === true;
+  var relaunchRequired = apply.relaunch_required_after_assignment !== false;
+  var status = disabledReason
+    ? 'Not launchable until issues are fixed.'
+    : (mutatesRunning ? 'May affect running sessions immediately.' : 'Saves and assignments do not change running sessions.');
+  var when = appliesAt === 'next_launch_or_relaunch' || relaunchRequired
+    ? 'Access freezes on the next launch or relaunch.'
+    : (appliesAt ? appliesAt.replace(/_/g, ' ') : 'Next launch/relaunch.');
+  var html = '<div class="agent-class-apply-state">';
+  html += '<div><span>Apply state</span><strong>' + esc(status) + '</strong></div>';
+  html += '<div><span>Relaunch behavior</span><strong>' + esc(when) + '</strong></div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentClassFilteredOperatorRestrictions(preview) {
+  preview = preview || {};
+  var restrictions = Array.isArray(preview.restrictions) ? preview.restrictions : [];
+  var out = [];
+  for (var i = 0; i < restrictions.length; i++) {
+    var text = String(restrictions[i] || '').trim();
+    if (!text) continue;
+    if (/agent profile|generated profile|mcp|raw mcp|compiler|internal policy/i.test(text)) continue;
+    out.push(text);
+  }
+  return out;
+}
+
+function _agentClassInternalDiagnosticsHtml(preview, validation) {
+  preview = preview || {};
+  var diagnostic = {};
+  ['internal_policy', 'agent_profile', 'internal_profile', 'compiled_profile', 'agent_profile_ref'].forEach(function(key) {
+    if (preview[key] && typeof preview[key] === 'object' && Object.keys(preview[key]).length) diagnostic[key] = preview[key];
+  });
+  var restrictions = Array.isArray(preview.restrictions) ? preview.restrictions : [];
+  if (restrictions.length) diagnostic.restrictions = restrictions;
+  var html = '<details class="agent-class-normalized agent-class-internal-diagnostics"><summary>Advanced/Internal diagnostics</summary>';
+  if (preview.source_path) html += '<div class="agent-class-storage">Source: <code>' + esc(preview.source_path) + '</code></div>';
+  if (Object.keys(diagnostic).length) html += '<pre>' + esc(JSON.stringify(diagnostic, null, 2)) + '</pre>';
+  else html += '<div class="agent-class-hint">No internal diagnostics returned for this class preview.</div>';
+  if (validation && validation.normalized) {
+    html += '<div class="agent-class-block-title">Normalized draft</div><pre>' + esc(JSON.stringify(validation.normalized, null, 2)) + '</pre>';
+  }
+  html += '</details>';
+  return html;
+}
+
 function _agentClassPreviewHtml(preview, validation) {
   preview = preview || {};
   var status = _agentClassStatus(preview);
-  var disabledReason = _agentClassLaunchDisabledReason(preview, preview.base_kind);
+  var previewKind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || '').trim();
+  var disabledReason = _agentClassLaunchDisabledReason(preview, previewKind);
   var isProductManager = _agentClassIsProductManager(preview);
   var primaryLabel = String(preview.primary_identity_label || preview.primary_display_name || _agentClassDisplayName(preview, preview.id || 'Agent Class')).trim();
   var secondaryLabel = String(preview.secondary_base_kind_label
     || (preview.secondary_base_kind_metadata && preview.secondary_base_kind_metadata.base_kind_label)
     || preview.base_kind
     || 'agent').trim();
+  var purpose = String(preview.purpose || preview.description || '').trim();
   var html = '<div class="agent-class-preview agent-class-preview-' + esc(status.replace(/[^a-z0-9_-]/gi, '-').toLowerCase()) + '">';
   html += '<div class="agent-class-preview-head"><div><div class="agent-class-preview-title">' + esc(primaryLabel || 'Agent Class') + esc(_agentClassVersionSuffix(preview.version)) + '</div>';
   html += '<div class="agent-class-preview-subtitle">' + esc((preview.id || 'unsaved') + ' · ' + secondaryLabel + ' base metadata') + '</div></div>';
@@ -1574,14 +2047,16 @@ function _agentClassPreviewHtml(preview, validation) {
   if (preview.scratch_only || (preview.draft && preview.draft.scratch_only)) html += '<span>scratch-only</span>';
   if (_agentClassIsArchived(preview)) html += '<span>archived</span>';
   html += '</div></div>';
-  if (preview.description) html += '<div class="agent-class-preview-description">' + esc(preview.description) + '</div>';
+  if (purpose) html += '<div class="agent-class-preview-description"><strong>Purpose:</strong> ' + esc(purpose) + '</div>';
   var prompt = preview.prompt_summary || {};
   html += '<div class="agent-class-summary-grid">';
   html += '<div><span>Primary identity</span><strong>' + esc(primaryLabel || '—') + '</strong></div>';
   html += '<div><span>Secondary/base metadata</span><strong>' + esc(secondaryLabel || '—') + '</strong></div>';
-  html += '<div><span>Prompt</span><strong>' + esc(prompt.has_prompt ? ((prompt.char_count || 0) + ' chars') : 'No class prompt') + '</strong></div>';
+  html += '<div><span>Class instructions</span><strong>' + esc(prompt.has_prompt ? ((prompt.char_count || 0) + ' chars') : 'No class instructions') + '</strong></div>';
   html += '<div><span>Launchable</span><strong>' + esc(disabledReason ? 'No' : 'Yes') + '</strong></div>';
   html += '</div>';
+  html += _agentClassOperatorAccessHtml(preview);
+  html += _agentClassApplyStateHtml(preview, disabledReason);
   if (prompt.preview) html += '<div class="agent-class-prompt-preview">' + esc(prompt.preview) + '</div>';
   var issues = [];
   if (validation && Array.isArray(validation.errors)) issues = issues.concat(validation.errors);
@@ -1591,18 +2066,13 @@ function _agentClassPreviewHtml(preview, validation) {
   }
   if (issues.length) html += _agentClassIssuesHtml(issues, 'Warnings / validation');
   if (disabledReason) html += '<div class="agent-class-error">' + esc(disabledReason) + '</div>';
-  if (isProductManager) {
-    html += _agentClassProductManagerCompactPolicyHtml(preview);
-  }
-  if (!isProductManager && Array.isArray(preview.restrictions) && preview.restrictions.length) {
-    html += '<div class="agent-class-restrictions"><div class="agent-class-block-title">Restrictions</div><ul>';
-    for (var i = 0; i < preview.restrictions.length; i++) html += '<li>' + esc(preview.restrictions[i]) + '</li>';
+  var filteredRestrictions = isProductManager ? [] : _agentClassFilteredOperatorRestrictions(preview);
+  if (filteredRestrictions.length) {
+    html += '<div class="agent-class-restrictions"><div class="agent-class-block-title">Additional restrictions</div><ul>';
+    for (var i = 0; i < filteredRestrictions.length; i++) html += '<li>' + esc(filteredRestrictions[i]) + '</li>';
     html += '</ul></div>';
   }
-  if (preview.source_path) html += '<div class="agent-class-storage">Source: <code>' + esc(preview.source_path) + '</code></div>';
-  if (validation && validation.normalized) {
-    html += '<details class="agent-class-normalized"><summary>Normalized preview</summary><pre>' + esc(JSON.stringify(validation.normalized, null, 2)) + '</pre></details>';
-  }
+  html += _agentClassInternalDiagnosticsHtml(preview, validation);
   html += _agentClassLaunchBoxHtml(preview, disabledReason);
   html += '</div>';
   return html;
@@ -1712,8 +2182,9 @@ function _agentClassLaunchBoxHtml(preview, disabledReason) {
   var draft = _agentClassLaunchDrafts[classId] || {};
   var group = draft.group || (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
   var name = draft.name || _agentClassDisplayName(preview, classId);
+  var kind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || 'agent').trim() || 'agent';
   var html = '<div class="agent-class-launch-box">';
-  html += '<div class="agent-class-block-title">Launch new ' + esc(preview.base_kind || 'agent') + ' from this class</div>';
+  html += '<div class="agent-class-block-title">Launch new ' + esc(kind) + ' from this class</div>';
   html += '<label>Name</label><input id="agent-class-launch-name" value="' + esc(name) + '" oninput="agentClassManagerLaunchDraftChanged()" autocomplete="off">';
   html += '<label>Group</label><select id="agent-class-launch-group" onchange="agentClassManagerLaunchDraftChanged()">';
   var groups = state && state.groups ? Object.keys(state.groups) : [];
@@ -1764,6 +2235,14 @@ function agentClassManagerBaseKindChanged() {
   var form = _agentClassReadFormSafe();
   var kind = form.base_kind || 'worker';
   var profileId = _agentClassDefaultProfileId(kind);
+  form.runtime = { base_kind: kind, base_kind_label: _agentClassKindLabel(kind), arbitrary_runtime_kind: false };
+  form.policy = { mode: 'compile', policy_schema_version: 1 };
+  form.capabilities = {
+    buckets: _agentClassDefaultCapabilityBucketsForKind(kind),
+    restrictions: _agentClassDefaultRestrictionBucketsForKind(kind),
+  };
+  form.capability_bucket_selection = form.capabilities.buckets.slice();
+  form.restriction_bucket_selection = form.capabilities.restrictions.slice();
   form.agent_profile_ref = { id: profileId, version: _agentClassProfileVersion(profileId, '1') };
   _agentClassPreview = Object.assign(_agentClassDefaultDraft(kind), form);
   _agentClassEditorDirty = true;
@@ -1780,6 +2259,39 @@ function agentClassManagerProfileChanged() {
   agentClassManagerMarkDirty();
 }
 
+function agentClassManagerBucketChanged() {
+  agentClassManagerMarkDirty();
+  _agentClassValidation = null;
+  _agentClassValidationSignature = '';
+}
+
+function _agentClassReadSelectedBucketIds(kind, restriction) {
+  var catalog = restriction ? _agentClassVisibleRestrictionBuckets(kind) : _agentClassVisibleCapabilityBuckets(kind);
+  var selected = [];
+  for (var i = 0; i < catalog.length; i++) {
+    var bucket = catalog[i] || {};
+    var id = String(bucket.id || '').trim();
+    if (!id) continue;
+    var domId = 'agent-class-' + (restriction ? 'restriction' : 'capability') + '-bucket-' + _agentClassBucketDomToken(id);
+    var el = document.getElementById(domId);
+    if (el && el.checked) selected.push(id);
+  }
+  return _agentClassDedupeStrings(selected);
+}
+
+function _agentClassRenderedBucketInputCount(kind, restriction) {
+  var catalog = restriction ? _agentClassVisibleRestrictionBuckets(kind) : _agentClassVisibleCapabilityBuckets(kind);
+  var count = 0;
+  for (var i = 0; i < catalog.length; i++) {
+    var bucket = catalog[i] || {};
+    var id = String(bucket.id || '').trim();
+    if (!id) continue;
+    var domId = 'agent-class-' + (restriction ? 'restriction' : 'capability') + '-bucket-' + _agentClassBucketDomToken(id);
+    if (document.getElementById(domId)) count++;
+  }
+  return count;
+}
+
 function _agentClassReadFormSafe() {
   function value(id, fallback) {
     var el = document.getElementById(id);
@@ -1794,16 +2306,42 @@ function _agentClassReadFormSafe() {
   var profileId = String(value('agent-class-profile-id', _agentClassDefaultProfileId(kind))).trim();
   var profileVersion = String(value('agent-class-profile-version', _agentClassProfileVersion(profileId, ''))).trim();
   var lifecycle = String(value('agent-class-lifecycle', 'stable')).trim() || 'stable';
+  var editablePreview = _agentClassEditablePreview() || {};
+  var selectedBuckets = _agentClassReadSelectedBucketIds(kind, false);
+  var selectedRestrictions = _agentClassReadSelectedBucketIds(kind, true);
+  if (!selectedBuckets.length && !_agentClassRenderedBucketInputCount(kind, false)
+      && _agentClassPolicyMode(editablePreview) === 'compile') {
+    selectedBuckets = _agentClassSelectedBucketIds(editablePreview, false);
+  }
+  if (!selectedRestrictions.length && !_agentClassRenderedBucketInputCount(kind, true)
+      && _agentClassPolicyMode(editablePreview) === 'compile') {
+    selectedRestrictions = _agentClassSelectedBucketIds(editablePreview, true);
+  }
+  selectedBuckets = _agentClassDedupeStrings(selectedBuckets.concat(_agentClassHiddenSelectedBucketIds(editablePreview, kind, false)));
+  selectedRestrictions = _agentClassDedupeStrings(selectedRestrictions.concat(_agentClassHiddenSelectedBucketIds(editablePreview, kind, true)));
+  var useBucketPolicy = _agentClassEditorNew
+    || selectedBuckets.length
+    || selectedRestrictions.length
+    || _agentClassPolicyMode(editablePreview) === 'compile';
   var data = {
     id: String(value('agent-class-id', '')).trim(),
     version: String(value('agent-class-version', '1')).trim() || '1',
     base_kind: kind,
+    agent_class_schema_version: 3,
+    runtime: { base_kind: kind, base_kind_label: _agentClassKindLabel(kind), arbitrary_runtime_kind: false },
     display_name: String(value('agent-class-display-name', '')).trim(),
     description: String(value('agent-class-description', '')).trim(),
     lifecycle: lifecycle,
-    agent_profile_ref: { id: profileId, version: profileVersion },
     prompt: value('agent-class-prompt', ''),
   };
+  if (useBucketPolicy) {
+    data.policy = { mode: 'compile', policy_schema_version: 1 };
+    data.capabilities = {};
+    if (selectedBuckets.length) data.capabilities.buckets = selectedBuckets;
+    if (selectedRestrictions.length) data.capabilities.restrictions = selectedRestrictions;
+  } else {
+    data.agent_profile_ref = { id: profileId, version: profileVersion };
+  }
   var ui = {};
   ['label', 'icon', 'badge', 'color'].forEach(function(key) {
     var v = String(value('agent-class-ui-' + key, '')).trim();
@@ -1836,6 +2374,13 @@ function _agentClassValidationCurrent() {
 function _agentClassSaveDisabledReason() {
   if (_agentClassValidationInFlight) return 'Validation is still running.';
   if (!_agentClassEditorDirty && !_agentClassEditorNew) return 'No changes to save.';
+  var draft = _agentClassReadFormSafe();
+  if (draft.policy && draft.policy.mode === 'compile') {
+    var buckets = draft.capabilities && Array.isArray(draft.capabilities.buckets)
+      ? draft.capabilities.buckets
+      : [];
+    if (!buckets.length) return 'Choose at least one reviewed capability bucket before validating.';
+  }
   if (!_agentClassValidation) return 'Validate before saving.';
   if (!_agentClassValidation.valid) return 'Fix validation errors before saving.';
   if (!_agentClassValidationCurrent()) return 'Validate the latest draft before saving.';
@@ -1912,6 +2457,12 @@ function agentClassManagerDuplicate() {
       description: _agentClassPreview.description || '',
       lifecycle: _agentClassPreview.lifecycle || 'stable',
       agent_profile_ref: { id: ref.id || _agentClassDefaultProfileId(_agentClassPreview.base_kind), version: ref.version || '' },
+      agent_class_schema_version: _agentClassPreview.agent_class_schema_version || 3,
+      runtime: _agentClassPreview.runtime || { base_kind: _agentClassPreview.base_kind || 'worker' },
+      policy: _agentClassPreview.policy || {},
+      capabilities: _agentClassPreview.capabilities || {},
+      capability_bucket_selection: _agentClassSelectedBucketIds(_agentClassPreview, false),
+      restriction_bucket_selection: _agentClassSelectedBucketIds(_agentClassPreview, true),
       prompt: _agentClassPreview.prompt || '',
       metadata: _agentClassPreview.metadata || {},
       draft: _agentClassPreview.draft || {},
@@ -1961,7 +2512,7 @@ function agentClassManagerLaunchSelected() {
   _agentClassSendWithBaseDir({
     cmd: 'create_agent_from_class',
     class_id: item.id,
-    kind: item.base_kind,
+    kind: item.base_kind || (item.runtime && item.runtime.base_kind) || '',
     name: name,
     group: group,
   });
@@ -1984,6 +2535,13 @@ function _agentClassCaptureEditorUiState() {
     'agent-class-ui-color', 'agent-class-archetype', 'agent-class-scratch-only',
     'agent-class-launch-name', 'agent-class-launch-group'
   ];
+  var currentKind = ((_agentClassPreview && (_agentClassPreview.base_kind || (_agentClassPreview.runtime && _agentClassPreview.runtime.base_kind))) || 'worker');
+  _agentClassVisibleCapabilityBuckets(currentKind).forEach(function(bucket) {
+    if (bucket && bucket.id) formIds.push('agent-class-capability-bucket-' + _agentClassBucketDomToken(bucket.id));
+  });
+  _agentClassVisibleRestrictionBuckets(currentKind).forEach(function(bucket) {
+    if (bucket && bucket.id) formIds.push('agent-class-restriction-bucket-' + _agentClassBucketDomToken(bucket.id));
+  });
   var form = {};
   var hasForm = false;
   for (var i = 0; i < formIds.length; i++) {
@@ -2019,21 +2577,50 @@ function _agentClassFormObjectFromSnapshot(form) {
   form = form || {};
   var kind = form['agent-class-base-kind'] || 'worker';
   var profileId = form['agent-class-profile-id'] || _agentClassDefaultProfileId(kind);
+  var selectedBuckets = [];
+  _agentClassVisibleCapabilityBuckets(kind).forEach(function(bucket) {
+    var id = String((bucket && bucket.id) || '').trim();
+    if (id && form['agent-class-capability-bucket-' + _agentClassBucketDomToken(id)]) selectedBuckets.push(id);
+  });
+  var selectedRestrictions = [];
+  _agentClassVisibleRestrictionBuckets(kind).forEach(function(bucket) {
+    var id = String((bucket && bucket.id) || '').trim();
+    if (id && form['agent-class-restriction-bucket-' + _agentClassBucketDomToken(id)]) selectedRestrictions.push(id);
+  });
+  if (!selectedBuckets.length && !_agentClassRenderedBucketInputCount(kind, false)
+      && _agentClassPolicyMode(_agentClassPreview || {}) === 'compile') {
+    selectedBuckets = _agentClassSelectedBucketIds(_agentClassPreview || {}, false);
+  }
+  if (!selectedRestrictions.length && !_agentClassRenderedBucketInputCount(kind, true)
+      && _agentClassPolicyMode(_agentClassPreview || {}) === 'compile') {
+    selectedRestrictions = _agentClassSelectedBucketIds(_agentClassPreview || {}, true);
+  }
   var out = {
     id: form['agent-class-id'] || '',
     version: form['agent-class-version'] || '1',
     base_kind: kind,
+    agent_class_schema_version: 3,
+    runtime: { base_kind: kind, base_kind_label: _agentClassKindLabel(kind), arbitrary_runtime_kind: false },
     display_name: form['agent-class-display-name'] || '',
     description: form['agent-class-description'] || '',
     lifecycle: form['agent-class-lifecycle'] || 'stable',
-    agent_profile_ref: {
-      id: profileId,
-      version: form['agent-class-profile-version'] || _agentClassProfileVersion(profileId, ''),
-    },
     prompt: form['agent-class-prompt'] || '',
     draft: { scratch_only: !!form['agent-class-scratch-only'], approved_for_live_dogfood: false },
     metadata: { ui: {} },
   };
+  if (selectedBuckets.length || selectedRestrictions.length || _agentClassPolicyMode(_agentClassPreview || {}) === 'compile') {
+    out.policy = { mode: 'compile', policy_schema_version: 1 };
+    out.capabilities = {};
+    if (selectedBuckets.length) out.capabilities.buckets = selectedBuckets;
+    if (selectedRestrictions.length) out.capabilities.restrictions = selectedRestrictions;
+    out.capability_bucket_selection = selectedBuckets.slice();
+    out.restriction_bucket_selection = selectedRestrictions.slice();
+  } else {
+    out.agent_profile_ref = {
+      id: profileId,
+      version: form['agent-class-profile-version'] || _agentClassProfileVersion(profileId, ''),
+    };
+  }
   ['label', 'icon', 'badge', 'color'].forEach(function(key) {
     var value = form['agent-class-ui-' + key] || '';
     if (value) out.metadata.ui[key] = value;

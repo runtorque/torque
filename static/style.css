@@ -14230,7 +14230,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .agent-class-pairing,
 .agent-class-summary-grid,
-.agent-class-launch-result {
+.agent-class-launch-result,
+.agent-class-access-summary-grid,
+.agent-class-apply-state {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 6px;
@@ -14238,12 +14240,16 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .agent-class-pairing div,
 .agent-class-summary-grid div,
-.agent-class-launch-result div {
+.agent-class-launch-result div,
+.agent-class-access-summary-grid div,
+.agent-class-apply-state div {
   min-width: 0;
 }
 .agent-class-pairing span,
 .agent-class-summary-grid span,
-.agent-class-launch-result span {
+.agent-class-launch-result span,
+.agent-class-access-summary-grid span,
+.agent-class-apply-state span {
   display: block;
   color: var(--text-dim);
   font-size: 8px;
@@ -14252,11 +14258,114 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .agent-class-pairing strong,
 .agent-class-summary-grid strong,
-.agent-class-launch-result strong {
+.agent-class-launch-result strong,
+.agent-class-access-summary-grid strong,
+.agent-class-apply-state strong {
   display: block;
   color: var(--text);
   font-size: 10px;
   overflow-wrap: anywhere;
+}
+.agent-class-bucket-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+}
+.agent-class-bucket-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(139, 148, 158, 0.06);
+}
+.agent-class-bucket-copy,
+.agent-class-bucket-title,
+.agent-class-bucket-summary,
+.agent-class-bucket-meta {
+  display: block;
+}
+.agent-class-bucket-title {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+}
+.agent-class-bucket-summary {
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.35;
+  margin-top: 2px;
+}
+.agent-class-bucket-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.agent-class-bucket-meta span,
+.agent-class-advanced-bucket em,
+.agent-class-advanced-bucket strong {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 5px;
+  color: var(--text-dim);
+  font-size: 8px;
+  font-style: normal;
+}
+.agent-class-restriction-title {
+  margin-top: 10px;
+}
+.agent-class-advanced-bucket-list,
+.agent-class-operator-access {
+  margin-top: 8px;
+}
+.agent-class-advanced-bucket {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.agent-class-advanced-bucket.selected strong {
+  border-color: rgba(210, 153, 34, 0.35);
+  color: var(--amber);
+  background: rgba(210, 153, 34, 0.08);
+}
+.agent-class-access-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.agent-class-access-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 5px;
+}
+.agent-class-access-item {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px;
+  background: rgba(139, 148, 158, 0.05);
+}
+.agent-class-access-item strong,
+.agent-class-access-item span,
+.agent-class-access-empty {
+  display: block;
+  font-size: 9px;
+  line-height: 1.35;
+}
+.agent-class-access-item strong {
+  color: var(--text);
+}
+.agent-class-access-item span,
+.agent-class-access-empty {
+  color: var(--text-dim);
 }
 .agent-class-prompt-preview,
 .agent-class-normalized pre {
