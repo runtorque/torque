@@ -205,7 +205,7 @@ function sampleClasses() {
   ];
 }
 
-test('Agent Class manager renders class list, PM caveat, archived disabled preview, and explicit launch command', () => {
+test('Agent Class manager renders class list, PM operator access summary, archived disabled preview, and explicit launch command', () => {
   const { context, document, panel, sendCalls } = createHarness();
   registerClassForm(document);
   run(context, `librarySwitchTab('agent_classes')`);
@@ -222,10 +222,11 @@ test('Agent Class manager renders class list, PM caveat, archived disabled previ
   assert.match(classUi(document, panel), /Product Manager@2/);
   assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
   assert.match(classUi(document, panel), /Advanced\/Internal Agent Profile policy/);
-  assert.match(classUi(document, panel), /class-policy-product-manager@2/);
   assert.match(classUi(document, panel), /draft/);
-  assert.match(classUi(document, panel), /External connectors are separate; Agent Class\/Profile policy does not govern them/);
-  assert.match(classUi(document, panel), /PM authority excludes hire\/dispatch\/merge\/deploy\/admin\/raw tools and direct engineer\/worker messaging/);
+  assert.doesNotMatch(classUi(document, panel), /External connectors/);
+  assert.match(classUi(document, panel), /Product planning and intake class with bounded Torque access/);
+  assert.match(classUi(document, panel), /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
+  assert.match(classUi(document, panel), /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
   assert.doesNotMatch(classUi(document, panel), /agent-class-restrictions[\s\S]*Do not use for live PM dogfood/);
 
   run(context, `agentClassManagerSelect('old-worker')`);
@@ -247,7 +248,7 @@ test('Agent Class manager renders class list, PM caveat, archived disabled previ
   });
 });
 
-test('Agent Class manager presents approved Product Manager dogfood state with compact deduped caveat', () => {
+test('Agent Class manager presents approved Product Manager dogfood state with compact operator access summary', () => {
   const { context, document, panel } = createHarness();
   registerClassForm(document);
   const classes = sampleClasses();
@@ -278,12 +279,12 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
   assert.match(html, /Product Manager@2/);
   assert.match(html, /approved dogfood/);
   assert.match(html, /PM-safe authority/);
-  assert.match(html, /PM authority excludes hire\/dispatch\/merge\/deploy\/admin\/raw tools and direct engineer\/worker messaging/);
-  const caveat = 'External connectors are separate; Agent Class/Profile policy does not govern them.';
-  assert.equal(countText(html, caveat), 1);
+  assert.match(html, /Product planning and intake class with bounded Torque access/);
+  assert.match(html, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
+  assert.match(html, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
+  assert.doesNotMatch(html, /External connectors/);
   assert.doesNotMatch(html, /agent-class-issues[\s\S]*External connector exposure/);
   assert.doesNotMatch(html, /agent-class-restrictions/);
-  assert.match(html, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
 });
 
 test('Agent Class authoring validates before save, shows validation issues, and archives/deletes custom classes', async () => {

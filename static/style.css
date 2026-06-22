@@ -13948,7 +13948,31 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   overflow-wrap: anywhere;
 }
 .agent-class-compact-caveat {
-  color: var(--amber);
+  color: var(--text-dim);
+}
+.agent-class-compact-access {
+  display: grid;
+  gap: 4px;
+}
+.agent-class-compact-access div {
+  display: grid;
+  grid-template-columns: minmax(44px, max-content) 1fr;
+  gap: 6px;
+  align-items: baseline;
+}
+.agent-class-compact-access span {
+  font-size: 8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-class-compact-access strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 9px;
+  line-height: 1.35;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .agent-profile-scratch-warning,
 .agent-profile-warning-list {

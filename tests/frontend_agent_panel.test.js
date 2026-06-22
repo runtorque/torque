@@ -3681,7 +3681,10 @@ test('agent class manager assigns Product Manager as desired and renders effecti
 
   context.agentPanelSelectClass('blueprint', 'product-manager');
   assert.match(classModalBody.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
-  assert.match(classModalBody.innerHTML, /External connectors are separate; Agent Class\/Profile policy does not govern them/);
+  assert.doesNotMatch(classModalBody.innerHTML, /External connectors/);
+  assert.match(classModalBody.innerHTML, /Product planning and intake class with bounded Torque access/);
+  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
+  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
   context.renderAgentPanel();
   assert.equal(classModal.classList.contains('visible'), true, 'routine rerender keeps Change Class modal open');
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
@@ -3744,7 +3747,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.equal(classModal.classList.contains('visible'), false);
 });
 
-test('agent panel renders Product Manager dogfood state as compact deduped class policy UI', () => {
+test('agent panel renders Product Manager dogfood state as compact operator access policy UI', () => {
   const { context, panel, classModalBody } = createHarness();
   const productManagerClass = {
     id: 'product-manager',
@@ -3810,14 +3813,16 @@ test('agent panel renders Product Manager dogfood state as compact deduped class
   assert.match(panel.innerHTML, /agent-class-compact-status/);
   assert.match(panel.innerHTML, /approved dogfood/);
   assert.match(panel.innerHTML, /PM-safe authority/);
-  assert.match(panel.innerHTML, /PM authority excludes hire\/dispatch\/merge\/deploy\/admin\/raw tools and direct engineer\/worker messaging/);
-  const caveat = 'External connectors are separate; Agent Class/Profile policy does not govern them.';
-  assert.equal(countText(panel.innerHTML, caveat), 1);
+  assert.match(panel.innerHTML, /Product planning and intake class with bounded Torque access/);
+  assert.match(panel.innerHTML, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
+  assert.match(panel.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
+  assert.doesNotMatch(panel.innerHTML, /External connectors/);
   assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
   assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.doesNotMatch(panel.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
+  assert.doesNotMatch(panel.innerHTML, /class-policy-product-manager|Product Manager internal policy|default full-architect|differs from desired/);
 
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   context.agentPanelReceiveAgentClasses({
@@ -3826,8 +3831,9 @@ test('agent panel renders Product Manager dogfood state as compact deduped class
     issues: [],
   });
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
-  assert.match(classModalBody.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
-  assert.equal(countText(panel.innerHTML, caveat), 1);
+  assert.match(classModalBody.innerHTML, /Policy source[\s\S]*Managed by Agent Class: Product Manager/);
+  assert.doesNotMatch(classModalBody.innerHTML, /class-policy-product-manager|Product Manager internal policy|differs from desired default/);
+  assert.doesNotMatch(panel.innerHTML, /External connectors/);
   assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
   assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
 });

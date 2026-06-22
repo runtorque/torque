@@ -1269,10 +1269,8 @@ function agentClassManagerReceiveLaunchResult(msg) {
   var agent = msg.agent || msg;
   var status = (agent && agent.agent_class_status) || {};
   var classId = status.effective_class_id || (msg.agent_class && msg.agent_class.id) || '';
-  var profileStatus = (agent && agent.agent_profile_status) || {};
-  var profileId = profileStatus.effective_profile_id || status.next_launch_profile_id || '';
   if (typeof _showToast === 'function' && classId) {
-    _showToast('Launched ' + (agent.kind || msg.base_kind || 'agent') + ' with Agent Class ' + classId + (profileId ? (' (internal policy ' + profileId + ')') : '') + '.', 'success');
+    _showToast('Launched ' + (agent.kind || msg.base_kind || 'agent') + ' with Agent Class ' + classId + '.', 'success');
   }
   if (_libraryActiveTab === 'agent_classes') renderAgentClassesPanel();
 }
@@ -1577,7 +1575,6 @@ function _agentClassPreviewHtml(preview, validation) {
   html += '<span>' + esc(status) + '</span>';
   if (preview.scratch_only || (preview.draft && preview.draft.scratch_only)) html += '<span>scratch-only</span>';
   if (_agentClassIsArchived(preview)) html += '<span>archived</span>';
-  if (preview.external_connector_caveat && !isProductManager) html += '<span>external connector caveat</span>';
   html += '</div></div>';
   if (preview.description) html += '<div class="agent-class-preview-description">' + esc(preview.description) + '</div>';
   var prompt = preview.prompt_summary || {};
@@ -1604,14 +1601,10 @@ function _agentClassPreviewHtml(preview, validation) {
     for (var i = 0; i < preview.restrictions.length; i++) html += '<li>' + esc(preview.restrictions[i]) + '</li>';
     html += '</ul></div>';
   }
-  if (preview.external_connector_caveat && !isProductManager) {
-    html += '<div class="agent-class-caveat">' + esc(_agentClassConnectorCaveat(preview)) + '</div>';
-  }
   if (preview.source_path) html += '<div class="agent-class-storage">Source: <code>' + esc(preview.source_path) + '</code></div>';
   if (validation && validation.normalized) {
     html += '<details class="agent-class-normalized"><summary>Normalized preview</summary><pre>' + esc(JSON.stringify(validation.normalized, null, 2)) + '</pre></details>';
   }
-  html += _agentClassInternalPolicyPreviewHtml(preview, profile, ref);
   html += _agentClassLaunchBoxHtml(preview, disabledReason);
   html += '</div>';
   return html;
@@ -1670,29 +1663,21 @@ function _agentClassDogfoodApproved(item) {
 }
 
 function _agentClassConnectorCaveat(item) {
-  item = item || {};
-  if (item.external_connector_caveat || _agentClassIsProductManager(item)) {
-    return 'External connectors: manage separately from Agent Class/Profile policy.';
-  }
-  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
-  for (var i = 0; i < warnings.length; i++) {
-    if (_agentClassIsExternalConnectorNotice(warnings[i])) {
-      return 'External connectors: manage separately from Agent Class/Profile policy.';
-    }
-  }
+  // Normal Agent Class library/editor surfaces omit connector-governance copy.
+  // Connector access is managed outside this UI and is not an actionable class
+  // warning in ordinary selection/editing flows.
   return '';
 }
 
 function _agentClassUniqueWarnings(item) {
   item = item || {};
   var warnings = Array.isArray(item.warnings) ? item.warnings : [];
-  var hasCaveat = !!_agentClassConnectorCaveat(item);
   var seen = {};
   var out = [];
   for (var i = 0; i < warnings.length; i++) {
     var text = String(warnings[i] || '').trim();
     if (!text) continue;
-    if (hasCaveat && _agentClassIsExternalConnectorNotice(text)) continue;
+    if (_agentClassIsExternalConnectorNotice(text)) continue;
     var key = _agentClassNoticeKey(text);
     if (!key || seen[key]) continue;
     seen[key] = true;
@@ -1704,7 +1689,6 @@ function _agentClassUniqueWarnings(item) {
 function _agentClassProductManagerCompactPolicyHtml(item) {
   item = item || {};
   var approved = _agentClassDogfoodApproved(item);
-  var caveat = _agentClassConnectorCaveat(item);
   var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="product-manager">';
   html += '<div class="agent-class-compact-chips">';
   html += '<span>Product Manager</span>';
@@ -1714,9 +1698,12 @@ function _agentClassProductManagerCompactPolicyHtml(item) {
   html += '<span>Architect base metadata only</span>';
   html += '</div>';
   html += '<div class="agent-class-compact-note">'
-    + 'PM authority excludes hire/dispatch/merge/deploy/admin/raw tools and direct engineer/worker messaging.'
+    + 'Product planning and intake class with bounded Torque access.'
     + '</div>';
-  if (caveat) html += '<div class="agent-class-compact-caveat">' + esc(caveat) + '</div>';
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>planning reads/writes, proposed decisions, queued task intake, user + peer Architect coordination</strong></div>'
+    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, raw tools, direct Engineer/Worker messages</strong></div>'
+    + '</div>';
   html += '</div>';
   return html;
 }
@@ -1771,12 +1758,11 @@ function _agentClassLaunchResultHtml(msg) {
   msg = msg || {};
   var agent = msg.agent || msg;
   var classStatus = (agent && agent.agent_class_status) || {};
-  var profileStatus = (agent && agent.agent_profile_status) || {};
-  if (!classStatus.effective_class_id && !profileStatus.effective_profile_id) return '';
+  if (!classStatus.effective_class_id) return '';
   var html = '<div class="agent-class-launch-result">';
   html += '<div><span>Launched</span><strong>' + esc((agent.kind || msg.base_kind || 'agent') + ' ' + (agent.name || agent.id || '')) + '</strong></div>';
   html += '<div><span>Frozen class</span><strong>' + esc((classStatus.effective_class_id || '—') + _agentClassVersionSuffix(classStatus.effective_class_version)) + '</strong></div>';
-  html += '<div><span>Frozen internal policy</span><strong>' + esc((profileStatus.effective_profile_id || classStatus.next_launch_profile_id || '—') + _agentClassVersionSuffix(profileStatus.effective_profile_version)) + '</strong></div>';
+  html += '<div><span>Status</span><strong>Class access policy applied</strong></div>';
   html += '</div>';
   return html;
 }
@@ -2227,11 +2213,9 @@ function _agentClassPickerHint(kind, state) {
   var item = state.item || _agentClassById(selected);
   if (!item) return state.reason || 'Selected Agent Class is not loaded yet.';
   var reason = state.reason || _agentClassLaunchDisabledReason(item, kind);
-  var ref = item.agent_profile_ref || {};
   if (reason) return reason;
   return 'Launch freezes ' + _agentClassDisplayName(item, selected) + _agentClassVersionSuffix(item.version)
     + ' as the primary Agent Class identity'
-    + (ref.id ? (' with internal policy ' + ref.id + _agentClassVersionSuffix(ref.version)) : '')
     + '.';
 }
 

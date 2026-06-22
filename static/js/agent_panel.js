@@ -1457,29 +1457,21 @@ function _agentPanelClassDogfoodApproved(item) {
 }
 
 function _agentPanelClassConnectorCaveat(item) {
-  item = item || {};
-  if (item.external_connector_caveat || _agentPanelClassIsProductManager(item)) {
-    return 'External connectors: manage separately from Agent Class/Profile policy.';
-  }
-  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
-  for (var i = 0; i < warnings.length; i++) {
-    if (_agentPanelIsExternalConnectorNotice(warnings[i])) {
-      return 'External connectors: manage separately from Agent Class/Profile policy.';
-    }
-  }
+  // Normal Agent Class surfaces intentionally omit connector-governance copy.
+  // Connector access is managed outside this UI; avoid presenting it as an
+  // actionable Agent Class warning.
   return '';
 }
 
 function _agentPanelClassUniqueWarnings(item) {
   item = item || {};
   var warnings = Array.isArray(item.warnings) ? item.warnings : [];
-  var hasCaveat = !!_agentPanelClassConnectorCaveat(item);
   var seen = {};
   var out = [];
   for (var i = 0; i < warnings.length; i++) {
     var text = String(warnings[i] || '').trim();
     if (!text) continue;
-    if (hasCaveat && _agentPanelIsExternalConnectorNotice(text)) continue;
+    if (_agentPanelIsExternalConnectorNotice(text)) continue;
     var key = _agentPanelClassNoticeKey(text);
     if (!key || seen[key]) continue;
     seen[key] = true;
@@ -1491,7 +1483,6 @@ function _agentPanelClassUniqueWarnings(item) {
 function _agentPanelProductManagerCompactPolicyHtml(item) {
   item = item || {};
   var approved = _agentPanelClassDogfoodApproved(item);
-  var caveat = _agentPanelClassConnectorCaveat(item);
   var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="product-manager">';
   html += '<div class="agent-class-compact-chips">';
   html += '<span class="agent-profile-chip agent-class-compact-chip">Product Manager</span>';
@@ -1503,11 +1494,12 @@ function _agentPanelProductManagerCompactPolicyHtml(item) {
   html += '<span class="agent-profile-chip agent-class-compact-chip">Architect base metadata only</span>';
   html += '</div>';
   html += '<div class="agent-class-compact-note">'
-    + 'PM authority excludes hire/dispatch/merge/deploy/admin/raw tools and direct engineer/worker messaging.'
+    + 'Product planning and intake class with bounded Torque access.'
     + '</div>';
-  if (caveat) {
-    html += '<div class="agent-class-compact-caveat">' + _agentPanelEsc(caveat) + '</div>';
-  }
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>planning reads/writes, proposed decisions, queued task intake, user + peer Architect coordination</strong></div>'
+    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, raw tools, direct Engineer/Worker messages</strong></div>'
+    + '</div>';
   html += '</div>';
   return html;
 }
@@ -1789,9 +1781,6 @@ function _agentPanelClassBadgeHtml(agent) {
     titleParts.push('desired next launch: ' + state.desiredLabel + _agentPanelClassVersionSuffix(state.desiredVersion));
   }
   var snapshot = _agentPanelClassSnapshot(agent);
-  if (snapshot.agent_profile_ref && snapshot.agent_profile_ref.id) {
-    titleParts.push('internal policy: ' + snapshot.agent_profile_ref.id + _agentPanelClassVersionSuffix(snapshot.agent_profile_ref.version));
-  }
   var badgeWarnings = _agentPanelClassIsProductManager(snapshot)
     ? []
     : _agentPanelClassUniqueWarnings(snapshot);
@@ -1806,6 +1795,22 @@ function _agentPanelClassBadgeHtml(agent) {
 function _agentPanelProfileBadgeHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
   var profileState = _agentPanelProfileState(agent);
+  if (profileState.managedByClass && !profileState.pending) {
+    var managedStatus = 'full';
+    var managedSnapshot = (agent.effective_agent_profile_snapshot && typeof agent.effective_agent_profile_snapshot === 'object')
+      ? agent.effective_agent_profile_snapshot
+      : {};
+    managedStatus = String(managedSnapshot.status || managedSnapshot.lifecycle || 'full').trim() || 'full';
+    var managedStatusClass = managedStatus.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
+    var managedLabel = 'Managed by Agent Class';
+    var managedTitle = 'Agent Class manages this internal access policy: '
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+    return '<span class="agent-profile-badge agent-profile-badge-' + _agentPanelEsc(managedStatusClass) + '" title="'
+      + _agentPanelEsc(managedTitle)
+      + '">'
+      + _agentPanelEsc(managedLabel)
+      + '</span>';
+  }
   var displayId = profileState.effectiveId || profileState.desiredId || profileState.assignedId;
   var kind = profileState.kind;
   if (!displayId) return '';
@@ -3082,16 +3087,16 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
     desiredLabel = assignedId + _agentPanelProfileVersionSuffix(assignedVersion);
   } else if (profileState.managedByClass) {
     desiredLabel = 'Managed by Agent Class: '
-      + (profileState.managedByClassLabel || profileState.managedByClassId || '—')
-      + ' (internal policy '
-      + (profileState.desiredId || '—')
-      + _agentPanelProfileVersionSuffix(profileState.desiredVersion)
-      + ')';
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
   } else {
     desiredLabel = 'default ' + (defaultId || ('full-' + kind));
   }
   var effectiveLabel = (effectiveName || effectiveId || '—')
     + _agentPanelProfileVersionSuffix(effectiveVersion);
+  if (profileState.managedByClass && !pending) {
+    effectiveLabel = 'Managed by Agent Class: '
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+  }
   var pendingMetaLabel = (!pending && profileState.managedByClass)
     ? 'Policy source'
     : 'Pending';
@@ -3413,14 +3418,12 @@ function _agentPanelClassSelectionHint(agent, selection) {
   }
   if (!selection.ok) return selection.reason || 'Choose a launchable Agent Class or Default (no explicit Agent Class).';
   var item = selection.item || {};
-  var ref = item.agent_profile_ref || {};
   return 'Next relaunch freezes '
     + _agentPanelClassDisplayName(item, selection.selectedId)
     + _agentPanelClassVersionSuffix(item.version)
     + ' as the primary identity; '
     + _agentPanelClassSecondaryLabel(item, kind)
     + ' remains secondary/base-kind metadata'
-    + (ref.id ? (' with internal policy ' + ref.id + _agentPanelClassVersionSuffix(ref.version)) : '')
     + '.';
 }
 
@@ -3521,15 +3524,11 @@ function _agentPanelClassPreviewHtml(agent, ui) {
   if (item.scratch_only || (item.draft && item.draft.scratch_only)) {
     html += '<span class="agent-profile-chip agent-profile-chip-draft">scratch-only</span>';
   }
-  if (item.external_connector_caveat && !_agentPanelClassIsProductManager(item)) {
-    html += '<span class="agent-profile-chip agent-profile-chip-pending">external connector caveat</span>';
-  }
   html += '</div></div>';
   html += '<div class="agent-profile-next-launch-note">'
     + _agentPanelEsc(_agentPanelClassSelectionHint(agent, selection))
     + '</div>';
   html += _agentPanelClassWarningsHtml(item);
-  html += _agentPanelClassInternalPolicyHtml(item);
   return html + '</div>';
 }
 
