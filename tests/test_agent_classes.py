@@ -11,7 +11,6 @@ except ModuleNotFoundError:
 install_aiohttp_stub()
 
 from torque.agent_classes import (
-    EXTERNAL_CONNECTOR_DRAFT_WARNING,
     agent_class_context_for_cell,
     agent_class_prompt_block_for_cell,
     agent_class_definition_by_id,
@@ -77,21 +76,33 @@ class AgentClassRegistryTests(unittest.TestCase):
 
         preview = enriched_agent_class_preview(pm, base_dir=str(self.project))
 
-        self.assertEqual(preview["status"], "draft")
+        self.assertEqual(preview["status"], "restricted")
         self.assertEqual(preview["display_name"], "Product Manager")
         self.assertEqual(preview["primary_identity_label"], "Product Manager")
         self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
+        self.assertEqual(preview["lifecycle"], "stable")
         self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "2"})
         self.assertEqual(preview["agent_profile"]["id"], "class-policy-product-manager")
+        self.assertEqual(preview["agent_profile"]["status"], "restricted")
         self.assertEqual(preview["internal_policy"]["mode"], "compile")
         self.assertEqual(preview["internal_policy"]["profile_source"], "compiled_from_agent_class")
         self.assertFalse(preview["internal_policy"]["generated_profile_written_to_project_yaml"])
-        self.assertTrue(preview["draft"]["scratch_only"])
+        self.assertEqual(preview["draft"], {})
+        self.assertTrue(preview["metadata"]["approved_for_live_dogfood"])
+        self.assertEqual(preview["metadata"]["permanence_state"], "dogfood_permanent")
+        self.assertEqual(
+            preview["product_manager_status"]["authority_model"],
+            "pm_safe_restricted",
+        )
+        self.assertTrue(preview["product_manager_status"]["approved_for_live_dogfood"])
+        self.assertFalse(preview["product_manager_status"]["raw_architect_authority"])
         self.assertIn("external_connector_caveat", preview)
         warnings = "\n".join(preview["warnings"])
-        self.assertIn("draft/restricted", warnings)
+        self.assertIn("approved for live dogfood", warnings)
+        self.assertIn("authority-bounded", warnings)
         self.assertIn("architect_product_*", warnings)
-        self.assertIn(EXTERNAL_CONNECTOR_DRAFT_WARNING, preview["warnings"])
+        self.assertNotIn("draft/restricted until explicit live-dogfood approval", warnings)
+        self.assertNotIn("External connector exposure is not enforced", warnings)
         categories = {
             entry["category"]: entry
             for entry in preview["agent_profile"]["projected_tool_categories"]
@@ -375,6 +386,9 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertEqual(snapshot["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "2"})
         self.assertEqual(snapshot["agent_profile"]["id"], "class-policy-product-manager")
         self.assertEqual(snapshot["internal_policy"]["mode"], "compile")
+        self.assertEqual(snapshot["status"], "restricted")
+        self.assertTrue(snapshot["product_manager_status"]["approved_for_live_dogfood"])
+        self.assertEqual(snapshot["product_manager_status"]["authority_model"], "pm_safe_restricted")
         self.assertEqual(cell.effective_agent_class_id, "product-manager")
         self.assertEqual(cell.effective_agent_profile_id, "class-policy-product-manager")
         self.assertEqual(cell.effective_agent_profile_version, "2")

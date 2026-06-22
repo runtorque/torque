@@ -1056,6 +1056,12 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
     profile_id = str(preview.get("id", "") or "").strip()
     lifecycle = str(preview.get("lifecycle", "") or "").strip().lower()
     status = _profile_status_from_preview(preview)
+    metadata = preview.get("metadata", {}) if isinstance(preview.get("metadata"), dict) else {}
+    generated_by = metadata.get("generated_by_agent_class", {}) if isinstance(metadata, dict) else {}
+    generated_by_product_manager = (
+        isinstance(generated_by, dict)
+        and str(generated_by.get("id", "") or "").strip() == "product-manager"
+    )
     if lifecycle and lifecycle != "stable":
         warnings.append(
             f"{profile_id or 'profile'} is lifecycle={lifecycle}; use only for preview/testing unless explicitly approved."
@@ -1069,9 +1075,14 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
             warnings.append(
                 "product-manager-draft is a legacy/internal scratch-only Product Manager profile; prefer the Product Manager Agent Class for next-launch assignment."
             )
-        warnings.append(
-            "Product Manager policy is draft/restricted until explicit live-dogfood approval; do not use it for Blueprint replacement."
-        )
+        if generated_by_product_manager and lifecycle == "stable":
+            warnings.append(
+                "Product Manager internal policy is approved for bounded live dogfood through the Agent Class, but remains restricted/PM-safe rather than full Architect authority."
+            )
+        else:
+            warnings.append(
+                "Product Manager policy is draft/restricted until explicit live-dogfood approval; do not use it for Blueprint replacement."
+            )
         warnings.append(
             "Raw Architect tools are denied for Product Manager-style profiles; use architect_product_* wrappers only."
         )

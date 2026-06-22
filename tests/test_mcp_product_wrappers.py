@@ -25,16 +25,25 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.state = self.state_mod.MatrixState(db=self.db)
         self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
         self.state.groups["g"] = []
+        self.state.groups["other"] = []
         self.calls = []
 
         self.architect = self._add_agent("architect-1", "Architect", kind="architect")
-        self.peer = self._add_agent("architect-2", "Peer", kind="architect")
+        self.peer = self._add_agent("architect-2", "Productmind", kind="architect")
+        self.torqly = self._add_agent("a5a7fc9e", "Torqly", kind="architect")
+        self.cross_group_architect = self._add_agent(
+            "architect-other",
+            "Other Group Architect",
+            kind="architect",
+            group="other",
+        )
         self.engineer = self._add_agent(
             "engineer-1",
             "Engineer",
             kind="engineer",
             hired_by_architect_id=self.architect.id,
         )
+        self.worker = self._add_agent("worker-1", "Worker", kind="worker")
         self.state.assign_agent_class(
             self.architect.id,
             "product-manager",
@@ -49,17 +58,17 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             self.peer.id: "product-manager-draft",
         }
 
-    def _add_agent(self, agent_id, name, *, kind="architect", **kwargs):
+    def _add_agent(self, agent_id, name, *, kind="architect", group="g", **kwargs):
         cell = self.state_mod.AgentCell(
             id=agent_id,
             name=name,
-            group="g",
+            group=group,
             cell_type="agent",
             kind=kind,
             **kwargs,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups.setdefault("g", []).append(cell.id)
+        self.state.groups.setdefault(group, []).append(cell.id)
         self.state._db_save_agent(cell)
         return cell
 
@@ -117,6 +126,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         for name in {
             "torque_context",
             "architect_product_task_propose",
+            "architect_product_peer_list",
             "architect_product_peer_message",
             "architect_product_peer_inbox",
             "architect_product_peer_reply",
@@ -132,14 +142,21 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         denied = {
             "architect_tool_search",
             "architect_engineer_hire",
+            "architect_engineer_rehire",
+            "architect_engineer_dismiss",
+            "architect_engineer_set_specializations",
             "architect_pending_hire_list",
             "architect_task_create",
             "architect_task_update",
             "architect_task_move",
+            "architect_task_reassign",
             "architect_engineer_message",
             "architect_engineer_feedback_request",
             "architect_behavior_overlay_read",
             "architect_behavior_overlay_approve",
+            "architect_deploy_state",
+            "architect_get_architect_settings",
+            "architect_mcp_calls",
             "architect_board_summary",
             "architect_task_list",
             "architect_task_show",
@@ -439,9 +456,150 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listed_initiative["links"]["decisions"], [product_decision["id"]])
         self.assertEqual(listed_initiative["linked_decisions"]["hidden_count"], 1)
 
+    async def test_product_peer_list_and_message_include_same_group_full_architect_with_anchors(self):
+        product_task = self.state.board_add_task(
+            "TORQUE:909 Product Manager permanence",
+            "g",
+            lane="Backlog",
+            id="TORQUE:909",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=self.architect.id,
+        )
+        self.assertIsNotNone(product_task)
+        decision = self.state.save_decision({
+            "id": "decision-54e82d9a220f",
+            "architect_id": self.architect.id,
+            "title": "Product Manager permanence proposal",
+            "rationale": "Proposed product scope for PM dogfood state.",
+            "status": "proposed",
+            "linked_task_ids": ["TORQUE:909"],
+            "metadata": {
+                "product_manager": {
+                    "marker": "torque.product_decision.v1",
+                    "owner_architect_id": self.architect.id,
+                    "proposed_only": True,
+                },
+            },
+        })
+        self.assertIsNotNone(decision)
+
+        peer_list = await self._call("architect_product_peer_list", {}, req_id=2)
+        peers = self._result_payload(peer_list)["architects"]
+        peer_ids = {item["id"] for item in peers}
+
+        self.assertIn(self.peer.id, peer_ids)
+        self.assertIn("a5a7fc9e", peer_ids)
+        torqly = next(item for item in peers if item["id"] == "a5a7fc9e")
+        self.assertEqual("same-group-architect-peer-capable", torqly["product_peer_scope"])
+        self.assertNotIn(self.cross_group_architect.id, peer_ids)
+        self.assertNotIn(self.engineer.id, peer_ids)
+        self.assertNotIn(self.worker.id, peer_ids)
+
+        sent = await self._call(
+            "architect_product_peer_message",
+            {
+                "architect_id": "a5a7fc9e",
+                "message": "Torqly, please review the PM permanence proposal.",
+                "context_task_ids": ["TORQUE:909"],
+                "context_decision_ids": ["decision-54e82d9a220f"],
+                "context_summary": "Product-scoped PM permanence/TORQUE:909 handoff.",
+            },
+            req_id=3,
+        )
+        payload = self._result_payload(sent)
+        self.assertEqual("a5a7fc9e", payload["recipient_architect_id"])
+        saved = self.db.load_agent_peer_message(payload["message_id"])
+        self.assertEqual(["TORQUE:909"], saved["context_task_ids"])
+        self.assertEqual(["decision-54e82d9a220f"], saved["context_decision_ids"])
+        self.assertEqual(
+            "torque.product_peer.v1",
+            saved["context_snapshot"]["product_peer"]["marker"],
+        )
+        self.assertEqual(
+            "torque.product_context.v1",
+            saved["context_snapshot"]["product_context"]["marker"],
+        )
+        self.assertEqual(1, len(self.calls))
+        self.assertEqual("inject_mcp_message", self.calls[0]["cmd"])
+        self.assertEqual("a5a7fc9e", self.calls[0]["agent_id"])
+
+    async def test_product_peer_message_denies_cross_group_non_architect_and_mixed_context_before_side_effects(self):
+        product_task = self.state.board_add_task(
+            "PM anchor",
+            "g",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=self.architect.id,
+        )
+        self.assertIsNotNone(product_task)
+        attempts = [
+            (
+                {
+                    "architect_id": self.cross_group_architect.id,
+                    "message": "cross group",
+                    "context_task_ids": [product_task.id],
+                },
+                "scope",
+            ),
+            (
+                {
+                    "architect_id": self.engineer.id,
+                    "message": "engineer",
+                    "context_task_ids": [product_task.id],
+                },
+                "Architect not found",
+            ),
+            (
+                {
+                    "architect_id": self.worker.id,
+                    "message": "worker",
+                    "context_task_ids": [product_task.id],
+                },
+                "Architect not found",
+            ),
+            (
+                {
+                    "architect_id": self.torqly.id,
+                    "message": "mixed context",
+                    "context_task_ids": [product_task.id],
+                    "context_engineer_ids": [self.engineer.id],
+                },
+                "context_engineer_ids",
+            ),
+        ]
+
+        for index, (args, expected) in enumerate(attempts, start=30):
+            before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
+            before_calls = list(self.calls)
+            response = await self._call(
+                "architect_product_peer_message",
+                args,
+                req_id=index,
+            )
+            self.assertIn(expected, self._error_text(response))
+            self.assertEqual(
+                [row["id"] for row in before_rows],
+                [row["id"] for row in self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)],
+            )
+            self.assertEqual(before_calls, self.calls)
+
     async def test_product_peer_threads_are_marker_filtered_and_ack_requires_anchor(self):
         task_resp = await self._call("architect_product_task_propose", {"title": "Anchor task"})
         task_id = self._result_payload(task_resp)["id"]
+
+        before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
+        before_calls = list(self.calls)
+        unanchored = await self._call(
+            "architect_product_peer_message",
+            {"architect_id": self.torqly.id, "message": "unanchored product peer"},
+            req_id=20,
+        )
+        self.assertIn("product-scope anchor", self._error_text(unanchored))
+        self.assertEqual(
+            [row["id"] for row in before_rows],
+            [row["id"] for row in self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)],
+        )
+        self.assertEqual(before_calls, self.calls)
 
         no_anchor = await self._call(
             "architect_product_peer_message",

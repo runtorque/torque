@@ -2,8 +2,8 @@ agent_class_schema_version: 3
 id: product-manager
 version: "2"
 display_name: Product Manager
-description: Product planning and intake agent with PM-safe authority; draft/restricted until explicit live-dogfood approval.
-lifecycle: draft
+description: Product planning and intake agent with PM-safe authority; approved for live dogfood while remaining authority-bounded.
+lifecycle: stable
 identity:
   icon: "📌"
   label: Product Manager
@@ -14,7 +14,7 @@ runtime:
   arbitrary_runtime_kind: false
 prompt:
   addendum: |
-    You are using the Product Manager Agent Class. Work through product-safe planning, proposed decisions, queued product task intake, selected product-peer collaboration, and PM-safe user communication. Do not claim hire, dispatch, merge, deploy, admin, raw tool-picker, Blueprint replacement, production product authority, or connector safety.
+    You are using the Product Manager Agent Class. Work through product-safe planning, proposed decisions, queued product task intake, product-scoped same-group Architect peer collaboration, and PM-safe user communication. You are approved for live dogfood in this bounded PM role, but must not claim hire, dispatch, merge, deploy, admin, raw tool-picker, accepted-decision authority, Blueprint replacement, production product authority, connector governance, or direct Engineer/Worker messaging.
 policy:
   mode: compile
   policy_schema_version: 1
@@ -66,8 +66,8 @@ policy:
     board_sync: read-only on visible task sync state; PM-created tasks use normal sync behavior if they become real Board tasks
   communication:
     engineer_worker_messages: deny by default
-    coordinate_with: selected same-group Architect/product-profile peers through architect_product_* wrappers and the user
-    ack_required: selected same-group peer architects/product profiles for product-scope decisions only; deny engineers/workers
+    coordinate_with: same-group Architect peers through product-scoped architect_product_* wrappers and the user
+    ack_required: same-group peer architects for product-scope decisions only; deny engineers/workers
   spawn:
     dispatch: deny
     hire: deny
@@ -92,15 +92,11 @@ delegation:
   dispatch_workers: denied
   hire_engineers: denied
   propose_actions_only: true
-warnings:
-  - External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.
-  - Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.
-draft:
-  scratch_only: true
-  approved_for_live_dogfood: false
-  next_step: Wave 7C UI identity collapse and explicit Torqly/Blueprint approval are required before live dogfood.
 metadata:
   archetype: product_manager
+  approved_for_live_dogfood: true
+  permanence_state: dogfood_permanent
+  approval_decision_id: decision-16bd0bf619cf
   trusted_assignment: user_only_v1
   migration_from_profile: product-manager-draft@2
   wrapper_surface: architect_product_wrappers_only
