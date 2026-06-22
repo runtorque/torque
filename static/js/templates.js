@@ -1556,8 +1556,6 @@ function _agentClassProfileOptionsHtml(kind, selectedId) {
 function _agentClassPreviewHtml(preview, validation) {
   preview = preview || {};
   var status = _agentClassStatus(preview);
-  var ref = preview.agent_profile_ref || {};
-  var profile = preview.agent_profile || _agentClassProfileById(ref.id) || {};
   var disabledReason = _agentClassLaunchDisabledReason(preview, preview.base_kind);
   var isProductManager = _agentClassIsProductManager(preview);
   var primaryLabel = String(preview.primary_identity_label || preview.primary_display_name || _agentClassDisplayName(preview, preview.id || 'Agent Class')).trim();
@@ -1705,29 +1703,6 @@ function _agentClassProductManagerCompactPolicyHtml(item) {
     + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, raw tools, direct Engineer/Worker messages</strong></div>'
     + '</div>';
   html += '</div>';
-  return html;
-}
-
-function _agentClassInternalPolicyPreviewHtml(preview, profile, ref) {
-  preview = preview || {};
-  profile = profile || {};
-  ref = ref || {};
-  var policy = preview.internal_policy && typeof preview.internal_policy === 'object' ? preview.internal_policy : {};
-  var html = '<details class="agent-class-normalized agent-class-internal-policy-preview"><summary>Advanced/Internal Agent Profile policy</summary>';
-  html += '<div class="agent-class-pairing"><div><span>Internal Agent Profile</span><strong>'
-    + esc((ref.id || profile.id || '—') + _agentClassVersionSuffix(ref.version || profile.version))
-    + '</strong></div>';
-  html += '<div><span>Profile status</span><strong>' + esc(profile.status || profile.lifecycle || '—') + '</strong></div>';
-  if (profile.capability_count != null) html += '<div><span>Profile capabilities</span><strong>' + esc(profile.capability_count) + '</strong></div>';
-  html += '<div><span>Runtime enforcement</span><strong>' + esc(preview.runtime_enforcement || 'launch_frozen_agent_class_profile_pairing') + '</strong></div>';
-  if (policy.mode) html += '<div><span>Policy mode</span><strong>' + esc(policy.mode) + '</strong></div>';
-  if (policy.profile_source) html += '<div><span>Policy source</span><strong>' + esc(policy.profile_source) + '</strong></div>';
-  if (policy.generated_profile_written_to_project_yaml !== undefined) {
-    html += '<div><span>Generated profile YAML</span><strong>'
-      + esc(policy.generated_profile_written_to_project_yaml ? 'yes' : 'no')
-      + '</strong></div>';
-  }
-  html += '</div></details>';
   return html;
 }
 

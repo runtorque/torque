@@ -3466,33 +3466,6 @@ function _agentPanelClassWarningsHtml(item) {
   return html;
 }
 
-function _agentPanelClassInternalPolicyHtml(item) {
-  item = item || {};
-  var ref = item.agent_profile_ref || {};
-  var profile = item.agent_profile || item.internal_profile || item.compiled_profile || {};
-  var policy = item.internal_policy && typeof item.internal_policy === 'object' ? item.internal_policy : {};
-  var rows = '';
-  rows += _agentPanelClassMetaLine(
-    'Internal Agent Profile',
-    (ref.id || profile.id || '—') + _agentPanelClassVersionSuffix(ref.version || profile.version)
-  );
-  rows += _agentPanelClassMetaLine('Profile status', String(profile.status || profile.lifecycle || '—'));
-  if (profile.capability_count != null) rows += _agentPanelClassMetaLine('Profile capabilities', profile.capability_count);
-  rows += _agentPanelClassMetaLine('Runtime enforcement', item.runtime_enforcement || 'launch_frozen_agent_class_profile_pairing');
-  if (policy.mode) rows += _agentPanelClassMetaLine('Policy mode', policy.mode);
-  if (policy.profile_source) rows += _agentPanelClassMetaLine('Policy source', policy.profile_source);
-  var generated = policy.generated_profile_written_to_project_yaml;
-  if (generated !== undefined) {
-    rows += _agentPanelClassMetaLine('Generated profile YAML', generated ? 'yes' : 'no');
-  }
-  return '<details class="agent-profile-internal-policy-details">'
-    + '<summary>Advanced/Internal Agent Profile policy</summary>'
-    + '<div class="agent-profile-status-grid agent-class-internal-policy-grid">'
-    + rows
-    + '</div>'
-    + '</details>';
-}
-
 function _agentPanelClassPreviewHtml(agent, ui) {
   var selection = _agentPanelClassSelectionState(agent, ui);
   var state = _agentPanelClassState(agent);
