@@ -1252,14 +1252,57 @@ function _agentClassCapabilityBucketSafeForNormalUi(bucket) {
   return !risk || risk === 'normal' || risk === 'low';
 }
 
+function _agentClassPlainPermissionCopy(text) {
+  text = String(text || '').trim();
+  if (!text) return '';
+  return text
+    .replace(/\bDeny raw tool picker\b/gi, 'No arbitrary tool selection')
+    .replace(/\braw tool picker authority\b/gi, 'arbitrary tool selection')
+    .replace(/\braw tool picker\b/gi, 'arbitrary tool selection')
+    .replace(/\braw tools\b/gi, 'arbitrary tool access')
+    .replace(/\bDeny remaining high-risk operations\b/gi, 'No powerful actions beyond this class')
+    .replace(/\bhigh-risk\/critical operations\b/gi, 'powerful or critical actions')
+    .replace(/\bhigh-risk operations\b/gi, 'powerful actions')
+    .replace(/\bhigh-risk\b/gi, 'powerful')
+    .replace(/\bcapability buckets?\b/gi, 'allowed actions')
+    .replace(/\brestriction buckets?\b/gi, 'limits')
+    .replace(/\bbuckets?\b/gi, 'actions')
+    .replace(/\bMCP call telemetry\b/gi, 'tool activity history')
+    .replace(/\bMCP calls?\b/gi, 'tool activity')
+    .replace(/\bMCP\b/gi, 'tool')
+    .replace(/\bgenerated profiles?\b/gi, 'internal enforcement records')
+    .replace(/\braw atoms?\b/gi, 'low-level permissions')
+    .replace(/\bdefault profiles?\b/gi, 'built-in access settings')
+    .replace(/\bprofile pairing\b/gi, 'internal troubleshooting link')
+    .replace(/\bcompiler\b/gi, 'internal validation')
+    .replace(/\bcompile\b/gi, 'validate');
+}
+
+function _agentClassRiskLabel(risk, restriction) {
+  risk = String(risk || '').trim().toLowerCase();
+  if (!risk || risk === 'normal' || risk === 'low') return '';
+  if (restriction) return 'protective limit';
+  if (risk === 'critical' || risk === 'high') return 'requires extra care';
+  return _agentClassPlainPermissionCopy(risk);
+}
+
 function _agentClassBucketLabel(bucket, fallback) {
   bucket = bucket || {};
-  return String(bucket.label || bucket.display_name || bucket.name || bucket.id || fallback || '').trim();
+  var id = String(bucket.id || '').trim();
+  if (id === 'deny_raw_tool_picker') return 'No arbitrary tool selection';
+  if (id === 'deny_high_risk_operations') return 'No powerful actions beyond this class';
+  if (id === 'deny_class_profile_admin') return 'No permission administration';
+  if (id === 'class_profile_admin') return 'Permission administration';
+  return _agentClassPlainPermissionCopy(bucket.label || bucket.display_name || bucket.name || id || fallback || '');
 }
 
 function _agentClassBucketSummary(bucket) {
   bucket = bucket || {};
-  return String(bucket.summary || bucket.description || '').trim();
+  var id = String(bucket.id || '').trim();
+  if (id === 'deny_raw_tool_picker') return 'Keeps arbitrary tool selection outside this class.';
+  if (id === 'deny_high_risk_operations') return 'Blocks powerful or critical actions that are not explicitly allowed here.';
+  if (id === 'deny_class_profile_admin') return 'Prevents changing Agent Class permissions from this class.';
+  return _agentClassPlainPermissionCopy(bucket.summary || bucket.description || '');
 }
 
 function _agentClassBucketIdsFromCapabilities(capabilities, restriction) {
@@ -1526,7 +1569,7 @@ function renderAgentClassesPanel() {
   html += '<div class="tpled-header agent-class-header">';
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row"><span class="tpled-header-title">Agent Classes</span>' + _libraryTabsHtml() + '</div>';
-  html += '<div class="tpled-header-subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Internal Agent Profile policy is shown only in Advanced/Internal Agent Profile policy sections.</div>';
+  html += '<div class="tpled-header-subtitle">Agent Classes are the operator-facing objects for authoring, selection, and launch. Troubleshooting details stay in Advanced/Internal sections.</div>';
   html += '</div>';
   html += '<div class="tpled-header-controls">';
   html += '<select class="tpled-select" id="agent-class-select" onchange="agentClassManagerSelect(this.value)">';
@@ -1701,7 +1744,7 @@ function _agentClassBucketCheckboxHtml(bucket, selectedSet, readOnly, restrictio
   var domId = 'agent-class-' + (restriction ? 'restriction' : 'capability') + '-bucket-' + _agentClassBucketDomToken(id);
   var label = _agentClassBucketLabel(bucket, id);
   var summary = _agentClassBucketSummary(bucket);
-  var risk = String(bucket.risk || '').trim();
+  var risk = _agentClassRiskLabel(bucket.risk, !!restriction);
   var category = String(bucket.category || '').trim();
   var checked = !!selectedSet[id];
   var html = '<label class="agent-class-bucket-option agent-class-bucket-option-' + esc(restriction ? 'restriction' : 'capability') + '">';
@@ -1728,10 +1771,10 @@ function _agentClassBucketAuthoringHtml(preview, kind, readOnly) {
   var capabilityBuckets = _agentClassVisibleCapabilityBuckets(kind);
   var restrictionBuckets = _agentClassVisibleRestrictionBuckets(kind);
   var hiddenSelected = _agentClassHiddenSelectedBucketIds(preview, kind, false);
-  var html = '<details class="tpled-section agent-class-bucket-section" id="agent-class-bucket-section" open><summary>Purpose and reviewed access buckets</summary>';
-  html += '<div class="agent-class-hint">Only reviewed safe buckets are selectable here. Higher-risk or unconfirmed catalog entries stay disabled in Advanced/Internal until their semantics are separately approved.</div>';
+  var html = '<details class="tpled-section agent-class-bucket-section" id="agent-class-bucket-section" open><summary>Purpose and permissions</summary>';
+  html += '<div class="agent-class-hint">Choose what this class can do. More powerful actions stay in Advanced/Internal for now and cannot be turned on from the normal form.</div>';
   if (!capabilityBuckets.length) {
-    html += '<div class="agent-class-caveat">No safe reviewed capability buckets were returned for this base kind. Refresh Agent Classes or use Advanced/Internal only for troubleshooting existing classes.</div>';
+    html += '<div class="agent-class-caveat">No normal permissions were returned for this class type. Refresh Agent Classes, or use Advanced/Internal only when troubleshooting an existing class.</div>';
   } else {
     html += '<div class="agent-class-bucket-list agent-class-safe-bucket-list">';
     for (var i = 0; i < capabilityBuckets.length; i++) {
@@ -1741,13 +1784,13 @@ function _agentClassBucketAuthoringHtml(preview, kind, readOnly) {
   }
   if (hiddenSelected.length) {
     html += '<div class="agent-class-caveat agent-class-hidden-selected-buckets">'
-      + 'This class already contains non-normal bucket selections preserved for compatibility. They are not selectable in the normal UI: '
+      + 'This class already includes Advanced permissions preserved for compatibility. They cannot be changed in the normal form: '
       + esc(hiddenSelected.join(', '))
       + '</div>';
   }
-  html += '<div class="agent-class-block-title agent-class-restriction-title">Safety restrictions</div>';
+  html += '<div class="agent-class-block-title agent-class-restriction-title">What this class cannot do</div>';
   if (!restrictionBuckets.length) {
-    html += '<div class="agent-class-hint">No explicit restriction buckets are available for this base kind.</div>';
+    html += '<div class="agent-class-hint">No extra limits are available for this class type.</div>';
   } else {
     html += '<div class="agent-class-bucket-list agent-class-restriction-bucket-list">';
     for (var r = 0; r < restrictionBuckets.length; r++) {
@@ -1761,7 +1804,7 @@ function _agentClassBucketAuthoringHtml(preview, kind, readOnly) {
 
 function _agentClassAdvancedBucketDiagnosticsHtml(preview, kind) {
   var catalog = _agentClassCatalogFromContract(false);
-  if (!catalog.length) return '<div class="agent-class-hint">Capability bucket catalog not loaded.</div>';
+  if (!catalog.length) return '<div class="agent-class-hint">Advanced permission catalog not loaded.</div>';
   var visible = {};
   _agentClassVisibleCapabilityBuckets(kind).forEach(function(bucket) { visible[String(bucket.id || '')] = true; });
   var selected = {};
@@ -1776,16 +1819,16 @@ function _agentClassAdvancedBucketDiagnosticsHtml(preview, kind) {
   }
   if (!hidden.length) return '';
   var html = '<div class="agent-class-advanced-bucket-list">';
-  html += '<div class="agent-class-block-title">Advanced/Internal bucket catalog (not normal-selectable)</div>';
-  html += '<div class="agent-class-hint">Shown for audit only. These buckets are disabled here because they are high-risk, Product-Manager-specific, or not yet reviewed for broad operator authoring.</div>';
+  html += '<div class="agent-class-block-title">Advanced/Internal permissions (not available in normal authoring)</div>';
+  html += '<div class="agent-class-hint">Shown for audit only. These powerful actions are disabled here because they need extra care, are Product-Manager-specific, or are not yet available for broad operator authoring.</div>';
   for (var j = 0; j < hidden.length; j++) {
     var item = hidden[j] || {};
     var itemId = String(item.id || '').trim();
     html += '<div class="agent-class-advanced-bucket' + (selected[itemId] ? ' selected' : '') + '">';
     html += '<span>' + esc(_agentClassBucketLabel(item, itemId)) + '</span>';
     html += '<code>' + esc(itemId) + '</code>';
-    html += '<em>' + esc(String(item.risk || 'normal')) + '</em>';
-    if (selected[itemId]) html += '<strong>selected in saved class</strong>';
+    html += '<em>' + esc(_agentClassRiskLabel(item.risk, false) || 'standard') + '</em>';
+    if (selected[itemId]) html += '<strong>already enabled in this saved class</strong>';
     html += '</div>';
   }
   html += '</div>';
@@ -1826,7 +1869,7 @@ function _agentClassEditorFormHtml(preview) {
   var title = _agentClassEditorNew ? 'Create project Agent Class' : (isBuiltin ? 'Built-in Agent Class' : (archived ? 'Archived Agent Class' : 'Edit project Agent Class'));
   var html = '<div class="agent-class-form tpled-form">';
   html += '<div class="agent-class-form-head"><div><div class="agent-class-form-title">' + esc(title) + '</div>';
-  html += '<div class="agent-class-form-subtitle">Class-first authoring: describe the purpose, then choose reviewed operator-language access buckets. Internal policy details stay in Advanced/Internal.</div></div></div>';
+  html += '<div class="agent-class-form-subtitle">Class-first authoring: describe the purpose, then choose what this class can do and what it cannot do. Troubleshooting details stay in Advanced/Internal.</div></div></div>';
   if (readOnly) {
     html += '<div class="agent-class-readonly-note">' + esc(isBuiltin ? 'Built-in classes are read-only. Duplicate into a project class to customize.' : 'Archived classes stay visible for audit/preview but cannot be edited or launched here.') + '</div>';
   }
@@ -1850,9 +1893,9 @@ function _agentClassEditorFormHtml(preview) {
   html += '<label>Additive prompt/class instructions</label><textarea id="agent-class-prompt" rows="6" ' + (readOnly ? 'readonly ' : '') + 'oninput="_tplAutoResize(this);agentClassManagerMarkDirty()" placeholder="Optional additive context appended after the base-kind prompt.">' + esc(preview.prompt || '') + '</textarea>';
   html += '</details>';
   html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal diagnostics and backcompat policy</summary>';
-  html += '<div class="agent-class-hint">Advanced/backcompat only: direct internal policy pairing is for troubleshooting existing classes. Normal authoring uses the reviewed buckets above.</div>';
+  html += '<div class="agent-class-hint">Advanced/backcompat only: direct troubleshooting links are for existing classes. Normal authoring uses the permissions above.</div>';
   html += _agentClassAdvancedBucketDiagnosticsHtml(preview, kind);
-  html += '<div class="agent-class-hint">Internal Agent Profile pairing for legacy/wrapped classes:</div>';
+  html += '<div class="agent-class-hint">Legacy/wrapped internal profile link:</div>';
   html += '<label>Internal Agent Profile</label><select id="agent-class-profile-id" ' + (readOnly ? 'disabled ' : '') + 'onchange="agentClassManagerProfileChanged()">' + _agentClassProfileOptionsHtml(kind, ref.id) + '</select>';
   html += '<input id="agent-class-profile-version" value="' + esc(ref.version || _agentClassProfileVersion(ref.id, '')) + '" ' + (readOnly ? 'readonly ' : '') + 'oninput="agentClassManagerMarkDirty()" autocomplete="off" placeholder="profile version">';
   if (_agentClassProfileLoadingBaseDir) html += '<div class="agent-class-hint">Loading internal Agent Profiles…</div>';
@@ -1911,7 +1954,7 @@ function _agentClassProfileOptionsHtml(kind, selectedId) {
 function _agentClassOperatorSummaryText(value, fallback) {
   var text = String(value || '').trim();
   if (!text || /wrapped internal agent profile policy/i.test(text)) return fallback || '';
-  return text;
+  return _agentClassPlainPermissionCopy(text);
 }
 
 function _agentClassBucketPreviewsFor(preview, restriction) {
@@ -1934,7 +1977,7 @@ function _agentClassBucketPreviewListHtml(buckets, emptyText) {
   for (var i = 0; i < buckets.length; i++) {
     var bucket = buckets[i] || {};
     html += '<div class="agent-class-access-item">';
-    html += '<strong>' + esc(_agentClassBucketLabel(bucket, bucket.id || 'Bucket')) + '</strong>';
+    html += '<strong>' + esc(_agentClassBucketLabel(bucket, bucket.id || 'Permission')) + '</strong>';
     var summary = _agentClassBucketSummary(bucket);
     if (summary) html += '<span>' + esc(summary) + '</span>';
     html += '</div>';
@@ -1953,21 +1996,21 @@ function _agentClassOperatorAccessHtml(preview) {
   var restrictionBuckets = _agentClassBucketPreviewsFor(preview, true);
   var isCompile = _agentClassPolicyMode(preview) === 'compile';
   var fallbackAllowed = isCompile
-    ? 'No capability buckets selected yet.'
-    : 'Default access for this base kind (legacy wrapped policy).';
+    ? 'No allowed actions selected yet.'
+    : 'Existing built-in access for this class type.';
   var allowedSummary = _agentClassOperatorSummaryText(summary.allowed_summary, fallbackAllowed);
-  var deniedSummary = _agentClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No explicit restriction buckets selected.');
+  var deniedSummary = _agentClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No extra limits selected.');
   var html = '<div class="agent-class-operator-access">';
-  html += '<div class="agent-class-block-title">Operator access preview</div>';
+  html += '<div class="agent-class-block-title">What this class can do</div>';
   html += '<div class="agent-class-access-summary-grid">';
-  html += '<div><span>Capability access</span><strong>' + esc(allowedSummary || fallbackAllowed) + '</strong></div>';
-  html += '<div><span>Explicit restrictions</span><strong>' + esc(deniedSummary || (restrictionBuckets.length ? 'See restriction buckets below.' : 'None selected')) + '</strong></div>';
+  html += '<div><span>Allowed actions</span><strong>' + esc(allowedSummary || fallbackAllowed) + '</strong></div>';
+  html += '<div><span>Not allowed</span><strong>' + esc(deniedSummary || (restrictionBuckets.length ? 'See limits below.' : 'None selected')) + '</strong></div>';
   html += '</div>';
   html += '<div class="agent-class-access-columns">';
-  html += '<div><div class="agent-class-block-title">Allowed buckets</div>'
+  html += '<div><div class="agent-class-block-title">Allowed actions</div>'
     + _agentClassBucketPreviewListHtml(allowedBuckets, fallbackAllowed) + '</div>';
-  html += '<div><div class="agent-class-block-title">Restriction buckets</div>'
-    + _agentClassBucketPreviewListHtml(restrictionBuckets, 'No explicit restriction buckets selected.') + '</div>';
+  html += '<div><div class="agent-class-block-title">Not allowed</div>'
+    + _agentClassBucketPreviewListHtml(restrictionBuckets, 'No extra limits selected.') + '</div>';
   html += '</div>';
   html += '</div>';
   return html;
@@ -2170,7 +2213,7 @@ function _agentClassProductManagerCompactPolicyHtml(item) {
     + '</div>';
   html += '<div class="agent-class-compact-access">'
     + '<div><span>Allowed</span><strong>planning reads/writes, proposed decisions, queued task intake, user + peer Architect coordination</strong></div>'
-    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, raw tools, direct Engineer/Worker messages</strong></div>'
+    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, arbitrary tool access, direct Engineer/Worker messages</strong></div>'
     + '</div>';
   html += '</div>';
   return html;
@@ -2208,7 +2251,7 @@ function _agentClassLaunchResultHtml(msg) {
   var html = '<div class="agent-class-launch-result">';
   html += '<div><span>Launched</span><strong>' + esc((agent.kind || msg.base_kind || 'agent') + ' ' + (agent.name || agent.id || '')) + '</strong></div>';
   html += '<div><span>Frozen class</span><strong>' + esc((classStatus.effective_class_id || '—') + _agentClassVersionSuffix(classStatus.effective_class_version)) + '</strong></div>';
-  html += '<div><span>Status</span><strong>Class access policy applied</strong></div>';
+  html += '<div><span>Status</span><strong>Class permissions applied</strong></div>';
   html += '</div>';
   return html;
 }
@@ -2379,7 +2422,7 @@ function _agentClassSaveDisabledReason() {
     var buckets = draft.capabilities && Array.isArray(draft.capabilities.buckets)
       ? draft.capabilities.buckets
       : [];
-    if (!buckets.length) return 'Choose at least one reviewed capability bucket before validating.';
+    if (!buckets.length) return 'Choose at least one allowed action before validating.';
   }
   if (!_agentClassValidation) return 'Validate before saving.';
   if (!_agentClassValidation.valid) return 'Fix validation errors before saving.';
