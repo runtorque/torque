@@ -147,6 +147,175 @@ function countText(haystack, needle) {
   return String(haystack || '').split(needle).length - 1;
 }
 
+function sampleCapabilityCatalog() {
+  return [
+    {
+      id: 'self_context',
+      label: 'Self and assigned task context',
+      summary: 'Read own agent/session context and visible assigned task details.',
+      category: 'read',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'task_reporting',
+      label: 'Task reporting and verification',
+      summary: 'Report progress/completion, record verification, and attach task artifacts.',
+      category: 'task',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'planning_area_reads',
+      label: 'Area reads',
+      summary: 'Read visible Areas and area context.',
+      category: 'planning',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'planning_reads',
+      label: 'Planning reads',
+      summary: 'Read board/task planning summaries, Areas, Initiatives, and Decisions.',
+      category: 'planning',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer'],
+      available: true,
+    },
+    {
+      id: 'board_task_reads',
+      label: 'Board/task reads',
+      summary: 'Read board/task detail, events, MCP call telemetry, and board-sync status.',
+      category: 'task',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer'],
+      available: true,
+    },
+    {
+      id: 'user_messages',
+      label: 'User messages',
+      summary: 'Ask the user for blocking decisions and send non-blocking user-facing messages.',
+      category: 'communication',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'private_journal',
+      label: 'Private journal',
+      summary: 'Use the private recovery journal for the running agent.',
+      category: 'journal',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'shared_memory',
+      label: 'Shared memory',
+      summary: 'Read and publish shared memory entries.',
+      category: 'memory',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'planning_writes',
+      label: 'Planning writes',
+      summary: 'Create/update/archive Areas and Initiatives.',
+      category: 'planning',
+      risk: 'high',
+      base_kinds: ['architect'],
+      available: true,
+    },
+    {
+      id: 'scoped_journals',
+      label: 'Scoped journals',
+      summary: 'Read/write scoped Engineer or Architect journals.',
+      category: 'journal',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer'],
+      available: true,
+    },
+    {
+      id: 'shared_memory_admin',
+      label: 'Shared memory admin',
+      summary: 'Pin, unpin, and link shared memory entries.',
+      category: 'memory',
+      risk: 'high',
+      base_kinds: ['architect', 'engineer'],
+      available: true,
+    },
+    {
+      id: 'worker_dispatch',
+      label: 'Worker dispatch',
+      summary: 'Launch or route work to Workers.',
+      category: 'agent_management',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer'],
+      available: true,
+    },
+  ];
+}
+
+function sampleRestrictionCatalog() {
+  return [
+    {
+      id: 'deny_high_risk_operations',
+      label: 'Deny remaining high-risk operations',
+      summary: 'Explicitly deny high-risk/critical operations not selected by capability buckets.',
+      category: 'safety',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_raw_tool_picker',
+      label: 'Deny raw tool picker',
+      summary: 'Records that arbitrary raw tool picker authority is outside the class contract.',
+      category: 'admin',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_worker_dispatch',
+      label: 'Deny Worker dispatch',
+      summary: 'Explicitly deny Worker launch/routing and task dispatch authority.',
+      category: 'agent_management',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+  ];
+}
+
+function catalogItem(id, restriction = false) {
+  const catalog = restriction ? sampleRestrictionCatalog() : sampleCapabilityCatalog();
+  return catalog.find((item) => item.id === id) || { id, label: id, summary: '' };
+}
+
+function sampleAgentClassListMessage(classes = sampleClasses(), issues = []) {
+  return {
+    type: 'agent_classes',
+    schema_version: 3,
+    classes,
+    issues,
+    authoring_contract: {
+      schema_version: 3,
+      normal_authoring_mode: 'capability_buckets',
+      capability_bucket_field: 'capabilities.buckets',
+      restriction_bucket_field: 'capabilities.restrictions',
+      capability_bucket_catalog: sampleCapabilityCatalog(),
+      restriction_bucket_catalog: sampleRestrictionCatalog(),
+    },
+    capability_bucket_catalog: sampleCapabilityCatalog(),
+    restriction_bucket_catalog: sampleRestrictionCatalog(),
+  };
+}
+
 function registerClassForm(document) {
   [
     ['agent-class-id', 'INPUT'],
@@ -169,6 +338,14 @@ function registerClassForm(document) {
   ].forEach(([id, tag]) => {
     if (!document.getElementById(id)) document.register(id, tag);
   });
+  sampleCapabilityCatalog().forEach((bucket) => {
+    const id = `agent-class-capability-bucket-${bucket.id}`;
+    if (!document.getElementById(id)) document.register(id, 'INPUT');
+  });
+  sampleRestrictionCatalog().forEach((bucket) => {
+    const id = `agent-class-restriction-bucket-${bucket.id}`;
+    if (!document.getElementById(id)) document.register(id, 'INPUT');
+  });
 }
 
 function sampleClasses() {
@@ -182,7 +359,22 @@ function sampleClasses() {
     {
       id: 'review-worker', version: '1', base_kind: 'worker', display_name: 'Review Worker', description: 'Reviews patches.',
       lifecycle: 'stable', builtin: false, custom: true, source: 'project', source_path: '/repo/.torque/agent_classes/review-worker.yaml', status: 'restricted', launchable: true,
-      agent_profile_ref: { id: 'restricted-worker', version: '2' }, agent_profile: { id: 'restricted-worker', version: '2', status: 'restricted', capability_count: 5 },
+      agent_class_schema_version: 3,
+      runtime: { base_kind: 'worker', base_kind_label: 'Worker', arbitrary_runtime_kind: false },
+      policy: { mode: 'compile', policy_schema_version: 1 },
+      capabilities: { buckets: ['self_context', 'task_reporting', 'shared_memory'], restrictions: ['deny_raw_tool_picker', 'deny_high_risk_operations'] },
+      capability_bucket_selection: ['self_context', 'task_reporting', 'shared_memory'],
+      restriction_bucket_selection: ['deny_raw_tool_picker', 'deny_high_risk_operations'],
+      capability_buckets: [catalogItem('self_context'), catalogItem('task_reporting'), catalogItem('shared_memory')],
+      restriction_buckets: [catalogItem('deny_high_risk_operations', true), catalogItem('deny_raw_tool_picker', true)],
+      operator_access_summary: {
+        allowed: ['Self and assigned task context', 'Task reporting and verification', 'Shared memory'],
+        denied: ['Deny remaining high-risk operations', 'Deny raw tool picker'],
+        allowed_summary: 'Self and assigned task context; Task reporting and verification; Shared memory',
+        denied_summary: 'Deny raw tool picker; Deny remaining high-risk operations',
+      },
+      apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
+      agent_profile_ref: { id: 'class-policy-review-worker', version: '1' }, agent_profile: { id: 'class-policy-review-worker', version: '1', status: 'restricted', capability_count: 5 },
       prompt: 'Focus on UI regressions.', prompt_summary: { has_prompt: true, char_count: 24, preview: 'Focus on UI regressions.' },
       restrictions: ['No raw tool grants.'], warnings: ['Use reviewed YAML.'], external_connector_caveat: 'External connector caveat.',
     },
@@ -199,6 +391,8 @@ function sampleClasses() {
       agent_profile_ref: { id: 'class-policy-product-manager', version: '2' }, agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'draft', capability_count: 3 },
       internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
       prompt_summary: { has_prompt: true, char_count: 64, preview: 'PM draft instructions.' }, draft: { scratch_only: true },
+      capability_bucket_selection: ['self_context', 'planning_reads', 'proposed_decisions', 'board_task_proposals', 'user_messages', 'product_peer_messages', 'private_journal'],
+      restriction_bucket_selection: ['deny_worker_dispatch', 'deny_raw_tool_picker'],
       warnings: ['Product Manager is draft/scratch-only in Wave 6B.'], external_connector_caveat: 'External connector caveat.',
       restrictions: ['Do not use for live PM dogfood.'],
     },
@@ -211,7 +405,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   run(context, `librarySwitchTab('agent_classes')`);
   assert.deepEqual(sendCalls[0], { cmd: 'agent_class_list', base_dir: '/repo' });
 
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
   assert.match(classUi(document, panel), /Default Worker/);
   assert.match(classUi(document, panel), /Review Worker/);
   assert.match(classUi(document, panel), /Old Worker/);
@@ -221,7 +415,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
   assert.match(classUi(document, panel), /Product Manager@2/);
   assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
-  assert.match(classUi(document, panel), /Advanced\/Internal Agent Profile policy/);
+  assert.match(classUi(document, panel), /Advanced\/Internal diagnostics/);
   assert.match(classUi(document, panel), /draft/);
   assert.doesNotMatch(classUi(document, panel), /External connectors/);
   assert.match(classUi(document, panel), /Product planning and intake class with bounded Torque access/);
@@ -235,6 +429,14 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
 
   run(context, `agentClassManagerSelect('review-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[1])} })`);
+  const reviewHtml = classUi(document, panel);
+  assert.match(reviewHtml, /Operator access preview/);
+  assert.match(reviewHtml, /Capability access[\s\S]*Self and assigned task context; Task reporting and verification; Shared memory/);
+  assert.match(reviewHtml, /Relaunch behavior[\s\S]*Access freezes on the next launch or relaunch/);
+  const previewStart = reviewHtml.indexOf('<div class="agent-class-preview');
+  const diagnosticsStart = reviewHtml.indexOf('<details class="agent-class-normalized', previewStart);
+  const normalPreviewHtml = reviewHtml.slice(previewStart, diagnosticsStart);
+  assert.doesNotMatch(normalPreviewHtml, /class-policy-review-worker|Agent Profile|generated profile|compiler/i);
   document.getElementById('agent-class-launch-name').value = 'Patch Reviewer';
   document.getElementById('agent-class-launch-group').value = 'alpha';
   run(context, `agentClassManagerLaunchSelected()`);
@@ -271,7 +473,7 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
   classes[3] = pm;
 
   run(context, `librarySwitchTab('agent_classes')`);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(classes)}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(classes))})`);
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(pm)} })`);
 
@@ -291,7 +493,13 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   const { context, document, panel, sendCalls } = createHarness();
   registerClassForm(document);
   run(context, `librarySwitchTab('agent_classes')`);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
+  run(context, `agentClassManagerNew('architect')`);
+  assert.match(classUi(document, panel), /Purpose and reviewed access buckets/);
+  assert.match(classUi(document, panel), /Self and assigned task context/);
+  assert.match(classUi(document, panel), /Task reporting and verification/);
+  assert.match(classUi(document, panel), /Advanced\/Internal bucket catalog[\s\S]*Planning writes/);
+  assert.match(classUi(document, panel), /Scoped journals/);
   run(context, `agentClassManagerNew('worker')`);
 
   document.getElementById('agent-class-id').value = 'qa-worker';
@@ -306,18 +514,25 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   run(context, `agentClassManagerValidate()`);
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_validate');
   assert.equal(sendCalls.at(-1).agent_class.id, 'qa-worker');
+  assert.equal(sendCalls.at(-1).agent_class.capabilities.buckets.includes('self_context'), true);
+  assert.equal(sendCalls.at(-1).agent_class.capabilities.buckets.includes('task_reporting'), true);
+  assert.equal(sendCalls.at(-1).agent_class.capabilities.buckets.includes('planning_writes'), false);
+  assert.equal(sendCalls.at(-1).agent_class.capabilities.buckets.includes('scoped_journals'), false);
 
   run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: false, ok: false, errors: [{ severity: 'error', code: 'bad', message: 'Display name is unsafe' }], warnings: [], agent_class: null })`);
   assert.match(classUi(document, panel), /Display name is unsafe/);
   run(context, `agentClassManagerSave()`);
   assert.notEqual(sendCalls.at(-1).cmd, 'agent_class_create');
 
-  run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: true, ok: true, errors: [], warnings: ['Review YAML before commit.'], normalized: { id: 'qa-worker' }, agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', display_name: 'QA Worker', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-worker', version: '1' }, prompt_summary: { has_prompt: true, char_count: 25, preview: 'Check state preservation.' }, external_connector_caveat: 'External connector caveat.', restrictions: [] } })`);
+  run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: true, ok: true, errors: [], warnings: ['Review YAML before commit.'], normalized: { id: 'qa-worker' }, authoring_contract: ${JSON.stringify(sampleAgentClassListMessage().authoring_contract)}, agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', agent_class_schema_version: 3, display_name: 'QA Worker', description: 'Checks UI.', purpose: 'Checks UI.', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, policy: { mode: 'compile', policy_schema_version: 1 }, capabilities: { buckets: ['user_messages', 'private_journal', 'shared_memory', 'planning_area_reads', 'self_context', 'task_reporting'], restrictions: ['deny_raw_tool_picker', 'deny_high_risk_operations'] }, capability_bucket_selection: ['user_messages', 'private_journal', 'shared_memory', 'planning_area_reads', 'self_context', 'task_reporting'], restriction_bucket_selection: ['deny_raw_tool_picker', 'deny_high_risk_operations'], capability_buckets: [${JSON.stringify(catalogItem('self_context'))}, ${JSON.stringify(catalogItem('task_reporting'))}, ${JSON.stringify(catalogItem('planning_area_reads'))}, ${JSON.stringify(catalogItem('user_messages'))}, ${JSON.stringify(catalogItem('private_journal'))}, ${JSON.stringify(catalogItem('shared_memory'))}], restriction_buckets: [${JSON.stringify(catalogItem('deny_high_risk_operations', true))}, ${JSON.stringify(catalogItem('deny_raw_tool_picker', true))}], operator_access_summary: { allowed_summary: 'User messages; Private journal; Shared memory; Area reads; Self and assigned task context; Task reporting and verification', denied_summary: 'Deny raw tool picker; Deny remaining high-risk operations' }, apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true }, prompt_summary: { has_prompt: true, char_count: 25, preview: 'Check state preservation.' }, external_connector_caveat: 'External connector caveat.', restrictions: [] } })`);
   run(context, `agentClassManagerSave()`);
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_create');
-  assert.equal(sendCalls.at(-1).agent_class.agent_profile_ref.id, 'full-worker');
+  assert.equal(sendCalls.at(-1).agent_class.policy.mode, 'compile');
+  assert.equal(sendCalls.at(-1).agent_class.capabilities.buckets.includes('self_context'), true);
+  assert.equal(sendCalls.at(-1).agent_class.capabilities.buckets.includes('task_reporting'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sendCalls.at(-1).agent_class, 'agent_profile_ref'), false);
 
-  run(context, `agentClassManagerReceiveMutation({ type: 'agent_class_save', ok: true, operation: 'created', agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', display_name: 'QA Worker', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-worker', version: '1' } }, classes: ${JSON.stringify(sampleClasses())} })`);
+  run(context, `agentClassManagerReceiveMutation({ type: 'agent_class_save', ok: true, operation: 'created', agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', display_name: 'QA Worker', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, policy: { mode: 'compile' }, capabilities: { buckets: ['self_context', 'task_reporting'] } }, classes: ${JSON.stringify(sampleClasses())} })`);
   run(context, `agentClassManagerArchive()`);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_archive');
@@ -333,7 +548,7 @@ test('Agent Class editor errors are not swallowed by inactive agent-panel class 
   const { context, document, panel } = createHarness({ loadAgentPanel: true });
   registerClassForm(document);
   run(context, `librarySwitchTab('agent_classes')`);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
   run(context, `agentClassManagerNew('worker')`);
   run(context, `
     _agentClassValidationInFlight = true;
@@ -363,7 +578,7 @@ test('Agent Class manager preserves focused draft, caret, and scroll across rere
   const { context, document, panel } = createHarness();
   registerClassForm(document);
   run(context, `librarySwitchTab('agent_classes')`);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
   run(context, `agentClassManagerSelect('review-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[1])} })`);
 
@@ -417,7 +632,7 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   const { context, document, sendCalls } = createHarness({ loadModals: true });
   registerAddWorkerDom(document);
   registerEngineerArchitectDom(document);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }]))}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }])))})`);
 
   run(context, `agentClassPickerPrepare('worker', 'alpha', '/repo', 'add-worker')`);
   assert.match(document.getElementById('add-agent-class-select').innerHTML, /Review Worker/);
@@ -456,13 +671,13 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
 test('Agent Class add-worker picker blocks stale archived selections instead of defaulting', () => {
   const { context, document, sendCalls, toasts } = createHarness({ loadModals: true });
   registerAddWorkerDom(document);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses())}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
   run(context, `agentClassPickerPrepare('worker', 'alpha', '/repo', 'add-worker'); agentClassPickerSelect('add-worker', 'review-worker');`);
 
   const archivedReviewWorker = sampleClasses().map((item) => item.id === 'review-worker'
     ? { ...item, status: 'archived', archived: true, disabled: true, launchable: false, metadata: { archived: true } }
     : item);
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(archivedReviewWorker)}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(archivedReviewWorker))})`);
   const staleState = json(context, `agentClassPickerSelectionState('add-worker')`);
   assert.equal(staleState.ok, false);
   assert.equal(staleState.selectedId, 'review-worker');
@@ -494,7 +709,7 @@ test('Engineer launch modal uses explicit launch-from-class only when a class is
     'engineer-launch-specializations-selected', 'engineer-launch-specializations-available', 'engineer-launch-specializations-reset',
     'engineer-launch-agent-class-row', 'engineer-launch-agent-class-select', 'engineer-launch-agent-class-hint'
   ].forEach((id) => document.register(id));
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }]))}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([{ id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } }])))})`);
   run(context, `openEngineerLaunchDialog('alpha', '')`);
   run(context, `submitEngineerLaunchDialog()`);
   assert.equal(sendCalls.at(-1).cmd, 'add_agent');
@@ -519,11 +734,11 @@ test('Engineer launch picker blocks stale incompatible selections instead of def
     'engineer-launch-agent-class-row', 'engineer-launch-agent-class-select', 'engineer-launch-agent-class-hint'
   ].forEach((id) => document.register(id));
   const validEngineer = { id: 'team-engineer', version: '1', base_kind: 'engineer', display_name: 'Team Engineer', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, agent_profile_ref: { id: 'full-engineer', version: '1' } };
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([validEngineer]))}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([validEngineer])))})`);
   run(context, `openEngineerLaunchDialog('alpha', ''); agentClassPickerSelect('engineer-launch', 'team-engineer');`);
 
   const incompatibleEngineer = { ...validEngineer, base_kind: 'worker', agent_profile_ref: { id: 'full-worker', version: '1' } };
-  run(context, `agentClassManagerReceiveList({ type: 'agent_classes', classes: ${JSON.stringify(sampleClasses().concat([incompatibleEngineer]))}, issues: [] })`);
+  run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses().concat([incompatibleEngineer])))})`);
   const staleState = json(context, `agentClassPickerSelectionState('engineer-launch')`);
   assert.equal(staleState.ok, false);
   assert.equal(staleState.selectedId, 'team-engineer');
