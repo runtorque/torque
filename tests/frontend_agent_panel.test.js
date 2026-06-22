@@ -17,6 +17,33 @@ function createHarness() {
     innerHTML: '',
     querySelector() { return null; },
   };
+  function makeClassList() {
+    const values = new Set();
+    return {
+      add(name) { values.add(name); },
+      remove(name) { values.delete(name); },
+      contains(name) { return values.has(name); },
+      toString() { return Array.from(values).join(' '); },
+    };
+  }
+  const classModal = {
+    innerHTML: '',
+    textContent: '',
+    classList: makeClassList(),
+    querySelector() { return null; },
+  };
+  const classModalBody = {
+    innerHTML: '',
+    textContent: '',
+    classList: makeClassList(),
+    querySelector() { return null; },
+  };
+  const classModalSummary = {
+    innerHTML: '',
+    textContent: '',
+    classList: makeClassList(),
+    querySelector() { return null; },
+  };
   const captureCalls = [];
   const restoreCalls = [];
   const intervalCalls = [];
@@ -50,7 +77,11 @@ function createHarness() {
     document: {
       activeElement: null,
       getElementById(id) {
-        return id === 'panel-agent' ? panel : null;
+        if (id === 'panel-agent') return panel;
+        if (id === 'modal-agent-class') return classModal;
+        if (id === 'agent-class-modal-body') return classModalBody;
+        if (id === 'agent-class-modal-summary') return classModalSummary;
+        return null;
       },
     },
     _captureSurfaceState(root, opts) {
@@ -78,6 +109,9 @@ function createHarness() {
   return {
     context,
     panel,
+    classModal,
+    classModalBody,
+    classModalSummary,
     captureCalls,
     restoreCalls,
     intervalCalls,
@@ -1967,6 +2001,44 @@ test('architect Messages tab renders peer-message affordances and context refs',
   assert.match(panel.innerHTML, /decision-1 · Use direct peer messages/);
 });
 
+test('architect Messages tab prefers peer names over architect IDs for peer messages', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'blueprint': {
+      id: 'blueprint',
+      name: 'Blueprint',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        {
+          id: 'peer-msg-name',
+          action: 'architect_peer_message',
+          message: 'PM polish scope accepted.',
+          timestamp: 1712345688,
+          sender_id: 'torqly-id',
+          sender_name: 'Torqly',
+          sender_kind: 'architect',
+          recipient_id: 'blueprint',
+          recipient_name: 'Blueprint',
+          recipient_kind: 'architect',
+          peer_id: 'torqly-id',
+          peer_name: 'Torqly',
+          peer_kind: 'architect',
+          direction: 'received',
+        },
+      ],
+    },
+  };
+  context.focusedItemId = 'blueprint';
+
+  context.agentPanelSelectTab('messages');
+
+  assert.match(panel.innerHTML, /From:<\/span><span class="agent-panel-message-attribution-name">Torqly/);
+  assert.match(panel.innerHTML, /agent-panel-message-peer[^>]*>Torqly/);
+  assert.doesNotMatch(panel.innerHTML, /From:<\/span><span class="agent-panel-message-attribution-name">torqly-id/);
+});
+
 test('architect Messages tab does not render peer compose controls or request peer list', () => {
   const { context, panel, sendCalls } = createHarness();
   context.state.agents = {
@@ -3461,7 +3533,7 @@ test('_engineerResetSessionMapMeta keeps the focused-agent panel rendered during
 });
 
 test('agent panel renders Agent Profile badge with draft warnings and pending assignment', () => {
-  const { context, panel } = createHarness();
+  const { context, classModalBody } = createHarness();
 
   setFocusedAgent(context, {
     id: 'arch-profile-1',
@@ -3486,15 +3558,15 @@ test('agent panel renders Agent Profile badge with draft warnings and pending as
     },
   });
 
-  context.renderAgentPanel();
+  context.agentPanelToggleProfileAssignment(null, 'arch-profile-1');
 
-  assert.match(panel.innerHTML, /agent-profile-badge/);
-  assert.match(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(panel.innerHTML, /Raw Architect tools are denied/);
+  assert.match(classModalBody.innerHTML, /agent-profile-badge/);
+  assert.match(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
+  assert.match(classModalBody.innerHTML, /Raw Architect tools are denied/);
 });
 
 test('agent panel marks cleared assignment pending default full profile next launch', () => {
-  const { context, panel } = createHarness();
+  const { context, classModalBody } = createHarness();
 
   setFocusedAgent(context, {
     id: 'arch-profile-clear',
@@ -3516,14 +3588,14 @@ test('agent panel marks cleared assignment pending default full profile next lau
     },
   });
 
-  context.renderAgentPanel();
+  context.agentPanelToggleProfileAssignment(null, 'arch-profile-clear');
 
-  assert.match(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(panel.innerHTML, /desired assignment: default full-architect/);
+  assert.match(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
+  assert.match(classModalBody.innerHTML, /desired assignment: default full-architect/);
 });
 
 test('agent class manager assigns Product Manager as desired and renders effective class identity after relaunch', () => {
-  const { context, panel, sendCalls } = createHarness();
+  const { context, panel, classModal, classModalBody, sendCalls } = createHarness();
   const defaultArchitectClass = {
     id: 'default-architect',
     version: '1',
@@ -3588,8 +3660,13 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     },
   });
 
+  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Agent Class/);
+  assert.match(panel.innerHTML, /Change Class/);
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '') || /^agent_profile_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class/profile data until Change Class opens the modal');
   context.agentPanelToggleClassAssignment(null, 'blueprint');
+  assert.equal(classModal.classList.contains('visible'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
     { cmd: 'agent_class_list', base_dir: '/repo' },
     { cmd: 'agent_class_status', agent_id: 'blueprint', base_dir: '/repo' },
@@ -3600,11 +3677,14 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     classes: [defaultArchitectClass, productManagerClass],
     issues: [],
   });
-  assert.match(panel.innerHTML, /Product Manager@2 · Architect-derived · draft/);
+  assert.match(classModalBody.innerHTML, /Product Manager@2 · Architect-derived · draft/);
 
   context.agentPanelSelectClass('blueprint', 'product-manager');
-  assert.match(panel.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
-  assert.match(panel.innerHTML, /External connectors are separate; Agent Class\/Profile policy does not govern them/);
+  assert.match(classModalBody.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
+  assert.match(classModalBody.innerHTML, /External connectors are separate; Agent Class\/Profile policy does not govern them/);
+  context.renderAgentPanel();
+  assert.equal(classModal.classList.contains('visible'), true, 'routine rerender keeps Change Class modal open');
+  assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
   context.agentPanelAssignSelectedClass(null, 'blueprint');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
     cmd: 'agent_class_assign',
@@ -3637,7 +3717,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Desired Agent Class updated\. It will freeze on the next launch or relaunch\./);
   assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Product Manager@2/);
-  assert.match(panel.innerHTML, /Advanced\/Internal Agent Profile policy/);
+  assert.match(classModalBody.innerHTML, /Advanced\/Internal Agent Profile policy/);
 
   Object.assign(context.state.agents.blueprint, {
     status: 'running',
@@ -3660,10 +3740,12 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — effective Agent Class snapshot matches desired/);
   assert.doesNotMatch(panel.innerHTML, /Desired Agent Class updated\. It will freeze/);
+  context.agentPanelCloseClassAssignmentModal(null);
+  assert.equal(classModal.classList.contains('visible'), false);
 });
 
 test('agent panel renders Product Manager dogfood state as compact deduped class policy UI', () => {
-  const { context, panel } = createHarness();
+  const { context, panel, classModalBody } = createHarness();
   const productManagerClass = {
     id: 'product-manager',
     version: '2',
@@ -3720,6 +3802,7 @@ test('agent panel renders Product Manager dogfood state as compact deduped class
     },
   });
 
+  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /Product Manager · Group: alpha/);
@@ -3734,7 +3817,7 @@ test('agent panel renders Product Manager dogfood state as compact deduped class
   assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
-  assert.match(panel.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
+  assert.doesNotMatch(panel.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
 
   context.agentPanelToggleClassAssignment(null, 'blueprint');
   context.agentPanelReceiveAgentClasses({
@@ -3742,14 +3825,63 @@ test('agent panel renders Product Manager dogfood state as compact deduped class
     classes: [productManagerClass],
     issues: [],
   });
-  assert.match(panel.innerHTML, /<option value="product-manager" selected>/);
+  assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
+  assert.match(classModalBody.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
   assert.equal(countText(panel.innerHTML, caveat), 1);
   assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
   assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
 });
 
+test('agent panel shows Agent Class summary only on Behavior tab and opens modal from Change Class', () => {
+  const { context, panel, classModal } = createHarness();
+  const productManagerClass = {
+    id: 'product-manager',
+    version: '2',
+    base_kind: 'architect',
+    display_name: 'Product Manager',
+    primary_identity_label: 'Product Manager',
+    secondary_base_kind_label: 'Architect-derived',
+    lifecycle: 'stable',
+    status: 'restricted',
+    launchable: true,
+    builtin: true,
+  };
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+    directory: '/repo',
+    effective_agent_class_id: 'product-manager',
+    effective_agent_class_version: '2',
+    effective_agent_class_snapshot: productManagerClass,
+  });
+
+  context.renderAgentPanel();
+  assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
+  assert.doesNotMatch(panel.innerHTML, /Change Class/);
+
+  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /data-agent-class-manager=/);
+  assert.match(panel.innerHTML, /Change Class/);
+  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+
+  context.agentPanelOpenClassAssignment(null, 'blueprint');
+  assert.equal(classModal.classList.contains('visible'), true);
+  context.agentPanelCloseClassAssignmentModal(null);
+  assert.equal(classModal.classList.contains('visible'), false);
+
+  context._agentPanelLastSelectedTabByKind.architect = 'messages';
+  context.renderAgentPanel();
+  assert.doesNotMatch(panel.innerHTML, /data-agent-class-manager=/);
+  assert.doesNotMatch(panel.innerHTML, /Change Class/);
+});
+
 test('agent class manager assignment errors remain routed to active panel operation', () => {
-  const { context, panel, sendCalls } = createHarness();
+  const { context, panel, classModal, classModalBody, sendCalls } = createHarness();
   const defaultArchitectClass = {
     id: 'default-architect',
     version: '1',
@@ -3788,8 +3920,13 @@ test('agent class manager assignment errors remain routed to active panel operat
     effective_agent_class_snapshot: defaultArchitectClass,
   });
 
+  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Agent Class/);
+  assert.match(panel.innerHTML, /Change Class/);
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '') || /^agent_profile_/.test(call.cmd || '')), false, 'compact Behavior summary does not fetch class/profile data until Change Class opens the modal');
   context.agentPanelToggleClassAssignment(null, 'blueprint');
+  assert.equal(classModal.classList.contains('visible'), true);
   context.agentPanelReceiveAgentClasses({
     type: 'agent_classes',
     classes: [defaultArchitectClass, productManagerClass],
@@ -3804,12 +3941,13 @@ test('agent class manager assignment errors remain routed to active panel operat
     code: 'agent_class_assign_failed',
   });
   assert.equal(handled, true);
+  assert.match(classModalBody.innerHTML, /Unknown Agent Class: product-manager/);
   assert.match(panel.innerHTML, /Unknown Agent Class: product-manager/);
-  assert.doesNotMatch(panel.innerHTML, /Saving…/);
+  assert.doesNotMatch(classModalBody.innerHTML, /Saving…/);
 });
 
 test('agent profile manager lists compatible profiles, previews PM draft, assigns, and clears', () => {
-  const { context, panel, sendCalls } = createHarness();
+  const { context, panel, classModalBody, sendCalls } = createHarness();
 
   setFocusedAgent(context, {
     id: 'arch-profile-ui',
@@ -3839,13 +3977,14 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
     },
   });
 
+  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /Agent Class assignment/);
+  assert.match(panel.innerHTML, /Agent Class/);
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Default Architect/);
   assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Default Architect/);
-  assert.match(panel.innerHTML, /Advanced\/Internal Agent Profile assignment/);
-  assert.match(panel.innerHTML, /Class…/);
-  assert.equal(sendCalls.length, 0, 'collapsed class/profile summaries do not fetch until the operator opens them');
+  assert.doesNotMatch(panel.innerHTML, /Advanced\/Internal Agent Profile assignment/);
+  assert.match(panel.innerHTML, /Change Class/);
+  assert.equal(sendCalls.some((call) => /^agent_class_/.test(call.cmd || '') || /^agent_profile_/.test(call.cmd || '')), false, 'collapsed class/profile summaries do not fetch until the operator opens them');
 
   context.agentPanelToggleProfileAssignment(null, 'arch-profile-ui');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.slice(-2))), [
@@ -3887,9 +4026,9 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
     ],
     issues: [],
   });
-  assert.match(panel.innerHTML, /Product Manager \(draft\)@2 · draft/);
-  assert.doesNotMatch(panel.innerHTML, /Full Worker/);
-  assert.match(panel.innerHTML, /Relaunch to apply/);
+  assert.match(classModalBody.innerHTML, /Product Manager \(draft\)@2 · draft/);
+  assert.doesNotMatch(classModalBody.innerHTML, /Full Worker/);
+  assert.match(classModalBody.innerHTML, /Relaunch to apply/);
 
   context.agentPanelSelectProfile('arch-profile-ui', 'product-manager-draft');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
@@ -3897,7 +4036,7 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
     profile_id: 'product-manager-draft',
     base_dir: '/repo',
   });
-  assert.match(panel.innerHTML, /Wait for preview before assigning\./);
+  assert.match(classModalBody.innerHTML, /Wait for preview before assigning\./);
 
   context.agentPanelReceiveAgentProfilePreview({
     type: 'agent_profile_preview',
@@ -3920,12 +4059,12 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
       audit_policy: { summary: 'profile assignment audit rows' },
     },
   });
-  assert.match(panel.innerHTML, /Scratch-only Product Manager draft/);
-  assert.match(panel.innerHTML, /do not use for live PM dogfood/);
-  assert.match(panel.innerHTML, /agent\.hire_engineer/);
-  assert.match(panel.innerHTML, /task\.dispatch/);
-  assert.match(panel.innerHTML, /coordinate through product wrappers/);
-  assert.doesNotMatch(panel.innerHTML, /Wait for preview before assigning\./);
+  assert.match(classModalBody.innerHTML, /Scratch-only Product Manager draft/);
+  assert.match(classModalBody.innerHTML, /do not use for live PM dogfood/);
+  assert.match(classModalBody.innerHTML, /agent\.hire_engineer/);
+  assert.match(classModalBody.innerHTML, /task\.dispatch/);
+  assert.match(classModalBody.innerHTML, /coordinate through product wrappers/);
+  assert.doesNotMatch(classModalBody.innerHTML, /Wait for preview before assigning\./);
 
   context.agentPanelAssignSelectedProfile(null, 'arch-profile-ui');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[sendCalls.length - 1])), {
@@ -3947,9 +4086,9 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
     },
   });
   assert.equal(context.state.agents['arch-profile-ui'].agent_profile_id, 'product-manager-draft');
-  assert.match(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
-  assert.match(panel.innerHTML, /Desired next launch[\s\S]*product-manager-draft@2/);
-  assert.match(panel.innerHTML, /Pending[\s\S]*Yes — effective Full Architect@1 differs from desired product-manager-draft@2/);
+  assert.match(classModalBody.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
+  assert.match(classModalBody.innerHTML, /Desired next launch[\s\S]*product-manager-draft@2/);
+  assert.match(classModalBody.innerHTML, /Pending[\s\S]*Yes — effective Full Architect@1 differs from desired product-manager-draft@2/);
 
   context.agentPanelClearProfileAssignment(null, 'arch-profile-ui');
   const clearCall = sendCalls.slice().reverse()
@@ -3963,7 +4102,7 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
 });
 
 test('agent profile manager clears stale pending message after relaunch applies desired profile', () => {
-  const { context, panel } = createHarness();
+  const { context, classModalBody } = createHarness();
 
   setFocusedAgent(context, {
     id: 'arch-profile-relaunch',
@@ -3988,7 +4127,7 @@ test('agent profile manager clears stale pending message after relaunch applies 
     },
   });
 
-  context.renderAgentPanel();
+  context.agentPanelToggleProfileAssignment(null, 'arch-profile-relaunch');
   context.agentPanelReceiveAgentProfileAssignment({
     type: 'agent_profile_assignment',
     status: {
@@ -4000,8 +4139,8 @@ test('agent profile manager clears stale pending message after relaunch applies 
       pending_next_launch: true,
     },
   });
-  assert.match(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
-  assert.match(panel.innerHTML, /Pending[\s\S]*Yes/);
+  assert.match(classModalBody.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
+  assert.match(classModalBody.innerHTML, /Pending[\s\S]*Yes/);
 
   Object.assign(context.state.agents['arch-profile-relaunch'], {
     status: 'running',
@@ -4021,14 +4160,14 @@ test('agent profile manager clears stale pending message after relaunch applies 
   });
   context.renderAgentPanel();
 
-  assert.doesNotMatch(panel.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
-  assert.doesNotMatch(panel.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(panel.innerHTML, /Product Manager \(draft\)@2/);
-  assert.match(panel.innerHTML, /Pending[\s\S]*No — effective profile matches desired/);
+  assert.doesNotMatch(classModalBody.innerHTML, /Desired profile updated\. It will apply on the next launch or relaunch\./);
+  assert.doesNotMatch(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
+  assert.match(classModalBody.innerHTML, /Product Manager \(draft\)@2/);
+  assert.match(classModalBody.innerHTML, /Pending[\s\S]*No — effective profile matches desired/);
 });
 
 test('agent profile manager diagnoses launch snapshot that still does not match desired profile', () => {
-  const { context, panel } = createHarness();
+  const { context, classModalBody } = createHarness();
 
   setFocusedAgent(context, {
     id: 'arch-profile-nonapplied',
@@ -4056,17 +4195,17 @@ test('agent profile manager diagnoses launch snapshot that still does not match 
     },
   });
 
-  context.renderAgentPanel();
+  context.agentPanelToggleProfileAssignment(null, 'arch-profile-nonapplied');
 
-  assert.match(panel.innerHTML, /full-architect@1 \(pending next launch\)/);
+  assert.match(classModalBody.innerHTML, /full-architect@1 \(pending next launch\)/);
   assert.match(
-    panel.innerHTML,
+    classModalBody.innerHTML,
     /Pending[\s\S]*Yes — last launch froze Full Architect@1, which does not match desired product-manager-draft@2/,
   );
 });
 
 test('agent profile manager preserves selected preview state across routine rerenders', () => {
-  const { context, panel, sendCalls, captureCalls, restoreCalls } = createHarness();
+  const { context, classModalBody, sendCalls, captureCalls, restoreCalls } = createHarness();
 
   setFocusedAgent(context, {
     id: 'arch-profile-preserve',
@@ -4124,7 +4263,7 @@ test('agent profile manager preserves selected preview state across routine rere
   assert.equal(sendCalls.length, sendsAfterSelect, 'routine rerender does not refetch list or preview');
   assert.ok(captureCalls.length > capturesAfterSelect, 'rerender captures surface state');
   assert.ok(restoreCalls.length > restoresAfterSelect, 'rerender restores surface state');
-  assert.match(panel.innerHTML, /<option value="product-manager-draft" selected>/);
-  assert.match(panel.innerHTML, /Product Manager \(draft\)@2/);
-  assert.match(panel.innerHTML, /Agent is running; this UI will not stop or relaunch it/);
+  assert.match(classModalBody.innerHTML, /<option value="product-manager-draft" selected>/);
+  assert.match(classModalBody.innerHTML, /Product Manager \(draft\)@2/);
+  assert.match(classModalBody.innerHTML, /Agent is running; this UI will not stop or relaunch it/);
 });

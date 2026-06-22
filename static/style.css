@@ -13708,6 +13708,32 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .agent-class-manager.open {
   background: rgba(88, 166, 255, 0.07);
 }
+.agent-class-manager-compact {
+  padding: 7px;
+}
+.agent-class-manager-compact-head {
+  align-items: center;
+}
+.agent-class-manager-compact .agent-profile-manager-subtitle {
+  max-width: 56ch;
+}
+.agent-class-change-btn {
+  white-space: nowrap;
+}
+.agent-class-status-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+.agent-class-modal-panel {
+  width: min(760px, calc(100vw - 32px));
+}
+.agent-class-modal-body {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+.agent-class-modal-body .agent-profile-manager {
+  margin-bottom: 0;
+}
 .agent-profile-manager-internal {
   margin-top: 8px;
   background: rgba(139, 148, 158, 0.04);

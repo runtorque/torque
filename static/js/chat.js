@@ -325,7 +325,23 @@ function _chatExactTimestamp(ts) {
 
 function _chatParticipantName(participant) {
   participant = participant || {};
-  return String(participant.name || participant.id || '').trim();
+  var explicit = String(participant.name || participant.display_name || '').trim();
+  if (explicit) return explicit;
+  var id = String(participant.id || '').trim();
+  var agent = _chatAgentForId(id);
+  return String((agent && (agent.name || agent.slug || agent.id)) || id || '').trim();
+}
+
+function _chatAgentForId(agentId) {
+  agentId = String(agentId || '').trim();
+  if (!agentId || !state || !state.agents) return null;
+  return state.agents[agentId] || null;
+}
+
+function _chatAgentNameForId(agentId) {
+  agentId = String(agentId || '').trim();
+  var agent = _chatAgentForId(agentId);
+  return String((agent && (agent.name || agent.slug || agent.id)) || '').trim();
 }
 
 function _chatParticipantKind(participant) {
@@ -661,8 +677,16 @@ function _chatMessageContextHtml(message, messageId) {
 
 function _chatMessageAttributionHtml(message) {
   message = message || {};
-  var senderName = String(message.sender_name || message.sender_id || '').trim() || 'Unknown';
-  var recipientName = String(message.recipient_name || message.recipient_id || '').trim() || 'Unknown';
+  var senderId = String(message.sender_id || '').trim();
+  var recipientId = String(message.recipient_id || '').trim();
+  var senderName = String(message.sender_name || '').trim()
+    || _chatAgentNameForId(senderId)
+    || senderId
+    || 'Unknown';
+  var recipientName = String(message.recipient_name || '').trim()
+    || _chatAgentNameForId(recipientId)
+    || recipientId
+    || 'Unknown';
   return '<span class="agent-panel-message-attribution agent-panel-message-attribution-out">'
     + '<span class="agent-panel-message-attribution-label">From:</span>'
     + '<span class="agent-panel-message-attribution-name">' + _chatEsc(senderName) + '</span>'
@@ -699,14 +723,20 @@ function _chatMessageActionLabel(action) {
 
 function _chatMessageSenderLabel(message) {
   message = message || {};
-  return String(message.sender_name || message.sender_id || '').trim()
+  var senderId = String(message.sender_id || '').trim();
+  return String(message.sender_name || '').trim()
+    || _chatAgentNameForId(senderId)
+    || senderId
     || _chatParticipantKind({ kind: message.sender_kind })
     || 'Unknown';
 }
 
 function _chatMessageRecipientLabel(message) {
   message = message || {};
-  return String(message.recipient_name || message.recipient_id || '').trim();
+  var recipientId = String(message.recipient_id || '').trim();
+  return String(message.recipient_name || '').trim()
+    || _chatAgentNameForId(recipientId)
+    || recipientId;
 }
 
 function _chatStablePairIds(thread, message) {
