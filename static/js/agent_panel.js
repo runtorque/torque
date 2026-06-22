@@ -1459,12 +1459,12 @@ function _agentPanelClassDogfoodApproved(item) {
 function _agentPanelClassConnectorCaveat(item) {
   item = item || {};
   if (item.external_connector_caveat || _agentPanelClassIsProductManager(item)) {
-    return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+    return 'External connectors: manage separately from Agent Class/Profile policy.';
   }
   var warnings = Array.isArray(item.warnings) ? item.warnings : [];
   for (var i = 0; i < warnings.length; i++) {
     if (_agentPanelIsExternalConnectorNotice(warnings[i])) {
-      return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+      return 'External connectors: manage separately from Agent Class/Profile policy.';
     }
   }
   return '';
@@ -1853,18 +1853,94 @@ function _agentPanelProfileDefaultIdForKind(kind) {
   return '';
 }
 
+function _agentPanelProfileRefFromClassPreview(item) {
+  item = item || {};
+  var ref = item.agent_profile_ref && typeof item.agent_profile_ref === 'object'
+    ? item.agent_profile_ref
+    : {};
+  var profile = item.agent_profile && typeof item.agent_profile === 'object'
+    ? item.agent_profile
+    : {};
+  if (!profile.id && item.compiled_profile && typeof item.compiled_profile === 'object') {
+    profile = item.compiled_profile;
+  }
+  return {
+    id: String(ref.id || profile.id || '').trim(),
+    version: String(ref.version || profile.version || '').trim(),
+  };
+}
+
+function _agentPanelProfileManagedByClassInfo(agent, classState, profileStatus) {
+  classState = classState || {};
+  profileStatus = profileStatus || {};
+  if (!agent || classState.directProfileId) return {};
+  var classId = String(classState.desiredId || '').trim();
+  if (!classId || classId === classState.defaultId) return {};
+  var classStatus = classState.statusObject && typeof classState.statusObject === 'object'
+    ? classState.statusObject
+    : {};
+  var profileId = String(
+    profileStatus.next_launch_profile_id
+    || classStatus.next_launch_profile_id
+    || ''
+  ).trim();
+  var profileVersion = String(
+    profileStatus.next_launch_profile_version
+    || classStatus.next_launch_profile_version
+    || ''
+  ).trim();
+  var preview = classState.desiredPreview && classState.desiredPreview.id
+    ? classState.desiredPreview
+    : {};
+  if ((!profileId || !profileVersion) && (!preview || !preview.id)
+      && classState.assignedPreview && classState.assignedPreview.id) {
+    preview = classState.assignedPreview;
+  }
+  if ((!profileId || !profileVersion) && classId === classState.effectiveId
+      && classState.effectivePreview && classState.effectivePreview.id) {
+    preview = classState.effectivePreview;
+  }
+  var ref = _agentPanelProfileRefFromClassPreview(preview || {});
+  if (!profileId) profileId = ref.id;
+  if (!profileVersion) profileVersion = ref.version;
+  if (!profileId && classId === String(agent.effective_agent_class_id || '').trim()) {
+    profileId = String(agent.effective_agent_profile_id || '').trim();
+    profileVersion = String(agent.effective_agent_profile_version || profileVersion || '').trim();
+  }
+  if (!profileId) return {};
+  return {
+    classId: classId,
+    classVersion: String(classState.desiredVersion || classState.effectiveVersion || '').trim(),
+    classLabel: String(classState.desiredLabel || classState.effectiveLabel || classId || '').trim() || classId,
+    profileId: profileId,
+    profileVersion: profileVersion,
+  };
+}
+
 function _agentPanelProfileState(agent) {
   var kind = String((agent && agent.kind) || '').trim();
   var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var status = (agent && agent.agent_profile_status && typeof agent.agent_profile_status === 'object')
+    ? agent.agent_profile_status
+    : {};
   var snapshot = (agent && agent.effective_agent_profile_snapshot
       && typeof agent.effective_agent_profile_snapshot === 'object')
     ? agent.effective_agent_profile_snapshot
     : {};
-  var assignedId = String((agent && agent.agent_profile_id) || '').trim();
-  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
+  var assignedId = String(
+    (agent && agent.agent_profile_id)
+    || status.assigned_profile_id
+    || ''
+  ).trim();
+  var assignedVersion = String(
+    (agent && agent.agent_profile_version)
+    || status.assigned_profile_version
+    || ''
+  ).trim();
   var effectiveId = String(
     (agent && agent.effective_agent_profile_id)
     || snapshot.id
+    || status.effective_profile_id
     || defaultId
     || assignedId
     || ''
@@ -1872,17 +1948,30 @@ function _agentPanelProfileState(agent) {
   var effectiveVersion = String(
     (agent && agent.effective_agent_profile_version)
     || snapshot.version
+    || status.effective_profile_version
     || ''
   ).trim();
-  var desiredId = assignedId || defaultId;
-  var desiredVersion = assignedId ? assignedVersion : '';
-  var pending = !!(
+  var classState = !assignedId ? _agentPanelClassState(agent) : {};
+  var managedByClass = !assignedId
+    ? _agentPanelProfileManagedByClassInfo(agent, classState, status)
+    : {};
+  var desiredId = assignedId
+    || managedByClass.profileId
+    || String(status.next_launch_profile_id || '').trim()
+    || defaultId;
+  var desiredVersion = assignedId
+    ? assignedVersion
+    : (managedByClass.profileVersion || String(status.next_launch_profile_version || '').trim() || '');
+  var computedPending = !!(
     desiredId
     && (
       desiredId !== effectiveId
       || (desiredVersion && desiredVersion !== effectiveVersion)
     )
   );
+  var pending = typeof status.pending_next_launch === 'boolean'
+    ? !!(status.pending_next_launch && computedPending)
+    : computedPending;
   return {
     kind: kind,
     defaultId: defaultId,
@@ -1893,6 +1982,11 @@ function _agentPanelProfileState(agent) {
     effectiveId: effectiveId,
     effectiveVersion: effectiveVersion,
     pending: pending,
+    managedByClass: !!managedByClass.profileId,
+    managedByClassId: managedByClass.classId || '',
+    managedByClassVersion: managedByClass.classVersion || '',
+    managedByClassLabel: managedByClass.classLabel || '',
+    statusObject: status,
   };
 }
 
@@ -2983,17 +3077,30 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
   var assignedId = profileState.assignedId;
   var assignedVersion = profileState.assignedVersion;
   var pending = profileState.pending;
-  var desiredLabel = assignedId
-    ? (assignedId + _agentPanelProfileVersionSuffix(assignedVersion))
-    : ('default ' + (defaultId || ('full-' + kind)));
+  var desiredLabel = '';
+  if (assignedId) {
+    desiredLabel = assignedId + _agentPanelProfileVersionSuffix(assignedVersion);
+  } else if (profileState.managedByClass) {
+    desiredLabel = 'Managed by Agent Class: '
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—')
+      + ' (internal policy '
+      + (profileState.desiredId || '—')
+      + _agentPanelProfileVersionSuffix(profileState.desiredVersion)
+      + ')';
+  } else {
+    desiredLabel = 'default ' + (defaultId || ('full-' + kind));
+  }
   var effectiveLabel = (effectiveName || effectiveId || '—')
     + _agentPanelProfileVersionSuffix(effectiveVersion);
+  var pendingMetaLabel = (!pending && profileState.managedByClass)
+    ? 'Policy source'
+    : 'Pending';
   var html = '<div class="agent-profile-status-grid">';
   html += _agentPanelProfileMetaLine('Effective now', effectiveLabel);
   html += _agentPanelProfileMetaLine('Desired next launch', desiredLabel);
   html += _agentPanelProfileMetaLine('Lifecycle/status', _agentPanelProfileStatusLabel(snapshot));
   html += _agentPanelProfileMetaLine(
-    'Pending',
+    pendingMetaLabel,
     _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent),
     pending ? 'agent-profile-meta-pending' : ''
   );
@@ -3012,7 +3119,13 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
 
 function _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent) {
   profileState = profileState || {};
-  if (!profileState.pending) return 'No — effective profile matches desired';
+  if (!profileState.pending) {
+    if (profileState.managedByClass) {
+      return 'Managed by Agent Class: '
+        + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+    }
+    return 'No — effective profile matches desired';
+  }
   var assignedAt = Number((agent && agent.agent_profile_assigned_at) || 0) || 0;
   var appliedAt = Number((agent && agent.effective_agent_profile_applied_at) || 0) || 0;
   var effective = String(effectiveLabel || profileState.effectiveId || '—').trim() || '—';

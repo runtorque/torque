@@ -1672,12 +1672,12 @@ function _agentClassDogfoodApproved(item) {
 function _agentClassConnectorCaveat(item) {
   item = item || {};
   if (item.external_connector_caveat || _agentClassIsProductManager(item)) {
-    return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+    return 'External connectors: manage separately from Agent Class/Profile policy.';
   }
   var warnings = Array.isArray(item.warnings) ? item.warnings : [];
   for (var i = 0; i < warnings.length; i++) {
     if (_agentClassIsExternalConnectorNotice(warnings[i])) {
-      return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+      return 'External connectors: manage separately from Agent Class/Profile policy.';
     }
   }
   return '';
