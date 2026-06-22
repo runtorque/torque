@@ -420,7 +420,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.doesNotMatch(classUi(document, panel), /External connectors/);
   assert.match(classUi(document, panel), /Product planning and intake class with bounded Torque access/);
   assert.match(classUi(document, panel), /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
-  assert.match(classUi(document, panel), /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
+  assert.match(classUi(document, panel), /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
   assert.doesNotMatch(classUi(document, panel), /agent-class-restrictions[\s\S]*Do not use for live PM dogfood/);
 
   run(context, `agentClassManagerSelect('old-worker')`);
@@ -430,13 +430,14 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   run(context, `agentClassManagerSelect('review-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[1])} })`);
   const reviewHtml = classUi(document, panel);
-  assert.match(reviewHtml, /Operator access preview/);
-  assert.match(reviewHtml, /Capability access[\s\S]*Self and assigned task context; Task reporting and verification; Shared memory/);
+  assert.match(reviewHtml, /What this class can do/);
+  assert.match(reviewHtml, /Allowed actions[\s\S]*Self and assigned task context; Task reporting and verification; Shared memory/);
+  assert.match(reviewHtml, /Not allowed[\s\S]*No arbitrary tool selection; No powerful actions beyond this class/);
   assert.match(reviewHtml, /Relaunch behavior[\s\S]*Access freezes on the next launch or relaunch/);
   const previewStart = reviewHtml.indexOf('<div class="agent-class-preview');
   const diagnosticsStart = reviewHtml.indexOf('<details class="agent-class-normalized', previewStart);
   const normalPreviewHtml = reviewHtml.slice(previewStart, diagnosticsStart);
-  assert.doesNotMatch(normalPreviewHtml, /class-policy-review-worker|Agent Profile|generated profile|compiler/i);
+  assert.doesNotMatch(normalPreviewHtml, /class-policy-review-worker|Agent Profile|generated profile|compiler|raw atom|default profile|capability bucket|Allowed buckets|Restriction buckets/i);
   document.getElementById('agent-class-launch-name').value = 'Patch Reviewer';
   document.getElementById('agent-class-launch-group').value = 'alpha';
   run(context, `agentClassManagerLaunchSelected()`);
@@ -483,7 +484,7 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
   assert.match(html, /PM-safe authority/);
   assert.match(html, /Product planning and intake class with bounded Torque access/);
   assert.match(html, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
-  assert.match(html, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
+  assert.match(html, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
   assert.doesNotMatch(html, /External connectors/);
   assert.doesNotMatch(html, /agent-class-issues[\s\S]*External connector exposure/);
   assert.doesNotMatch(html, /agent-class-restrictions/);
@@ -495,11 +496,13 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   run(context, `librarySwitchTab('agent_classes')`);
   run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
   run(context, `agentClassManagerNew('architect')`);
-  assert.match(classUi(document, panel), /Purpose and reviewed access buckets/);
+  assert.match(classUi(document, panel), /Purpose and permissions/);
+  assert.match(classUi(document, panel), /Choose what this class can do/);
   assert.match(classUi(document, panel), /Self and assigned task context/);
   assert.match(classUi(document, panel), /Task reporting and verification/);
-  assert.match(classUi(document, panel), /Advanced\/Internal bucket catalog[\s\S]*Planning writes/);
+  assert.match(classUi(document, panel), /Advanced\/Internal permissions[\s\S]*Planning writes/);
   assert.match(classUi(document, panel), /Scoped journals/);
+  assert.doesNotMatch(classUi(document, panel), /safe reviewed buckets|reviewed safe buckets|high-risk buckets|capability buckets|Allowed buckets|Restriction buckets|generated profile|raw atom|default profile/i);
   run(context, `agentClassManagerNew('worker')`);
 
   document.getElementById('agent-class-id').value = 'qa-worker';

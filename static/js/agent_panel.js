@@ -1498,7 +1498,7 @@ function _agentPanelProductManagerCompactPolicyHtml(item) {
     + '</div>';
   html += '<div class="agent-class-compact-access">'
     + '<div><span>Allowed</span><strong>planning reads/writes, proposed decisions, queued task intake, user + peer Architect coordination</strong></div>'
-    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, raw tools, direct Engineer/Worker messages</strong></div>'
+    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, arbitrary tool access, direct Engineer/Worker messages</strong></div>'
     + '</div>';
   html += '</div>';
   return html;
@@ -1699,7 +1699,7 @@ function _agentPanelClassState(agent) {
   if (!effectiveLabel) effectiveLabel = effectiveId || _agentPanelKindDisplayLabel(kind);
   var desiredLabel = '';
   if (directProfileId) {
-    desiredLabel = 'No Agent Class — internal policy '
+    desiredLabel = 'No Agent Class — Advanced/Internal direct assignment '
       + directProfileId
       + _agentPanelClassVersionSuffix(directProfileVersion);
   } else {
@@ -1843,7 +1843,7 @@ function _agentPanelProfileBadgeHtml(agent) {
   } else if (profileState.desiredId) {
     titleParts.push('desired assignment: default ' + profileState.desiredId);
   }
-  if (denied.length) titleParts.push('high-risk denied: ' + denied.slice(0, 8).join(', '));
+  if (denied.length) titleParts.push('powerful actions denied: ' + denied.slice(0, 8).join(', '));
   for (var i = 0; i < warnings.length && i < 3; i++) titleParts.push(String(warnings[i] || ''));
   return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
     + _agentPanelEsc(label)
@@ -2951,11 +2951,11 @@ function _agentPanelProfileDeniedHtml(profile) {
     ? profile.denied_high_risk_capabilities
     : [];
   if (!denied.length) {
-    return '<div class="agent-profile-denied-empty">No high-risk capability denies reported for this profile.</div>';
+    return '<div class="agent-profile-denied-empty">No powerful-action denies reported for this profile.</div>';
   }
   var limit = 12;
   var html = '<div class="agent-profile-denied">';
-  html += '<div class="agent-profile-denied-title">High-risk denied capabilities</div>';
+  html += '<div class="agent-profile-denied-title">Powerful actions denied</div>';
   html += '<div class="agent-profile-denied-chips">';
   for (var i = 0; i < Math.min(limit, denied.length); i++) {
     html += '<span class="agent-profile-denied-chip">' + _agentPanelEsc(denied[i]) + '</span>';
@@ -3098,7 +3098,7 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
       + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
   }
   var pendingMetaLabel = (!pending && profileState.managedByClass)
-    ? 'Policy source'
+    ? 'Access source'
     : 'Pending';
   var html = '<div class="agent-profile-status-grid">';
   html += _agentPanelProfileMetaLine('Effective now', effectiveLabel);
@@ -3305,7 +3305,7 @@ function _agentPanelClassEffectiveLabelWithVersion(state) {
 
 function _agentPanelClassPendingLabel(state, effectiveLabel, desiredLabel, agent) {
   state = state || {};
-  if (!state.pending) return 'No — effective Agent Class snapshot matches desired';
+  if (!state.pending) return 'No — running session already matches desired Agent Class';
   if (state.directProfileId) {
     return 'Yes — advanced direct Agent Profile assignment bypasses Agent Class selection; choose an Agent Class above for the next relaunch.';
   }
@@ -3361,7 +3361,7 @@ function _agentPanelClassLaunchGuidanceHtml(agent) {
   var agentId = String(agent.id || '');
   if (status === 'stopped') {
     return '<div class="agent-profile-launch-guidance agent-profile-launch-guidance-stopped agent-class-launch-guidance">'
-      + '<span>Agent is stopped; relaunch when you are ready to freeze the desired Agent Class snapshot.</span>'
+      + '<span>Agent is stopped; relaunch when you are ready to apply the desired Agent Class.</span>'
       + '<button type="button" class="agent-profile-secondary-btn"'
       + ' onclick="' + _agentPanelEventAttr('event.stopPropagation();relaunchAgent('
         + _agentPanelJsString(agentId) + ')') + '">Relaunch to apply</button>'
@@ -3468,12 +3468,47 @@ function _agentPanelClassWarningsHtml(item) {
 
 function _agentPanelClassBucketLabel(bucket, fallback) {
   bucket = bucket || {};
-  return String(bucket.label || bucket.display_name || bucket.name || bucket.id || fallback || '').trim();
+  var id = String(bucket.id || '').trim();
+  if (id === 'deny_raw_tool_picker') return 'No arbitrary tool selection';
+  if (id === 'deny_high_risk_operations') return 'No powerful actions beyond this class';
+  if (id === 'deny_class_profile_admin') return 'No permission administration';
+  if (id === 'class_profile_admin') return 'Permission administration';
+  return _agentPanelClassPlainPermissionCopy(bucket.label || bucket.display_name || bucket.name || id || fallback || '');
 }
 
 function _agentPanelClassBucketSummary(bucket) {
   bucket = bucket || {};
-  return String(bucket.summary || bucket.description || '').trim();
+  var id = String(bucket.id || '').trim();
+  if (id === 'deny_raw_tool_picker') return 'Keeps arbitrary tool selection outside this class.';
+  if (id === 'deny_high_risk_operations') return 'Blocks powerful or critical actions that are not explicitly allowed here.';
+  if (id === 'deny_class_profile_admin') return 'Prevents changing Agent Class permissions from this class.';
+  return _agentPanelClassPlainPermissionCopy(bucket.summary || bucket.description || '');
+}
+
+function _agentPanelClassPlainPermissionCopy(text) {
+  text = String(text || '').trim();
+  if (!text) return '';
+  return text
+    .replace(/\bDeny raw tool picker\b/gi, 'No arbitrary tool selection')
+    .replace(/\braw tool picker authority\b/gi, 'arbitrary tool selection')
+    .replace(/\braw tool picker\b/gi, 'arbitrary tool selection')
+    .replace(/\braw tools\b/gi, 'arbitrary tool access')
+    .replace(/\bDeny remaining high-risk operations\b/gi, 'No powerful actions beyond this class')
+    .replace(/\bhigh-risk\/critical operations\b/gi, 'powerful or critical actions')
+    .replace(/\bhigh-risk operations\b/gi, 'powerful actions')
+    .replace(/\bhigh-risk\b/gi, 'powerful')
+    .replace(/\bcapability buckets?\b/gi, 'allowed actions')
+    .replace(/\brestriction buckets?\b/gi, 'limits')
+    .replace(/\bbuckets?\b/gi, 'actions')
+    .replace(/\bMCP call telemetry\b/gi, 'tool activity history')
+    .replace(/\bMCP calls?\b/gi, 'tool activity')
+    .replace(/\bMCP\b/gi, 'tool')
+    .replace(/\bgenerated profiles?\b/gi, 'internal enforcement records')
+    .replace(/\braw atoms?\b/gi, 'low-level permissions')
+    .replace(/\bdefault profiles?\b/gi, 'built-in access settings')
+    .replace(/\bprofile pairing\b/gi, 'internal troubleshooting link')
+    .replace(/\bcompiler\b/gi, 'internal validation')
+    .replace(/\bcompile\b/gi, 'validate');
 }
 
 function _agentPanelClassDedupeStrings(values) {
@@ -3526,7 +3561,7 @@ function _agentPanelClassPolicyMode(item) {
 function _agentPanelClassOperatorSummaryText(value, fallback) {
   var text = String(value || '').trim();
   if (!text || /wrapped internal agent profile policy/i.test(text)) return fallback || '';
-  return text;
+  return _agentPanelClassPlainPermissionCopy(text);
 }
 
 function _agentPanelClassBucketPreviewListHtml(buckets, emptyText) {
@@ -3538,7 +3573,7 @@ function _agentPanelClassBucketPreviewListHtml(buckets, emptyText) {
   for (var i = 0; i < buckets.length; i++) {
     var bucket = buckets[i] || {};
     html += '<div class="agent-class-access-item">';
-    html += '<strong>' + _agentPanelEsc(_agentPanelClassBucketLabel(bucket, bucket.id || 'Bucket')) + '</strong>';
+    html += '<strong>' + _agentPanelEsc(_agentPanelClassBucketLabel(bucket, bucket.id || 'Permission')) + '</strong>';
     var summary = _agentPanelClassBucketSummary(bucket);
     if (summary) html += '<span>' + _agentPanelEsc(summary) + '</span>';
     html += '</div>';
@@ -3557,21 +3592,21 @@ function _agentPanelClassOperatorAccessHtml(item) {
   var restrictionBuckets = _agentPanelClassBucketPreviews(item, true);
   var isCompile = _agentPanelClassPolicyMode(item) === 'compile';
   var fallbackAllowed = isCompile
-    ? 'No capability buckets selected yet.'
-    : 'Default access for this base kind.';
+    ? 'No allowed actions selected yet.'
+    : 'Existing built-in access for this class type.';
   var allowedSummary = _agentPanelClassOperatorSummaryText(summary.allowed_summary, fallbackAllowed);
-  var deniedSummary = _agentPanelClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No explicit restriction buckets selected.');
+  var deniedSummary = _agentPanelClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No extra limits selected.');
   var html = '<div class="agent-class-operator-access">';
-  html += '<div class="agent-class-block-title">Operator access preview</div>';
+  html += '<div class="agent-class-block-title">What this class can do</div>';
   html += '<div class="agent-class-access-summary-grid">';
-  html += '<div><span>Capability access</span><strong>' + _agentPanelEsc(allowedSummary || fallbackAllowed) + '</strong></div>';
-  html += '<div><span>Explicit restrictions</span><strong>' + _agentPanelEsc(deniedSummary || (restrictionBuckets.length ? 'See restriction buckets below.' : 'None selected')) + '</strong></div>';
+  html += '<div><span>Allowed actions</span><strong>' + _agentPanelEsc(allowedSummary || fallbackAllowed) + '</strong></div>';
+  html += '<div><span>Not allowed</span><strong>' + _agentPanelEsc(deniedSummary || (restrictionBuckets.length ? 'See limits below.' : 'None selected')) + '</strong></div>';
   html += '</div>';
   html += '<div class="agent-class-access-columns">';
-  html += '<div><div class="agent-class-block-title">Allowed buckets</div>'
+  html += '<div><div class="agent-class-block-title">Allowed actions</div>'
     + _agentPanelClassBucketPreviewListHtml(allowedBuckets, fallbackAllowed) + '</div>';
-  html += '<div><div class="agent-class-block-title">Restriction buckets</div>'
-    + _agentPanelClassBucketPreviewListHtml(restrictionBuckets, 'No explicit restriction buckets selected.') + '</div>';
+  html += '<div><div class="agent-class-block-title">Not allowed</div>'
+    + _agentPanelClassBucketPreviewListHtml(restrictionBuckets, 'No extra limits selected.') + '</div>';
   html += '</div>';
   html += '</div>';
   return html;
@@ -3666,7 +3701,7 @@ function _agentPanelClassManagerHtml(agent) {
   html += '<div class="agent-profile-manager-head agent-class-manager-compact-head">';
   html += '<div>';
   html += '<div class="agent-profile-manager-title">Agent Class</div>';
-  html += '<div class="agent-profile-manager-subtitle">Operator-facing identity and launch policy; detailed changes open in a modal.</div>';
+  html += '<div class="agent-profile-manager-subtitle">Operator-facing identity and allowed actions; detailed changes open in a modal.</div>';
   html += '</div>';
   html += '<button type="button" class="agent-profile-secondary-btn agent-class-change-btn"'
     + ' title="Change desired Agent Class assignment"'
@@ -3707,7 +3742,7 @@ function _agentPanelClassModalBodyHtml(agent) {
   html += '<div>';
   html += '<div class="agent-profile-manager-title">Agent Class assignment</div>';
   html += '<div class="agent-profile-manager-subtitle">'
-    + 'Agent Classes are the operator-facing identity and launch policy. Effective snapshots stay frozen until launch/relaunch.'
+    + 'Agent Classes describe what an agent is for and which actions it can use. Running sessions keep their current access until launch/relaunch.'
     + '</div>';
   html += '</div>';
   html += '<button type="button" class="agent-profile-secondary-btn"'

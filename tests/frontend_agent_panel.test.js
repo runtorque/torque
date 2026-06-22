@@ -3634,6 +3634,32 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
     runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
   };
+  const planningClass = {
+    id: 'planning-architect',
+    version: '1',
+    base_kind: 'architect',
+    display_name: 'Planning Architect',
+    description: 'Plans and reviews task intake.',
+    lifecycle: 'stable',
+    status: 'restricted',
+    launchable: true,
+    policy: { mode: 'compile' },
+    capability_bucket_selection: ['planning_reads', 'board_task_reads'],
+    restriction_bucket_selection: ['deny_raw_tool_picker', 'deny_high_risk_operations'],
+    capability_buckets: [
+      { id: 'planning_reads', label: 'Planning reads', summary: 'Read planning docs and proposed decisions.' },
+      { id: 'board_task_reads', label: 'Board/task reads', summary: 'Read Board tasks and MCP call telemetry.' },
+    ],
+    restriction_buckets: [
+      { id: 'deny_raw_tool_picker', label: 'Deny raw tool picker', summary: 'Records that arbitrary raw tool picker authority is outside the class contract.' },
+      { id: 'deny_high_risk_operations', label: 'Deny remaining high-risk operations', summary: 'Explicitly deny high-risk/critical operations not selected by capability buckets.' },
+    ],
+    operator_access_summary: {
+      allowed_summary: 'Planning reads; Board/task reads; MCP call telemetry',
+      denied_summary: 'Deny raw tool picker; Deny remaining high-risk operations',
+    },
+    apply_state: { applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
+  };
 
   setFocusedAgent(context, {
     id: 'blueprint',
@@ -3674,17 +3700,24 @@ test('agent class manager assigns Product Manager as desired and renders effecti
 
   context.agentPanelReceiveAgentClasses({
     type: 'agent_classes',
-    classes: [defaultArchitectClass, productManagerClass],
+    classes: [defaultArchitectClass, planningClass, productManagerClass],
     issues: [],
   });
   assert.match(classModalBody.innerHTML, /Product Manager@2 · Architect-derived · draft/);
+
+  context.agentPanelSelectClass('blueprint', 'planning-architect');
+  assert.match(classModalBody.innerHTML, /What this class can do/);
+  assert.match(classModalBody.innerHTML, /Allowed actions[\s\S]*Planning reads; Board\/task reads; tool activity history/);
+  assert.match(classModalBody.innerHTML, /Not allowed[\s\S]*No arbitrary tool selection; No powerful actions beyond this class/);
+  assert.match(classModalBody.innerHTML, /No arbitrary tool selection[\s\S]*No powerful actions beyond this class/);
+  assert.doesNotMatch(classModalBody.innerHTML, /Operator access preview|Capability access|Allowed buckets|Restriction buckets|capability buckets|raw tool picker|high-risk/i);
 
   context.agentPanelSelectClass('blueprint', 'product-manager');
   assert.match(classModalBody.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
   assert.doesNotMatch(classModalBody.innerHTML, /External connectors/);
   assert.match(classModalBody.innerHTML, /Product planning and intake class with bounded Torque access/);
   assert.match(classModalBody.innerHTML, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
-  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
+  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
   context.renderAgentPanel();
   assert.equal(classModal.classList.contains('visible'), true, 'routine rerender keeps Change Class modal open');
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
@@ -3741,7 +3774,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Product Manager/);
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
-  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — effective Agent Class snapshot matches desired/);
+  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — running session already matches desired Agent Class/);
   assert.doesNotMatch(panel.innerHTML, /Desired Agent Class updated\. It will freeze/);
   context.agentPanelCloseClassAssignmentModal(null);
   assert.equal(classModal.classList.contains('visible'), false);
@@ -3815,7 +3848,7 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
   assert.match(panel.innerHTML, /PM-safe authority/);
   assert.match(panel.innerHTML, /Product planning and intake class with bounded Torque access/);
   assert.match(panel.innerHTML, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
-  assert.match(panel.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, raw tools, direct Engineer\/Worker messages/);
+  assert.match(panel.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
   assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
   assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
@@ -3831,7 +3864,7 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
     issues: [],
   });
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
-  assert.match(classModalBody.innerHTML, /Policy source[\s\S]*Managed by Agent Class: Product Manager/);
+  assert.match(classModalBody.innerHTML, /Access source[\s\S]*Managed by Agent Class: Product Manager/);
   assert.doesNotMatch(classModalBody.innerHTML, /class-policy-product-manager|Product Manager internal policy|differs from desired default/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
   assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
