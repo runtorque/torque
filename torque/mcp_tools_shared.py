@@ -8761,6 +8761,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return ack_error, True
         if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "comm.product_ack_request"):
             return "ack_required=true requires comm.product_ack_request", True
+        if _dedupe_strings(args.get("context_engineer_ids", [])):
+            context, context_error = _normalize_product_context(
+                real_state,
+                caller_id,
+                _engineer_group,
+                args,
+            )
+            if context_error:
+                return context_error, True
+            return "context_engineer_ids are not supported for Product Manager wrappers", True
         has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_summary"))
         if has_explicit_context:
             context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)

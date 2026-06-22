@@ -656,6 +656,24 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([product_message_id], [threads[0]["messages"][0]["id"]])
 
         before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
+        before_calls = list(self.calls)
+        mixed_context_reply = await self._call(
+            "architect_product_peer_reply",
+            {
+                "message_id": product_message_id,
+                "message": "reply with invalid engineer context",
+                "context_engineer_ids": [self.engineer.id],
+            },
+            req_id=45,
+        )
+        self.assertIn("context_engineer_ids", self._error_text(mixed_context_reply))
+        self.assertEqual(
+            [row["id"] for row in before_rows],
+            [row["id"] for row in self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)],
+        )
+        self.assertEqual(before_calls, self.calls)
+
+        before_rows = self.db.load_agent_peer_messages_for_agent(self.architect.id, limit=20)
         raw_reply = await self._call(
             "architect_product_peer_reply",
             {"message_id": "msg-raw-peer", "message": "no"},
