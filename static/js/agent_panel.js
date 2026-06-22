@@ -1457,29 +1457,21 @@ function _agentPanelClassDogfoodApproved(item) {
 }
 
 function _agentPanelClassConnectorCaveat(item) {
-  item = item || {};
-  if (item.external_connector_caveat || _agentPanelClassIsProductManager(item)) {
-    return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
-  }
-  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
-  for (var i = 0; i < warnings.length; i++) {
-    if (_agentPanelIsExternalConnectorNotice(warnings[i])) {
-      return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
-    }
-  }
+  // Normal Agent Class surfaces intentionally omit connector-governance copy.
+  // Connector access is managed outside this UI; avoid presenting it as an
+  // actionable Agent Class warning.
   return '';
 }
 
 function _agentPanelClassUniqueWarnings(item) {
   item = item || {};
   var warnings = Array.isArray(item.warnings) ? item.warnings : [];
-  var hasCaveat = !!_agentPanelClassConnectorCaveat(item);
   var seen = {};
   var out = [];
   for (var i = 0; i < warnings.length; i++) {
     var text = String(warnings[i] || '').trim();
     if (!text) continue;
-    if (hasCaveat && _agentPanelIsExternalConnectorNotice(text)) continue;
+    if (_agentPanelIsExternalConnectorNotice(text)) continue;
     var key = _agentPanelClassNoticeKey(text);
     if (!key || seen[key]) continue;
     seen[key] = true;
@@ -1491,7 +1483,6 @@ function _agentPanelClassUniqueWarnings(item) {
 function _agentPanelProductManagerCompactPolicyHtml(item) {
   item = item || {};
   var approved = _agentPanelClassDogfoodApproved(item);
-  var caveat = _agentPanelClassConnectorCaveat(item);
   var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="product-manager">';
   html += '<div class="agent-class-compact-chips">';
   html += '<span class="agent-profile-chip agent-class-compact-chip">Product Manager</span>';
@@ -1503,11 +1494,12 @@ function _agentPanelProductManagerCompactPolicyHtml(item) {
   html += '<span class="agent-profile-chip agent-class-compact-chip">Architect base metadata only</span>';
   html += '</div>';
   html += '<div class="agent-class-compact-note">'
-    + 'PM authority excludes hire/dispatch/merge/deploy/admin/raw tools and direct engineer/worker messaging.'
+    + 'Product planning and intake class with bounded Torque access.'
     + '</div>';
-  if (caveat) {
-    html += '<div class="agent-class-compact-caveat">' + _agentPanelEsc(caveat) + '</div>';
-  }
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>planning reads/writes, proposed decisions, queued task intake, user + peer Architect coordination</strong></div>'
+    + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, raw tools, direct Engineer/Worker messages</strong></div>'
+    + '</div>';
   html += '</div>';
   return html;
 }
@@ -1789,9 +1781,6 @@ function _agentPanelClassBadgeHtml(agent) {
     titleParts.push('desired next launch: ' + state.desiredLabel + _agentPanelClassVersionSuffix(state.desiredVersion));
   }
   var snapshot = _agentPanelClassSnapshot(agent);
-  if (snapshot.agent_profile_ref && snapshot.agent_profile_ref.id) {
-    titleParts.push('internal policy: ' + snapshot.agent_profile_ref.id + _agentPanelClassVersionSuffix(snapshot.agent_profile_ref.version));
-  }
   var badgeWarnings = _agentPanelClassIsProductManager(snapshot)
     ? []
     : _agentPanelClassUniqueWarnings(snapshot);
@@ -1806,6 +1795,22 @@ function _agentPanelClassBadgeHtml(agent) {
 function _agentPanelProfileBadgeHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
   var profileState = _agentPanelProfileState(agent);
+  if (profileState.managedByClass && !profileState.pending) {
+    var managedStatus = 'full';
+    var managedSnapshot = (agent.effective_agent_profile_snapshot && typeof agent.effective_agent_profile_snapshot === 'object')
+      ? agent.effective_agent_profile_snapshot
+      : {};
+    managedStatus = String(managedSnapshot.status || managedSnapshot.lifecycle || 'full').trim() || 'full';
+    var managedStatusClass = managedStatus.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
+    var managedLabel = 'Managed by Agent Class';
+    var managedTitle = 'Agent Class manages this internal access policy: '
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+    return '<span class="agent-profile-badge agent-profile-badge-' + _agentPanelEsc(managedStatusClass) + '" title="'
+      + _agentPanelEsc(managedTitle)
+      + '">'
+      + _agentPanelEsc(managedLabel)
+      + '</span>';
+  }
   var displayId = profileState.effectiveId || profileState.desiredId || profileState.assignedId;
   var kind = profileState.kind;
   if (!displayId) return '';
@@ -1853,18 +1858,94 @@ function _agentPanelProfileDefaultIdForKind(kind) {
   return '';
 }
 
+function _agentPanelProfileRefFromClassPreview(item) {
+  item = item || {};
+  var ref = item.agent_profile_ref && typeof item.agent_profile_ref === 'object'
+    ? item.agent_profile_ref
+    : {};
+  var profile = item.agent_profile && typeof item.agent_profile === 'object'
+    ? item.agent_profile
+    : {};
+  if (!profile.id && item.compiled_profile && typeof item.compiled_profile === 'object') {
+    profile = item.compiled_profile;
+  }
+  return {
+    id: String(ref.id || profile.id || '').trim(),
+    version: String(ref.version || profile.version || '').trim(),
+  };
+}
+
+function _agentPanelProfileManagedByClassInfo(agent, classState, profileStatus) {
+  classState = classState || {};
+  profileStatus = profileStatus || {};
+  if (!agent || classState.directProfileId) return {};
+  var classId = String(classState.desiredId || '').trim();
+  if (!classId || classId === classState.defaultId) return {};
+  var classStatus = classState.statusObject && typeof classState.statusObject === 'object'
+    ? classState.statusObject
+    : {};
+  var profileId = String(
+    profileStatus.next_launch_profile_id
+    || classStatus.next_launch_profile_id
+    || ''
+  ).trim();
+  var profileVersion = String(
+    profileStatus.next_launch_profile_version
+    || classStatus.next_launch_profile_version
+    || ''
+  ).trim();
+  var preview = classState.desiredPreview && classState.desiredPreview.id
+    ? classState.desiredPreview
+    : {};
+  if ((!profileId || !profileVersion) && (!preview || !preview.id)
+      && classState.assignedPreview && classState.assignedPreview.id) {
+    preview = classState.assignedPreview;
+  }
+  if ((!profileId || !profileVersion) && classId === classState.effectiveId
+      && classState.effectivePreview && classState.effectivePreview.id) {
+    preview = classState.effectivePreview;
+  }
+  var ref = _agentPanelProfileRefFromClassPreview(preview || {});
+  if (!profileId) profileId = ref.id;
+  if (!profileVersion) profileVersion = ref.version;
+  if (!profileId && classId === String(agent.effective_agent_class_id || '').trim()) {
+    profileId = String(agent.effective_agent_profile_id || '').trim();
+    profileVersion = String(agent.effective_agent_profile_version || profileVersion || '').trim();
+  }
+  if (!profileId) return {};
+  return {
+    classId: classId,
+    classVersion: String(classState.desiredVersion || classState.effectiveVersion || '').trim(),
+    classLabel: String(classState.desiredLabel || classState.effectiveLabel || classId || '').trim() || classId,
+    profileId: profileId,
+    profileVersion: profileVersion,
+  };
+}
+
 function _agentPanelProfileState(agent) {
   var kind = String((agent && agent.kind) || '').trim();
   var defaultId = _agentPanelProfileDefaultIdForKind(kind);
+  var status = (agent && agent.agent_profile_status && typeof agent.agent_profile_status === 'object')
+    ? agent.agent_profile_status
+    : {};
   var snapshot = (agent && agent.effective_agent_profile_snapshot
       && typeof agent.effective_agent_profile_snapshot === 'object')
     ? agent.effective_agent_profile_snapshot
     : {};
-  var assignedId = String((agent && agent.agent_profile_id) || '').trim();
-  var assignedVersion = String((agent && agent.agent_profile_version) || '').trim();
+  var assignedId = String(
+    (agent && agent.agent_profile_id)
+    || status.assigned_profile_id
+    || ''
+  ).trim();
+  var assignedVersion = String(
+    (agent && agent.agent_profile_version)
+    || status.assigned_profile_version
+    || ''
+  ).trim();
   var effectiveId = String(
     (agent && agent.effective_agent_profile_id)
     || snapshot.id
+    || status.effective_profile_id
     || defaultId
     || assignedId
     || ''
@@ -1872,17 +1953,30 @@ function _agentPanelProfileState(agent) {
   var effectiveVersion = String(
     (agent && agent.effective_agent_profile_version)
     || snapshot.version
+    || status.effective_profile_version
     || ''
   ).trim();
-  var desiredId = assignedId || defaultId;
-  var desiredVersion = assignedId ? assignedVersion : '';
-  var pending = !!(
+  var classState = !assignedId ? _agentPanelClassState(agent) : {};
+  var managedByClass = !assignedId
+    ? _agentPanelProfileManagedByClassInfo(agent, classState, status)
+    : {};
+  var desiredId = assignedId
+    || managedByClass.profileId
+    || String(status.next_launch_profile_id || '').trim()
+    || defaultId;
+  var desiredVersion = assignedId
+    ? assignedVersion
+    : (managedByClass.profileVersion || String(status.next_launch_profile_version || '').trim() || '');
+  var computedPending = !!(
     desiredId
     && (
       desiredId !== effectiveId
       || (desiredVersion && desiredVersion !== effectiveVersion)
     )
   );
+  var pending = typeof status.pending_next_launch === 'boolean'
+    ? !!(status.pending_next_launch && computedPending)
+    : computedPending;
   return {
     kind: kind,
     defaultId: defaultId,
@@ -1893,6 +1987,11 @@ function _agentPanelProfileState(agent) {
     effectiveId: effectiveId,
     effectiveVersion: effectiveVersion,
     pending: pending,
+    managedByClass: !!managedByClass.profileId,
+    managedByClassId: managedByClass.classId || '',
+    managedByClassVersion: managedByClass.classVersion || '',
+    managedByClassLabel: managedByClass.classLabel || '',
+    statusObject: status,
   };
 }
 
@@ -2983,17 +3082,30 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
   var assignedId = profileState.assignedId;
   var assignedVersion = profileState.assignedVersion;
   var pending = profileState.pending;
-  var desiredLabel = assignedId
-    ? (assignedId + _agentPanelProfileVersionSuffix(assignedVersion))
-    : ('default ' + (defaultId || ('full-' + kind)));
+  var desiredLabel = '';
+  if (assignedId) {
+    desiredLabel = assignedId + _agentPanelProfileVersionSuffix(assignedVersion);
+  } else if (profileState.managedByClass) {
+    desiredLabel = 'Managed by Agent Class: '
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+  } else {
+    desiredLabel = 'default ' + (defaultId || ('full-' + kind));
+  }
   var effectiveLabel = (effectiveName || effectiveId || '—')
     + _agentPanelProfileVersionSuffix(effectiveVersion);
+  if (profileState.managedByClass && !pending) {
+    effectiveLabel = 'Managed by Agent Class: '
+      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+  }
+  var pendingMetaLabel = (!pending && profileState.managedByClass)
+    ? 'Policy source'
+    : 'Pending';
   var html = '<div class="agent-profile-status-grid">';
   html += _agentPanelProfileMetaLine('Effective now', effectiveLabel);
   html += _agentPanelProfileMetaLine('Desired next launch', desiredLabel);
   html += _agentPanelProfileMetaLine('Lifecycle/status', _agentPanelProfileStatusLabel(snapshot));
   html += _agentPanelProfileMetaLine(
-    'Pending',
+    pendingMetaLabel,
     _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent),
     pending ? 'agent-profile-meta-pending' : ''
   );
@@ -3012,7 +3124,13 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
 
 function _agentPanelProfilePendingLabel(profileState, effectiveLabel, desiredLabel, agent) {
   profileState = profileState || {};
-  if (!profileState.pending) return 'No — effective profile matches desired';
+  if (!profileState.pending) {
+    if (profileState.managedByClass) {
+      return 'Managed by Agent Class: '
+        + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+    }
+    return 'No — effective profile matches desired';
+  }
   var assignedAt = Number((agent && agent.agent_profile_assigned_at) || 0) || 0;
   var appliedAt = Number((agent && agent.effective_agent_profile_applied_at) || 0) || 0;
   var effective = String(effectiveLabel || profileState.effectiveId || '—').trim() || '—';
@@ -3300,14 +3418,12 @@ function _agentPanelClassSelectionHint(agent, selection) {
   }
   if (!selection.ok) return selection.reason || 'Choose a launchable Agent Class or Default (no explicit Agent Class).';
   var item = selection.item || {};
-  var ref = item.agent_profile_ref || {};
   return 'Next relaunch freezes '
     + _agentPanelClassDisplayName(item, selection.selectedId)
     + _agentPanelClassVersionSuffix(item.version)
     + ' as the primary identity; '
     + _agentPanelClassSecondaryLabel(item, kind)
     + ' remains secondary/base-kind metadata'
-    + (ref.id ? (' with internal policy ' + ref.id + _agentPanelClassVersionSuffix(ref.version)) : '')
     + '.';
 }
 
@@ -3350,33 +3466,6 @@ function _agentPanelClassWarningsHtml(item) {
   return html;
 }
 
-function _agentPanelClassInternalPolicyHtml(item) {
-  item = item || {};
-  var ref = item.agent_profile_ref || {};
-  var profile = item.agent_profile || item.internal_profile || item.compiled_profile || {};
-  var policy = item.internal_policy && typeof item.internal_policy === 'object' ? item.internal_policy : {};
-  var rows = '';
-  rows += _agentPanelClassMetaLine(
-    'Internal Agent Profile',
-    (ref.id || profile.id || '—') + _agentPanelClassVersionSuffix(ref.version || profile.version)
-  );
-  rows += _agentPanelClassMetaLine('Profile status', String(profile.status || profile.lifecycle || '—'));
-  if (profile.capability_count != null) rows += _agentPanelClassMetaLine('Profile capabilities', profile.capability_count);
-  rows += _agentPanelClassMetaLine('Runtime enforcement', item.runtime_enforcement || 'launch_frozen_agent_class_profile_pairing');
-  if (policy.mode) rows += _agentPanelClassMetaLine('Policy mode', policy.mode);
-  if (policy.profile_source) rows += _agentPanelClassMetaLine('Policy source', policy.profile_source);
-  var generated = policy.generated_profile_written_to_project_yaml;
-  if (generated !== undefined) {
-    rows += _agentPanelClassMetaLine('Generated profile YAML', generated ? 'yes' : 'no');
-  }
-  return '<details class="agent-profile-internal-policy-details">'
-    + '<summary>Advanced/Internal Agent Profile policy</summary>'
-    + '<div class="agent-profile-status-grid agent-class-internal-policy-grid">'
-    + rows
-    + '</div>'
-    + '</details>';
-}
-
 function _agentPanelClassPreviewHtml(agent, ui) {
   var selection = _agentPanelClassSelectionState(agent, ui);
   var state = _agentPanelClassState(agent);
@@ -3408,15 +3497,11 @@ function _agentPanelClassPreviewHtml(agent, ui) {
   if (item.scratch_only || (item.draft && item.draft.scratch_only)) {
     html += '<span class="agent-profile-chip agent-profile-chip-draft">scratch-only</span>';
   }
-  if (item.external_connector_caveat && !_agentPanelClassIsProductManager(item)) {
-    html += '<span class="agent-profile-chip agent-profile-chip-pending">external connector caveat</span>';
-  }
   html += '</div></div>';
   html += '<div class="agent-profile-next-launch-note">'
     + _agentPanelEsc(_agentPanelClassSelectionHint(agent, selection))
     + '</div>';
   html += _agentPanelClassWarningsHtml(item);
-  html += _agentPanelClassInternalPolicyHtml(item);
   return html + '</div>';
 }
 
