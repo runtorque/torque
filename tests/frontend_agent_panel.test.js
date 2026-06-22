@@ -94,6 +94,9 @@ function setFocusedAgent(context, agent) {
     context.focusedItemId = agent.id;
   }
 }
+function countText(haystack, needle) {
+  return String(haystack || '').split(needle).length - 1;
+}
 
 test('renderAgentPanel shows an empty state when no grid item is focused', () => {
   const { context, panel, captureCalls, restoreCalls } = createHarness();
@@ -3601,7 +3604,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
 
   context.agentPanelSelectClass('blueprint', 'product-manager');
   assert.match(panel.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
-  assert.match(panel.innerHTML, /external connector caveat/);
+  assert.match(panel.innerHTML, /External connectors are separate; Agent Class\/Profile policy does not govern them/);
   context.agentPanelAssignSelectedClass(null, 'blueprint');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
     cmd: 'agent_class_assign',
@@ -3657,6 +3660,92 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.match(panel.innerHTML, /Pending relaunch[\s\S]*No — effective Agent Class snapshot matches desired/);
   assert.doesNotMatch(panel.innerHTML, /Desired Agent Class updated\. It will freeze/);
+});
+
+test('agent panel renders Product Manager dogfood state as compact deduped class policy UI', () => {
+  const { context, panel } = createHarness();
+  const productManagerClass = {
+    id: 'product-manager',
+    version: '2',
+    base_kind: 'architect',
+    display_name: 'Product Manager',
+    primary_identity_label: 'Product Manager',
+    secondary_base_kind_label: 'Architect-derived',
+    lifecycle: 'stable',
+    status: 'restricted',
+    launchable: true,
+    builtin: true,
+    draft: { scratch_only: false, approved_for_live_dogfood: true },
+    agent_profile_ref: { id: 'class-policy-product-manager', version: '2' },
+    agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'restricted', capability_count: 7 },
+    internal_policy: {
+      mode: 'compile',
+      profile_source: 'compiled_from_agent_class',
+      generated_profile_written_to_project_yaml: false,
+    },
+    warnings: [
+      'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
+      'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+      'Raw Architect tools are denied; use architect_product_* wrappers only.',
+      'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
+    ],
+    external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
+    runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
+  };
+
+  setFocusedAgent(context, {
+    id: 'blueprint',
+    name: 'Blueprint',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+    directory: '/repo',
+    agent_class_id: 'product-manager',
+    agent_class_version: '2',
+    effective_agent_class_id: 'product-manager',
+    effective_agent_class_version: '2',
+    effective_agent_class_snapshot: productManagerClass,
+    effective_agent_profile_id: 'class-policy-product-manager',
+    effective_agent_profile_version: '2',
+    effective_agent_profile_snapshot: {
+      id: 'class-policy-product-manager',
+      version: '2',
+      base_kind: 'architect',
+      display_name: 'Product Manager internal policy',
+      lifecycle: 'restricted',
+      status: 'restricted',
+      warnings: ['Raw Architect tools are denied; use architect_product_* wrappers only.'],
+      denied_high_risk_capabilities: ['agent.hire_engineer', 'task.dispatch', 'worktree.merge', 'deploy.apply'],
+    },
+  });
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Product Manager · Group: alpha/);
+  assert.doesNotMatch(panel.innerHTML, /Architect: Product Manager/);
+  assert.match(panel.innerHTML, /agent-class-compact-status/);
+  assert.match(panel.innerHTML, /approved dogfood/);
+  assert.match(panel.innerHTML, /PM-safe authority/);
+  assert.match(panel.innerHTML, /PM authority excludes hire\/dispatch\/merge\/deploy\/admin\/raw tools and direct engineer\/worker messaging/);
+  const caveat = 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+  assert.equal(countText(panel.innerHTML, caveat), 1);
+  assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
+  assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
+  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
+  assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
+  assert.match(panel.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
+
+  context.agentPanelToggleClassAssignment(null, 'blueprint');
+  context.agentPanelReceiveAgentClasses({
+    type: 'agent_classes',
+    classes: [productManagerClass],
+    issues: [],
+  });
+  assert.match(panel.innerHTML, /<option value="product-manager" selected>/);
+  assert.equal(countText(panel.innerHTML, caveat), 1);
+  assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
+  assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
 });
 
 test('agent class manager assignment errors remain routed to active panel operation', () => {

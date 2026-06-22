@@ -1398,6 +1398,114 @@ function _agentPanelClassStatusLabel(item) {
   return String(item.status || item.lifecycle || '').trim() || 'full';
 }
 
+function _agentPanelClassNoticeKey(value) {
+  return String(value == null ? '' : value)
+    .trim()
+    .toLowerCase()
+    .replace(/&amp;/g, '&')
+    .replace(/\bagent classes?\b/g, 'agent class')
+    .replace(/\bagent profiles?\b/g, 'agent profile')
+    .replace(/[^\w]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _agentPanelIsExternalConnectorNotice(value) {
+  var key = _agentPanelClassNoticeKey(value);
+  return !!(
+    key
+    && (
+      key.indexOf('external connector') >= 0
+      || key.indexOf('connector exposure') >= 0
+    )
+    && (
+      key.indexOf('not govern') >= 0
+      || key.indexOf('not enforced') >= 0
+      || key.indexOf('separate') >= 0
+      || key.indexOf('manage connector access separately') >= 0
+    )
+  );
+}
+
+function _agentPanelClassIsProductManager(item) {
+  item = item || {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  var draft = item.draft && typeof item.draft === 'object' ? item.draft : {};
+  var label = _agentPanelClassDisplayName(item, '');
+  return String(item.id || '') === 'product-manager'
+    || String(metadata.archetype || '') === 'product_manager'
+    || String(metadata.migration_from_profile || '').indexOf('product-manager') === 0
+    || String(draft.product_manager || '') === 'true'
+    || label === 'Product Manager';
+}
+
+function _agentPanelClassDogfoodApproved(item) {
+  item = item || {};
+  var draft = item.draft && typeof item.draft === 'object' ? item.draft : {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  return draft.approved_for_live_dogfood === true
+    || item.approved_for_live_dogfood === true
+    || metadata.approved_for_live_dogfood === true
+    || String(metadata.dogfood_state || metadata.dogfood_status || '').toLowerCase() === 'approved'
+    || String(item.dogfood_state || item.dogfood_status || '').toLowerCase() === 'approved';
+}
+
+function _agentPanelClassConnectorCaveat(item) {
+  item = item || {};
+  if (item.external_connector_caveat || _agentPanelClassIsProductManager(item)) {
+    return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+  }
+  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
+  for (var i = 0; i < warnings.length; i++) {
+    if (_agentPanelIsExternalConnectorNotice(warnings[i])) {
+      return 'External connectors are separate; Agent Class/Profile policy does not govern them.';
+    }
+  }
+  return '';
+}
+
+function _agentPanelClassUniqueWarnings(item) {
+  item = item || {};
+  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
+  var hasCaveat = !!_agentPanelClassConnectorCaveat(item);
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < warnings.length; i++) {
+    var text = String(warnings[i] || '').trim();
+    if (!text) continue;
+    if (hasCaveat && _agentPanelIsExternalConnectorNotice(text)) continue;
+    var key = _agentPanelClassNoticeKey(text);
+    if (!key || seen[key]) continue;
+    seen[key] = true;
+    out.push(text);
+  }
+  return out;
+}
+
+function _agentPanelProductManagerCompactPolicyHtml(item) {
+  item = item || {};
+  var approved = _agentPanelClassDogfoodApproved(item);
+  var caveat = _agentPanelClassConnectorCaveat(item);
+  var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="product-manager">';
+  html += '<div class="agent-class-compact-chips">';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Product Manager</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip '
+    + (approved ? 'agent-profile-chip-full' : 'agent-profile-chip-pending') + '">'
+    + _agentPanelEsc(approved ? 'approved dogfood' : 'dogfood approval pending')
+    + '</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">PM-safe authority</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Architect base metadata only</span>';
+  html += '</div>';
+  html += '<div class="agent-class-compact-note">'
+    + 'PM authority excludes hire/dispatch/merge/deploy/admin/raw tools and direct engineer/worker messaging.'
+    + '</div>';
+  if (caveat) {
+    html += '<div class="agent-class-compact-caveat">' + _agentPanelEsc(caveat) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function _agentPanelClassIsArchived(item) {
   item = item || {};
   var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
@@ -1502,6 +1610,28 @@ function _agentPanelClassIsDefault(agent, classId) {
 function _agentPanelClassEffectiveLabel(agent) {
   var state = _agentPanelClassState(agent);
   return state.effectiveLabel || state.effectiveId || _agentPanelKindDisplayLabel(state.kind);
+}
+
+function _agentPanelPrimaryClassIdentity(agent) {
+  if (!agent || String(agent.cell_type || 'agent') !== 'agent') return null;
+  var state = _agentPanelClassState(agent);
+  if (!state.effectiveId || state.effectiveId === state.defaultId) return null;
+  var label = String(state.effectiveLabel || state.effectiveId || '').trim();
+  if (!label) return null;
+  return {
+    label: label,
+    secondary: state.secondaryLabel || _agentPanelKindDisplayLabel(state.kind),
+    kind: state.kind,
+  };
+}
+
+function _agentPanelRoleTitle(agent, roleLabel) {
+  var group = String((agent && agent.group) || '').trim() || '—';
+  var identity = _agentPanelPrimaryClassIdentity(agent);
+  if (identity) {
+    return identity.label + ' · Group: ' + group;
+  }
+  return roleLabel + ': ' + ((agent && (agent.name || agent.id)) || 'Unknown') + ' · Group: ' + group;
 }
 
 function _agentPanelClassState(agent) {
@@ -1656,8 +1786,11 @@ function _agentPanelClassBadgeHtml(agent) {
   if (snapshot.agent_profile_ref && snapshot.agent_profile_ref.id) {
     titleParts.push('internal policy: ' + snapshot.agent_profile_ref.id + _agentPanelClassVersionSuffix(snapshot.agent_profile_ref.version));
   }
-  if (Array.isArray(snapshot.warnings)) {
-    for (var i = 0; i < snapshot.warnings.length && i < 3; i++) titleParts.push(String(snapshot.warnings[i] || ''));
+  var badgeWarnings = _agentPanelClassIsProductManager(snapshot)
+    ? []
+    : _agentPanelClassUniqueWarnings(snapshot);
+  for (var i = 0; i < badgeWarnings.length && i < 3; i++) {
+    titleParts.push(String(badgeWarnings[i] || ''));
   }
   return '<span class="' + classes + '" title="' + _agentPanelEsc(titleParts.join('\n')) + '">'
     + _agentPanelEsc(label)
@@ -3101,7 +3234,10 @@ function _agentPanelClassIssuesHtml(issues) {
 
 function _agentPanelClassWarningsHtml(item) {
   item = item || {};
-  var warnings = Array.isArray(item.warnings) ? item.warnings : [];
+  if (_agentPanelClassIsProductManager(item)) {
+    return _agentPanelProductManagerCompactPolicyHtml(item);
+  }
+  var warnings = _agentPanelClassUniqueWarnings(item);
   var html = '';
   if (warnings.length) {
     html += '<ul class="agent-profile-warning-list agent-class-warning-list">';
@@ -3110,9 +3246,10 @@ function _agentPanelClassWarningsHtml(item) {
     }
     html += '</ul>';
   }
-  if (item.external_connector_caveat) {
+  var caveat = _agentPanelClassConnectorCaveat(item);
+  if (caveat) {
     html += '<div class="agent-profile-scratch-warning agent-class-caveat">'
-      + _agentPanelEsc(item.external_connector_caveat)
+      + _agentPanelEsc(caveat)
       + '</div>';
   }
   return html;
@@ -3138,7 +3275,7 @@ function _agentPanelClassInternalPolicyHtml(item) {
     rows += _agentPanelClassMetaLine('Generated profile YAML', generated ? 'yes' : 'no');
   }
   return '<details class="agent-profile-internal-policy-details">'
-    + '<summary>Advanced/Internal enforcement details</summary>'
+    + '<summary>Advanced/Internal Agent Profile policy</summary>'
     + '<div class="agent-profile-status-grid agent-class-internal-policy-grid">'
     + rows
     + '</div>'
@@ -3176,7 +3313,7 @@ function _agentPanelClassPreviewHtml(agent, ui) {
   if (item.scratch_only || (item.draft && item.draft.scratch_only)) {
     html += '<span class="agent-profile-chip agent-profile-chip-draft">scratch-only</span>';
   }
-  if (item.external_connector_caveat) {
+  if (item.external_connector_caveat && !_agentPanelClassIsProductManager(item)) {
     html += '<span class="agent-profile-chip agent-profile-chip-pending">external connector caveat</span>';
   }
   html += '</div></div>';
@@ -3219,10 +3356,19 @@ function _agentPanelClassManagerHtml(agent) {
     + '</button>';
   html += '</div>';
   html += _agentPanelClassAssignmentStatusHtml(agent);
-  if (state.warnings && state.warnings.length) {
-    html += _agentPanelClassWarningsHtml({ warnings: state.warnings, external_connector_caveat: state.externalConnectorCaveat });
-  } else if (state.externalConnectorCaveat) {
-    html += _agentPanelClassWarningsHtml({ warnings: [], external_connector_caveat: state.externalConnectorCaveat });
+  if (!ui.open) {
+    var effectiveNoticeSource = state.effectivePreview && state.effectivePreview.id
+      ? state.effectivePreview
+      : {};
+    if (state.warnings && state.warnings.length) {
+      effectiveNoticeSource = Object.assign({}, effectiveNoticeSource, { warnings: state.warnings });
+    }
+    if (state.externalConnectorCaveat) {
+      effectiveNoticeSource = Object.assign({}, effectiveNoticeSource, {
+        external_connector_caveat: state.externalConnectorCaveat,
+      });
+    }
+    html += _agentPanelClassWarningsHtml(effectiveNoticeSource);
   }
   if (ui.message) html += '<div class="agent-profile-message">' + _agentPanelEsc(ui.message) + '</div>';
   if (ui.error) html += '<div class="agent-profile-error">' + _agentPanelEsc(ui.error) + '</div>';
@@ -5368,7 +5514,6 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
 }
 
 function _renderEngineerPanel(agent) {
-  var group = String((agent && agent.group) || '');
   var activeTab = _agentPanelActiveTab('engineer');
   var parts = _agentPanelTabRenderParts(agent, 'engineer', activeTab);
   var bodyHtml = _agentPanelBodyWithProfileManager(
@@ -5376,7 +5521,7 @@ function _renderEngineerPanel(agent) {
     _agentPanelEngineerSpecializationsEditorHtml(agent) + (parts.bodyHtml || '')
   );
   return _agentPanelShell(
-    'Engineer: ' + ((agent && (agent.name || agent.id)) || 'Unknown') + ' · Group: ' + (group || '—'),
+    _agentPanelRoleTitle(agent, 'Engineer'),
     'Journal, digest queue, assigned tasks, and completed work for this engineer\'s group.',
     'engineer',
     activeTab,
@@ -5546,8 +5691,7 @@ function _renderWorkerPanel(agent) {
   var activeTab = _agentPanelActiveTab('worker');
   var parts = _agentPanelTabRenderParts(agent, 'worker', activeTab);
   return _agentPanelShell(
-    'Worker: ' + ((agent && (agent.name || agent.id)) || 'Unknown')
-      + ' · Group: ' + (((agent && agent.group) || '') || '—'),
+    _agentPanelRoleTitle(agent, 'Worker'),
     'Per-worker event stream and task history.',
     'worker',
     activeTab,
@@ -5820,8 +5964,7 @@ function _renderArchitectPanel(agent) {
   var activeTab = _agentPanelActiveTab('architect');
   var parts = _agentPanelTabRenderParts(agent, 'architect', activeTab);
   return _agentPanelShell(
-    'Architect: ' + ((agent && (agent.name || agent.id)) || 'Unknown')
-      + ' · Group: ' + (((agent && agent.group) || '') || '—'),
+    _agentPanelRoleTitle(agent, 'Architect'),
     'Journal, decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
