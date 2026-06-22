@@ -4476,14 +4476,49 @@ def _product_peer_allowlist_contains(state, caller_id: str, peer_id: str) -> boo
     return peer_id in {str(item or "").strip() for item in candidates}
 
 
-def _product_peer_eligible(state, caller_id: str, peer) -> bool:
+def _cell_kind(cell) -> str:
+    return str(getattr(cell, "kind", "") or "").strip()
+
+
+def _cell_id(cell) -> str:
+    return str(getattr(cell, "id", "") or "").strip()
+
+
+def _cell_group(cell) -> str:
+    return str(getattr(cell, "group", "") or "").strip()
+
+
+def _product_peer_scope_reason(state, caller_id: str, peer) -> str:
     if not peer:
-        return False
-    peer_id = str(getattr(peer, "id", "") or "").strip()
-    return (
-        _cell_has_product_manager_profile(state, peer)
-        or _product_peer_allowlist_contains(state, caller_id, peer_id)
-    )
+        return ""
+    caller_id = str(caller_id or "").strip()
+    peer_id = _cell_id(peer)
+    if not caller_id or not peer_id or peer_id == caller_id:
+        return ""
+    caller = getattr(state, "agents", {}).get(caller_id)
+    if not caller:
+        return ""
+    if (
+            getattr(peer, "cell_type", "") != "agent"
+            or _cell_kind(peer) != "architect"
+            or _agent_is_tombstoned(state, peer)):
+        return ""
+    if not _cell_group(caller) or _cell_group(peer) != _cell_group(caller):
+        return ""
+    if _cell_has_product_manager_profile(state, peer):
+        return "product-manager-profile"
+    if _product_peer_allowlist_contains(state, caller_id, peer_id):
+        return "product-peer-allowlist"
+    if _caller_profile_allows_capability(
+            state,
+            peer_id,
+            "comm.peer_architect_message"):
+        return "same-group-architect-peer-capable"
+    return ""
+
+
+def _product_peer_eligible(state, caller_id: str, peer) -> bool:
+    return bool(_product_peer_scope_reason(state, caller_id, peer))
 
 
 def _resolve_product_architect_peer(state, caller_id: str,
@@ -4920,6 +4955,15 @@ def _product_context_anchor_count(context: dict) -> int:
         + len(list((context or {}).get("context_decision_ids", []) or []))
         + len(list(product.get("area_ids", []) or []))
         + len(list(product.get("initiative_ids", []) or []))
+    )
+
+
+def _require_product_peer_anchor(context: dict, *, tool_name: str) -> str:
+    if _product_context_anchor_count(context) > 0:
+        return ""
+    return (
+        f"{tool_name} requires at least one product-scope anchor "
+        "(decision, task proposal, Area, or Initiative)"
     )
 
 
@@ -8451,10 +8495,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 continue
             if _agent_dismissed_at(cell) and not include_dismissed:
                 continue
-            if not _product_peer_eligible(real_state, caller_id, cell):
+            product_peer_scope = _product_peer_scope_reason(real_state, caller_id, cell)
+            if not product_peer_scope:
                 continue
             item = _architect_peer_item(real_state, cell)
             item["product_peer_eligible"] = True
+            item["product_peer_scope"] = product_peer_scope
             peers.append(item)
         peers.sort(key=lambda item: (str(item.get("name", "") or "").lower(), str(item.get("id", "") or "")))
         return _compact_json({"type": "product_peers", "architect_id": caller_id, "architects": peers}), False
@@ -8667,6 +8713,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
         if context_error:
             return context_error, True
+        anchor_error = _require_product_peer_anchor(
+            context,
+            tool_name="architect_product_peer_message",
+        )
+        if anchor_error:
+            return anchor_error, True
         ack_anchor_error = _require_product_ack_anchor(ack_required, context)
         if ack_anchor_error:
             return ack_anchor_error, True
@@ -8709,6 +8761,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return ack_error, True
         if ack_required and not _caller_profile_allows_capability(real_state, caller_id, "comm.product_ack_request"):
             return "ack_required=true requires comm.product_ack_request", True
+        if _dedupe_strings(args.get("context_engineer_ids", [])):
+            context, context_error = _normalize_product_context(
+                real_state,
+                caller_id,
+                _engineer_group,
+                args,
+            )
+            if context_error:
+                return context_error, True
+            return "context_engineer_ids are not supported for Product Manager wrappers", True
         has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_summary"))
         if has_explicit_context:
             context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
@@ -8716,6 +8778,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 return context_error, True
         else:
             context = _row_product_context(row)
+        anchor_error = _require_product_peer_anchor(
+            context,
+            tool_name="architect_product_peer_reply",
+        )
+        if anchor_error:
+            return anchor_error, True
         ack_anchor_error = _require_product_ack_anchor(ack_required, context)
         if ack_anchor_error:
             return ack_anchor_error, True

@@ -147,6 +147,12 @@ PM_DRAFT_WARNING = (
     "do not use it for Blueprint replacement or production product authority without "
     "explicit future approval."
 )
+PM_DOGFOOD_AUTHORITY_CAVEAT = (
+    "Product Manager is approved for live dogfood as a permanent Agent Class, "
+    "but remains PM-safe and authority-bounded: no hire, dispatch, merge, deploy, "
+    "admin, raw tool picker, accepted-decision authority, connector governance, "
+    "or direct Engineer/Worker messaging."
+)
 
 
 @dataclass(frozen=True)
@@ -1289,6 +1295,25 @@ def internal_policy_preview_for_class(
     return out
 
 
+def _product_manager_status_contract(class_preview: dict[str, Any],
+                                     profile_preview: dict[str, Any]) -> dict[str, Any]:
+    if not _class_is_product_manager_preview(class_preview):
+        return {}
+    approved = _class_preview_approved_for_live_dogfood(class_preview)
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return {
+        "approved_for_live_dogfood": approved,
+        "permanence_state": str((metadata or {}).get("permanence_state", "") or (
+            "dogfood_permanent" if approved else "draft"
+        )),
+        "authority_model": "pm_safe_restricted",
+        "status": _class_status_from_previews(class_preview, profile_preview),
+        "raw_architect_authority": False,
+        "direct_engineer_worker_messaging": False,
+        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
+    }
+
+
 def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: dict[str, Any]) -> str:
     if agent_class_is_archived(class_preview):
         return "archived"
@@ -1299,6 +1324,20 @@ def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: 
     if profile_status and profile_status != "full":
         return profile_status
     return "full"
+
+
+def _class_is_product_manager_preview(class_preview: dict[str, Any]) -> bool:
+    class_id = str(class_preview.get("id", "") or "").strip()
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return (
+        class_id == "product-manager"
+        or str((metadata or {}).get("archetype", "") or "").strip() == "product_manager"
+    )
+
+
+def _class_preview_approved_for_live_dogfood(class_preview: dict[str, Any]) -> bool:
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return bool((metadata or {}).get("approved_for_live_dogfood") is True)
 
 
 def _profile_ref_text(definition_or_preview: AgentClassDefinition | dict[str, Any]) -> str:
@@ -1320,6 +1359,8 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
     class_id = str(class_preview.get("id", "") or "").strip()
     lifecycle = str(class_preview.get("lifecycle", "") or "").strip().lower()
     status = _class_status_from_previews(class_preview, profile_preview)
+    is_product_manager = _class_is_product_manager_preview(class_preview)
+    pm_approved = is_product_manager and _class_preview_approved_for_live_dogfood(class_preview)
     if agent_class_is_archived(class_preview):
         warnings.append(
             f"{class_id or 'Agent Class'} is archived/disabled and cannot be assigned or launched until re-enabled."
@@ -1328,13 +1369,19 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
         warnings.append(
             f"{class_id or 'Agent Class'} is lifecycle={lifecycle}; use only for scratch/preview unless explicitly approved."
         )
-    if class_id == "product-manager" or str((class_preview.get("metadata") or {}).get("archetype", "") if isinstance(class_preview.get("metadata"), dict) else "") == "product_manager":
-        warnings.append(PM_DRAFT_WARNING)
-    if status in {"draft", "restricted"} or lifecycle == "draft":
+    if is_product_manager:
+        warnings.append(PM_DOGFOOD_AUTHORITY_CAVEAT if pm_approved else PM_DRAFT_WARNING)
+    if (status in {"draft", "restricted"} or lifecycle == "draft") and not pm_approved:
         warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
     # Preserve profile warnings (PM wrapper restrictions, narrowed MCP surface).
     for warning in list(profile_preview.get("warnings", []) or []):
         text = str(warning or "").strip()
+        if pm_approved and (
+                text == PM_DRAFT_WARNING
+                or "draft/restricted until explicit live-dogfood approval" in text
+                or "approved for bounded live dogfood through the Agent Class" in text
+                or text == EXTERNAL_CONNECTOR_DRAFT_WARNING):
+            continue
         if text and text not in warnings:
             warnings.append(text)
     return warnings
@@ -1384,6 +1431,9 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["secondary_base_kind_label"] = secondary_base_kind_label_for_class(definition)
     preview["secondary_base_kind_metadata"] = agent_class_runtime_preview(definition)
     preview["status"] = _class_status_from_previews(preview, profile_preview)
+    pm_status_contract = _product_manager_status_contract(preview, profile_preview)
+    if pm_status_contract:
+        preview["product_manager_status"] = pm_status_contract
     warnings = class_warnings_for_preview(preview, profile_preview)
     for warning in definition.warnings or []:
         text = str(warning or "").strip()
@@ -1458,6 +1508,9 @@ def freeze_agent_class_snapshot(
         "assignment_source": assignment_source,
         "frozen_at": float(frozen_at),
     }
+    pm_status_contract = _product_manager_status_contract(snapshot, profile_preview)
+    if pm_status_contract:
+        snapshot["product_manager_status"] = pm_status_contract
     snapshot["snapshot_hash"] = snapshot_hash({k: v for k, v in snapshot.items() if k != "snapshot_hash"})
     return snapshot
 
@@ -1645,7 +1698,18 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             "No silent migration is performed."
         )
         warnings.append(legacy_direct_profile_warning)
-    if not direct_profile_without_class and next_launch_class_id == "product-manager":
+    next_launch_pm_approved = False
+    if assigned_preview and assigned_preview.get("id") == next_launch_class_id:
+        next_launch_pm_approved = (
+            _class_is_product_manager_preview(assigned_preview)
+            and _class_preview_approved_for_live_dogfood(assigned_preview)
+        )
+    elif effective_preview and effective_preview.get("id") == next_launch_class_id:
+        next_launch_pm_approved = (
+            _class_is_product_manager_preview(effective_preview)
+            and _class_preview_approved_for_live_dogfood(effective_preview)
+        )
+    if not direct_profile_without_class and next_launch_class_id == "product-manager" and not next_launch_pm_approved:
         if EXTERNAL_CONNECTOR_DRAFT_WARNING not in warnings:
             warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
     deduped_warnings: list[str] = []
