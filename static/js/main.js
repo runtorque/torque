@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-initiatives', 'panel-mission-control', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
+var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-initiatives', 'panel-thinking', 'panel-mission-control', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
@@ -118,6 +118,9 @@ function _loadPanelApp(appName) {
       initiativesEnsureLoaded();
     }
   }
+  if (appName === 'thinking' && typeof thinkingEnsureLoaded === 'function') {
+    thinkingEnsureLoaded({ includeInactive: true });
+  }
   if (appName === 'mission-control' && typeof missionControlEnsureLoaded === 'function') {
     missionControlEnsureLoaded();
   }
@@ -179,6 +182,9 @@ function _reloadGroupScopedPanelApp(appName) {
   if (appName === 'initiatives') {
     if (typeof initiativesBeginGroupSwitch === 'function') initiativesBeginGroupSwitch();
   }
+  if (appName === 'thinking') {
+    if (typeof thinkingBeginGroupSwitch === 'function') thinkingBeginGroupSwitch();
+  }
   if (appName === 'mission-control') {
     if (typeof missionControlBeginGroupSwitch === 'function') missionControlBeginGroupSwitch();
   }
@@ -195,7 +201,7 @@ function _reloadGroupScopedPanelApp(appName) {
 function _reloadVisibleGroupScopedPanelApps() {
   var seen = {};
   _visiblePanelAppsForGroupScopeReload().forEach(function(appName) {
-    if ((appName !== 'actions' && appName !== 'templates' && appName !== 'initiatives' && appName !== 'mission-control' && appName !== 'history' && appName !== 'health') || seen[appName]) return;
+    if ((appName !== 'actions' && appName !== 'templates' && appName !== 'initiatives' && appName !== 'thinking' && appName !== 'mission-control' && appName !== 'history' && appName !== 'health') || seen[appName]) return;
     seen[appName] = true;
     _reloadGroupScopedPanelApp(appName);
   });
@@ -305,6 +311,7 @@ function togglePanel(appName) {
     if (appName === 'chat' && typeof renderChatPanel === 'function') renderChatPanel();
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'initiatives' && typeof renderInitiativesPanel === 'function') renderInitiativesPanel();
+    if (appName === 'thinking' && typeof renderThinkingPanel === 'function') renderThinkingPanel();
     if (appName === 'mission-control' && typeof renderMissionControlPanel === 'function') renderMissionControlPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
     if (appName === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
