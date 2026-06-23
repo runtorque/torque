@@ -57,6 +57,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual([], [issue.as_dict() for issue in issues])
         by_id = {definition.id: definition for definition in classes}
         expected = {
+            "creative-architect": ("architect", "class-policy-creative-architect", "1"),
             "default-architect": ("architect", "full-architect", "1"),
             "default-engineer": ("engineer", "full-engineer", "1"),
             "default-worker": ("worker", "full-worker", "1"),
@@ -132,6 +133,91 @@ class AgentClassRegistryTests(unittest.TestCase):
             "admin.settings",
             "profile.assign",
             "profile.edit",
+        }, set())
+
+    def test_creative_architect_preview_is_proposal_only_thinking_class(self):
+        classes, issues = load_agent_classes(base_dir=str(self.project))
+        self.assertFalse(issues)
+        creative = next(definition for definition in classes if definition.id == "creative-architect")
+
+        preview = enriched_agent_class_preview(creative, base_dir=str(self.project))
+
+        self.assertEqual(preview["status"], "restricted")
+        self.assertEqual(preview["display_name"], "Creative Architect")
+        self.assertEqual(preview["primary_identity_label"], "Creative Architect")
+        self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
+        self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-creative-architect", "version": "1"})
+        self.assertEqual(preview["agent_profile"]["id"], "class-policy-creative-architect")
+        self.assertEqual(preview["metadata"]["archetype"], "creative_architect")
+        self.assertTrue(preview["metadata"]["proposal_only"])
+        self.assertEqual(
+            preview["creative_architect_status"]["authority_model"],
+            "proposal_only_ideation_partner",
+        )
+        self.assertFalse(preview["creative_architect_status"]["raw_architect_authority"])
+        self.assertFalse(preview["creative_architect_status"]["direct_engineer_worker_messaging"])
+        self.assertFalse(preview["creative_architect_status"]["accepted_decision_authority"])
+        for bucket in {
+            "self_context",
+            "planning_reads",
+            "recent_context_reads",
+            "thinking_workspace",
+            "proposed_decisions",
+            "board_task_proposals",
+            "user_messages",
+            "product_peer_messages",
+            "private_journal",
+        }:
+            self.assertIn(bucket, preview["capability_bucket_selection"])
+        for restriction in {
+            "deny_engineer_management",
+            "deny_worker_dispatch",
+            "deny_execution_task_control",
+            "deny_engineer_worker_messages",
+            "deny_worktree_merge",
+            "deny_deploy_admin",
+            "deny_class_profile_admin",
+            "deny_decision_acceptance",
+            "deny_raw_tool_picker",
+        }:
+            self.assertIn(restriction, preview["restriction_bucket_selection"])
+        categories = {
+            entry["category"]: entry
+            for entry in preview["agent_profile"]["projected_tool_categories"]
+        }
+        self.assertEqual(categories["thinking_reads"]["status"], "allowed")
+        self.assertEqual(categories["thinking_writes"]["status"], "allowed")
+        self.assertEqual(categories["worker_dispatch"]["status"], "denied")
+        self.assertEqual(categories["deploy_admin"]["status"], "denied")
+        warnings = "\n".join(preview["warnings"])
+        self.assertIn("proposal-only", warnings)
+        self.assertIn("architect_thinking_*", warnings)
+        self.assertIn("architect_product_*", warnings)
+
+        compiled = compile_agent_class_profile(creative)
+        self.assertEqual(compiled.id, "class-policy-creative-architect")
+        self.assertIn("thinking.read", compiled.grants)
+        self.assertIn("thinking.write_own", compiled.grants)
+        self.assertEqual(set(compiled.grants) & {
+            "agent.hire_engineer",
+            "agent.dispatch_worker",
+            "agent.engineer_roster_read",
+            "task.dispatch",
+            "task.create",
+            "task.update",
+            "task.move",
+            "comm.engineer_message",
+            "comm.worker_message",
+            "worktree.merge",
+            "deploy.apply",
+            "admin.settings",
+            "profile.assign",
+            "profile.edit",
+            "decision.accept",
+            "decision.create",
+            "decision.update",
+            "planning.area_write",
+            "planning.initiative_write",
         }, set())
 
     def test_schema_v3_compile_accepts_capability_buckets_and_rejects_raw_tools(self):
@@ -576,6 +662,46 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
+
+    def test_creative_architect_launch_freezes_prompt_and_safe_internal_policy(self):
+        cell = self._add_agent(kind="architect")
+        self.state.assign_agent_class(
+            cell.id,
+            "creative-architect",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+
+        snapshot = self.state.apply_effective_agent_class_for_launch(
+            cell,
+            base_dir=str(self.project),
+        )
+        policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
+        prompt_block = agent_class_prompt_block_for_cell(cell)
+
+        self.assertEqual(snapshot["id"], "creative-architect")
+        self.assertEqual(snapshot["primary_identity_label"], "Creative Architect")
+        self.assertEqual(snapshot["agent_profile_ref"], {"id": "class-policy-creative-architect", "version": "1"})
+        self.assertEqual(cell.effective_agent_class_id, "creative-architect")
+        self.assertEqual(cell.effective_agent_profile_id, "class-policy-creative-architect")
+        self.assertEqual(
+            cell.effective_agent_profile_snapshot["metadata"]["generated_by_agent_class"]["id"],
+            "creative-architect",
+        )
+        self.assertIn("Creative Architect", prompt_block)
+        self.assertIn("Diverge first", prompt_block)
+        self.assertIn("never treat ideas as accepted plans", prompt_block)
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_thinking_scratchpad_create", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_thinking_mind_map_node_create", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_task_propose", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("torque_message_user", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_link", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
 
     def test_default_unassigned_classes_preserve_full_base_kind_profiles_and_no_prompt(self):
         for kind, expected_class, expected_profile in [

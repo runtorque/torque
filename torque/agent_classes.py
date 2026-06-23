@@ -25,6 +25,7 @@ from .agent_profiles import (
     BASE_KINDS,
     BASE_KIND_CEILINGS,
     CAPABILITIES,
+    CREATIVE_ARCHITECT_DANGEROUS_CAPABILITIES,
     HIGH_RISK_CAPABILITIES,
     AgentProfileDefinition,
     PM_DANGEROUS_CAPABILITIES,
@@ -66,6 +67,7 @@ BUILTIN_CLASS_BASE_KIND = {
     "default-architect": "architect",
     "default-engineer": "engineer",
     "default-worker": "worker",
+    "creative-architect": "architect",
     "product-manager": "architect",
 }
 
@@ -79,6 +81,7 @@ BUILTIN_CLASS_POLICY_MODE = {
     "default-architect": "wrap_profile",
     "default-engineer": "wrap_profile",
     "default-worker": "wrap_profile",
+    "creative-architect": "compile",
     "product-manager": "compile",
 }
 
@@ -156,6 +159,11 @@ PM_DOGFOOD_AUTHORITY_CAVEAT = (
     "but remains PM-safe and authority-bounded: no hire, dispatch, merge, deploy, "
     "admin, raw tool picker, accepted-decision authority, connector governance, "
     "or direct Engineer/Worker messaging."
+)
+CREATIVE_ARCHITECT_AUTHORITY_CAVEAT = (
+    "Creative Architect is a proposal-only ideation partner: use Thinking "
+    "and product-safe proposal wrappers, but do not treat generated ideas, "
+    "queued tasks, peer messages, or proposed decisions as accepted plans."
 )
 
 @dataclass(frozen=True)
@@ -256,6 +264,22 @@ CAPABILITY_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
             {"observe.board_summary", "observe.task_detail", "planning.area_read", "planning.initiative_read", "decision.list"},
             base_kinds={"engineer", "architect"},
             category="planning",
+        ),
+        _bucket(
+            "recent_context_reads",
+            "Recent context reads",
+            "Read recent same-group activity summaries/events where the base kind already permits them.",
+            {"observe.events"},
+            base_kinds={"engineer", "architect"},
+            category="read",
+        ),
+        _bucket(
+            "thinking_workspace",
+            "Thinking workspace",
+            "Read same-group Scratchpad notes and Mind Maps; create/update only caller-owned Thinking artifacts.",
+            {"thinking.read", "thinking.write_own"},
+            base_kinds={"architect"},
+            category="thinking",
         ),
         _bucket(
             "planning_writes",
@@ -1318,6 +1342,11 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
     metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
     archetype = str((metadata or {}).get("archetype", "") or "").strip()
     is_pm_class = class_id == "product-manager" or archetype == "product_manager" or "product-manager" in class_id
+    is_creative_architect_class = (
+        class_id == "creative-architect"
+        or archetype == "creative_architect"
+        or "creative-architect" in class_id
+    )
     dangerous = sorted(grants & PM_DANGEROUS_CAPABILITIES)
     if is_pm_class and dangerous:
         issues.append(ValidationIssue(
@@ -1325,6 +1354,16 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
             "dangerous_product_manager_capability_buckets",
             "Product Manager Agent Classes must not select buckets that grant dangerous execution/admin capabilities: "
             + ", ".join(dangerous),
+            path=source,
+            profile_id=class_id,
+        ))
+    creative_dangerous = sorted(grants & CREATIVE_ARCHITECT_DANGEROUS_CAPABILITIES)
+    if is_creative_architect_class and creative_dangerous:
+        issues.append(ValidationIssue(
+            "error",
+            "dangerous_creative_architect_capability_buckets",
+            "Creative Architect Agent Classes must stay proposal-only and must not select execution/admin/accepted-decision capabilities: "
+            + ", ".join(creative_dangerous),
             path=source,
             profile_id=class_id,
         ))
@@ -1975,6 +2014,24 @@ def _product_manager_status_contract(class_preview: dict[str, Any],
     }
 
 
+def _creative_architect_status_contract(class_preview: dict[str, Any],
+                                        profile_preview: dict[str, Any]) -> dict[str, Any]:
+    if not _class_is_creative_architect_preview(class_preview):
+        return {}
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return {
+        "proposal_only": bool((metadata or {}).get("proposal_only") is True),
+        "authority_model": "proposal_only_ideation_partner",
+        "status": _class_status_from_previews(class_preview, profile_preview),
+        "raw_architect_authority": False,
+        "direct_engineer_worker_messaging": False,
+        "accepted_decision_authority": False,
+        "thinking_wrappers": "architect_thinking_*",
+        "proposal_wrappers": "architect_product_*",
+        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
+    }
+
+
 def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: dict[str, Any]) -> str:
     if agent_class_is_archived(class_preview):
         return "archived"
@@ -1993,6 +2050,15 @@ def _class_is_product_manager_preview(class_preview: dict[str, Any]) -> bool:
     return (
         class_id == "product-manager"
         or str((metadata or {}).get("archetype", "") or "").strip() == "product_manager"
+    )
+
+
+def _class_is_creative_architect_preview(class_preview: dict[str, Any]) -> bool:
+    class_id = str(class_preview.get("id", "") or "").strip()
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return (
+        class_id == "creative-architect"
+        or str((metadata or {}).get("archetype", "") or "").strip() == "creative_architect"
     )
 
 
@@ -2021,6 +2087,7 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
     lifecycle = str(class_preview.get("lifecycle", "") or "").strip().lower()
     status = _class_status_from_previews(class_preview, profile_preview)
     is_product_manager = _class_is_product_manager_preview(class_preview)
+    is_creative_architect = _class_is_creative_architect_preview(class_preview)
     pm_approved = is_product_manager and _class_preview_approved_for_live_dogfood(class_preview)
     if agent_class_is_archived(class_preview):
         warnings.append(
@@ -2032,6 +2099,8 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
         )
     if is_product_manager:
         warnings.append(PM_DOGFOOD_AUTHORITY_CAVEAT if pm_approved else PM_DRAFT_WARNING)
+    if is_creative_architect:
+        warnings.append(CREATIVE_ARCHITECT_AUTHORITY_CAVEAT)
     if (status in {"draft", "restricted"} or lifecycle == "draft") and not pm_approved:
         warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
     # Preserve profile warnings (PM wrapper restrictions, narrowed MCP surface).
@@ -2112,6 +2181,9 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     pm_status_contract = _product_manager_status_contract(preview, profile_preview)
     if pm_status_contract:
         preview["product_manager_status"] = pm_status_contract
+    creative_status_contract = _creative_architect_status_contract(preview, profile_preview)
+    if creative_status_contract:
+        preview["creative_architect_status"] = creative_status_contract
     warnings = class_warnings_for_preview(preview, profile_preview)
     for warning in definition.warnings or []:
         text = str(warning or "").strip()
@@ -2211,6 +2283,9 @@ def freeze_agent_class_snapshot(
     pm_status_contract = _product_manager_status_contract(snapshot, profile_preview)
     if pm_status_contract:
         snapshot["product_manager_status"] = pm_status_contract
+    creative_status_contract = _creative_architect_status_contract(snapshot, profile_preview)
+    if creative_status_contract:
+        snapshot["creative_architect_status"] = creative_status_contract
     snapshot["snapshot_hash"] = snapshot_hash({k: v for k, v in snapshot.items() if k != "snapshot_hash"})
     return snapshot
 
@@ -2492,7 +2567,13 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
 
 
 def built_in_agent_class_ids() -> list[str]:
-    return ["default-architect", "default-engineer", "default-worker", "product-manager"]
+    return [
+        "creative-architect",
+        "default-architect",
+        "default-engineer",
+        "default-worker",
+        "product-manager",
+    ]
 
 
 def _extract_project_class_paths_by_id(base_dir: str = "") -> dict[str, Path]:

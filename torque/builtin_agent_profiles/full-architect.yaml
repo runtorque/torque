@@ -57,6 +57,8 @@ grants:
   - task.update_planning_fields
   - task.upload_artifact
   - task.verify
+  - thinking.read
+  - thinking.write_own
   - worktree.merge
   - worktree.read
 denies: []

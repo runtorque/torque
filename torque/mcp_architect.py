@@ -1740,6 +1740,75 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
 ]
 
 
+_ARCHITECT_THINKING_TOOL_SPECS = [
+    {
+        "name": "architect_thinking_scratchpad_list",
+        "description": "List same-group Scratchpad notes visible to this Architect; includes caller_owned for safe update decisions.",
+        "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_thinking_scratchpad_show",
+        "description": "Show one same-group Scratchpad note by id or slug.",
+        "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}, "required": ["note"]},
+    },
+    {
+        "name": "architect_thinking_scratchpad_create",
+        "description": "Create a caller-owned Scratchpad note in the Architect's group; never writes outside the caller group.",
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}, "required": ["title"]},
+    },
+    {
+        "name": "architect_thinking_scratchpad_update",
+        "description": "Update a caller-owned Scratchpad note only; same-group notes owned by others are read-only.",
+        "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}, "required": ["note"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_list",
+        "description": "List same-group Mind Maps visible to this Architect; includes caller_owned for safe update decisions.",
+        "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_thinking_mind_map_show",
+        "description": "Show one same-group Mind Map with nodes and links.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}, "required": ["mind_map"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_create",
+        "description": "Create a caller-owned Mind Map in the Architect's group.",
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}, "required": ["title"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_update",
+        "description": "Update a caller-owned Mind Map only.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}, "required": ["mind_map"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_node_create",
+        "description": "Create a node in a caller-owned Mind Map.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["mind_map", "label"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_node_update",
+        "description": "Update a node in a caller-owned Mind Map only.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["node"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_node_position",
+        "description": "Move a node in a caller-owned Mind Map only.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "group": {"type": "string"}}, "required": ["node"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_link_create",
+        "description": "Create a link between nodes in a caller-owned Mind Map.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["mind_map", "source_node_id", "target_node_id"]},
+    },
+    {
+        "name": "architect_thinking_mind_map_link_update",
+        "description": "Update a link in a caller-owned Mind Map only.",
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "link": {"type": "string"}, "link_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["link"]},
+    },
+]
+
+
 def _copy_tool_spec(tool: dict) -> dict:
     copied = deepcopy(tool)
     if str(copied.get("name", "") or "").strip() in ARCHITECT_DEFERRED_TOOL_NAMES:
@@ -1747,7 +1816,14 @@ def _copy_tool_spec(tool: dict) -> dict:
     return copied
 
 
-ARCHITECT_TOOLS = [_copy_tool_spec(tool) for tool in (_ARCHITECT_TOOL_SPECS + _ARCHITECT_PRODUCT_TOOL_SPECS)]
+ARCHITECT_TOOLS = [
+    _copy_tool_spec(tool)
+    for tool in (
+        _ARCHITECT_TOOL_SPECS
+        + _ARCHITECT_PRODUCT_TOOL_SPECS
+        + _ARCHITECT_THINKING_TOOL_SPECS
+    )
+]
 _ARCHITECT_TOOL_NAMES = {
     str(tool.get("name", "") or "").strip()
     for tool in ARCHITECT_TOOLS
