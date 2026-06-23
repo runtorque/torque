@@ -13033,18 +13033,14 @@ def _mind_map_node_ref_from_data(data: dict) -> str:
     explicit = str(data.get("node", "") or data.get("node_id", "") or "").strip()
     if explicit:
         return explicit
-    if not any(data.get(key) for key in ("mind_map", "map", "map_id", "mind_map_id")):
-        return str(data.get("id", "") or "").strip()
-    return ""
+    return str(data.get("id", "") or "").strip()
 
 
 def _mind_map_link_ref_from_data(data: dict) -> str:
     explicit = str(data.get("link", "") or data.get("link_id", "") or "").strip()
     if explicit:
         return explicit
-    if not any(data.get(key) for key in ("mind_map", "map", "map_id", "mind_map_id")):
-        return str(data.get("id", "") or "").strip()
-    return ""
+    return str(data.get("id", "") or "").strip()
 
 
 def _mind_map_order_from_data(data: dict, primary: str) -> list:
@@ -13186,23 +13182,26 @@ async def _handle_mind_map_command(data: dict, state: MatrixState) -> dict:
         return {"type": "mind_map_deleted", "mind_map": deleted}
 
     if cmd == "mind_map_node_create":
+        node_payload = {
+            "label": data.get("label", data.get("title", "")),
+            "title": data.get("title", ""),
+            "notes": data.get("notes", ""),
+            "node_type": data.get("node_type", data.get("type", "")),
+            "tags": data.get("tags", data.get("tags_json", [])),
+            "color": data.get("color", ""),
+            "position": data.get("position", data.get("position_json", {})),
+            "sort_order": data.get("sort_order", None),
+            "created_by_kind": actor["kind"],
+            "created_by_id": actor["id"],
+            "updated_by_kind": actor["kind"],
+            "updated_by_id": actor["id"],
+        }
+        if "x" in data:
+            node_payload["x"] = data.get("x")
+        if "y" in data:
+            node_payload["y"] = data.get("y")
         try:
-            node = await state.create_mind_map_node_async(map_id, {
-                "label": data.get("label", data.get("title", "")),
-                "title": data.get("title", ""),
-                "notes": data.get("notes", ""),
-                "node_type": data.get("node_type", data.get("type", "")),
-                "tags": data.get("tags", data.get("tags_json", [])),
-                "color": data.get("color", ""),
-                "x": data.get("x", 0),
-                "y": data.get("y", 0),
-                "position": data.get("position", data.get("position_json", {})),
-                "sort_order": data.get("sort_order", None),
-                "created_by_kind": actor["kind"],
-                "created_by_id": actor["id"],
-                "updated_by_kind": actor["kind"],
-                "updated_by_id": actor["id"],
-            })
+            node = await state.create_mind_map_node_async(map_id, node_payload)
         except ValueError as exc:
             return _thinking_error(str(exc), "validation_error")
         return {"type": "mind_map_node_created", "node": node}

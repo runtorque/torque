@@ -6870,8 +6870,16 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             raise ValueError(f"mind map node already exists: {node_id}")
         now = datetime.now(timezone.utc).isoformat()
         position = _json_payload(row.get("position", row.get("position_json", {})), {})
-        x_value = row.get("x", position.get("x", 0))
-        y_value = row.get("y", position.get("y", 0))
+        x_value = (
+            row.get("x")
+            if "x" in row and row.get("x") is not None
+            else position.get("x", 0)
+        )
+        y_value = (
+            row.get("y")
+            if "y" in row and row.get("y") is not None
+            else position.get("y", 0)
+        )
         try:
             x = float(x_value or 0)
         except (TypeError, ValueError):
@@ -6880,10 +6888,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             y = float(y_value or 0)
         except (TypeError, ValueError):
             y = 0.0
-        if "x" not in position:
-            position["x"] = x
-        if "y" not in position:
-            position["y"] = y
+        position["x"] = x
+        position["y"] = y
         created_by_kind = _normalize_actor_kind(row.get("created_by_kind", "user"))
         sort_order_raw = row.get("sort_order", None)
         if sort_order_raw is None:
@@ -6980,8 +6986,14 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 patch.get("position", patch.get("position_json", node.get("position", {}))),
                 {},
             )
-            position["x"] = values.get("x", node.get("x", 0))
-            position["y"] = values.get("y", node.get("y", 0))
+            if "x" not in values and "x" in position:
+                values["x"] = float(position.get("x") or 0)
+            if "y" not in values and "y" in position:
+                values["y"] = float(position.get("y") or 0)
+            effective_x = values.get("x", node.get("x", 0))
+            effective_y = values.get("y", node.get("y", 0))
+            position["x"] = effective_x
+            position["y"] = effective_y
             values["position_json"] = _json_payload_text(position, {})
         if "updated_by_kind" in values:
             values["updated_by_kind"] = _normalize_actor_kind(values["updated_by_kind"])

@@ -261,6 +261,10 @@ class ThinkingStateAndServerTests(unittest.IsolatedAsyncioTestCase):
             "label": "Map",
             "position": {"x": 3, "y": 4},
         })
+        self.assertEqual(second["node"]["x"], 3.0)
+        self.assertEqual(second["node"]["y"], 4.0)
+        self.assertEqual(second["node"]["position"]["x"], 3.0)
+        self.assertEqual(second["node"]["position"]["y"], 4.0)
         link = await handle_command({
             "cmd": "mind_map_link_create",
             "group": "Torque",
@@ -310,6 +314,161 @@ class ThinkingStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(map_id, snapshot["mind_maps"])
         compact = self.state.to_dict_compact()["thinking"]
         self.assertIn(map_id, compact["mind_maps"])
+
+    async def test_mind_map_position_payloads_and_id_aliases(self):
+        handle_command = self._extract_server_handle_command()
+        created = await handle_command({
+            "cmd": "mind_map_create",
+            "group": "Torque",
+            "title": "Alias map",
+        })
+        map_id = created["mind_map"]["id"]
+
+        node = await handle_command({
+            "cmd": "mind_map_node_create",
+            "group": "Torque",
+            "map_id": map_id,
+            "label": "Position-only",
+            "position": {"x": 12, "y": 34, "lane": "main"},
+        })
+        node_id = node["node"]["id"]
+        self.assertEqual(node["node"]["x"], 12.0)
+        self.assertEqual(node["node"]["y"], 34.0)
+        self.assertEqual(node["node"]["position"], {
+            "x": 12.0,
+            "y": 34.0,
+            "lane": "main",
+        })
+
+        positioned = await handle_command({
+            "cmd": "mind_map_node_position",
+            "group": "Torque",
+            "id": node_id,
+            "position": {"x": 56, "y": 78, "lane": "moved"},
+        })
+        self.assertEqual(positioned["type"], "mind_map_node_positioned")
+        self.assertEqual(positioned["node"]["x"], 56.0)
+        self.assertEqual(positioned["node"]["y"], 78.0)
+        self.assertEqual(positioned["node"]["position"], {
+            "x": 56.0,
+            "y": 78.0,
+            "lane": "moved",
+        })
+
+        positioned_with_map = await handle_command({
+            "cmd": "mind_map_node_position",
+            "group": "Torque",
+            "map_id": map_id,
+            "id": node_id,
+            "position": {"x": 90, "y": 91, "lane": "explicit-map"},
+        })
+        self.assertEqual(positioned_with_map["type"], "mind_map_node_positioned")
+        self.assertEqual(positioned_with_map["node"]["x"], 90.0)
+        self.assertEqual(positioned_with_map["node"]["y"], 91.0)
+        self.assertEqual(positioned_with_map["node"]["position"]["lane"], "explicit-map")
+
+        updated = await handle_command({
+            "cmd": "mind_map_node_update",
+            "group": "Torque",
+            "id": node_id,
+            "label": "Updated without map",
+        })
+        self.assertEqual(updated["type"], "mind_map_node_updated")
+        self.assertEqual(updated["node"]["label"], "Updated without map")
+        updated_with_map = await handle_command({
+            "cmd": "mind_map_node_update",
+            "group": "Torque",
+            "map_id": map_id,
+            "id": node_id,
+            "notes": "Updated with explicit map",
+        })
+        self.assertEqual(updated_with_map["type"], "mind_map_node_updated")
+        self.assertEqual(updated_with_map["node"]["notes"], "Updated with explicit map")
+
+        target = await handle_command({
+            "cmd": "mind_map_node_create",
+            "group": "Torque",
+            "map_id": map_id,
+            "label": "Target",
+        })
+        link = await handle_command({
+            "cmd": "mind_map_link_create",
+            "group": "Torque",
+            "map_id": map_id,
+            "source_node_id": node_id,
+            "target_node_id": target["node"]["id"],
+            "label": "Original link",
+        })
+        link_id = link["link"]["id"]
+        link_updated = await handle_command({
+            "cmd": "mind_map_link_update",
+            "group": "Torque",
+            "id": link_id,
+            "label": "Updated without map",
+        })
+        self.assertEqual(link_updated["type"], "mind_map_link_updated")
+        self.assertEqual(link_updated["link"]["label"], "Updated without map")
+        link_updated_with_map = await handle_command({
+            "cmd": "mind_map_link_update",
+            "group": "Torque",
+            "map_id": map_id,
+            "id": link_id,
+            "link_type": "explicit-map",
+        })
+        self.assertEqual(link_updated_with_map["type"], "mind_map_link_updated")
+        self.assertEqual(link_updated_with_map["link"]["link_type"], "explicit-map")
+
+        link_deleted = await handle_command({
+            "cmd": "mind_map_link_delete",
+            "group": "Torque",
+            "id": link_id,
+        })
+        self.assertEqual(link_deleted["type"], "mind_map_link_deleted")
+        self.assertTrue(link_deleted["link"]["deleted"])
+        second_link = await handle_command({
+            "cmd": "mind_map_link_create",
+            "group": "Torque",
+            "map_id": map_id,
+            "source_node_id": node_id,
+            "target_node_id": target["node"]["id"],
+            "label": "Delete with map",
+        })
+        second_link_deleted = await handle_command({
+            "cmd": "mind_map_link_delete",
+            "group": "Torque",
+            "map_id": map_id,
+            "id": second_link["link"]["id"],
+        })
+        self.assertEqual(second_link_deleted["type"], "mind_map_link_deleted")
+        self.assertTrue(second_link_deleted["link"]["deleted"])
+
+        delete_without_map = await handle_command({
+            "cmd": "mind_map_node_create",
+            "group": "Torque",
+            "map_id": map_id,
+            "label": "Delete without map",
+        })
+        deleted = await handle_command({
+            "cmd": "mind_map_node_delete",
+            "group": "Torque",
+            "id": delete_without_map["node"]["id"],
+        })
+        self.assertEqual(deleted["type"], "mind_map_node_deleted")
+        self.assertTrue(deleted["node"]["deleted"])
+        delete_with_map = await handle_command({
+            "cmd": "mind_map_node_create",
+            "group": "Torque",
+            "map_id": map_id,
+            "label": "Delete with map",
+        })
+        deleted_with_map = await handle_command({
+            "cmd": "mind_map_node_delete",
+            "group": "Torque",
+            "map_id": map_id,
+            "id": delete_with_map["node"]["id"],
+        })
+        self.assertEqual(deleted_with_map["type"], "mind_map_node_deleted")
+        self.assertTrue(deleted_with_map["node"]["deleted"])
 
     async def test_planning_commands_and_state_are_not_changed_by_thinking(self):
         initiative = self.db.create_initiative({
