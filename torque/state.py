@@ -4497,6 +4497,7 @@ class MatrixState:
             "engineer_streams": self._engineer_streams_snapshot(),
             "decisions": decisions,
             "pending_hires": pending_hires,
+            "thinking": self.thinking_snapshot(),
             "behavior_overlay_proposals": behavior_overlay_proposals,
             "behavior_overlay_active": behavior_overlay_active,
             # Ephemeral daemon-global relay connection-state for the status bar.
@@ -4809,6 +4810,7 @@ class MatrixState:
             "agent_message_history": self.agent_message_history_snapshot(),
             "direct_messages_by_agent": self.direct_messages_snapshot(),
             "agent_peer_threads": self.agent_peer_threads_snapshot(),
+            "thinking": self.thinking_snapshot(),
             "behavior_overlay_proposals": behavior_overlay_proposals,
             "behavior_overlay_active": behavior_overlay_active,
             # Ephemeral daemon-global relay connection-state for the status bar.
@@ -8458,6 +8460,416 @@ class MatrixState:
             return note
         except Exception:
             log.exception("Failed to archive area note %s", note_id)
+            raise
+
+    # -- Thinking read/write helpers ---------------------------------------
+
+    def thinking_snapshot(self, *, group: str = "",
+                          include_archived: bool = False) -> dict:
+        if not self.db:
+            return {"scratchpad_notes": {}, "mind_maps": {}}
+        try:
+            notes = self.db.list_scratchpad_notes(
+                group=group,
+                include_archived=include_archived,
+                include_deleted=False,
+                limit=1000,
+            )
+            maps = self.db.list_mind_maps(
+                group=group,
+                include_archived=include_archived,
+                include_deleted=False,
+                include_counts=True,
+                limit=1000,
+            )
+            return {
+                "scratchpad_notes": {
+                    str(note.get("id", "") or ""): note
+                    for note in notes
+                    if str(note.get("id", "") or "")
+                },
+                "mind_maps": {
+                    str(item.get("id", "") or ""): item
+                    for item in maps
+                    if str(item.get("id", "") or "")
+                },
+            }
+        except Exception:
+            log.exception("Failed to load thinking snapshot")
+            return {"scratchpad_notes": {}, "mind_maps": {}}
+
+    def _emit_scratchpad_note(self, note: dict | None) -> None:
+        if not note:
+            return
+        self._emit("thinking_scratchpad_note_upsert", **dict(note))
+
+    def _emit_mind_map(self, mind_map: dict | None) -> None:
+        if not mind_map:
+            return
+        self._emit("thinking_mind_map_upsert", **dict(mind_map))
+
+    def _emit_mind_map_node(self, node: dict | None) -> None:
+        if not node:
+            return
+        self._emit("thinking_mind_map_node_upsert", **dict(node))
+
+    def _emit_mind_map_link(self, link: dict | None) -> None:
+        if not link:
+            return
+        self._emit("thinking_mind_map_link_upsert", **dict(link))
+
+    def resolve_scratchpad_note_id(self, identifier: str, *,
+                                   group: str = "") -> str:
+        ident = str(identifier or "").strip()
+        if not ident or not self.db:
+            return ""
+        note = self.db.load_scratchpad_note(ident)
+        if note:
+            return str(note.get("id", "") or "")
+        group = str(group or "").strip()
+        ident_lower = ident.lower()
+        try:
+            for item in self.db.list_scratchpad_notes(
+                    group=group,
+                    include_archived=True,
+                    include_deleted=True,
+                    limit=1000):
+                if str(item.get("slug", "") or "").lower() == ident_lower:
+                    return str(item.get("id", "") or "")
+        except Exception:
+            log.exception("Failed to resolve scratchpad note %s", ident)
+        return ""
+
+    def list_scratchpad_notes(self, *, group: str = "",
+                              include_archived: bool = False,
+                              include_deleted: bool = False,
+                              limit: int = 200) -> list[dict]:
+        if not self.db:
+            return []
+        try:
+            return self.db.list_scratchpad_notes(
+                group=group,
+                include_archived=include_archived,
+                include_deleted=include_deleted,
+                limit=limit,
+            )
+        except Exception:
+            log.exception("Failed to list scratchpad notes")
+            return []
+
+    def load_scratchpad_note(self, note_id: str) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            return self.db.load_scratchpad_note(note_id)
+        except Exception:
+            log.exception("Failed to load scratchpad note %s", note_id)
+            return None
+
+    async def create_scratchpad_note_async(self, row_dict: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            note = await self.db.create_scratchpad_note_async(row_dict)
+            self._emit_scratchpad_note(note)
+            return note
+        except Exception:
+            log.exception("Failed to create scratchpad note")
+            raise
+
+    async def update_scratchpad_note_async(self, note_id: str,
+                                           patch: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            note = await self.db.update_scratchpad_note_async(note_id, patch)
+            self._emit_scratchpad_note(note)
+            return note
+        except Exception:
+            log.exception("Failed to update scratchpad note %s", note_id)
+            raise
+
+    async def archive_scratchpad_note_async(self, note_id: str,
+                                            **kwargs) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            note = await self.db.archive_scratchpad_note_async(note_id, **kwargs)
+            self._emit_scratchpad_note(note)
+            return note
+        except Exception:
+            log.exception("Failed to archive scratchpad note %s", note_id)
+            raise
+
+    async def delete_scratchpad_note_async(self, note_id: str,
+                                           **kwargs) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            note = await self.db.delete_scratchpad_note_async(note_id, **kwargs)
+            self._emit_scratchpad_note(note)
+            return note
+        except Exception:
+            log.exception("Failed to delete scratchpad note %s", note_id)
+            raise
+
+    def resolve_mind_map_id(self, identifier: str, *, group: str = "") -> str:
+        ident = str(identifier or "").strip()
+        if not ident or not self.db:
+            return ""
+        mind_map = self.db.load_mind_map(ident)
+        if mind_map:
+            return str(mind_map.get("id", "") or "")
+        group = str(group or "").strip()
+        ident_lower = ident.lower()
+        try:
+            for item in self.db.list_mind_maps(
+                    group=group,
+                    include_archived=True,
+                    include_deleted=True,
+                    include_counts=False,
+                    limit=1000):
+                if str(item.get("slug", "") or "").lower() == ident_lower:
+                    return str(item.get("id", "") or "")
+        except Exception:
+            log.exception("Failed to resolve mind map %s", ident)
+        return ""
+
+    def list_mind_maps(self, *, group: str = "",
+                       include_archived: bool = False,
+                       include_deleted: bool = False,
+                       include_counts: bool = True,
+                       limit: int = 200) -> list[dict]:
+        if not self.db:
+            return []
+        try:
+            return self.db.list_mind_maps(
+                group=group,
+                include_archived=include_archived,
+                include_deleted=include_deleted,
+                include_counts=include_counts,
+                limit=limit,
+            )
+        except Exception:
+            log.exception("Failed to list mind maps")
+            return []
+
+    def load_mind_map(self, map_id: str, *, include_counts: bool = False
+                      ) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            return self.db.load_mind_map(map_id, include_counts=include_counts)
+        except Exception:
+            log.exception("Failed to load mind map %s", map_id)
+            return None
+
+    def mind_map_payload(self, map_id: str, *,
+                         include_archived: bool = False,
+                         include_deleted: bool = False) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            return self.db.mind_map_payload(
+                map_id,
+                include_archived=include_archived,
+                include_deleted=include_deleted,
+            )
+        except Exception:
+            log.exception("Failed to load mind map payload %s", map_id)
+            return None
+
+    def load_mind_map_node(self, node_id: str) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            return self.db.load_mind_map_node(node_id)
+        except Exception:
+            log.exception("Failed to load mind map node %s", node_id)
+            return None
+
+    def load_mind_map_link(self, link_id: str) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            return self.db.load_mind_map_link(link_id)
+        except Exception:
+            log.exception("Failed to load mind map link %s", link_id)
+            return None
+
+    async def create_mind_map_async(self, row_dict: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            mind_map = await self.db.create_mind_map_async(row_dict)
+            self._emit_mind_map(mind_map)
+            return mind_map
+        except Exception:
+            log.exception("Failed to create mind map")
+            raise
+
+    async def update_mind_map_async(self, map_id: str,
+                                    patch: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            mind_map = await self.db.update_mind_map_async(map_id, patch)
+            self._emit_mind_map(mind_map)
+            return mind_map
+        except Exception:
+            log.exception("Failed to update mind map %s", map_id)
+            raise
+
+    async def archive_mind_map_async(self, map_id: str,
+                                     **kwargs) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            mind_map = await self.db.archive_mind_map_async(map_id, **kwargs)
+            self._emit_mind_map(mind_map)
+            return mind_map
+        except Exception:
+            log.exception("Failed to archive mind map %s", map_id)
+            raise
+
+    async def delete_mind_map_async(self, map_id: str,
+                                    **kwargs) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            mind_map = await self.db.delete_mind_map_async(map_id, **kwargs)
+            self._emit_mind_map(mind_map)
+            return mind_map
+        except Exception:
+            log.exception("Failed to delete mind map %s", map_id)
+            raise
+
+    async def create_mind_map_node_async(self, map_id: str,
+                                         row_dict: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            node = await self.db.create_mind_map_node_async(map_id, row_dict)
+            self._emit_mind_map_node(node)
+            self._emit_mind_map(self.db.load_mind_map(map_id, include_counts=True))
+            return node
+        except Exception:
+            log.exception("Failed to create mind map node")
+            raise
+
+    async def update_mind_map_node_async(self, node_id: str,
+                                         patch: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            node = await self.db.update_mind_map_node_async(node_id, patch)
+            self._emit_mind_map_node(node)
+            if node:
+                self._emit_mind_map(
+                    self.db.load_mind_map(node.get("map_id", ""), include_counts=True)
+                )
+            return node
+        except Exception:
+            log.exception("Failed to update mind map node %s", node_id)
+            raise
+
+    async def delete_mind_map_node_async(self, node_id: str,
+                                         **kwargs) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            node = await self.db.delete_mind_map_node_async(node_id, **kwargs)
+            self._emit_mind_map_node(node)
+            if node:
+                self._emit_mind_map(
+                    self.db.load_mind_map(node.get("map_id", ""), include_counts=True)
+                )
+            return node
+        except Exception:
+            log.exception("Failed to delete mind map node %s", node_id)
+            raise
+
+    async def reorder_mind_map_nodes_async(self, map_id: str,
+                                           node_order: list,
+                                           **kwargs) -> list[dict]:
+        if not self.db:
+            return []
+        try:
+            nodes = await self.db.reorder_mind_map_nodes_async(
+                map_id,
+                node_order,
+                **kwargs,
+            )
+            for node in nodes:
+                self._emit_mind_map_node(node)
+            self._emit_mind_map(self.db.load_mind_map(map_id, include_counts=True))
+            return nodes
+        except Exception:
+            log.exception("Failed to reorder mind map nodes %s", map_id)
+            raise
+
+    async def create_mind_map_link_async(self, map_id: str,
+                                         row_dict: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            link = await self.db.create_mind_map_link_async(map_id, row_dict)
+            self._emit_mind_map_link(link)
+            self._emit_mind_map(self.db.load_mind_map(map_id, include_counts=True))
+            return link
+        except Exception:
+            log.exception("Failed to create mind map link")
+            raise
+
+    async def update_mind_map_link_async(self, link_id: str,
+                                         patch: dict) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            link = await self.db.update_mind_map_link_async(link_id, patch)
+            self._emit_mind_map_link(link)
+            if link:
+                self._emit_mind_map(
+                    self.db.load_mind_map(link.get("map_id", ""), include_counts=True)
+                )
+            return link
+        except Exception:
+            log.exception("Failed to update mind map link %s", link_id)
+            raise
+
+    async def delete_mind_map_link_async(self, link_id: str,
+                                         **kwargs) -> dict | None:
+        if not self.db:
+            return None
+        try:
+            link = await self.db.delete_mind_map_link_async(link_id, **kwargs)
+            self._emit_mind_map_link(link)
+            if link:
+                self._emit_mind_map(
+                    self.db.load_mind_map(link.get("map_id", ""), include_counts=True)
+                )
+            return link
+        except Exception:
+            log.exception("Failed to delete mind map link %s", link_id)
+            raise
+
+    async def reorder_mind_map_links_async(self, map_id: str,
+                                           link_order: list,
+                                           **kwargs) -> list[dict]:
+        if not self.db:
+            return []
+        try:
+            links = await self.db.reorder_mind_map_links_async(
+                map_id,
+                link_order,
+                **kwargs,
+            )
+            for link in links:
+                self._emit_mind_map_link(link)
+            self._emit_mind_map(self.db.load_mind_map(map_id, include_counts=True))
+            return links
+        except Exception:
+            log.exception("Failed to reorder mind map links %s", map_id)
             raise
 
 

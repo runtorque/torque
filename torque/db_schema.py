@@ -302,6 +302,141 @@ AREA_NOTE_COLUMNS = {
     "archived_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+THINKING_SCRATCHPAD_NOTE_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "slug": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "body": "TEXT NOT NULL DEFAULT ''",
+    "context_json": "TEXT NOT NULL DEFAULT '{}'",
+    "links_json": "TEXT NOT NULL DEFAULT '[]'",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_id": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+    "deleted_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+THINKING_MIND_MAP_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "slug": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "description": "TEXT NOT NULL DEFAULT ''",
+    "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_id": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+    "deleted_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+THINKING_MIND_MAP_NODE_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "map_id": "TEXT NOT NULL",
+    "label": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "notes": "TEXT NOT NULL DEFAULT ''",
+    "node_type": "TEXT NOT NULL DEFAULT ''",
+    "tags_json": "TEXT NOT NULL DEFAULT '[]'",
+    "color": "TEXT NOT NULL DEFAULT ''",
+    "x": "REAL NOT NULL DEFAULT 0",
+    "y": "REAL NOT NULL DEFAULT 0",
+    "position_json": "TEXT NOT NULL DEFAULT '{}'",
+    "sort_order": "INTEGER NOT NULL DEFAULT 0",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "deleted_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+THINKING_MIND_MAP_LINK_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "map_id": "TEXT NOT NULL",
+    "source_node_id": "TEXT NOT NULL",
+    "target_node_id": "TEXT NOT NULL",
+    "label": "TEXT NOT NULL DEFAULT ''",
+    "link_type": "TEXT NOT NULL DEFAULT ''",
+    "sort_order": "INTEGER NOT NULL DEFAULT 0",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "deleted_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "deleted_at": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _ensure_thinking_schema(conn: sqlite3.Connection) -> None:
+    """Keep Thinking Scratchpad and Mind Map tables additive/idempotent."""
+
+    _ensure_columns(
+        conn,
+        "thinking_scratchpad_notes",
+        THINKING_SCRATCHPAD_NOTE_COLUMNS,
+    )
+    _ensure_columns(conn, "thinking_mind_maps", THINKING_MIND_MAP_COLUMNS)
+    _ensure_columns(
+        conn,
+        "thinking_mind_map_nodes",
+        THINKING_MIND_MAP_NODE_COLUMNS,
+    )
+    _ensure_columns(
+        conn,
+        "thinking_mind_map_links",
+        THINKING_MIND_MAP_LINK_COLUMNS,
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_scratchpad_group "
+        "ON thinking_scratchpad_notes(group_name, deleted_at, archived_at, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_scratchpad_slug "
+        "ON thinking_scratchpad_notes(group_name, slug)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_mind_maps_group "
+        "ON thinking_mind_maps(group_name, deleted_at, archived_at, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_mind_maps_slug "
+        "ON thinking_mind_maps(group_name, slug)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_nodes_map "
+        "ON thinking_mind_map_nodes(map_id, deleted_at, sort_order, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_map "
+        "ON thinking_mind_map_links(map_id, deleted_at, sort_order, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_nodes "
+        "ON thinking_mind_map_links(source_node_id, target_node_id)"
+    )
+
 
 def _ensure_areas_schema(conn: sqlite3.Connection) -> None:
     """Keep Planning Area tables additive/idempotent across partial migrations."""
@@ -1181,6 +1316,126 @@ CREATE TABLE IF NOT EXISTS planning_area_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_planning_area_notes_area
     ON planning_area_notes(area_id, archived_at, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS scratchpad_note_id_counters (
+    group_prefix                TEXT PRIMARY KEY,
+    next_note_number            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS mind_map_id_counters (
+    group_prefix                TEXT PRIMARY KEY,
+    next_map_number             INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS thinking_mind_map_item_counters (
+    map_id                      TEXT PRIMARY KEY,
+    next_node_number            INTEGER NOT NULL DEFAULT 1,
+    next_link_number            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS thinking_scratchpad_notes (
+    id                 TEXT PRIMARY KEY,
+    slug               TEXT NOT NULL DEFAULT '',
+    group_name         TEXT NOT NULL DEFAULT '',
+    title              TEXT NOT NULL DEFAULT '',
+    body               TEXT NOT NULL DEFAULT '',
+    context_json       TEXT NOT NULL DEFAULT '{}',
+    links_json         TEXT NOT NULL DEFAULT '[]',
+    created_by_kind    TEXT NOT NULL DEFAULT 'user',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    archived_by_kind   TEXT NOT NULL DEFAULT '',
+    archived_by_id     TEXT NOT NULL DEFAULT '',
+    deleted_by_kind    TEXT NOT NULL DEFAULT '',
+    deleted_by_id      TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    archived_at        TEXT NOT NULL DEFAULT '',
+    deleted_at         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_thinking_scratchpad_group
+    ON thinking_scratchpad_notes(group_name, deleted_at, archived_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_thinking_scratchpad_slug
+    ON thinking_scratchpad_notes(group_name, slug);
+
+CREATE TABLE IF NOT EXISTS thinking_mind_maps (
+    id                 TEXT PRIMARY KEY,
+    slug               TEXT NOT NULL DEFAULT '',
+    group_name         TEXT NOT NULL DEFAULT '',
+    title              TEXT NOT NULL DEFAULT '',
+    description        TEXT NOT NULL DEFAULT '',
+    metadata_json      TEXT NOT NULL DEFAULT '{}',
+    created_by_kind    TEXT NOT NULL DEFAULT 'user',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    archived_by_kind   TEXT NOT NULL DEFAULT '',
+    archived_by_id     TEXT NOT NULL DEFAULT '',
+    deleted_by_kind    TEXT NOT NULL DEFAULT '',
+    deleted_by_id      TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    archived_at        TEXT NOT NULL DEFAULT '',
+    deleted_at         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_thinking_mind_maps_group
+    ON thinking_mind_maps(group_name, deleted_at, archived_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_thinking_mind_maps_slug
+    ON thinking_mind_maps(group_name, slug);
+
+CREATE TABLE IF NOT EXISTS thinking_mind_map_nodes (
+    id                 TEXT PRIMARY KEY,
+    map_id             TEXT NOT NULL,
+    label              TEXT NOT NULL DEFAULT '',
+    title              TEXT NOT NULL DEFAULT '',
+    notes              TEXT NOT NULL DEFAULT '',
+    node_type          TEXT NOT NULL DEFAULT '',
+    tags_json          TEXT NOT NULL DEFAULT '[]',
+    color              TEXT NOT NULL DEFAULT '',
+    x                  REAL NOT NULL DEFAULT 0,
+    y                  REAL NOT NULL DEFAULT 0,
+    position_json      TEXT NOT NULL DEFAULT '{}',
+    sort_order         INTEGER NOT NULL DEFAULT 0,
+    created_by_kind    TEXT NOT NULL DEFAULT 'user',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    deleted_by_kind    TEXT NOT NULL DEFAULT '',
+    deleted_by_id      TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    deleted_at         TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY(map_id) REFERENCES thinking_mind_maps(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_nodes_map
+    ON thinking_mind_map_nodes(map_id, deleted_at, sort_order, id);
+
+CREATE TABLE IF NOT EXISTS thinking_mind_map_links (
+    id                 TEXT PRIMARY KEY,
+    map_id             TEXT NOT NULL,
+    source_node_id     TEXT NOT NULL,
+    target_node_id     TEXT NOT NULL,
+    label              TEXT NOT NULL DEFAULT '',
+    link_type          TEXT NOT NULL DEFAULT '',
+    sort_order         INTEGER NOT NULL DEFAULT 0,
+    created_by_kind    TEXT NOT NULL DEFAULT 'user',
+    created_by_id      TEXT NOT NULL DEFAULT '',
+    updated_by_kind    TEXT NOT NULL DEFAULT '',
+    updated_by_id      TEXT NOT NULL DEFAULT '',
+    deleted_by_kind    TEXT NOT NULL DEFAULT '',
+    deleted_by_id      TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT '',
+    updated_at         TEXT NOT NULL DEFAULT '',
+    deleted_at         TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY(map_id) REFERENCES thinking_mind_maps(id) ON DELETE CASCADE,
+    FOREIGN KEY(source_node_id) REFERENCES thinking_mind_map_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY(target_node_id) REFERENCES thinking_mind_map_nodes(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_map
+    ON thinking_mind_map_links(map_id, deleted_at, sort_order, id);
+CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_nodes
+    ON thinking_mind_map_links(source_node_id, target_node_id);
 
 CREATE TABLE IF NOT EXISTS pipeline_task_counters (
     root_task_id       TEXT PRIMARY KEY,
@@ -2095,6 +2350,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_mcp_idempotency_schema(conn)
     _ensure_initiatives_schema(conn)
     _ensure_areas_schema(conn)
+    _ensure_thinking_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads
