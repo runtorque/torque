@@ -2548,6 +2548,10 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "task_chain",
     "task_list",
     "task_show",
+    "thinking_mind_map_list",
+    "thinking_mind_map_show",
+    "thinking_scratchpad_list",
+    "thinking_scratchpad_show",
     "wave_summary",
 })
 
@@ -5173,6 +5177,481 @@ def _product_peer_inbox_json(state, caller_id: str,
         "type": "product_peer_inbox",
         "threads": threads[:limit],
     }), False
+
+
+def _thinking_group_for_caller(caller_group: str, args: dict) -> tuple[str, str]:
+    requested = str((args or {}).get("group", "") or "").strip()
+    caller_group = str(caller_group or "").strip()
+    if requested and requested != caller_group:
+        return "", "group must match the architect's group"
+    if not caller_group:
+        return "", "architect is not assigned to a group"
+    return caller_group, ""
+
+
+def _thinking_bool_arg(args: dict, key: str, default: bool = False) -> bool:
+    value = (args or {}).get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
+def _thinking_limit(args: dict, default: int = 100, maximum: int = 500) -> int:
+    try:
+        limit = int((args or {}).get("limit", default) or default)
+    except (TypeError, ValueError):
+        limit = default
+    return max(1, min(limit, maximum))
+
+
+def _thinking_item_group(item: dict | None) -> str:
+    return str((item or {}).get("group_name", (item or {}).get("group", "")) or "").strip()
+
+
+def _thinking_item_owned_by_caller(item: dict | None, caller_id: str) -> bool:
+    return (
+        str((item or {}).get("created_by_kind", "") or "").strip() == "architect"
+        and str((item or {}).get("created_by_id", "") or "").strip()
+        == str(caller_id or "").strip()
+    )
+
+
+def _with_thinking_owner_flag(item: dict | None, caller_id: str) -> dict:
+    payload = dict(item or {})
+    payload["caller_owned"] = _thinking_item_owned_by_caller(payload, caller_id)
+    return payload
+
+
+def _resolve_thinking_scratchpad_note(state, caller_group: str, args: dict, *,
+                                      include_archived: bool = False
+                                      ) -> tuple[str, dict | None, str]:
+    ident = str(
+        (args or {}).get("note", "")
+        or (args or {}).get("note_id", "")
+        or (args or {}).get("id", "")
+        or ""
+    ).strip()
+    if not ident:
+        return "", None, "note is required"
+    note_id = state.resolve_scratchpad_note_id(ident, group=caller_group)
+    note = state.load_scratchpad_note(note_id)
+    if not note or _thinking_item_group(note) != caller_group:
+        return "", None, "Scratchpad note not found"
+    if note.get("deleted"):
+        return "", None, "Scratchpad note not found"
+    if note.get("archived") and not include_archived:
+        return "", None, "Scratchpad note is archived"
+    return str(note.get("id", "") or ""), note, ""
+
+
+def _mind_map_ref_from_args(args: dict) -> str:
+    return str(
+        (args or {}).get("mind_map", "")
+        or (args or {}).get("map", "")
+        or (args or {}).get("map_id", "")
+        or (args or {}).get("mind_map_id", "")
+        or (args or {}).get("id", "")
+        or ""
+    ).strip()
+
+
+def _mind_map_node_ref_from_args(args: dict) -> str:
+    return str(
+        (args or {}).get("node", "")
+        or (args or {}).get("node_id", "")
+        or (args or {}).get("id", "")
+        or ""
+    ).strip()
+
+
+def _mind_map_link_ref_from_args(args: dict) -> str:
+    return str(
+        (args or {}).get("link", "")
+        or (args or {}).get("link_id", "")
+        or (args or {}).get("id", "")
+        or ""
+    ).strip()
+
+
+def _resolve_thinking_mind_map(state, caller_group: str, args: dict, *,
+                               include_archived: bool = False
+                               ) -> tuple[str, dict | None, str]:
+    ident = _mind_map_ref_from_args(args)
+    if not ident:
+        return "", None, "mind_map is required"
+    map_id = state.resolve_mind_map_id(ident, group=caller_group)
+    mind_map = state.load_mind_map(map_id, include_counts=True)
+    if not mind_map or _thinking_item_group(mind_map) != caller_group:
+        return "", None, "Mind Map not found"
+    if mind_map.get("deleted"):
+        return "", None, "Mind Map not found"
+    if mind_map.get("archived") and not include_archived:
+        return "", None, "Mind Map is archived"
+    return str(mind_map.get("id", "") or ""), mind_map, ""
+
+
+def _resolve_thinking_mind_map_for_node_or_link(state, caller_group: str,
+                                                args: dict, *,
+                                                item_kind: str
+                                                ) -> tuple[str, dict | None, str]:
+    if _mind_map_ref_from_args(args):
+        return _resolve_thinking_mind_map(state, caller_group, args)
+    if item_kind == "node":
+        node = state.load_mind_map_node(_mind_map_node_ref_from_args(args))
+        map_id = str((node or {}).get("map_id", "") or "").strip()
+    else:
+        link = state.load_mind_map_link(_mind_map_link_ref_from_args(args))
+        map_id = str((link or {}).get("map_id", "") or "").strip()
+    if not map_id:
+        return "", None, "Mind Map not found"
+    return _resolve_thinking_mind_map(
+        state,
+        caller_group,
+        {"map_id": map_id},
+    )
+
+
+def _require_caller_owned_thinking_item(item: dict | None, caller_id: str,
+                                        label: str) -> str:
+    if _thinking_item_owned_by_caller(item, caller_id):
+        return ""
+    return f"{label} is not in this architect's caller-owned Thinking workspace"
+
+
+async def _architect_thinking_tool(
+        tool_name: str,
+        state,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[str, bool]:
+    args = dict(args or {})
+    group, group_error = _thinking_group_for_caller(caller_group, args)
+    if group_error:
+        return group_error, True
+    include_archived = _thinking_bool_arg(args, "include_archived", False)
+
+    if tool_name == "thinking_scratchpad_list":
+        notes = [
+            _with_thinking_owner_flag(note, caller_id)
+            for note in state.list_scratchpad_notes(
+                group=group,
+                include_archived=include_archived,
+                include_deleted=False,
+                limit=_thinking_limit(args),
+            )
+        ]
+        return _compact_json({
+            "type": "thinking_scratchpad_list",
+            "group": group,
+            "notes": notes,
+        }), False
+
+    if tool_name == "thinking_scratchpad_show":
+        _note_id, note, error = _resolve_thinking_scratchpad_note(
+            state,
+            group,
+            args,
+            include_archived=include_archived,
+        )
+        if error:
+            return error, True
+        payload = _with_thinking_owner_flag(note, caller_id)
+        payload["type"] = "thinking_scratchpad_note"
+        return _compact_json(payload), False
+
+    if tool_name == "thinking_scratchpad_create":
+        title = str(args.get("title", "") or "").strip()
+        if not title:
+            return "title is required", True
+        try:
+            note = await state.create_scratchpad_note_async({
+                "group": group,
+                "title": title,
+                "body": str(args.get("body", "") or ""),
+                "context": args.get("context", args.get("context_json", {})),
+                "links": args.get("links", args.get("links_json", [])),
+                "created_by_kind": "architect",
+                "created_by_id": str(caller_id or "").strip(),
+                "updated_by_kind": "architect",
+                "updated_by_id": str(caller_id or "").strip(),
+            })
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "thinking_scratchpad_created",
+            "note": _with_thinking_owner_flag(note, caller_id),
+        }), False
+
+    if tool_name == "thinking_scratchpad_update":
+        note_id, note, error = _resolve_thinking_scratchpad_note(
+            state,
+            group,
+            args,
+            include_archived=False,
+        )
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            note,
+            caller_id,
+            "Scratchpad note",
+        )
+        if owner_error:
+            return owner_error, True
+        patch = {
+            key: args[key]
+            for key in ("title", "body", "context", "context_json", "links", "links_json")
+            if key in args
+        }
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = str(caller_id or "").strip()
+        try:
+            updated = await state.update_scratchpad_note_async(note_id, patch)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "thinking_scratchpad_updated",
+            "note": _with_thinking_owner_flag(updated, caller_id),
+        }), False
+
+    if tool_name == "thinking_mind_map_list":
+        mind_maps = [
+            _with_thinking_owner_flag(mind_map, caller_id)
+            for mind_map in state.list_mind_maps(
+                group=group,
+                include_archived=include_archived,
+                include_deleted=False,
+                include_counts=True,
+                limit=_thinking_limit(args),
+            )
+        ]
+        return _compact_json({
+            "type": "thinking_mind_map_list",
+            "group": group,
+            "mind_maps": mind_maps,
+        }), False
+
+    if tool_name == "thinking_mind_map_show":
+        map_id, mind_map, error = _resolve_thinking_mind_map(
+            state,
+            group,
+            args,
+            include_archived=include_archived,
+        )
+        if error:
+            return error, True
+        payload = state.mind_map_payload(
+            map_id,
+            include_archived=include_archived,
+            include_deleted=False,
+        )
+        if not payload:
+            return "Mind Map not found", True
+        payload = _with_thinking_owner_flag(payload, caller_id)
+        payload["type"] = "thinking_mind_map"
+        payload["mind_map"] = _with_thinking_owner_flag(mind_map, caller_id)
+        return _compact_json(payload), False
+
+    if tool_name == "thinking_mind_map_create":
+        title = str(args.get("title", "") or "").strip()
+        if not title:
+            return "title is required", True
+        try:
+            mind_map = await state.create_mind_map_async({
+                "group": group,
+                "title": title,
+                "description": str(args.get("description", "") or ""),
+                "metadata": args.get("metadata", args.get("metadata_json", {})),
+                "created_by_kind": "architect",
+                "created_by_id": str(caller_id or "").strip(),
+                "updated_by_kind": "architect",
+                "updated_by_id": str(caller_id or "").strip(),
+            })
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "thinking_mind_map_created",
+            "mind_map": _with_thinking_owner_flag(mind_map, caller_id),
+        }), False
+
+    if tool_name == "thinking_mind_map_update":
+        map_id, mind_map, error = _resolve_thinking_mind_map(state, group, args)
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map,
+            caller_id,
+            "Mind Map",
+        )
+        if owner_error:
+            return owner_error, True
+        patch = {
+            key: args[key]
+            for key in ("title", "description", "metadata", "metadata_json")
+            if key in args
+        }
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = str(caller_id or "").strip()
+        try:
+            updated = await state.update_mind_map_async(map_id, patch)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "thinking_mind_map_updated",
+            "mind_map": _with_thinking_owner_flag(updated, caller_id),
+        }), False
+
+    if tool_name == "thinking_mind_map_node_create":
+        map_id, mind_map, error = _resolve_thinking_mind_map(state, group, args)
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map,
+            caller_id,
+            "Mind Map",
+        )
+        if owner_error:
+            return owner_error, True
+        node_payload = {
+            "label": args.get("label", args.get("title", "")),
+            "title": args.get("title", ""),
+            "notes": args.get("notes", ""),
+            "node_type": args.get("node_type", args.get("type", "")),
+            "tags": args.get("tags", args.get("tags_json", [])),
+            "color": args.get("color", ""),
+            "position": args.get("position", args.get("position_json", {})),
+            "sort_order": args.get("sort_order", None),
+            "created_by_kind": "architect",
+            "created_by_id": str(caller_id or "").strip(),
+            "updated_by_kind": "architect",
+            "updated_by_id": str(caller_id or "").strip(),
+        }
+        if "x" in args:
+            node_payload["x"] = args.get("x")
+        if "y" in args:
+            node_payload["y"] = args.get("y")
+        try:
+            node = await state.create_mind_map_node_async(map_id, node_payload)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({"type": "thinking_mind_map_node_created", "node": node}), False
+
+    if tool_name in {"thinking_mind_map_node_update", "thinking_mind_map_node_position"}:
+        map_id, mind_map, error = _resolve_thinking_mind_map_for_node_or_link(
+            state,
+            group,
+            args,
+            item_kind="node",
+        )
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map,
+            caller_id,
+            "Mind Map",
+        )
+        if owner_error:
+            return owner_error, True
+        node_id = _mind_map_node_ref_from_args(args)
+        if not node_id:
+            return "node is required", True
+        node = state.load_mind_map_node(node_id)
+        if (
+                not node
+                or node.get("deleted")
+                or str(node.get("map_id", "") or "").strip() != map_id):
+            return "Mind Map node not found", True
+        allowed = (
+            ("position", "position_json", "x", "y")
+            if tool_name == "thinking_mind_map_node_position"
+            else (
+                "label", "title", "notes", "node_type", "type", "tags",
+                "tags_json", "color", "x", "y", "position",
+                "position_json", "sort_order",
+            )
+        )
+        patch = {key: args[key] for key in allowed if key in args}
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = str(caller_id or "").strip()
+        try:
+            updated = await state.update_mind_map_node_async(node_id, patch)
+        except (TypeError, ValueError) as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": (
+                "thinking_mind_map_node_positioned"
+                if tool_name == "thinking_mind_map_node_position"
+                else "thinking_mind_map_node_updated"
+            ),
+            "node": updated,
+        }), False
+
+    if tool_name == "thinking_mind_map_link_create":
+        map_id, mind_map, error = _resolve_thinking_mind_map(state, group, args)
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map,
+            caller_id,
+            "Mind Map",
+        )
+        if owner_error:
+            return owner_error, True
+        try:
+            link = await state.create_mind_map_link_async(map_id, {
+                "source_node_id": args.get("source_node_id", args.get("source", "")),
+                "target_node_id": args.get("target_node_id", args.get("target", "")),
+                "label": args.get("label", ""),
+                "link_type": args.get("link_type", args.get("type", "")),
+                "sort_order": args.get("sort_order", None),
+                "created_by_kind": "architect",
+                "created_by_id": str(caller_id or "").strip(),
+                "updated_by_kind": "architect",
+                "updated_by_id": str(caller_id or "").strip(),
+            })
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({"type": "thinking_mind_map_link_created", "link": link}), False
+
+    if tool_name == "thinking_mind_map_link_update":
+        map_id, mind_map, error = _resolve_thinking_mind_map_for_node_or_link(
+            state,
+            group,
+            args,
+            item_kind="link",
+        )
+        if error:
+            return error, True
+        owner_error = _require_caller_owned_thinking_item(
+            mind_map,
+            caller_id,
+            "Mind Map",
+        )
+        if owner_error:
+            return owner_error, True
+        link_id = _mind_map_link_ref_from_args(args)
+        if not link_id:
+            return "link is required", True
+        link = state.load_mind_map_link(link_id)
+        if (
+                not link
+                or link.get("deleted")
+                or str(link.get("map_id", "") or "").strip() != map_id):
+            return "Mind Map link not found", True
+        allowed = (
+            "label", "link_type", "type", "source_node_id", "source",
+            "target_node_id", "target", "sort_order",
+        )
+        patch = {key: args[key] for key in allowed if key in args}
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = str(caller_id or "").strip()
+        try:
+            updated = await state.update_mind_map_link_async(link_id, patch)
+        except (TypeError, ValueError) as exc:
+            return str(exc), True
+        return _compact_json({"type": "thinking_mind_map_link_updated", "link": updated}), False
+
+    return f"Unknown architect thinking tool: {tool_name}", True
 
 
 def _validate_architect_peer_message_length(
@@ -8450,6 +8929,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return await _raw_handle_command(command_payload)
 
     # -- Product Manager wrapper tools ------------------------------------
+
+    if caller_kind == "architect" and tool_name.startswith("thinking_"):
+        return await _architect_thinking_tool(
+            tool_name,
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
 
     if caller_kind == "architect" and tool_name == "product_board_summary":
         return _product_board_summary_json(real_state, caller_id, args)

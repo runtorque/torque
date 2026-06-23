@@ -181,6 +181,8 @@ CAPABILITIES: dict[str, Capability] = {
     "journal.private": Capability("journal.private", "journal", "Private recovery journal."),
     "journal.read": Capability("journal.read", "journal", "Read scoped journals."),
     "journal.write": Capability("journal.write", "journal", "Write scoped journals."),
+    "thinking.read": Capability("thinking.read", "thinking", "Read same-group Scratchpad notes and Mind Maps."),
+    "thinking.write_own": Capability("thinking.write_own", "thinking", "Create/update caller-owned Scratchpad notes and Mind Maps."),
     "memory.read": Capability("memory.read", "memory", "Read shared memory."),
     "memory.publish": Capability("memory.publish", "memory", "Publish shared memory."),
     "memory.admin": Capability("memory.admin", "memory", "Pin/link/unpin shared memory.", "high"),
@@ -253,6 +255,8 @@ ARCHITECT_CEILING = frozenset(ENGINEER_CEILING | {
     "task.move_planning_safe",
     "decision.create_proposed",
     "decision.update_proposed",
+    "thinking.read",
+    "thinking.write_own",
 })
 
 BASE_KIND_CEILINGS = {
@@ -285,6 +289,15 @@ PM_DANGEROUS_CAPABILITIES = frozenset({
     "profile.assign",
     "profile.edit",
     "decision.accept",
+})
+
+CREATIVE_ARCHITECT_DANGEROUS_CAPABILITIES = frozenset(PM_DANGEROUS_CAPABILITIES | {
+    "agent.engineer_roster_read",
+    "decision.create",
+    "decision.update",
+    "observe.deploy_state",
+    "planning.area_write",
+    "planning.initiative_write",
 })
 
 PM_RAW_TOOL_DENYLIST = frozenset({
@@ -346,6 +359,25 @@ PM_RAW_TOOL_DENYLIST = frozenset({
     "architect_journal_read",
 })
 
+CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST = frozenset({
+    # Creative Architect is an ideation/proposal partner. It may read broad
+    # product context, but side effects must go through proposal-only
+    # architect_product_* wrappers and caller-owned architect_thinking_* tools.
+    "architect_tool_search",
+    "torque_ask",
+    "torque_message_user",
+    "torque_reply",
+    "architect_ask",
+    "architect_message_user",
+    "architect_peer_list",
+    "architect_peer_message",
+    "architect_peer_inbox",
+    "architect_reply",
+    "architect_decision_create",
+    "architect_decision_update",
+    "architect_decision_link",
+})
+
 HIGH_RISK_CAPABILITIES = frozenset(
     atom for atom, cap in CAPABILITIES.items() if cap.risk in {"high", "critical"}
 )
@@ -395,6 +427,8 @@ TOOL_CATEGORY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "worktree_merge": frozenset({"worktree.merge"}),
     "deploy_admin": frozenset({"deploy.apply", "admin.settings"}),
     "profile_admin": frozenset({"profile.assign", "profile.edit"}),
+    "thinking_reads": frozenset({"thinking.read"}),
+    "thinking_writes": frozenset({"thinking.read", "thinking.write_own"}),
 }
 
 
@@ -605,6 +639,21 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "architect_product_ask_user": frozenset({"comm.user_ask"}),
     "architect_product_journal": frozenset({"journal.private"}),
     "architect_product_journal_read": frozenset({"journal.private"}),
+    # Creative/Thinking wrapper surface. Read tools are same-group; write tools
+    # enforce caller-owned artifact scope before side effects.
+    "architect_thinking_scratchpad_list": frozenset({"thinking.read"}),
+    "architect_thinking_scratchpad_show": frozenset({"thinking.read"}),
+    "architect_thinking_scratchpad_create": frozenset({"thinking.write_own"}),
+    "architect_thinking_scratchpad_update": frozenset({"thinking.read", "thinking.write_own"}),
+    "architect_thinking_mind_map_list": frozenset({"thinking.read"}),
+    "architect_thinking_mind_map_show": frozenset({"thinking.read"}),
+    "architect_thinking_mind_map_create": frozenset({"thinking.write_own"}),
+    "architect_thinking_mind_map_update": frozenset({"thinking.read", "thinking.write_own"}),
+    "architect_thinking_mind_map_node_create": frozenset({"thinking.read", "thinking.write_own"}),
+    "architect_thinking_mind_map_node_update": frozenset({"thinking.read", "thinking.write_own"}),
+    "architect_thinking_mind_map_node_position": frozenset({"thinking.read", "thinking.write_own"}),
+    "architect_thinking_mind_map_link_create": frozenset({"thinking.read", "thinking.write_own"}),
+    "architect_thinking_mind_map_link_update": frozenset({"thinking.read", "thinking.write_own"}),
 }
 
 
@@ -929,6 +978,24 @@ def _policy_is_product_manager(policy: AgentProfilePolicy | None) -> bool:
     return False
 
 
+def _policy_is_creative_architect(policy: AgentProfilePolicy | None) -> bool:
+    if not policy:
+        return False
+    profile_id = str(getattr(policy, "profile_id", "") or "").strip()
+    if profile_id == "class-policy-creative-architect" or "creative-architect" in profile_id:
+        return True
+    profile = getattr(policy, "profile", None)
+    metadata = getattr(profile, "metadata", {}) if profile is not None else {}
+    if isinstance(metadata, dict):
+        if str(metadata.get("archetype", "") or "").strip() == "creative_architect":
+            return True
+        generated_by = metadata.get("generated_by_agent_class", {})
+        if isinstance(generated_by, dict) and str(
+                generated_by.get("id", "") or "").strip() == "creative-architect":
+            return True
+    return False
+
+
 def profile_preview_is_product_manager(preview: dict[str, Any]) -> bool:
     """Return whether a preview/snapshot represents Product Manager policy."""
 
@@ -944,6 +1011,25 @@ def profile_preview_is_product_manager(preview: dict[str, Any]) -> bool:
     generated_by = metadata.get("generated_by_agent_class", {}) if isinstance(metadata, dict) else {}
     if isinstance(generated_by, dict) and str(generated_by.get("id", "") or "").strip() == "product-manager":
         return True
+    return False
+
+
+def profile_preview_is_creative_architect(preview: dict[str, Any]) -> bool:
+    """Return whether a preview/snapshot represents Creative Architect policy."""
+
+    if not isinstance(preview, dict):
+        return False
+    profile_id = str(preview.get("id", "") or "").strip()
+    if profile_id == "class-policy-creative-architect" or "creative-architect" in profile_id:
+        return True
+    metadata = preview.get("metadata", {})
+    if isinstance(metadata, dict):
+        if str(metadata.get("archetype", "") or "").strip() == "creative_architect":
+            return True
+        generated_by = metadata.get("generated_by_agent_class", {})
+        if isinstance(generated_by, dict) and str(
+                generated_by.get("id", "") or "").strip() == "creative-architect":
+            return True
     return False
 
 
@@ -967,6 +1053,8 @@ def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None
         return True
     normalized_name = str(tool_name or "").strip()
     if _policy_is_product_manager(policy) and normalized_name in PM_RAW_TOOL_DENYLIST:
+        return False
+    if _policy_is_creative_architect(policy) and normalized_name in CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST:
         return False
     requirements = mcp_tool_capability_requirements(normalized_name)
     if not requirements:
@@ -1085,6 +1173,10 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
             )
         warnings.append(
             "Raw Architect tools are denied for Product Manager-style profiles; use architect_product_* wrappers only."
+        )
+    if profile_preview_is_creative_architect(preview):
+        warnings.append(
+            "Creative Architect policy is proposal-only and hides execution/admin authority; use architect_product_* wrappers for proposals and architect_thinking_* wrappers for Scratchpad/Mind Map work."
         )
     return warnings
 
