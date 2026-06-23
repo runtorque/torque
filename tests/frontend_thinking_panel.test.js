@@ -197,8 +197,14 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
   assert.match(render, /surface === 'thinking'/);
   assert.match(ws, /thinking_scratchpad_note_upsert[\s\S]*_markSurface\(flags, 'thinking'\)/);
   assert.match(webview, /id="panel-thinking"/);
-  assert.match(webview, /data-app="thinking"[^>]*>[^<]*Thinking/);
+  assert.match(webview, /data-app="thinking"[\s\S]*thinking-connected-nodes-icon[\s\S]*<span>Thinking<\/span>/);
+  assert.doesNotMatch(webview, /&#9889;\s*Thinking/);
+  assert.match(manager, /function _standalonePanelIconNode\([^)]*\)[\s\S]*app !== 'thinking'/);
+  assert.match(manager, /standalone-panel-tab-has-icon/);
+  assert.match(manager, /standalone-float-title-has-icon/);
   assert.match(webview, /static\/js\/thinking\.js[\s\S]*static\/js\/mission_control\.js/);
+  assert.match(css, /\.thinking-connected-nodes-icon\s*\{[^}]*stroke:\s*currentColor;[^}]*stroke-linecap:\s*round;[^}]*stroke-linejoin:\s*round;/s);
+  assert.match(css, /\.thinking-header-icon\s*\{[^}]*color:\s*var\(--accent\);/s);
   assert.match(css, /body\.runtime-embedded \.standalone-panel-zone-body > #panel-thinking,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-thinking[\s\S]*\{[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*min-width:\s*0;/s);
   assert.match(css, /#panel-thinking\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*container-type:\s*inline-size;/s);
   assert.match(css, /#panel-thinking\[data-panel-placement="right"\] \.thinking-workspace\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow:\s*auto;/s);
@@ -214,6 +220,7 @@ test('Thinking panel initial load requests scratchpad and map lists and renders 
   assert.equal(sendCalls[1].group, 'Torque');
   const html = document.getElementById('panel-thinking').innerHTML;
   assert.match(html, /Thinking/);
+  assert.match(html, /thinking-header-icon[\s\S]*thinking-connected-nodes-icon/);
   assert.match(html, /Scratchpad/);
   assert.match(html, /Mind Map/);
   assert.match(html, /stay separate from Planning/);

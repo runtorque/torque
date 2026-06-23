@@ -997,10 +997,46 @@ function _standalonePanelActionButton(label, iconName, onClick) {
   return btn;
 }
 
+function _standaloneConnectedNodesIconSvg() {
+  var svg = _standaloneSvgNode('svg', {
+    class: 'thinking-connected-nodes-icon',
+    viewBox: '0 0 16 16',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  });
+  svg.appendChild(_standaloneSvgNode('path', {
+    d: 'M7.15 5.55 4.9 9.65M8.85 5.55l2.25 4.1M5.8 11.4h4.4',
+  }));
+  svg.appendChild(_standaloneSvgNode('circle', { cx: '8', cy: '4', r: '1.8' }));
+  svg.appendChild(_standaloneSvgNode('circle', { cx: '4', cy: '11.4', r: '1.8' }));
+  svg.appendChild(_standaloneSvgNode('circle', { cx: '12', cy: '11.4', r: '1.8' }));
+  return svg;
+}
+
+function _standalonePanelIconNode(app, className) {
+  if (app !== 'thinking') return null;
+  var icon = _makeStandaloneNode('span', className || 'standalone-panel-icon');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.appendChild(_standaloneConnectedNodesIconSvg());
+  return icon;
+}
+
 function _standaloneZoneTab(app, active) {
-  var btn = _makeStandaloneNode('button', 'standalone-panel-tab' + (active ? ' active' : ''), _standalonePanelTitle(app));
+  var title = _standalonePanelTitle(app);
+  var hasIcon = app === 'thinking';
+  var btn = _makeStandaloneNode(
+    'button',
+    'standalone-panel-tab' + (active ? ' active' : '') + (hasIcon ? ' standalone-panel-tab-has-icon' : ''),
+    hasIcon ? null : title
+  );
   btn.dataset.app = app;
   btn.draggable = false;
+  btn.title = title;
+  btn.setAttribute('aria-label', title);
+  if (hasIcon) {
+    btn.appendChild(_standalonePanelIconNode(app, 'standalone-panel-tab-icon'));
+    btn.appendChild(_makeStandaloneNode('span', 'standalone-panel-tab-label', title));
+  }
   btn.onclick = function(event) {
     if (_standaloneConsumeSuppressedPanelClick(event)) return;
     _standaloneSelectPanel(app);
@@ -1071,7 +1107,17 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
 function _standaloneFloatHeader(app) {
   var header = _makeStandaloneNode('div', 'standalone-float-header');
   header.onmousedown = function(event) { standalonePanelStartFloatDrag(event, app); };
-  var title = _makeStandaloneNode('div', 'standalone-float-title', _standalonePanelTitle(app));
+  var titleText = _standalonePanelTitle(app);
+  var hasIcon = app === 'thinking';
+  var title = _makeStandaloneNode(
+    'div',
+    'standalone-float-title' + (hasIcon ? ' standalone-float-title-has-icon' : ''),
+    hasIcon ? null : titleText
+  );
+  if (hasIcon) {
+    title.appendChild(_standalonePanelIconNode(app, 'standalone-float-title-icon'));
+    title.appendChild(_makeStandaloneNode('span', 'standalone-float-title-label', titleText));
+  }
   header.appendChild(title);
   var actions = _makeStandaloneNode('div', 'standalone-float-actions');
   var detach = _standalonePanelActionButton('Detach to OS window', 'detach', function() {

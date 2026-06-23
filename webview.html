@@ -1672,7 +1672,17 @@
     <button class="taskbar-app" data-app="chat" onclick="togglePanel('chat')">&#9993; Chat</button>
     <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
     <button class="taskbar-app" data-app="initiatives" onclick="togglePanel('initiatives')">&#9873; Planning</button>
-    <button class="taskbar-app" data-app="thinking" onclick="togglePanel('thinking')">&#9889; Thinking</button>
+    <button class="taskbar-app" data-app="thinking" onclick="togglePanel('thinking')" title="Thinking" aria-label="Thinking">
+      <span class="taskbar-app-icon thinking-nav-icon" aria-hidden="true">
+        <svg class="thinking-connected-nodes-icon" viewBox="0 0 16 16" focusable="false">
+          <path d="M7.15 5.55 4.9 9.65M8.85 5.55l2.25 4.1M5.8 11.4h4.4"/>
+          <circle cx="8" cy="4" r="1.8"/>
+          <circle cx="4" cy="11.4" r="1.8"/>
+          <circle cx="12" cy="11.4" r="1.8"/>
+        </svg>
+      </span>
+      <span>Thinking</span>
+    </button>
     <button class="taskbar-app" data-app="mission-control" onclick="togglePanel('mission-control')">&#9737; Mission</button>
     <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Library</button>
     <button class="taskbar-app" data-app="history" onclick="togglePanel('history')">&#8635; History</button>
