@@ -13,6 +13,12 @@ _INITIATIVE_ID_RE = re.compile(
 _AREA_ID_RE = re.compile(
     r"^(?P<group_prefix>[A-Z][A-Z0-9_]*)-A:(?P<number>[1-9][0-9]*)$"
 )
+_SCRATCHPAD_NOTE_ID_RE = re.compile(
+    r"^(?P<group_prefix>[A-Z][A-Z0-9_]*)-S:(?P<number>[1-9][0-9]*)$"
+)
+_MIND_MAP_ID_RE = re.compile(
+    r"^(?P<group_prefix>[A-Z][A-Z0-9_]*)-M:(?P<number>[1-9][0-9]*)$"
+)
 _TASK_ID_RE = re.compile(
     r"^(?P<prefix>[A-Z][A-Z0-9_]*):(?P<root>[1-9][0-9]*)(?::(?P<child>[1-9][0-9]*))?$"
 )
@@ -77,6 +83,52 @@ def is_canonical_area_id(area_id: str) -> bool:
 
 def format_area_id(group_prefix: str, number: int) -> str:
     return f"{normalize_group_prefix(group_prefix)}-A:{int(number)}"
+
+
+def parse_scratchpad_note_id(note_id: str) -> dict | None:
+    """Parse a canonical Thinking Scratchpad note ID.
+
+    Scratchpad IDs use ``<GROUP>-S:<n>`` so they do not collide with Board
+    tasks, Initiatives, Areas, or Mind Maps.
+    """
+    match = _SCRATCHPAD_NOTE_ID_RE.match(str(note_id or "").strip())
+    if not match:
+        return None
+    return {
+        "group_prefix": match.group("group_prefix"),
+        "number": int(match.group("number")),
+    }
+
+
+def is_canonical_scratchpad_note_id(note_id: str) -> bool:
+    return parse_scratchpad_note_id(note_id) is not None
+
+
+def format_scratchpad_note_id(group_prefix: str, number: int) -> str:
+    return f"{normalize_group_prefix(group_prefix)}-S:{int(number)}"
+
+
+def parse_mind_map_id(map_id: str) -> dict | None:
+    """Parse a canonical Thinking Mind Map ID.
+
+    Mind Map IDs use ``<GROUP>-M:<n>`` to remain distinct from Board task IDs
+    and other planning/thinking object identifiers.
+    """
+    match = _MIND_MAP_ID_RE.match(str(map_id or "").strip())
+    if not match:
+        return None
+    return {
+        "group_prefix": match.group("group_prefix"),
+        "number": int(match.group("number")),
+    }
+
+
+def is_canonical_mind_map_id(map_id: str) -> bool:
+    return parse_mind_map_id(map_id) is not None
+
+
+def format_mind_map_id(group_prefix: str, number: int) -> str:
+    return f"{normalize_group_prefix(group_prefix)}-M:{int(number)}"
 
 
 def parse_task_id(task_id: str) -> dict | None:

@@ -12874,6 +12874,446 @@ async def _handle_area_command(data: dict, state: MatrixState) -> dict:
 
     return _area_error(f"Unknown area command: {cmd}")
 
+
+def _thinking_error(message: str, code: str = "thinking_error") -> dict:
+    return {
+        "type": "error",
+        "code": str(code or "thinking_error"),
+        "message": str(message or ""),
+    }
+
+
+def _thinking_actor_from_data(data: dict, *, default_kind: str = "user") -> dict:
+    kind = str(data.get("actor_kind", "") or default_kind).strip().lower() or default_kind
+    actor_id = str(data.get("actor_id", "") or "").strip()
+    return {"kind": kind, "id": actor_id}
+
+
+def _thinking_group_from_data(data: dict, *, required: bool = False) -> tuple[str, dict | None]:
+    group = str(data.get("group", "") or "").strip()
+    if required and not group:
+        return "", _thinking_error("group is required", "group_required")
+    return group, None
+
+
+def _thinking_item_scope_error(item: dict | None, group: str, label: str,
+                               *, include_archived: bool = False,
+                               include_deleted: bool = False) -> dict | None:
+    if not item:
+        return _thinking_error(f"{label} not found", "not_found")
+    item_group = str(item.get("group_name", item.get("group", "")) or "").strip()
+    if group and item_group and item_group != group:
+        return _thinking_error(f"{label} is outside group", "out_of_scope")
+    if item.get("deleted") and not include_deleted:
+        return _thinking_error(f"{label} is deleted", "deleted")
+    if item.get("archived") and not include_archived:
+        return _thinking_error(f"{label} is archived", "archived")
+    return None
+
+
+def _thinking_bool(data: dict, key: str, default: bool = False) -> bool:
+    value = data.get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
+async def _handle_scratchpad_command(data: dict, state: MatrixState) -> dict:
+    cmd = str(data.get("cmd", "") or "").strip()
+    include_archived = _thinking_bool(data, "include_archived", False)
+    include_deleted = _thinking_bool(data, "include_deleted", False)
+    if cmd == "scratchpad_note_list":
+        group, error = _thinking_group_from_data(data, required=True)
+        if error:
+            return error
+        try:
+            limit = min(max(int(data.get("limit", 200)), 1), 1000)
+        except (TypeError, ValueError):
+            limit = 200
+        notes = state.list_scratchpad_notes(
+            group=group,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+            limit=limit,
+        )
+        return {
+            "type": "scratchpad_note_list",
+            "group": group,
+            "notes": notes,
+        }
+
+    if cmd == "scratchpad_note_create":
+        group, error = _thinking_group_from_data(data, required=True)
+        if error:
+            return error
+        actor = _thinking_actor_from_data(data)
+        try:
+            note = await state.create_scratchpad_note_async({
+                "group": group,
+                "title": data.get("title", ""),
+                "body": data.get("body", ""),
+                "context": data.get("context", data.get("context_json", {})),
+                "links": data.get("links", data.get("links_json", [])),
+                "created_by_kind": actor["kind"],
+                "created_by_id": actor["id"],
+                "updated_by_kind": actor["kind"],
+                "updated_by_id": actor["id"],
+            })
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "scratchpad_note_created", "note": note}
+
+    ident = str(
+        data.get("note", "") or data.get("note_id", "") or data.get("id", "")
+        or ""
+    ).strip()
+    group_hint, _ = _thinking_group_from_data(data, required=False)
+    note_id = state.resolve_scratchpad_note_id(ident, group=group_hint)
+    note = state.load_scratchpad_note(note_id)
+    error = _thinking_item_scope_error(
+        note,
+        group_hint,
+        "Scratchpad note",
+        include_archived=include_archived or cmd in {"scratchpad_note_archive", "scratchpad_note_delete"},
+        include_deleted=include_deleted,
+    )
+    if error:
+        return error
+
+    if cmd == "scratchpad_note_show":
+        payload = dict(note)
+        payload["type"] = "scratchpad_note"
+        return payload
+
+    if note.get("deleted"):
+        return _thinking_error("Scratchpad note is deleted", "deleted")
+    if note.get("archived") and cmd not in {"scratchpad_note_delete"}:
+        return _thinking_error("Scratchpad note is archived", "archived")
+
+    actor = _thinking_actor_from_data(data)
+    if cmd == "scratchpad_note_update":
+        allowed = {"title", "body", "context", "context_json", "links", "links_json", "slug"}
+        patch = {key: data[key] for key in allowed if key in data}
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_scratchpad_note_async(note_id, patch)
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "scratchpad_note_updated", "note": updated}
+
+    if cmd == "scratchpad_note_archive":
+        archived = await state.archive_scratchpad_note_async(
+            note_id,
+            archived_by_kind=actor["kind"],
+            archived_by_id=actor["id"],
+        )
+        return {"type": "scratchpad_note_archived", "note": archived}
+
+    if cmd == "scratchpad_note_delete":
+        deleted = await state.delete_scratchpad_note_async(
+            note_id,
+            deleted_by_kind=actor["kind"],
+            deleted_by_id=actor["id"],
+        )
+        return {"type": "scratchpad_note_deleted", "note": deleted}
+
+    return _thinking_error(f"Unknown scratchpad command: {cmd}", "unknown_command")
+
+
+def _mind_map_ref_from_data(data: dict) -> str:
+    return str(
+        data.get("mind_map", "") or data.get("map", "")
+        or data.get("map_id", "") or data.get("mind_map_id", "")
+        or data.get("id", "") or ""
+    ).strip()
+
+
+def _mind_map_node_ref_from_data(data: dict) -> str:
+    explicit = str(data.get("node", "") or data.get("node_id", "") or "").strip()
+    if explicit:
+        return explicit
+    return str(data.get("id", "") or "").strip()
+
+
+def _mind_map_link_ref_from_data(data: dict) -> str:
+    explicit = str(data.get("link", "") or data.get("link_id", "") or "").strip()
+    if explicit:
+        return explicit
+    return str(data.get("id", "") or "").strip()
+
+
+def _mind_map_order_from_data(data: dict, primary: str) -> list:
+    value = data.get(primary)
+    if value is None:
+        value = data.get("order")
+    return value if isinstance(value, list) else []
+
+
+async def _resolve_mind_map_for_command(data: dict, state: MatrixState, *,
+                                        include_archived: bool = False,
+                                        include_deleted: bool = False,
+                                        label: str = "Mind Map"
+                                        ) -> tuple[str, dict | None, dict | None]:
+    group_hint, _ = _thinking_group_from_data(data, required=False)
+    map_ref = _mind_map_ref_from_data(data)
+    map_id = state.resolve_mind_map_id(map_ref, group=group_hint)
+    mind_map = state.load_mind_map(map_id, include_counts=True)
+    error = _thinking_item_scope_error(
+        mind_map,
+        group_hint,
+        label,
+        include_archived=include_archived,
+        include_deleted=include_deleted,
+    )
+    if error:
+        return "", None, error
+    return map_id, mind_map, None
+
+
+async def _handle_mind_map_command(data: dict, state: MatrixState) -> dict:
+    cmd = str(data.get("cmd", "") or "").strip()
+    include_archived = _thinking_bool(data, "include_archived", False)
+    include_deleted = _thinking_bool(data, "include_deleted", False)
+
+    if cmd == "mind_map_list":
+        group, error = _thinking_group_from_data(data, required=True)
+        if error:
+            return error
+        try:
+            limit = min(max(int(data.get("limit", 200)), 1), 1000)
+        except (TypeError, ValueError):
+            limit = 200
+        maps = state.list_mind_maps(
+            group=group,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+            include_counts=True,
+            limit=limit,
+        )
+        return {"type": "mind_map_list", "group": group, "mind_maps": maps}
+
+    if cmd == "mind_map_create":
+        group, error = _thinking_group_from_data(data, required=True)
+        if error:
+            return error
+        actor = _thinking_actor_from_data(data)
+        try:
+            mind_map = await state.create_mind_map_async({
+                "group": group,
+                "title": data.get("title", ""),
+                "description": data.get("description", ""),
+                "metadata": data.get("metadata", data.get("metadata_json", {})),
+                "created_by_kind": actor["kind"],
+                "created_by_id": actor["id"],
+                "updated_by_kind": actor["kind"],
+                "updated_by_id": actor["id"],
+            })
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_created", "mind_map": mind_map}
+
+    if not any(data.get(key) for key in ("mind_map", "map", "map_id", "mind_map_id")):
+        if cmd in {"mind_map_node_update", "mind_map_node_position", "mind_map_node_delete"}:
+            node = state.load_mind_map_node(_mind_map_node_ref_from_data(data))
+            if node:
+                data = dict(data)
+                data["map_id"] = node.get("map_id", "")
+        elif cmd in {"mind_map_link_update", "mind_map_link_delete"}:
+            link = state.load_mind_map_link(_mind_map_link_ref_from_data(data))
+            if link:
+                data = dict(data)
+                data["map_id"] = link.get("map_id", "")
+
+    map_include_archived = include_archived or cmd in {
+        "mind_map_archive", "mind_map_delete",
+    }
+    map_id, mind_map, error = await _resolve_mind_map_for_command(
+        data,
+        state,
+        include_archived=map_include_archived,
+        include_deleted=include_deleted,
+    )
+    if error:
+        return error
+
+    if cmd == "mind_map_show":
+        payload = state.mind_map_payload(
+            map_id,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
+        if not payload:
+            return _thinking_error("Mind Map not found", "not_found")
+        payload["type"] = "mind_map"
+        return payload
+
+    if mind_map.get("deleted"):
+        return _thinking_error("Mind Map is deleted", "deleted")
+    if mind_map.get("archived") and cmd not in {"mind_map_delete"}:
+        return _thinking_error("Mind Map is archived", "archived")
+
+    actor = _thinking_actor_from_data(data)
+    if cmd == "mind_map_update":
+        allowed = {"title", "description", "metadata", "metadata_json", "slug"}
+        patch = {key: data[key] for key in allowed if key in data}
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_mind_map_async(map_id, patch)
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_updated", "mind_map": updated}
+
+    if cmd == "mind_map_archive":
+        archived = await state.archive_mind_map_async(
+            map_id,
+            archived_by_kind=actor["kind"],
+            archived_by_id=actor["id"],
+        )
+        return {"type": "mind_map_archived", "mind_map": archived}
+
+    if cmd == "mind_map_delete":
+        deleted = await state.delete_mind_map_async(
+            map_id,
+            deleted_by_kind=actor["kind"],
+            deleted_by_id=actor["id"],
+        )
+        return {"type": "mind_map_deleted", "mind_map": deleted}
+
+    if cmd == "mind_map_node_create":
+        node_payload = {
+            "label": data.get("label", data.get("title", "")),
+            "title": data.get("title", ""),
+            "notes": data.get("notes", ""),
+            "node_type": data.get("node_type", data.get("type", "")),
+            "tags": data.get("tags", data.get("tags_json", [])),
+            "color": data.get("color", ""),
+            "position": data.get("position", data.get("position_json", {})),
+            "sort_order": data.get("sort_order", None),
+            "created_by_kind": actor["kind"],
+            "created_by_id": actor["id"],
+            "updated_by_kind": actor["kind"],
+            "updated_by_id": actor["id"],
+        }
+        if "x" in data:
+            node_payload["x"] = data.get("x")
+        if "y" in data:
+            node_payload["y"] = data.get("y")
+        try:
+            node = await state.create_mind_map_node_async(map_id, node_payload)
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_node_created", "node": node}
+
+    if cmd in {"mind_map_node_update", "mind_map_node_position", "mind_map_node_delete"}:
+        node_id = _mind_map_node_ref_from_data(data)
+        node = state.load_mind_map_node(node_id)
+        if (
+                not node or node.get("deleted")
+                or str(node.get("map_id", "") or "") != map_id):
+            return _thinking_error("Mind Map node not found", "not_found")
+        if cmd == "mind_map_node_delete":
+            deleted = await state.delete_mind_map_node_async(
+                node_id,
+                deleted_by_kind=actor["kind"],
+                deleted_by_id=actor["id"],
+            )
+            return {"type": "mind_map_node_deleted", "node": deleted}
+        allowed = {
+            "label", "title", "notes", "node_type", "type", "tags",
+            "tags_json", "color", "x", "y", "position", "position_json",
+            "sort_order",
+        }
+        patch = {key: data[key] for key in allowed if key in data}
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_mind_map_node_async(node_id, patch)
+        except (TypeError, ValueError) as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {
+            "type": (
+                "mind_map_node_positioned"
+                if cmd == "mind_map_node_position"
+                else "mind_map_node_updated"
+            ),
+            "node": updated,
+        }
+
+    if cmd == "mind_map_node_reorder":
+        order = _mind_map_order_from_data(data, "nodes") or _mind_map_order_from_data(data, "node_order")
+        try:
+            nodes = await state.reorder_mind_map_nodes_async(
+                map_id,
+                order,
+                updated_by_kind=actor["kind"],
+                updated_by_id=actor["id"],
+            )
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_node_reordered", "nodes": nodes, "map_id": map_id}
+
+    if cmd == "mind_map_link_create":
+        try:
+            link = await state.create_mind_map_link_async(map_id, {
+                "source_node_id": data.get("source_node_id", data.get("source", "")),
+                "target_node_id": data.get("target_node_id", data.get("target", "")),
+                "label": data.get("label", ""),
+                "link_type": data.get("link_type", data.get("type", "")),
+                "sort_order": data.get("sort_order", None),
+                "created_by_kind": actor["kind"],
+                "created_by_id": actor["id"],
+                "updated_by_kind": actor["kind"],
+                "updated_by_id": actor["id"],
+            })
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_link_created", "link": link}
+
+    if cmd in {"mind_map_link_update", "mind_map_link_delete"}:
+        link_id = _mind_map_link_ref_from_data(data)
+        link = state.load_mind_map_link(link_id)
+        if (
+                not link or link.get("deleted")
+                or str(link.get("map_id", "") or "") != map_id):
+            return _thinking_error("Mind Map link not found", "not_found")
+        if cmd == "mind_map_link_delete":
+            deleted = await state.delete_mind_map_link_async(
+                link_id,
+                deleted_by_kind=actor["kind"],
+                deleted_by_id=actor["id"],
+            )
+            return {"type": "mind_map_link_deleted", "link": deleted}
+        allowed = {
+            "label", "link_type", "type", "source_node_id", "source",
+            "target_node_id", "target", "sort_order",
+        }
+        patch = {key: data[key] for key in allowed if key in data}
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_mind_map_link_async(link_id, patch)
+        except (TypeError, ValueError) as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_link_updated", "link": updated}
+
+    if cmd == "mind_map_link_reorder":
+        order = _mind_map_order_from_data(data, "links") or _mind_map_order_from_data(data, "link_order")
+        try:
+            links = await state.reorder_mind_map_links_async(
+                map_id,
+                order,
+                updated_by_kind=actor["kind"],
+                updated_by_id=actor["id"],
+            )
+        except ValueError as exc:
+            return _thinking_error(str(exc), "validation_error")
+        return {"type": "mind_map_link_reordered", "links": links, "map_id": map_id}
+
+    return _thinking_error(f"Unknown mind map command: {cmd}", "unknown_command")
+
+
 def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
     """Return deferred architect decisions for compact snapshot clients."""
     include_archived = bool(data.get("include_archived", False))
@@ -16838,6 +17278,35 @@ async def main(connection=None):
             "area_note_archive",
         }:
             return await _handle_area_command(data, state)
+
+        if cmd in {
+            "scratchpad_note_list",
+            "scratchpad_note_show",
+            "scratchpad_note_create",
+            "scratchpad_note_update",
+            "scratchpad_note_archive",
+            "scratchpad_note_delete",
+        }:
+            return await _handle_scratchpad_command(data, state)
+
+        if cmd in {
+            "mind_map_list",
+            "mind_map_show",
+            "mind_map_create",
+            "mind_map_update",
+            "mind_map_archive",
+            "mind_map_delete",
+            "mind_map_node_create",
+            "mind_map_node_update",
+            "mind_map_node_position",
+            "mind_map_node_reorder",
+            "mind_map_node_delete",
+            "mind_map_link_create",
+            "mind_map_link_update",
+            "mind_map_link_reorder",
+            "mind_map_link_delete",
+        }:
+            return await _handle_mind_map_command(data, state)
 
         if cmd == "get_agent_message_history":
             return _handle_agent_message_history_command(data, state)

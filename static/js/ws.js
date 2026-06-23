@@ -3477,6 +3477,30 @@ function _applyDelta(ops) {
         break;
       }
 
+      case 'thinking_scratchpad_note_upsert': {
+        if (!state.thinking) state.thinking = { scratchpad_notes: {}, mind_maps: {} };
+        if (!state.thinking.scratchpad_notes) state.thinking.scratchpad_notes = {};
+        var thinkingNote = Object.assign({}, op);
+        delete thinkingNote.op;
+        if (thinkingNote.id) state.thinking.scratchpad_notes[thinkingNote.id] = Object.assign({}, state.thinking.scratchpad_notes[thinkingNote.id] || {}, thinkingNote);
+        break;
+      }
+
+      case 'thinking_mind_map_upsert': {
+        if (!state.thinking) state.thinking = { scratchpad_notes: {}, mind_maps: {} };
+        if (!state.thinking.mind_maps) state.thinking.mind_maps = {};
+        var thinkingMap = Object.assign({}, op);
+        delete thinkingMap.op;
+        if (thinkingMap.id) state.thinking.mind_maps[thinkingMap.id] = Object.assign({}, state.thinking.mind_maps[thinkingMap.id] || {}, thinkingMap);
+        break;
+      }
+
+      case 'thinking_mind_map_node_upsert':
+      case 'thinking_mind_map_link_upsert':
+        // Dedicated Thinking UI will lazy-load map detail; keep list summaries
+        // fresh through thinking_mind_map_upsert without mutating Planning.
+        break;
+
       case 'decision_upsert': {
         if (!state.decisions) state.decisions = {};
         var decisionId = op.id;
