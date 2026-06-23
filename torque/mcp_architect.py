@@ -1749,7 +1749,7 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
     {
         "name": "architect_thinking_scratchpad_show",
         "description": "Show one same-group Scratchpad note by id or slug.",
-        "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}, "required": ["note"]},
+        "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
     {
         "name": "architect_thinking_scratchpad_create",
@@ -1759,7 +1759,7 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
     {
         "name": "architect_thinking_scratchpad_update",
         "description": "Update a caller-owned Scratchpad note only; same-group notes owned by others are read-only.",
-        "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}, "required": ["note"]},
+        "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}},
     },
     {
         "name": "architect_thinking_mind_map_list",
@@ -1769,7 +1769,7 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
     {
         "name": "architect_thinking_mind_map_show",
         "description": "Show one same-group Mind Map with nodes and links.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}, "required": ["mind_map"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
     {
         "name": "architect_thinking_mind_map_create",
@@ -1779,32 +1779,32 @@ _ARCHITECT_THINKING_TOOL_SPECS = [
     {
         "name": "architect_thinking_mind_map_update",
         "description": "Update a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}, "required": ["mind_map"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
         "name": "architect_thinking_mind_map_node_create",
         "description": "Create a node in a caller-owned Mind Map.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["mind_map", "label"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["label"]},
     },
     {
         "name": "architect_thinking_mind_map_node_update",
         "description": "Update a node in a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["node"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
     {
         "name": "architect_thinking_mind_map_node_position",
         "description": "Move a node in a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "group": {"type": "string"}}, "required": ["node"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "group": {"type": "string"}}},
     },
     {
         "name": "architect_thinking_mind_map_link_create",
         "description": "Create a link between nodes in a caller-owned Mind Map.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["mind_map", "source_node_id", "target_node_id"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
     {
         "name": "architect_thinking_mind_map_link_update",
         "description": "Update a link in a caller-owned Mind Map only.",
-        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "link": {"type": "string"}, "link_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["link"]},
+        "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "link": {"type": "string"}, "link_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
 ]
 
