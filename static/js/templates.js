@@ -1197,6 +1197,16 @@ function _agentClassKindLabel(kind) {
   return kind ? kind.replace(/[-_]+/g, ' ') : 'Agent';
 }
 
+function _agentClassSecondaryLabel(item, fallbackKind) {
+  item = item || {};
+  return String(
+    item.secondary_base_kind_label
+    || (item.secondary_base_kind_metadata && item.secondary_base_kind_metadata.base_kind_label)
+    || (item.runtime && item.runtime.base_kind_label)
+    || _agentClassKindLabel(item.base_kind || fallbackKind)
+  ).trim();
+}
+
 function _agentClassPolicyMode(item) {
   item = item || {};
   var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
@@ -1598,7 +1608,7 @@ function _agentClassSelectGroupHtml(label, list, selected) {
     if (!id) continue;
     var optionLabel = _agentClassDisplayName(item, id)
       + _agentClassVersionSuffix(item.version)
-      + ' · ' + (item.base_kind || 'agent')
+      + ' · ' + _agentClassSecondaryLabel(item, item.base_kind || 'agent')
       + ' · ' + _agentClassStatus(item);
     html += '<option value="' + esc(id) + '"' + (selected === id ? ' selected' : '') + '>'
       + esc(optionLabel) + '</option>';
@@ -1725,7 +1735,7 @@ function _agentClassCardsHtml() {
     html += '<span class="agent-class-card-id">' + esc(id + _agentClassVersionSuffix(item.version)) + '</span>';
     html += '<span class="agent-class-card-chips">';
     html += '<span>' + esc(item.source || (item.builtin ? 'builtin' : 'project')) + '</span>';
-    html += '<span>' + esc(item.base_kind || 'agent') + '</span>';
+    html += '<span>' + esc(_agentClassSecondaryLabel(item, item.base_kind || 'agent')) + '</span>';
     html += '<span>' + esc(item.lifecycle || 'stable') + '</span>';
     html += '<span>' + esc(status) + '</span>';
     if (item.scratch_only) html += '<span>scratch</span>';
@@ -1989,6 +1999,7 @@ function _agentClassBucketPreviewListHtml(buckets, emptyText) {
 function _agentClassOperatorAccessHtml(preview) {
   preview = preview || {};
   if (_agentClassIsProductManager(preview)) return _agentClassProductManagerCompactPolicyHtml(preview);
+  if (_agentClassIsCreativeArchitect(preview)) return _agentClassCreativeArchitectCompactPolicyHtml(preview);
   var summary = (preview.operator_access_summary && typeof preview.operator_access_summary === 'object')
     ? preview.operator_access_summary
     : ((preview.capability_bucket_summary && typeof preview.capability_bucket_summary === 'object') ? preview.capability_bucket_summary : {});
@@ -2073,6 +2084,7 @@ function _agentClassPreviewHtml(preview, validation) {
   var previewKind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || '').trim();
   var disabledReason = _agentClassLaunchDisabledReason(preview, previewKind);
   var isProductManager = _agentClassIsProductManager(preview);
+  var isCreativeArchitect = _agentClassIsCreativeArchitect(preview);
   var primaryLabel = String(preview.primary_identity_label || preview.primary_display_name || _agentClassDisplayName(preview, preview.id || 'Agent Class')).trim();
   var secondaryLabel = String(preview.secondary_base_kind_label
     || (preview.secondary_base_kind_metadata && preview.secondary_base_kind_metadata.base_kind_label)
@@ -2104,12 +2116,12 @@ function _agentClassPreviewHtml(preview, validation) {
   var issues = [];
   if (validation && Array.isArray(validation.errors)) issues = issues.concat(validation.errors);
   if (validation && Array.isArray(validation.warnings)) issues = issues.concat(validation.warnings);
-  if (!isProductManager && Array.isArray(preview.warnings)) {
+  if (!isProductManager && !isCreativeArchitect && Array.isArray(preview.warnings)) {
     issues = issues.concat(_agentClassUniqueWarnings(preview));
   }
   if (issues.length) html += _agentClassIssuesHtml(issues, 'Warnings / validation');
   if (disabledReason) html += '<div class="agent-class-error">' + esc(disabledReason) + '</div>';
-  var filteredRestrictions = isProductManager ? [] : _agentClassFilteredOperatorRestrictions(preview);
+  var filteredRestrictions = (isProductManager || _agentClassIsCreativeArchitect(preview)) ? [] : _agentClassFilteredOperatorRestrictions(preview);
   if (filteredRestrictions.length) {
     html += '<div class="agent-class-restrictions"><div class="agent-class-block-title">Additional restrictions</div><ul>';
     for (var i = 0; i < filteredRestrictions.length; i++) html += '<li>' + esc(filteredRestrictions[i]) + '</li>';
@@ -2160,6 +2172,15 @@ function _agentClassIsProductManager(item) {
     || String(metadata.migration_from_profile || '').indexOf('product-manager') === 0
     || String(draft.product_manager || '') === 'true'
     || label === 'Product Manager';
+}
+
+function _agentClassIsCreativeArchitect(item) {
+  item = item || {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  var label = _agentClassDisplayName(item, '');
+  return String(item.id || '') === 'creative-architect'
+    || String(metadata.archetype || '') === 'creative_architect'
+    || label === 'Creative Architect';
 }
 
 function _agentClassDogfoodApproved(item) {
@@ -2219,6 +2240,30 @@ function _agentClassProductManagerCompactPolicyHtml(item) {
   return html;
 }
 
+function _agentClassCreativeArchitectCompactPolicyHtml(item) {
+  item = item || {};
+  var contract = item.creative_architect_status && typeof item.creative_architect_status === 'object'
+    ? item.creative_architect_status
+    : {};
+  var proposalOnly = contract.proposal_only !== false;
+  var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="creative-architect">';
+  html += '<div class="agent-class-compact-chips">';
+  html += '<span>Creative Architect</span>';
+  html += '<span class="agent-profile-chip-full">' + esc(proposalOnly ? 'proposal-only' : 'ideation mode') + '</span>';
+  html += '<span>Thinking workspace</span>';
+  html += '<span>Architect-derived</span>';
+  html += '</div>';
+  html += '<div class="agent-class-compact-note">'
+    + 'Curated ideation partner for exploring possibilities with Thinking artifacts, product context, and small shippable proposals.'
+    + '</div>';
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad/Mind Map writes, proposed decisions, queued task ideas, user + product-peer messages</strong></div>'
+    + '<div><span>Denied</span><strong>hire/assign/dispatch, execution task control, merge/deploy/admin/settings, direct Engineer/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator</strong></div>'
+    + '</div>';
+  html += '</div>';
+  return html;
+}
+
 function _agentClassLaunchBoxHtml(preview, disabledReason) {
   if (!preview || !preview.id || _agentClassEditorNew) return '';
   var classId = String(preview.id || '');
@@ -2226,8 +2271,9 @@ function _agentClassLaunchBoxHtml(preview, disabledReason) {
   var group = draft.group || (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
   var name = draft.name || _agentClassDisplayName(preview, classId);
   var kind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || 'agent').trim() || 'agent';
+  var kindLabel = _agentClassSecondaryLabel(preview, kind);
   var html = '<div class="agent-class-launch-box">';
-  html += '<div class="agent-class-block-title">Launch new ' + esc(kind) + ' from this class</div>';
+  html += '<div class="agent-class-block-title">Launch new ' + esc(kindLabel || kind) + ' from this class</div>';
   html += '<label>Name</label><input id="agent-class-launch-name" value="' + esc(name) + '" oninput="agentClassManagerLaunchDraftChanged()" autocomplete="off">';
   html += '<label>Group</label><select id="agent-class-launch-group" onchange="agentClassManagerLaunchDraftChanged()">';
   var groups = state && state.groups ? Object.keys(state.groups) : [];
@@ -2798,6 +2844,7 @@ function _agentClassPickerOptionHtml(kind, selected, state) {
     if (selected === id) sawSelected = true;
     var reason = _agentClassLaunchDisabledReason(item, kind);
     var label = _agentClassDisplayName(item, id) + _agentClassVersionSuffix(item.version)
+      + ' · ' + _agentClassSecondaryLabel(item, kind)
       + ' · ' + (item.source || (item.builtin ? 'builtin' : 'project'))
       + ' · ' + _agentClassStatus(item);
     if (reason) label += ' (disabled)';

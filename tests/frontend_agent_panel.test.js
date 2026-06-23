@@ -3871,6 +3871,133 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
   assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
 });
 
+test('agent panel assigns and renders Creative Architect as proposal-only Thinking class', () => {
+  const { context, panel, classModal, classModalBody, sendCalls } = createHarness();
+  const defaultArchitectClass = {
+    id: 'default-architect',
+    version: '1',
+    base_kind: 'architect',
+    display_name: 'Default Architect',
+    primary_identity_label: 'Default Architect',
+    secondary_base_kind_label: 'Architect',
+    lifecycle: 'stable',
+    status: 'full',
+    launchable: true,
+    builtin: true,
+  };
+  const creativeArchitectClass = {
+    id: 'creative-architect',
+    version: '1',
+    base_kind: 'architect',
+    display_name: 'Creative Architect',
+    primary_identity_label: 'Creative Architect',
+    secondary_base_kind_label: 'Architect-derived',
+    description: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts and suggests small shippable proposals.',
+    purpose: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts and suggests small shippable proposals.',
+    lifecycle: 'stable',
+    status: 'restricted',
+    launchable: true,
+    builtin: true,
+    metadata: { archetype: 'creative_architect', proposal_only: true },
+    creative_architect_status: {
+      proposal_only: true,
+      authority_model: 'proposal_only_ideation_partner',
+      raw_architect_authority: false,
+      direct_engineer_worker_messaging: false,
+      accepted_decision_authority: false,
+    },
+    agent_profile_ref: { id: 'class-policy-creative-architect', version: '1' },
+    agent_profile: { id: 'class-policy-creative-architect', version: '1', status: 'restricted', capability_count: 9 },
+    internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class' },
+    warnings: [
+      'Creative Architect is proposal-only: ideas remain non-binding until accepted through normal Torque authority.',
+      'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and architect_product_* wrappers for product proposals.',
+    ],
+    external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
+    apply_state: { applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
+  };
+
+  setFocusedAgent(context, {
+    id: 'spark',
+    name: 'Spark',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'stopped',
+    directory: '/repo',
+    agent_class_id: '',
+    agent_class_version: '',
+    effective_agent_class_id: 'default-architect',
+    effective_agent_class_version: '1',
+    effective_agent_class_snapshot: defaultArchitectClass,
+  });
+
+  context._agentPanelLastSelectedTabByKind.architect = 'behavior';
+  context.renderAgentPanel();
+  context.agentPanelToggleClassAssignment(null, 'spark');
+  assert.equal(classModal.classList.contains('visible'), true);
+  context.agentPanelReceiveAgentClasses({
+    type: 'agent_classes',
+    classes: [defaultArchitectClass, creativeArchitectClass],
+    issues: [],
+  });
+  assert.match(classModalBody.innerHTML, /Creative Architect@1 · Architect-derived · restricted/);
+  context.agentPanelSelectClass('spark', 'creative-architect');
+  assert.match(classModalBody.innerHTML, /Next relaunch freezes Creative Architect@1 as the primary identity/);
+  assert.match(classModalBody.innerHTML, /proposal-only/);
+  assert.match(classModalBody.innerHTML, /Thinking workspace/);
+  assert.match(classModalBody.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
+  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, proposed decisions, queued task ideas, user \+ product-peer messages/);
+  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator/);
+  assert.doesNotMatch(classModalBody.innerHTML, /External connectors|architect_thinking_|architect_product_|class-policy-creative-architect|generated profile|compiler|raw atom/i);
+
+  context.agentPanelAssignSelectedClass(null, 'spark');
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
+    cmd: 'agent_class_assign',
+    agent_id: 'spark',
+    actor_label: 'trusted-user-ui',
+    base_dir: '/repo',
+    class_id: 'creative-architect',
+  });
+  context.agentPanelReceiveAgentClassAssignment({
+    type: 'agent_class_assignment',
+    status: {
+      agent_id: 'spark',
+      assigned_class_id: 'creative-architect',
+      assigned_class_version: '1',
+      assigned_at: 100,
+      assigned_by: 'trusted-user-ui',
+      effective_class_id: 'default-architect',
+      effective_class_version: '1',
+      effective_class: defaultArchitectClass,
+      assigned_class: creativeArchitectClass,
+      next_launch_class_id: 'creative-architect',
+      next_launch_class_version: '1',
+      next_launch_primary_identity_label: 'Creative Architect',
+      pending_next_launch: true,
+    },
+  });
+  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Creative Architect@1/);
+  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Creative Architect@1/);
+
+  Object.assign(context.state.agents.spark, {
+    status: 'running',
+    agent_class_id: 'creative-architect',
+    agent_class_version: '1',
+    effective_agent_class_id: 'creative-architect',
+    effective_agent_class_version: '1',
+    effective_agent_class_applied_at: 200,
+    effective_agent_class_snapshot: creativeArchitectClass,
+  });
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Creative Architect · Group: alpha/);
+  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Creative Architect@1/);
+  assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
+  assert.match(panel.innerHTML, /agent-class-compact-status/);
+  assert.match(panel.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
+  assert.doesNotMatch(panel.innerHTML, /class-policy-creative-architect|architect_thinking_|architect_product_|External connectors|raw atom|compiler/i);
+});
+
 test('agent panel shows Agent Class summary only on Behavior tab and opens modal from Change Class', () => {
   const { context, panel, classModal } = createHarness();
   const productManagerClass = {

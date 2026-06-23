@@ -1445,6 +1445,15 @@ function _agentPanelClassIsProductManager(item) {
     || label === 'Product Manager';
 }
 
+function _agentPanelClassIsCreativeArchitect(item) {
+  item = item || {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  var label = _agentPanelClassDisplayName(item, '');
+  return String(item.id || '') === 'creative-architect'
+    || String(metadata.archetype || '') === 'creative_architect'
+    || label === 'Creative Architect';
+}
+
 function _agentPanelClassDogfoodApproved(item) {
   item = item || {};
   var draft = item.draft && typeof item.draft === 'object' ? item.draft : {};
@@ -1499,6 +1508,32 @@ function _agentPanelProductManagerCompactPolicyHtml(item) {
   html += '<div class="agent-class-compact-access">'
     + '<div><span>Allowed</span><strong>planning reads/writes, proposed decisions, queued task intake, user + peer Architect coordination</strong></div>'
     + '<div><span>Denied</span><strong>hire/dispatch, merge/deploy/admin, arbitrary tool access, direct Engineer/Worker messages</strong></div>'
+    + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelCreativeArchitectCompactPolicyHtml(item) {
+  item = item || {};
+  var contract = item.creative_architect_status && typeof item.creative_architect_status === 'object'
+    ? item.creative_architect_status
+    : {};
+  var proposalOnly = contract.proposal_only !== false;
+  var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="creative-architect">';
+  html += '<div class="agent-class-compact-chips">';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Creative Architect</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip agent-profile-chip-full">'
+    + _agentPanelEsc(proposalOnly ? 'proposal-only' : 'ideation mode')
+    + '</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Thinking workspace</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Architect-derived</span>';
+  html += '</div>';
+  html += '<div class="agent-class-compact-note">'
+    + 'Curated ideation partner for exploring possibilities with Thinking artifacts, product context, and small shippable proposals.'
+    + '</div>';
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad/Mind Map writes, proposed decisions, queued task ideas, user + product-peer messages</strong></div>'
+    + '<div><span>Denied</span><strong>hire/assign/dispatch, execution task control, merge/deploy/admin/settings, direct Engineer/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator</strong></div>'
     + '</div>';
   html += '</div>';
   return html;
@@ -1781,7 +1816,7 @@ function _agentPanelClassBadgeHtml(agent) {
     titleParts.push('desired next launch: ' + state.desiredLabel + _agentPanelClassVersionSuffix(state.desiredVersion));
   }
   var snapshot = _agentPanelClassSnapshot(agent);
-  var badgeWarnings = _agentPanelClassIsProductManager(snapshot)
+  var badgeWarnings = (_agentPanelClassIsProductManager(snapshot) || _agentPanelClassIsCreativeArchitect(snapshot))
     ? []
     : _agentPanelClassUniqueWarnings(snapshot);
   for (var i = 0; i < badgeWarnings.length && i < 3; i++) {
@@ -3448,6 +3483,9 @@ function _agentPanelClassWarningsHtml(item) {
   if (_agentPanelClassIsProductManager(item)) {
     return _agentPanelProductManagerCompactPolicyHtml(item);
   }
+  if (_agentPanelClassIsCreativeArchitect(item)) {
+    return _agentPanelCreativeArchitectCompactPolicyHtml(item);
+  }
   var warnings = _agentPanelClassUniqueWarnings(item);
   var html = '';
   if (warnings.length) {
@@ -3585,6 +3623,7 @@ function _agentPanelClassBucketPreviewListHtml(buckets, emptyText) {
 function _agentPanelClassOperatorAccessHtml(item) {
   item = item || {};
   if (_agentPanelClassIsProductManager(item)) return _agentPanelProductManagerCompactPolicyHtml(item);
+  if (_agentPanelClassIsCreativeArchitect(item)) return _agentPanelCreativeArchitectCompactPolicyHtml(item);
   var summary = (item.operator_access_summary && typeof item.operator_access_summary === 'object')
     ? item.operator_access_summary
     : ((item.capability_bucket_summary && typeof item.capability_bucket_summary === 'object') ? item.capability_bucket_summary : {});
@@ -3665,7 +3704,9 @@ function _agentPanelClassPreviewHtml(agent, ui) {
     + '</div>';
   html += _agentPanelClassOperatorAccessHtml(item);
   html += _agentPanelClassApplyStateHtml(item);
-  if (!_agentPanelClassIsProductManager(item)) html += _agentPanelClassWarningsHtml(item);
+  if (!_agentPanelClassIsProductManager(item) && !_agentPanelClassIsCreativeArchitect(item)) {
+    html += _agentPanelClassWarningsHtml(item);
+  }
   return html + '</div>';
 }
 
