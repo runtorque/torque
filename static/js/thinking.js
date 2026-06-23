@@ -52,6 +52,18 @@ function _thinkingNowMs() {
   return 0;
 }
 
+function _thinkingConnectedNodesIcon(className) {
+  var cls = 'thinking-icon';
+  if (className) cls += ' ' + String(className);
+  return '<span class="' + cls + '" aria-hidden="true">'
+    + '<svg class="thinking-connected-nodes-icon" viewBox="0 0 16 16" focusable="false">'
+    + '<path d="M7.15 5.55 4.9 9.65M8.85 5.55l2.25 4.1M5.8 11.4h4.4"></path>'
+    + '<circle cx="8" cy="4" r="1.8"></circle>'
+    + '<circle cx="4" cy="11.4" r="1.8"></circle>'
+    + '<circle cx="12" cy="11.4" r="1.8"></circle>'
+    + '</svg></span>';
+}
+
 function _thinkingSyncStateReference() {
   if (typeof state === 'undefined' || !state) return;
   if (_thinkingStateRef === state) return;
@@ -1595,7 +1607,7 @@ function renderThinkingPanel() {
   var maps = _thinkingMapsForGroup(group);
   var activeTab = String(_thinkingActiveTab || 'scratchpad');
   var html = '<div class="thinking-panel">';
-  html += '<div class="tpled-header thinking-header"><div class="tpled-header-copy"><div class="tpled-header-title-row"><span class="tpled-header-title">Thinking</span></div>';
+  html += '<div class="tpled-header thinking-header"><div class="tpled-header-copy"><div class="tpled-header-title-row">' + _thinkingConnectedNodesIcon('thinking-header-icon') + '<span class="tpled-header-title">Thinking</span></div>';
   html += '<div class="tpled-header-subtitle">Scratchpad and Mind Map are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning.</div></div>';
   html += '<div class="tpled-header-controls"><span class="thinking-total">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
   html += _renderThinkingTabs(notes.length, maps.length);

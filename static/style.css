@@ -4418,6 +4418,24 @@ body.runtime-embedded .taskbar-app {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.thinking-icon,
+.standalone-panel-tab-icon,
+.standalone-float-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.thinking-connected-nodes-icon {
+  width: 100%;
+  height: 100%;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .taskbar-app:hover { color: var(--statusbar-fg); background: var(--statusbar-segment-hover); }
 .taskbar-app.active { color: var(--accent); background: var(--statusbar-segment-active); }
 body.runtime-embedded .taskbar-app.active {
@@ -4726,6 +4744,18 @@ body.runtime-embedded #standalone-right-rail {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
 }
+.standalone-panel-tab-has-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.standalone-panel-tab-icon {
+  width: 12px;
+  height: 12px;
+}
+.standalone-panel-tab-label {
+  min-width: 0;
+}
 .standalone-panel-zone-actions,
 .standalone-float-actions {
   display: flex;
@@ -4867,6 +4897,16 @@ body.runtime-embedded.standalone-panel-dragging #standalone-right-rail {
   font-size: 11px;
   font-weight: 600;
   color: var(--text);
+}
+.standalone-float-title-has-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.standalone-float-title-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
 }
 .standalone-float-body {
   flex: 1;
@@ -13673,6 +13713,18 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   line-height: 1.35;
 }
 .thinking-header { flex: 0 0 auto; }
+.thinking-header-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-hover));
+}
+.thinking-header-icon svg {
+  width: 13px;
+  height: 13px;
+}
 .thinking-total { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .thinking-error {
   margin: 8px 12px 0;
