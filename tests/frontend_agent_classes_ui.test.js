@@ -186,6 +186,24 @@ function sampleCapabilityCatalog() {
       available: true,
     },
     {
+      id: 'recent_context_reads',
+      label: 'Recent context reads',
+      summary: 'Read recent same-group activity summaries and context.',
+      category: 'read',
+      risk: 'normal',
+      base_kinds: ['architect', 'engineer'],
+      available: true,
+    },
+    {
+      id: 'thinking_workspace',
+      label: 'Thinking workspace',
+      summary: 'Read same-group Thinking artifacts and update caller-owned Scratchpad notes and Mind Maps.',
+      category: 'thinking',
+      risk: 'normal',
+      base_kinds: ['architect'],
+      available: true,
+    },
+    {
       id: 'board_task_reads',
       label: 'Board/task reads',
       summary: 'Read board/task detail, events, MCP call telemetry, and board-sync status.',
@@ -227,6 +245,33 @@ function sampleCapabilityCatalog() {
       summary: 'Create/update/archive Areas and Initiatives.',
       category: 'planning',
       risk: 'high',
+      base_kinds: ['architect'],
+      available: true,
+    },
+    {
+      id: 'board_task_proposals',
+      label: 'Board/task proposals',
+      summary: 'Create queued product task proposals without dispatch authority.',
+      category: 'task',
+      risk: 'normal',
+      base_kinds: ['architect'],
+      available: true,
+    },
+    {
+      id: 'proposed_decisions',
+      label: 'Proposed decisions',
+      summary: 'Create and update proposed product decisions without acceptance authority.',
+      category: 'decision',
+      risk: 'normal',
+      base_kinds: ['architect'],
+      available: true,
+    },
+    {
+      id: 'product_peer_messages',
+      label: 'Product peer Architect messages',
+      summary: 'Coordinate with same-group Architect/product peers.',
+      category: 'communication',
+      risk: 'normal',
       base_kinds: ['architect'],
       available: true,
     },
@@ -286,6 +331,69 @@ function sampleRestrictionCatalog() {
       summary: 'Explicitly deny Worker launch/routing and task dispatch authority.',
       category: 'agent_management',
       risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_engineer_management',
+      label: 'Deny Engineer management',
+      summary: 'Explicitly deny Engineer roster management and hire authority.',
+      category: 'agent_management',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_execution_task_control',
+      label: 'Deny execution task control',
+      summary: 'Explicitly deny executable task create/update/reassign/move/dispatch authority.',
+      category: 'task',
+      risk: 'high',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_engineer_worker_messages',
+      label: 'Deny Engineer/Worker messages',
+      summary: 'Explicitly deny direct Engineer/Worker messaging.',
+      category: 'communication',
+      risk: 'high',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_worktree_merge',
+      label: 'Deny worktree/merge',
+      summary: 'Explicitly deny merge/apply/checkpoint worktree authority.',
+      category: 'worktree',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_deploy_admin',
+      label: 'Deny deploy/admin',
+      summary: 'Explicitly deny deploy/restart/live-settings authority.',
+      category: 'admin',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_class_profile_admin',
+      label: 'Deny Class/Profile admin',
+      summary: 'Explicitly deny Agent Profile assignment/edit authority.',
+      category: 'admin',
+      risk: 'critical',
+      base_kinds: ['architect', 'engineer', 'worker'],
+      available: true,
+    },
+    {
+      id: 'deny_decision_acceptance',
+      label: 'Deny accepted-decision authority',
+      summary: 'Explicitly deny accepting decisions or creating accepted decisions.',
+      category: 'decision',
+      risk: 'high',
       base_kinds: ['architect', 'engineer', 'worker'],
       available: true,
     },
@@ -396,6 +504,40 @@ function sampleClasses() {
       warnings: ['Product Manager is draft/scratch-only in Wave 6B.'], external_connector_caveat: 'External connector caveat.',
       restrictions: ['Do not use for live PM dogfood.'],
     },
+    {
+      id: 'creative-architect', version: '1', base_kind: 'architect', display_name: 'Creative Architect',
+      primary_identity_label: 'Creative Architect', secondary_base_kind_label: 'Architect-derived',
+      description: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.',
+      purpose: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.',
+      lifecycle: 'stable', builtin: true, custom: false, source: 'builtin', status: 'restricted', launchable: true,
+      metadata: { archetype: 'creative_architect', proposal_only: true },
+      creative_architect_status: {
+        proposal_only: true,
+        authority_model: 'proposal_only_ideation_partner',
+        raw_architect_authority: false,
+        direct_engineer_worker_messaging: false,
+        accepted_decision_authority: false,
+      },
+      agent_profile_ref: { id: 'class-policy-creative-architect', version: '1' },
+      agent_profile: { id: 'class-policy-creative-architect', version: '1', status: 'restricted', capability_count: 9 },
+      internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
+      prompt_summary: { has_prompt: true, char_count: 420, preview: 'You are using the Creative Architect Agent Class. Diverge first, converge second, and keep ideas proposal-only.' },
+      capability_bucket_selection: ['self_context', 'planning_reads', 'recent_context_reads', 'thinking_workspace', 'proposed_decisions', 'board_task_proposals', 'user_messages', 'product_peer_messages', 'private_journal'],
+      restriction_bucket_selection: ['deny_engineer_management', 'deny_worker_dispatch', 'deny_execution_task_control', 'deny_engineer_worker_messages', 'deny_worktree_merge', 'deny_deploy_admin', 'deny_class_profile_admin', 'deny_decision_acceptance', 'deny_raw_tool_picker'],
+      capability_buckets: [catalogItem('self_context'), catalogItem('planning_reads'), catalogItem('recent_context_reads'), catalogItem('thinking_workspace'), catalogItem('proposed_decisions'), catalogItem('board_task_proposals'), catalogItem('user_messages'), catalogItem('product_peer_messages'), catalogItem('private_journal')],
+      restriction_buckets: [catalogItem('deny_engineer_management', true), catalogItem('deny_worker_dispatch', true), catalogItem('deny_execution_task_control', true), catalogItem('deny_engineer_worker_messages', true), catalogItem('deny_worktree_merge', true), catalogItem('deny_deploy_admin', true), catalogItem('deny_class_profile_admin', true), catalogItem('deny_decision_acceptance', true), catalogItem('deny_raw_tool_picker', true)],
+      operator_access_summary: {
+        allowed_summary: 'Self and assigned task context; Planning reads; Recent context reads; Thinking workspace; Proposed decisions; Board/task proposals; User messages; Product peer Architect messages; Private journal',
+        denied_summary: 'Deny Engineer management; Deny Worker dispatch; Deny execution task control; Deny Engineer/Worker messages; Deny worktree/merge; Deny deploy/admin; Deny Class/Profile admin; Deny accepted-decision authority; Deny raw tool picker',
+      },
+      apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
+      warnings: [
+        'Creative Architect is proposal-only: ideas, decisions, tasks, and messages remain non-binding until accepted through normal Torque authority.',
+        'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and architect_product_* wrappers for product proposals.',
+      ],
+      external_connector_caveat: 'External connector caveat.',
+      restrictions: ['Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.'],
+    },
   ];
 }
 
@@ -410,6 +552,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(classUi(document, panel), /Review Worker/);
   assert.match(classUi(document, panel), /Old Worker/);
   assert.match(classUi(document, panel), /Product Manager/);
+  assert.match(classUi(document, panel), /Creative Architect/);
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
@@ -422,6 +565,33 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(classUi(document, panel), /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
   assert.match(classUi(document, panel), /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
   assert.doesNotMatch(classUi(document, panel), /agent-class-restrictions[\s\S]*Do not use for live PM dogfood/);
+
+  run(context, `agentClassManagerSelect('creative-architect')`);
+  run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[4])} })`);
+  const creativeHtml = classUi(document, panel);
+  assert.match(creativeHtml, /Creative Architect@1/);
+  assert.match(creativeHtml, /Architect-derived/);
+  assert.match(creativeHtml, /proposal-only/);
+  assert.match(creativeHtml, /Thinking workspace/);
+  assert.match(creativeHtml, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
+  assert.match(creativeHtml, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, proposed decisions, queued task ideas, user \+ product-peer messages/);
+  assert.match(creativeHtml, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator/);
+  assert.match(creativeHtml, /Launch new Architect-derived from this class/);
+  const creativePreviewStart = creativeHtml.indexOf('<div class="agent-class-preview');
+  const creativeDiagnosticsStart = creativeHtml.indexOf('<details class="agent-class-normalized', creativePreviewStart);
+  const creativeNormalPreviewHtml = creativeHtml.slice(creativePreviewStart, creativeDiagnosticsStart);
+  assert.doesNotMatch(creativeNormalPreviewHtml, /class-policy-creative-architect|Agent Profile|generated profile|compiler|raw atom|default profile|capability bucket|architect_thinking_|architect_product_/i);
+  document.getElementById('agent-class-launch-name').value = 'Spark Partner';
+  document.getElementById('agent-class-launch-group').value = 'alpha';
+  run(context, `agentClassManagerLaunchSelected()`);
+  assert.deepEqual(sendCalls.at(-1), {
+    cmd: 'create_agent_from_class',
+    class_id: 'creative-architect',
+    kind: 'architect',
+    name: 'Spark Partner',
+    group: 'alpha',
+    base_dir: '/repo',
+  });
 
   run(context, `agentClassManagerSelect('old-worker')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[2])} })`);
@@ -669,6 +839,14 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   run(context, `submitAddArchitect();`);
   assert.equal(sendCalls.at(-1).cmd, 'add_architect');
   assert.equal(sendCalls.at(-1).agent_class_id, 'product-manager');
+
+  run(context, `openAddArchitectModal({ group: 'alpha' }); agentClassPickerSelect('add-architect', 'creative-architect');`);
+  assert.match(document.getElementById('architect-agent-class-select').innerHTML, /Creative Architect@1 · Architect-derived/);
+  assert.match(document.getElementById('architect-agent-class-hint').textContent, /Launch freezes Creative Architect@1/);
+  document.getElementById('architect-name-input').value = 'Spark Partner';
+  run(context, `submitAddArchitect();`);
+  assert.equal(sendCalls.at(-1).cmd, 'add_architect');
+  assert.equal(sendCalls.at(-1).agent_class_id, 'creative-architect');
 });
 
 test('Agent Class add-worker picker blocks stale archived selections instead of defaulting', () => {
