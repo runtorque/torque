@@ -5694,6 +5694,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     engineer: true,
     templates: false,
     health: false,
+    thinking: false,
     focus: true,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
@@ -5724,6 +5725,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     engineer: true,
     templates: false,
     health: false,
+    thinking: false,
     focus: true,
   });
   assert.equal(
@@ -21955,6 +21957,7 @@ test('engineer peer chat thread deltas do not broadly invalidate the engineer pa
     engineer: false,
     templates: false,
     health: false,
+    thinking: false,
     chat: true,
   });
 });
@@ -28013,7 +28016,7 @@ test('standalone restore includes Supervisor panel in the bottom dock by default
   context.togglePanel('supervisor');
 
   assert.equal(jsonValue(context, `_standalonePanelPlacement('supervisor')`), 'bottom');
-  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'chat', 'initiatives', 'mission-control', 'context', 'supervisor']);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'chat', 'initiatives', 'thinking', 'mission-control', 'context', 'supervisor']);
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'supervisor');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs.includes('supervisor')`), false);
   assert.equal(sandbox.sendCalls.length, 1);
@@ -28194,7 +28197,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
     cmd: 'standalone_set_panel_layout',
     layout: {
       version: 1,
-      bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'mission-control', 'context', 'supervisor'], active: 'context' },
+      bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'thinking', 'mission-control', 'context', 'supervisor'], active: 'context' },
       right: {
         open: true,
         size: 320,
@@ -28350,7 +28353,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,
-    bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'mission-control', 'context', 'supervisor'], active: 'context' },
+    bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'thinking', 'mission-control', 'context', 'supervisor'], active: 'context' },
     right: {
       open: true,
       size: 320,
@@ -28362,7 +28365,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   });
   assert.deepEqual(
     jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs.concat(_standalonePanelCurrentLayout().right.tabs).sort()`),
-    ['actions', 'board', 'chat', 'context', 'engineer', 'events', 'health', 'history', 'initiatives', 'mission-control', 'supervisor', 'templates']
+    ['actions', 'board', 'chat', 'context', 'engineer', 'events', 'health', 'history', 'initiatives', 'mission-control', 'supervisor', 'templates', 'thinking']
   );
   assert.deepEqual(jsonValue(context, `sendCalls`), [
     {
@@ -28373,7 +28376,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
       cmd: 'standalone_set_panel_layout',
       layout: {
         version: 1,
-        bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'mission-control', 'context', 'supervisor'], active: 'context' },
+        bottom: { open: true, size: 306, tabs: ['board', 'chat', 'initiatives', 'thinking', 'mission-control', 'context', 'supervisor'], active: 'context' },
         right: {
           open: true,
           size: 320,

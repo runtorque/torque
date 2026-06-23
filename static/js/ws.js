@@ -830,6 +830,24 @@ function connect() {
       if (typeof areasReceiveLinkMutation === 'function') areasReceiveLinkMutation(msg);
     } else if (msg.type === 'area_note_created' || msg.type === 'area_note_updated' || msg.type === 'area_note_archived' || msg.type === 'planning_area_note_created' || msg.type === 'planning_area_note_updated' || msg.type === 'planning_area_note_archived') {
       if (typeof areasReceiveNoteMutation === 'function') areasReceiveNoteMutation(msg);
+    } else if (msg.type === 'scratchpad_note_list') {
+      if (typeof thinkingReceiveScratchpadList === 'function') thinkingReceiveScratchpadList(msg);
+    } else if (msg.type === 'scratchpad_note_created' || msg.type === 'scratchpad_note_updated' || msg.type === 'scratchpad_note_archived' || msg.type === 'scratchpad_note_deleted') {
+      if (typeof thinkingReceiveScratchpadMutation === 'function') thinkingReceiveScratchpadMutation(msg);
+    } else if (msg.type === 'mind_map_list') {
+      if (typeof thinkingReceiveMindMapList === 'function') thinkingReceiveMindMapList(msg);
+    } else if (msg.type === 'mind_map') {
+      if (typeof thinkingReceiveMindMapDetail === 'function') thinkingReceiveMindMapDetail(msg);
+    } else if (msg.type === 'mind_map_created' || msg.type === 'mind_map_updated' || msg.type === 'mind_map_archived' || msg.type === 'mind_map_deleted') {
+      if (typeof thinkingReceiveMindMapMutation === 'function') thinkingReceiveMindMapMutation(msg);
+    } else if (msg.type === 'mind_map_node_created' || msg.type === 'mind_map_node_updated' || msg.type === 'mind_map_node_positioned' || msg.type === 'mind_map_node_deleted') {
+      if (typeof thinkingReceiveMindMapNodeMutation === 'function') thinkingReceiveMindMapNodeMutation(msg);
+    } else if (msg.type === 'mind_map_node_reordered') {
+      if (typeof thinkingReceiveMindMapNodeReordered === 'function') thinkingReceiveMindMapNodeReordered(msg);
+    } else if (msg.type === 'mind_map_link_created' || msg.type === 'mind_map_link_updated' || msg.type === 'mind_map_link_deleted') {
+      if (typeof thinkingReceiveMindMapLinkMutation === 'function') thinkingReceiveMindMapLinkMutation(msg);
+    } else if (msg.type === 'mind_map_link_reordered') {
+      if (typeof thinkingReceiveMindMapLinkReordered === 'function') thinkingReceiveMindMapLinkReordered(msg);
     } else if (msg.type === 'error') {
       if (typeof healthMetricsReceiveHistory === 'function'
           && typeof healthMetricsState !== 'undefined'
@@ -884,6 +902,7 @@ function connect() {
       }
       if (!systemPromptErrorHandled && !specializationEditorErrorHandled && !agentProfileErrorHandled && !agentClassErrorHandled) {
         if (typeof aiSettingsHandleError === 'function' && aiSettingsHandleError(msg)) return;
+        if (typeof thinkingHandleError === 'function' && thinkingHandleError(msg)) return;
         if (typeof handleContextError === 'function') handleContextError(msg);
         else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
       }
@@ -1446,6 +1465,7 @@ function _blankSurfaceInvalidations() {
     engineer: false,
     templates: false,
     health: false,
+    thinking: false,
   };
 }
 
@@ -1869,6 +1889,12 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'planning_area_link_remove':
       case 'planning_area_note_upsert':
         _markSurface(flags, 'initiatives');
+        break;
+      case 'thinking_scratchpad_note_upsert':
+      case 'thinking_mind_map_upsert':
+      case 'thinking_mind_map_node_upsert':
+      case 'thinking_mind_map_link_upsert':
+        _markSurface(flags, 'thinking');
         break;
       case 'behavior_overlay_version_append':
       case 'behavior_overlay_active_update':
@@ -2593,13 +2619,13 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
 
 function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
-    _markSurface(flags, 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives');
+    _markSurface(flags, 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'active_group') {
-    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives');
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'workspace_sidebar_width') {
-    _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives');
+    _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'terminal_direct_messages_height') {
     _markSurface(flags, 'main');
@@ -2669,7 +2695,7 @@ function _surfaceUsesCurrentGroup(surface) {
   if (surface === 'events') {
     return typeof _eventsFilterByGroup === 'undefined' || !!_eventsFilterByGroup;
   }
-  return surface === 'context' || surface === 'engineer' || surface === 'initiatives';
+  return surface === 'context' || surface === 'engineer' || surface === 'initiatives' || surface === 'thinking';
 }
 
 function _captureDeltaGroupHints(ops) {
@@ -2762,7 +2788,9 @@ function _opTouchesGroup(op, group, hint) {
     case 'peer_message_upsert':
     case 'direct_message_upsert':
     case 'direct_message_read':
-      return (op.group || '') === group;
+    case 'thinking_scratchpad_note_upsert':
+    case 'thinking_mind_map_upsert':
+      return (op.group || op.group_name || '') === group;
     default:
       return true;
   }
@@ -3483,6 +3511,7 @@ function _applyDelta(ops) {
         var thinkingNote = Object.assign({}, op);
         delete thinkingNote.op;
         if (thinkingNote.id) state.thinking.scratchpad_notes[thinkingNote.id] = Object.assign({}, state.thinking.scratchpad_notes[thinkingNote.id] || {}, thinkingNote);
+        if (typeof thinkingReceiveScratchpadDelta === 'function') thinkingReceiveScratchpadDelta(thinkingNote);
         break;
       }
 
@@ -3492,14 +3521,23 @@ function _applyDelta(ops) {
         var thinkingMap = Object.assign({}, op);
         delete thinkingMap.op;
         if (thinkingMap.id) state.thinking.mind_maps[thinkingMap.id] = Object.assign({}, state.thinking.mind_maps[thinkingMap.id] || {}, thinkingMap);
+        if (typeof thinkingReceiveMindMapDelta === 'function') thinkingReceiveMindMapDelta(thinkingMap);
         break;
       }
 
-      case 'thinking_mind_map_node_upsert':
-      case 'thinking_mind_map_link_upsert':
-        // Dedicated Thinking UI will lazy-load map detail; keep list summaries
-        // fresh through thinking_mind_map_upsert without mutating Planning.
+      case 'thinking_mind_map_node_upsert': {
+        var thinkingNode = Object.assign({}, op);
+        delete thinkingNode.op;
+        if (typeof thinkingReceiveMindMapNodeDelta === 'function') thinkingReceiveMindMapNodeDelta(thinkingNode);
         break;
+      }
+
+      case 'thinking_mind_map_link_upsert': {
+        var thinkingLink = Object.assign({}, op);
+        delete thinkingLink.op;
+        if (typeof thinkingReceiveMindMapLinkDelta === 'function') thinkingReceiveMindMapLinkDelta(thinkingLink);
+        break;
+      }
 
       case 'decision_upsert': {
         if (!state.decisions) state.decisions = {};
