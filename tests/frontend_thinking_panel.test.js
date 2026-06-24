@@ -393,6 +393,49 @@ test('Idea Brief tab renders list/detail and creates briefs with linked Thinking
   assert.equal(createCall.thinking_links[0].context, 'Source note for the problem framing.');
 });
 
+test('Idea Brief add link preserves non-default selected source without link context', () => {
+  const { sandbox, document, sendCalls } = createHarness();
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:1'] = {
+    id: 'TORQUE-S:1', group: 'Torque', group_name: 'Torque', title: 'A first source', body: 'Default source'
+  };
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:2'] = {
+    id: 'TORQUE-S:2', group: 'Torque', group_name: 'Torque', title: 'B second source', body: 'Selected source'
+  };
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Traceability source binding',
+    status: 'draft',
+    problem_opportunity: 'Operators need traceability links to bind to the selected source.',
+    why_it_matters: '',
+    proposed_shape: '',
+    smallest_useful_version: '',
+    risks_tradeoffs: '',
+    open_questions: '',
+    thinking_links: [],
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  const source = document.getElementById('idea-brief-link-source');
+  assert.equal(source.value, 'scratchpad_note|TORQUE-S:1');
+  source.value = 'scratchpad_note|TORQUE-S:2';
+  run(sandbox, `ideaBriefChanged(); ideaBriefAddLink();`);
+
+  const linked = JSON.parse(run(sandbox, `JSON.stringify(_ideaBriefDraft('TORQUE-IB:1').thinking_links.map(function(link) {
+    return { id: link.id, context: link.context || '' };
+  }))`));
+  assert.deepEqual(linked, [{ id: 'TORQUE-S:2', context: '' }]);
+  assert.doesNotMatch(document.getElementById('panel-thinking').innerHTML, /TORQUE-S:1<\/span>/);
+  assert.match(document.getElementById('panel-thinking').innerHTML, /TORQUE-S:2/);
+
+  run(sandbox, `ideaBriefSave();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_update');
+  assert.equal(sendCalls.at(-1).thinking_links.length, 1);
+  assert.equal(sendCalls.at(-1).thinking_links[0].id, 'TORQUE-S:2');
+  assert.equal(sendCalls.at(-1).thinking_links[0].context || '', '');
+});
+
 test('Idea Brief selection binds detail/body fields and traceability links to the selected brief id', () => {
   const { sandbox, document } = createHarness();
   const sharedSafety = 'Shared proposal-only safety boilerplate: review only, no task or dispatch.';

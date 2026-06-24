@@ -1974,6 +1974,7 @@ function _ideaBriefDraftHasTransientState(draft) {
     String((draft && draft.refinement_note) || '').trim()
     || String((draft && draft.lifecycle_reason) || '').trim()
     || String((draft && draft.proposal_note) || '').trim()
+    || String((draft && draft.link_source_key) || '').trim()
     || String((draft && draft.link_context) || '').trim()
   );
 }
