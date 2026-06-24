@@ -2,9 +2,21 @@
 /* Thinking panel — Scratchpad + Mind Map                              */
 /* ------------------------------------------------------------------ */
 
-var THINKING_TABS = ['scratchpad', 'mind-map'];
+var THINKING_TABS = ['scratchpad', 'mind-map', 'idea-briefs'];
 var THINKING_NEW_NOTE_ID = '__new_note__';
 var THINKING_NEW_MAP_ID = '__new_map__';
+var THINKING_NEW_IDEA_BRIEF_ID = '__new_idea_brief__';
+var IDEA_BRIEF_FIELDS = [
+  'title',
+  'problem_opportunity',
+  'why_it_matters',
+  'proposed_shape',
+  'smallest_useful_version',
+  'risks_tradeoffs',
+  'open_questions',
+];
+var IDEA_BRIEF_BODY_FIELDS = IDEA_BRIEF_FIELDS.slice(1);
+var IDEA_BRIEF_STATUS_ORDER = ['draft', 'proposed', 'parked', 'archived'];
 
 var _thinkingStateRef = null;
 var _thinkingActiveTab = 'scratchpad';
@@ -28,6 +40,18 @@ var _thinkingSaving = false;
 var _thinkingLastError = '';
 var _thinkingLastCommandAt = 0;
 var _thinkingDrag = null;
+var _ideaBriefLoadedGroup = null;
+var _ideaBriefLoadingGroup = null;
+var _ideaBriefIncludeArchived = false;
+var _ideaBriefSelectedId = '';
+var _ideaBriefShowLoadingId = '';
+var _ideaBriefDraftsById = {};
+var _ideaBriefSelectedLinkKey = '';
+var _ideaBriefSaving = false;
+var _ideaBriefLastError = '';
+var _ideaBriefLastStatus = '';
+var _ideaBriefLastCommandAt = 0;
+var _ideaBriefProposalResultById = {};
 
 function _thinkingEsc(value) {
   if (typeof esc === 'function') return esc(value == null ? '' : value);
@@ -74,6 +98,9 @@ function _thinkingSyncStateReference() {
   _thinkingMindLoadingGroup = null;
   _thinkingMindDetailLoadingId = '';
   _thinkingMindDetailsById = {};
+  _ideaBriefLoadedGroup = null;
+  _ideaBriefLoadingGroup = null;
+  _ideaBriefShowLoadingId = '';
 }
 
 function _thinkingEnsureState() {
@@ -90,6 +117,15 @@ function _thinkingEnsureState() {
   if (!state.thinking.mind_maps || typeof state.thinking.mind_maps !== 'object') {
     state.thinking.mind_maps = {};
   }
+}
+
+function _ideaBriefEnsureState() {
+  _thinkingSyncStateReference();
+  if (typeof state === 'undefined' || !state) {
+    if (typeof globalThis !== 'undefined') globalThis.state = {};
+  }
+  if (!state.idea_briefs || typeof state.idea_briefs !== 'object') state.idea_briefs = {};
+  return state.idea_briefs;
 }
 
 function _thinkingGroup() {
@@ -214,7 +250,11 @@ function thinkingEnsureMindMapsLoaded(opts) {
 function thinkingEnsureLoaded(opts) {
   opts = opts || {};
   var loaded = false;
-  if (_thinkingActiveTab === 'mind-map') {
+  if (_thinkingActiveTab === 'idea-briefs') {
+    loaded = ideaBriefEnsureLoaded(opts) || loaded;
+    loaded = thinkingEnsureScratchpadLoaded(opts) || loaded;
+    loaded = thinkingEnsureMindMapsLoaded(opts) || loaded;
+  } else if (_thinkingActiveTab === 'mind-map') {
     loaded = thinkingEnsureMindMapsLoaded(opts) || loaded;
     if (opts.includeInactive || opts.all) loaded = thinkingEnsureScratchpadLoaded(opts) || loaded;
   } else {
@@ -228,6 +268,7 @@ function thinkingRefresh() {
   _thinkingCaptureDrafts();
   thinkingEnsureScratchpadLoaded({ force: true });
   thinkingEnsureMindMapsLoaded({ force: true });
+  ideaBriefEnsureLoaded({ force: true });
   if (_thinkingMindSelectedId && _thinkingMindSelectedId !== THINKING_NEW_MAP_ID) {
     thinkingMindLoadDetail(_thinkingMindSelectedId, { force: true });
   }
@@ -251,8 +292,16 @@ function thinkingBeginGroupSwitch() {
     _thinkingSelectedNodeId = '';
     _thinkingSelectedLinkId = '';
   }
+  var brief = _ideaBriefSelectedId && state && state.idea_briefs
+    ? state.idea_briefs[_ideaBriefSelectedId]
+    : null;
+  if (_ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID && brief && _ideaBriefItemGroup(brief) !== group) {
+    _ideaBriefSelectedId = '';
+    _ideaBriefSelectedLinkKey = '';
+  }
   thinkingEnsureScratchpadLoaded({ force: true });
   thinkingEnsureMindMapsLoaded({ force: true });
+  ideaBriefEnsureLoaded({ force: true });
   renderThinkingPanel();
 }
 
@@ -648,6 +697,7 @@ function _thinkingCaptureDrafts() {
   _thinkingCaptureMapDraft();
   _thinkingCaptureNodeDraft();
   _thinkingCaptureLinkDraft();
+  _ideaBriefCaptureDraft();
 }
 
 function thinkingSetTab(tab) {
@@ -655,7 +705,11 @@ function thinkingSetTab(tab) {
   if (THINKING_TABS.indexOf(tab) < 0) tab = 'scratchpad';
   _thinkingCaptureDrafts();
   _thinkingActiveTab = tab;
-  if (tab === 'mind-map') thinkingEnsureMindMapsLoaded();
+  if (tab === 'idea-briefs') {
+    ideaBriefEnsureLoaded();
+    thinkingEnsureScratchpadLoaded();
+    thinkingEnsureMindMapsLoaded();
+  } else if (tab === 'mind-map') thinkingEnsureMindMapsLoaded();
   else thinkingEnsureScratchpadLoaded();
   renderThinkingPanel();
 }
@@ -1269,11 +1323,12 @@ function thinkingMindDeleteLink(linkId) {
   });
 }
 
-function _renderThinkingTabs(noteTotal, mapTotal) {
+function _renderThinkingTabs(noteTotal, mapTotal, briefTotal) {
   var active = String(_thinkingActiveTab || 'scratchpad');
   var html = '<div class="thinking-tabs" role="tablist" aria-label="Thinking surfaces">';
   html += '<button type="button" role="tab" class="thinking-tab' + (active === 'scratchpad' ? ' active' : '') + '" aria-selected="' + (active === 'scratchpad' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'scratchpad\')">Scratchpad <span>' + _thinkingEsc(noteTotal) + '</span></button>';
   html += '<button type="button" role="tab" class="thinking-tab' + (active === 'mind-map' ? ' active' : '') + '" aria-selected="' + (active === 'mind-map' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'mind-map\')">Mind Map <span>' + _thinkingEsc(mapTotal) + '</span></button>';
+  html += '<button type="button" role="tab" class="thinking-tab' + (active === 'idea-briefs' ? ' active' : '') + '" aria-selected="' + (active === 'idea-briefs' ? 'true' : 'false') + '" onclick="thinkingSetTab(\'idea-briefs\')">Idea Briefs <span>' + _thinkingEsc(briefTotal || 0) + '</span></button>';
   html += '</div>';
   return html;
 }
@@ -1577,6 +1632,837 @@ function _renderThinkingMindMap(group) {
     + '</div>';
 }
 
+/* Idea Brief review flow ------------------------------------------------ */
+
+function _ideaBriefActorPayload() {
+  return { actor_kind: 'user', actor_id: '' };
+}
+
+function _ideaBriefSend(payload) {
+  var data = Object.assign({}, payload || {}, _ideaBriefActorPayload());
+  _ideaBriefSaving = true;
+  _ideaBriefLastError = '';
+  _ideaBriefLastCommandAt = _thinkingNowMs();
+  if (typeof send === 'function') send(data);
+}
+
+function _ideaBriefItemGroup(item) {
+  return String((item && (item.group || item.group_name)) || '');
+}
+
+function _ideaBriefStatus(item) {
+  var status = String((item && item.status) || 'draft').toLowerCase();
+  return IDEA_BRIEF_STATUS_ORDER.indexOf(status) >= 0 ? status : 'draft';
+}
+
+function _ideaBriefIsArchived(item) {
+  return !!item && (_ideaBriefStatus(item) === 'archived'
+    || !!String(item.archived_at || '').trim()
+    || item.archived === true);
+}
+
+function _ideaBriefIsVisible(item, includeArchived) {
+  if (!item || !item.id) return false;
+  if (_ideaBriefIsArchived(item) && !includeArchived) return false;
+  return true;
+}
+
+function _ideaBriefStatusLabel(status) {
+  status = String(status || 'draft').toLowerCase();
+  if (status === 'proposed') return 'Proposed for review';
+  if (status === 'parked') return 'Parked';
+  if (status === 'archived') return 'Archived';
+  return 'Draft';
+}
+
+function _ideaBriefTimestamp(item) {
+  var value = String((item && (item.updated_at || item.created_at)) || '');
+  var parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function _ideaBriefsForGroup(group, includeArchived) {
+  _ideaBriefEnsureState();
+  var items = [];
+  var g = String(group || '');
+  var briefs = state.idea_briefs || {};
+  for (var id in briefs) {
+    var item = briefs[id];
+    if (!item || !item.id) continue;
+    if (g && _ideaBriefItemGroup(item) !== g) continue;
+    if (!_ideaBriefIsVisible(item, !!includeArchived)) continue;
+    items.push(item);
+  }
+  items.sort(function(a, b) {
+    var as = IDEA_BRIEF_STATUS_ORDER.indexOf(_ideaBriefStatus(a));
+    var bs = IDEA_BRIEF_STATUS_ORDER.indexOf(_ideaBriefStatus(b));
+    if (as !== bs) return as - bs;
+    var at = _ideaBriefTimestamp(a);
+    var bt = _ideaBriefTimestamp(b);
+    if (at !== bt) return bt - at;
+    return String(a.title || a.id || '').localeCompare(String(b.title || b.id || ''));
+  });
+  return items;
+}
+
+function _ideaBriefFirstVisibleId(group) {
+  var items = _ideaBriefsForGroup(group, _ideaBriefIncludeArchived);
+  return items.length ? String(items[0].id || '') : '';
+}
+
+function ideaBriefEnsureLoaded(opts) {
+  opts = opts || {};
+  var group = _thinkingGroup();
+  if (!group && !opts.force) return false;
+  var loadKey = group + '|' + (_ideaBriefIncludeArchived ? '1' : '0');
+  if (!opts.force && (_ideaBriefLoadedGroup === loadKey || _ideaBriefLoadingGroup === loadKey)) return false;
+  _ideaBriefLoadingGroup = loadKey;
+  _ideaBriefLastError = '';
+  if (typeof send === 'function') {
+    send({
+      cmd: 'idea_brief_list',
+      group: group,
+      include_archived: !!_ideaBriefIncludeArchived,
+    });
+  }
+  return true;
+}
+
+function ideaBriefReceiveList(msg) {
+  _ideaBriefEnsureState();
+  var group = String((msg && msg.group) || _thinkingGroup() || '');
+  var includeArchived = !!_ideaBriefIncludeArchived;
+  var loadKey = group + '|' + (includeArchived ? '1' : '0');
+  var incoming = Array.isArray(msg && msg.idea_briefs) ? msg.idea_briefs : [];
+  for (var id in state.idea_briefs) {
+    var existing = state.idea_briefs[id];
+    if (existing && _ideaBriefItemGroup(existing) === group) delete state.idea_briefs[id];
+  }
+  incoming.forEach(function(brief) {
+    if (brief && brief.id) state.idea_briefs[brief.id] = Object.assign({}, brief);
+  });
+  if (_ideaBriefLoadingGroup === loadKey) _ideaBriefLoadingGroup = null;
+  _ideaBriefLoadedGroup = loadKey;
+  if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+    var selected = state.idea_briefs[_ideaBriefSelectedId];
+    if (!selected || _ideaBriefItemGroup(selected) !== group || !_ideaBriefIsVisible(selected, includeArchived)) {
+      _ideaBriefSelectedId = _ideaBriefFirstVisibleId(group);
+      _ideaBriefSelectedLinkKey = '';
+    }
+  }
+  if (_thinkingPanelVisible()) renderThinkingPanel();
+}
+
+function _ideaBriefFromMessage(msg) {
+  if (!msg) return null;
+  if (msg.idea_brief) return msg.idea_brief;
+  if (msg.type === 'idea_brief' && msg.id) {
+    var payload = Object.assign({}, msg);
+    delete payload.type;
+    return payload;
+  }
+  return null;
+}
+
+function ideaBriefReceiveMutation(msg) {
+  var brief = _ideaBriefFromMessage(msg);
+  if (!brief || !brief.id) return;
+  _ideaBriefEnsureState();
+  state.idea_briefs[brief.id] = Object.assign({}, state.idea_briefs[brief.id] || {}, brief);
+  if (_ideaBriefShowLoadingId === brief.id) _ideaBriefShowLoadingId = '';
+  _ideaBriefSaving = false;
+  _ideaBriefLastError = '';
+  var verb = 'updated';
+  if (msg.type === 'idea_brief_created') {
+    verb = 'created';
+    delete _ideaBriefDraftsById[THINKING_NEW_IDEA_BRIEF_ID];
+    _ideaBriefSelectedId = brief.id;
+  } else if (msg.type === 'idea_brief_refined') {
+    verb = 'refined';
+  } else if (msg.type === 'idea_brief_parked') {
+    verb = 'parked';
+  } else if (msg.type === 'idea_brief_archived') {
+    verb = 'archived';
+  } else if (msg.type === 'idea_brief_proposed') {
+    verb = 'proposed for product-safe review';
+    _ideaBriefProposalResultById[brief.id] = {
+      caveat: String(msg.caveat || ''),
+      review_scope: String(msg.review_scope || ''),
+      proposal: msg.proposal || brief.proposal || {},
+    };
+  }
+  if (msg.type !== 'idea_brief') {
+    _ideaBriefLastStatus = 'Idea Brief ' + verb + '.';
+    delete _ideaBriefDraftsById[brief.id];
+  }
+  if (!_ideaBriefSelectedId || _ideaBriefSelectedId === THINKING_NEW_IDEA_BRIEF_ID) {
+    _ideaBriefSelectedId = brief.id;
+  }
+  if (msg.type === 'idea_brief_archived' && !_ideaBriefIncludeArchived) {
+    _ideaBriefSelectedId = _ideaBriefFirstVisibleId(_thinkingGroup());
+  }
+  ideaBriefEnsureLoaded({ force: true });
+  if (_thinkingPanelVisible()) renderThinkingPanel();
+}
+
+function ideaBriefReceiveDelta(brief) {
+  if (!brief || !brief.id) return;
+  _ideaBriefEnsureState();
+  state.idea_briefs[brief.id] = Object.assign({}, state.idea_briefs[brief.id] || {}, brief);
+  if (_ideaBriefSelectedId === brief.id && !_ideaBriefIsVisible(state.idea_briefs[brief.id], _ideaBriefIncludeArchived)) {
+    _ideaBriefSelectedId = _ideaBriefFirstVisibleId(_thinkingGroup());
+    _ideaBriefSelectedLinkKey = '';
+  }
+}
+
+function ideaBriefHandleError(msg) {
+  if (!msg || msg.contract !== 'torque.idea_brief.v1') return false;
+  var age = _thinkingNowMs() - Number(_ideaBriefLastCommandAt || 0);
+  var likelyIdeaBrief = age >= 0 && age < 15000;
+  if (!_thinkingPanelVisible() && !likelyIdeaBrief) return false;
+  _ideaBriefSaving = false;
+  _ideaBriefLoadingGroup = null;
+  _ideaBriefShowLoadingId = '';
+  var code = String(msg.code || 'idea_brief_error');
+  var text = String(msg.message || 'Idea Brief command failed.');
+  _ideaBriefLastError = code ? (code + ': ' + text) : text;
+  if (_thinkingPanelVisible() && typeof renderThinkingPanel === 'function') renderThinkingPanel();
+  return true;
+}
+
+function ideaBriefRefresh() {
+  _thinkingCaptureDrafts();
+  ideaBriefEnsureLoaded({ force: true });
+  thinkingEnsureScratchpadLoaded({ force: true });
+  thinkingEnsureMindMapsLoaded({ force: true });
+  if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+    ideaBriefLoad(_ideaBriefSelectedId, { force: true });
+  }
+  renderThinkingPanel();
+}
+
+function ideaBriefToggleArchived() {
+  _thinkingCaptureDrafts();
+  _ideaBriefIncludeArchived = !_ideaBriefIncludeArchived;
+  _ideaBriefSelectedId = '';
+  _ideaBriefSelectedLinkKey = '';
+  ideaBriefEnsureLoaded({ force: true });
+  renderThinkingPanel();
+}
+
+function ideaBriefNew() {
+  _thinkingCaptureDrafts();
+  _ideaBriefLastStatus = '';
+  _ideaBriefSelectedId = THINKING_NEW_IDEA_BRIEF_ID;
+  _ideaBriefSelectedLinkKey = '';
+  if (!_ideaBriefDraftsById[THINKING_NEW_IDEA_BRIEF_ID]) {
+    _ideaBriefDraftsById[THINKING_NEW_IDEA_BRIEF_ID] = _ideaBriefBlankDraft();
+  }
+  renderThinkingPanel();
+}
+
+function ideaBriefSelect(briefId) {
+  _thinkingCaptureDrafts();
+  _ideaBriefLastStatus = '';
+  _ideaBriefSelectedId = String(briefId || '');
+  _ideaBriefSelectedLinkKey = '';
+  if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+    ideaBriefLoad(_ideaBriefSelectedId);
+  }
+  renderThinkingPanel();
+}
+
+function ideaBriefLoad(briefId, opts) {
+  opts = opts || {};
+  briefId = String(briefId || _ideaBriefSelectedId || '').trim();
+  if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return false;
+  if (!opts.force && _ideaBriefShowLoadingId === briefId) return false;
+  _ideaBriefShowLoadingId = briefId;
+  if (typeof send === 'function') {
+    send({
+      cmd: 'idea_brief_show',
+      group: _thinkingGroup(),
+      idea_brief: briefId,
+      include_archived: !!_ideaBriefIncludeArchived,
+    });
+  }
+  return true;
+}
+
+function ideaBriefChanged() {
+  _ideaBriefCaptureDraft();
+  _thinkingSetText('idea-brief-draft-status', 'Unsaved Idea Brief edits');
+}
+
+function ideaBriefSelectLink(key) {
+  _ideaBriefSelectedLinkKey = String(key || '');
+  renderThinkingPanel();
+}
+
+function _ideaBriefCopyLinks(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(function(link) { return Object.assign({}, link || {}); });
+}
+
+function _ideaBriefBlankDraft() {
+  return {
+    title: '',
+    problem_opportunity: '',
+    why_it_matters: '',
+    proposed_shape: '',
+    smallest_useful_version: '',
+    risks_tradeoffs: '',
+    open_questions: '',
+    thinking_links: [],
+    refinement_note: '',
+    lifecycle_reason: '',
+    proposal_note: '',
+    link_source_key: '',
+    link_context: '',
+  };
+}
+
+function _ideaBriefDraftFromRow(row) {
+  var draft = _ideaBriefBlankDraft();
+  IDEA_BRIEF_FIELDS.forEach(function(field) {
+    draft[field] = String((row && row[field]) || '');
+  });
+  draft.thinking_links = _ideaBriefCopyLinks(row && row.thinking_links);
+  return draft;
+}
+
+function _ideaBriefDraft(briefId) {
+  briefId = String(briefId || _ideaBriefSelectedId || '');
+  if (_ideaBriefDraftsById[briefId]) return Object.assign({}, _ideaBriefDraftsById[briefId], {
+    thinking_links: _ideaBriefCopyLinks(_ideaBriefDraftsById[briefId].thinking_links),
+  });
+  var row = briefId === THINKING_NEW_IDEA_BRIEF_ID ? null : (state && state.idea_briefs ? state.idea_briefs[briefId] : null);
+  return _ideaBriefDraftFromRow(row);
+}
+
+function _ideaBriefCaptureDraft() {
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId) return;
+  var hasField = false;
+  var draft = _ideaBriefDraft(briefId);
+  IDEA_BRIEF_FIELDS.forEach(function(field) {
+    var el = _thinkingEl('idea-brief-' + field.replace(/_/g, '-'));
+    if (el && 'value' in el) {
+      draft[field] = String(el.value || '');
+      hasField = true;
+    }
+  });
+  var refineEl = _thinkingEl('idea-brief-refinement-note');
+  var reasonEl = _thinkingEl('idea-brief-lifecycle-reason');
+  var proposalEl = _thinkingEl('idea-brief-proposal-note');
+  var sourceEl = _thinkingEl('idea-brief-link-source');
+  var contextEl = _thinkingEl('idea-brief-link-context');
+  if (refineEl && 'value' in refineEl) { draft.refinement_note = String(refineEl.value || ''); hasField = true; }
+  if (reasonEl && 'value' in reasonEl) { draft.lifecycle_reason = String(reasonEl.value || ''); hasField = true; }
+  if (proposalEl && 'value' in proposalEl) { draft.proposal_note = String(proposalEl.value || ''); hasField = true; }
+  if (sourceEl && 'value' in sourceEl) { draft.link_source_key = String(sourceEl.value || ''); hasField = true; }
+  if (contextEl && 'value' in contextEl) { draft.link_context = String(contextEl.value || ''); hasField = true; }
+  if (hasField) _ideaBriefDraftsById[briefId] = draft;
+}
+
+function _ideaBriefDraftIsDirty(briefId, draft) {
+  if (briefId === THINKING_NEW_IDEA_BRIEF_ID) {
+    return IDEA_BRIEF_FIELDS.some(function(field) { return !!String(draft[field] || '').trim(); })
+      || (draft.thinking_links || []).length > 0;
+  }
+  var row = state && state.idea_briefs ? state.idea_briefs[briefId] : null;
+  if (!row) return false;
+  for (var i = 0; i < IDEA_BRIEF_FIELDS.length; i++) {
+    var field = IDEA_BRIEF_FIELDS[i];
+    if (String(row[field] || '') !== String(draft[field] || '')) return true;
+  }
+  return JSON.stringify(_ideaBriefCopyLinks(row.thinking_links)) !== JSON.stringify(_ideaBriefCopyLinks(draft.thinking_links));
+}
+
+function _ideaBriefPayloadFromDraft(draft) {
+  var payload = {};
+  IDEA_BRIEF_FIELDS.forEach(function(field) {
+    payload[field] = String((draft && draft[field]) || '');
+  });
+  payload.title = String(payload.title || '').trim()
+    || String(payload.problem_opportunity || '').trim().split(/\n/)[0].slice(0, 80)
+    || 'Untitled Idea Brief';
+  payload.thinking_links = _ideaBriefCopyLinks(draft && draft.thinking_links);
+  return payload;
+}
+
+function ideaBriefSave() {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId) return;
+  var draft = _ideaBriefDraft(briefId);
+  if (!String(draft.problem_opportunity || '').trim()) {
+    _ideaBriefLastError = 'validation_error: Problem or opportunity is required.';
+    renderThinkingPanel();
+    return;
+  }
+  var payload = _ideaBriefPayloadFromDraft(draft);
+  payload.group = _thinkingGroup();
+  if (briefId === THINKING_NEW_IDEA_BRIEF_ID) {
+    payload.cmd = 'idea_brief_create';
+  } else {
+    payload.cmd = 'idea_brief_update';
+    payload.idea_brief = briefId;
+  }
+  _ideaBriefSend(payload);
+  renderThinkingPanel();
+}
+
+function ideaBriefRefine() {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  var draft = _ideaBriefDraft(briefId);
+  var payload = _ideaBriefPayloadFromDraft(draft);
+  payload.cmd = 'idea_brief_refine';
+  payload.group = _thinkingGroup();
+  payload.idea_brief = briefId;
+  payload.refinement_note = String(draft.refinement_note || '');
+  _ideaBriefSend(payload);
+  renderThinkingPanel();
+}
+
+function _ideaBriefConfirm(message, opts) {
+  if (typeof showConfirm === 'function') return showConfirm(message, opts || {});
+  return Promise.resolve(true);
+}
+
+function ideaBriefPark() {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  var draft = _ideaBriefDraft(briefId);
+  _ideaBriefConfirm('Park this Idea Brief? It stays available for later review.', {
+    label: 'Park', variant: 'btn-secondary', title: 'Park Idea Brief'
+  }).then(function(ok) {
+    if (!ok) return;
+    _ideaBriefSend({ cmd: 'idea_brief_park', group: _thinkingGroup(), idea_brief: briefId, reason: draft.lifecycle_reason || '' });
+    renderThinkingPanel();
+  });
+}
+
+function ideaBriefArchive() {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  var draft = _ideaBriefDraft(briefId);
+  _ideaBriefConfirm('Archive this Idea Brief? Archived briefs are hidden by default.', {
+    label: 'Archive', variant: 'btn-danger', title: 'Archive Idea Brief'
+  }).then(function(ok) {
+    if (!ok) return;
+    _ideaBriefSend({ cmd: 'idea_brief_archive', group: _thinkingGroup(), idea_brief: briefId, reason: draft.lifecycle_reason || '' });
+    renderThinkingPanel();
+  });
+}
+
+function ideaBriefPropose() {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId || briefId === THINKING_NEW_IDEA_BRIEF_ID) return;
+  var draft = _ideaBriefDraft(briefId);
+  _ideaBriefConfirm('Propose this Idea Brief for product-safe review? This will not create tasks, assign work, dispatch agents, or accept a decision.', {
+    label: 'Propose for review', variant: 'btn-primary', title: 'Propose Idea Brief'
+  }).then(function(ok) {
+    if (!ok) return;
+    _ideaBriefSend({ cmd: 'idea_brief_propose', group: _thinkingGroup(), idea_brief: briefId, note: draft.proposal_note || '' });
+    renderThinkingPanel();
+  });
+}
+
+function _ideaBriefLinkKey(link, index) {
+  return [
+    String((link && link.type) || ''),
+    String((link && link.id) || ''),
+    String((link && link.map_id) || ''),
+    String(index || 0),
+  ].join('|');
+}
+
+function _ideaBriefLinkTypeLabel(type) {
+  type = String(type || '');
+  if (type === 'scratchpad_note') return 'Scratchpad note';
+  if (type === 'mind_map') return 'Mind Map';
+  if (type === 'mind_map_node') return 'Mind Map node';
+  if (type === 'mind_map_link') return 'Mind Map link';
+  return 'Thinking link';
+}
+
+function _ideaBriefLinkTitle(link) {
+  if (!link) return 'Linked Thinking';
+  return String(link.title || link.map_title || link.label || link.summary || link.id || 'Linked Thinking');
+}
+
+function _ideaBriefLinkSubtitle(link) {
+  if (!link) return '';
+  var type = _ideaBriefLinkTypeLabel(link.type);
+  if (link.type === 'mind_map_node') return type + (link.map_title ? ' · ' + link.map_title : '');
+  if (link.type === 'mind_map_link') return type + (link.map_title ? ' · ' + link.map_title : '');
+  if (link.type === 'mind_map') {
+    var counts = [];
+    if (link.node_count != null) counts.push(String(link.node_count) + ' nodes');
+    if (link.link_count != null) counts.push(String(link.link_count) + ' links');
+    return counts.length ? type + ' · ' + counts.join(' · ') : type;
+  }
+  return type;
+}
+
+function _ideaBriefLinkMetadata(link) {
+  var keys = ['context', 'source_context', 'summary', 'reason', 'quote', 'selection', 'note', 'confidence'];
+  var out = [];
+  keys.forEach(function(key) {
+    var value = link && link[key];
+    if (value == null || value === '') return;
+    if (typeof value === 'object') {
+      try { value = JSON.stringify(value); } catch (_err) { value = String(value); }
+    }
+    out.push({ key: key, value: String(value) });
+  });
+  return out;
+}
+
+function _ideaBriefKnownLinkIds(links) {
+  var seen = {};
+  (links || []).forEach(function(link) {
+    var key = String((link && link.type) || '') + '|' + String((link && link.id) || '');
+    seen[key] = true;
+  });
+  return seen;
+}
+
+function _ideaBriefLinkSources(group, existingLinks) {
+  _thinkingEnsureState();
+  var seen = _ideaBriefKnownLinkIds(existingLinks || []);
+  var sources = [];
+  _thinkingNotesForGroup(group).forEach(function(note) {
+    var key = 'scratchpad_note|' + String(note.id || '');
+    if (seen[key]) return;
+    sources.push({
+      key: key,
+      label: 'Scratchpad · ' + (note.title || note.id || 'Untitled note'),
+      payload: {
+        type: 'scratchpad_note',
+        id: note.id,
+        title: note.title || '',
+        slug: note.slug || '',
+        group: _thinkingItemGroup(note) || group,
+        archived: !!note.archived,
+        summary: String(note.body || '').trim().split(/\n/)[0].slice(0, 140),
+      },
+    });
+  });
+  _thinkingMapsForGroup(group).forEach(function(map) {
+    var key = 'mind_map|' + String(map.id || '');
+    if (!seen[key]) {
+      sources.push({
+        key: key,
+        label: 'Mind Map · ' + (map.title || map.id || 'Untitled map'),
+        payload: {
+          type: 'mind_map',
+          id: map.id,
+          title: map.title || '',
+          slug: map.slug || '',
+          group: _thinkingItemGroup(map) || group,
+          node_count: Number(map.node_count || 0) || 0,
+          link_count: Number(map.link_count || 0) || 0,
+        },
+      });
+    }
+    var detail = _thinkingMapDetail(map.id);
+    var nodes = _thinkingActiveNodes(detail);
+    var links = _thinkingActiveLinks(detail);
+    nodes.forEach(function(node) {
+      var nodeKey = 'mind_map_node|' + String(node.id || '');
+      if (seen[nodeKey]) return;
+      sources.push({
+        key: nodeKey,
+        label: 'Map node · ' + (node.label || node.title || node.id || 'Untitled node'),
+        payload: {
+          type: 'mind_map_node',
+          id: node.id,
+          map_id: map.id,
+          map_title: map.title || '',
+          label: node.label || node.title || '',
+          node_type: node.node_type || '',
+        },
+      });
+    });
+    links.forEach(function(link) {
+      var linkKey = 'mind_map_link|' + String(link.id || '');
+      if (seen[linkKey]) return;
+      sources.push({
+        key: linkKey,
+        label: 'Map link · ' + (link.label || link.link_type || link.id || 'Link'),
+        payload: {
+          type: 'mind_map_link',
+          id: link.id,
+          map_id: map.id,
+          map_title: map.title || '',
+          source_node_id: link.source_node_id || '',
+          target_node_id: link.target_node_id || '',
+          label: link.label || '',
+          link_type: link.link_type || '',
+        },
+      });
+    });
+  });
+  return sources;
+}
+
+function ideaBriefAddLink() {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId) return;
+  var draft = _ideaBriefDraft(briefId);
+  var sources = _ideaBriefLinkSources(_thinkingGroup(), draft.thinking_links);
+  var selectedKey = String(draft.link_source_key || (sources[0] && sources[0].key) || '');
+  var source = null;
+  for (var i = 0; i < sources.length; i++) {
+    if (sources[i].key === selectedKey) {
+      source = sources[i];
+      break;
+    }
+  }
+  if (!source) {
+    _ideaBriefLastError = 'validation_error: Choose a Thinking artifact to link.';
+    renderThinkingPanel();
+    return;
+  }
+  var link = Object.assign({}, source.payload || {});
+  var context = String(draft.link_context || '').trim();
+  if (context) link.context = context;
+  draft.thinking_links = _ideaBriefCopyLinks(draft.thinking_links);
+  draft.thinking_links.push(link);
+  draft.link_source_key = '';
+  draft.link_context = '';
+  _ideaBriefDraftsById[briefId] = draft;
+  _ideaBriefSelectedLinkKey = _ideaBriefLinkKey(link, draft.thinking_links.length - 1);
+  renderThinkingPanel();
+}
+
+function ideaBriefRemoveLink(index) {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId) return;
+  var draft = _ideaBriefDraft(briefId);
+  var idx = Number(index);
+  if (!Number.isFinite(idx) || idx < 0 || idx >= (draft.thinking_links || []).length) return;
+  draft.thinking_links = _ideaBriefCopyLinks(draft.thinking_links);
+  draft.thinking_links.splice(idx, 1);
+  _ideaBriefDraftsById[briefId] = draft;
+  _ideaBriefSelectedLinkKey = '';
+  renderThinkingPanel();
+}
+
+function ideaBriefOpenThinkingLink(index) {
+  _ideaBriefCaptureDraft();
+  var briefId = String(_ideaBriefSelectedId || '');
+  var draft = _ideaBriefDraft(briefId);
+  var link = (draft.thinking_links || [])[Number(index)];
+  if (!link) return;
+  var type = String(link.type || '');
+  if (type === 'scratchpad_note') {
+    _thinkingActiveTab = 'scratchpad';
+    _thinkingScratchSelectedId = String(link.id || '');
+    thinkingEnsureScratchpadLoaded();
+    renderThinkingPanel();
+    return;
+  }
+  if (type === 'mind_map' || type === 'mind_map_node' || type === 'mind_map_link') {
+    var mapId = String(link.map_id || link.id || '');
+    _thinkingActiveTab = 'mind-map';
+    _thinkingMindSelectedId = mapId;
+    _thinkingSelectedNodeId = type === 'mind_map_node' ? String(link.id || '') : '';
+    _thinkingSelectedLinkId = type === 'mind_map_link' ? String(link.id || '') : '';
+    thinkingEnsureMindMapsLoaded();
+    thinkingMindLoadDetail(mapId);
+    renderThinkingPanel();
+  }
+}
+
+function _renderIdeaBriefList(group) {
+  var briefs = _ideaBriefsForGroup(group, _ideaBriefIncludeArchived);
+  if (!_ideaBriefSelectedId && briefs.length) _ideaBriefSelectedId = String(briefs[0].id || '');
+  if (_ideaBriefSelectedId && _ideaBriefSelectedId !== THINKING_NEW_IDEA_BRIEF_ID) {
+    var selected = state.idea_briefs[_ideaBriefSelectedId];
+    if (!selected || _ideaBriefItemGroup(selected) !== group || !_ideaBriefIsVisible(selected, _ideaBriefIncludeArchived)) {
+      _ideaBriefSelectedId = briefs.length ? String(briefs[0].id || '') : '';
+      _ideaBriefSelectedLinkKey = '';
+    }
+  }
+  var loadKey = group + '|' + (_ideaBriefIncludeArchived ? '1' : '0');
+  var html = '<aside class="thinking-list-pane idea-brief-list-pane">';
+  html += '<div class="thinking-list-toolbar idea-brief-list-toolbar"><div><strong>Idea Briefs</strong><span>Opportunity proposals linked to Thinking</span></div><button type="button" class="btn-primary" onclick="ideaBriefNew()">New brief</button></div>';
+  html += '<div class="idea-brief-filter-row"><button type="button" class="btn-secondary' + (_ideaBriefIncludeArchived ? ' active' : '') + '" onclick="ideaBriefToggleArchived()">' + (_ideaBriefIncludeArchived ? 'Hide archived' : 'Show archived') + '</button><button type="button" class="btn-secondary" onclick="ideaBriefRefresh()">Refresh</button></div>';
+  if (_ideaBriefLoadingGroup === loadKey && _ideaBriefLoadedGroup !== loadKey) {
+    html += '<div class="thinking-loading">Loading Idea Briefs…</div>';
+  }
+  html += '<div class="thinking-list idea-brief-list" id="thinking-idea-list">';
+  if (_ideaBriefSelectedId === THINKING_NEW_IDEA_BRIEF_ID) {
+    html += '<button type="button" class="thinking-list-card idea-brief-card selected draft" onclick="ideaBriefSelect(\'' + _thinkingJs(THINKING_NEW_IDEA_BRIEF_ID) + '\')"><span class="thinking-list-title">New Idea Brief</span><span class="thinking-list-meta">Draft · not saved yet</span></button>';
+  }
+  if (!briefs.length) html += '<div class="thinking-empty">No Idea Briefs yet. Create one from a problem, opportunity, or linked Thinking artifact.</div>';
+  briefs.forEach(function(brief) {
+    var briefId = String(brief.id || '');
+    var selected = _ideaBriefSelectedId === briefId;
+    var status = _ideaBriefStatus(brief);
+    html += '<button type="button" class="thinking-list-card idea-brief-card idea-brief-status-' + _thinkingAttr(status) + (selected ? ' selected' : '') + '" onclick="ideaBriefSelect(\'' + _thinkingJs(briefId) + '\')">';
+    html += '<span class="thinking-list-title">' + _thinkingEsc(brief.title || 'Untitled Idea Brief') + '</span>';
+    html += '<span class="thinking-list-body">' + _thinkingEsc(brief.problem_opportunity || brief.proposed_shape || 'Opportunity proposal') + '</span>';
+    html += '<span class="thinking-list-meta"><span class="idea-brief-status-pill">' + _thinkingEsc(_ideaBriefStatusLabel(status)) + '</span> ' + _thinkingEsc(briefId + (_thinkingTimeLabel(brief) ? ' · ' + _thinkingTimeLabel(brief) : '')) + '</span>';
+    html += '</button>';
+  });
+  html += '</div></aside>';
+  return html;
+}
+
+function _renderIdeaBriefField(field, draft) {
+  var labels = {
+    title: 'Title',
+    problem_opportunity: 'Problem or opportunity',
+    why_it_matters: 'Why it matters',
+    proposed_shape: 'Proposed shape',
+    smallest_useful_version: 'Smallest useful version',
+    risks_tradeoffs: 'Risks and tradeoffs',
+    open_questions: 'Open questions',
+  };
+  var placeholders = {
+    title: 'Short operator-facing name',
+    problem_opportunity: 'What problem, opportunity, or user need is this brief about?',
+    why_it_matters: 'Why should Blueprint/Torqly/user care now?',
+    proposed_shape: 'What might the product or workflow look like?',
+    smallest_useful_version: 'What is the smallest reviewable version?',
+    risks_tradeoffs: 'Known risks, tradeoffs, and caveats',
+    open_questions: 'Questions to answer before accepting scope',
+  };
+  var domId = 'idea-brief-' + field.replace(/_/g, '-');
+  var rows = field === 'title' ? 0 : (field === 'problem_opportunity' ? 4 : 3);
+  var html = '<label for="' + _thinkingAttr(domId) + '">' + _thinkingEsc(labels[field] || field) + '</label>';
+  if (field === 'title') {
+    html += '<input id="' + _thinkingAttr(domId) + '" data-thinking-field="idea-brief:' + _thinkingAttr(_ideaBriefSelectedId) + ':' + _thinkingAttr(field) + '" value="' + _thinkingAttr(draft[field] || '') + '" oninput="ideaBriefChanged()" autocomplete="off" placeholder="' + _thinkingAttr(placeholders[field] || '') + '">';
+  } else {
+    html += '<textarea id="' + _thinkingAttr(domId) + '" data-thinking-field="idea-brief:' + _thinkingAttr(_ideaBriefSelectedId) + ':' + _thinkingAttr(field) + '" rows="' + _thinkingAttr(rows) + '" oninput="ideaBriefChanged()" placeholder="' + _thinkingAttr(placeholders[field] || '') + '">' + _thinkingEsc(draft[field] || '') + '</textarea>';
+  }
+  return html;
+}
+
+function _renderIdeaBriefProposalBanner(brief, proposalResult) {
+  var proposal = (proposalResult && proposalResult.proposal) || (brief && brief.proposal) || {};
+  var status = _ideaBriefStatus(brief);
+  if (status !== 'proposed' && !proposal.proposal_only && !proposalResult) return '';
+  var note = String((proposalResult && proposalResult.caveat) || '');
+  if (!note) note = 'Proposed for product-safe review only. No task, assignment, dispatch, accepted decision, merge, or deploy action was created.';
+  var html = '<div class="idea-brief-proposal-banner"><strong>Proposal for review</strong><span>' + _thinkingEsc(note) + '</span>';
+  html += '<div class="idea-brief-proposal-facts"><span>No task created</span><span>No assignment</span><span>No dispatch</span><span>No accepted decision</span></div>';
+  html += '</div>';
+  return html;
+}
+
+function _renderIdeaBriefLinks(draft) {
+  var links = _ideaBriefCopyLinks(draft.thinking_links);
+  var group = _thinkingGroup();
+  var sources = _ideaBriefLinkSources(group, links);
+  var selectedSource = String(draft.link_source_key || (sources[0] && sources[0].key) || '');
+  var html = '<section class="idea-brief-link-section"><div class="idea-brief-section-title"><h3>Linked Thinking</h3><span>Trace the brief back to scratchpad notes and Mind Map artifacts.</span></div>';
+  html += '<div class="idea-brief-link-list">';
+  if (!links.length) html += '<div class="thinking-empty compact">No linked Thinking yet. Add a Scratchpad note, Mind Map, node, or link for traceability.</div>';
+  links.forEach(function(link, index) {
+    var key = _ideaBriefLinkKey(link, index);
+    var selected = _ideaBriefSelectedLinkKey === key;
+    html += '<article class="idea-brief-link-card' + (selected ? ' selected' : '') + '">';
+    html += '<button type="button" class="idea-brief-link-main" onclick="ideaBriefSelectLink(\'' + _thinkingJs(key) + '\')">';
+    html += '<span class="idea-brief-link-type">' + _thinkingEsc(_ideaBriefLinkSubtitle(link)) + '</span>';
+    html += '<span class="idea-brief-link-title">' + _thinkingEsc(_ideaBriefLinkTitle(link)) + '</span>';
+    html += '<span class="idea-brief-link-id">' + _thinkingEsc(link.id || '') + '</span>';
+    html += '</button>';
+    var metadata = _ideaBriefLinkMetadata(link);
+    if (metadata.length) {
+      html += '<div class="idea-brief-link-metadata">';
+      metadata.forEach(function(item) {
+        html += '<span><strong>' + _thinkingEsc(item.key.replace(/_/g, ' ')) + '</strong> ' + _thinkingEsc(item.value) + '</span>';
+      });
+      html += '</div>';
+    }
+    html += '<div class="idea-brief-link-actions"><button type="button" class="btn-secondary" onclick="ideaBriefOpenThinkingLink(' + _thinkingAttr(index) + ')">Open in Thinking</button><button type="button" class="btn-secondary danger" onclick="ideaBriefRemoveLink(' + _thinkingAttr(index) + ')">Remove</button></div>';
+    html += '</article>';
+  });
+  html += '</div>';
+  html += '<div class="idea-brief-link-add thinking-form">';
+  html += '<label for="idea-brief-link-source">Add Thinking link</label><select id="idea-brief-link-source" data-thinking-field="idea-brief:' + _thinkingAttr(_ideaBriefSelectedId) + ':link-source" onchange="ideaBriefChanged()">';
+  if (!sources.length) {
+    html += '<option value="">No available Thinking artifacts loaded</option>';
+  } else {
+    sources.forEach(function(source) {
+      html += '<option value="' + _thinkingAttr(source.key) + '"' + (selectedSource === source.key ? ' selected' : '') + '>' + _thinkingEsc(source.label) + '</option>';
+    });
+  }
+  html += '</select>';
+  html += '<label for="idea-brief-link-context">Why this link matters</label><textarea id="idea-brief-link-context" data-thinking-field="idea-brief:' + _thinkingAttr(_ideaBriefSelectedId) + ':link-context" rows="2" oninput="ideaBriefChanged()" placeholder="Optional context preserved with the link">' + _thinkingEsc(draft.link_context || '') + '</textarea>';
+  html += '<div class="thinking-tool-actions"><button type="button" class="btn-primary" onclick="ideaBriefAddLink()"' + (!sources.length ? ' disabled' : '') + '>Add link</button></div>';
+  html += '</div></section>';
+  return html;
+}
+
+function _renderIdeaBriefDetail() {
+  var briefId = String(_ideaBriefSelectedId || '');
+  if (!briefId) {
+    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail">Select or create an Idea Brief. Briefs are proposal-only review artifacts; they do not create tasks or authorize execution.</div></section>';
+  }
+  var isNew = briefId === THINKING_NEW_IDEA_BRIEF_ID;
+  var brief = isNew ? null : (state.idea_briefs && state.idea_briefs[briefId]);
+  if (!isNew && (!brief || !_ideaBriefIsVisible(brief, _ideaBriefIncludeArchived))) {
+    return '<section class="thinking-editor idea-brief-detail thinking-editor-empty"><div class="thinking-empty-detail">This Idea Brief is not visible in the current list.</div></section>';
+  }
+  var draft = _ideaBriefDraft(briefId);
+  var dirty = _ideaBriefDraftIsDirty(briefId, draft);
+  var status = isNew ? 'draft' : _ideaBriefStatus(brief);
+  var proposalResult = !isNew ? _ideaBriefProposalResultById[briefId] : null;
+  var title = isNew ? 'New Idea Brief' : (brief.title || briefId);
+  var disabledLifecycle = isNew || status === 'archived' || _ideaBriefSaving;
+  var html = '<section class="thinking-editor idea-brief-detail" id="thinking-idea-detail">';
+  html += '<div class="thinking-detail-head"><div><div class="thinking-kicker">Idea Brief</div><h2>' + _thinkingEsc(title || 'Idea Brief') + '</h2><div class="thinking-detail-id">' + _thinkingEsc(isNew ? 'Draft' : briefId) + ' · <span class="idea-brief-status-pill idea-brief-status-' + _thinkingAttr(status) + '">' + _thinkingEsc(_ideaBriefStatusLabel(status)) + '</span></div></div>';
+  if (!isNew) html += '<button type="button" class="thinking-close" onclick="ideaBriefSelect(\'\')" title="Close">×</button>';
+  html += '</div>';
+  html += _renderIdeaBriefProposalBanner(brief, proposalResult);
+  html += '<div class="idea-brief-review-banner"><strong>Review artifact</strong><span>Use this to evaluate an opportunity, refine the proposal, park it, archive it, or propose it for product-safe review. It never auto-dispatches or auto-assigns work.</span></div>';
+  html += '<div class="thinking-form idea-brief-form">';
+  IDEA_BRIEF_FIELDS.forEach(function(field) { html += _renderIdeaBriefField(field, draft); });
+  html += '</div>';
+  html += _renderIdeaBriefLinks(draft);
+  html += '<section class="idea-brief-review-actions thinking-form"><div class="idea-brief-section-title"><h3>Next step</h3><span>Choose a review path without converting this into execution.</span></div>';
+  if (!isNew) {
+    html += '<label for="idea-brief-refinement-note">Refinement note</label><textarea id="idea-brief-refinement-note" data-thinking-field="idea-brief:' + _thinkingAttr(briefId) + ':refinement-note" rows="2" oninput="ideaBriefChanged()" placeholder="What changed or what should Catalyst refine?">' + _thinkingEsc(draft.refinement_note || '') + '</textarea>';
+    html += '<label for="idea-brief-proposal-note">Proposal review note</label><textarea id="idea-brief-proposal-note" data-thinking-field="idea-brief:' + _thinkingAttr(briefId) + ':proposal-note" rows="2" oninput="ideaBriefChanged()" placeholder="Optional note for Blueprint/Torqly/user review">' + _thinkingEsc(draft.proposal_note || '') + '</textarea>';
+    html += '<label for="idea-brief-lifecycle-reason">Park/archive reason</label><textarea id="idea-brief-lifecycle-reason" data-thinking-field="idea-brief:' + _thinkingAttr(briefId) + ':lifecycle-reason" rows="2" oninput="ideaBriefChanged()" placeholder="Optional reason for parking or archiving">' + _thinkingEsc(draft.lifecycle_reason || '') + '</textarea>';
+  }
+  html += '</section>';
+  html += '<div class="thinking-detail-actions idea-brief-actions"><span class="thinking-save-status" id="idea-brief-draft-status">' + _thinkingEsc(isNew ? 'Unsaved Idea Brief' : (dirty ? 'Unsaved Idea Brief edits' : 'Saved Idea Brief')) + '</span>';
+  if (!isNew) {
+    html += '<button type="button" class="btn-secondary" onclick="ideaBriefRefine()"' + (disabledLifecycle ? ' disabled' : '') + '>Refine</button>';
+    html += '<button type="button" class="btn-secondary" onclick="ideaBriefPark()"' + (disabledLifecycle ? ' disabled' : '') + '>Park</button>';
+    html += '<button type="button" class="btn-secondary danger" onclick="ideaBriefArchive()"' + (disabledLifecycle ? ' disabled' : '') + '>Archive</button>';
+    html += '<button type="button" class="btn-primary idea-brief-propose-btn" onclick="ideaBriefPropose()"' + (disabledLifecycle ? ' disabled' : '') + '>Propose for review</button>';
+  }
+  html += '<button type="button" class="btn-primary" onclick="ideaBriefSave()"' + (_ideaBriefSaving ? ' disabled' : '') + '>' + (_ideaBriefSaving ? 'Saving…' : (isNew ? 'Create brief' : 'Save edits')) + '</button>';
+  html += '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _renderThinkingIdeaBriefs(group) {
+  ideaBriefEnsureLoaded();
+  thinkingEnsureScratchpadLoaded();
+  thinkingEnsureMindMapsLoaded();
+  return '<div class="thinking-workspace idea-brief-workspace" id="thinking-workspace">'
+    + _renderIdeaBriefList(group)
+    + _renderIdeaBriefDetail()
+    + '</div>';
+}
+
 function renderThinkingPanel() {
   var panel = document.getElementById('panel-thinking');
   if (!panel) return;
@@ -1593,6 +2479,8 @@ function renderThinkingPanel() {
         '#thinking-map-list-scroll',
         '#thinking-map-detail',
         '#thinking-map-canvas-wrap',
+        '#thinking-idea-list',
+        '#thinking-idea-detail',
       ],
       captureFocusKey: function(active) {
         if (active && active.dataset && active.dataset.thinkingField) {
@@ -1605,14 +2493,18 @@ function renderThinkingPanel() {
   var group = _thinkingGroup();
   var notes = _thinkingNotesForGroup(group);
   var maps = _thinkingMapsForGroup(group);
+  var briefs = _ideaBriefsForGroup(group, _ideaBriefIncludeArchived);
   var activeTab = String(_thinkingActiveTab || 'scratchpad');
   var html = '<div class="thinking-panel">';
   html += '<div class="tpled-header thinking-header"><div class="tpled-header-copy"><div class="tpled-header-title-row">' + _thinkingConnectedNodesIcon('thinking-header-icon') + '<span class="tpled-header-title">Thinking</span></div>';
-  html += '<div class="tpled-header-subtitle">Scratchpad and Mind Map are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning.</div></div>';
-  html += '<div class="tpled-header-controls"><span class="thinking-total">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
-  html += _renderThinkingTabs(notes.length, maps.length);
+  html += '<div class="tpled-header-subtitle">Scratchpad, Mind Map, and Idea Briefs are group-scoped thinking tools for ' + _thinkingEsc(group || 'all groups') + '; they stay separate from Planning execution.</div></div>';
+  html += '<div class="tpled-header-controls"><span class="thinking-total">' + _thinkingEsc(notes.length + ' notes · ' + maps.length + ' maps · ' + briefs.length + ' briefs') + '</span><button class="tpled-new-btn" onclick="thinkingRefresh()" title="Refresh Thinking data">&#x21BB;</button></div></div>';
+  html += _renderThinkingTabs(notes.length, maps.length, briefs.length);
   if (_thinkingLastError) html += '<div class="thinking-error">' + _thinkingEsc(_thinkingLastError) + '</div>';
-  if (activeTab === 'mind-map') html += _renderThinkingMindMap(group);
+  if (_ideaBriefLastError && activeTab === 'idea-briefs') html += '<div class="thinking-error">' + _thinkingEsc(_ideaBriefLastError) + '</div>';
+  if (_ideaBriefLastStatus && activeTab === 'idea-briefs') html += '<div class="idea-brief-status-message">' + _thinkingEsc(_ideaBriefLastStatus) + '</div>';
+  if (activeTab === 'idea-briefs') html += _renderThinkingIdeaBriefs(group);
+  else if (activeTab === 'mind-map') html += _renderThinkingMindMap(group);
   else html += _renderThinkingScratchpad(group);
   html += '</div>';
   panel.innerHTML = html;

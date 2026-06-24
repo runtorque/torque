@@ -13771,6 +13771,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .thinking-scratch-workspace { grid-template-columns: minmax(260px, clamp(280px, 24vw, 390px)) minmax(0, 1fr); }
 .thinking-map-workspace { grid-template-columns: minmax(240px, clamp(260px, 22vw, 360px)) minmax(0, 1fr); }
+.idea-brief-workspace { grid-template-columns: minmax(280px, clamp(300px, 26vw, 420px)) minmax(0, 1fr); }
 .thinking-list-pane,
 .thinking-editor,
 .thinking-map-detail {
@@ -13928,6 +13929,193 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .thinking-detail-actions .danger,
 .thinking-tool-actions .danger { color: var(--danger-fg, #ffb4b4); border-color: var(--danger, #9f3a3a); }
+.idea-brief-status-message {
+  margin: 8px 12px 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(88, 166, 255, .28);
+  color: var(--accent);
+  background: rgba(88, 166, 255, .08);
+  border-radius: 6px;
+}
+.idea-brief-filter-row {
+  display: flex;
+  gap: 6px;
+  padding: 7px;
+  border-bottom: 1px solid var(--border);
+}
+.idea-brief-filter-row .btn-secondary,
+.idea-brief-actions .btn-secondary,
+.idea-brief-actions .btn-primary,
+.idea-brief-link-actions .btn-secondary {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.idea-brief-filter-row .active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(88, 166, 255, .10);
+}
+.idea-brief-card .idea-brief-status-pill { margin-right: 4px; }
+.idea-brief-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .035);
+  font-size: 10px;
+  line-height: 16px;
+}
+.idea-brief-status-proposed .idea-brief-status-pill,
+.idea-brief-status-pill.idea-brief-status-proposed {
+  color: var(--accent);
+  border-color: rgba(88, 166, 255, .42);
+  background: rgba(88, 166, 255, .10);
+}
+.idea-brief-status-parked .idea-brief-status-pill,
+.idea-brief-status-pill.idea-brief-status-parked {
+  color: var(--amber);
+  border-color: rgba(210, 153, 34, .38);
+  background: rgba(210, 153, 34, .10);
+}
+.idea-brief-status-archived .idea-brief-status-pill,
+.idea-brief-status-pill.idea-brief-status-archived {
+  color: var(--muted);
+  border-style: dashed;
+}
+.idea-brief-detail textarea { min-height: 78px; }
+.idea-brief-detail #idea-brief-problem-opportunity { min-height: 112px; }
+.idea-brief-review-banner,
+.idea-brief-proposal-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 10px;
+  padding: 8px 9px;
+  border: 1px solid rgba(88, 166, 255, .28);
+  border-radius: 7px;
+  background: rgba(88, 166, 255, .08);
+  color: var(--muted);
+}
+.idea-brief-proposal-banner {
+  border-color: rgba(63, 185, 80, .34);
+  background: rgba(63, 185, 80, .09);
+}
+.idea-brief-review-banner strong,
+.idea-brief-proposal-banner strong {
+  color: var(--accent);
+}
+.idea-brief-proposal-banner strong { color: var(--green); }
+.idea-brief-proposal-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.idea-brief-proposal-facts span {
+  border: 1px solid rgba(63, 185, 80, .28);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--green);
+  background: rgba(63, 185, 80, .08);
+  font-size: 10px;
+}
+.idea-brief-section-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  margin: 12px 0 7px;
+}
+.idea-brief-section-title h3 {
+  margin: 0;
+  font-size: 12px;
+}
+.idea-brief-section-title span {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+.idea-brief-link-section,
+.idea-brief-review-actions {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 2px;
+}
+.idea-brief-link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.idea-brief-link-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, .025);
+}
+.idea-brief-link-card.selected {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, .08);
+}
+.idea-brief-link-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.idea-brief-link-type,
+.idea-brief-link-id {
+  color: var(--muted);
+  font-size: 10px;
+}
+.idea-brief-link-title {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.idea-brief-link-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.idea-brief-link-metadata span {
+  border-left: 2px solid rgba(88, 166, 255, .30);
+  padding-left: 6px;
+}
+.idea-brief-link-metadata strong {
+  color: var(--fg);
+  text-transform: capitalize;
+}
+.idea-brief-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.idea-brief-link-actions .danger { color: var(--danger-fg, #ffb4b4); border-color: var(--danger, #9f3a3a); }
+.idea-brief-link-add {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.idea-brief-propose-btn {
+  border-color: rgba(63, 185, 80, .45);
+  background: color-mix(in srgb, var(--green) 82%, var(--accent) 18%);
+}
 .thinking-map-summary-row {
   display: flex;
   flex-wrap: wrap;
@@ -14054,6 +14242,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 #panel-thinking[data-panel-placement="right"] .thinking-inline-form { grid-template-columns: 1fr; }
 #panel-thinking[data-panel-placement="right"] .thinking-inline-form textarea,
 #panel-thinking[data-panel-placement="right"] .thinking-link-form input { grid-column: auto; }
+#panel-thinking[data-panel-placement="right"] .idea-brief-section-title { flex-direction: column; align-items: flex-start; }
+#panel-thinking[data-panel-placement="right"] .idea-brief-section-title span { text-align: left; }
 @container (max-width: 720px) {
   .thinking-workspace {
     display: flex;
@@ -14072,10 +14262,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   .thinking-inline-form { grid-template-columns: 1fr; }
   .thinking-inline-form textarea,
   .thinking-link-form input { grid-column: auto; }
+  .idea-brief-section-title { flex-direction: column; align-items: flex-start; }
+  .idea-brief-section-title span { text-align: left; }
 }
 @media (max-width: 920px) {
   .thinking-scratch-workspace,
-  .thinking-map-workspace { grid-template-columns: 1fr; }
+  .thinking-map-workspace,
+  .idea-brief-workspace { grid-template-columns: 1fr; }
 }
 
 .agent-profile-badge {

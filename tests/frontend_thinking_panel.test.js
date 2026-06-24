@@ -162,6 +162,7 @@ function createHarness() {
     state: {
       active_group: 'Torque',
       thinking: { scratchpad_notes: {}, mind_maps: {} },
+      idea_briefs: {},
     },
     _activePanelApp: 'thinking',
     _currentGroup() { return sandbox.state.active_group; },
@@ -196,6 +197,8 @@ test('Thinking panel is registered as a first-class panel with responsive CSS', 
   assert.match(main, /thinkingEnsureLoaded\(\{ includeInactive: true \}\)/);
   assert.match(render, /surface === 'thinking'/);
   assert.match(ws, /thinking_scratchpad_note_upsert[\s\S]*_markSurface\(flags, 'thinking'\)/);
+  assert.match(ws, /case 'idea_brief_upsert':[\s\S]*_markSurface\(flags, 'thinking'\)/);
+  assert.match(ws, /ideaBriefReceiveMutation/);
   assert.match(webview, /id="panel-thinking"/);
   assert.match(webview, /data-app="thinking"[\s\S]*thinking-connected-nodes-icon[\s\S]*<span>Thinking<\/span>/);
   assert.doesNotMatch(webview, /&#9889;\s*Thinking/);
@@ -223,6 +226,7 @@ test('Thinking panel initial load requests scratchpad and map lists and renders 
   assert.match(html, /thinking-header-icon[\s\S]*thinking-connected-nodes-icon/);
   assert.match(html, /Scratchpad/);
   assert.match(html, /Mind Map/);
+  assert.match(html, /Idea Briefs/);
   assert.match(html, /stay separate from Planning/);
 });
 
@@ -352,4 +356,146 @@ test('Mind Map tab and websocket deltas preserve focused link editor state', () 
   assert.equal(document.activeElement, restored);
   assert.equal(restored.selectionStart, 5);
   assert.equal(restored.selectionEnd, 9);
+});
+
+test('Idea Brief tab renders list/detail and creates briefs with linked Thinking', () => {
+  const { sandbox, document, sendCalls } = createHarness();
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:1'] = {
+    id: 'TORQUE-S:1', group: 'Torque', group_name: 'Torque', title: 'Pain note', body: 'Customers need a clearer intake.'
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefNew();`);
+  assert.equal(sendCalls[0].cmd, 'idea_brief_list');
+  assert.equal(sendCalls[0].group, 'Torque');
+  let html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /Idea Briefs/);
+  assert.match(html, /Review artifact/);
+  assert.match(html, /Linked Thinking/);
+  assert.match(html, /Pain note/);
+
+  document.getElementById('idea-brief-title').value = 'Intake clarity';
+  document.getElementById('idea-brief-problem-opportunity').value = 'Teams cannot evaluate raw ideas quickly.';
+  document.getElementById('idea-brief-why-it-matters').value = 'Reduces review thrash.';
+  document.getElementById('idea-brief-proposed-shape').value = 'A guided Idea Brief review surface.';
+  document.getElementById('idea-brief-smallest-useful-version').value = 'List and editable detail.';
+  document.getElementById('idea-brief-risks-tradeoffs').value = 'Could imply execution if copy is wrong.';
+  document.getElementById('idea-brief-open-questions').value = 'Who reviews first?';
+  document.getElementById('idea-brief-link-context').value = 'Source note for the problem framing.';
+  run(sandbox, `ideaBriefAddLink(); ideaBriefSave();`);
+
+  const createCall = sendCalls.at(-1);
+  assert.equal(createCall.cmd, 'idea_brief_create');
+  assert.equal(createCall.title, 'Intake clarity');
+  assert.equal(createCall.problem_opportunity, 'Teams cannot evaluate raw ideas quickly.');
+  assert.equal(createCall.thinking_links.length, 1);
+  assert.equal(createCall.thinking_links[0].type, 'scratchpad_note');
+  assert.equal(createCall.thinking_links[0].id, 'TORQUE-S:1');
+  assert.equal(createCall.thinking_links[0].context, 'Source note for the problem framing.');
+});
+
+test('Idea Brief edit/refine/propose/park/archive use reviewed backend commands and safety copy', async () => {
+  const { sandbox, document, sendCalls } = createHarness();
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Review flow',
+    status: 'draft',
+    problem_opportunity: 'Operators need a product-safe review path.',
+    why_it_matters: 'Prevents accidental execution.',
+    proposed_shape: 'Brief list and detail.',
+    smallest_useful_version: 'Review actions only.',
+    risks_tradeoffs: 'Ambiguous promote language.',
+    open_questions: 'Who can approve?',
+    thinking_links: [{
+      type: 'scratchpad_note',
+      id: 'TORQUE-S:1',
+      title: 'Original note',
+      summary: 'Summary metadata',
+      quote: 'Important quote',
+      confidence: 'medium',
+    }],
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  let html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /Original note/);
+  assert.match(html, /Summary metadata/);
+  assert.match(html, /Important quote/);
+  assert.match(html, /never auto-dispatches or auto-assigns work/);
+
+  document.getElementById('idea-brief-why-it-matters').value = 'Prevents accidental execution and assignment.';
+  run(sandbox, `ideaBriefSave();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_update');
+  assert.equal(sendCalls.at(-1).idea_brief, 'TORQUE-IB:1');
+  assert.equal(sendCalls.at(-1).why_it_matters, 'Prevents accidental execution and assignment.');
+  assert.equal(sendCalls.at(-1).thinking_links[0].quote, 'Important quote');
+
+  document.getElementById('idea-brief-refinement-note').value = 'Tighten proposal language.';
+  run(sandbox, `ideaBriefRefine();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_refine');
+  assert.equal(sendCalls.at(-1).refinement_note, 'Tighten proposal language.');
+
+  document.getElementById('idea-brief-proposal-note').value = 'Ready for Blueprint review.';
+  await run(sandbox, `ideaBriefPropose(); Promise.resolve();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_propose');
+  assert.equal(sendCalls.at(-1).note, 'Ready for Blueprint review.');
+
+  run(sandbox, `ideaBriefReceiveMutation({ type: 'idea_brief_proposed', caveat: 'No task, assignment, dispatch, decision acceptance, merge, or deploy action was created.', review_scope: 'product_safe_review', proposal: { proposal_only: true, auto_dispatch: false, auto_assign: false, created_task_id: '', created_decision_id: '' }, idea_brief: Object.assign({}, state.idea_briefs['TORQUE-IB:1'], { status: 'proposed', proposal: { proposal_only: true, auto_dispatch: false, auto_assign: false, created_task_id: '', created_decision_id: '' } }) });`);
+  html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /Proposal for review/);
+  assert.match(html, /No task created/);
+  assert.match(html, /No assignment/);
+  assert.match(html, /No dispatch/);
+  assert.doesNotMatch(html, /Task created:/);
+
+  document.getElementById('idea-brief-lifecycle-reason').value = 'Needs more evidence.';
+  await run(sandbox, `ideaBriefPark(); Promise.resolve();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_park');
+  assert.equal(sendCalls.at(-1).reason, 'Needs more evidence.');
+
+  await run(sandbox, `ideaBriefArchive(); Promise.resolve();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_archive');
+  assert.equal(sendCalls.at(-1).reason, 'Needs more evidence.');
+});
+
+test('Idea Brief preserves local draft, caret, selected link, and scroll across deltas', () => {
+  const { sandbox, document } = createHarness();
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Drafted brief',
+    status: 'draft',
+    problem_opportunity: 'Server problem',
+    why_it_matters: 'Server why',
+    proposed_shape: '',
+    smallest_useful_version: '',
+    risks_tradeoffs: '',
+    open_questions: '',
+    thinking_links: [{ type: 'scratchpad_note', id: 'TORQUE-S:1', title: 'Note' }],
+  };
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1'); ideaBriefSelectLink('scratchpad_note|TORQUE-S:1||0');`);
+  const problem = document.getElementById('idea-brief-problem-opportunity');
+  problem.value = 'Local problem draft';
+  problem.selectionStart = 6;
+  problem.selectionEnd = 13;
+  problem.scrollTop = 33;
+  problem.focus();
+
+  run(sandbox, `ideaBriefReceiveDelta({ id: 'TORQUE-IB:1', group: 'Torque', group_name: 'Torque', problem_opportunity: 'Server pushed problem' }); renderThinkingPanel();`);
+
+  const restored = document.getElementById('idea-brief-problem-opportunity');
+  assert.equal(restored.value, 'Local problem draft');
+  assert.equal(document.activeElement, restored);
+  assert.equal(restored.selectionStart, 6);
+  assert.equal(restored.selectionEnd, 13);
+  assert.equal(restored.scrollTop, 33);
+  assert.match(document.getElementById('panel-thinking').innerHTML, /idea-brief-link-card selected/);
+});
+
+test('Idea Brief error envelopes render on the review surface', () => {
+  const { sandbox, document } = createHarness();
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefHandleError({ type: 'error', code: 'validation_error', message: 'Problem is required', contract: 'torque.idea_brief.v1' });`);
+  assert.match(document.getElementById('panel-thinking').innerHTML, /validation_error: Problem is required/);
 });
