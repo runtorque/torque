@@ -505,8 +505,8 @@ function sampleClasses() {
       restrictions: ['Do not use for live PM dogfood.'],
     },
     {
-      id: 'creative-architect', version: '1', base_kind: 'architect', display_name: 'Creative Architect',
-      primary_identity_label: 'Creative Architect', secondary_base_kind_label: 'Architect-derived',
+      id: 'creative-architect', version: '1', base_kind: 'architect', display_name: 'Creative',
+      primary_identity_label: 'Creative', secondary_base_kind_label: 'Architect-derived',
       description: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.',
       purpose: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.',
       lifecycle: 'stable', builtin: true, custom: false, source: 'builtin', status: 'restricted', launchable: true,
@@ -552,7 +552,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(classUi(document, panel), /Review Worker/);
   assert.match(classUi(document, panel), /Old Worker/);
   assert.match(classUi(document, panel), /Product Manager/);
-  assert.match(classUi(document, panel), /Creative Architect/);
+  assert.match(classUi(document, panel), /Creative/);
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
@@ -569,7 +569,8 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   run(context, `agentClassManagerSelect('creative-architect')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[4])} })`);
   const creativeHtml = classUi(document, panel);
-  assert.match(creativeHtml, /Creative Architect@1/);
+  assert.match(creativeHtml, /Creative@1/);
+  assert.doesNotMatch(creativeHtml, /Creative Architect@1/);
   assert.match(creativeHtml, /Architect-derived/);
   assert.match(creativeHtml, /proposal-only/);
   assert.match(creativeHtml, /Thinking workspace/);
@@ -841,8 +842,8 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   assert.equal(sendCalls.at(-1).agent_class_id, 'product-manager');
 
   run(context, `openAddArchitectModal({ group: 'alpha' }); agentClassPickerSelect('add-architect', 'creative-architect');`);
-  assert.match(document.getElementById('architect-agent-class-select').innerHTML, /Creative Architect@1 · Architect-derived/);
-  assert.match(document.getElementById('architect-agent-class-hint').textContent, /Launch freezes Creative Architect@1/);
+  assert.match(document.getElementById('architect-agent-class-select').innerHTML, /Creative@1 · Architect-derived/);
+  assert.match(document.getElementById('architect-agent-class-hint').textContent, /Launch freezes Creative@1/);
   document.getElementById('architect-name-input').value = 'Spark Partner';
   run(context, `submitAddArchitect();`);
   assert.equal(sendCalls.at(-1).cmd, 'add_architect');

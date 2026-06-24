@@ -505,6 +505,22 @@ function _agentCardEffectiveClassSnapshot(agent) {
     : {};
 }
 
+function _agentCardClassIsCreativeArchitect(id, snapshot, status, rawLabel) {
+  snapshot = snapshot || {};
+  status = status || {};
+  const metadata = snapshot.metadata && typeof snapshot.metadata === 'object' ? snapshot.metadata : {};
+  return String(id || '').trim() === 'creative-architect'
+    || String(status.effective_class_id || '').trim() === 'creative-architect'
+    || String(snapshot.id || '').trim() === 'creative-architect'
+    || String(metadata.archetype || '').trim() === 'creative_architect'
+    || String(rawLabel || '').trim() === 'Creative Architect';
+}
+
+function _agentCardClassDisplayLabel(id, snapshot, status, rawLabel) {
+  rawLabel = String(rawLabel || '').trim();
+  return _agentCardClassIsCreativeArchitect(id, snapshot, status, rawLabel) ? 'Creative' : rawLabel;
+}
+
 function _agentCardPrimaryClassIdentity(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return null;
   const kind = String(agent.kind || '').trim();
@@ -526,12 +542,13 @@ function _agentCardPrimaryClassIdentity(agent) {
     || snapshot.display_name
     || ''
   ).trim();
-  const label = String(
+  const rawLabel = String(
     snapshotLabel
     || status.effective_primary_identity_label
     || status.primary_identity_label
     || id
   ).trim();
+  const label = _agentCardClassDisplayLabel(id, snapshot, status, rawLabel);
   if (!label) return null;
   return {
     id,

@@ -3871,7 +3871,7 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
   assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
 });
 
-test('agent panel assigns and renders Creative Architect as proposal-only Thinking class', () => {
+test('agent panel assigns and renders Creative as proposal-only Thinking class', () => {
   const { context, panel, classModal, classModalBody, sendCalls } = createHarness();
   const defaultArchitectClass = {
     id: 'default-architect',
@@ -3941,9 +3941,10 @@ test('agent panel assigns and renders Creative Architect as proposal-only Thinki
     classes: [defaultArchitectClass, creativeArchitectClass],
     issues: [],
   });
-  assert.match(classModalBody.innerHTML, /Creative Architect@1 · Architect-derived · restricted/);
+  assert.match(classModalBody.innerHTML, /Creative@1 · Architect-derived · restricted/);
+  assert.doesNotMatch(classModalBody.innerHTML, /Creative Architect@1/);
   context.agentPanelSelectClass('spark', 'creative-architect');
-  assert.match(classModalBody.innerHTML, /Next relaunch freezes Creative Architect@1 as the primary identity/);
+  assert.match(classModalBody.innerHTML, /Next relaunch freezes Creative@1 as the primary identity/);
   assert.match(classModalBody.innerHTML, /proposal-only/);
   assert.match(classModalBody.innerHTML, /Thinking workspace/);
   assert.match(classModalBody.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
@@ -3977,8 +3978,8 @@ test('agent panel assigns and renders Creative Architect as proposal-only Thinki
       pending_next_launch: true,
     },
   });
-  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Creative Architect@1/);
-  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Creative Architect@1/);
+  assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Creative@1/);
+  assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Creative@1/);
 
   Object.assign(context.state.agents.spark, {
     status: 'running',
@@ -3990,8 +3991,9 @@ test('agent panel assigns and renders Creative Architect as proposal-only Thinki
     effective_agent_class_snapshot: creativeArchitectClass,
   });
   context.renderAgentPanel();
-  assert.match(panel.innerHTML, /Creative Architect · Group: alpha/);
-  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Creative Architect@1/);
+  assert.match(panel.innerHTML, /Creative · Group: alpha/);
+  assert.match(panel.innerHTML, /Primary identity now[\s\S]*Creative@1/);
+  assert.doesNotMatch(panel.innerHTML, /Creative Architect@1|Creative Architect · Group: alpha/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
   assert.match(panel.innerHTML, /agent-class-compact-status/);
   assert.match(panel.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts/);

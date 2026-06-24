@@ -24,7 +24,7 @@ Torque ships built-in Agent Classes in `torque/builtin_agent_classes/`:
 - `default-architect.yaml` → wraps `full-architect@1`
 - `default-engineer.yaml` → wraps `full-engineer@1`
 - `default-worker.yaml` → wraps `full-worker@1`
-- `creative-architect.yaml` → primary label **Creative Architect**, schema v3,
+- `creative-architect.yaml` → primary label **Creative**, schema v3,
   uses operator capability buckets, and compiles to generated/internal
   `class-policy-creative-architect@1`
 - `product-manager.yaml` → primary label **Product Manager**, schema v3,
@@ -192,14 +192,14 @@ record no hire, dispatch, merge, deploy, settings/admin, profile-admin, raw tool
 picker authority, accepted-decision authority, or direct engineer/worker
 messaging.
 
-## Creative Architect class
+## Creative class
 
-The built-in Creative Architect class has primary identity label **Creative
-Architect** and compiles proposal-only ideation policy to
-`class-policy-creative-architect@1`. It is an Architect-derived thinking mode,
-not a new runtime kind and not an execution authority.
+The built-in Creative class has primary identity label **Creative** and keeps
+the stable internal id `creative-architect`. It compiles proposal-only ideation
+policy to `class-policy-creative-architect@1`. It is an Architect-derived
+thinking mode, not a new runtime kind and not an execution authority.
 
-Creative Architect can read same-group product context, Planning
+Creative can read same-group product context, Planning
 Areas/Initiatives, decisions, relevant recent context, and Thinking artifacts.
 It can create/update only its own Scratchpad notes and Mind Maps through
 `architect_thinking_*` wrappers. Proposal outputs use existing product-safe
