@@ -133,6 +133,9 @@ function ahToggleMsg(id) {
 }
 
 function agentHistoryFocusAgent(agentId) {
+  if (typeof _agentFocusPersistExplicitSelection === 'function') {
+    _agentFocusPersistExplicitSelection(agentId);
+  }
   send({ cmd: 'focus_agent', id: agentId });
 }
 
