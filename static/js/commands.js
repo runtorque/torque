@@ -143,6 +143,9 @@ function focusAgent(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   _updateSelectedAgentContext(id);
+  if (typeof _agentFocusPersistExplicitSelection === 'function') {
+    _agentFocusPersistExplicitSelection(id);
+  }
   selectedTerminalId = id;
   _syncPanelsAfterSelectionChange(prevSelectedId);
   if (typeof renderAgentFocusPanel === 'function') renderAgentFocusPanel();
@@ -159,6 +162,9 @@ function onAgentClick(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   selectedTerminalId = id;
+  if (typeof _agentFocusPersistExplicitSelection === 'function') {
+    _agentFocusPersistExplicitSelection(id);
+  }
   if (typeof renderTerminalWorkspace === 'function' && typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
     _updateSelectedAgentContext(id);
     _syncPanelsAfterSelectionChange(prevSelectedId);
@@ -189,6 +195,9 @@ function onAgentDblClick(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   _updateSelectedAgentContext(id);
+  if (typeof _agentFocusPersistExplicitSelection === 'function') {
+    _agentFocusPersistExplicitSelection(id);
+  }
   selectedTerminalId = id;
   send({ cmd: 'focus_agent', id });
   _syncPanelsAfterSelectionChange(prevSelectedId);
@@ -1083,6 +1092,9 @@ function selectPrincipal(principalId, groupName) {
       send({ cmd: 'select_agent', id: id });
     }
     selectedTerminalId = id;
+    if (typeof _agentFocusPersistExplicitSelection === 'function') {
+      _agentFocusPersistExplicitSelection(id);
+    }
     send({ cmd: 'focus_agent', id: id });
   } else if (!id) {
     const userFocus = _principalLegacyUserFocusId(group);

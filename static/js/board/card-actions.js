@@ -394,6 +394,9 @@ function boardFocusAgent(agentId) {
     selectedAgentId = agentId;
     focusedItemId = agentId;
   }
+  if (typeof _agentFocusPersistExplicitSelection === 'function') {
+    _agentFocusPersistExplicitSelection(agentId);
+  }
 }
 
 function _boardRevealTaskRootId(taskId, visibleTasks) {

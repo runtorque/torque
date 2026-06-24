@@ -1,6 +1,7 @@
 var AGENT_FOCUS_SPLIT_KEY = 'engineer_panel_split_fraction';
 var AGENT_FOCUS_MODE_STORAGE_KEY = 'agent_focus_panel_mode';
 var AGENT_FOCUS_COLLAPSED_STORAGE_KEY = 'agent_focus_panel_collapsed';
+var AGENT_FOCUS_SELECTED_AGENT_STORAGE_KEY = 'agent_focus_selected_agent';
 var AGENT_FOCUS_DEFAULT_FRACTION = 0.30;
 var AGENT_FOCUS_MIN_HEIGHT = 120;
 var AGENT_GRID_MIN_HEIGHT = 200;
@@ -36,6 +37,195 @@ function _agentFocusWriteStorage(name, value) {
   try {
     localStorage.setItem(_agentFocusStorageKey(name), String(value));
   } catch (_e) {}
+}
+
+
+function _agentFocusRemoveStorage(name) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(_agentFocusStorageKey(name));
+  } catch (_e) {}
+}
+
+function _agentFocusPersistedSelectionRaw() {
+  return String(_agentFocusReadStorage(AGENT_FOCUS_SELECTED_AGENT_STORAGE_KEY, '') || '').trim();
+}
+
+function _agentFocusWritePersistedSelectedAgentId(agentId) {
+  var id = String(agentId || '').trim();
+  if (!id) {
+    _agentFocusRemoveStorage(AGENT_FOCUS_SELECTED_AGENT_STORAGE_KEY);
+    return '';
+  }
+  _agentFocusWriteStorage(AGENT_FOCUS_SELECTED_AGENT_STORAGE_KEY, id);
+  return id;
+}
+
+function _agentFocusRootAgentId(agentId) {
+  var id = String(agentId || '').trim();
+  if (!id || !state || !state.agents) return '';
+  var cell = state.agents[id] || null;
+  if (!cell) return '';
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) return '';
+  if (cell.cell_type === 'terminal') {
+    var parentId = String(cell.parent_id || '').trim();
+    if (!parentId || !state.agents[parentId]) return '';
+    var parent = state.agents[parentId];
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(parent)) return '';
+    return String(parent.id || parentId || '').trim();
+  }
+  return String(cell.id || id || '').trim();
+}
+
+function _agentFocusEmbeddedRuntimeEnabled() {
+  if (typeof _embeddedRuntimeEnabled === 'function') return !!_embeddedRuntimeEnabled();
+  if (typeof isEmbeddedTerminalMode === 'function') return !!isEmbeddedTerminalMode();
+  return !!(state && state.runtime && state.runtime.embedded_terminal);
+}
+
+function _agentFocusVisibleRootAgentId(agentId) {
+  var rootId = _agentFocusRootAgentId(agentId);
+  if (!rootId || !state || !state.agents) return '';
+  var root = state.agents[rootId] || null;
+  if (!root) return '';
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(root)) return '';
+  var group = String(root.group || '').trim();
+  if (state.groups && Object.keys(state.groups).length) {
+    if (!group || !Object.prototype.hasOwnProperty.call(state.groups, group)) return '';
+  }
+  if (typeof _visibleGroupCellsForGrid === 'function'
+      && typeof getFilterByWindow === 'function'
+      && group) {
+    var cells = _visibleGroupCellsForGrid(group, _agentFocusEmbeddedRuntimeEnabled());
+    if (cells && cells.hiddenByWindow) return '';
+    var visibleAgents = (cells && Array.isArray(cells.agents)) ? cells.agents : [];
+    var found = visibleAgents.some(function(agent) {
+      return agent && String(agent.id || '') === rootId;
+    });
+    if (!found) return '';
+  }
+  return rootId;
+}
+
+function _agentFocusPersistExplicitSelection(agentId) {
+  var rootId = _agentFocusVisibleRootAgentId(agentId);
+  if (!rootId) return '';
+  return _agentFocusWritePersistedSelectedAgentId(rootId);
+}
+
+function _agentFocusApplySelectionId(agentId, opts) {
+  var rootId = _agentFocusVisibleRootAgentId(agentId);
+  if (!rootId) return '';
+  opts = opts || {};
+  var activeSelection = opts.activeSessionSelection || null;
+  var targetId = rootId;
+  if (activeSelection
+      && activeSelection.cell
+      && activeSelection.cell.cell_type === 'terminal'
+      && String(activeSelection.agentId || '') === rootId) {
+    targetId = activeSelection.terminalId || rootId;
+  }
+  if (typeof _applySelectedAgentFromServer === 'function') {
+    var applied = _applySelectedAgentFromServer(targetId, {
+      syncGroup: true,
+      persist: false,
+    });
+    return applied || rootId;
+  }
+  if (state) state.selected_agent_id = rootId;
+  if (typeof selectedAgentId !== 'undefined') selectedAgentId = rootId;
+  if (typeof focusedItemId !== 'undefined') focusedItemId = targetId;
+  return rootId;
+}
+
+function _agentFocusUrlParams(searchText) {
+  var params = null;
+  if (typeof URLSearchParams === 'function') {
+    try {
+      params = new URLSearchParams(searchText || '');
+    } catch (_e) {
+      params = null;
+    }
+  }
+  return params;
+}
+
+function _agentFocusFirstUrlParam(params, names) {
+  if (!params || !names) return '';
+  for (var i = 0; i < names.length; i++) {
+    var value = String(params.get(names[i]) || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function _agentFocusHashTargetAgentId(hashText) {
+  var hash = String(hashText || '').trim();
+  if (!hash) return '';
+  if (hash.charAt(0) === '#') hash = hash.slice(1);
+  if (!hash) return '';
+  var queryIndex = hash.indexOf('?');
+  var queryText = queryIndex >= 0 ? hash.slice(queryIndex + 1) : '';
+  var pathText = queryIndex >= 0 ? hash.slice(0, queryIndex) : hash;
+  var params = _agentFocusUrlParams(queryText || (hash.indexOf('=') >= 0 ? hash : ''));
+  var fromParams = _agentFocusFirstUrlParam(params, [
+    'agent',
+    'agent_id',
+    'agentId',
+    'cell',
+    'cell_id',
+    'cellId',
+    'focus_agent',
+    'focusAgent',
+    'focus',
+  ]);
+  if (fromParams) return fromParams;
+  var match = pathText.match(/^(?:agent|cell|focus-agent|focus_agent)[:/](.+)$/i);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(String(match[1] || '').trim());
+  } catch (_e) {
+    return String(match[1] || '').trim();
+  }
+}
+
+function _agentFocusUrlTargetAgentId() {
+  if (typeof location === 'undefined' || !location) return '';
+  var searchParams = _agentFocusUrlParams(location.search || '');
+  var fromSearch = _agentFocusFirstUrlParam(searchParams, [
+    'agent',
+    'agent_id',
+    'agentId',
+    'cell',
+    'cell_id',
+    'cellId',
+    'focus_agent',
+    'focusAgent',
+    'focus',
+  ]);
+  if (fromSearch) return fromSearch;
+  return _agentFocusHashTargetAgentId(location.hash || '');
+}
+
+function _agentFocusApplyUrlSelection(opts) {
+  var raw = _agentFocusUrlTargetAgentId();
+  if (!raw) return '';
+  opts = opts || {};
+  var applied = _agentFocusApplySelectionId(raw, opts);
+  if (applied) _agentFocusWritePersistedSelectedAgentId(applied);
+  return applied;
+}
+
+function _agentFocusRestorePersistedSelection(opts) {
+  var raw = _agentFocusPersistedSelectionRaw();
+  if (!raw) return '';
+  var rootId = _agentFocusVisibleRootAgentId(raw);
+  if (!rootId) {
+    _agentFocusRemoveStorage(AGENT_FOCUS_SELECTED_AGENT_STORAGE_KEY);
+    return '';
+  }
+  if (rootId !== raw) _agentFocusWritePersistedSelectedAgentId(rootId);
+  return _agentFocusApplySelectionId(rootId, opts);
 }
 
 function _agentFocusMode() {

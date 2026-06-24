@@ -1137,18 +1137,32 @@ function _handleFullState(msg) {
     }
   }
   var activeSessionSelection = _selectedAgentSelectionForActiveSession();
+  var urlSelectedAgentId = (typeof _agentFocusUrlTargetAgentId === 'function')
+    ? _agentFocusUrlTargetAgentId()
+    : '';
+  if (urlSelectedAgentId && typeof _agentFocusApplyUrlSelection === 'function') {
+    restoredSelectedAgentId = _agentFocusApplyUrlSelection({
+      activeSessionSelection: activeSessionSelection,
+    });
+  } else if (!urlSelectedAgentId
+      && typeof _agentFocusRestorePersistedSelection === 'function') {
+    restoredSelectedAgentId = _agentFocusRestorePersistedSelection({
+      activeSessionSelection: activeSessionSelection,
+    });
+  }
   var preferActiveTerminalSelection = !!(
     activeSessionSelection
     && activeSessionSelection.agentId
     && activeSessionSelection.cell
     && activeSessionSelection.cell.cell_type === 'terminal'
   );
-  if (preferActiveTerminalSelection) {
+  if (!restoredSelectedAgentId && preferActiveTerminalSelection) {
     restoredSelectedAgentId = _applySelectedAgentFromServer(
       activeSessionSelection.terminalId || activeSessionSelection.agentId,
       { syncGroup: true, persist: false },
     );
-  } else if (state.selected_agent_id
+  } else if (!restoredSelectedAgentId
+      && state.selected_agent_id
       && state.agents
       && state.agents[state.selected_agent_id]
       && !(typeof _isTombstonedAgent === 'function'
@@ -1159,7 +1173,7 @@ function _handleFullState(msg) {
       state.selected_agent_id,
       { syncGroup: !persistedActiveGroup, persist: false },
     );
-  } else if (state.selected_agent_id) {
+  } else if (!restoredSelectedAgentId && state.selected_agent_id) {
     _applySelectedAgentFromServer('');
     if (persistedActiveGroup) state.active_group = persistedActiveGroup;
   }

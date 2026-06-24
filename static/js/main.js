@@ -1084,6 +1084,9 @@ function focusComposerForFocusedAgent() {
     selectedAgentId = cell.id;
   }
   if (typeof selectedTerminalId !== 'undefined') selectedTerminalId = cell.id;
+  if (typeof _agentFocusPersistExplicitSelection === 'function') {
+    _agentFocusPersistExplicitSelection(cell.id);
+  }
   if (typeof _syncPanelsAfterSelectionChange === 'function') {
     _syncPanelsAfterSelectionChange(prevSelectedId);
   }

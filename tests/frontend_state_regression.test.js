@@ -28605,6 +28605,269 @@ test('full-state hydration preserves persisted active group over stale selected 
   assert.equal(jsonValue(context, `state.selected_agent_id`), '');
 });
 
+
+test('full-state hydration restores locally persisted agent focus over active session fallback', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    _agentFocusWritePersistedSelectedAgentId('agent-1');
+    selectedAgentId = null;
+    focusedItemId = null;
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Newest', group: 'beta', cell_type: 'agent', session_id: 'sess-2' },
+    },
+    groups: { alpha: ['agent-1'], beta: ['agent-2'] },
+    children: { 'agent-1': [], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-2',
+    active_group: 'beta',
+    selected_agent_id: 'agent-2',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+  assert.equal(jsonValue(context, `state.selected_agent_id`), 'agent-1');
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+});
+
+test('full-state resync keeps locally persisted focus instead of newly active agent', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    _agentFocusWritePersistedSelectedAgentId('agent-1');
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Newest', group: 'alpha', cell_type: 'agent', session_id: 'sess-2' },
+    },
+    groups: { alpha: ['agent-1', 'agent-2'] },
+    children: { 'agent-1': [], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-2',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-2',
+    standalone_panel_layout: {},
+  });
+
+  context._handleFullState({
+    seq: 2,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Newest', group: 'alpha', cell_type: 'agent', session_id: 'sess-2' },
+    },
+    groups: { alpha: ['agent-1', 'agent-2'] },
+    children: { 'agent-1': [], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-2',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-2',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+  assert.equal(jsonValue(context, `state.selected_agent_id`), 'agent-1');
+});
+
+test('agent creation and focus deltas do not overwrite locally persisted focus', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    _agentFocusWritePersistedSelectedAgentId('agent-1');
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+    },
+    groups: { alpha: ['agent-1'] },
+    children: { 'agent-1': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: '',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-1',
+    standalone_panel_layout: {},
+  });
+
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'agent_upsert', id: 'agent-2', name: 'Newest', group: 'alpha', cell_type: 'agent', session_id: 'sess-2' },
+      { op: 'focus_update', active_session_id: 'sess-2', current_window_id: 'standalone' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `_agentFocusPersistedSelectionRaw()`), 'agent-1');
+
+  context._handleFullState({
+    seq: 3,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Newest', group: 'alpha', cell_type: 'agent', session_id: 'sess-2' },
+    },
+    groups: { alpha: ['agent-1', 'agent-2'] },
+    children: { 'agent-1': [], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-2',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-2',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+});
+
+test('missing locally persisted focus clears storage and falls back deterministically', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    _agentFocusWritePersistedSelectedAgentId('missing-agent');
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-2': { id: 'agent-2', name: 'Fallback', group: 'alpha', cell_type: 'agent', session_id: 'sess-2' },
+    },
+    groups: { alpha: ['agent-2'] },
+    children: { 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-2',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-2',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-2');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-2');
+  assert.equal(jsonValue(context, `_agentFocusPersistedSelectionRaw()`), '');
+});
+
+test('local focus restoration keeps active child terminal focus for the same saved agent', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    _agentFocusWritePersistedSelectedAgentId('agent-1');
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'term-1': {
+        id: 'term-1',
+        name: 'Shell',
+        group: 'alpha',
+        cell_type: 'terminal',
+        parent_id: 'agent-1',
+        session_id: 'sess-term-1',
+      },
+    },
+    groups: { alpha: ['agent-1', 'term-1'] },
+    children: { 'agent-1': ['term-1'] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-term-1',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-1',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'term-1');
+  assert.equal(jsonValue(context, `selectedTerminalId`), 'term-1');
+});
+
+test('explicit URL agent target wins over locally persisted focus', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  context.URLSearchParams = URLSearchParams;
+  runInContext(context, `
+    location.search = '?agent=agent-2';
+    location.hash = '';
+    _panelStateRestored = false;
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    _agentFocusWritePersistedSelectedAgentId('agent-1');
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true, profile: 'desktop', port: '18932' },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Deep Link Target', group: 'alpha', cell_type: 'agent' },
+    },
+    groups: { alpha: ['agent-1', 'agent-2'] },
+    children: { 'agent-1': [], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: '',
+    active_group: 'alpha',
+    selected_agent_id: 'agent-1',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-2');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-2');
+  assert.equal(jsonValue(context, `_agentFocusPersistedSelectionRaw()`), 'agent-2');
+});
+
+test('explicit user agent selection persists local focus for restart restore', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  loadScript(context, 'static/js/commands.js');
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true, profile: 'desktop', port: '18932' };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Blueprint', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Newest', group: 'alpha', cell_type: 'agent' },
+    };
+    state.children = { 'agent-1': [], 'agent-2': [] };
+    selectedAgentId = null;
+    focusedItemId = null;
+    onAgentClick('agent-1');
+  `);
+
+  assert.equal(jsonValue(context, `_agentFocusPersistedSelectionRaw()`), 'agent-1');
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+});
+
 test('selected_agent_id deltas move detached Agent panel focus to the main selection', () => {
   const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
