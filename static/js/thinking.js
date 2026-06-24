@@ -103,7 +103,6 @@ function _thinkingSyncStateReference() {
   _ideaBriefLoadedGroup = null;
   _ideaBriefLoadingGroup = null;
   _ideaBriefShowLoadingId = '';
-  _ideaBriefRenderedDraftsById = {};
 }
 
 function _thinkingEnsureState() {
@@ -1969,12 +1968,24 @@ function _ideaBriefDraftSnapshotsEqual(a, b) {
     === JSON.stringify(_ideaBriefCopyLinks(right.thinking_links));
 }
 
+function _ideaBriefDefaultLinkSourceKey(draft) {
+  var links = _ideaBriefCopyLinks(draft && draft.thinking_links);
+  var sources = _ideaBriefLinkSources(_thinkingGroup(), links);
+  return String((sources[0] && sources[0].key) || '');
+}
+
+function _ideaBriefDraftHasNonDefaultLinkSource(draft) {
+  var selected = String((draft && draft.link_source_key) || '');
+  if (!selected) return false;
+  return selected !== _ideaBriefDefaultLinkSourceKey(draft);
+}
+
 function _ideaBriefDraftHasTransientState(draft) {
   return !!(
     String((draft && draft.refinement_note) || '').trim()
     || String((draft && draft.lifecycle_reason) || '').trim()
     || String((draft && draft.proposal_note) || '').trim()
-    || String((draft && draft.link_source_key) || '').trim()
+    || _ideaBriefDraftHasNonDefaultLinkSource(draft)
     || String((draft && draft.link_context) || '').trim()
   );
 }
@@ -2458,9 +2469,7 @@ function _renderIdeaBriefProposalBanner(brief, proposalResult) {
 }
 
 function _ideaBriefSelectedLinkSourceKey(draft) {
-  var links = _ideaBriefCopyLinks(draft && draft.thinking_links);
-  var sources = _ideaBriefLinkSources(_thinkingGroup(), links);
-  return String((draft && draft.link_source_key) || (sources[0] && sources[0].key) || '');
+  return String((draft && draft.link_source_key) || _ideaBriefDefaultLinkSourceKey(draft));
 }
 
 function _renderIdeaBriefLinks(draft) {

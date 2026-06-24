@@ -599,6 +599,53 @@ test('Idea Brief clean selected detail updates from websocket deltas without a s
   assert.doesNotMatch(html, /TORQUE-S:1/);
 });
 
+test('Idea Brief clean resync with default link source does not mask later selected detail deltas', () => {
+  const { sandbox, document } = createHarness();
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:1'] = {
+    id: 'TORQUE-S:1', group: 'Torque', group_name: 'Torque', title: 'A first source', body: 'Default source'
+  };
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:2'] = {
+    id: 'TORQUE-S:2', group: 'Torque', group_name: 'Torque', title: 'B second source', body: 'Alternate source'
+  };
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Clean resync brief',
+    status: 'draft',
+    problem_opportunity: 'Original problem',
+    why_it_matters: 'Original why',
+    proposed_shape: '',
+    smallest_useful_version: '',
+    risks_tradeoffs: '',
+    open_questions: '',
+    thinking_links: [],
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  assert.equal(document.getElementById('idea-brief-link-source').value, 'scratchpad_note|TORQUE-S:1');
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Original problem');
+
+  run(sandbox, `
+    var sameState = JSON.parse(JSON.stringify(state));
+    state = sameState;
+    globalThis.state = sameState;
+    renderThinkingPanel();
+  `);
+
+  assert.equal(run(sandbox, `Object.prototype.hasOwnProperty.call(_ideaBriefDraftsById, 'TORQUE-IB:1')`), false);
+  run(sandbox, `ideaBriefReceiveDelta({
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    problem_opportunity: 'Updated problem from server',
+    why_it_matters: 'Updated why from server'
+  }); renderThinkingPanel();`);
+
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Updated problem from server');
+  assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Updated why from server');
+});
+
 test('Idea Brief preserves local draft, caret, selected link, and scroll across deltas', () => {
   const { sandbox, document } = createHarness();
   sandbox.state.idea_briefs['TORQUE-IB:1'] = {
