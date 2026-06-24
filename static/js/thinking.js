@@ -46,6 +46,8 @@ var _ideaBriefIncludeArchived = false;
 var _ideaBriefSelectedId = '';
 var _ideaBriefShowLoadingId = '';
 var _ideaBriefDraftsById = {};
+var _ideaBriefDirtyDraftsById = {};
+var _ideaBriefRenderedDraftsById = {};
 var _ideaBriefSelectedLinkKey = '';
 var _ideaBriefSaving = false;
 var _ideaBriefLastError = '';
@@ -1776,6 +1778,8 @@ function ideaBriefReceiveMutation(msg) {
   if (msg.type === 'idea_brief_created') {
     verb = 'created';
     delete _ideaBriefDraftsById[THINKING_NEW_IDEA_BRIEF_ID];
+    delete _ideaBriefDirtyDraftsById[THINKING_NEW_IDEA_BRIEF_ID];
+    delete _ideaBriefRenderedDraftsById[THINKING_NEW_IDEA_BRIEF_ID];
     _ideaBriefSelectedId = brief.id;
   } else if (msg.type === 'idea_brief_refined') {
     verb = 'refined';
@@ -1794,6 +1798,7 @@ function ideaBriefReceiveMutation(msg) {
   if (msg.type !== 'idea_brief') {
     _ideaBriefLastStatus = 'Idea Brief ' + verb + '.';
     delete _ideaBriefDraftsById[brief.id];
+    delete _ideaBriefDirtyDraftsById[brief.id];
   }
   if (!_ideaBriefSelectedId || _ideaBriefSelectedId === THINKING_NEW_IDEA_BRIEF_ID) {
     _ideaBriefSelectedId = brief.id;
@@ -1931,6 +1936,69 @@ function _ideaBriefDraftFromRow(row) {
   return draft;
 }
 
+function _ideaBriefDraftSnapshot(draft) {
+  var snapshot = _ideaBriefBlankDraft();
+  IDEA_BRIEF_FIELDS.forEach(function(field) {
+    snapshot[field] = String((draft && draft[field]) || '');
+  });
+  snapshot.thinking_links = _ideaBriefCopyLinks(draft && draft.thinking_links);
+  snapshot.refinement_note = String((draft && draft.refinement_note) || '');
+  snapshot.lifecycle_reason = String((draft && draft.lifecycle_reason) || '');
+  snapshot.proposal_note = String((draft && draft.proposal_note) || '');
+  snapshot.link_source_key = String((draft && draft.link_source_key) || '');
+  snapshot.link_context = String((draft && draft.link_context) || '');
+  return snapshot;
+}
+
+function _ideaBriefDraftSnapshotsEqual(a, b) {
+  var left = _ideaBriefDraftSnapshot(a);
+  var right = _ideaBriefDraftSnapshot(b);
+  var fields = IDEA_BRIEF_FIELDS.concat([
+    'refinement_note',
+    'lifecycle_reason',
+    'proposal_note',
+    'link_source_key',
+    'link_context',
+  ]);
+  for (var i = 0; i < fields.length; i++) {
+    var field = fields[i];
+    if (String(left[field] || '') !== String(right[field] || '')) return false;
+  }
+  return JSON.stringify(_ideaBriefCopyLinks(left.thinking_links))
+    === JSON.stringify(_ideaBriefCopyLinks(right.thinking_links));
+}
+
+function _ideaBriefDefaultLinkSourceKey(draft) {
+  var links = _ideaBriefCopyLinks(draft && draft.thinking_links);
+  var sources = _ideaBriefLinkSources(_thinkingGroup(), links);
+  return String((sources[0] && sources[0].key) || '');
+}
+
+function _ideaBriefDraftHasNonDefaultLinkSource(draft) {
+  var selected = String((draft && draft.link_source_key) || '');
+  if (!selected) return false;
+  return selected !== _ideaBriefDefaultLinkSourceKey(draft);
+}
+
+function _ideaBriefDraftHasTransientState(draft) {
+  return !!(
+    String((draft && draft.refinement_note) || '').trim()
+    || String((draft && draft.lifecycle_reason) || '').trim()
+    || String((draft && draft.proposal_note) || '').trim()
+    || _ideaBriefDraftHasNonDefaultLinkSource(draft)
+    || String((draft && draft.link_context) || '').trim()
+  );
+}
+
+function _ideaBriefDraftHasLocalContent(briefId, draft) {
+  if (briefId === THINKING_NEW_IDEA_BRIEF_ID) {
+    return IDEA_BRIEF_FIELDS.some(function(field) { return !!String((draft && draft[field]) || '').trim(); })
+      || _ideaBriefCopyLinks(draft && draft.thinking_links).length > 0
+      || _ideaBriefDraftHasTransientState(draft);
+  }
+  return _ideaBriefDraftIsDirty(briefId, draft) || _ideaBriefDraftHasTransientState(draft);
+}
+
 function _ideaBriefDraft(briefId) {
   briefId = String(briefId || _ideaBriefSelectedId || '');
   if (_ideaBriefDraftsById[briefId]) return Object.assign({}, _ideaBriefDraftsById[briefId], {
@@ -1940,11 +2008,33 @@ function _ideaBriefDraft(briefId) {
   return _ideaBriefDraftFromRow(row);
 }
 
+function _ideaBriefRenderedDraftIdFromDom() {
+  var ids = IDEA_BRIEF_FIELDS.map(function(field) {
+    return 'idea-brief-' + field.replace(/_/g, '-');
+  }).concat([
+    'idea-brief-refinement-note',
+    'idea-brief-lifecycle-reason',
+    'idea-brief-proposal-note',
+    'idea-brief-link-source',
+    'idea-brief-link-context',
+  ]);
+  for (var i = 0; i < ids.length; i++) {
+    var el = _thinkingEl(ids[i]);
+    var key = el && el.dataset ? String(el.dataset.thinkingField || '') : '';
+    var match = key.match(/^idea-brief:(.*):[^:]+$/);
+    if (match) return match[1];
+  }
+  return '';
+}
+
 function _ideaBriefCaptureDraft() {
-  var briefId = String(_ideaBriefSelectedId || '');
+  var briefId = String(_ideaBriefRenderedDraftIdFromDom() || _ideaBriefSelectedId || '');
   if (!briefId) return;
   var hasField = false;
-  var draft = _ideaBriefDraft(briefId);
+  var renderedDraft = _ideaBriefRenderedDraftsById[briefId] || null;
+  var draft = _ideaBriefDraftsById[briefId]
+    ? _ideaBriefDraft(briefId)
+    : (renderedDraft ? _ideaBriefDraftSnapshot(renderedDraft) : _ideaBriefDraft(briefId));
   IDEA_BRIEF_FIELDS.forEach(function(field) {
     var el = _thinkingEl('idea-brief-' + field.replace(/_/g, '-'));
     if (el && 'value' in el) {
@@ -1962,7 +2052,21 @@ function _ideaBriefCaptureDraft() {
   if (proposalEl && 'value' in proposalEl) { draft.proposal_note = String(proposalEl.value || ''); hasField = true; }
   if (sourceEl && 'value' in sourceEl) { draft.link_source_key = String(sourceEl.value || ''); hasField = true; }
   if (contextEl && 'value' in contextEl) { draft.link_context = String(contextEl.value || ''); hasField = true; }
-  if (hasField) _ideaBriefDraftsById[briefId] = draft;
+  if (!hasField) return;
+  draft = _ideaBriefDraftSnapshot(draft);
+  var changedSinceRender = renderedDraft
+    ? !_ideaBriefDraftSnapshotsEqual(draft, renderedDraft)
+    : _ideaBriefDraftHasLocalContent(briefId, draft);
+  if (changedSinceRender) {
+    if (_ideaBriefDraftHasLocalContent(briefId, draft)) _ideaBriefDirtyDraftsById[briefId] = true;
+    else delete _ideaBriefDirtyDraftsById[briefId];
+  }
+  if (_ideaBriefDirtyDraftsById[briefId] && _ideaBriefDraftHasLocalContent(briefId, draft)) {
+    _ideaBriefDraftsById[briefId] = draft;
+  } else {
+    delete _ideaBriefDraftsById[briefId];
+    delete _ideaBriefDirtyDraftsById[briefId];
+  }
 }
 
 function _ideaBriefDraftIsDirty(briefId, draft) {
@@ -2240,6 +2344,7 @@ function ideaBriefAddLink() {
   draft.link_source_key = '';
   draft.link_context = '';
   _ideaBriefDraftsById[briefId] = draft;
+  _ideaBriefDirtyDraftsById[briefId] = true;
   _ideaBriefSelectedLinkKey = _ideaBriefLinkKey(link, draft.thinking_links.length - 1);
   renderThinkingPanel();
 }
@@ -2254,6 +2359,7 @@ function ideaBriefRemoveLink(index) {
   draft.thinking_links = _ideaBriefCopyLinks(draft.thinking_links);
   draft.thinking_links.splice(idx, 1);
   _ideaBriefDraftsById[briefId] = draft;
+  _ideaBriefDirtyDraftsById[briefId] = true;
   _ideaBriefSelectedLinkKey = '';
   renderThinkingPanel();
 }
@@ -2362,11 +2468,15 @@ function _renderIdeaBriefProposalBanner(brief, proposalResult) {
   return html;
 }
 
+function _ideaBriefSelectedLinkSourceKey(draft) {
+  return String((draft && draft.link_source_key) || _ideaBriefDefaultLinkSourceKey(draft));
+}
+
 function _renderIdeaBriefLinks(draft) {
   var links = _ideaBriefCopyLinks(draft.thinking_links);
   var group = _thinkingGroup();
   var sources = _ideaBriefLinkSources(group, links);
-  var selectedSource = String(draft.link_source_key || (sources[0] && sources[0].key) || '');
+  var selectedSource = _ideaBriefSelectedLinkSourceKey(draft);
   var html = '<section class="idea-brief-link-section"><div class="idea-brief-section-title"><h3>Linked Thinking</h3><span>Trace the brief back to scratchpad notes and Mind Map artifacts.</span></div>';
   html += '<div class="idea-brief-link-list">';
   if (!links.length) html += '<div class="thinking-empty compact">No linked Thinking yet. Add a Scratchpad note, Mind Map, node, or link for traceability.</div>';
@@ -2423,6 +2533,9 @@ function _renderIdeaBriefDetail() {
   var proposalResult = !isNew ? _ideaBriefProposalResultById[briefId] : null;
   var title = isNew ? 'New Idea Brief' : (brief.title || briefId);
   var disabledLifecycle = isNew || status === 'archived' || _ideaBriefSaving;
+  var renderedDraft = _ideaBriefDraftSnapshot(draft);
+  renderedDraft.link_source_key = _ideaBriefSelectedLinkSourceKey(draft);
+  _ideaBriefRenderedDraftsById[briefId] = renderedDraft;
   var html = '<section class="thinking-editor idea-brief-detail" id="thinking-idea-detail">';
   html += '<div class="thinking-detail-head"><div><div class="thinking-kicker">Idea Brief</div><h2>' + _thinkingEsc(title || 'Idea Brief') + '</h2><div class="thinking-detail-id">' + _thinkingEsc(isNew ? 'Draft' : briefId) + ' · <span class="idea-brief-status-pill idea-brief-status-' + _thinkingAttr(status) + '">' + _thinkingEsc(_ideaBriefStatusLabel(status)) + '</span></div></div>';
   if (!isNew) html += '<button type="button" class="thinking-close" onclick="ideaBriefSelect(\'\')" title="Close">×</button>';

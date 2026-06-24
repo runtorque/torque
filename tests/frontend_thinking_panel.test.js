@@ -393,6 +393,108 @@ test('Idea Brief tab renders list/detail and creates briefs with linked Thinking
   assert.equal(createCall.thinking_links[0].context, 'Source note for the problem framing.');
 });
 
+test('Idea Brief add link preserves non-default selected source without link context', () => {
+  const { sandbox, document, sendCalls } = createHarness();
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:1'] = {
+    id: 'TORQUE-S:1', group: 'Torque', group_name: 'Torque', title: 'A first source', body: 'Default source'
+  };
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:2'] = {
+    id: 'TORQUE-S:2', group: 'Torque', group_name: 'Torque', title: 'B second source', body: 'Selected source'
+  };
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Traceability source binding',
+    status: 'draft',
+    problem_opportunity: 'Operators need traceability links to bind to the selected source.',
+    why_it_matters: '',
+    proposed_shape: '',
+    smallest_useful_version: '',
+    risks_tradeoffs: '',
+    open_questions: '',
+    thinking_links: [],
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  const source = document.getElementById('idea-brief-link-source');
+  assert.equal(source.value, 'scratchpad_note|TORQUE-S:1');
+  source.value = 'scratchpad_note|TORQUE-S:2';
+  run(sandbox, `ideaBriefChanged(); ideaBriefAddLink();`);
+
+  const linked = JSON.parse(run(sandbox, `JSON.stringify(_ideaBriefDraft('TORQUE-IB:1').thinking_links.map(function(link) {
+    return { id: link.id, context: link.context || '' };
+  }))`));
+  assert.deepEqual(linked, [{ id: 'TORQUE-S:2', context: '' }]);
+  assert.doesNotMatch(document.getElementById('panel-thinking').innerHTML, /TORQUE-S:1<\/span>/);
+  assert.match(document.getElementById('panel-thinking').innerHTML, /TORQUE-S:2/);
+
+  run(sandbox, `ideaBriefSave();`);
+  assert.equal(sendCalls.at(-1).cmd, 'idea_brief_update');
+  assert.equal(sendCalls.at(-1).thinking_links.length, 1);
+  assert.equal(sendCalls.at(-1).thinking_links[0].id, 'TORQUE-S:2');
+  assert.equal(sendCalls.at(-1).thinking_links[0].context || '', '');
+});
+
+test('Idea Brief selection binds detail/body fields and traceability links to the selected brief id', () => {
+  const { sandbox, document } = createHarness();
+  const sharedSafety = 'Shared proposal-only safety boilerplate: review only, no task or dispatch.';
+  const makeBrief = (id, sourceId, suffix) => ({
+    id,
+    group: 'Torque',
+    group_name: 'Torque',
+    title: `Catalyst brief ${suffix}`,
+    status: 'proposed',
+    problem_opportunity: `Distinct problem ${suffix}`,
+    why_it_matters: `Distinct why ${suffix}`,
+    proposed_shape: `Distinct product shape ${suffix}`,
+    smallest_useful_version: `Distinct smallest version ${suffix}`,
+    risks_tradeoffs: sharedSafety,
+    open_questions: `Distinct open question ${suffix}`,
+    proposal: { proposal_only: true, auto_dispatch: false, auto_assign: false },
+    thinking_links: [
+      { type: 'scratchpad_note', id: 'TORQUE-S:1', title: 'Shared source context' },
+      { type: 'scratchpad_note', id: sourceId, title: `Draft source ${suffix}`, context: 'Shared source-context boilerplate' },
+    ],
+  });
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = makeBrief('TORQUE-IB:1', 'TORQUE-S:2', 'one');
+  sandbox.state.idea_briefs['TORQUE-IB:2'] = makeBrief('TORQUE-IB:2', 'TORQUE-S:3', 'two');
+  sandbox.state.idea_briefs['TORQUE-IB:3'] = makeBrief('TORQUE-IB:3', 'TORQUE-S:4', 'three');
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Distinct problem one');
+  assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Distinct why one');
+  assert.equal(document.getElementById('idea-brief-proposed-shape').value, 'Distinct product shape one');
+  let html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /Shared proposal-only safety boilerplate/);
+  assert.match(html, /Proposal for review/);
+  assert.match(html, /TORQUE-S:1/);
+  assert.match(html, /TORQUE-S:2/);
+
+  run(sandbox, `ideaBriefSelect('TORQUE-IB:2');`);
+  assert.equal(document.getElementById('idea-brief-title').value, 'Catalyst brief two');
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Distinct problem two');
+  assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Distinct why two');
+  assert.equal(document.getElementById('idea-brief-proposed-shape').value, 'Distinct product shape two');
+  assert.equal(document.getElementById('idea-brief-risks-tradeoffs').value, sharedSafety);
+  html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /TORQUE-S:1/);
+  assert.match(html, /TORQUE-S:3/);
+  assert.doesNotMatch(html, /TORQUE-S:2/);
+
+  run(sandbox, `ideaBriefSelect('TORQUE-IB:3');`);
+  assert.equal(document.getElementById('idea-brief-title').value, 'Catalyst brief three');
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Distinct problem three');
+  assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Distinct why three');
+  assert.equal(document.getElementById('idea-brief-proposed-shape').value, 'Distinct product shape three');
+  assert.equal(document.getElementById('idea-brief-risks-tradeoffs').value, sharedSafety);
+  html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /TORQUE-S:1/);
+  assert.match(html, /TORQUE-S:4/);
+  assert.doesNotMatch(html, /TORQUE-S:2/);
+  assert.doesNotMatch(html, /TORQUE-S:3/);
+});
+
 test('Idea Brief edit/refine/propose/park/archive use reviewed backend commands and safety copy', async () => {
   const { sandbox, document, sendCalls } = createHarness();
   sandbox.state.idea_briefs['TORQUE-IB:1'] = {
@@ -457,6 +559,91 @@ test('Idea Brief edit/refine/propose/park/archive use reviewed backend commands 
   await run(sandbox, `ideaBriefArchive(); Promise.resolve();`);
   assert.equal(sendCalls.at(-1).cmd, 'idea_brief_archive');
   assert.equal(sendCalls.at(-1).reason, 'Needs more evidence.');
+});
+
+test('Idea Brief clean selected detail updates from websocket deltas without a stale draft cache', () => {
+  const { sandbox, document } = createHarness();
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Server brief',
+    status: 'draft',
+    problem_opportunity: 'Original server problem',
+    why_it_matters: 'Original server why',
+    proposed_shape: 'Original server shape',
+    smallest_useful_version: 'Original server version',
+    risks_tradeoffs: 'Original server risk',
+    open_questions: 'Original server question',
+    thinking_links: [{ type: 'scratchpad_note', id: 'TORQUE-S:1', title: 'Original note' }],
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Original server problem');
+
+  run(sandbox, `ideaBriefReceiveDelta({
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    problem_opportunity: 'Updated server problem',
+    why_it_matters: 'Updated server why',
+    proposed_shape: 'Updated server shape',
+    thinking_links: [{ type: 'scratchpad_note', id: 'TORQUE-S:2', title: 'Updated note' }]
+  }); renderThinkingPanel();`);
+
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Updated server problem');
+  assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Updated server why');
+  assert.equal(document.getElementById('idea-brief-proposed-shape').value, 'Updated server shape');
+  const html = document.getElementById('panel-thinking').innerHTML;
+  assert.match(html, /TORQUE-S:2/);
+  assert.doesNotMatch(html, /TORQUE-S:1/);
+});
+
+test('Idea Brief clean resync with default link source does not mask later selected detail deltas', () => {
+  const { sandbox, document } = createHarness();
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:1'] = {
+    id: 'TORQUE-S:1', group: 'Torque', group_name: 'Torque', title: 'A first source', body: 'Default source'
+  };
+  sandbox.state.thinking.scratchpad_notes['TORQUE-S:2'] = {
+    id: 'TORQUE-S:2', group: 'Torque', group_name: 'Torque', title: 'B second source', body: 'Alternate source'
+  };
+  sandbox.state.idea_briefs['TORQUE-IB:1'] = {
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    title: 'Clean resync brief',
+    status: 'draft',
+    problem_opportunity: 'Original problem',
+    why_it_matters: 'Original why',
+    proposed_shape: '',
+    smallest_useful_version: '',
+    risks_tradeoffs: '',
+    open_questions: '',
+    thinking_links: [],
+  };
+
+  run(sandbox, `thinkingSetTab('idea-briefs'); ideaBriefSelect('TORQUE-IB:1');`);
+  assert.equal(document.getElementById('idea-brief-link-source').value, 'scratchpad_note|TORQUE-S:1');
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Original problem');
+
+  run(sandbox, `
+    var sameState = JSON.parse(JSON.stringify(state));
+    state = sameState;
+    globalThis.state = sameState;
+    renderThinkingPanel();
+  `);
+
+  assert.equal(run(sandbox, `Object.prototype.hasOwnProperty.call(_ideaBriefDraftsById, 'TORQUE-IB:1')`), false);
+  run(sandbox, `ideaBriefReceiveDelta({
+    id: 'TORQUE-IB:1',
+    group: 'Torque',
+    group_name: 'Torque',
+    problem_opportunity: 'Updated problem from server',
+    why_it_matters: 'Updated why from server'
+  }); renderThinkingPanel();`);
+
+  assert.equal(document.getElementById('idea-brief-problem-opportunity').value, 'Updated problem from server');
+  assert.equal(document.getElementById('idea-brief-why-it-matters').value, 'Updated why from server');
 });
 
 test('Idea Brief preserves local draft, caret, selected link, and scroll across deltas', () => {
