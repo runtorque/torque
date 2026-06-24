@@ -11204,12 +11204,19 @@ def _behavior_overlay_prompt_block_for_cell(
 def _architect_persistent_prompt_text(group: str = "",
                                       action_system_prompt: str = "",
                                       state: MatrixState = None,
-                                      architect_id: str = "") -> str:
+                                      architect_id: str = "",
+                                      agent_class_snapshot: dict | None = None,
+                                      agent_profile_snapshot: dict | None = None
+                                      ) -> str:
     """Build the persistent prompt for user-created architect agents."""
-    from .architect import build_architect_system_prompt
+    from .architect import (
+        build_architect_system_prompt,
+        build_architect_torque_preamble,
+    )
 
     group_settings = None
     architect_settings = None
+    architect_cell = None
     if state is not None and group:
         try:
             group_settings = state.get_group_settings(group)
@@ -11217,12 +11224,30 @@ def _architect_persistent_prompt_text(group: str = "",
         except Exception:
             group_settings = None
             architect_settings = None
+    if state is not None and architect_id:
+        architect_cell = state.agents.get(str(architect_id or "").strip())
+        if architect_cell is not None:
+            if not agent_class_snapshot:
+                agent_class_snapshot = getattr(
+                    architect_cell,
+                    "effective_agent_class_snapshot",
+                    {},
+                )
+            if not agent_profile_snapshot:
+                agent_profile_snapshot = getattr(
+                    architect_cell,
+                    "effective_agent_profile_snapshot",
+                    {},
+                )
 
     architect_body = build_architect_system_prompt(
         group or "default",
         architect_settings=architect_settings,
         action_system_prompt=action_system_prompt,
         group_settings=group_settings,
+        architect_cell=architect_cell,
+        agent_class_snapshot=agent_class_snapshot,
+        agent_profile_snapshot=agent_profile_snapshot,
         behavior_overlay_block=_behavior_overlay_prompt_block_for_cell(
             state,
             agent_id=architect_id,
@@ -11230,8 +11255,10 @@ def _architect_persistent_prompt_text(group: str = "",
         ),
     ).rstrip()
 
-    torque_preamble = build_torque_system_prompt(
-        include_shared_memory=False,
+    torque_preamble = build_architect_torque_preamble(
+        architect_cell=architect_cell,
+        agent_class_snapshot=agent_class_snapshot,
+        agent_profile_snapshot=agent_profile_snapshot,
     ).rstrip()
     return torque_preamble + "\n\n" + architect_body + "\n"
 
@@ -11670,10 +11697,21 @@ async def _handle_add_architect_command(
     else:
         launch_cfg["worktree"] = False
 
+    class_prompt_context = (
+        class_launch.get("agent_class")
+        if isinstance(class_launch.get("agent_class"), dict)
+        else {}
+    )
     persistent_prompt_text = _architect_persistent_prompt_text(
         group=group,
         action_system_prompt=launch_cfg.get("system_prompt", ""),
         state=state,
+        agent_class_snapshot=class_prompt_context,
+        agent_profile_snapshot=(
+            class_prompt_context.get("agent_profile", {})
+            if isinstance(class_prompt_context, dict)
+            else {}
+        ),
     )
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
@@ -11694,6 +11732,14 @@ async def _handle_add_architect_command(
     )
     if not cell:
         return {"type": "error", "message": "Failed to create architect"}
+
+    startup_prompt = _startup_prompt_for_new_agent(
+        agent_type=launch_cfg.get("agent_type", ""),
+        persistent_prompt_text=append_agent_class_prompt_block(
+            persistent_prompt_text,
+            cell,
+        ),
+    )
 
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(

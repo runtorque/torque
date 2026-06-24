@@ -653,6 +653,65 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("## Custom Instructions", prompt)
         self.assertIn("Prefer reversible scope cuts.", prompt)
 
+    async def test_add_architect_product_manager_persistent_prompt_is_restricted(self):
+        state = self._make_state()
+        bridge = _CapturingBridge()
+        sent_prompts = []
+        captured_prompts = []
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            del cell, kwargs
+            sent_prompts.append(prompt)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self.server_agent_mod.AgentLaunchService(
+                state=state,
+                connection=None,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                template_mgr=None,
+            )
+            service.apply_persistent_prompt = (
+                lambda _cell, _launch_cfg, prompt_text:
+                captured_prompts.append(prompt_text)
+            )
+
+            async def fake_resolve_base_dir(group):
+                del group
+                return tmp
+
+            def fake_resolve_architect_launch_config(*args, **kwargs):
+                del args, kwargs
+                return self._launch_config(tmp)
+
+            result = await self.server_mod._handle_add_architect_command(
+                {
+                    "name": "Productmind",
+                    "group": "torque",
+                    "agent_class_id": "product-manager",
+                },
+                state,
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_engineer_launch_config=fake_resolve_architect_launch_config,
+                resolve_architect_launch_config=fake_resolve_architect_launch_config,
+                create_agent_with_config=service.create_agent_with_config,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertIn("id", result)
+        self.assertEqual(len(captured_prompts), 1)
+        persistent_prompt = captured_prompts[0]
+        self.assertIn("Product Manager", persistent_prompt)
+        self.assertIn("proposal-only product authority", persistent_prompt)
+        self.assertIn("architect_product_task_propose", persistent_prompt)
+        self.assertIn("## Agent Class", persistent_prompt)
+        self.assertNotIn("architect_engineer_hire", persistent_prompt)
+        self.assertNotIn("architect_task_create", persistent_prompt)
+        self.assertNotIn("Hiring discipline", persistent_prompt)
+        self.assertTrue(sent_prompts)
+        self.assertIn("## Agent Class", sent_prompts[0])
+        self.assertNotIn("architect_engineer_hire", sent_prompts[0])
+
     async def test_add_architect_worktree_default_and_knob(self):
         async def spawn(*, knob=False, launch_worktree=False, group_worktree=False):
             state = self._make_state()
