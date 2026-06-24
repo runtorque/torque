@@ -388,6 +388,36 @@ THINKING_MIND_MAP_LINK_COLUMNS = {
     "deleted_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+IDEA_BRIEF_COLUMNS = {
+    "id": "TEXT PRIMARY KEY",
+    "slug": "TEXT NOT NULL DEFAULT ''",
+    "group_name": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "status": "TEXT NOT NULL DEFAULT 'draft'",
+    "problem_opportunity": "TEXT NOT NULL DEFAULT ''",
+    "why_it_matters": "TEXT NOT NULL DEFAULT ''",
+    "proposed_shape": "TEXT NOT NULL DEFAULT ''",
+    "smallest_useful_version": "TEXT NOT NULL DEFAULT ''",
+    "risks_tradeoffs": "TEXT NOT NULL DEFAULT ''",
+    "open_questions": "TEXT NOT NULL DEFAULT ''",
+    "thinking_links_json": "TEXT NOT NULL DEFAULT '[]'",
+    "source_context_json": "TEXT NOT NULL DEFAULT '{}'",
+    "proposal_json": "TEXT NOT NULL DEFAULT '{}'",
+    "refinement_log_json": "TEXT NOT NULL DEFAULT '[]'",
+    "created_by_kind": "TEXT NOT NULL DEFAULT 'user'",
+    "created_by_id": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "updated_by_id": "TEXT NOT NULL DEFAULT ''",
+    "parked_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "parked_by_id": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_kind": "TEXT NOT NULL DEFAULT ''",
+    "archived_by_id": "TEXT NOT NULL DEFAULT ''",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+    "parked_at": "TEXT NOT NULL DEFAULT ''",
+    "archived_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _ensure_thinking_schema(conn: sqlite3.Connection) -> None:
     """Keep Thinking Scratchpad and Mind Map tables additive/idempotent."""
@@ -435,6 +465,24 @@ def _ensure_thinking_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_nodes "
         "ON thinking_mind_map_links(source_node_id, target_node_id)"
+    )
+
+
+def _ensure_idea_brief_schema(conn: sqlite3.Connection) -> None:
+    """Keep Idea Brief tables additive/idempotent across partial migrations."""
+
+    _ensure_columns(conn, "idea_briefs", IDEA_BRIEF_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_idea_briefs_group_status "
+        "ON idea_briefs(group_name, status, archived_at, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_idea_briefs_group_slug "
+        "ON idea_briefs(group_name, slug)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_idea_briefs_owner "
+        "ON idea_briefs(created_by_kind, created_by_id, updated_at DESC)"
     )
 
 
@@ -1437,6 +1485,47 @@ CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_map
 CREATE INDEX IF NOT EXISTS idx_thinking_mind_map_links_nodes
     ON thinking_mind_map_links(source_node_id, target_node_id);
 
+CREATE TABLE IF NOT EXISTS idea_brief_id_counters (
+    group_prefix                TEXT PRIMARY KEY,
+    next_brief_number           INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS idea_briefs (
+    id                         TEXT PRIMARY KEY,
+    slug                       TEXT NOT NULL DEFAULT '',
+    group_name                 TEXT NOT NULL DEFAULT '',
+    title                      TEXT NOT NULL DEFAULT '',
+    status                     TEXT NOT NULL DEFAULT 'draft',
+    problem_opportunity        TEXT NOT NULL DEFAULT '',
+    why_it_matters             TEXT NOT NULL DEFAULT '',
+    proposed_shape             TEXT NOT NULL DEFAULT '',
+    smallest_useful_version    TEXT NOT NULL DEFAULT '',
+    risks_tradeoffs            TEXT NOT NULL DEFAULT '',
+    open_questions             TEXT NOT NULL DEFAULT '',
+    thinking_links_json        TEXT NOT NULL DEFAULT '[]',
+    source_context_json        TEXT NOT NULL DEFAULT '{}',
+    proposal_json              TEXT NOT NULL DEFAULT '{}',
+    refinement_log_json        TEXT NOT NULL DEFAULT '[]',
+    created_by_kind            TEXT NOT NULL DEFAULT 'user',
+    created_by_id              TEXT NOT NULL DEFAULT '',
+    updated_by_kind            TEXT NOT NULL DEFAULT '',
+    updated_by_id              TEXT NOT NULL DEFAULT '',
+    parked_by_kind             TEXT NOT NULL DEFAULT '',
+    parked_by_id               TEXT NOT NULL DEFAULT '',
+    archived_by_kind           TEXT NOT NULL DEFAULT '',
+    archived_by_id             TEXT NOT NULL DEFAULT '',
+    created_at                 TEXT NOT NULL DEFAULT '',
+    updated_at                 TEXT NOT NULL DEFAULT '',
+    parked_at                  TEXT NOT NULL DEFAULT '',
+    archived_at                TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_idea_briefs_group_status
+    ON idea_briefs(group_name, status, archived_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_idea_briefs_group_slug
+    ON idea_briefs(group_name, slug);
+CREATE INDEX IF NOT EXISTS idx_idea_briefs_owner
+    ON idea_briefs(created_by_kind, created_by_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS pipeline_task_counters (
     root_task_id       TEXT PRIMARY KEY,
     next_child_number  INTEGER NOT NULL DEFAULT 1
@@ -2351,6 +2440,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _ensure_initiatives_schema(conn)
     _ensure_areas_schema(conn)
     _ensure_thinking_schema(conn)
+    _ensure_idea_brief_schema(conn)
     conn.commit()
     _migrate_behavior_overlay_scope_schema(conn)
     # Migrate: add journal author provenance for engineer-scoped reads

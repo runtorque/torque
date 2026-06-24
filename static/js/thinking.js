@@ -1564,7 +1564,7 @@ function _renderMapDetail() {
   html += '<div class="thinking-map-summary-row"><span>' + _thinkingEsc(nodes.length) + ' nodes</span><span>' + _thinkingEsc(links.length) + ' links</span><span>Drag or use arrow keys to persist positions.</span></div>';
   html += _renderMapCanvas(detail);
   html += '<div class="thinking-map-tools">' + _renderNodeTools(detail) + _renderLinkTools(detail) + '</div>';
-  html += '<div class="thinking-handoff-affordance"><strong>Future handoff affordance</strong><span>Map title, description, node notes, coordinates, and links are preserved for later Creative Architect / Idea Brief Generator workflows; those workflows are intentionally not active here.</span></div>';
+  html += '<div class="thinking-handoff-affordance"><strong>Idea Brief handoff affordance</strong><span>Map title, description, node notes, coordinates, and links are preserved as stable references for Creative Architect Idea Brief workflows; creating or proposing a brief remains proposal-only and never dispatches implementation work.</span></div>';
   html += '</section>';
   return html;
 }

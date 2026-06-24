@@ -162,6 +162,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "planning_reads",
             "recent_context_reads",
             "thinking_workspace",
+            "idea_briefs",
             "proposed_decisions",
             "board_task_proposals",
             "user_messages",
@@ -187,6 +188,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         }
         self.assertEqual(categories["thinking_reads"]["status"], "allowed")
         self.assertEqual(categories["thinking_writes"]["status"], "allowed")
+        self.assertEqual(categories["idea_briefs"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         self.assertEqual(categories["deploy_admin"]["status"], "denied")
         warnings = "\n".join(preview["warnings"])
@@ -199,6 +201,9 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(compiled.display_name, "Creative Architect internal policy")
         self.assertIn("thinking.read", compiled.grants)
         self.assertIn("thinking.write_own", compiled.grants)
+        self.assertIn("idea_brief.read", compiled.grants)
+        self.assertIn("idea_brief.write_own", compiled.grants)
+        self.assertIn("idea_brief.propose", compiled.grants)
         self.assertEqual(set(compiled.grants) & {
             "agent.hire_engineer",
             "agent.dispatch_worker",
@@ -660,6 +665,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
 
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_board_summary", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_idea_brief_create", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
@@ -695,6 +701,8 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertIn("never treat ideas as accepted plans", prompt_block)
         self.assertTrue(mcp_tool_allowed_by_policy("architect_thinking_scratchpad_create", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_thinking_mind_map_node_create", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_idea_brief_create", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_idea_brief_propose", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_task_propose", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))

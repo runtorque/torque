@@ -59,6 +59,9 @@ grants:
   - task.verify
   - thinking.read
   - thinking.write_own
+  - idea_brief.read
+  - idea_brief.write_own
+  - idea_brief.propose
   - worktree.merge
   - worktree.read
 denies: []

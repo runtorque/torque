@@ -134,6 +134,14 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             "architect_product_decision_create",
             "architect_product_decision_update",
             "architect_product_decision_link",
+            "architect_product_idea_brief_list",
+            "architect_product_idea_brief_show",
+            "architect_product_idea_brief_create",
+            "architect_product_idea_brief_update",
+            "architect_product_idea_brief_refine",
+            "architect_product_idea_brief_park",
+            "architect_product_idea_brief_archive",
+            "architect_product_idea_brief_propose",
             "architect_product_peer_list",
             "architect_product_peer_message",
             "architect_product_message_user",
@@ -329,3 +337,130 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             req_id=13,
         )
         self.assertEqual("converges to", self._result_payload(link_update)["link"]["label"])
+
+    async def test_idea_brief_wrappers_are_same_group_owner_scoped_and_proposal_only(self):
+        source_note = self.db.create_scratchpad_note({
+            "group": "g",
+            "title": "Catalyst scratch",
+            "body": "Idea source.",
+            "created_by_kind": "architect",
+            "created_by_id": self.architect.id,
+        })
+        peer_brief = self.db.create_idea_brief({
+            "group": "g",
+            "title": "Peer brief",
+            "problem_opportunity": "Peer-owned.",
+            "created_by_kind": "architect",
+            "created_by_id": self.peer.id,
+        })
+        other_brief = self.db.create_idea_brief({
+            "group": "other",
+            "title": "Other brief",
+            "problem_opportunity": "Other group.",
+            "created_by_kind": "architect",
+            "created_by_id": self.cross_group_architect.id,
+        })
+        before_tasks = set(self.state.board_tasks)
+
+        created = await self._call(
+            "architect_product_idea_brief_create",
+            {
+                "title": "Idea Brief workflow",
+                "problem_opportunity": "Catalyst needs durable synthesis.",
+                "why_it_matters": "Blueprint needs traceability.",
+                "proposed_shape": "Structured proposal artifact.",
+                "smallest_useful_version": "Draft and propose.",
+                "risks_tradeoffs": "Must not become execution pressure.",
+                "open_questions": "Who reviews?",
+                "thinking_links": [{
+                    "type": "scratchpad_note",
+                    "id": source_note["id"],
+                    "summary": "source",
+                }],
+            },
+            req_id=30,
+        )
+        brief = self._result_payload(created)["idea_brief"]
+        self.assertEqual("g", brief["group_name"])
+        self.assertTrue(brief["caller_owned"])
+        self.assertEqual(source_note["id"], brief["thinking_links"][0]["id"])
+
+        listed = await self._call(
+            "architect_product_idea_brief_list",
+            {},
+            req_id=31,
+        )
+        by_id = {
+            item["id"]: item
+            for item in self._result_payload(listed)["idea_briefs"]
+        }
+        self.assertIn(brief["id"], by_id)
+        self.assertIn(peer_brief["id"], by_id)
+        self.assertNotIn(other_brief["id"], by_id)
+        self.assertTrue(by_id[brief["id"]]["caller_owned"])
+        self.assertFalse(by_id[peer_brief["id"]]["caller_owned"])
+
+        peer_update = await self._call(
+            "architect_product_idea_brief_update",
+            {"idea_brief": peer_brief["id"], "proposed_shape": "steal"},
+            req_id=32,
+        )
+        self.assertIn("caller-owned", self._error_text(peer_update))
+        self.assertEqual(
+            "",
+            self.db.load_idea_brief(peer_brief["id"])["proposed_shape"],
+        )
+        cross_group_show = await self._call(
+            "architect_product_idea_brief_show",
+            {"idea_brief": other_brief["id"]},
+            req_id=33,
+        )
+        self.assertIn("not found", self._error_text(cross_group_show).lower())
+
+        refined = await self._call(
+            "architect_product_idea_brief_refine",
+            {
+                "idea_brief": brief["id"],
+                "refinement_note": "Tightened to proposal-only Wave A.",
+                "open_questions": "Panelsmith smoke checklist?",
+            },
+            req_id=34,
+        )
+        refined_brief = self._result_payload(refined)["idea_brief"]
+        self.assertEqual("Panelsmith smoke checklist?", refined_brief["open_questions"])
+        self.assertEqual(
+            "Tightened to proposal-only Wave A.",
+            refined_brief["refinement_log"][0]["note"],
+        )
+
+        parked = await self._call(
+            "architect_product_idea_brief_park",
+            {"idea_brief": brief["id"], "reason": "waiting"},
+            req_id=35,
+        )
+        self.assertEqual("parked", self._result_payload(parked)["idea_brief"]["status"])
+        proposed = await self._call(
+            "architect_product_idea_brief_propose",
+            {"idea_brief": brief["id"], "note": "Ready for product-safe review."},
+            req_id=36,
+        )
+        proposal = self._result_payload(proposed)["idea_brief"]["proposal"]
+        self.assertTrue(proposal["proposal_only"])
+        self.assertFalse(proposal["auto_dispatch"])
+        self.assertEqual("", proposal["created_task_id"])
+        self.assertEqual(before_tasks, set(self.state.board_tasks))
+
+        peer_message = await self._call(
+            "architect_product_peer_message",
+            {
+                "architect_id": self.peer.id,
+                "message": "Please review this Idea Brief.",
+                "context_idea_brief_ids": [brief["id"]],
+            },
+            req_id=37,
+        )
+        peer_payload = self._result_payload(peer_message)
+        self.assertEqual("ok", peer_payload["type"])
+        saved = self.db.load_agent_peer_message(peer_payload["message_id"])
+        product_context = saved["context_snapshot"]["product_context"]
+        self.assertEqual([brief["id"]], product_context["idea_brief_ids"])

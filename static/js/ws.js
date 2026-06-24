@@ -848,6 +848,21 @@ function connect() {
       if (typeof thinkingReceiveMindMapLinkMutation === 'function') thinkingReceiveMindMapLinkMutation(msg);
     } else if (msg.type === 'mind_map_link_reordered') {
       if (typeof thinkingReceiveMindMapLinkReordered === 'function') thinkingReceiveMindMapLinkReordered(msg);
+    } else if (msg.type === 'idea_brief_list') {
+      if (!state.idea_briefs) state.idea_briefs = {};
+      (msg.idea_briefs || []).forEach(function(brief) {
+        if (brief && brief.id) state.idea_briefs[brief.id] = Object.assign({}, brief);
+      });
+    } else if (msg.type === 'idea_brief'
+        || msg.type === 'idea_brief_created'
+        || msg.type === 'idea_brief_updated'
+        || msg.type === 'idea_brief_refined'
+        || msg.type === 'idea_brief_parked'
+        || msg.type === 'idea_brief_archived'
+        || msg.type === 'idea_brief_proposed') {
+      if (!state.idea_briefs) state.idea_briefs = {};
+      var ideaBrief = msg.idea_brief || (msg.type === 'idea_brief' ? msg : null);
+      if (ideaBrief && ideaBrief.id) state.idea_briefs[ideaBrief.id] = Object.assign({}, state.idea_briefs[ideaBrief.id] || {}, ideaBrief);
     } else if (msg.type === 'error') {
       if (typeof healthMetricsReceiveHistory === 'function'
           && typeof healthMetricsState !== 'undefined'
@@ -1910,6 +1925,8 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'thinking_mind_map_link_upsert':
         _markSurface(flags, 'thinking');
         break;
+      case 'idea_brief_upsert':
+        break;
       case 'behavior_overlay_version_append':
       case 'behavior_overlay_active_update':
       case 'behavior_overlay_proposal_upsert':
@@ -2804,6 +2821,7 @@ function _opTouchesGroup(op, group, hint) {
     case 'direct_message_read':
     case 'thinking_scratchpad_note_upsert':
     case 'thinking_mind_map_upsert':
+    case 'idea_brief_upsert':
       return (op.group || op.group_name || '') === group;
     default:
       return true;
@@ -3550,6 +3568,20 @@ function _applyDelta(ops) {
         var thinkingLink = Object.assign({}, op);
         delete thinkingLink.op;
         if (typeof thinkingReceiveMindMapLinkDelta === 'function') thinkingReceiveMindMapLinkDelta(thinkingLink);
+        break;
+      }
+
+      case 'idea_brief_upsert': {
+        if (!state.idea_briefs) state.idea_briefs = {};
+        var deltaIdeaBrief = Object.assign({}, op);
+        delete deltaIdeaBrief.op;
+        if (deltaIdeaBrief.id) {
+          state.idea_briefs[deltaIdeaBrief.id] = Object.assign(
+            {},
+            state.idea_briefs[deltaIdeaBrief.id] || {},
+            deltaIdeaBrief
+          );
+        }
         break;
       }
 

@@ -3947,9 +3947,9 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
   assert.match(classModalBody.innerHTML, /Next relaunch freezes Creative@1 as the primary identity/);
   assert.match(classModalBody.innerHTML, /proposal-only/);
   assert.match(classModalBody.innerHTML, /Thinking workspace/);
-  assert.match(classModalBody.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
-  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, proposed decisions, queued task ideas, user \+ product-peer messages/);
-  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator/);
+  assert.match(classModalBody.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts, Idea Briefs/);
+  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, caller-owned Idea Brief drafts\/refinements, proposed decisions, queued task ideas, user \+ product-peer messages/);
+  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance/);
   assert.doesNotMatch(classModalBody.innerHTML, /External connectors|architect_thinking_|architect_product_|class-policy-creative-architect|generated profile|compiler|raw atom/i);
 
   context.agentPanelAssignSelectedClass(null, 'spark');

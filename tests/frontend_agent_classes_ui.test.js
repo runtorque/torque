@@ -522,9 +522,9 @@ function sampleClasses() {
       agent_profile: { id: 'class-policy-creative-architect', version: '1', status: 'restricted', capability_count: 9 },
       internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
       prompt_summary: { has_prompt: true, char_count: 420, preview: 'You are using the Creative Architect Agent Class. Diverge first, converge second, and keep ideas proposal-only.' },
-      capability_bucket_selection: ['self_context', 'planning_reads', 'recent_context_reads', 'thinking_workspace', 'proposed_decisions', 'board_task_proposals', 'user_messages', 'product_peer_messages', 'private_journal'],
+      capability_bucket_selection: ['self_context', 'planning_reads', 'recent_context_reads', 'thinking_workspace', 'idea_briefs', 'proposed_decisions', 'board_task_proposals', 'user_messages', 'product_peer_messages', 'private_journal'],
       restriction_bucket_selection: ['deny_engineer_management', 'deny_worker_dispatch', 'deny_execution_task_control', 'deny_engineer_worker_messages', 'deny_worktree_merge', 'deny_deploy_admin', 'deny_class_profile_admin', 'deny_decision_acceptance', 'deny_raw_tool_picker'],
-      capability_buckets: [catalogItem('self_context'), catalogItem('planning_reads'), catalogItem('recent_context_reads'), catalogItem('thinking_workspace'), catalogItem('proposed_decisions'), catalogItem('board_task_proposals'), catalogItem('user_messages'), catalogItem('product_peer_messages'), catalogItem('private_journal')],
+      capability_buckets: [catalogItem('self_context'), catalogItem('planning_reads'), catalogItem('recent_context_reads'), catalogItem('thinking_workspace'), catalogItem('idea_briefs'), catalogItem('proposed_decisions'), catalogItem('board_task_proposals'), catalogItem('user_messages'), catalogItem('product_peer_messages'), catalogItem('private_journal')],
       restriction_buckets: [catalogItem('deny_engineer_management', true), catalogItem('deny_worker_dispatch', true), catalogItem('deny_execution_task_control', true), catalogItem('deny_engineer_worker_messages', true), catalogItem('deny_worktree_merge', true), catalogItem('deny_deploy_admin', true), catalogItem('deny_class_profile_admin', true), catalogItem('deny_decision_acceptance', true), catalogItem('deny_raw_tool_picker', true)],
       operator_access_summary: {
         allowed_summary: 'Self and assigned task context; Planning reads; Recent context reads; Thinking workspace; Proposed decisions; Board/task proposals; User messages; Product peer Architect messages; Private journal',
@@ -574,9 +574,9 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(creativeHtml, /Architect-derived/);
   assert.match(creativeHtml, /proposal-only/);
   assert.match(creativeHtml, /Thinking workspace/);
-  assert.match(creativeHtml, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
-  assert.match(creativeHtml, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, proposed decisions, queued task ideas, user \+ product-peer messages/);
-  assert.match(creativeHtml, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator/);
+  assert.match(creativeHtml, /Curated ideation partner for exploring possibilities with Thinking artifacts, Idea Briefs/);
+  assert.match(creativeHtml, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, caller-owned Idea Brief drafts\/refinements, proposed decisions, queued task ideas, user \+ product-peer messages/);
+  assert.match(creativeHtml, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance/);
   assert.match(creativeHtml, /Launch new Architect-derived from this class/);
   const creativePreviewStart = creativeHtml.indexOf('<div class="agent-class-preview');
   const creativeDiagnosticsStart = creativeHtml.indexOf('<details class="agent-class-normalized', creativePreviewStart);

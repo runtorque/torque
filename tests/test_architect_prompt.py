@@ -271,6 +271,8 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Scratchpad/Mind Map", prompt)
         self.assertIn("architect_thinking_scratchpad_*", prompt)
         self.assertIn("architect_thinking_mind_map_*", prompt)
+        self.assertIn("architect_product_idea_brief_*", prompt)
+        self.assertIn("Idea Brief", prompt)
         self.assertIn("architect_product_task_propose", prompt)
         self.assertIn("architect_product_decision_create", prompt)
         self.assertIn("architect_product_peer_*", prompt)

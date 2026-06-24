@@ -57,6 +57,11 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
+from .idea_briefs import (
+    IDEA_BRIEF_TEXT_FIELDS,
+    idea_brief_contract_metadata,
+    idea_brief_is_archived,
+)
 from .mission_control import build_mission_control_summary
 from .remote_ingress import (
     ingest_remote_command_request,
@@ -13360,6 +13365,216 @@ async def _handle_mind_map_command(data: dict, state: MatrixState) -> dict:
     return _thinking_error(f"Unknown mind map command: {cmd}", "unknown_command")
 
 
+def _idea_brief_error(message: str, code: str = "idea_brief_error") -> dict:
+    return {
+        "type": "error",
+        "code": str(code or "idea_brief_error"),
+        "message": str(message or ""),
+        **idea_brief_contract_metadata(),
+    }
+
+
+def _idea_brief_ref_from_data(data: dict) -> str:
+    return str(
+        data.get("idea_brief", "")
+        or data.get("brief", "")
+        or data.get("brief_id", "")
+        or data.get("idea_brief_id", "")
+        or data.get("id", "")
+        or ""
+    ).strip()
+
+
+def _idea_brief_scope_error(brief: dict | None, group: str, *,
+                            include_archived: bool = False) -> dict | None:
+    if not brief:
+        return _idea_brief_error("Idea Brief not found", "not_found")
+    item_group = str(brief.get("group_name", brief.get("group", "")) or "").strip()
+    if group and item_group and item_group != group:
+        return _idea_brief_error("Idea Brief is outside group", "out_of_scope")
+    if idea_brief_is_archived(brief) and not include_archived:
+        return _idea_brief_error("Idea Brief is archived", "archived")
+    return None
+
+
+def _idea_brief_patch_from_data(data: dict) -> dict:
+    allowed = set(IDEA_BRIEF_TEXT_FIELDS) | {
+        "status",
+        "slug",
+        "thinking_links",
+        "thinking_links_json",
+        "source_context",
+        "source_context_json",
+        "proposal",
+        "proposal_json",
+        "refinement_log",
+        "refinement_log_json",
+    }
+    return {key: data[key] for key in allowed if key in data}
+
+
+async def _handle_idea_brief_command(data: dict, state: MatrixState) -> dict:
+    cmd = str(data.get("cmd", "") or "").strip()
+    include_archived = _thinking_bool(data, "include_archived", False)
+    group, group_error = _thinking_group_from_data(data, required=cmd in {
+        "idea_brief_list",
+        "idea_brief_create",
+    })
+    if group_error:
+        return _idea_brief_error(group_error.get("message", "group is required"),
+                                 group_error.get("code", "group_required"))
+
+    if cmd == "idea_brief_list":
+        try:
+            limit = min(max(int(data.get("limit", 200)), 1), 1000)
+        except (TypeError, ValueError):
+            limit = 200
+        try:
+            briefs = state.list_idea_briefs(
+                group=group,
+                status=str(data.get("status", "") or ""),
+                include_archived=include_archived,
+                created_by_id=str(data.get("created_by_id", "") or ""),
+                limit=limit,
+            )
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_list",
+            "group": group,
+            "idea_briefs": briefs,
+            **idea_brief_contract_metadata(),
+        }
+
+    actor = _thinking_actor_from_data(data)
+    if cmd == "idea_brief_create":
+        payload = _idea_brief_patch_from_data(data)
+        payload.update({
+            "group": group,
+            "created_by_kind": actor["kind"],
+            "created_by_id": actor["id"],
+            "updated_by_kind": actor["kind"],
+            "updated_by_id": actor["id"],
+        })
+        try:
+            brief = await state.create_idea_brief_async(payload)
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_created",
+            "idea_brief": brief,
+            **idea_brief_contract_metadata(),
+        }
+
+    ident = _idea_brief_ref_from_data(data)
+    group_hint = group
+    brief_id = state.resolve_idea_brief_id(ident, group=group_hint)
+    brief = state.load_idea_brief(brief_id)
+    error = _idea_brief_scope_error(
+        brief,
+        group_hint,
+        include_archived=include_archived or cmd == "idea_brief_archive",
+    )
+    if error:
+        return error
+
+    if cmd == "idea_brief_show":
+        payload = dict(brief)
+        payload["type"] = "idea_brief"
+        payload.update(idea_brief_contract_metadata())
+        return payload
+
+    if idea_brief_is_archived(brief):
+        return _idea_brief_error("Idea Brief is archived", "archived")
+
+    if cmd == "idea_brief_update":
+        patch = _idea_brief_patch_from_data(data)
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            updated = await state.update_idea_brief_async(brief_id, patch)
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_updated",
+            "idea_brief": updated,
+            **idea_brief_contract_metadata(),
+        }
+
+    if cmd == "idea_brief_refine":
+        patch = _idea_brief_patch_from_data(data)
+        if "refinement_note" in data:
+            patch["refinement_note"] = data.get("refinement_note", "")
+        patch["updated_by_kind"] = actor["kind"]
+        patch["updated_by_id"] = actor["id"]
+        try:
+            refined = await state.refine_idea_brief_async(brief_id, patch)
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_refined",
+            "idea_brief": refined,
+            **idea_brief_contract_metadata(),
+        }
+
+    if cmd == "idea_brief_park":
+        try:
+            parked = await state.park_idea_brief_async(
+                brief_id,
+                parked_by_kind=actor["kind"],
+                parked_by_id=actor["id"],
+                reason=str(data.get("reason", "") or ""),
+            )
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_parked",
+            "idea_brief": parked,
+            **idea_brief_contract_metadata(),
+        }
+
+    if cmd == "idea_brief_archive":
+        try:
+            archived = await state.archive_idea_brief_async(
+                brief_id,
+                archived_by_kind=actor["kind"],
+                archived_by_id=actor["id"],
+                reason=str(data.get("reason", "") or ""),
+            )
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_archived",
+            "idea_brief": archived,
+            **idea_brief_contract_metadata(),
+        }
+
+    if cmd in {"idea_brief_propose", "idea_brief_promote"}:
+        try:
+            proposed = await state.propose_idea_brief_async(
+                brief_id,
+                proposed_by_kind=actor["kind"],
+                proposed_by_id=actor["id"],
+                note=str(data.get("note", data.get("proposal_note", "")) or ""),
+                review_target=str(data.get("review_target", "") or ""),
+            )
+        except ValueError as exc:
+            return _idea_brief_error(str(exc), "validation_error")
+        return {
+            "type": "idea_brief_proposed",
+            "idea_brief": proposed,
+            "review_scope": proposed.get("proposal", {}) if proposed else {},
+            "caveat": (
+                "Idea Brief was marked proposed for product-safe review only; "
+                "no task, assignment, dispatch, decision acceptance, merge, or "
+                "deploy action was created."
+            ),
+            **idea_brief_contract_metadata(),
+        }
+
+    return _idea_brief_error(f"Unknown Idea Brief command: {cmd}", "unknown_command")
+
+
 def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
     """Return deferred architect decisions for compact snapshot clients."""
     include_archived = bool(data.get("include_archived", False))
@@ -17353,6 +17568,19 @@ async def main(connection=None):
             "mind_map_link_delete",
         }:
             return await _handle_mind_map_command(data, state)
+
+        if cmd in {
+            "idea_brief_list",
+            "idea_brief_show",
+            "idea_brief_create",
+            "idea_brief_update",
+            "idea_brief_refine",
+            "idea_brief_park",
+            "idea_brief_archive",
+            "idea_brief_propose",
+            "idea_brief_promote",
+        }:
+            return await _handle_idea_brief_command(data, state)
 
         if cmd == "get_agent_message_history":
             return _handle_agent_message_history_command(data, state)

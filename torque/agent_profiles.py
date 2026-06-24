@@ -183,6 +183,9 @@ CAPABILITIES: dict[str, Capability] = {
     "journal.write": Capability("journal.write", "journal", "Write scoped journals."),
     "thinking.read": Capability("thinking.read", "thinking", "Read same-group Scratchpad notes and Mind Maps."),
     "thinking.write_own": Capability("thinking.write_own", "thinking", "Create/update caller-owned Scratchpad notes and Mind Maps."),
+    "idea_brief.read": Capability("idea_brief.read", "idea_brief", "Read same-group Idea Brief proposal artifacts."),
+    "idea_brief.write_own": Capability("idea_brief.write_own", "idea_brief", "Create/update caller-owned Idea Brief proposal artifacts."),
+    "idea_brief.propose": Capability("idea_brief.propose", "idea_brief", "Mark caller-owned Idea Briefs proposed for product-safe review."),
     "memory.read": Capability("memory.read", "memory", "Read shared memory."),
     "memory.publish": Capability("memory.publish", "memory", "Publish shared memory."),
     "memory.admin": Capability("memory.admin", "memory", "Pin/link/unpin shared memory.", "high"),
@@ -257,6 +260,9 @@ ARCHITECT_CEILING = frozenset(ENGINEER_CEILING | {
     "decision.update_proposed",
     "thinking.read",
     "thinking.write_own",
+    "idea_brief.read",
+    "idea_brief.write_own",
+    "idea_brief.propose",
 })
 
 BASE_KIND_CEILINGS = {
@@ -429,6 +435,7 @@ TOOL_CATEGORY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "profile_admin": frozenset({"profile.assign", "profile.edit"}),
     "thinking_reads": frozenset({"thinking.read"}),
     "thinking_writes": frozenset({"thinking.read", "thinking.write_own"}),
+    "idea_briefs": frozenset({"idea_brief.read", "idea_brief.write_own", "idea_brief.propose"}),
 }
 
 
@@ -631,6 +638,15 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "architect_product_decision_create": frozenset({"decision.create_proposed"}),
     "architect_product_decision_update": frozenset({"decision.update_proposed"}),
     "architect_product_decision_link": frozenset({"decision.update_proposed", "decision.link"}),
+    "architect_product_idea_brief_list": frozenset({"idea_brief.read"}),
+    "architect_product_idea_brief_show": frozenset({"idea_brief.read"}),
+    "architect_product_idea_brief_create": frozenset({"idea_brief.write_own"}),
+    "architect_product_idea_brief_update": frozenset({"idea_brief.read", "idea_brief.write_own"}),
+    "architect_product_idea_brief_refine": frozenset({"idea_brief.read", "idea_brief.write_own"}),
+    "architect_product_idea_brief_park": frozenset({"idea_brief.read", "idea_brief.write_own"}),
+    "architect_product_idea_brief_archive": frozenset({"idea_brief.read", "idea_brief.write_own"}),
+    "architect_product_idea_brief_propose": frozenset({"idea_brief.read", "idea_brief.write_own", "idea_brief.propose"}),
+    "architect_product_idea_brief_promote": frozenset({"idea_brief.read", "idea_brief.write_own", "idea_brief.propose"}),
     "architect_product_peer_list": frozenset({"comm.peer_architect_list"}),
     "architect_product_peer_message": frozenset({"comm.peer_architect_message"}),
     "architect_product_peer_inbox": frozenset({"comm.peer_architect_message"}),

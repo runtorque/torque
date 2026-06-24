@@ -292,6 +292,14 @@ CAPABILITY_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
             category="thinking",
         ),
         _bucket(
+            "idea_briefs",
+            "Idea Brief proposals",
+            "Draft, refine, park, archive, and explicitly propose caller-owned Idea Brief artifacts for product-safe review.",
+            {"idea_brief.read", "idea_brief.write_own", "idea_brief.propose"},
+            base_kinds={"architect"},
+            category="thinking",
+        ),
+        _bucket(
             "planning_writes",
             "Planning writes",
             "Create/update/archive Areas and Initiatives and link visible decisions where supported.",
@@ -2050,6 +2058,7 @@ def _creative_architect_status_contract(class_preview: dict[str, Any],
         "direct_engineer_worker_messaging": False,
         "accepted_decision_authority": False,
         "thinking_wrappers": "architect_thinking_*",
+        "idea_brief_wrappers": "architect_product_idea_brief_*",
         "proposal_wrappers": "architect_product_*",
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }

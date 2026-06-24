@@ -529,6 +529,10 @@ def _restricted_tool_lines(authority: dict) -> list[str]:
         lines.append(
             "- Thinking workspace: use `architect_thinking_scratchpad_*` and `architect_thinking_mind_map_*`; create/update only caller-owned Thinking artifacts."
         )
+    if _allows_category(authority, "idea_briefs"):
+        lines.append(
+            "- Idea Briefs: use `architect_product_idea_brief_*` to draft/refine/park structured proposal artifacts linked to Thinking references; proposing a brief never dispatches or assigns work."
+        )
     if _allows_category(authority, "pm_queued_tasks"):
         lines.append(
             "- Task proposals: use `architect_product_task_propose` for queued, unassigned, non-dispatched product task proposals."
@@ -603,6 +607,11 @@ def _restricted_boot_lines(authority: dict) -> list[str]:
             f"{index}. Use Scratchpad notes or Mind Maps to explore rough ideas before converting them into proposals."
         )
         index += 1
+    if _allows_category(authority, "idea_briefs"):
+        lines.append(
+            f"{index}. Draft or refine an Idea Brief when the next useful artifact is a structured, reviewable proposal rather than an execution task."
+        )
+        index += 1
     if _allows_category(authority, "pm_decisions"):
         lines.append(
             f"{index}. Re-read proposed decisions you own before drafting new or updated proposals."
@@ -626,7 +635,7 @@ def _restricted_operating_lines(authority: dict) -> list[str]:
     ]
     if authority.get("is_creative"):
         lines.append(
-            "3. **Creative workflow** — Diverge first with several possibilities, capture rough exploration in Scratchpad/Mind Map artifacts, then converge on small shippable slices and decision points."
+            "3. **Creative workflow** — Diverge first with several possibilities, capture rough exploration in Scratchpad/Mind Map artifacts, then converge into Idea Briefs, small shippable slices, and decision points."
         )
     else:
         lines.append(
