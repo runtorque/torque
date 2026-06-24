@@ -853,6 +853,7 @@ function connect() {
       (msg.idea_briefs || []).forEach(function(brief) {
         if (brief && brief.id) state.idea_briefs[brief.id] = Object.assign({}, brief);
       });
+      if (typeof ideaBriefReceiveList === 'function') ideaBriefReceiveList(msg);
     } else if (msg.type === 'idea_brief'
         || msg.type === 'idea_brief_created'
         || msg.type === 'idea_brief_updated'
@@ -863,6 +864,7 @@ function connect() {
       if (!state.idea_briefs) state.idea_briefs = {};
       var ideaBrief = msg.idea_brief || (msg.type === 'idea_brief' ? msg : null);
       if (ideaBrief && ideaBrief.id) state.idea_briefs[ideaBrief.id] = Object.assign({}, state.idea_briefs[ideaBrief.id] || {}, ideaBrief);
+      if (typeof ideaBriefReceiveMutation === 'function') ideaBriefReceiveMutation(msg);
     } else if (msg.type === 'error') {
       if (typeof healthMetricsReceiveHistory === 'function'
           && typeof healthMetricsState !== 'undefined'
@@ -886,6 +888,7 @@ function connect() {
       if (typeof missionControlHandleError === 'function' && missionControlHandleError(msg)) return;
       if (typeof areasHandleError === 'function' && areasHandleError(msg)) return;
       if (typeof initiativesHandleError === 'function' && initiativesHandleError(msg)) return;
+      if (typeof ideaBriefHandleError === 'function' && ideaBriefHandleError(msg)) return;
       var systemPromptErrorHandled = false;
       if (typeof _showSystemPromptPreviewError === 'function') {
         systemPromptErrorHandled = _showSystemPromptPreviewError(msg);
@@ -1926,6 +1929,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'thinking');
         break;
       case 'idea_brief_upsert':
+        _markSurface(flags, 'thinking');
         break;
       case 'behavior_overlay_version_append':
       case 'behavior_overlay_active_update':
@@ -3582,6 +3586,7 @@ function _applyDelta(ops) {
             deltaIdeaBrief
           );
         }
+        if (typeof ideaBriefReceiveDelta === 'function') ideaBriefReceiveDelta(deltaIdeaBrief);
         break;
       }
 
