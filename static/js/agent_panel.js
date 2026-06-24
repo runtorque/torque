@@ -1376,7 +1376,7 @@ function _agentPanelKindDisplayLabel(kind) {
   return kind ? kind.replace(/[-_]+/g, ' ') : 'Agent';
 }
 
-function _agentPanelClassDisplayName(item, fallback) {
+function _agentPanelClassRawDisplayName(item, fallback) {
   item = item || {};
   return String(
     item.primary_identity_label
@@ -1387,6 +1387,11 @@ function _agentPanelClassDisplayName(item, fallback) {
     || fallback
     || ''
   ).trim();
+}
+
+function _agentPanelClassDisplayName(item, fallback) {
+  var raw = _agentPanelClassRawDisplayName(item, fallback);
+  return _agentPanelClassIsCreativeArchitect(item, raw) ? 'Creative' : raw;
 }
 
 function _agentPanelClassSecondaryLabel(item, fallbackKind) {
@@ -1445,10 +1450,10 @@ function _agentPanelClassIsProductManager(item) {
     || label === 'Product Manager';
 }
 
-function _agentPanelClassIsCreativeArchitect(item) {
+function _agentPanelClassIsCreativeArchitect(item, rawLabel) {
   item = item || {};
   var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
-  var label = _agentPanelClassDisplayName(item, '');
+  var label = String(rawLabel || _agentPanelClassRawDisplayName(item, '') || '').trim();
   return String(item.id || '') === 'creative-architect'
     || String(metadata.archetype || '') === 'creative_architect'
     || label === 'Creative Architect';
@@ -1521,7 +1526,7 @@ function _agentPanelCreativeArchitectCompactPolicyHtml(item) {
   var proposalOnly = contract.proposal_only !== false;
   var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="creative-architect">';
   html += '<div class="agent-class-compact-chips">';
-  html += '<span class="agent-profile-chip agent-class-compact-chip">Creative Architect</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Creative</span>';
   html += '<span class="agent-profile-chip agent-class-compact-chip agent-profile-chip-full">'
     + _agentPanelEsc(proposalOnly ? 'proposal-only' : 'ideation mode')
     + '</span>';
@@ -1720,13 +1725,19 @@ function _agentPanelClassState(agent) {
     ? (assignedPreview || _agentPanelClassPreviewFor(agent, assignedId))
     : _agentPanelClassPreviewFor(agent, defaultId);
   var effectivePreviewLabel = _agentPanelClassDisplayName(effectivePreview, '');
-  var effectiveLabel = String(
-    effectivePreviewLabel
-    || status.effective_primary_identity_label
+  var effectiveStatusLabel = String(
+    status.effective_primary_identity_label
     || status.primary_identity_label
     || effectiveId
     || ''
   ).trim();
+  var effectiveLabel = _agentPanelClassDisplayName(
+    Object.assign({}, effectivePreview || {}, {
+      id: effectiveId || (effectivePreview && effectivePreview.id) || '',
+      primary_identity_label: effectivePreviewLabel || effectiveStatusLabel,
+    }),
+    effectiveStatusLabel || effectiveId || ''
+  );
   if (effectiveId === defaultId && (!effectivePreview || !effectivePreview.id || effectiveLabel === effectiveId)) {
     effectiveLabel = 'Default ' + _agentPanelKindDisplayLabel(kind);
   }
@@ -1738,13 +1749,20 @@ function _agentPanelClassState(agent) {
       + directProfileId
       + _agentPanelClassVersionSuffix(directProfileVersion);
   } else {
-    desiredLabel = String(
+    var desiredPreviewLabel = _agentPanelClassDisplayName(desiredPreview, '');
+    var desiredStatusLabel = String(
       status.next_launch_primary_identity_label
       || status.assigned_primary_identity_label
-      || _agentPanelClassDisplayName(desiredPreview, desiredId)
       || desiredId
       || ''
     ).trim();
+    desiredLabel = _agentPanelClassDisplayName(
+      Object.assign({}, desiredPreview || {}, {
+        id: desiredId || (desiredPreview && desiredPreview.id) || '',
+        primary_identity_label: desiredPreviewLabel || desiredStatusLabel,
+      }),
+      desiredStatusLabel || desiredId || ''
+    );
     if (!assignedId && desiredId === defaultId
         && (!desiredPreview || !desiredPreview.id || desiredLabel === desiredId)) {
       desiredLabel = 'Default ' + _agentPanelKindDisplayLabel(kind);

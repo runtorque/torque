@@ -142,7 +142,7 @@ test('agent grid card ignores stale assignment status after relaunch effective P
   assert.doesNotMatch(html, /agent-card-kind[^>]*>Architect</);
 });
 
-test('agent grid card shows Creative Architect badge with Architect-derived metadata', () => {
+test('agent grid card shows Creative badge with Architect-derived metadata', () => {
   const context = createHarness();
   const html = vm.runInContext(`renderAgentCell({
     id: 'spark',
@@ -165,7 +165,8 @@ test('agent grid card shows Creative Architect badge with Architect-derived meta
   })`, context);
 
   assert.match(html, /cell-name[^>]*>Spark</);
-  assert.match(html, /cell-agent-class-badge[^>]*>Creative Architect</);
+  assert.match(html, /cell-agent-class-badge[^>]*>Creative</);
+  assert.doesNotMatch(html, /cell-agent-class-badge[^>]*>Creative Architect</);
   assert.match(html, /Secondary metadata: Architect-derived/);
   assert.doesNotMatch(html, /cell-agent-class-badge[^>]*>Architect</);
 });

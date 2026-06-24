@@ -453,6 +453,11 @@ def _architect_prompt_authority_context(
         or archetype == "creative_architect"
         or "creative-architect" in profile_id
     )
+    if is_creative and label == "Creative":
+        # Normal UI shortens the class badge to "Creative"; keep the runtime
+        # prompt language stable because this helper is used for authority and
+        # behavior instructions, not for normal display surfaces.
+        label = "Creative Architect"
 
     return {
         "class_id": class_id,

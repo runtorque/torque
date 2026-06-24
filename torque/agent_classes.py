@@ -165,6 +165,16 @@ CREATIVE_ARCHITECT_AUTHORITY_CAVEAT = (
     "and product-safe proposal wrappers, but do not treat generated ideas, "
     "queued tasks, peer messages, or proposed decisions as accepted plans."
 )
+CREATIVE_ARCHITECT_NORMAL_LABEL = "Creative"
+CREATIVE_ARCHITECT_INTERNAL_POLICY_LABEL = "Creative Architect"
+
+
+def _is_creative_architect_class_identity(class_id: str, metadata: dict[str, Any] | None = None) -> bool:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return (
+        str(class_id or "").strip() == "creative-architect"
+        or str((metadata or {}).get("archetype", "") or "").strip() == "creative_architect"
+    )
 
 @dataclass(frozen=True)
 class AgentClassCapabilityBucket:
@@ -945,15 +955,28 @@ def primary_identity_label_for_class(definition_or_preview: "AgentClassDefinitio
         identity = definition_or_preview.identity or {}
         display_name = definition_or_preview.display_name
         class_id = definition_or_preview.id
+        metadata = definition_or_preview.metadata or {}
     else:
         identity = definition_or_preview.get("identity", {}) if isinstance(definition_or_preview.get("identity"), dict) else {}
         display_name = str(definition_or_preview.get("display_name", "") or "")
         class_id = str(definition_or_preview.get("id", "") or "")
+        metadata = definition_or_preview.get("metadata", {}) if isinstance(definition_or_preview.get("metadata"), dict) else {}
+    if _is_creative_architect_class_identity(class_id, metadata):
+        return CREATIVE_ARCHITECT_NORMAL_LABEL
     for key in ("primary_ui_label", "label", "name"):
         text = str(identity.get(key, "") or "").strip()
         if text:
             return text
     return str(display_name or class_id).strip()
+
+
+def internal_policy_display_name_for_class(definition: "AgentClassDefinition") -> str:
+    label = (
+        CREATIVE_ARCHITECT_INTERNAL_POLICY_LABEL
+        if _is_creative_architect_class_identity(definition.id, definition.metadata)
+        else primary_identity_label_for_class(definition)
+    )
+    return f"{label} internal policy"
 
 
 def secondary_base_kind_label_for_class(definition_or_preview: "AgentClassDefinition | dict[str, Any]") -> str:
@@ -1908,7 +1931,7 @@ def _compiled_profile_data_for_class(definition: AgentClassDefinition) -> dict[s
         "id": generated_ref.id,
         "version": generated_ref.version,
         "base_kind": definition.base_kind,
-        "display_name": f"{primary_identity_label_for_class(definition)} internal policy",
+        "display_name": internal_policy_display_name_for_class(definition),
         "description": (
             "Generated internal Agent Profile-compatible policy compiled from "
             f"Agent Class {definition.id}@{definition.version}. It is not written as project YAML."
@@ -2056,10 +2079,7 @@ def _class_is_product_manager_preview(class_preview: dict[str, Any]) -> bool:
 def _class_is_creative_architect_preview(class_preview: dict[str, Any]) -> bool:
     class_id = str(class_preview.get("id", "") or "").strip()
     metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return (
-        class_id == "creative-architect"
-        or str((metadata or {}).get("archetype", "") or "").strip() == "creative_architect"
-    )
+    return _is_creative_architect_class_identity(class_id, metadata)
 
 
 def _class_preview_approved_for_live_dogfood(class_preview: dict[str, Any]) -> bool:
@@ -2502,9 +2522,9 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         next_launch_label = "Internal policy: " + next_launch_profile_id if next_launch_profile_id else ""
     elif next_launch_class_id:
         if assigned_preview and assigned_preview.get("id") == next_launch_class_id:
-            next_launch_label = str(assigned_preview.get("primary_identity_label", "") or "")
+            next_launch_label = primary_identity_label_for_class(assigned_preview)
         elif effective_preview and effective_preview.get("id") == next_launch_class_id:
-            next_launch_label = str(effective_preview.get("primary_identity_label", "") or "")
+            next_launch_label = primary_identity_label_for_class(effective_preview)
         else:
             next_class = agent_class_definition_by_id(
                 next_launch_class_id,
@@ -2512,8 +2532,8 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
                 include_archived=True,
             )
             next_launch_label = primary_identity_label_for_class(next_class) if next_class else next_launch_class_id
-    effective_label = str(effective_preview.get("primary_identity_label", effective_preview.get("display_name", "")) or "")
-    assigned_label = str(assigned_preview.get("primary_identity_label", assigned_preview.get("display_name", "")) or "")
+    effective_label = primary_identity_label_for_class(effective_preview) if effective_preview else ""
+    assigned_label = primary_identity_label_for_class(assigned_preview) if assigned_preview else ""
     return {
         "agent_id": str(getattr(cell, "id", "") or ""),
         "agent_name": str(getattr(cell, "name", "") or ""),

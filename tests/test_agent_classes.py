@@ -143,8 +143,8 @@ class AgentClassRegistryTests(unittest.TestCase):
         preview = enriched_agent_class_preview(creative, base_dir=str(self.project))
 
         self.assertEqual(preview["status"], "restricted")
-        self.assertEqual(preview["display_name"], "Creative Architect")
-        self.assertEqual(preview["primary_identity_label"], "Creative Architect")
+        self.assertEqual(preview["display_name"], "Creative")
+        self.assertEqual(preview["primary_identity_label"], "Creative")
         self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
         self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-creative-architect", "version": "1"})
         self.assertEqual(preview["agent_profile"]["id"], "class-policy-creative-architect")
@@ -196,6 +196,7 @@ class AgentClassRegistryTests(unittest.TestCase):
 
         compiled = compile_agent_class_profile(creative)
         self.assertEqual(compiled.id, "class-policy-creative-architect")
+        self.assertEqual(compiled.display_name, "Creative Architect internal policy")
         self.assertIn("thinking.read", compiled.grants)
         self.assertIn("thinking.write_own", compiled.grants)
         self.assertEqual(set(compiled.grants) & {
@@ -680,7 +681,8 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         prompt_block = agent_class_prompt_block_for_cell(cell)
 
         self.assertEqual(snapshot["id"], "creative-architect")
-        self.assertEqual(snapshot["primary_identity_label"], "Creative Architect")
+        self.assertEqual(snapshot["display_name"], "Creative")
+        self.assertEqual(snapshot["primary_identity_label"], "Creative")
         self.assertEqual(snapshot["agent_profile_ref"], {"id": "class-policy-creative-architect", "version": "1"})
         self.assertEqual(cell.effective_agent_class_id, "creative-architect")
         self.assertEqual(cell.effective_agent_profile_id, "class-policy-creative-architect")
@@ -702,6 +704,12 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_link", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
+
+        cell.effective_agent_class_snapshot["display_name"] = "Creative Architect"
+        cell.effective_agent_class_snapshot["primary_identity_label"] = "Creative Architect"
+        status = self.state.agent_class_status_for_cell(cell, base_dir=str(self.project))
+        self.assertEqual(status["effective_primary_identity_label"], "Creative")
+        self.assertEqual(status["next_launch_primary_identity_label"], "Creative")
 
     def test_default_unassigned_classes_preserve_full_base_kind_profiles_and_no_prompt(self):
         for kind, expected_class, expected_profile in [

@@ -1138,7 +1138,7 @@ function _agentClassById(classId) {
   return null;
 }
 
-function _agentClassDisplayName(item, fallback) {
+function _agentClassRawDisplayName(item, fallback) {
   item = item || {};
   return String(
     item.primary_identity_label
@@ -1150,6 +1150,11 @@ function _agentClassDisplayName(item, fallback) {
     || fallback
     || ''
   ).trim();
+}
+
+function _agentClassDisplayName(item, fallback) {
+  var raw = _agentClassRawDisplayName(item, fallback);
+  return _agentClassIsCreativeArchitect(item, raw) ? 'Creative' : raw;
 }
 
 function _agentClassStatus(item) {
@@ -2085,7 +2090,7 @@ function _agentClassPreviewHtml(preview, validation) {
   var disabledReason = _agentClassLaunchDisabledReason(preview, previewKind);
   var isProductManager = _agentClassIsProductManager(preview);
   var isCreativeArchitect = _agentClassIsCreativeArchitect(preview);
-  var primaryLabel = String(preview.primary_identity_label || preview.primary_display_name || _agentClassDisplayName(preview, preview.id || 'Agent Class')).trim();
+  var primaryLabel = _agentClassDisplayName(preview, preview.id || 'Agent Class');
   var secondaryLabel = String(preview.secondary_base_kind_label
     || (preview.secondary_base_kind_metadata && preview.secondary_base_kind_metadata.base_kind_label)
     || preview.base_kind
@@ -2174,10 +2179,10 @@ function _agentClassIsProductManager(item) {
     || label === 'Product Manager';
 }
 
-function _agentClassIsCreativeArchitect(item) {
+function _agentClassIsCreativeArchitect(item, rawLabel) {
   item = item || {};
   var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
-  var label = _agentClassDisplayName(item, '');
+  var label = String(rawLabel || _agentClassRawDisplayName(item, '') || '').trim();
   return String(item.id || '') === 'creative-architect'
     || String(metadata.archetype || '') === 'creative_architect'
     || label === 'Creative Architect';
@@ -2248,7 +2253,7 @@ function _agentClassCreativeArchitectCompactPolicyHtml(item) {
   var proposalOnly = contract.proposal_only !== false;
   var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="creative-architect">';
   html += '<div class="agent-class-compact-chips">';
-  html += '<span>Creative Architect</span>';
+  html += '<span>Creative</span>';
   html += '<span class="agent-profile-chip-full">' + esc(proposalOnly ? 'proposal-only' : 'ideation mode') + '</span>';
   html += '<span>Thinking workspace</span>';
   html += '<span>Architect-derived</span>';

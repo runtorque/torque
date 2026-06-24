@@ -1,13 +1,13 @@
 agent_class_schema_version: 3
 id: creative-architect
 version: "1"
-display_name: Creative Architect
+display_name: Creative
 description: Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.
 lifecycle: stable
 identity:
   icon: "💡"
-  label: Creative Architect
-  primary_ui_label: Creative Architect
+  label: Creative
+  primary_ui_label: Creative
 runtime:
   base_kind: architect
   base_kind_label: Architect-derived
