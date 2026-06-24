@@ -7637,6 +7637,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
             if values["status"] == "archived":
                 raise ValueError("Use idea_brief_archive to archive a brief")
+            if (
+                    values["status"] == "proposed"
+                    and str(existing.get("status", "") or "").strip() != "proposed"):
+                raise ValueError("Use idea_brief_propose to propose a brief for review")
         if "title" in values:
             values["title"] = str(values["title"] or "").strip()
             if not values["title"]:

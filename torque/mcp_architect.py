@@ -1715,7 +1715,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_product_idea_brief_update",
         "description": "Update a caller-owned Idea Brief only; status may remain draft/proposed/parked but archive uses the explicit archive tool.",
-        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "proposed", "parked"]}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "parked"]}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
         "name": "architect_product_idea_brief_refine",

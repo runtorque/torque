@@ -186,6 +186,17 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brief["thinking_links"][1]["type"], "mind_map_node")
         self.assertEqual(emitted[-1]["op"], "idea_brief_upsert")
 
+        implicit_propose = await handle_command({
+            "cmd": "idea_brief_update",
+            "group": "Torque",
+            "idea_brief": brief["id"],
+            "status": "proposed",
+            "actor_kind": "architect",
+            "actor_id": "arch-1",
+        })
+        self.assertEqual(implicit_propose["type"], "error")
+        self.assertIn("idea_brief_propose", implicit_propose["message"])
+
         shown = await handle_command({
             "cmd": "idea_brief_show",
             "group": "Torque",

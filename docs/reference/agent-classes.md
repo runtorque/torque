@@ -202,9 +202,14 @@ thinking mode, not a new runtime kind and not an execution authority.
 Creative can read same-group product context, Planning
 Areas/Initiatives, decisions, relevant recent context, and Thinking artifacts.
 It can create/update only its own Scratchpad notes and Mind Maps through
-`architect_thinking_*` wrappers. Proposal outputs use existing product-safe
-wrappers: proposed decisions, queued/unassigned product task proposals,
-product-anchored peer messages, and product-scoped user ask/message paths.
+`architect_thinking_*` wrappers. It can draft, refine, park, archive, and
+explicitly propose only its own Idea Briefs through
+`architect_product_idea_brief_*` wrappers; proposing an Idea Brief is
+review-only and never creates tasks, assigns Engineers/Workers, dispatches
+work, accepts decisions, merges, or deploys. Other proposal outputs use
+existing product-safe wrappers: proposed decisions, queued/unassigned product
+task proposals, product-anchored peer messages, and product-scoped user
+ask/message paths.
 
 Its compiled policy explicitly denies hire/Engineer management, Worker
 dispatch, execution task control, direct Engineer/Worker messaging,
