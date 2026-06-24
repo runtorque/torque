@@ -30,6 +30,11 @@ from .db import canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
 from .direct_message_mirrors import save_direct_ask_mirror
+from .idea_briefs import (
+    IDEA_BRIEF_PROPOSAL_SCOPE,
+    idea_brief_contract_metadata,
+    idea_brief_is_archived,
+)
 from .ai_recall import normalize_recall_limit, semantic_recall_payload
 from .mcp_retry import (
     derive_idempotency_key,
@@ -4766,6 +4771,22 @@ def _product_initiative_ref(state, caller_id: str,
     return initiative_id, ""
 
 
+def _product_idea_brief_ref(state, caller_id: str,
+                            brief_ref: str) -> tuple[str, dict | None, str]:
+    caller = state.agents.get(str(caller_id or "").strip())
+    group = str(getattr(caller, "group", "") or "").strip()
+    brief_id = state.resolve_idea_brief_id(brief_ref, group=group)
+    if not brief_id:
+        return "", None, "Idea Brief not found"
+    brief = state.load_idea_brief(brief_id)
+    if (
+            not brief
+            or _idea_brief_item_group(brief) != group
+            or idea_brief_is_archived(brief)):
+        return "", None, "Idea Brief not found"
+    return brief_id, brief, ""
+
+
 def _product_initiative_read_json(state, caller_id: str,
                                   args: dict, *, show: bool) -> tuple[str, bool]:
     """Read broad same-group initiatives with product-scoped link detail."""
@@ -4929,6 +4950,25 @@ def _normalize_product_context(
             "slug": str((initiative or {}).get("slug", "") or ""),
         })
 
+    idea_brief_ids = []
+    idea_brief_snapshots = []
+    for brief_ident in _dedupe_strings(args.get("context_idea_brief_ids", [])):
+        brief_id, brief, brief_error = _product_idea_brief_ref(
+            state,
+            caller_id,
+            brief_ident,
+        )
+        if not brief_id:
+            return {}, brief_error
+        idea_brief_ids.append(brief_id)
+        idea_brief_snapshots.append({
+            "id": brief_id,
+            "title": str((brief or {}).get("title", "") or ""),
+            "slug": str((brief or {}).get("slug", "") or ""),
+            "status": str((brief or {}).get("status", "") or ""),
+            "caller_owned": _idea_brief_owned_by_caller(brief, caller_id),
+        })
+
     context_summary = str(args.get("context_summary", "") or "").strip()
     return {
         "context_task_ids": task_ids,
@@ -4940,6 +4980,7 @@ def _normalize_product_context(
                 "marker": _PRODUCT_CONTEXT_MARKER,
                 "area_ids": area_ids,
                 "initiative_ids": initiative_ids,
+                "idea_brief_ids": idea_brief_ids,
                 "scope": "product_manager_wave_4b",
             },
             "tasks": task_snapshots,
@@ -4947,6 +4988,7 @@ def _normalize_product_context(
             "decisions": decision_snapshots,
             "areas": area_snapshots,
             "initiatives": initiative_snapshots,
+            "idea_briefs": idea_brief_snapshots,
         },
     }, ""
 
@@ -4959,6 +5001,7 @@ def _product_context_anchor_count(context: dict) -> int:
         + len(list((context or {}).get("context_decision_ids", []) or []))
         + len(list(product.get("area_ids", []) or []))
         + len(list(product.get("initiative_ids", []) or []))
+        + len(list(product.get("idea_brief_ids", []) or []))
     )
 
 
@@ -4967,7 +5010,7 @@ def _require_product_peer_anchor(context: dict, *, tool_name: str) -> str:
         return ""
     return (
         f"{tool_name} requires at least one product-scope anchor "
-        "(decision, task proposal, Area, or Initiative)"
+        "(Idea Brief, decision, task proposal, Area, or Initiative)"
     )
 
 
@@ -4977,7 +5020,7 @@ def _require_product_ack_anchor(ack_required: bool, context: dict) -> str:
     if _product_context_anchor_count(context) <= 0:
         return (
             "ack_required=true requires comm.product_ack_request plus at least "
-            "one product-scope anchor (decision, task proposal, Area, or Initiative)"
+            "one product-scope anchor (Idea Brief, decision, task proposal, Area, or Initiative)"
         )
     return ""
 
@@ -5652,6 +5695,241 @@ async def _architect_thinking_tool(
         return _compact_json({"type": "thinking_mind_map_link_updated", "link": updated}), False
 
     return f"Unknown architect thinking tool: {tool_name}", True
+
+
+def _idea_brief_item_group(item: dict | None) -> str:
+    return str((item or {}).get("group_name", (item or {}).get("group", "")) or "").strip()
+
+
+def _idea_brief_owned_by_caller(item: dict | None, caller_id: str) -> bool:
+    return (
+        str((item or {}).get("created_by_kind", "") or "").strip() == "architect"
+        and str((item or {}).get("created_by_id", "") or "").strip()
+        == str(caller_id or "").strip()
+    )
+
+
+def _with_idea_brief_owner_flag(item: dict | None, caller_id: str) -> dict:
+    payload = dict(item or {})
+    payload["caller_owned"] = _idea_brief_owned_by_caller(payload, caller_id)
+    return payload
+
+
+def _idea_brief_ref_from_args(args: dict) -> str:
+    return str(
+        (args or {}).get("idea_brief", "")
+        or (args or {}).get("brief", "")
+        or (args or {}).get("brief_id", "")
+        or (args or {}).get("idea_brief_id", "")
+        or (args or {}).get("id", "")
+        or ""
+    ).strip()
+
+
+def _resolve_idea_brief_for_caller(state, caller_group: str, args: dict, *,
+                                   include_archived: bool = False
+                                   ) -> tuple[str, dict | None, str]:
+    ident = _idea_brief_ref_from_args(args)
+    if not ident:
+        return "", None, "idea_brief is required"
+    brief_id = state.resolve_idea_brief_id(ident, group=caller_group)
+    brief = state.load_idea_brief(brief_id)
+    if not brief or _idea_brief_item_group(brief) != caller_group:
+        return "", None, "Idea Brief not found"
+    if idea_brief_is_archived(brief) and not include_archived:
+        return "", None, "Idea Brief is archived"
+    return str(brief.get("id", "") or ""), brief, ""
+
+
+def _require_caller_owned_idea_brief(item: dict | None, caller_id: str) -> str:
+    if _idea_brief_owned_by_caller(item, caller_id):
+        return ""
+    return "Idea Brief is not caller-owned by this architect"
+
+
+def _idea_brief_patch_from_args(args: dict) -> dict:
+    allowed = {
+        "title",
+        "problem_opportunity",
+        "why_it_matters",
+        "proposed_shape",
+        "smallest_useful_version",
+        "risks_tradeoffs",
+        "open_questions",
+        "status",
+        "thinking_links",
+        "source_context",
+    }
+    return {key: args[key] for key in allowed if key in args}
+
+
+async def _architect_product_idea_brief_tool(
+        tool_name: str,
+        state,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[str, bool]:
+    args = dict(args or {})
+    group, group_error = _thinking_group_for_caller(caller_group, args)
+    if group_error:
+        return group_error, True
+    include_archived = _thinking_bool_arg(args, "include_archived", False)
+
+    if tool_name == "product_idea_brief_list":
+        try:
+            briefs = [
+                _with_idea_brief_owner_flag(brief, caller_id)
+                for brief in state.list_idea_briefs(
+                    group=group,
+                    status=str(args.get("status", "") or ""),
+                    include_archived=include_archived,
+                    limit=_thinking_limit(args),
+                )
+            ]
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_list",
+            "group": group,
+            "idea_briefs": briefs,
+            **idea_brief_contract_metadata(),
+        }), False
+
+    if tool_name == "product_idea_brief_show":
+        _brief_id, brief, error = _resolve_idea_brief_for_caller(
+            state,
+            group,
+            args,
+            include_archived=include_archived,
+        )
+        if error:
+            return error, True
+        payload = _with_idea_brief_owner_flag(brief, caller_id)
+        payload["type"] = "product_idea_brief"
+        payload.update(idea_brief_contract_metadata())
+        return _compact_json(payload), False
+
+    if tool_name == "product_idea_brief_create":
+        problem = str(args.get("problem_opportunity", "") or "").strip()
+        if not problem:
+            return "problem_opportunity is required", True
+        patch = _idea_brief_patch_from_args(args)
+        patch.update({
+            "group": group,
+            "created_by_kind": "architect",
+            "created_by_id": str(caller_id or "").strip(),
+            "updated_by_kind": "architect",
+            "updated_by_id": str(caller_id or "").strip(),
+        })
+        try:
+            brief = await state.create_idea_brief_async(patch)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_created",
+            "idea_brief": _with_idea_brief_owner_flag(brief, caller_id),
+            **idea_brief_contract_metadata(),
+        }), False
+
+    brief_id, brief, error = _resolve_idea_brief_for_caller(
+        state,
+        group,
+        args,
+        include_archived=(include_archived or tool_name == "product_idea_brief_archive"),
+    )
+    if error:
+        return error, True
+    owner_error = _require_caller_owned_idea_brief(brief, caller_id)
+    if owner_error:
+        return owner_error, True
+
+    if tool_name == "product_idea_brief_update":
+        patch = _idea_brief_patch_from_args(args)
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = str(caller_id or "").strip()
+        try:
+            updated = await state.update_idea_brief_async(brief_id, patch)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_updated",
+            "idea_brief": _with_idea_brief_owner_flag(updated, caller_id),
+            **idea_brief_contract_metadata(),
+        }), False
+
+    if tool_name == "product_idea_brief_refine":
+        patch = _idea_brief_patch_from_args(args)
+        if "refinement_note" in args:
+            patch["refinement_note"] = args.get("refinement_note", "")
+        patch["updated_by_kind"] = "architect"
+        patch["updated_by_id"] = str(caller_id or "").strip()
+        try:
+            refined = await state.refine_idea_brief_async(brief_id, patch)
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_refined",
+            "idea_brief": _with_idea_brief_owner_flag(refined, caller_id),
+            **idea_brief_contract_metadata(),
+        }), False
+
+    if tool_name == "product_idea_brief_park":
+        try:
+            parked = await state.park_idea_brief_async(
+                brief_id,
+                parked_by_kind="architect",
+                parked_by_id=str(caller_id or "").strip(),
+                reason=str(args.get("reason", "") or ""),
+            )
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_parked",
+            "idea_brief": _with_idea_brief_owner_flag(parked, caller_id),
+            **idea_brief_contract_metadata(),
+        }), False
+
+    if tool_name == "product_idea_brief_archive":
+        try:
+            archived = await state.archive_idea_brief_async(
+                brief_id,
+                archived_by_kind="architect",
+                archived_by_id=str(caller_id or "").strip(),
+                reason=str(args.get("reason", "") or ""),
+            )
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_archived",
+            "idea_brief": _with_idea_brief_owner_flag(archived, caller_id),
+            **idea_brief_contract_metadata(),
+        }), False
+
+    if tool_name in {"product_idea_brief_propose", "product_idea_brief_promote"}:
+        try:
+            proposed = await state.propose_idea_brief_async(
+                brief_id,
+                proposed_by_kind="architect",
+                proposed_by_id=str(caller_id or "").strip(),
+                note=str(args.get("note", args.get("proposal_note", "")) or ""),
+                review_target=str(args.get("review_target", "") or ""),
+            )
+        except ValueError as exc:
+            return str(exc), True
+        return _compact_json({
+            "type": "product_idea_brief_proposed",
+            "idea_brief": _with_idea_brief_owner_flag(proposed, caller_id),
+            "review_scope": IDEA_BRIEF_PROPOSAL_SCOPE,
+            "proposal": proposed.get("proposal", {}) if proposed else {},
+            "caveat": (
+                "Marked proposed for product-safe review only; no task, "
+                "decision acceptance, assignment, dispatch, merge, or deploy "
+                "was created."
+            ),
+            **idea_brief_contract_metadata(),
+        }), False
+
+    return f"Unknown architect product Idea Brief tool: {tool_name}", True
 
 
 def _validate_architect_peer_message_length(
@@ -8939,6 +9217,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args,
         )
 
+    if caller_kind == "architect" and tool_name.startswith("product_idea_brief_"):
+        return await _architect_product_idea_brief_tool(
+            tool_name,
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+
     if caller_kind == "architect" and tool_name == "product_board_summary":
         return _product_board_summary_json(real_state, caller_id, args)
 
@@ -9259,7 +9546,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if context_error:
                 return context_error, True
             return "context_engineer_ids are not supported for Product Manager wrappers", True
-        has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_summary"))
+        has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_idea_brief_ids", "context_summary"))
         if has_explicit_context:
             context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)
             if context_error:

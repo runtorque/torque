@@ -2259,11 +2259,11 @@ function _agentClassCreativeArchitectCompactPolicyHtml(item) {
   html += '<span>Architect-derived</span>';
   html += '</div>';
   html += '<div class="agent-class-compact-note">'
-    + 'Curated ideation partner for exploring possibilities with Thinking artifacts, product context, and small shippable proposals.'
+    + 'Curated ideation partner for exploring possibilities with Thinking artifacts, Idea Briefs, product context, and small shippable proposals.'
     + '</div>';
   html += '<div class="agent-class-compact-access">'
-    + '<div><span>Allowed</span><strong>same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad/Mind Map writes, proposed decisions, queued task ideas, user + product-peer messages</strong></div>'
-    + '<div><span>Denied</span><strong>hire/assign/dispatch, execution task control, merge/deploy/admin/settings, direct Engineer/Worker messages, accepted decisions, arbitrary tool access, connector governance, Idea Brief Generator</strong></div>'
+    + '<div><span>Allowed</span><strong>same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad/Mind Map writes, caller-owned Idea Brief drafts/refinements, proposed decisions, queued task ideas, user + product-peer messages</strong></div>'
+    + '<div><span>Denied</span><strong>hire/assign/dispatch, execution task control, merge/deploy/admin/settings, direct Engineer/Worker messages, accepted decisions, arbitrary tool access, connector governance</strong></div>'
     + '</div>';
   html += '</div>';
   return html;

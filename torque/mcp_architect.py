@@ -1698,6 +1698,46 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "task_id": {"type": "string"}, "engineer_id": {"type": "string"}}, "required": ["id", "task_id"]},
     },
     {
+        "name": "architect_product_idea_brief_list",
+        "description": "List same-group Idea Brief proposal artifacts visible to this product/Creative Architect; includes caller_owned for safe update decisions.",
+        "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "proposed", "parked", "archived"]}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
+    },
+    {
+        "name": "architect_product_idea_brief_show",
+        "description": "Show one same-group Idea Brief by id or slug without granting execution authority.",
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
+    },
+    {
+        "name": "architect_product_idea_brief_create",
+        "description": "Create a caller-owned Idea Brief draft linked to allowed Thinking artifacts; proposal-only and never dispatches work.",
+        "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}}, "required": ["problem_opportunity"]},
+    },
+    {
+        "name": "architect_product_idea_brief_update",
+        "description": "Update a caller-owned Idea Brief only; status may remain draft/proposed/parked but archive uses the explicit archive tool.",
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "parked"]}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
+    },
+    {
+        "name": "architect_product_idea_brief_refine",
+        "description": "Refine a caller-owned Idea Brief with field patches and an optional refinement note; no execution side effects.",
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "refinement_note": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
+    },
+    {
+        "name": "architect_product_idea_brief_park",
+        "description": "Park a caller-owned Idea Brief for later; keeps it durable and does not create tasks or decisions.",
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "reason": {"type": "string"}, "group": {"type": "string"}}},
+    },
+    {
+        "name": "architect_product_idea_brief_archive",
+        "description": "Archive a caller-owned Idea Brief; this is a terminal visibility change, not an execution action.",
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "reason": {"type": "string"}, "group": {"type": "string"}}},
+    },
+    {
+        "name": "architect_product_idea_brief_propose",
+        "description": "Explicitly mark a caller-owned Idea Brief proposed for product-safe review. It creates no task, assignment, dispatch, accepted decision, merge, or deploy action.",
+        "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "note": {"type": "string"}, "proposal_note": {"type": "string"}, "review_target": {"type": "string"}, "group": {"type": "string"}}},
+    },
+    {
         "name": "architect_product_peer_list",
         "description": "List selected same-group Architect/product-profile peers eligible for product-peer messages.",
         "inputSchema": {"type": "object", "properties": {"include_dismissed": {"type": "boolean"}}},
@@ -1705,7 +1745,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_product_peer_message",
         "description": "Send a product-peer marked message to an eligible same-group Architect/product-profile peer. ack_required requires a product-scope anchor.",
-        "inputSchema": {"type": "object", "properties": {"architect_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["architect_id", "message"]},
+        "inputSchema": {"type": "object", "properties": {"architect_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["architect_id", "message"]},
     },
     {
         "name": "architect_product_peer_inbox",
@@ -1715,17 +1755,17 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_product_peer_reply",
         "description": "Reply inside a product-peer marked thread only. ack_required requires a product-scope anchor.",
-        "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message_id", "message"]},
+        "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message_id", "message"]},
     },
     {
         "name": "architect_product_message_user",
         "description": "Send a PM-safe direct user message after validating product-scoped context attachments.",
-        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string"}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
+        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string"}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
     },
     {
         "name": "architect_product_ask_user",
         "description": "Create a blocking PM-safe user ask after validating product-scoped context attachments.",
-        "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["question"]},
+        "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["question"]},
     },
     {
         "name": "architect_product_journal",

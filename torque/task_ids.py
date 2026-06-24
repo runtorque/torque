@@ -19,6 +19,9 @@ _SCRATCHPAD_NOTE_ID_RE = re.compile(
 _MIND_MAP_ID_RE = re.compile(
     r"^(?P<group_prefix>[A-Z][A-Z0-9_]*)-M:(?P<number>[1-9][0-9]*)$"
 )
+_IDEA_BRIEF_ID_RE = re.compile(
+    r"^(?P<group_prefix>[A-Z][A-Z0-9_]*)-IB:(?P<number>[1-9][0-9]*)$"
+)
 _TASK_ID_RE = re.compile(
     r"^(?P<prefix>[A-Z][A-Z0-9_]*):(?P<root>[1-9][0-9]*)(?::(?P<child>[1-9][0-9]*))?$"
 )
@@ -129,6 +132,29 @@ def is_canonical_mind_map_id(map_id: str) -> bool:
 
 def format_mind_map_id(group_prefix: str, number: int) -> str:
     return f"{normalize_group_prefix(group_prefix)}-M:{int(number)}"
+
+
+def parse_idea_brief_id(brief_id: str) -> dict | None:
+    """Parse a canonical Idea Brief ID.
+
+    Idea Brief IDs use ``<GROUP>-IB:<n>`` so proposal artifacts remain
+    distinct from Board tasks, Planning objects, and Thinking artifacts.
+    """
+    match = _IDEA_BRIEF_ID_RE.match(str(brief_id or "").strip())
+    if not match:
+        return None
+    return {
+        "group_prefix": match.group("group_prefix"),
+        "number": int(match.group("number")),
+    }
+
+
+def is_canonical_idea_brief_id(brief_id: str) -> bool:
+    return parse_idea_brief_id(brief_id) is not None
+
+
+def format_idea_brief_id(group_prefix: str, number: int) -> str:
+    return f"{normalize_group_prefix(group_prefix)}-IB:{int(number)}"
 
 
 def parse_task_id(task_id: str) -> dict | None:
