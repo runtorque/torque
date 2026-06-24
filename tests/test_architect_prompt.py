@@ -23,6 +23,14 @@ class ArchitectPromptTests(unittest.TestCase):
         _install_aiohttp_stub()
         self.architect_mod = importlib.import_module("torque.architect")
         self.architect_mod = importlib.reload(self.architect_mod)
+        self.agent_classes_mod = importlib.import_module("torque.agent_classes")
+        self.agent_classes_mod = importlib.reload(self.agent_classes_mod)
+
+    def _class_prompt_context(self, class_id: str):
+        definition = self.agent_classes_mod.agent_class_definition_by_id(class_id)
+        self.assertIsNotNone(definition)
+        preview = self.agent_classes_mod.enriched_agent_class_preview(definition)
+        return preview, preview["agent_profile"]
 
     def test_prompt_includes_dispatch_freely_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
@@ -181,3 +189,101 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("verification or\n   test expectations", prompt)
         self.assertIn("required handoff evidence before Done/merge", prompt)
         self.assertIn("when\n   to ask or escalate", prompt)
+
+    def test_full_architect_class_prompt_retains_management_guidance(self):
+        class_snapshot, profile_snapshot = self._class_prompt_context(
+            "default-architect"
+        )
+
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Torque",
+            agent_class_snapshot=class_snapshot,
+            agent_profile_snapshot=profile_snapshot,
+        )
+
+        self.assertIn("Your role is to own product-level scope", prompt)
+        self.assertIn("## Available tools", prompt)
+        self.assertIn("architect_engineer_hire", prompt)
+        self.assertIn("architect_task_create", prompt)
+        self.assertIn("architect_engineer_message", prompt)
+        self.assertIn("engineer_merge", prompt)
+        self.assertIn("Hiring discipline", prompt)
+        self.assertIn("Routing over instructing", prompt)
+
+    def test_product_manager_prompt_uses_pm_safe_authority_not_full_architect_guidance(self):
+        class_snapshot, profile_snapshot = self._class_prompt_context(
+            "product-manager"
+        )
+
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Torque",
+            SimpleNamespace(
+                architect_autonomy_mode="dispatch_after_confirm",
+                architect_custom_instructions="",
+            ),
+            agent_class_snapshot=class_snapshot,
+            agent_profile_snapshot=profile_snapshot,
+        )
+
+        self.assertIn("Product Manager", prompt)
+        self.assertIn("proposal-only product authority", prompt)
+        self.assertIn("architect_product_task_propose", prompt)
+        self.assertIn("architect_product_decision_create", prompt)
+        self.assertIn("architect_product_peer_*", prompt)
+        self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
+        self.assertIn("Unavailable powers in this session", prompt)
+        self.assertIn("accepted-decision authority", prompt)
+        self.assertNotIn("## Shared memory", prompt)
+        self.assertNotIn("architect_engineer_hire", prompt)
+        self.assertNotIn("architect_pending_hire_status", prompt)
+        self.assertNotIn("architect_engineer_message", prompt)
+        self.assertNotIn("architect_task_create", prompt)
+        self.assertNotIn("architect_task_reassign", prompt)
+        self.assertNotIn("architect_task_move", prompt)
+        self.assertNotIn("architect_deploy_state", prompt)
+        self.assertNotIn("engineer_merge", prompt)
+        self.assertNotIn("Hiring discipline", prompt)
+        self.assertNotIn("Routing over instructing", prompt)
+        self.assertNotIn(
+            "permission to route work, reassign scope, and message engineers",
+            prompt,
+        )
+
+    def test_creative_prompt_emphasizes_thinking_and_proposals_without_management_guidance(self):
+        class_snapshot, profile_snapshot = self._class_prompt_context(
+            "creative-architect"
+        )
+
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Torque",
+            SimpleNamespace(
+                architect_autonomy_mode="ask_always",
+                architect_journal_checkpoint_frequency="manual_only",
+                architect_custom_instructions="",
+            ),
+            agent_class_snapshot=class_snapshot,
+            agent_profile_snapshot=profile_snapshot,
+        )
+
+        self.assertIn("Creative Architect", prompt)
+        self.assertIn("ideation and product-discovery partner", prompt)
+        self.assertIn("Diverge first", prompt)
+        self.assertIn("Scratchpad/Mind Map", prompt)
+        self.assertIn("architect_thinking_scratchpad_*", prompt)
+        self.assertIn("architect_thinking_mind_map_*", prompt)
+        self.assertIn("architect_product_task_propose", prompt)
+        self.assertIn("architect_product_decision_create", prompt)
+        self.assertIn("architect_product_peer_*", prompt)
+        self.assertIn("Autonomy mode: Ask always (authority-bounded)", prompt)
+        self.assertIn("checkpoint with the visible private journal wrapper", prompt)
+        self.assertNotIn("architect_engineer_hire", prompt)
+        self.assertNotIn("architect_pending_hire_status", prompt)
+        self.assertNotIn("architect_engineer_message", prompt)
+        self.assertNotIn("architect_task_create", prompt)
+        self.assertNotIn("architect_task_reassign", prompt)
+        self.assertNotIn("architect_task_move", prompt)
+        self.assertNotIn("architect_deploy_state", prompt)
+        self.assertNotIn("engineer_merge", prompt)
+        self.assertNotIn("Hiring discipline", prompt)
+        self.assertNotIn("Routing over instructing", prompt)
+        self.assertNotIn("active engineers, open scope, pending hires", prompt)

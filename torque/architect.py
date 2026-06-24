@@ -11,8 +11,13 @@ surfaces stay structurally comparable.
 from __future__ import annotations
 
 from .server_prompts import (
+    build_torque_system_prompt,
     build_owner_user_message_guidance,
     build_shared_memory_guidance,
+)
+from .agent_profiles import (
+    BASE_KIND_CEILINGS,
+    TOOL_CATEGORY_REQUIREMENTS,
 )
 from .state import (
     normalize_architect_autonomy_mode,
@@ -296,6 +301,387 @@ automatically close scope for you.
 """
 
 
+_RESTRICTED_TORQUE_PREAMBLE = """\
+# Torque Agent
+
+You are running inside Torque, an AI agent orchestration system.
+Torque tracks durable product context, board state, decisions, Thinking
+artifacts, and messages for your group.
+
+## Restricted Agent Class boundary
+
+Your Architect-derived Agent Class/Profile projects a narrower MCP tool
+surface before side effects. Use only the tools actually visible in this
+session. If an instruction mentions a tool or workflow that is not visible,
+treat that power as unavailable and use a proposal, product-peer message,
+or user ask/message instead.
+
+Start with `torque_context()` when it is visible to confirm your identity,
+class, and group. For user-facing replies, use the visible product/user
+message tool rather than relying on free-text terminal output.
+"""
+
+
+def _safe_dict(value) -> dict:
+    return dict(value or {}) if isinstance(value, dict) else {}
+
+
+def _metadata_from_context(class_snapshot: dict, profile_snapshot: dict) -> dict:
+    metadata = _safe_dict(class_snapshot.get("metadata"))
+    profile_metadata = _safe_dict(profile_snapshot.get("metadata"))
+    for key, value in profile_metadata.items():
+        metadata.setdefault(key, value)
+    generated_by = _safe_dict(profile_metadata.get("generated_by_agent_class"))
+    if generated_by:
+        metadata.setdefault("generated_by_agent_class", generated_by)
+    return metadata
+
+
+def _profile_capability_atoms(profile_snapshot: dict) -> set[str]:
+    grants = profile_snapshot.get("grants")
+    if isinstance(grants, list):
+        return {
+            str(atom or "").strip()
+            for atom in grants
+            if str(atom or "").strip()
+        }
+    atoms: set[str] = set()
+    capabilities = profile_snapshot.get("capabilities")
+    if isinstance(capabilities, list):
+        for item in capabilities:
+            if isinstance(item, dict):
+                atom = str(item.get("atom", "") or "").strip()
+            else:
+                atom = str(item or "").strip()
+            if atom:
+                atoms.add(atom)
+    return atoms
+
+
+def _category_status_map(profile_snapshot: dict, class_snapshot: dict) -> dict[str, str]:
+    categories: dict[str, str] = {}
+    for source in (profile_snapshot, _safe_dict(class_snapshot.get("internal_policy"))):
+        for item in list(source.get("projected_tool_categories", []) or []):
+            if not isinstance(item, dict):
+                continue
+            category = str(item.get("category", "") or "").strip()
+            status = str(item.get("status", "") or "").strip()
+            if category and status:
+                categories[category] = status
+    return categories
+
+
+def _architect_prompt_authority_context(
+        *,
+        architect_cell=None,
+        agent_class_snapshot: dict | None = None,
+        agent_profile_snapshot: dict | None = None) -> dict:
+    """Return normalized capability/authority facts for prompt shaping.
+
+    Missing context intentionally means "legacy/full Architect" so existing
+    callers that do not launch through Agent Classes preserve byte-for-byte
+    full Architect guidance.
+    """
+
+    class_snapshot = _safe_dict(agent_class_snapshot)
+    profile_snapshot = _safe_dict(agent_profile_snapshot)
+    if architect_cell is not None:
+        if not class_snapshot:
+            class_snapshot = _safe_dict(
+                getattr(architect_cell, "effective_agent_class_snapshot", {})
+            )
+        if not profile_snapshot:
+            profile_snapshot = _safe_dict(
+                getattr(architect_cell, "effective_agent_profile_snapshot", {})
+            )
+    if not profile_snapshot:
+        nested = class_snapshot.get("agent_profile")
+        if isinstance(nested, dict):
+            profile_snapshot = _safe_dict(nested)
+
+    class_id = str(class_snapshot.get("id", "") or "").strip()
+    profile_id = str(profile_snapshot.get("id", "") or "").strip()
+    profile_base_kind = str(
+        profile_snapshot.get("base_kind", class_snapshot.get("base_kind", ""))
+        or ""
+    ).strip()
+    status = str(
+        profile_snapshot.get("status", class_snapshot.get("status", ""))
+        or ""
+    ).strip().lower()
+    lifecycle = str(
+        class_snapshot.get("lifecycle", profile_snapshot.get("lifecycle", ""))
+        or ""
+    ).strip().lower()
+    grants = _profile_capability_atoms(profile_snapshot)
+    categories = _category_status_map(profile_snapshot, class_snapshot)
+
+    # No effective profile/class context is the historical full Architect path.
+    no_context = not class_snapshot and not profile_snapshot
+    architect_ceiling = BASE_KIND_CEILINGS.get("architect", frozenset())
+    full_by_grants = bool(grants) and grants == set(architect_ceiling)
+    full_by_status = status == "full" and lifecycle in {"", "stable"}
+    is_full = no_context or (
+        profile_base_kind == "architect"
+        and (full_by_grants or (full_by_status and not grants))
+    )
+
+    metadata = _metadata_from_context(class_snapshot, profile_snapshot)
+    generated_by = _safe_dict(metadata.get("generated_by_agent_class"))
+    archetype = str(metadata.get("archetype", "") or "").strip()
+    source_class_id = str(generated_by.get("id", "") or "").strip()
+    label = str(
+        class_snapshot.get(
+            "primary_identity_label",
+            class_snapshot.get("display_name", ""),
+        )
+        or profile_snapshot.get("display_name", "")
+        or class_id
+        or "Restricted Architect"
+    ).strip()
+
+    is_product_manager = (
+        class_id == "product-manager"
+        or source_class_id == "product-manager"
+        or archetype == "product_manager"
+        or profile_id == "product-manager-draft"
+        or "product-manager" in profile_id
+    )
+    is_creative = (
+        class_id == "creative-architect"
+        or source_class_id == "creative-architect"
+        or archetype == "creative_architect"
+        or "creative-architect" in profile_id
+    )
+
+    return {
+        "class_id": class_id,
+        "profile_id": profile_id,
+        "label": label,
+        "status": status or ("full" if is_full else "restricted"),
+        "lifecycle": lifecycle,
+        "grants": grants,
+        "categories": categories,
+        "is_full": is_full,
+        "is_product_manager": is_product_manager,
+        "is_creative": is_creative,
+    }
+
+
+def _has_capability(authority: dict, atom: str) -> bool:
+    return atom in set(authority.get("grants") or set())
+
+
+def _has_capabilities(authority: dict, *atoms: str) -> bool:
+    grants = set(authority.get("grants") or set())
+    return set(atoms).issubset(grants)
+
+
+def _allows_category(authority: dict, category: str) -> bool:
+    if authority.get("is_full"):
+        return True
+    categories = dict(authority.get("categories") or {})
+    status = categories.get(category)
+    if status:
+        return status == "allowed"
+    required = TOOL_CATEGORY_REQUIREMENTS.get(category)
+    if not required:
+        return False
+    grants = set(authority.get("grants") or set())
+    return set(required).issubset(grants)
+
+
+def _restricted_identity_sentence(authority: dict) -> str:
+    label = authority.get("label") or "Restricted Architect"
+    if authority.get("is_creative"):
+        return (
+            f"You are the {label} for the \"{{group}}\" group in Torque: "
+            "an ideation and product-discovery partner, not an execution "
+            "authority or a source of accepted plans."
+        )
+    if authority.get("is_product_manager"):
+        return (
+            f"You are the {label} for the \"{{group}}\" group in Torque: "
+            "a PM-safe planning and intake agent with proposal-only product "
+            "authority."
+        )
+    return (
+        f"You are the {label} for the \"{{group}}\" group in Torque: an "
+        "Architect-derived agent with a restricted, projected tool surface."
+    )
+
+
+def _restricted_tool_lines(authority: dict) -> list[str]:
+    lines = [
+        "- Use only MCP tools visible in this session; profile projection is the source of truth.",
+        "- Context: use `torque_context()` when visible, then product/context reads that are projected for your class.",
+    ]
+    if _allows_category(authority, "planning_reads"):
+        lines.append(
+            "- Product reads: use visible board/task, Area, Initiative, and Decision read tools; Product/Creative classes should prefer `architect_product_*` reads when present."
+        )
+    if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
+        lines.append(
+            "- Thinking workspace: use `architect_thinking_scratchpad_*` and `architect_thinking_mind_map_*`; create/update only caller-owned Thinking artifacts."
+        )
+    if _allows_category(authority, "pm_queued_tasks"):
+        lines.append(
+            "- Task proposals: use `architect_product_task_propose` for queued, unassigned, non-dispatched product task proposals."
+        )
+    if _allows_category(authority, "pm_decisions"):
+        lines.append(
+            "- Decision proposals: use `architect_product_decision_create`, `architect_product_decision_update`, and `architect_product_decision_link` for proposed decisions only."
+        )
+    if _allows_category(authority, "peer_architect_comm"):
+        lines.append(
+            "- Product-peer discussion: use visible peer tools; Product/Creative classes should use `architect_product_peer_*` wrappers and keep acknowledgement requests anchored to product context."
+        )
+    if _has_capability(authority, "comm.user_message") or _has_capability(authority, "comm.user_ask"):
+        lines.append(
+            "- User communication: use visible product/user ask or message tools for blocking decisions and non-blocking status."
+        )
+    if _has_capability(authority, "journal.private"):
+        lines.append(
+            "- Recovery notes: use the visible private journal wrapper for observations, plans, and checkpoints."
+        )
+    if _allows_category(authority, "execution_task_control"):
+        lines.append(
+            "- Executable task control: if explicitly visible, use it only inside this class's policy and do not assume Worker dispatch or merge authority."
+        )
+    if _allows_category(authority, "engineer_roster"):
+        lines.append(
+            "- Engineer roster/hiring: if explicitly visible, follow user-approval gates before treating a staffing change as live."
+        )
+    return lines
+
+
+def _restricted_unavailable_line(authority: dict) -> str:
+    unavailable: list[str] = []
+    if not _allows_category(authority, "engineer_roster"):
+        unavailable.append("Engineer hiring/roster management")
+    if not _allows_category(authority, "engineer_worker_comm"):
+        unavailable.append("direct Engineer/Worker messaging or control")
+    if not _allows_category(authority, "execution_task_control"):
+        unavailable.append("executable task create/reassign/move/dispatch")
+    if not _allows_category(authority, "worker_dispatch"):
+        unavailable.append("Worker dispatch")
+    if not _allows_category(authority, "worktree_merge"):
+        unavailable.append("worktree merge/release")
+    if not _allows_category(authority, "deploy_admin"):
+        unavailable.append("deploy/restart/admin")
+    if not _allows_category(authority, "profile_admin"):
+        unavailable.append("settings/profile administration")
+    if not _has_capabilities(
+            authority,
+            "decision.accept",
+            "decision.create",
+            "decision.update",
+    ):
+        unavailable.append("accepted-decision authority")
+    if not unavailable:
+        return ""
+    return (
+        "- Unavailable powers in this session: "
+        + "; ".join(unavailable)
+        + ". Do not present these as workflows you can perform; capture the need as a proposal, user ask, or product-peer discussion instead."
+    )
+
+
+def _restricted_boot_lines(authority: dict) -> list[str]:
+    lines = [
+        "1. Confirm your class, group, and visible tools with `torque_context()` when available.",
+        "2. Read projected product context before proposing changes; prefer product-safe read wrappers when they are visible.",
+    ]
+    index = 3
+    if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
+        lines.append(
+            f"{index}. Use Scratchpad notes or Mind Maps to explore rough ideas before converting them into proposals."
+        )
+        index += 1
+    if _allows_category(authority, "pm_decisions"):
+        lines.append(
+            f"{index}. Re-read proposed decisions you own before drafting new or updated proposals."
+        )
+        index += 1
+    if _allows_category(authority, "peer_architect_comm"):
+        lines.append(
+            f"{index}. Check product-peer messages that require a reply before starting new discussions."
+        )
+        index += 1
+    lines.append(
+        f"{index}. Only then draft proposals, user asks/messages, or product-peer messages."
+    )
+    return lines
+
+
+def _restricted_operating_lines(authority: dict) -> list[str]:
+    lines = [
+        "1. **Authority boundary** — Tool visibility is authoritative. Do not try to route around denied tools with freeform instructions, terminal output, or raw MCP names.",
+        "2. **Proposal discipline** — Separate observations, inferences, options, risks, and non-goals. A proposal is not accepted until the user or an authorized product owner accepts it through normal Torque authority.",
+    ]
+    if authority.get("is_creative"):
+        lines.append(
+            "3. **Creative workflow** — Diverge first with several possibilities, capture rough exploration in Scratchpad/Mind Map artifacts, then converge on small shippable slices and decision points."
+        )
+    else:
+        lines.append(
+            "3. **Planning workflow** — Frame the problem, desired outcome, candidate task proposal, acceptance criteria, and open decisions before asking others to act."
+        )
+    next_index = 4
+    if _allows_category(authority, "pm_queued_tasks"):
+        lines.append(
+            f"{next_index}. **Task intake** — Product task proposals stay queued, unassigned, and non-dispatched; include enough context for an authorized Architect/Engineer to decide what to do next."
+        )
+        next_index += 1
+    if _allows_category(authority, "pm_decisions"):
+        lines.append(
+            f"{next_index}. **Decision proposals** — Keep decisions proposed-only unless accepted-decision authority is actually visible. Do not supersede or edit other owners' decisions as accepted truth."
+        )
+        next_index += 1
+    if _allows_category(authority, "peer_architect_comm"):
+        lines.append(
+            f"{next_index}. **Peer discussion** — Product-peer messages are for alignment, critique, and handoff context. Anchor them to product context and record durable outcomes as proposals."
+        )
+        next_index += 1
+    lines.append(
+        f"{next_index}. **Escalation** — When useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the authorized path instead of teaching the denied workflow."
+    )
+    return lines
+
+
+def _build_restricted_system_prompt(authority: dict, group: str) -> str:
+    unavailable = _restricted_unavailable_line(authority)
+    tool_lines = _restricted_tool_lines(authority)
+    if unavailable:
+        tool_lines.append(unavailable)
+    lines = [
+        _restricted_identity_sentence(authority).format(group=group),
+        "",
+        "Your job is to shape product understanding, options, and safe next-step proposals within the authority that your Agent Class/Profile actually grants.",
+        "",
+        "## Available tools and authority",
+        "",
+        *tool_lines,
+        "",
+        "## Core model",
+        "",
+        "- **Product context** is evidence you can read: tasks, Areas, Initiatives, Decisions, recent context, Thinking artifacts, and user/peer messages that your projected tools expose.",
+        "- **Proposal** is a non-binding task, decision, or direction candidate. Mark assumptions and acceptance criteria clearly; never imply it has already been approved.",
+        "- **Thinking artifacts** are for exploration and synthesis. Use them to keep rough reasoning visible without converting every idea into a task or decision.",
+        "- **User asks/messages** are the safe path for decisions or status that need the user's attention. Keep asks concrete and bounded.",
+        "- **Product peers** are for discussion and alignment with same-group Architect/product profiles when that communication surface is visible.",
+        "",
+        "## Session boot checklist",
+        "",
+        *_restricted_boot_lines(authority),
+        "",
+        "## Operating guidelines",
+        "",
+        *_restricted_operating_lines(authority),
+    ]
+    return "\n".join(lines).strip()
+
+
 # ---------------------------------------------------------------------------
 # Policy section
 # ---------------------------------------------------------------------------
@@ -365,12 +751,94 @@ def _checkpoint_policy_lines(frequency: str) -> list[str]:
     ]
 
 
-def _build_policy_section(architect_settings=None, group_settings=None) -> str:
+def _restricted_checkpoint_policy_lines(frequency: str) -> list[str]:
+    frequency = normalize_architect_journal_checkpoint_frequency(frequency)
+    mode, count = _checkpoint_frequency_parts(frequency)
+    summary = (
+        "current product question, evidence read, proposals drafted, "
+        "open assumptions, and next safe steps"
+    )
+    if frequency == "manual_only":
+        return [
+            "- Checkpoint reminder policy: Manual only — Torque will not add automatic checkpoint reminders to digests.",
+            f"- Still write a checkpoint with the visible private journal wrapper after major scope shifts; summarize {summary}.",
+        ]
+    if mode == "minutes":
+        return [
+            f"- Checkpoint reminder policy: Torque will remind you after {count} minute{'s' if count != 1 else ''} without a checkpoint while journal activity exists.",
+            f"- Checkpoints should use the visible private journal wrapper and summarize {summary}.",
+        ]
+    return [
+        f"- Checkpoint reminder policy: Torque will remind you after {count} non-checkpoint journal entr{'ies' if count != 1 else 'y'} without a checkpoint.",
+        f"- Checkpoints should use the visible private journal wrapper and summarize {summary}.",
+    ]
+
+
+def _build_restricted_policy_section(architect_settings=None,
+                                     group_settings=None,
+                                     authority: dict | None = None) -> str:
+    """Render autonomy settings without broadening restricted authority."""
+    del group_settings
+    if architect_settings is None:
+        return ""
+    authority = authority or {}
+    mode = normalize_architect_autonomy_mode(
+        getattr(architect_settings, "architect_autonomy_mode", "")
+    )
+    checkpoint_frequency = normalize_architect_journal_checkpoint_frequency(
+        getattr(
+            architect_settings,
+            "architect_journal_checkpoint_frequency",
+            "",
+        )
+    )
+    if mode == "dispatch_freely":
+        autonomy_lines = [
+            "- You may proceed with low-risk reads, ideation, proposals, and visible user/product-peer messages without routine confirmation.",
+            "- This does not grant execution authority: unavailable operations still require a proposal or user/authorized-peer path.",
+        ]
+    elif mode == "ask_always":
+        autonomy_lines = [
+            "- Ask before creating or changing proposals, sending product-peer messages, or making user-visible scope recommendations unless the user explicitly requested that exact action.",
+            "- You may read visible context and capture private notes that do not change product state.",
+        ]
+    else:
+        autonomy_lines = [
+            "- Proceed on clearly confirmed user direction and on follow-through already implied by active proposals or accepted decisions.",
+            "- Before widening product scope or asking others to act, surface the proposed plan through visible proposal/user/peer channels.",
+        ]
+    lines = [
+        "## Operating Policy",
+        f"Autonomy mode: {_autonomy_mode_label(mode)} (authority-bounded)",
+        f"Journal checkpoint cadence: {checkpoint_frequency}",
+        "",
+        (
+            "Apply this autonomy posture only inside the projected Agent "
+            f"Class authority for {authority.get('label') or 'this session'}:"
+        ),
+        *autonomy_lines,
+        *_restricted_checkpoint_policy_lines(checkpoint_frequency),
+        (
+            "- Tool-enforced gates and Agent Class/Profile restrictions still "
+            "apply regardless of autonomy mode."
+        ),
+    ]
+    return "\n".join(lines)
+
+
+def _build_policy_section(architect_settings=None, group_settings=None,
+                          authority: dict | None = None) -> str:
     """Render the architect-facing policy section.
 
     The settings are intentionally prompt-level guardrails. The daemon still
     enforces hard workflow/tool constraints such as user approval for hires.
     """
+    if authority and not authority.get("is_full"):
+        return _build_restricted_policy_section(
+            architect_settings,
+            group_settings,
+            authority,
+        )
     if architect_settings is None and group_settings is None:
         return ""
     mode = normalize_architect_autonomy_mode(
@@ -404,29 +872,77 @@ def _build_policy_section(architect_settings=None, group_settings=None) -> str:
 # Public builder
 # ---------------------------------------------------------------------------
 
+def build_architect_torque_preamble(*,
+                                    architect_cell=None,
+                                    agent_class_snapshot: dict | None = None,
+                                    agent_profile_snapshot: dict | None = None
+                                    ) -> str:
+    """Return the Torque preamble appropriate for this Architect authority."""
+
+    authority = _architect_prompt_authority_context(
+        architect_cell=architect_cell,
+        agent_class_snapshot=agent_class_snapshot,
+        agent_profile_snapshot=agent_profile_snapshot,
+    )
+    if authority.get("is_full"):
+        return build_torque_system_prompt(
+            include_shared_memory=False,
+        )
+    return _RESTRICTED_TORQUE_PREAMBLE.rstrip() + "\n"
+
+
 def build_architect_system_prompt(group: str,
                                   architect_settings=None,
                                   action_system_prompt: str = "",
                                   group_settings=None,
-                                  behavior_overlay_block: str = "") -> str:
+                                  behavior_overlay_block: str = "",
+                                  architect_cell=None,
+                                  agent_class_snapshot: dict | None = None,
+                                  agent_profile_snapshot: dict | None = None
+                                  ) -> str:
     """Assemble the architect boot prompt.
 
     Concatenates: base identity → shared memory guidance → action
     system_prompt → structured policy section → custom instructions.
     """
-    parts = [
-        _BASE_SYSTEM_PROMPT.format(group=group),
-        build_shared_memory_guidance(),
-        # Architects are user-created only, so their owner is always the
-        # user: surface the first substantive message to the user instead
-        # of only emitting it to the terminal.
-        build_owner_user_message_guidance("architect_message_user"),
-    ]
+    authority = _architect_prompt_authority_context(
+        architect_cell=architect_cell,
+        agent_class_snapshot=agent_class_snapshot,
+        agent_profile_snapshot=agent_profile_snapshot,
+    )
+    if authority.get("is_full"):
+        parts = [
+            _BASE_SYSTEM_PROMPT.format(group=group),
+            build_shared_memory_guidance(),
+            # Architects are user-created only, so their owner is always the
+            # user: surface the first substantive message to the user instead
+            # of only emitting it to the terminal.
+            build_owner_user_message_guidance("architect_message_user"),
+        ]
+    else:
+        parts = [_build_restricted_system_prompt(authority, group)]
+        if _has_capabilities(
+                authority,
+                "memory.read",
+                "memory.publish",
+                "memory.admin",
+        ):
+            parts.append(build_shared_memory_guidance())
+        if _has_capability(authority, "comm.user_message"):
+            parts.append(
+                build_owner_user_message_guidance(
+                    "architect_product_message_user"
+                )
+            )
 
     if action_system_prompt:
         parts.append(str(action_system_prompt).rstrip())
 
-    policy = _build_policy_section(architect_settings, group_settings)
+    policy = _build_policy_section(
+        architect_settings,
+        group_settings,
+        authority,
+    )
     if policy:
         parts.append(policy.rstrip())
 
