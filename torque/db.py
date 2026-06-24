@@ -7534,14 +7534,19 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not problem:
             raise ValueError("problem_opportunity is required")
         title = self._idea_brief_title(row)
+        status = normalize_idea_brief_status(
+            row.get("status", IDEA_BRIEF_DEFAULT_STATUS)
+        )
+        if status != IDEA_BRIEF_DEFAULT_STATUS:
+            raise ValueError(
+                "Idea Briefs are created as drafts; use idea_brief_park, "
+                "idea_brief_archive, or idea_brief_propose for lifecycle changes"
+            )
         brief_id = str(row.get("id", "") or "").strip()
         if not brief_id:
             brief_id = self.next_idea_brief_id(group)
         if self.load_idea_brief(brief_id):
             raise ValueError(f"idea brief already exists: {brief_id}")
-        status = normalize_idea_brief_status(
-            row.get("status", IDEA_BRIEF_DEFAULT_STATUS)
-        )
         now = datetime.now(timezone.utc).isoformat()
         created_by_kind = _normalize_actor_kind(row.get("created_by_kind", "user"))
         slug = str(row.get("slug", "") or "").strip()

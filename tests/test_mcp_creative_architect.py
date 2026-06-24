@@ -444,7 +444,10 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             {"idea_brief": brief["id"], "note": "Ready for product-safe review."},
             req_id=36,
         )
-        proposal = self._result_payload(proposed)["idea_brief"]["proposal"]
+        proposed_payload = self._result_payload(proposed)
+        self.assertEqual("product_safe_review", proposed_payload["review_scope"])
+        self.assertFalse(proposed_payload["proposal"]["auto_assign"])
+        proposal = proposed_payload["idea_brief"]["proposal"]
         self.assertTrue(proposal["proposal_only"])
         self.assertFalse(proposal["auto_dispatch"])
         self.assertEqual("", proposal["created_task_id"])

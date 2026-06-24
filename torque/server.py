@@ -58,6 +58,7 @@ from .config import (
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
 from .idea_briefs import (
+    IDEA_BRIEF_PROPOSAL_SCOPE,
     IDEA_BRIEF_TEXT_FIELDS,
     idea_brief_contract_metadata,
     idea_brief_is_archived,
@@ -13563,7 +13564,8 @@ async def _handle_idea_brief_command(data: dict, state: MatrixState) -> dict:
         return {
             "type": "idea_brief_proposed",
             "idea_brief": proposed,
-            "review_scope": proposed.get("proposal", {}) if proposed else {},
+            "review_scope": IDEA_BRIEF_PROPOSAL_SCOPE,
+            "proposal": proposed.get("proposal", {}) if proposed else {},
             "caveat": (
                 "Idea Brief was marked proposed for product-safe review only; "
                 "no task, assignment, dispatch, decision acceptance, merge, or "

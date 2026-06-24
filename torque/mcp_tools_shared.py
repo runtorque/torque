@@ -30,7 +30,11 @@ from .db import canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
 from .direct_message_mirrors import save_direct_ask_mirror
-from .idea_briefs import idea_brief_contract_metadata, idea_brief_is_archived
+from .idea_briefs import (
+    IDEA_BRIEF_PROPOSAL_SCOPE,
+    idea_brief_contract_metadata,
+    idea_brief_is_archived,
+)
 from .ai_recall import normalize_recall_limit, semantic_recall_payload
 from .mcp_retry import (
     derive_idempotency_key,
@@ -5915,7 +5919,8 @@ async def _architect_product_idea_brief_tool(
         return _compact_json({
             "type": "product_idea_brief_proposed",
             "idea_brief": _with_idea_brief_owner_flag(proposed, caller_id),
-            "review_scope": proposed.get("proposal", {}) if proposed else {},
+            "review_scope": IDEA_BRIEF_PROPOSAL_SCOPE,
+            "proposal": proposed.get("proposal", {}) if proposed else {},
             "caveat": (
                 "Marked proposed for product-safe review only; no task, "
                 "decision acceptance, assignment, dispatch, merge, or deploy "

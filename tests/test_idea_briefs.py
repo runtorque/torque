@@ -162,6 +162,17 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         })
         before_tasks = set(self.state.board_tasks)
 
+        implicit_create_propose = await handle_command({
+            "cmd": "idea_brief_create",
+            "group": "Torque",
+            "problem_opportunity": "Create should not bypass review proposal.",
+            "status": "proposed",
+            "actor_kind": "architect",
+            "actor_id": "arch-1",
+        })
+        self.assertEqual(implicit_create_propose["type"], "error")
+        self.assertIn("created as drafts", implicit_create_propose["message"])
+
         created = await handle_command({
             "cmd": "idea_brief_create",
             "group": "Torque",
@@ -242,7 +253,8 @@ class IdeaBriefStateAndServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proposed["type"], "idea_brief_proposed")
         self.assertEqual(proposed["idea_brief"]["status"], "proposed")
         self.assertEqual(before_tasks, set(self.state.board_tasks))
-        self.assertFalse(proposed["review_scope"]["auto_assign"])
+        self.assertEqual("product_safe_review", proposed["review_scope"])
+        self.assertFalse(proposed["proposal"]["auto_assign"])
         snapshot = self.state.to_dict()["idea_briefs"]
         self.assertIn(brief["id"], snapshot)
 

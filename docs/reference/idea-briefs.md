@@ -78,7 +78,7 @@ Commands:
   - response: `{type:"idea_brief_archived", idea_brief, ...contract}`
 - `idea_brief_propose` (preferred) / `idea_brief_promote` (alias)
   - request: `{cmd, group?, idea_brief|..., note?|proposal_note?, review_target?, actor_kind?, actor_id?}`
-  - response: `{type:"idea_brief_proposed", idea_brief, review_scope, caveat, ...contract}`
+  - response: `{type:"idea_brief_proposed", idea_brief, review_scope:"product_safe_review", proposal, caveat, ...contract}`
 
 ## WebSocket / snapshot state
 
@@ -117,6 +117,7 @@ Wrapper rules:
 - Update/refine/park/archive/propose require caller ownership.
 - Thinking links are validated same-group.
 - Propose is review-only and never creates/dispatches/assigns work.
+- Propose returns `review_scope:"product_safe_review"` plus the persisted `proposal` object.
 
 Product peer/user context wrappers also accept `context_idea_brief_ids` and store them in `context_snapshot.product_context.idea_brief_ids`.
 
