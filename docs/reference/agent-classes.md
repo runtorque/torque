@@ -30,6 +30,9 @@ Torque ships built-in Agent Classes in `torque/builtin_agent_classes/`:
 - `product-manager.yaml` → primary label **Product Manager**, schema v3,
   uses operator capability buckets, and compiles to generated/internal
   `class-policy-product-manager@2`
+- `torque-steward.yaml` → primary label **Torque Steward**, schema v3,
+  draft/read-only foundation for operational stewardship, and compiles to
+  generated/internal `class-policy-torque-steward@1`
 
 Project Agent Class definitions live in:
 
@@ -109,6 +112,11 @@ diagnostics. Product Manager-style classes cannot select buckets that grant
 dangerous execution/admin capabilities such as hire, dispatch, merge, deploy,
 settings, accepted-decision authority, direct Engineer/Worker messaging, or
 profile-admin.
+Torque Steward-style Wave A classes are stricter: they may select only
+read-only operational observation capabilities, and validation rejects
+communication, task mutation, planning writes, memory publication, or any
+other non-observation atoms until a later reviewed authority wave changes that
+contract.
 
 Draft classes must set `draft.scratch_only: true` and must not claim live dogfood
 approval.
@@ -223,6 +231,32 @@ External connector exposure is a known limitation: Agent Classes and Agent
 Profiles do **not** enforce external connector governance in Wave 7. Previews,
 status, and doctor output surface this caveat, especially for PM/draft/restricted
 classes, but connector access must be managed separately.
+
+## Torque Steward class
+
+The built-in Torque Steward class has primary identity label **Torque Steward**
+and stable internal id `torque-steward`. Wave A keeps it lifecycle `draft` and
+`draft.scratch_only: true`; it must not be auto-created, auto-run, or treated as
+broad user-delegated authority.
+
+Torque Steward is Architect-derived because it will eventually represent the
+user's operational wishes for a group, but its Wave A compiled policy is
+read-only/observational. It can read projected self context, board/task
+summaries and details, recent events, MCP-call telemetry, Areas, Initiatives,
+Decisions, and board-sync state. It explicitly denies Engineer management,
+Worker dispatch, execution task control, direct Engineer/Worker messaging,
+worktree/merge, deploy/admin/settings, class/profile admin, accepted-decision
+authority, raw tool-picker authority, and all remaining high-risk operations.
+
+The prompt and preview status contract define the Steward as an operations
+observer/suggester: summarize health, anomaly, stale/stuck work, missed
+handoff, review/fix-loop, and cleanup risks; separate evidence from inference;
+recommend the smallest safe next step and the authorized actor. Wave A Steward
+must not restart, compact, notify, schedule, dispatch, assign, hire, merge,
+deploy, edit Agent Classes/Profiles, change settings, accept decisions, or
+message/control Engineers or Workers. Explicit user-directed powerful actions
+remain future reviewed waves that need confirmation, auditability, visibility,
+and rollback expectations before enablement.
 
 ## Prompt composition
 

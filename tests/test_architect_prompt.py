@@ -289,3 +289,41 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertNotIn("Hiring discipline", prompt)
         self.assertNotIn("Routing over instructing", prompt)
         self.assertNotIn("active engineers, open scope, pending hires", prompt)
+
+    def test_torque_steward_prompt_emphasizes_read_only_operations_boundary(self):
+        class_snapshot, profile_snapshot = self._class_prompt_context(
+            "torque-steward"
+        )
+
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Torque",
+            SimpleNamespace(
+                architect_autonomy_mode="dispatch_after_confirm",
+                architect_custom_instructions="",
+            ),
+            agent_class_snapshot=class_snapshot,
+            agent_profile_snapshot=profile_snapshot,
+        )
+
+        self.assertIn("Torque Steward", prompt)
+        self.assertIn("conservative operational steward", prompt)
+        self.assertIn("observing, explaining, and recommending", prompt)
+        self.assertIn("Operational context", prompt)
+        self.assertIn("stale/stuck tasks", prompt)
+        self.assertIn("missed handoffs", prompt)
+        self.assertIn("Wave A Steward authority is observation/recommendation only", prompt)
+        self.assertIn("future reviewed power path", prompt)
+        self.assertIn("restart, compact, notify, schedule, dispatch, assign, hire, merge, deploy", prompt)
+        self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
+        self.assertIn("Unavailable powers in this session", prompt)
+        self.assertNotIn("proposal-only product authority", prompt)
+        self.assertNotIn("architect_product_task_propose", prompt)
+        self.assertNotIn("architect_product_decision_create", prompt)
+        self.assertNotIn("architect_product_peer_*", prompt)
+        self.assertNotIn("architect_engineer_hire", prompt)
+        self.assertNotIn("architect_engineer_message", prompt)
+        self.assertNotIn("architect_task_create", prompt)
+        self.assertNotIn("architect_task_reassign", prompt)
+        self.assertNotIn("architect_task_move", prompt)
+        self.assertNotIn("architect_deploy_state", prompt)
+        self.assertNotIn("engineer_merge", prompt)
