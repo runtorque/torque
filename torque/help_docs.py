@@ -601,6 +601,7 @@ def show_help_topic(topic: str, *, max_chars: Any = DEFAULT_SHOW_CHARS, base_dir
             "message": "No Torque Help topic matched the requested id/path. Use help_list or help_search to discover valid topics.",
             "requested": str(topic or ""),
             "source_model": index.source_model(),
+            "index_hash": index.index_hash,
         }
     max_len = _normalize_max_chars(max_chars)
     body = section.text if section else resolved.text
@@ -625,6 +626,7 @@ def show_help_topic(topic: str, *, max_chars: Any = DEFAULT_SHOW_CHARS, base_dir
         "body_excerpt": body_excerpt,
         "truncated": truncated,
         "source_model": index.source_model(),
+        "index_hash": index.index_hash,
     })
     return payload
 

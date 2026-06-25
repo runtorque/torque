@@ -97,6 +97,7 @@ torque ai derive "Review" -t feature/review
         shown = show_help_topic("docs/reference/mcp-tools.md#worker-tools", base_dir=self.root)
         self.assertEqual(shown["status"], "ok")
         self.assertEqual(shown["anchor"], "worker-tools")
+        self.assertTrue(shown["index_hash"])
         self.assertIn("torque_derive", shown["body_excerpt"])
         self.assertTrue(shown["examples"])
 
@@ -117,6 +118,7 @@ torque ai derive "Review" -t feature/review
 
         traversal = show_help_topic("../.torque/secret.md", base_dir=self.root)
         self.assertEqual(traversal["status"], "not_found")
+        self.assertTrue(traversal["index_hash"])
 
     def test_handle_help_command_shapes(self):
         response = handle_help_command(
