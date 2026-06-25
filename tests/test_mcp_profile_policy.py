@@ -242,6 +242,96 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("architect_reply", tool_names)
         self.assertNotIn("architect_engineer_hire", tool_names)
 
+    async def test_torque_steward_class_hides_tool_search_and_lists_read_observation_tools(self):
+        state, architect = self._state_with_architect()
+        state.assign_agent_class(
+            architect.id,
+            "torque-steward",
+            actor_kind="user",
+        )
+        state.apply_effective_agent_class_for_launch(architect)
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        listed = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
+
+        self.assertEqual(architect.effective_agent_class_id, "torque-steward")
+        self.assertEqual(architect.effective_agent_profile_id, "class-policy-torque-steward")
+        for tool_name in {
+            "torque_context",
+            "architect_attention_digest",
+            "architect_board_summary",
+            "architect_events_recent",
+            "architect_task_show",
+            "architect_task_list",
+            "architect_area_list",
+            "architect_area_show",
+            "architect_initiative_list",
+            "architect_initiative_show",
+            "architect_decision_list",
+        }:
+            self.assertIn(tool_name, tool_names)
+
+        # Steward grants telemetry reads, but architect_mcp_calls is deferred
+        # today. With raw tool search denied, it is not part of the Wave A
+        # user-facing tools/list surface until a narrower wrapper is designed.
+        self.assertNotIn("architect_mcp_calls", tool_names)
+
+        denied_tools = {
+            "architect_tool_search",
+            "engineer_tool_search",
+            "architect_ask",
+            "architect_message_user",
+            "architect_peer_list",
+            "architect_peer_message",
+            "architect_peer_inbox",
+            "architect_reply",
+            "architect_engineer_hire",
+            "architect_engineer_set_specializations",
+            "architect_engineer_message",
+            "architect_engineer_answer",
+            "architect_task_create",
+            "architect_task_update",
+            "architect_task_reassign",
+            "architect_task_move",
+            "architect_task_mark_covered",
+            "architect_area_create",
+            "architect_initiative_create",
+            "architect_decision_create",
+            "architect_decision_update",
+            "architect_deploy_state",
+            "architect_get_architect_settings",
+            "architect_behavior_overlay_read",
+        }
+        self.assertFalse(denied_tools & tool_names)
+
+        for tool_name in sorted(denied_tools):
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": tool_name,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": {}},
+                    },
+                    headers={"X-Torque-Cell-Id": architect.id},
+                )
+            )
+            self.assertIn("error", response.payload, tool_name)
+            self.assertIn("Unknown tool", response.payload["error"]["message"])
+
+        self.assertEqual(calls, [])
+
     async def test_product_manager_profile_cannot_use_peer_tools_for_engineer_threads(self):
         state, architect = self._state_with_architect()
         engineer = self.state_mod.AgentCell(

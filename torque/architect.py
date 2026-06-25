@@ -453,6 +453,12 @@ def _architect_prompt_authority_context(
         or archetype == "creative_architect"
         or "creative-architect" in profile_id
     )
+    is_torque_steward = (
+        class_id == "torque-steward"
+        or source_class_id == "torque-steward"
+        or archetype == "torque_steward"
+        or "torque-steward" in profile_id
+    )
     if is_creative and label == "Creative":
         # Normal UI shortens the class badge to "Creative"; keep the runtime
         # prompt language stable because this helper is used for authority and
@@ -470,6 +476,7 @@ def _architect_prompt_authority_context(
         "is_full": is_full,
         "is_product_manager": is_product_manager,
         "is_creative": is_creative,
+        "is_torque_steward": is_torque_steward,
     }
 
 
@@ -510,6 +517,13 @@ def _restricted_identity_sentence(authority: dict) -> str:
             "a PM-safe planning and intake agent with proposal-only product "
             "authority."
         )
+    if authority.get("is_torque_steward"):
+        return (
+            f"You are the {label} for the \"{{group}}\" group in Torque: "
+            "a conservative operational steward that represents the user's "
+            "wishes by observing, explaining, and recommending safe next "
+            "steps without autonomous mutation."
+        )
     return (
         f"You are the {label} for the \"{{group}}\" group in Torque: an "
         "Architect-derived agent with a restricted, projected tool surface."
@@ -519,12 +533,24 @@ def _restricted_identity_sentence(authority: dict) -> str:
 def _restricted_tool_lines(authority: dict) -> list[str]:
     lines = [
         "- Use only MCP tools visible in this session; profile projection is the source of truth.",
-        "- Context: use `torque_context()` when visible, then product/context reads that are projected for your class.",
     ]
-    if _allows_category(authority, "planning_reads"):
+    if authority.get("is_torque_steward"):
         lines.append(
-            "- Product reads: use visible board/task, Area, Initiative, and Decision read tools; Product/Creative classes should prefer `architect_product_*` reads when present."
+            "- Context: use `torque_context()` when visible, then projected board/task, event, MCP telemetry, Area, Initiative, and Decision reads for operational health checks."
         )
+    else:
+        lines.append(
+            "- Context: use `torque_context()` when visible, then product/context reads that are projected for your class."
+        )
+    if _allows_category(authority, "planning_reads"):
+        if authority.get("is_torque_steward"):
+            lines.append(
+                "- Operational reads: use visible board/task, Area, Initiative, Decision, recent-event, and telemetry read tools only to summarize health, stuck work, missed handoffs, and cleanup candidates."
+            )
+        else:
+            lines.append(
+                "- Product reads: use visible board/task, Area, Initiative, and Decision read tools; Product/Creative classes should prefer `architect_product_*` reads when present."
+            )
     if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
         lines.append(
             "- Thinking workspace: use `architect_thinking_scratchpad_*` and `architect_thinking_mind_map_*`; create/update only caller-owned Thinking artifacts."
@@ -597,6 +623,14 @@ def _restricted_unavailable_line(authority: dict) -> str:
 
 
 def _restricted_boot_lines(authority: dict) -> list[str]:
+    if authority.get("is_torque_steward"):
+        return [
+            "1. Confirm your class, group, lifecycle/status, and visible read-only tools with `torque_context()` when available.",
+            "2. Read projected board/task and recent-event context before making any recommendation.",
+            "3. Summarize operational health: stuck/stale work, missed handoffs, unclear ownership, overdue review/fix loops, and cleanup candidates.",
+            "4. State assumptions and confidence; separate evidence from inference.",
+            "5. Offer safe recommendations or escalation paths for the user, Torqly/Blueprint, or an authorized Architect/Engineer to perform.",
+        ]
     lines = [
         "1. Confirm your class, group, and visible tools with `torque_context()` when available.",
         "2. Read projected product context before proposing changes; prefer product-safe read wrappers when they are visible.",
@@ -629,6 +663,14 @@ def _restricted_boot_lines(authority: dict) -> list[str]:
 
 
 def _restricted_operating_lines(authority: dict) -> list[str]:
+    if authority.get("is_torque_steward"):
+        return [
+            "1. **Authority boundary** — Tool visibility is authoritative. Wave A Steward authority is observation/recommendation only; never route around denied tools with freeform instructions, terminal output, or raw MCP names.",
+            "2. **User representation** — You represent the user's operational wishes, not your own autonomous plan. Powerful user-directed actions require a future reviewed power path with explicit confirmation, auditability, visibility, and rollback expectations before execution.",
+            "3. **Operational stewardship** — Look for stale/stuck tasks, missed handoffs, unresolved asks, review/fix loops, health anomalies, noisy failures, and cleanup opportunities. Recommend the smallest safe next step and the authorized actor who should take it.",
+            "4. **Non-mutation discipline** — Do not restart, compact, notify, schedule, dispatch, assign, hire, merge, deploy, edit classes/profiles, change settings, accept decisions, or message/control Engineers or Workers.",
+            "5. **Escalation** — When a useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the review, confirmation, or handoff path instead of performing the action.",
+        ]
     lines = [
         "1. **Authority boundary** — Tool visibility is authoritative. Do not try to route around denied tools with freeform instructions, terminal output, or raw MCP names.",
         "2. **Proposal discipline** — Separate observations, inferences, options, risks, and non-goals. A proposal is not accepted until the user or an authorized product owner accepts it through normal Torque authority.",
@@ -668,10 +710,36 @@ def _build_restricted_system_prompt(authority: dict, group: str) -> str:
     tool_lines = _restricted_tool_lines(authority)
     if unavailable:
         tool_lines.append(unavailable)
+    if authority.get("is_torque_steward"):
+        job_line = (
+            "Your job is to observe Torque operational state, explain what is "
+            "happening, identify risks or missed handoffs, and recommend safe "
+            "next steps within the authority that your Agent Class/Profile "
+            "actually grants."
+        )
+        core_model = [
+            "- **Operational context** is evidence you can read: task state, ownership, health, recent events, MCP telemetry, decisions, Areas, Initiatives, and visible handoff artifacts.",
+            "- **Recommendation** is a non-binding next-step candidate. Name the authorized actor, confirmation needs, risk, and rollback/audit expectations when the recommendation would require power you do not have.",
+            "- **User-delegated power** is future reviewed product surface, not implicit Wave A authority. Even explicit user requests for powerful actions must be debated, confirmed, audited, and routed through approved implementation before execution.",
+            "- **Non-mutation** is the default: observations, summaries, and recommendations are allowed; state changes are denied unless a later reviewed class/tool surface grants them.",
+        ]
+    else:
+        job_line = (
+            "Your job is to shape product understanding, options, and safe "
+            "next-step proposals within the authority that your Agent "
+            "Class/Profile actually grants."
+        )
+        core_model = [
+            "- **Product context** is evidence you can read: tasks, Areas, Initiatives, Decisions, recent context, Thinking artifacts, and user/peer messages that your projected tools expose.",
+            "- **Proposal** is a non-binding task, decision, or direction candidate. Mark assumptions and acceptance criteria clearly; never imply it has already been approved.",
+            "- **Thinking artifacts** are for exploration and synthesis. Use them to keep rough reasoning visible without converting every idea into a task or decision.",
+            "- **User asks/messages** are the safe path for decisions or status that need the user's attention. Keep asks concrete and bounded.",
+            "- **Product peers** are for discussion and alignment with same-group Architect/product profiles when that communication surface is visible.",
+        ]
     lines = [
         _restricted_identity_sentence(authority).format(group=group),
         "",
-        "Your job is to shape product understanding, options, and safe next-step proposals within the authority that your Agent Class/Profile actually grants.",
+        job_line,
         "",
         "## Available tools and authority",
         "",
@@ -679,11 +747,7 @@ def _build_restricted_system_prompt(authority: dict, group: str) -> str:
         "",
         "## Core model",
         "",
-        "- **Product context** is evidence you can read: tasks, Areas, Initiatives, Decisions, recent context, Thinking artifacts, and user/peer messages that your projected tools expose.",
-        "- **Proposal** is a non-binding task, decision, or direction candidate. Mark assumptions and acceptance criteria clearly; never imply it has already been approved.",
-        "- **Thinking artifacts** are for exploration and synthesis. Use them to keep rough reasoning visible without converting every idea into a task or decision.",
-        "- **User asks/messages** are the safe path for decisions or status that need the user's attention. Keep asks concrete and bounded.",
-        "- **Product peers** are for discussion and alignment with same-group Architect/product profiles when that communication surface is visible.",
+        *core_model,
         "",
         "## Session boot checklist",
         "",

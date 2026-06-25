@@ -384,6 +384,14 @@ CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST = frozenset({
     "architect_decision_link",
 })
 
+TORQUE_STEWARD_RAW_TOOL_DENYLIST = frozenset({
+    # Torque Steward Wave A is observation/recommendation only. It can use
+    # projected read tools, but not raw tool-picker/search surfaces that could
+    # reveal or invite denied full-Architect workflows.
+    "architect_tool_search",
+    "engineer_tool_search",
+})
+
 HIGH_RISK_CAPABILITIES = frozenset(
     atom for atom, cap in CAPABILITIES.items() if cap.risk in {"high", "critical"}
 )
@@ -1024,6 +1032,24 @@ def _policy_is_creative_architect(policy: AgentProfilePolicy | None) -> bool:
     return False
 
 
+def _policy_is_torque_steward(policy: AgentProfilePolicy | None) -> bool:
+    if not policy:
+        return False
+    profile_id = str(getattr(policy, "profile_id", "") or "").strip()
+    if profile_id == "class-policy-torque-steward" or "torque-steward" in profile_id:
+        return True
+    profile = getattr(policy, "profile", None)
+    metadata = getattr(profile, "metadata", {}) if profile is not None else {}
+    if isinstance(metadata, dict):
+        if str(metadata.get("archetype", "") or "").strip() == "torque_steward":
+            return True
+        generated_by = metadata.get("generated_by_agent_class", {})
+        if isinstance(generated_by, dict) and str(
+                generated_by.get("id", "") or "").strip() == "torque-steward":
+            return True
+    return False
+
+
 def profile_preview_is_product_manager(preview: dict[str, Any]) -> bool:
     """Return whether a preview/snapshot represents Product Manager policy."""
 
@@ -1083,6 +1109,8 @@ def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None
     if _policy_is_product_manager(policy) and normalized_name in PM_RAW_TOOL_DENYLIST:
         return False
     if _policy_is_creative_architect(policy) and normalized_name in CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST:
+        return False
+    if _policy_is_torque_steward(policy) and normalized_name in TORQUE_STEWARD_RAW_TOOL_DENYLIST:
         return False
     requirements = mcp_tool_capability_requirements(normalized_name)
     if not requirements:

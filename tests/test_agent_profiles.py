@@ -9,6 +9,7 @@ except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
 from torque.agent_profiles import (
+    AgentProfileDefinition,
     BASE_KIND_CEILINGS,
     PM_DANGEROUS_CAPABILITIES,
     agent_profile_cell_status,
@@ -128,6 +129,53 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", pm))
+
+
+    def test_torque_steward_policy_denies_raw_tool_picker_only_allows_read_observation(self):
+        steward = profile_policy_from_definition(AgentProfileDefinition(
+            id="class-policy-torque-steward",
+            version="1",
+            base_kind="architect",
+            display_name="Torque Steward internal policy",
+            grants=[
+                "observe.self_context",
+                "observe.board_summary",
+                "observe.task_detail",
+                "observe.events",
+                "observe.mcp_calls",
+                "planning.area_read",
+                "planning.initiative_read",
+                "decision.list",
+                "task.board_sync_read",
+            ],
+            metadata={
+                "archetype": "torque_steward",
+                "generated_by_agent_class": {"id": "torque-steward"},
+            },
+        ))
+
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", steward))
+
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("engineer_tool_search", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_message", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_update", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_move", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_read", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_create", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_update", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("engineer_merge", steward))
 
 
     def test_enriched_preview_warns_for_product_manager_draft(self):

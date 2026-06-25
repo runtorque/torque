@@ -69,6 +69,7 @@ BUILTIN_CLASS_BASE_KIND = {
     "default-worker": "worker",
     "creative-architect": "architect",
     "product-manager": "architect",
+    "torque-steward": "architect",
 }
 
 BUILTIN_CLASS_PROFILE_REF = {
@@ -83,6 +84,7 @@ BUILTIN_CLASS_POLICY_MODE = {
     "default-worker": "wrap_profile",
     "creative-architect": "compile",
     "product-manager": "compile",
+    "torque-steward": "compile",
 }
 
 KNOWN_CLASS_KEYS = {
@@ -165,8 +167,27 @@ CREATIVE_ARCHITECT_AUTHORITY_CAVEAT = (
     "and product-safe proposal wrappers, but do not treat generated ideas, "
     "queued tasks, peer messages, or proposed decisions as accepted plans."
 )
+TORQUE_STEWARD_AUTHORITY_CAVEAT = (
+    "Torque Steward Wave A is a read-only/draft foundation: it represents "
+    "the user's operational wishes, but has no autonomous mutating, restart, "
+    "compaction, notification, scheduling, dispatch, hire, merge, deploy, "
+    "class/profile admin, settings, accepted-decision, or direct "
+    "Engineer/Worker messaging authority."
+)
 CREATIVE_ARCHITECT_NORMAL_LABEL = "Creative"
 CREATIVE_ARCHITECT_INTERNAL_POLICY_LABEL = "Creative Architect"
+
+TORQUE_STEWARD_FOUNDATION_ALLOWED_CAPABILITIES = frozenset({
+    "observe.self_context",
+    "observe.board_summary",
+    "observe.task_detail",
+    "observe.events",
+    "observe.mcp_calls",
+    "planning.area_read",
+    "planning.initiative_read",
+    "decision.list",
+    "task.board_sync_read",
+})
 
 
 def _is_creative_architect_class_identity(class_id: str, metadata: dict[str, Any] | None = None) -> bool:
@@ -1378,6 +1399,11 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
         or archetype == "creative_architect"
         or "creative-architect" in class_id
     )
+    is_torque_steward_class = (
+        class_id == "torque-steward"
+        or archetype == "torque_steward"
+        or "torque-steward" in class_id
+    )
     dangerous = sorted(grants & PM_DANGEROUS_CAPABILITIES)
     if is_pm_class and dangerous:
         issues.append(ValidationIssue(
@@ -1395,6 +1421,16 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
             "dangerous_creative_architect_capability_buckets",
             "Creative Architect Agent Classes must stay proposal-only and must not select execution/admin/accepted-decision capabilities: "
             + ", ".join(creative_dangerous),
+            path=source,
+            profile_id=class_id,
+        ))
+    steward_disallowed = sorted(grants - TORQUE_STEWARD_FOUNDATION_ALLOWED_CAPABILITIES)
+    if is_torque_steward_class and steward_disallowed:
+        issues.append(ValidationIssue(
+            "error",
+            "dangerous_torque_steward_capability_buckets",
+            "Torque Steward Wave A Agent Classes must stay read-only/observational; disallowed capability atoms: "
+            + ", ".join(steward_disallowed),
             path=source,
             profile_id=class_id,
         ))
@@ -2064,6 +2100,32 @@ def _creative_architect_status_contract(class_preview: dict[str, Any],
     }
 
 
+def _torque_steward_status_contract(class_preview: dict[str, Any],
+                                    profile_preview: dict[str, Any]) -> dict[str, Any]:
+    if not _class_is_torque_steward_preview(class_preview):
+        return {}
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return {
+        "foundation_wave": str((metadata or {}).get("foundation_wave", "") or "A"),
+        "authority_model": "conservative_observer_suggester",
+        "status": _class_status_from_previews(class_preview, profile_preview),
+        "represents_user_wishes": bool((metadata or {}).get("represents_user_wishes") is True),
+        "auto_create_enabled": False,
+        "raw_architect_authority": False,
+        "autonomous_mutation_authority": False,
+        "user_delegated_power_surface": "future_reviewed_waves_only",
+        "direct_engineer_worker_messaging": False,
+        "worker_dispatch": False,
+        "restart_compaction": False,
+        "notifications_scheduling": False,
+        "deploy_admin": False,
+        "profile_class_admin": False,
+        "accepted_decision_authority": False,
+        "confirmation_required_before_powerful_actions": True,
+        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
+    }
+
+
 def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: dict[str, Any]) -> str:
     if agent_class_is_archived(class_preview):
         return "archived"
@@ -2089,6 +2151,15 @@ def _class_is_creative_architect_preview(class_preview: dict[str, Any]) -> bool:
     class_id = str(class_preview.get("id", "") or "").strip()
     metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
     return _is_creative_architect_class_identity(class_id, metadata)
+
+
+def _class_is_torque_steward_preview(class_preview: dict[str, Any]) -> bool:
+    class_id = str(class_preview.get("id", "") or "").strip()
+    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
+    return (
+        class_id == "torque-steward"
+        or str((metadata or {}).get("archetype", "") or "").strip() == "torque_steward"
+    )
 
 
 def _class_preview_approved_for_live_dogfood(class_preview: dict[str, Any]) -> bool:
@@ -2117,6 +2188,7 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
     status = _class_status_from_previews(class_preview, profile_preview)
     is_product_manager = _class_is_product_manager_preview(class_preview)
     is_creative_architect = _class_is_creative_architect_preview(class_preview)
+    is_torque_steward = _class_is_torque_steward_preview(class_preview)
     pm_approved = is_product_manager and _class_preview_approved_for_live_dogfood(class_preview)
     if agent_class_is_archived(class_preview):
         warnings.append(
@@ -2130,6 +2202,8 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
         warnings.append(PM_DOGFOOD_AUTHORITY_CAVEAT if pm_approved else PM_DRAFT_WARNING)
     if is_creative_architect:
         warnings.append(CREATIVE_ARCHITECT_AUTHORITY_CAVEAT)
+    if is_torque_steward:
+        warnings.append(TORQUE_STEWARD_AUTHORITY_CAVEAT)
     if (status in {"draft", "restricted"} or lifecycle == "draft") and not pm_approved:
         warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
     # Preserve profile warnings (PM wrapper restrictions, narrowed MCP surface).
@@ -2213,6 +2287,9 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     creative_status_contract = _creative_architect_status_contract(preview, profile_preview)
     if creative_status_contract:
         preview["creative_architect_status"] = creative_status_contract
+    steward_status_contract = _torque_steward_status_contract(preview, profile_preview)
+    if steward_status_contract:
+        preview["torque_steward_status"] = steward_status_contract
     warnings = class_warnings_for_preview(preview, profile_preview)
     for warning in definition.warnings or []:
         text = str(warning or "").strip()
@@ -2315,6 +2392,9 @@ def freeze_agent_class_snapshot(
     creative_status_contract = _creative_architect_status_contract(snapshot, profile_preview)
     if creative_status_contract:
         snapshot["creative_architect_status"] = creative_status_contract
+    steward_status_contract = _torque_steward_status_contract(snapshot, profile_preview)
+    if steward_status_contract:
+        snapshot["torque_steward_status"] = steward_status_contract
     snapshot["snapshot_hash"] = snapshot_hash({k: v for k, v in snapshot.items() if k != "snapshot_hash"})
     return snapshot
 

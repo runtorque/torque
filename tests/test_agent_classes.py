@@ -62,6 +62,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "default-engineer": ("engineer", "full-engineer", "1"),
             "default-worker": ("worker", "full-worker", "1"),
             "product-manager": ("architect", "class-policy-product-manager", "2"),
+            "torque-steward": ("architect", "class-policy-torque-steward", "1"),
         }
         self.assertEqual(set(expected), set(by_id))
         for class_id, (base_kind, profile_id, profile_version) in expected.items():
@@ -226,6 +227,106 @@ class AgentClassRegistryTests(unittest.TestCase):
             "planning.initiative_write",
         }, set())
 
+    def test_torque_steward_preview_is_read_only_observer_foundation(self):
+        classes, issues = load_agent_classes(base_dir=str(self.project))
+        self.assertFalse(issues)
+        steward = next(definition for definition in classes if definition.id == "torque-steward")
+
+        preview = enriched_agent_class_preview(steward, base_dir=str(self.project))
+
+        self.assertEqual(preview["status"], "draft")
+        self.assertEqual(preview["display_name"], "Torque Steward")
+        self.assertEqual(preview["primary_identity_label"], "Torque Steward")
+        self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
+        self.assertEqual(preview["lifecycle"], "draft")
+        self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-torque-steward", "version": "1"})
+        self.assertEqual(preview["agent_profile"]["id"], "class-policy-torque-steward")
+        self.assertEqual(preview["metadata"]["archetype"], "torque_steward")
+        self.assertFalse(preview["metadata"]["auto_create_enabled"])
+        self.assertEqual(
+            preview["torque_steward_status"]["authority_model"],
+            "conservative_observer_suggester",
+        )
+        self.assertTrue(preview["torque_steward_status"]["represents_user_wishes"])
+        self.assertFalse(preview["torque_steward_status"]["auto_create_enabled"])
+        self.assertFalse(preview["torque_steward_status"]["autonomous_mutation_authority"])
+        self.assertFalse(preview["torque_steward_status"]["direct_engineer_worker_messaging"])
+        self.assertFalse(preview["torque_steward_status"]["worker_dispatch"])
+        self.assertFalse(preview["torque_steward_status"]["deploy_admin"])
+        self.assertFalse(preview["torque_steward_status"]["profile_class_admin"])
+        self.assertEqual(
+            preview["torque_steward_status"]["user_delegated_power_surface"],
+            "future_reviewed_waves_only",
+        )
+        self.assertEqual(preview["capability_bucket_selection"], [
+            "self_context",
+            "planning_reads",
+            "recent_context_reads",
+            "board_task_reads",
+        ])
+        for restriction in {
+            "deny_engineer_management",
+            "deny_worker_dispatch",
+            "deny_execution_task_control",
+            "deny_engineer_worker_messages",
+            "deny_worktree_merge",
+            "deny_deploy_admin",
+            "deny_class_profile_admin",
+            "deny_decision_acceptance",
+            "deny_raw_tool_picker",
+            "deny_high_risk_operations",
+        }:
+            self.assertIn(restriction, preview["restriction_bucket_selection"])
+        categories = {
+            entry["category"]: entry
+            for entry in preview["agent_profile"]["projected_tool_categories"]
+        }
+        self.assertEqual(categories["planning_reads"]["status"], "allowed")
+        self.assertEqual(categories["worker_dispatch"]["status"], "denied")
+        self.assertEqual(categories["execution_task_control"]["status"], "denied")
+        self.assertEqual(categories["deploy_admin"]["status"], "denied")
+        self.assertEqual(categories["profile_admin"]["status"], "denied")
+        warnings = "\n".join(preview["warnings"])
+        self.assertIn("read-only/draft foundation", warnings)
+        self.assertIn("no autonomous mutating", warnings)
+
+        compiled = compile_agent_class_profile(steward)
+        self.assertEqual(compiled.id, "class-policy-torque-steward")
+        self.assertEqual(set(compiled.grants), {
+            "observe.self_context",
+            "observe.board_summary",
+            "observe.task_detail",
+            "observe.events",
+            "observe.mcp_calls",
+            "planning.area_read",
+            "planning.initiative_read",
+            "decision.list",
+            "task.board_sync_read",
+        })
+        self.assertEqual(set(compiled.grants) & {
+            "comm.user_ask",
+            "comm.user_message",
+            "comm.engineer_message",
+            "comm.worker_message",
+            "agent.hire_engineer",
+            "agent.dispatch_worker",
+            "task.dispatch",
+            "task.create",
+            "task.update",
+            "task.move",
+            "worktree.merge",
+            "deploy.apply",
+            "admin.settings",
+            "profile.assign",
+            "profile.edit",
+            "decision.accept",
+            "decision.create",
+            "decision.update",
+            "planning.area_write",
+            "planning.initiative_write",
+            "memory.publish",
+        }, set())
+
     def test_schema_v3_compile_accepts_capability_buckets_and_rejects_raw_tools(self):
         valid = {
             "agent_class_schema_version": 3,
@@ -309,6 +410,22 @@ class AgentClassRegistryTests(unittest.TestCase):
         }
         _definition, pm_issues = validate_class_data(pm_with_dispatch, base_dir=str(self.project))
         self.assertIn("dangerous_product_manager_capability_buckets", {issue.code for issue in pm_issues})
+
+        steward_with_message = {
+            "agent_class_schema_version": 3,
+            "id": "custom-torque-steward",
+            "version": "1",
+            "display_name": "Custom Torque Steward",
+            "runtime": {"base_kind": "architect"},
+            "policy": {"mode": "compile"},
+            "capabilities": {"buckets": ["self_context", "user_messages"]},
+            "metadata": {"archetype": "torque_steward"},
+        }
+        _definition, steward_issues = validate_class_data(steward_with_message, base_dir=str(self.project))
+        self.assertIn(
+            "dangerous_torque_steward_capability_buckets",
+            {issue.code for issue in steward_issues},
+        )
 
     def test_invalid_config_rejects_raw_tools_profile_confusion_and_bad_draft(self):
         _definition, issues = validate_class_data(
@@ -669,6 +786,41 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
+
+    def test_torque_steward_class_projection_denies_tool_search_and_mutations(self):
+        cell = self._add_agent(kind="architect")
+        self.state.assign_agent_class(
+            cell.id,
+            "torque-steward",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.apply_effective_agent_class_for_launch(cell, base_dir=str(self.project))
+
+        policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
+
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("engineer_tool_search", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_update", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_move", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_deploy_state", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_read", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_create", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_update", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("engineer_merge", policy))
 
     def test_creative_architect_launch_freezes_prompt_and_safe_internal_policy(self):
         cell = self._add_agent(kind="architect")
