@@ -1,6 +1,6 @@
 /* Standalone-only panel workspace manager */
 
-var _standalonePanelApps = ['board', 'chat', 'actions', 'initiatives', 'thinking', 'mission-control', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health'];
+var _standalonePanelApps = ['board', 'chat', 'actions', 'initiatives', 'thinking', 'mission-control', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health', 'help'];
 var _standalonePanelTitles = {
   board: 'Board',
   chat: 'Chat',
@@ -15,6 +15,7 @@ var _standalonePanelTitles = {
   engineer: 'Agent',
   supervisor: 'Supervisor',
   health: 'Health',
+  help: 'Help',
 };
 var _standalonePanelDefaults = {
   board: 'bottom',
@@ -30,6 +31,7 @@ var _standalonePanelDefaults = {
   engineer: 'right',
   supervisor: 'bottom',
   health: 'right',
+  help: 'right',
 };
 var _standaloneExternalPanelRootIds = {};
 var _standalonePanelLayoutVersion = 1;

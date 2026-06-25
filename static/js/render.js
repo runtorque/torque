@@ -725,6 +725,7 @@ function _surfacePanelApp(surface) {
   if (surface === 'history') return 'history';
   if (surface === 'supervisor') return 'supervisor';
   if (surface === 'health') return 'health';
+  if (surface === 'help') return 'help';
   return '';
 }
 
@@ -770,6 +771,7 @@ function _renderSurface(surface) {
   if (surface === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
   if (surface === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
   if (surface === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
+  if (surface === 'help' && typeof renderHelpPanel === 'function') renderHelpPanel();
 }
 
 function renderActivePanel() {
