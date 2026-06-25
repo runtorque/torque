@@ -787,6 +787,41 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
 
+    def test_torque_steward_class_projection_denies_tool_search_and_mutations(self):
+        cell = self._add_agent(kind="architect")
+        self.state.assign_agent_class(
+            cell.id,
+            "torque-steward",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.apply_effective_agent_class_for_launch(cell, base_dir=str(self.project))
+
+        policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
+
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("engineer_tool_search", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_update", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_move", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_deploy_state", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_read", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_create", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_update", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("engineer_merge", policy))
+
     def test_creative_architect_launch_freezes_prompt_and_safe_internal_policy(self):
         cell = self._add_agent(kind="architect")
         self.state.assign_agent_class(
