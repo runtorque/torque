@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-initiatives', 'panel-thinking', 'panel-mission-control', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
+var _panelIds = ['panel-board', 'panel-chat', 'panel-actions', 'panel-initiatives', 'panel-thinking', 'panel-mission-control', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health', 'panel-help'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
@@ -132,6 +132,9 @@ function _loadPanelApp(appName) {
   }
   if (appName === 'health' && typeof healthEnsureLoaded === 'function') {
     healthEnsureLoaded({ force: true });
+  }
+  if (appName === 'help' && typeof helpEnsureLoaded === 'function') {
+    helpEnsureLoaded();
   }
 }
 
@@ -318,6 +321,7 @@ function togglePanel(appName) {
     if (appName === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
     if (appName === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
     if (appName === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
+    if (appName === 'help' && typeof renderHelpPanel === 'function') renderHelpPanel();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -349,6 +353,7 @@ function _restorePanelState() {
     if (detachedApp === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
     if (detachedApp === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
     if (detachedApp === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
+    if (detachedApp === 'help' && typeof renderHelpPanel === 'function') renderHelpPanel();
     if (typeof torqueDetachedWindowBoundsChanged === 'function') {
       torqueDetachedWindowBoundsChanged();
     }
@@ -401,6 +406,7 @@ function _restorePanelState() {
     if (active === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
     if (active === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
     if (active === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
+    if (active === 'help' && typeof renderHelpPanel === 'function') renderHelpPanel();
   }
   if (typeof _standaloneRestoreDetachedPanels === 'function') _standaloneRestoreDetachedPanels();
 }
