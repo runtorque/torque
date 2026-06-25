@@ -653,14 +653,14 @@ function renderHelpPanel() {
   var snapshot = null;
   if (typeof _captureSurfaceState === 'function') {
     snapshot = _captureSurfaceState(root, {
-      scrollSelectors: ['#help-browser-scroll', '#help-detail-scroll', '#help-query-scroll'],
+      scrollSelectors: ['#help-workspace-scroll', '#help-browser-scroll', '#help-detail-scroll', '#help-query-scroll'],
     });
   }
   root.innerHTML = '<div class="help-panel">'
     + _helpRenderHeader()
     + _helpRenderToolbar()
     + _helpRenderQueryPanel()
-    + '<div class="help-workspace">'
+    + '<div class="help-workspace" id="help-workspace-scroll">'
     + _helpRenderTopicBrowser()
     + _helpRenderDetail()
     + '</div>'
