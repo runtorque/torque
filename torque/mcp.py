@@ -34,6 +34,7 @@ from .mcp_engineer import (
 )
 from .mcp_tool_search import deferred_tool_specs, eager_tool_specs
 from .mcp_tool_search import tool_search_response
+from .help_docs import dispatch_help_tool, help_tool_specs
 from .mcp_tools_shared import (
     _direct_user_message_response,
     save_agent_user_direct_message_from_mcp,
@@ -268,6 +269,7 @@ TOOLS = [
             "required": ["area"],
         },
     },
+    *help_tool_specs("torque_"),
     {
         "name": "torque_task_upload_artifact",
         "description": (
@@ -999,6 +1001,14 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             ) or item
             areas.append(payload)
         return json.dumps({"type": "area_list", "group": group, "areas": areas}, separators=(",", ":")), False
+
+    if name in {
+        "torque_help_list",
+        "torque_help_show",
+        "torque_help_search",
+        "torque_help_query",
+    }:
+        return dispatch_help_tool(name, args, prefix="torque_")
 
     if name == "torque_task_upload_artifact":
         payload = {"cmd": "task_upload_artifact", "cell_id": cell_id}

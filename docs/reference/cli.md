@@ -17,6 +17,52 @@ This creates a symlink so `torque` is available in your shell. The CLI talks to 
 
 ---
 
+## help
+
+Query maintained Torque Help documentation without requiring the daemon. Results
+come from the docs allow-list described in [Help docs contract](help.md).
+
+```bash
+torque help list
+torque help list --audience agent
+torque help show docs/reference/mcp-tools.md#worker-tools-torque_
+torque help search "worktree merge"
+torque help query "How should a worker hand off review?"
+```
+
+### help list
+
+List Help topics with source paths, summaries, audience tags, section anchors,
+and source hashes.
+
+| Flag | Description |
+|------|-------------|
+| `--audience` | Optional audience tag filter such as `user`, `agent`, `worker`, `engineer`, `architect`, or `operator` |
+| `--json` | Output the full Help response schema |
+
+### help show
+
+Show one topic or section by topic id, source path, or `source/path.md#anchor`.
+
+| Flag | Description |
+|------|-------------|
+| `--max-chars` | Maximum markdown excerpt length (default `8000`, capped by the Help contract) |
+| `--json` | Output the full Help response schema |
+
+### help search / help query
+
+`help search` returns ranked excerpts. `help query` assembles a concise
+extractive answer from top matching excerpts and always includes source
+references in JSON mode. Neither command reads board state, journals, logs, or
+arbitrary files.
+
+| Flag | Description |
+|------|-------------|
+| `--limit` | Maximum results/source snippets |
+| `--json` | Output the full Help response schema |
+
+---
+
 ## status
 
 Show groups and agents, or details for a specific agent.

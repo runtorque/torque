@@ -68,6 +68,7 @@ nav:
       - Detailed architecture: reference/architecture.md
       - CLI Reference: reference/cli.md
       - MCP tools: reference/mcp-tools.md
+      - Help docs contract: reference/help.md
       - Roles and specializations: reference/specializations.md
       - Agent Profiles: reference/agent-profiles.md
       - Agent Classes: reference/agent-classes.md

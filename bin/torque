@@ -886,6 +886,105 @@ def check_ok(resp):
 
 
 # ---------------------------------------------------------------------------
+# Help docs commands (offline/read-only)
+# ---------------------------------------------------------------------------
+
+def _help_command(payload):
+    from torque.help_docs import handle_help_command
+
+    return handle_help_command(payload)
+
+
+def _print_help_json(data):
+    print(json.dumps(data, indent=2))
+
+
+def _print_help_topics(data):
+    topics = data.get("topics", []) or []
+    print(f"Torque Help topics ({len(topics)})")
+    for topic in topics:
+        source = topic.get("source_path", "")
+        topic_id = topic.get("topic_id", "")
+        title = topic.get("title", "")
+        summary = topic.get("summary", "")
+        print(f"\n  {topic_id}  {_bold(title)}")
+        print(f"    {source}")
+        if summary:
+            print(f"    {_dim(summary)}")
+
+
+def _print_help_search(data):
+    results = data.get("results", []) or []
+    status = data.get("status", "")
+    if not results:
+        print(data.get("message") or f"No Help results ({status}).")
+        return
+    print(f"Torque Help search: {data.get('query') or data.get('question') or ''}")
+    for idx, result in enumerate(results, start=1):
+        title = result.get("title") or result.get("topic_title") or ""
+        ref = result.get("path_anchor") or result.get("source_path") or ""
+        excerpt = result.get("excerpt") or result.get("summary") or ""
+        print(f"\n  {idx}. {_bold(title)}")
+        print(f"     {ref}")
+        if excerpt:
+            print(f"     {excerpt}")
+
+
+def cmd_help_list(args):
+    data = _help_command({
+        "cmd": "help_list",
+        "audience": getattr(args, "audience", "") or "",
+    })
+    if getattr(args, "json", False):
+        _print_help_json(data)
+    else:
+        _print_help_topics(data)
+
+
+def cmd_help_show(args):
+    data = _help_command({
+        "cmd": "help_show",
+        "topic": args.topic,
+        "max_chars": getattr(args, "max_chars", 8000),
+    })
+    if getattr(args, "json", False):
+        _print_help_json(data)
+        return
+    if data.get("status") != "ok":
+        die(data.get("message", "Help topic not found"))
+    print(f"{_bold(data.get('title', 'Torque Help'))}")
+    print(data.get("path_anchor") or data.get("source_path", ""))
+    print()
+    print(data.get("body_excerpt", ""))
+    if data.get("truncated"):
+        print(_dim("\n[truncated; rerun with --max-chars for more]"))
+
+
+def cmd_help_search(args):
+    data = _help_command({
+        "cmd": "help_search",
+        "query": args.query,
+        "limit": getattr(args, "limit", 8),
+    })
+    if getattr(args, "json", False):
+        _print_help_json(data)
+    else:
+        _print_help_search(data)
+
+
+def cmd_help_query(args):
+    data = _help_command({
+        "cmd": "help_query",
+        "question": args.question,
+        "limit": getattr(args, "limit", 5),
+    })
+    if getattr(args, "json", False):
+        _print_help_json(data)
+    else:
+        print(data.get("answer", ""))
+
+
+# ---------------------------------------------------------------------------
 # Daemon lifecycle helpers
 # ---------------------------------------------------------------------------
 
@@ -5761,6 +5860,38 @@ def build_parser():
     p.add_argument("-a", "--all", action="store_true",
                    help="Show all windows (default: current window only)")
     p.set_defaults(func=cmd_status)
+
+    # -- help ---------------------------------------------------------------
+    hlp = sub.add_parser("help", help="Query maintained Torque Help docs")
+    hlp.set_defaults(func=cmd_help_list, _sub_parser=hlp)
+    hlp_sub = hlp.add_subparsers(dest="help_cmd")
+
+    p = hlp_sub.add_parser("list", help="List Torque Help topics")
+    p.add_argument("--audience", default="",
+                   help="Optional audience tag filter (user, agent, worker, engineer, architect, operator)")
+    p.add_argument("--json", action="store_true", help="Output raw JSON")
+    p.set_defaults(func=cmd_help_list)
+
+    p = hlp_sub.add_parser("show", help="Show one Help topic or source path")
+    p.add_argument("topic", help="Topic id, source path, or source path#anchor")
+    p.add_argument("--max-chars", type=int, default=8000,
+                   help="Maximum body excerpt characters (default: 8000)")
+    p.add_argument("--json", action="store_true", help="Output raw JSON")
+    p.set_defaults(func=cmd_help_show)
+
+    p = hlp_sub.add_parser("search", help="Search maintained Help docs")
+    p.add_argument("query", help="Search query")
+    p.add_argument("--limit", type=int, default=8,
+                   help="Maximum results (default: 8)")
+    p.add_argument("--json", action="store_true", help="Output raw JSON")
+    p.set_defaults(func=cmd_help_search)
+
+    p = hlp_sub.add_parser("query", help="Ask a question answered from Help docs")
+    p.add_argument("question", help="Question to answer from docs")
+    p.add_argument("--limit", type=int, default=5,
+                   help="Maximum source snippets (default: 5)")
+    p.add_argument("--json", action="store_true", help="Output raw JSON")
+    p.set_defaults(func=cmd_help_query)
 
     # -- doctor -------------------------------------------------------------
     p = sub.add_parser("doctor", help="Run Torque doctor checks")

@@ -17297,6 +17297,11 @@ async def main(connection=None):
         if cmd == "doctor":
             return await _handle_doctor_command(db, bridge)
 
+        if cmd in {"help_list", "help_show", "help_search", "help_query"}:
+            from .help_docs import handle_help_command
+
+            return handle_help_command(data)
+
         if cmd == "agent_profile_list":
             base_dir = str(data.get("base_dir", "") or os.getcwd())
             profiles, issues = load_agent_profiles(base_dir=base_dir)
