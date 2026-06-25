@@ -12943,6 +12943,22 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .help-search-input { flex: 1 1 240px; min-width: 180px; }
 .help-query-input { flex: 1 1 280px; min-width: 160px; }
 .help-audience-select { flex: 0 0 auto; }
+.help-toolbar .btn-primary,
+.help-toolbar .btn-secondary,
+.help-query-row .btn-primary,
+.help-query-row .btn-secondary {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .help-search-input:focus,
 .help-query-input:focus,
 .help-audience-select:focus {
@@ -13174,6 +13190,12 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   flex-basis: 100%;
   width: 100%;
 }
+#panel-help[data-panel-placement="right"] .help-toolbar .btn-primary,
+#panel-help[data-panel-placement="right"] .help-toolbar .btn-secondary,
+#panel-help[data-panel-placement="right"] .help-query-row .btn-primary,
+#panel-help[data-panel-placement="right"] .help-query-row .btn-secondary {
+  flex: 1 1 calc(50% - 3px);
+}
 
 @container (max-width: 760px) {
   .help-query-panel { max-height: none; }
@@ -13192,6 +13214,12 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   .help-audience-select {
     flex-basis: 100%;
     width: 100%;
+  }
+  .help-toolbar .btn-primary,
+  .help-toolbar .btn-secondary,
+  .help-query-row .btn-primary,
+  .help-query-row .btn-secondary {
+    flex: 1 1 calc(50% - 3px);
   }
 }
 

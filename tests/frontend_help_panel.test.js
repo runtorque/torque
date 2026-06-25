@@ -165,26 +165,29 @@ function listPayload(overrides = {}) {
 
 function showPayload(ref = 'docs-reference-help-md', overrides = {}) {
   const section = String(ref).includes('#wave-b-ui-brief');
+  const agentTopic = /(^agents-md$|AGENTS\.md)/i.test(String(ref));
   return Object.assign({
     type: 'help_topic',
     schema_version: 1,
     status: 'ok',
-    topic_id: 'docs-reference-help-md',
-    title: section ? 'Wave B UI brief' : 'Help docs contract',
-    summary: 'Torque Help is a read-only documentation lookup surface.',
-    source_path: 'docs/reference/help.md',
-    path_anchor: section ? 'docs/reference/help.md#wave-b-ui-brief' : 'docs/reference/help.md',
+    topic_id: agentTopic ? 'agents-md' : 'docs-reference-help-md',
+    title: agentTopic ? 'AGENTS instructions' : (section ? 'Wave B UI brief' : 'Help docs contract'),
+    summary: agentTopic ? 'Agent-facing operating rules mirror CLAUDE.md.' : 'Torque Help is a read-only documentation lookup surface.',
+    source_path: agentTopic ? 'AGENTS.md' : 'docs/reference/help.md',
+    path_anchor: agentTopic ? 'AGENTS.md' : (section ? 'docs/reference/help.md#wave-b-ui-brief' : 'docs/reference/help.md'),
     anchor: section ? 'wave-b-ui-brief' : '',
-    source_hash: 'src-help',
-    updated_at: '2026-06-25T09:00:00+00:00',
-    audience_tags: ['agent', 'operator'],
+    source_hash: agentTopic ? 'src-agents' : 'src-help',
+    updated_at: agentTopic ? '2026-06-24T12:00:00+00:00' : '2026-06-25T09:00:00+00:00',
+    audience_tags: agentTopic ? ['agent', 'worker'] : ['agent', 'operator'],
     restricted_safe: true,
-    body_excerpt: section
+    body_excerpt: agentTopic
+      ? '# AGENTS instructions\n\nWorkers report through Torque MCP tools and derive feature/review before done.'
+      : section
       ? 'Panelsmith can build a Help panel against the response fields above.'
       : '# Help docs contract\n\nTorque Help is **read-only** and returns source references.',
     truncated: false,
-    examples: ['torque help query "How do I derive review?"'],
-    sections: [
+    examples: agentTopic ? [] : ['torque help query "How do I derive review?"'],
+    sections: agentTopic ? [] : [
       {
         id: 'docs-reference-help-md::wave-b-ui-brief',
         title: 'Wave B UI brief',
@@ -347,6 +350,8 @@ test('Help panel is wired as a first-class panel app', () => {
   assert.match(render, /surface === 'help'/);
   assert.match(css, /#panel-help\s*\{[\s\S]*container-type:\s*inline-size;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-workspace\s*\{[\s\S]*flex-direction:\s*column;/);
+  assert.match(css, /\.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*min-width:\s*64px;[\s\S]*justify-content:\s*center;/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*flex:\s*1 1 calc\(50% - 3px\);/);
 });
 
 test('Help panel loads topics, preserves search order, shows detail, and queries sources', async () => {
@@ -437,4 +442,35 @@ test('Help panel rerender preserves query draft, focus/caret, selected topic, sc
   const html = document.getElementById('panel-help').innerHTML;
   assert.match(html, /Open section/);
   assert.match(html, /docs\/reference\/help\.md#wave-b-ui-brief/);
+});
+
+test('Help topic selection preserves narrow workspace scroll and loads selected detail', async () => {
+  const { sandbox, document, fetchCalls } = createSandbox();
+  await vm.runInContext('helpEnsureLoaded({ force: true })', sandbox);
+
+  let html = document.getElementById('panel-help').innerHTML;
+  assert.match(html, /id="help-workspace-scroll"/);
+  assert.match(html, /data-help-ref="agents-md"[\s\S]*onclick="helpSelectReference\(&quot;agents-md&quot;\)"/);
+
+  document.getElementById('help-workspace-scroll').scrollTop = 318;
+  document.getElementById('help-browser-scroll').scrollTop = 42;
+  document.getElementById('help-detail-scroll').scrollTop = 7;
+  vm.runInContext(`
+    helpSearchInputChanged('review');
+    helpQueryInputChanged('How do I derive review?');
+  `, sandbox);
+
+  await vm.runInContext(`helpSelectReference('agents-md')`, sandbox);
+
+  html = document.getElementById('panel-help').innerHTML;
+  assert.equal(fetchCalls.at(-1).cmd, 'help_show');
+  assert.equal(fetchCalls.at(-1).topic, 'agents-md');
+  assert.equal(vm.runInContext('_helpState.selectedRef', sandbox), 'agents-md');
+  assert.equal(document.getElementById('help-workspace-scroll').scrollTop, 318);
+  assert.equal(document.getElementById('help-browser-scroll').scrollTop, 42);
+  assert.equal(document.getElementById('help-search-input').value, 'review');
+  assert.equal(document.getElementById('help-query-input').value, 'How do I derive review?');
+  assert.match(html, /AGENTS instructions/);
+  assert.match(html, /Workers report through Torque MCP tools/);
+  assert.match(html, /class="help-topic-card selected" data-help-ref="agents-md"/);
 });
