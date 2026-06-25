@@ -55,6 +55,20 @@ the same panel for chronology.
 | `torque_context` | Read-only dump of the calling agent's identity, group, current task, worktree, and terminal state. |
 | `torque_name` | Suggest a more descriptive name for the agent (often the Worker knows what it's working on better than the dispatching action did). |
 
+### Help docs
+
+| Tool | What it does |
+|---|---|
+| `torque_help_list` | List maintained Torque Help topics from the docs allow-list. |
+| `torque_help_show` | Show one Help topic or section by topic id, source path, or `path#anchor`. |
+| `torque_help_search` | Deterministically search Help docs and return excerpts with source references. |
+| `torque_help_query` | Answer a question with extractive Help snippets and source references. |
+
+See [Help docs contract](help.md) for the source allow-list, response schema,
+restricted-agent safety model, and Panelsmith UI fields. Help reads maintained
+markdown only; it does not expose board state, journals, logs, secrets, or
+arbitrary files.
+
 ### Artifacts
 
 | Tool | What it does |
@@ -228,6 +242,13 @@ default worker-role mapping.
 |---|---|
 | `engineer_tools` | Eager catalog of available Engineer tools (visible at list time). |
 | `engineer_tool_search` | Search the deferred tool catalog and return schemas on demand. |
+
+### Help docs
+
+Engineer sessions also see `engineer_help_list`, `engineer_help_show`,
+`engineer_help_search`, and `engineer_help_query`. These mirror the Worker Help
+tools with the Engineer prefix and return only maintained docs allow-list
+content.
 
 ## Architect tools (`architect_*`)
 
@@ -493,6 +514,15 @@ otherwise see while preserving aggregate hidden counts.
 | Tool | What it does |
 |---|---|
 | `architect_tool_search` | Search the deferred Architect tool catalog and return schemas on demand. |
+
+### Help docs
+
+Architect sessions also see `architect_help_list`, `architect_help_show`,
+`architect_help_search`, and `architect_help_query`. Restricted Architect-derived
+profiles such as Product Manager and Creative can see these tools when their
+effective profile permits self-context reads; the tools themselves are
+hard-limited to maintained documentation and do not broaden planning, execution,
+journal, worktree, deploy, or secret visibility.
 
 ## AI read tools
 

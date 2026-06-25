@@ -41,6 +41,7 @@ from .mcp_retry import (
     is_mcp_pr_phase,
     is_mcp_pr_phase_retryable,
 )
+from .help_docs import dispatch_help_tool
 from .mcp_engineer_tools.shared import (
     active_worker_ids as _active_worker_ids,
     blocked_dependency_titles as _blocked_dependency_titles,
@@ -2523,6 +2524,10 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "events",
     "events_recent",
     "get_architect_settings",
+    "help_list",
+    "help_query",
+    "help_search",
+    "help_show",
     "area_list",
     "area_show",
     "initiative_list",
@@ -9205,6 +9210,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 command_payload,
             )
         return await _raw_handle_command(command_payload)
+
+    if tool_name in {"help_list", "help_show", "help_search", "help_query"}:
+        return dispatch_help_tool(name, args, prefix=tool_prefix)
 
     # -- Product Manager wrapper tools ------------------------------------
 

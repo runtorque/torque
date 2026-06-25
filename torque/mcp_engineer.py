@@ -16,6 +16,7 @@ from copy import deepcopy
 from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
 from .mcp_tool_search import make_tool_search_spec, tool_search_response
+from .help_docs import help_tool_specs
 from .mcp_engineer_tools.tool_specs import (
     ENGINEER_TOOLS as ENGINEER_ORCHESTRATION_TOOLS,
 )
@@ -148,6 +149,7 @@ ENGINEER_TOOLS.extend([
             "required": ["initiative"],
         },
     },
+    *help_tool_specs("engineer_"),
     make_tool_search_spec("engineer_tool_search", "engineer"),
     {
         "name": "engineer_behavior_overlay_read",

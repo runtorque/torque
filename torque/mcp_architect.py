@@ -17,6 +17,7 @@ from .db import TorqueDB
 from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
 from .mcp_tool_search import make_tool_search_spec, tool_search_response
+from .help_docs import help_tool_specs
 
 _ENV_VAR = "TORQUE_ARCHITECT_ID"
 
@@ -257,6 +258,7 @@ _ARCHITECT_TOOL_SPECS = [
             },
         },
     },
+    *help_tool_specs("architect_"),
     {
         "name": "architect_deploy_state",
         "description": (
