@@ -1315,6 +1315,15 @@ function _terminalComposeIsRichInput(input) {
   return editable === 'true';
 }
 
+function _terminalComposeOwnsLiveEditing(input) {
+  return !!(
+    input
+    && _terminalComposeIsRichInput(input)
+    && typeof document !== 'undefined'
+    && document.activeElement === input
+  );
+}
+
 function _terminalComposeEscapeText(value) {
   return esc(String(value || '')).replace(/\n/g, '<br>');
 }
@@ -2387,11 +2396,20 @@ function _terminalComposeAttachmentIndex(cellId, token) {
   return -1;
 }
 
-function _terminalComposeRenderAttachmentChips(form, cellId) {
+function _terminalComposeRenderAttachmentChips(form, cellId, opts) {
   if (!form || typeof form.querySelector !== 'function') return;
   const input = form.querySelector('.terminal-compose-input');
   if (_terminalComposeIsRichInput(input)) {
-    _terminalComposeRenderRichInput(input, { preserveSelection: true });
+    // While the contenteditable composer owns focus, the browser's live DOM is
+    // the source of truth for newline/caret geometry. Generic workspace
+    // rerenders happen under active terminal output; rewriting innerHTML here
+    // canonicalizes browser-created paragraphs/BRs on every keyup and was the
+    // root of multiline draft collapse + visible editor/terminal flicker. Real
+    // attachment operations call this helper without the preserve flag, so
+    // PR #782 inline-token rendering still updates immediately.
+    if (!(opts && opts.preserveActiveRichEditor && _terminalComposeOwnsLiveEditing(input))) {
+      _terminalComposeRenderRichInput(input, { preserveSelection: true });
+    }
     return;
   }
   const row = form.querySelector('.terminal-compose-attachments');
@@ -2913,7 +2931,9 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
       && _terminalComposeInputText(input) !== _terminalComposeDrafts[cellId]) {
     _terminalComposeSetInputText(input, _terminalComposeDrafts[cellId], { preserveSelection: true });
   }
-  _terminalComposeRenderRichInput(input, { preserveSelection: true });
+  if (!_terminalComposeOwnsLiveEditing(input)) {
+    _terminalComposeRenderRichInput(input, { preserveSelection: true });
+  }
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
 }
@@ -2985,7 +3005,7 @@ function _renderTerminalCompose(root, cell) {
       _terminalComposeAutoResize(input);
       _terminalComposeSetButtonState(input);
     }
-    _terminalComposeRenderAttachmentChips(existingForm, cellId);
+    _terminalComposeRenderAttachmentChips(existingForm, cellId, { preserveActiveRichEditor: true });
     const errorEl = existingForm.querySelector
       ? existingForm.querySelector('.terminal-compose-error')
       : null;
@@ -4318,7 +4338,16 @@ function _activateEmbeddedTerminalSurface(stage, sessionKey, opts) {
   _setActiveEmbeddedTerminalEntry(entry);
   if (entry) {
     _attachEmbeddedTerminalTailControls(entry);
-    _scheduleEmbeddedTerminalFit(entry, { preserveTail: !!opts.preserveTail });
+    // Same-session grid/workspace rerenders can happen for every state delta
+    // while a user is typing a DM and an agent is producing output. Fitting
+    // xterm on each rerender visibly flickers and perturbs tail/focus state.
+    // Initial connections and true session switches still fit; compose/stage
+    // size changes are handled by the ResizeObserver with preserveTail=true,
+    // preserving PR #770's tailing semantics without coupling every keystroke
+    // to a terminal reflow.
+    if (previousSessionKey !== sessionKey || opts.forceFit) {
+      _scheduleEmbeddedTerminalFit(entry, { preserveTail: !!opts.preserveTail });
+    }
     // Switching to an agent's terminal should land at the bottom and resume
     // tailing rather than leaving the viewport pinned to the top (or wherever
     // the previous activation left it). Skip same-session rerenders so a
