@@ -42,6 +42,7 @@ class FakeElement {
     this.selectionEnd = 0;
     this.focusCalls = [];
     this.classList = new FakeClassList();
+    this._listeners = new Map();
   }
 
   get innerHTML() { return this._innerHTML; }
@@ -59,6 +60,29 @@ class FakeElement {
   }
 
   querySelectorAll() { return []; }
+
+  addEventListener(type, handler) {
+    if (!this._listeners.has(type)) this._listeners.set(type, []);
+    this._listeners.get(type).push(handler);
+  }
+
+  dispatchEvent(event) {
+    const evt = event || {};
+    if (!evt.type) throw new Error('FakeElement.dispatchEvent requires an event type');
+    if (!evt.target) evt.target = this;
+    evt.currentTarget = this;
+    if (typeof evt.preventDefault !== 'function') {
+      evt.defaultPrevented = false;
+      evt.preventDefault = function preventDefault() { this.defaultPrevented = true; };
+    }
+    const listeners = this._listeners.get(evt.type) || [];
+    listeners.forEach((handler) => handler.call(this, evt));
+    return !evt.defaultPrevented;
+  }
+
+  click() {
+    return this.dispatchEvent({ type: 'click', target: this });
+  }
 
   focus(opts) {
     this.focusCalls.push(opts === undefined ? null : opts);
@@ -538,17 +562,15 @@ test('Help Ask submit reads live input, invokes help_query, and renders answer s
   assert.match(html, /Extractive answer/);
   assert.match(html, /Sources/);
   assert.match(html, /AGENTS\.md#worker-dispatch-and-reporting/);
-  assert.match(html, /<form class="help-query-row" onsubmit="helpQuerySubmit\(event\); return false">/);
-  assert.match(html, /<button type="button" class="btn-primary" onclick="helpQuerySubmit\(event\); return false">Ask<\/button>/);
+  assert.match(html, /<form class="help-query-row" id="help-query-form">/);
+  assert.match(html, /<button type="button" class="btn-primary" id="help-query-ask-button">Ask<\/button>/);
   assert.match(html, /id="help-query-result-scroll" aria-live="polite"/);
 });
 
-test('Help Ask button path calls help_query exactly once and preserves query focus state', async () => {
+test('Help Ask button DOM click calls help_query exactly once and preserves query focus state', async () => {
   const { sandbox, document, fetchCalls } = createSandbox();
   await vm.runInContext('helpEnsureLoaded({ force: true })', sandbox);
 
-  let prevented = false;
-  sandbox.clickEvent = { preventDefault() { prevented = true; } };
   const input = document.getElementById('help-query-input');
   input.value = 'How do I derive review?';
   input.selectionStart = 7;
@@ -558,16 +580,15 @@ test('Help Ask button path calls help_query exactly once and preserves query foc
   document.getElementById('help-query-result-scroll').scrollTop = 22;
 
   const before = fetchCalls.length;
-  const pending = vm.runInContext('helpQuerySubmit(clickEvent)', sandbox);
+  document.getElementById('help-query-ask-button').click();
   let html = document.getElementById('panel-help').innerHTML;
   assert.match(html, /Looking up maintained docs/);
   assert.equal(document.activeElement, document.getElementById('help-query-input'));
 
-  await pending;
+  await new Promise((resolve) => setImmediate(resolve));
 
   const nextInput = document.getElementById('help-query-input');
   html = document.getElementById('panel-help').innerHTML;
-  assert.equal(prevented, true);
   assert.equal(fetchCalls.slice(before).filter((call) => call.cmd === 'help_query').length, 1);
   assert.equal(fetchCalls.at(-1).question, 'How do I derive review?');
   assert.equal(document.activeElement, nextInput);
@@ -577,4 +598,25 @@ test('Help Ask button path calls help_query exactly once and preserves query foc
   assert.equal(document.getElementById('help-query-result-scroll').scrollTop, 22);
   assert.match(html, /Extractive answer/);
   assert.match(html, /Sources/);
+});
+
+test('Help Ask form submit listener invokes help_query once without native navigation fallback', async () => {
+  const { sandbox, document, fetchCalls } = createSandbox();
+  await vm.runInContext('helpEnsureLoaded({ force: true })', sandbox);
+
+  const input = document.getElementById('help-query-input');
+  input.value = 'How do I derive review?';
+  const before = fetchCalls.length;
+  const submitEvent = { type: 'submit', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+  const allowed = document.getElementById('help-query-form').dispatchEvent(submitEvent);
+  assert.equal(allowed, false);
+  assert.equal(submitEvent.defaultPrevented, true);
+  let html = document.getElementById('panel-help').innerHTML;
+  assert.match(html, /Looking up maintained docs/);
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  html = document.getElementById('panel-help').innerHTML;
+  assert.equal(fetchCalls.slice(before).filter((call) => call.cmd === 'help_query').length, 1);
+  assert.match(html, /Extractive answer/);
 });

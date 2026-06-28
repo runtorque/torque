@@ -341,6 +341,27 @@ function helpQueryKeydown(event) {
   }
 }
 
+function _helpBindQueryControls() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var form = document.getElementById('help-query-form');
+  var input = document.getElementById('help-query-input');
+  var ask = document.getElementById('help-query-ask-button');
+  var clear = document.getElementById('help-query-clear-button');
+  if (form && typeof form.addEventListener === 'function') {
+    form.addEventListener('submit', helpQuerySubmit);
+  }
+  if (input && typeof input.addEventListener === 'function') {
+    input.addEventListener('input', function () { helpQueryInputChanged(input.value); });
+    input.addEventListener('keydown', helpQueryKeydown);
+  }
+  if (ask && typeof ask.addEventListener === 'function') {
+    ask.addEventListener('click', helpQuerySubmit);
+  }
+  if (clear && typeof clear.addEventListener === 'function') {
+    clear.addEventListener('click', helpClearQuery);
+  }
+}
+
 async function helpRunQuery() {
   var rawQuestion = _helpLiveInputValue('help-query-input', _helpState.queryDraft);
   _helpState.queryDraft = rawQuestion;
@@ -736,12 +757,11 @@ function _helpRenderQueryPanel() {
   return '<section class="help-query-panel" id="help-query-scroll">'
     + '<div class="help-query-title">Ask Help</div>'
     + '<div class="help-query-subtitle">Extractive lookup over maintained Torque docs. Answers cite source paths and do not inspect board, journal, user, or runtime state.</div>'
-    + '<form class="help-query-row" onsubmit="helpQuerySubmit(event); return false">'
+    + '<form class="help-query-row" id="help-query-form">'
     + '<input id="help-query-input" class="help-query-input" value="' + _helpEsc(_helpState.queryDraft) + '" '
-    + 'placeholder="Ask a docs question…" autocomplete="off" '
-    + 'oninput="helpQueryInputChanged(this.value)" onkeydown="helpQueryKeydown(event)">'
-    + '<button type="button" class="btn-primary" onclick="helpQuerySubmit(event); return false">Ask</button>'
-    + '<button type="button" class="btn-secondary" onclick="helpClearQuery()">Clear</button>'
+    + 'placeholder="Ask a docs question…" autocomplete="off">'
+    + '<button type="button" class="btn-primary" id="help-query-ask-button">Ask</button>'
+    + '<button type="button" class="btn-secondary" id="help-query-clear-button">Clear</button>'
     + '</form>'
     + '<div class="help-query-result-scroll" id="help-query-result-scroll" aria-live="polite">' + body + '</div>'
     + '</section>';
@@ -783,4 +803,5 @@ function renderHelpPanel() {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(root, snapshot);
   }
+  _helpBindQueryControls();
 }
