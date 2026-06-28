@@ -10891,21 +10891,6 @@ async def _relaunch_agent_after_worktree_removal(
         cell.worktree_base_branch = ""
         cell.worktree_auto_checkpoint = False
         cell.checkpoint_on_progress = False
-    if getattr(cell, "runner_backend", ""):
-        launch_cfg["runner_backend"] = getattr(cell, "runner_backend", "")
-    from .runner_backends import CODEX_SDK_READONLY_BACKEND, is_codex_sdk_readonly
-    if is_codex_sdk_readonly(cell) or launch_cfg.get("runner_backend") == CODEX_SDK_READONLY_BACKEND:
-        cell.runner_backend = CODEX_SDK_READONLY_BACKEND
-        launch_cfg["runner_backend"] = CODEX_SDK_READONLY_BACKEND
-        launch_cfg["worktree"] = False
-        launch_cfg["worktree_auto_checkpoint"] = False
-        launch_cfg["checkpoint_on_progress"] = False
-        cell.worktree_path = ""
-        cell.worktree_branch = ""
-        cell.worktree_repo_root = ""
-        cell.worktree_base_branch = ""
-        cell.worktree_auto_checkpoint = False
-        cell.checkpoint_on_progress = False
     persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
     apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)

@@ -40,6 +40,39 @@ class FakeClient:
         self.closed = True
 
 
+class DocLikeThread:
+    def __init__(self, thread_id="doc-thread", response="doc ok", fail_run=None):
+        self.id = thread_id
+        self.response = response
+        self.fail_run = fail_run
+        self.run_calls = []
+
+    async def run(self, prompt, *, sandbox):
+        self.run_calls.append({"prompt": prompt, "sandbox": sandbox})
+        if self.fail_run:
+            raise self.fail_run
+        return {"text": self.response}
+
+
+class DocLikeAsyncCodex:
+    def __init__(self, thread=None):
+        self.thread = thread or DocLikeThread()
+        self.entered = False
+        self.exited = False
+        self.thread_start_calls = []
+
+    async def __aenter__(self):
+        self.entered = True
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.exited = True
+
+    async def thread_start(self, **kwargs):
+        self.thread_start_calls.append(kwargs)
+        return self.thread
+
+
 class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
     def _state_cell(self):
         state = MatrixState()
@@ -93,6 +126,64 @@ class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.create_calls[0]["system_prompt"], "sys")
         self.assertEqual(events[-1].event_type, "session_start")
         self.assertEqual(events[-1].data["runner_backend"], CODEX_SDK_READONLY_BACKEND)
+
+    async def test_documented_async_codex_thread_start_and_thread_run_shape(self):
+        state, cell = self._state_cell()
+        thread = DocLikeThread(thread_id="doc-thread", response="doc final")
+        client = DocLikeAsyncCodex(thread=thread)
+        runner = CodexSdkReadonlyRunner(
+            state,
+            client_factory=lambda: (client, "read_only"),
+        )
+        await runner.create_session(cell, sdk_system_prompt="sys")
+        sid = cell.session_id
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.agent_session_id, "doc-thread")
+        self.assertTrue(client.entered)
+        self.assertEqual(client.thread_start_calls[0]["sandbox"], "read_only")
+        self.assertEqual(client.thread_start_calls[0]["cwd"], "/repo")
+        self.assertEqual(client.thread_start_calls[0]["developer_instructions"], "sys")
+        self.assertNotIn("system_prompt", client.thread_start_calls[0])
+
+        await runner.send_text(sid, "hello")
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.session_id, sid)
+        self.assertEqual(thread.run_calls[0], {"prompt": "hello", "sandbox": "read_only"})
+        self.assertIn("doc final", runner.get_terminal_buffer(sid))
+
+        await runner.close_session(sid)
+        self.assertTrue(client.exited)
+        self.assertEqual(cell.status, "stopped")
+
+    async def test_unsupported_setup_fails_closed_without_fabricated_thread_id(self):
+        class UnsupportedClient:
+            read_only_sandbox = "read_only"
+
+            def __init__(self):
+                self.entered = False
+                self.exited = False
+
+            async def __aenter__(self):
+                self.entered = True
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                self.exited = True
+
+        state, cell = self._state_cell()
+        client = UnsupportedClient()
+        runner = CodexSdkReadonlyRunner(
+            state,
+            client_factory=lambda: (client, "read_only"),
+        )
+        with self.assertRaises(CodexSdkSetupError):
+            await runner.create_session(cell)
+        self.assertTrue(client.entered)
+        self.assertTrue(client.exited)
+        self.assertEqual(cell.status, "error")
+        self.assertIsNone(cell.session_id)
+        self.assertEqual(cell.agent_session_id, "")
+        self.assertEqual(runner.sessions, {})
 
     async def test_run_success_returns_idle_retaining_reusable_ids(self):
         state, cell = self._state_cell()

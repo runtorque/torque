@@ -33,6 +33,9 @@ class CodexSdkSession:
     cell_id: str
     sdk_thread_id: str = ""
     client: Any = None
+    thread: Any = None
+    sandbox: Any = None
+    client_context: Any = None
     buffer: str = ""
     closed: bool = False
 
@@ -81,6 +84,15 @@ def _extract_thread_id(thread: Any) -> str:
     if isinstance(thread, dict):
         return str(thread.get("id", "") or thread.get("thread_id", "") or "")
     return str(getattr(thread, "id", "") or getattr(thread, "thread_id", "") or "")
+
+
+def _has_supported_run_surface(client: Any, thread: Any) -> bool:
+    if callable(getattr(thread, "run", None)):
+        return True
+    if callable(getattr(client, "run", None)) or callable(getattr(client, "run_turn", None)):
+        return True
+    threads = getattr(client, "threads", None)
+    return callable(getattr(threads, "run", None)) if threads is not None else False
 
 
 class DefaultCodexSdkClientFactory:
@@ -156,6 +168,26 @@ class CodexSdkReadonlyRunner:
         cell.activity = ""
         cell.activity_detail = ""
 
+    async def _enter_client(self, client: Any) -> tuple[Any, Any | None]:
+        enter = getattr(client, "__aenter__", None)
+        if not callable(enter):
+            return client, None
+        entered = await _maybe_await(enter())
+        return entered or client, client
+
+    async def _close_client(self, session: CodexSdkSession) -> None:
+        context_manager = session.client_context
+        if context_manager is not None:
+            exit_ = getattr(context_manager, "__aexit__", None)
+            if callable(exit_):
+                await _maybe_await(exit_(None, None, None))
+                return
+        for method_name in ("aclose", "close"):
+            close = getattr(session.client, method_name, None)
+            if callable(close):
+                await _maybe_await(close())
+                return
+
     async def create_session(
         self,
         cell,
@@ -164,6 +196,8 @@ class CodexSdkReadonlyRunner:
         system_prompt: str = "",
         **_kwargs,
     ) -> None:
+        client_for_cleanup = None
+        context_for_cleanup = None
         try:
             factory_result = self.client_factory()
             factory_result = await _maybe_await(factory_result)
@@ -181,11 +215,18 @@ class CodexSdkReadonlyRunner:
                 raise CodexSdkSetupError(
                     "Codex SDK runner only supports read-only sandbox mode."
                 )
+            client, context_for_cleanup = await self._enter_client(client)
+            client_for_cleanup = client
             thread = await self._create_thread(
                 client,
                 sandbox=read_only,
                 system_prompt=sdk_system_prompt or system_prompt or "",
+                cwd=cell.directory or None,
             )
+            if not _has_supported_run_surface(client, thread):
+                raise CodexSdkSetupError(
+                    "Codex SDK client does not expose a supported thread run API."
+                )
             thread_id = _extract_thread_id(thread)
             runtime_session_id = "sdk-" + uuid.uuid4().hex
             session = CodexSdkSession(
@@ -193,6 +234,9 @@ class CodexSdkReadonlyRunner:
                 cell_id=cell.id,
                 sdk_thread_id=thread_id,
                 client=client,
+                thread=thread,
+                sandbox=read_only,
+                client_context=context_for_cleanup,
             )
             self.sessions[runtime_session_id] = session
             self.session_by_cell[cell.id] = runtime_session_id
@@ -235,9 +279,26 @@ class CodexSdkReadonlyRunner:
             self.state.mark_agent_heartbeat(cell, emit=False)
             self._save_emit(cell)
             await self._emit_event(cell.id, "error", {"error": cell.error_message})
+            if client_for_cleanup is not None:
+                session = CodexSdkSession(
+                    runtime_session_id="",
+                    cell_id=getattr(cell, "id", ""),
+                    client=client_for_cleanup,
+                    client_context=context_for_cleanup,
+                )
+                with contextlib.suppress(Exception):
+                    await self._close_client(session)
             raise
 
-    async def _create_thread(self, client, *, sandbox, system_prompt: str):
+    async def _create_thread(self, client, *, sandbox, system_prompt: str, cwd: str | None = None):
+        thread_start = getattr(client, "thread_start", None)
+        if callable(thread_start):
+            kwargs = {"sandbox": sandbox}
+            if cwd:
+                kwargs["cwd"] = cwd
+            if system_prompt:
+                kwargs["developer_instructions"] = system_prompt
+            return await _maybe_await(thread_start(**kwargs))
         if hasattr(client, "create_thread"):
             return await _maybe_await(client.create_thread(
                 sandbox=sandbox,
@@ -250,12 +311,15 @@ class CodexSdkReadonlyRunner:
                 sandbox=sandbox,
                 system_prompt=system_prompt,
             ))
-        # Some SDKs may create a thread implicitly on first run. Keep a stable
-        # diagnostic id rather than failing if no explicit thread API exists.
-        return "sdk-thread-" + uuid.uuid4().hex
+        raise CodexSdkSetupError(
+            "Codex SDK client does not expose a supported thread setup API."
+        )
 
     async def _run_turn(self, session: CodexSdkSession, prompt: str, *, sandbox):
         client = session.client
+        thread_run = getattr(session.thread, "run", None)
+        if callable(thread_run):
+            return await _maybe_await(thread_run(prompt, sandbox=sandbox))
         if hasattr(client, "run"):
             return await _maybe_await(client.run(
                 thread_id=session.sdk_thread_id,
@@ -290,7 +354,7 @@ class CodexSdkReadonlyRunner:
             return
         if session.cell_id in self.active_runs:
             raise RuntimeError("Codex SDK read-only session already has an active run")
-        read_only = getattr(session.client, "read_only_sandbox", "read_only")
+        read_only = session.sandbox or getattr(session.client, "read_only_sandbox", "read_only")
 
         async def _run() -> None:
             try:
@@ -361,9 +425,7 @@ class CodexSdkReadonlyRunner:
                 run_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await run_task
-            close = getattr(session.client, "close", None)
-            if callable(close):
-                await _maybe_await(close())
+            await self._close_client(session)
             self.sessions.pop(session_id, None)
             self.session_by_cell.pop(session.cell_id, None)
             session.closed = True
