@@ -11600,6 +11600,100 @@ test('embedded terminal output does not refollow when user scrolls up during asy
   assert.equal(term.scrollToBottomCount || 0, 0);
 });
 
+test('embedded terminal intentional wheel scroll-up disables tailing before streaming output can refollow', () => {
+  const { context, dom, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  const viewport = new FakeElement('xterm-viewport');
+  viewport.classList.add('xterm-viewport');
+  viewport.scrollHeight = 1000;
+  viewport.clientHeight = 250;
+  viewport.scrollTop = 750;
+  dom.surface.setQuerySelector('.xterm-viewport', viewport);
+  context.__viewport = viewport;
+
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.writeBaseGrowth = 7;
+  runInContext(context, `_attachEmbeddedTerminalTailControls(_embeddedTerminalSessions['term-1:sess-1']);`);
+
+  viewport.listeners.wheel({ deltaY: -48, deltaMode: 0 });
+
+  assert.equal(
+    runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailPinned`),
+    false,
+    'large wheel-up detaches immediately, before native scroll or output callbacks',
+  );
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'stream while scrolling\r\n' }),
+  });
+
+  assert.deepEqual(term.writes, ['stream while scrolling\r\n']);
+  assert.equal(term.buffer.active.baseY, 49);
+  assert.equal(term.buffer.active.viewportY, 42);
+  assert.equal(term.scrollToBottomCount || 0, 0);
+});
+
+test('embedded terminal small near-bottom wheel headroom keeps tailing through output', () => {
+  const { context, dom, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
+  const term = terminals[0];
+  const viewport = new FakeElement('xterm-viewport');
+  viewport.classList.add('xterm-viewport');
+  viewport.scrollHeight = 1000;
+  viewport.clientHeight = 250;
+  viewport.scrollTop = 750;
+  dom.surface.setQuerySelector('.xterm-viewport', viewport);
+  context.__viewport = viewport;
+
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+  term.writeBaseGrowth = 7;
+  runInContext(context, `_attachEmbeddedTerminalTailControls(_embeddedTerminalSessions['term-1:sess-1']);`);
+
+  viewport.listeners.wheel({ deltaY: -12, deltaMode: 0 });
+  viewport.scrollTop = 738; // 12px above the bottom: outside at-tail, below detach threshold.
+  viewport.listeners.scroll({ currentTarget: viewport });
+
+  assert.equal(
+    runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailPinned`),
+    true,
+    'small near-bottom wheel movement should preserve follow-tail intent',
+  );
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'minor headroom\r\n' }),
+  });
+
+  assert.deepEqual(term.writes, ['minor headroom\r\n']);
+  assert.equal(term.buffer.active.baseY, 49);
+  assert.equal(term.buffer.active.viewportY, 49);
+  assert.equal(term.scrollToBottomCount, 1);
+  assert.equal(viewport.scrollTop, 750);
+});
+
+test('embedded terminal repeated small trackpad scroll-up accumulates intent and disables tailing', () => {
+  const { context, dom } = setupEmbeddedTerminalOutputHarness();
+  const viewport = new FakeElement('xterm-viewport');
+  viewport.classList.add('xterm-viewport');
+  viewport.scrollHeight = 1000;
+  viewport.clientHeight = 250;
+  viewport.scrollTop = 750;
+  dom.surface.setQuerySelector('.xterm-viewport', viewport);
+  context.__viewport = viewport;
+
+  runInContext(context, `_attachEmbeddedTerminalTailControls(_embeddedTerminalSessions['term-1:sess-1']);`);
+
+  viewport.listeners.wheel({ deltaY: -12, deltaMode: 0 });
+  assert.equal(runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailPinned`), true);
+
+  viewport.listeners.wheel({ deltaY: -12, deltaMode: 0 });
+  assert.equal(
+    runInContext(context, `_embeddedTerminalSessions['term-1:sess-1'].tailPinned`),
+    false,
+    'cumulative small trackpad deltas should detach once they cross the threshold',
+  );
+});
+
 function triggerEmbeddedTerminalResize(context, sessionKey) {
   runInContext(context, `
     (function() {

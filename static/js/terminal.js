@@ -57,6 +57,13 @@ var XTERM_SCROLLBACK_DEFAULT = 2000;
 var XTERM_SCROLLBACK_MIN = 100;
 var XTERM_SCROLLBACK_MAX = 100000;
 var EMBEDDED_TERMINAL_TAIL_THRESHOLD_PX = 8;
+// Wheel/trackpad scroll-up can arrive while xterm is actively appending output.
+// Detach only after a small intentional movement (roughly two terminal rows) so
+// incidental near-bottom headroom keeps useful tailing, but a real scroll-up
+// disables follow-tail before the next output callback can pull the viewport
+// back down.
+var EMBEDDED_TERMINAL_SCROLL_UP_DETACH_THRESHOLD_PX = 24;
+var EMBEDDED_TERMINAL_WHEEL_INTENT_RESET_MS = 350;
 var EMBEDDED_TERMINAL_USER_SCROLL_INTENT_MS = 900;
 
 function _xtermScrollbackFromSettings(settings) {
@@ -2712,6 +2719,35 @@ function _embeddedTerminalViewportAtTail(viewport) {
     || (scrollHeight - scrollTop - clientHeight) <= EMBEDDED_TERMINAL_TAIL_THRESHOLD_PX;
 }
 
+function _embeddedTerminalViewportTailDistance(viewport) {
+  if (!viewport) return 0;
+  const scrollTop = Number(viewport.scrollTop) || 0;
+  const clientHeight = Number(viewport.clientHeight) || 0;
+  const scrollHeight = Number(viewport.scrollHeight) || 0;
+  return Math.max(0, scrollHeight - scrollTop - clientHeight);
+}
+
+function _embeddedTerminalBufferTailDistancePx(entry) {
+  const term = entry && entry.terminal;
+  const buffer = term && term.buffer && term.buffer.active;
+  if (!buffer) return 0;
+  const viewportY = Number(buffer.viewportY);
+  const baseY = Number(buffer.baseY);
+  if (!Number.isFinite(viewportY) || !Number.isFinite(baseY)) return 0;
+  const rows = Math.max(0, baseY - viewportY);
+  if (!rows) return 0;
+  const lineHeight = Math.max(1, Number(term && term.options && term.options.fontSize) || 13);
+  return rows * lineHeight;
+}
+
+function _embeddedTerminalScrolledUpBeyondTailDetachThreshold(entry) {
+  const viewport = _embeddedTerminalViewport(entry);
+  const viewportDistance = _embeddedTerminalViewportTailDistance(viewport);
+  const bufferDistance = _embeddedTerminalBufferTailDistancePx(entry);
+  return Math.max(viewportDistance, bufferDistance)
+    >= EMBEDDED_TERMINAL_SCROLL_UP_DETACH_THRESHOLD_PX;
+}
+
 function _embeddedTerminalAtTail(entry) {
   const term = entry && entry.terminal;
   const buffer = term && term.buffer && term.buffer.active;
@@ -2749,6 +2785,10 @@ function _updateEmbeddedTerminalTailButton(entry) {
 function _embeddedTerminalSetTailPinned(entry, pinned) {
   if (!entry) return;
   entry.tailPinned = !!pinned;
+  if (entry.tailPinned) {
+    entry.wheelScrollUpIntentPx = 0;
+    entry.wheelScrollUpIntentAt = 0;
+  }
   _updateEmbeddedTerminalTailButton(entry);
 }
 
@@ -2767,10 +2807,49 @@ function _syncEmbeddedTerminalTailPinnedFromViewport(entry, userInitiated) {
   if (!entry) return;
   if (_embeddedTerminalAtTail(entry)) {
     _embeddedTerminalSetTailPinned(entry, true);
-  } else if (userInitiated || _embeddedTerminalHasUserScrollIntent(entry)) {
+  } else if (userInitiated || (
+      _embeddedTerminalHasUserScrollIntent(entry)
+      && _embeddedTerminalScrolledUpBeyondTailDetachThreshold(entry)
+    )) {
     _embeddedTerminalSetTailPinned(entry, false);
   } else {
     _updateEmbeddedTerminalTailButton(entry);
+  }
+}
+
+function _embeddedTerminalWheelDeltaYPx(event, viewport) {
+  const raw = Number(event && event.deltaY);
+  if (!Number.isFinite(raw)) return 0;
+  const mode = Number(event && event.deltaMode) || 0;
+  if (mode === 1) return raw * 16;
+  if (mode === 2) return raw * Math.max(1, Number(viewport && viewport.clientHeight) || 240);
+  return raw;
+}
+
+function _embeddedTerminalResetWheelScrollUpIntent(entry) {
+  if (!entry) return;
+  entry.wheelScrollUpIntentPx = 0;
+  entry.wheelScrollUpIntentAt = 0;
+}
+
+function _embeddedTerminalMarkWheelIntent(entry, event, viewport) {
+  if (!entry) return;
+  _embeddedTerminalMarkUserScrollIntent(entry);
+  const deltaY = _embeddedTerminalWheelDeltaYPx(event, viewport);
+  if (deltaY >= 0) {
+    _embeddedTerminalResetWheelScrollUpIntent(entry);
+    return;
+  }
+  const now = Date.now();
+  const previousAt = Number(entry.wheelScrollUpIntentAt || 0);
+  const previousPx = previousAt && (now - previousAt) <= EMBEDDED_TERMINAL_WHEEL_INTENT_RESET_MS
+    ? Number(entry.wheelScrollUpIntentPx || 0)
+    : 0;
+  const nextPx = previousPx + Math.abs(deltaY);
+  entry.wheelScrollUpIntentPx = nextPx;
+  entry.wheelScrollUpIntentAt = now;
+  if (nextPx >= EMBEDDED_TERMINAL_SCROLL_UP_DETACH_THRESHOLD_PX) {
+    _embeddedTerminalSetTailPinned(entry, false);
   }
 }
 
@@ -2813,7 +2892,7 @@ function _detachEmbeddedTerminalTailControls(entry) {
   const surface = controls.surface;
   const handlers = controls.handlers || {};
   if (viewport && typeof viewport.removeEventListener === 'function') {
-    viewport.removeEventListener('wheel', handlers.userIntent);
+    viewport.removeEventListener('wheel', handlers.wheelIntent || handlers.userIntent);
     viewport.removeEventListener('touchstart', handlers.userIntent);
     viewport.removeEventListener('pointerdown', handlers.pointerDown);
     viewport.removeEventListener('scroll', handlers.scroll);
@@ -2851,6 +2930,9 @@ function _attachEmbeddedTerminalTailControls(entry) {
       }, 0);
     }
   };
+  const wheelIntent = function(event) {
+    _embeddedTerminalMarkWheelIntent(entry, event, viewport);
+  };
   const userIntentKey = function(event) {
     const key = event && (event.key || event.code);
     if (key === 'PageUp' || key === 'PageDown' || key === 'Home' || key === 'End'
@@ -2869,7 +2951,7 @@ function _attachEmbeddedTerminalTailControls(entry) {
   const scroll = function() {
     _syncEmbeddedTerminalTailPinnedFromViewport(entry, false);
   };
-  viewport.addEventListener('wheel', userIntent, { passive: true });
+  viewport.addEventListener('wheel', wheelIntent, { passive: true });
   viewport.addEventListener('touchstart', userIntent, { passive: true });
   viewport.addEventListener('pointerdown', pointerDown, true);
   viewport.addEventListener('scroll', scroll);
@@ -2885,6 +2967,7 @@ function _attachEmbeddedTerminalTailControls(entry) {
     surface: surface,
     handlers: {
       userIntent: userIntent,
+      wheelIntent: wheelIntent,
       userIntentKey: userIntentKey,
       pointerDown: pointerDown,
       pointerUp: pointerUp,
