@@ -235,9 +235,9 @@ classes, but connector access must be managed separately.
 ## Torque Steward class
 
 The built-in Torque Steward class has primary identity label **Torque Steward**
-and stable internal id `torque-steward`. Wave A keeps it lifecycle `draft` and
-`draft.scratch_only: true`; it must not be auto-created, auto-run, or treated as
-broad user-delegated authority.
+and stable internal id `torque-steward`. Wave B still keeps it lifecycle
+`draft` and `draft.scratch_only: true`; it must not be auto-created, auto-run,
+or treated as broad user-delegated authority.
 
 Torque Steward is Architect-derived because it will eventually represent the
 user's operational wishes for a group, but its Wave A compiled policy is
@@ -257,6 +257,26 @@ deploy, edit Agent Classes/Profiles, change settings, accept decisions, or
 message/control Engineers or Workers. Explicit user-directed powerful actions
 remain future reviewed waves that need confirmation, auditability, visibility,
 and rollback expectations before enablement.
+
+Wave B adds one deterministic read-only helper,
+`architect_steward_operating_brief`, when the Steward's projected policy grants
+the required read atoms. The helper returns a structured onboarding/operating
+brief with:
+
+- observed facts: group/task counts, active workstreams, current asks/gates,
+  visible actor/class context, and Help doc references;
+- inferred risks: blocked asks, stale handoffs/reviews, missed user-update
+  candidates, dangling/unused workers, silent agents/workstreams, unhealthy
+  tasks, and visible branch-boundary/merge gates;
+- suggested next steps and responsible-actor recommendations, each marked as a
+  recommendation with `mutation_performed: false`.
+
+The helper is intentionally not a routing or authority surface. It does not
+create/update/move/assign/dispatch tasks, message users/agents, hire/dismiss
+Engineers, accept decisions, edit classes/profiles, merge worktrees, deploy, or
+restart anything. It is a bounded starting point for Steward answers; the
+Steward should still cite visible evidence and use Help docs for Torque concept
+explanations.
 
 ## Prompt composition
 

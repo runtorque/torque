@@ -153,8 +153,11 @@ class AgentProfileRegistryTests(unittest.TestCase):
                 "generated_by_agent_class": {"id": "torque-steward"},
             },
         ))
+        pm = profile_policy_by_id("product-manager-draft", base_dir=str(self.project))
+        self.assertIsNotNone(pm)
 
         self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_steward_operating_brief", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", steward))
@@ -176,6 +179,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_create", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_update", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("engineer_merge", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_steward_operating_brief", pm))
 
 
     def test_enriched_preview_warns_for_product_manager_draft(self):

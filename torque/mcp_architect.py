@@ -52,6 +52,38 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_steward_operating_brief",
+        "description": (
+            "Return a read-only Torque Steward onboarding/operating brief for "
+            "this Architect's group. The payload separates observed facts, "
+            "inferred risks, suggested next steps, and responsible-actor "
+            "recommendations; it never routes, dispatches, messages, creates "
+            "tasks, accepts decisions, merges, deploys, or mutates state."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["onboarding", "operating", "anomalies"],
+                    "description": "Brief focus. Defaults to operating.",
+                },
+                "limit_per_section": {
+                    "type": "integer",
+                    "description": "Maximum items per section (default 5, max 20).",
+                },
+                "stale_after_hours": {
+                    "type": "number",
+                    "description": "Age threshold for stale task/review/handoff heuristics (default 24).",
+                },
+                "silent_after_hours": {
+                    "type": "number",
+                    "description": "Progress silence threshold for active agents/workstreams (default 2).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_board_summary",
         "description": (
             "Return a compact board overview for this architect's group, "

@@ -538,6 +538,19 @@ def _restricted_tool_lines(authority: dict) -> list[str]:
         lines.append(
             "- Context: use `torque_context()` when visible, then projected board/task, event, MCP telemetry, Area, Initiative, and Decision reads for operational health checks."
         )
+        if _has_capabilities(
+                authority,
+                "observe.board_summary",
+                "observe.task_detail",
+                "observe.events",
+                "observe.mcp_calls",
+                "planning.area_read",
+                "planning.initiative_read",
+                "decision.list",
+        ):
+            lines.append(
+                "- Operating brief: when `architect_steward_operating_brief` is visible, use it as the deterministic read-only starting point for onboarding, anomaly reports, and responsible-actor suggestions."
+            )
     else:
         lines.append(
             "- Context: use `torque_context()` when visible, then product/context reads that are projected for your class."
@@ -627,7 +640,7 @@ def _restricted_boot_lines(authority: dict) -> list[str]:
         return [
             "1. Confirm your class, group, lifecycle/status, and visible read-only tools with `torque_context()` when available.",
             "2. Read projected board/task and recent-event context before making any recommendation.",
-            "3. Summarize operational health: stuck/stale work, missed handoffs, unclear ownership, overdue review/fix loops, and cleanup candidates.",
+            "3. For onboarding or operating-state requests, prefer the structured Steward operating brief helper when visible; otherwise summarize operational health from projected reads: stuck/stale work, missed handoffs, unclear ownership, overdue review/fix loops, and cleanup candidates.",
             "4. State assumptions and confidence; separate evidence from inference.",
             "5. Offer safe recommendations or escalation paths for the user, Torqly/Blueprint, or an authorized Architect/Engineer to perform.",
         ]
@@ -667,7 +680,7 @@ def _restricted_operating_lines(authority: dict) -> list[str]:
         return [
             "1. **Authority boundary** — Tool visibility is authoritative. Wave A Steward authority is observation/recommendation only; never route around denied tools with freeform instructions, terminal output, or raw MCP names.",
             "2. **User representation** — You represent the user's operational wishes, not your own autonomous plan. Powerful user-directed actions require a future reviewed power path with explicit confirmation, auditability, visibility, and rollback expectations before execution.",
-            "3. **Operational stewardship** — Look for stale/stuck tasks, missed handoffs, unresolved asks, review/fix loops, health anomalies, noisy failures, and cleanup opportunities. Recommend the smallest safe next step and the authorized actor who should take it.",
+            "3. **Operational stewardship** — Look for stale/stuck tasks, missed handoffs, unresolved asks, review/fix loops, health anomalies, noisy failures, and cleanup opportunities. Keep outputs structured as observed facts, inferred risks, and suggested next steps. Recommend the smallest safe next step and the authorized actor who should take it.",
             "4. **Non-mutation discipline** — Do not restart, compact, notify, schedule, dispatch, assign, hire, merge, deploy, edit classes/profiles, change settings, accept decisions, or message/control Engineers or Workers.",
             "5. **Escalation** — When a useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the review, confirmation, or handoff path instead of performing the action.",
         ]

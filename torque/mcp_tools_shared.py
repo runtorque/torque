@@ -55,6 +55,7 @@ from .mcp_engineer_tools.shared import (
 )
 from .server_artifacts import serialize_task_for_mcp
 from .server_prompts import build_engineer_deliverable_awareness
+from .steward_brief import build_steward_operating_brief
 from .identity import prepend_agent_identity_anchor
 from .state import (
     ARCHITECT_MANDATORY_EVENTS,
@@ -2553,6 +2554,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "session_map",
     "specialization_show",
     "specializations_list",
+    "steward_operating_brief",
     "stream_show",
     "streams_list",
     "task_chain",
@@ -9660,6 +9662,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             _engineer_group,
             args,
         )
+
+    if tool_name == "steward_operating_brief" and caller_kind == "architect":
+        return _compact_json(build_steward_operating_brief(
+            state,
+            caller_id,
+            _engineer_group,
+            args,
+        )), False
 
     if tool_name == "wave_summary" and caller_kind == "architect":
         return _architect_wave_summary_json(
