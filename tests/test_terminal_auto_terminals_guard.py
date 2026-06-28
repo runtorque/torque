@@ -138,16 +138,22 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     async def _fake_create_agent_with_config(state, group, name, launch_cfg,
                                              **_kwargs):
-        return state.add_agent(
+        cell = state.add_agent(
             name=name,
             group=group,
             terminal_backend="pty",
+            runner_backend=launch_cfg.get("runner_backend", ""),
             profile=launch_cfg.get("profile", "Default"),
             command=launch_cfg.get("command", "codex"),
             directory=launch_cfg.get("directory", "/repo"),
             tab_color=launch_cfg.get("tab_color", ""),
             icon=launch_cfg.get("icon", ""),
         )
+        if cell:
+            cell.agent_type = launch_cfg.get("agent_type", "")
+            state._emit_agent(cell)
+            state._db_save_agent(cell)
+        return cell
 
     def _state_with_hidden_auto_terminals(self, count=2):
         state = self.state_mod.MatrixState()
@@ -194,6 +200,76 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(
             any(cell.cell_type == "terminal" for cell in state.agents.values())
+        )
+
+    async def test_add_agent_accepts_public_sdk_runner_backend_override(self):
+        state = self._state_with_hidden_auto_terminals(count=2)
+        resolver_calls = []
+        child_terminal_calls = []
+
+        async def create_child_terminals(*args, **kwargs):
+            child_terminal_calls.append({"args": args, "kwargs": kwargs})
+            return []
+
+        def resolve_launch_config(group, *, base_dir="", explicit_template="",
+                                  overrides=None):
+            resolver_calls.append({
+                "group": group,
+                "base_dir": base_dir,
+                "explicit_template": explicit_template,
+                "overrides": dict(overrides or {}),
+            })
+            return {
+                "provider": "codex",
+                "agent_type": "codex",
+                "runner_backend": (overrides or {}).get("runner_backend", ""),
+                "profile": "Default",
+                "command": (overrides or {}).get("command", "codex"),
+                "directory": (overrides or {}).get("directory", "/repo"),
+                "tab_color": "",
+                "icon": "",
+                "initial_prompt": "",
+                "terminals": [],
+                "worktree": False,
+                "worktree_auto_checkpoint": False,
+                "checkpoint_on_progress": False,
+            }
+
+        handle_command = self._extract_handle_command(
+            state,
+            _create_agent_with_config=(
+                lambda group, name, cfg, **kwargs:
+                self._fake_create_agent_with_config(
+                    state, group, name, cfg, **kwargs)
+            ),
+            _create_child_terminals=create_child_terminals,
+            _resolve_agent_launch_config=resolve_launch_config,
+        )
+
+        # Public /api/cmd shape used for operator SDK smoke after deploy/relaunch.
+        await handle_command({
+            "cmd": "add_agent",
+            "group": "g",
+            "name": "Codex SDK Smoke",
+            "provider": "codex",
+            "command": "codex",
+            "directory": "/repo",
+            "runner_backend": "codex-sdk-readonly",
+            "initial_prompt": "",
+        })
+
+        self.assertEqual(
+            resolver_calls[0]["overrides"]["runner_backend"],
+            "codex-sdk-readonly",
+        )
+        self.assertEqual(child_terminal_calls, [])
+        cell = next(iter(state.agents.values()))
+        self.assertEqual(cell.name, "Codex SDK Smoke")
+        self.assertEqual(cell.agent_type, "codex")
+        self.assertEqual(cell.runner_backend, "codex-sdk-readonly")
+        self.assertEqual(
+            state.to_dict()["agents"][cell.id]["runner_backend"],
+            "codex-sdk-readonly",
         )
 
     async def test_add_agent_preserves_explicit_companion_terminals(self):
