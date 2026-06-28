@@ -891,6 +891,76 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   flex: 1;
   min-width: 0;
 }
+.terminal-compose-resize-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 10px;
+  margin: 0 0 -1px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  cursor: ns-resize;
+  color: var(--text-dim);
+}
+.terminal-compose-resize-handle span {
+  display: block;
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.16);
+  box-shadow: 0 1px 0 rgba(0,0,0,.2);
+}
+.terminal-compose-resize-handle:hover span,
+.terminal-compose-resize-handle:focus-visible span {
+  background: color-mix(in srgb, var(--accent) 56%, rgba(255,255,255,.16) 44%);
+}
+.terminal-compose-resize-handle:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--accent) 56%, var(--border) 44%);
+  outline-offset: 1px;
+}
+.terminal-compose-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 5px;
+  min-width: 0;
+}
+.terminal-compose-attachments[hidden] {
+  display: none !important;
+}
+.terminal-compose-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(260px, 100%);
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border) 65%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, rgba(255,255,255,.035) 88%);
+  color: var(--text);
+  font: 10px/1.2 ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Consolas, monospace;
+}
+.terminal-compose-attachment-chip:hover,
+.terminal-compose-attachment-chip:focus-visible,
+.terminal-compose-attachment-chip.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  outline: none;
+}
+.terminal-compose-attachment-icon {
+  color: var(--accent);
+  font-size: 11px;
+}
+.terminal-compose-attachment-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .terminal-compose-reply {
   display: flex;
   align-items: center;
@@ -930,7 +1000,7 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   width: 100%;
   min-width: 0;
   min-height: 32px;
-  max-height: 88px;
+  max-height: var(--terminal-compose-user-height, 88px);
   padding: 8px 10px;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 10px;
@@ -943,6 +1013,73 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   font-variant-numeric: tabular-nums;
   outline: none;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+body.terminal-compose-resizing,
+body.terminal-compose-resizing * {
+  cursor: ns-resize !important;
+  user-select: none;
+}
+.terminal-compose-attachment-preview-overlay {
+  align-items: center;
+  justify-content: center;
+}
+.terminal-compose-attachment-preview-modal {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  overflow: hidden;
+}
+.terminal-compose-attachment-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.terminal-compose-attachment-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-compose-attachment-preview-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+}
+.terminal-compose-attachment-preview-close:hover,
+.terminal-compose-attachment-preview-close:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.terminal-compose-attachment-preview-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  max-height: calc(min(720px, calc(100vh - 32px)) - 54px);
+  padding: 14px;
+  overflow: auto;
+}
+.terminal-compose-attachment-preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 110px);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.38);
+}
+.terminal-compose-attachment-preview-unavailable {
+  color: var(--text-dim);
+  font-size: 12px;
 }
 .terminal-compose-input::placeholder {
   color: color-mix(in srgb, var(--text-dim) 78%, transparent);

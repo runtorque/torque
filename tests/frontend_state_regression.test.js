@@ -12610,13 +12610,57 @@ test('terminal composer uses a markdown-friendly monospace stack without changin
   const rule = css.match(/\.terminal-compose-input\s*\{[^}]+\}/);
   assert.ok(rule, 'terminal composer input CSS rule exists');
   assert.match(rule[0], /min-height:\s*32px;/);
-  assert.match(rule[0], /max-height:\s*88px;/);
+  assert.match(rule[0], /max-height:\s*var\(--terminal-compose-user-height,\s*88px\);/);
   assert.match(
     rule[0],
     /font:\s*12px\/1\.35 ui-monospace,\s*"SF Mono",\s*"Cascadia Mono",\s*"Segoe UI Mono",\s*"Liberation Mono",\s*Menlo,\s*Consolas,\s*monospace;/,
   );
   assert.match(rule[0], /font-variant-ligatures:\s*none;/);
   assert.match(rule[0], /font-variant-numeric:\s*tabular-nums;/);
+});
+
+test('terminal composer drag handle resizes message box across rerenders', () => {
+  const { context, document } = createEmbeddedTerminalHarness();
+  const form = new FakeElement('compose-form');
+  form.classList.add('terminal-compose');
+  const wrap = new FakeElement('compose-wrap');
+  wrap.classList.add('terminal-compose-input-wrap');
+  const handle = new FakeElement('compose-resize');
+  handle.classList.add('terminal-compose-resize-handle');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.scrollHeight = 42;
+  input.getBoundingClientRect = () => ({ top: 0, bottom: 88, height: 88, left: 0, right: 300, width: 300 });
+  form.appendChild(wrap);
+  wrap.appendChild(handle);
+  wrap.appendChild(input);
+  form.setQuerySelector('.terminal-compose-input', input);
+  context.__resizeHandle = handle;
+
+  runInContext(context, `
+    terminalComposeResizeStart({
+      button: 0,
+      clientY: 200,
+      currentTarget: __resizeHandle,
+      preventDefault() { this.prevented = true; },
+      stopPropagation() { this.stopped = true; },
+    });
+  `);
+  assert.equal(document.body.classList.contains('terminal-compose-resizing'), true);
+  document.listeners.mousemove({ clientY: 150, preventDefault() {} });
+  assert.equal(input.style.height, '138px');
+  assert.equal(input.style.maxHeight, '138px');
+  assert.equal(jsonValue(context, `_terminalComposeHeights['agent-1']`), 138);
+
+  document.listeners.mouseup({ clientY: 150, preventDefault() {}, stopPropagation() {} });
+  assert.equal(document.body.classList.contains('terminal-compose-resizing'), false);
+
+  input.style.height = '';
+  input.style.maxHeight = '';
+  runInContext(context, `_terminalComposeAutoResize(document.getElementById('terminal-compose-input-agent-1'));`);
+  assert.equal(input.style.height, '138px');
+  assert.equal(input.style.maxHeight, '138px');
 });
 
 test('embedded terminal markdown links do not select messages or refocus terminal', () => {
@@ -13701,7 +13745,7 @@ test('terminal compose validates dropped attachments before upload', () => {
   ]);
 });
 
-test('terminal compose image drop displays tokens and sends returned paths', async () => {
+test('terminal compose image drop displays chips and sends returned paths', async () => {
   const uploads = [];
   class FakeFormData {
     constructor() {
@@ -13715,6 +13759,12 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
 
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     FormData: FakeFormData,
+    URL: {
+      createObjectURL(file) {
+        return 'blob:preview-' + (file && file.name);
+      },
+      revokeObjectURL() {},
+    },
     fetch(url, options) {
       uploads.push({ url, entries: options.body.entries });
       return Promise.resolve({
@@ -13741,11 +13791,15 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
   input.selectionEnd = 'prefix-'.length;
   const error = new FakeElement('compose-error');
   error.classList.add('terminal-compose-error');
+  const chips = new FakeElement('compose-attachments');
+  chips.classList.add('terminal-compose-attachments');
   const button = document.register('terminal-compose-submit-agent-1');
   button.classList.add('terminal-compose-submit');
   form.appendChild(input);
+  form.appendChild(chips);
   form.appendChild(error);
   form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-attachments', chips);
   form.setQuerySelector('.terminal-compose-error', error);
   form.setQuerySelector('.terminal-compose-submit', button);
 
@@ -13773,15 +13827,18 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
   ]);
   const firstPath = '/home/testuser/.torque/attachments/agent-1-first.png';
   const secondPath = '/home/testuser/.torque/attachments/agent-1-second.jpg';
-  const displayInserted = '[ Image #1 ]\n[ Image #2 ]';
   const payloadInserted = firstPath + '\n' + secondPath;
-  assert.equal(input.value, 'prefix-' + displayInserted + ' suffix');
-  assert.equal(input.selectionStart, 'prefix-'.length + displayInserted.length);
+  assert.equal(input.value, 'prefix- suffix');
+  assert.match(chips.innerHTML, /terminal-compose-attachment-chip/);
+  assert.match(chips.innerHTML, /first\.png/);
+  assert.match(chips.innerHTML, /second\.jpg/);
+  assert.equal(chips.hidden, false);
+  assert.equal(input.selectionStart, 'prefix-'.length);
   assert.equal(input.selectionEnd, input.selectionStart);
   assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), input.value);
-  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
-    { token: '[ Image #1 ]', path: firstPath },
-    { token: '[ Image #2 ]', path: secondPath },
+  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, filename: e.filename, mime_type: e.mime_type, size_bytes: e.size_bytes, position: e.position }; })`), [
+    { token: '[ Image #1 ]', path: firstPath, filename: 'first.png', mime_type: 'image/png', size_bytes: 1200, position: 'prefix-'.length },
+    { token: '[ Image #2 ]', path: secondPath, filename: 'second.jpg', mime_type: 'image/jpeg', size_bytes: 1400, position: 'prefix-'.length },
   ]);
   assert.equal(
     runInContext(context, `_terminalComposePayloadText('agent-1', ${JSON.stringify(input.value)})`),
@@ -13791,12 +13848,39 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
   assert.equal(button.disabled, false);
   assert.equal(input.focused, true);
 
-  input.value = 'prefix-[ Image #2 ] suffix';
-  input.selectionStart = input.value.length;
-  input.selectionEnd = input.value.length;
-  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
-  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
-    { token: '[ Image #2 ]', path: secondPath },
+  const previewEvt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__previewEvt = previewEvt;
+  runInContext(context, `terminalComposeAttachmentPreview(__previewEvt, 'agent-1', '[ Image #1 ]');`);
+  assert.equal(previewEvt.preventDefaultCalled, true);
+  assert.equal(previewEvt.stopPropagationCalled, true);
+  assert.equal(document.body.children.length > 0, true);
+  assert.match(document.body.children.at(-1).innerHTML, /blob:preview-first\.png/);
+  assert.match(document.body.children.at(-1).innerHTML, /terminal-compose-attachment-preview-image/);
+
+  input.selectionStart = 'prefix-'.length;
+  input.selectionEnd = 'prefix-'.length;
+  const deleteEvt = {
+    key: 'Backspace',
+    target: input,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__deleteChipEvt = deleteEvt;
+  runInContext(context, `terminalComposeKeydown(__deleteChipEvt, 'agent-1');`);
+  assert.equal(deleteEvt.preventDefaultCalled, true);
+  assert.equal(deleteEvt.stopPropagationCalled, true);
+  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
+    { token: '[ Image #2 ]', path: secondPath, position: 'prefix-'.length },
   ]);
 
   context.__submitEvt = {
@@ -13813,7 +13897,7 @@ test('terminal compose image drop displays tokens and sends returned paths', asy
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
 });
 
-test('terminal compose preserves image token payload through history recall restore', async () => {
+test('terminal compose preserves image chip payload through history recall restore', async () => {
   async function runRecallRestoreFlow(restoreKey) {
     const uploads = [];
     class FakeFormData {
@@ -13856,12 +13940,16 @@ test('terminal compose preserves image token payload through history recall rest
     input.selectionEnd = 0;
     const error = new FakeElement('compose-error');
     error.classList.add('terminal-compose-error');
+    const chips = new FakeElement('compose-attachments');
+    chips.classList.add('terminal-compose-attachments');
     const button = document.register('terminal-compose-submit-agent-1');
     button.classList.add('terminal-compose-submit');
     form.appendChild(input);
+    form.appendChild(chips);
     form.appendChild(error);
     form.appendChild(button);
     form.setQuerySelector('.terminal-compose-input', input);
+    form.setQuerySelector('.terminal-compose-attachments', chips);
     form.setQuerySelector('.terminal-compose-error', error);
     form.setQuerySelector('.terminal-compose-submit', button);
 
@@ -13879,9 +13967,10 @@ test('terminal compose preserves image token payload through history recall rest
     assert.equal(dropEvent.preventDefaultCalled, true);
     assert.equal(dropEvent.stopPropagationCalled, true);
     assert.equal(uploads.length, 1);
-    assert.equal(input.value, '[ Image #1 ]');
-    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
-      { token: '[ Image #1 ]', path: fullPath },
+    assert.equal(input.value, '');
+    assert.match(chips.innerHTML, /history\.png/);
+    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, filename: e.filename, position: e.position }; })`), [
+      { token: '[ Image #1 ]', path: fullPath, filename: 'history.png', position: 0 },
     ]);
 
     function keyEvent(key) {
@@ -13905,8 +13994,8 @@ test('terminal compose preserves image token payload through history recall rest
     assert.equal(up.preventDefaultCalled, true);
     assert.equal(up.stopPropagationCalled, true);
     assert.equal(input.value, 'previous history entry');
-    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
-      { token: '[ Image #1 ]', path: fullPath },
+    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
+      { token: '[ Image #1 ]', path: fullPath, position: 0 },
     ]);
 
     const restore = keyEvent(restoreKey);
@@ -13914,9 +14003,9 @@ test('terminal compose preserves image token payload through history recall rest
     runInContext(context, `terminalComposeKeydown(__historyRestore, 'agent-1');`);
     assert.equal(restore.preventDefaultCalled, true);
     assert.equal(restore.stopPropagationCalled, true);
-    assert.equal(input.value, '[ Image #1 ]');
-    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries`), [
-      { token: '[ Image #1 ]', path: fullPath },
+    assert.equal(input.value, '');
+    assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
+      { token: '[ Image #1 ]', path: fullPath, position: 0 },
     ]);
 
     context.__submitHistoryRestore = {

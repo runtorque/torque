@@ -14,6 +14,11 @@ let _terminalComposeDrafts = Object.create(null);
 let _terminalComposeAttachments = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
+let _terminalComposeHeights = Object.create(null);
+let _terminalComposeResizeDrag = null;
+let _terminalComposeSelectedAttachmentByCell = Object.create(null);
+let _terminalComposePreviewOverlay = null;
+let _terminalComposePreviewKeyHandler = null;
 let _terminalComposeHistoryOpenCellId = '';
 let _terminalComposeTaskDropdownCellId = '';
 let _terminalComposeTaskDropdownIdx = -1;
@@ -45,6 +50,9 @@ var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
 var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_THRESHOLD_PX = 4;
 var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_DURATION_MS = 650;
 
+var TERMINAL_COMPOSE_MIN_HEIGHT = 32;
+var TERMINAL_COMPOSE_DEFAULT_MAX_HEIGHT = 88;
+var TERMINAL_COMPOSE_MAX_HEIGHT_FALLBACK = 260;
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
   'image/png': true,
@@ -1305,13 +1313,182 @@ function _terminalComposeAutoResize(el) {
   } else if (typeof boardAddTaskAutoResize === 'function') {
     boardAddTaskAutoResize(el);
   }
+  _terminalComposeApplyHeight(el);
+}
+
+function _terminalComposeHeightBounds(input) {
+  const min = TERMINAL_COMPOSE_MIN_HEIGHT;
+  let max = 0;
+  const shell = input && typeof input.closest === 'function'
+    ? input.closest('.terminal-shell')
+    : null;
+  if (shell && typeof shell.getBoundingClientRect === 'function') {
+    const rect = shell.getBoundingClientRect();
+    const shellHeight = rect && Number.isFinite(rect.height) ? rect.height : 0;
+    if (shellHeight >= 260) max = Math.floor(shellHeight * 0.36);
+  }
+  if (!max && typeof window !== 'undefined' && typeof window.innerHeight === 'number') {
+    max = Math.floor(window.innerHeight * 0.34);
+  }
+  max = Math.max(min, max || TERMINAL_COMPOSE_MAX_HEIGHT_FALLBACK);
+  return { min: min, max: max };
+}
+
+function _terminalComposeClampHeight(input, height) {
+  const raw = parseInt(height, 10);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  const bounds = _terminalComposeHeightBounds(input);
+  return Math.max(bounds.min, Math.min(bounds.max, raw));
+}
+
+function _terminalComposeStoredHeight(cellId) {
+  const value = Number(_terminalComposeHeights[String(cellId || '')] || 0);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function _terminalComposeApplyHeight(input) {
+  if (!input) return 0;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const saved = _terminalComposeStoredHeight(cellId);
+  const clamped = saved ? _terminalComposeClampHeight(input, saved) : 0;
+  const container = _terminalComposeContainerFor(input);
+  if (clamped > 0) {
+    input.style.maxHeight = clamped + 'px';
+    input.style.height = clamped + 'px';
+    if (input.style && typeof input.style.setProperty === 'function') {
+      input.style.setProperty('--terminal-compose-user-height', clamped + 'px');
+    } else {
+      input.style['--terminal-compose-user-height'] = clamped + 'px';
+    }
+    if (container && container.dataset) container.dataset.composeResized = 'true';
+  } else {
+    input.style.maxHeight = '';
+    if (input.style && typeof input.style.removeProperty === 'function') {
+      input.style.removeProperty('--terminal-compose-user-height');
+    } else if (input.style) {
+      delete input.style['--terminal-compose-user-height'];
+    }
+    if (container && container.dataset) delete container.dataset.composeResized;
+  }
+  return clamped;
+}
+
+function _terminalComposeCurrentHeight(input) {
+  if (!input) return TERMINAL_COMPOSE_DEFAULT_MAX_HEIGHT;
+  if (typeof input.getBoundingClientRect === 'function') {
+    const rect = input.getBoundingClientRect();
+    if (rect && Number.isFinite(rect.height) && rect.height > 0) return rect.height;
+  }
+  if (Number(input.offsetHeight) > 0) return Number(input.offsetHeight);
+  return _terminalComposeStoredHeight(input.dataset ? input.dataset.cellId : '')
+    || TERMINAL_COMPOSE_DEFAULT_MAX_HEIGHT;
+}
+
+function _terminalComposeSetUserHeight(input, height) {
+  if (!input) return 0;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const clamped = _terminalComposeClampHeight(input, height);
+  if (cellId && clamped > 0) _terminalComposeHeights[cellId] = clamped;
+  input.style.height = clamped + 'px';
+  _terminalComposeApplyHeight(input);
+  return clamped;
+}
+
+function _terminalComposeResizeInputFromEvent(event, cellId) {
+  const target = event && (event.currentTarget || event.target);
+  if (target && typeof target.closest === 'function') {
+    const form = target.closest('.terminal-compose');
+    if (form && typeof form.querySelector === 'function') {
+      const input = form.querySelector('.terminal-compose-input');
+      if (input) return input;
+    }
+  }
+  const id = String(cellId || '');
+  return document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
+}
+
+function terminalComposeResizeStart(event, cellId) {
+  if (!event || (typeof event.button === 'number' && event.button !== 0)) return false;
+  const input = _terminalComposeResizeInputFromEvent(event, cellId);
+  if (!input) return false;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  _terminalComposeResizeDrag = {
+    input: input,
+    cellId: String(cellId || (input.dataset ? input.dataset.cellId : '') || ''),
+    startY: Number.isFinite(event.clientY) ? event.clientY : 0,
+    startHeight: _terminalComposeCurrentHeight(input),
+    currentHeight: _terminalComposeCurrentHeight(input),
+    changed: false,
+  };
+  if (document && document.body) {
+    if (document.body.classList) document.body.classList.add('terminal-compose-resizing');
+    if (document.body.style) document.body.style.cursor = 'ns-resize';
+  }
+  document.addEventListener('mousemove', _terminalComposeResizeMove);
+  document.addEventListener('mouseup', _terminalComposeResizeEnd);
+  return false;
+}
+
+function _terminalComposeResizeMove(event) {
+  const drag = _terminalComposeResizeDrag;
+  if (!drag) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  const clientY = event && Number.isFinite(event.clientY) ? event.clientY : drag.startY;
+  const next = drag.startHeight - (clientY - drag.startY);
+  drag.currentHeight = _terminalComposeSetUserHeight(drag.input, next);
+  drag.changed = true;
+}
+
+function _terminalComposeClearResizeDrag() {
+  document.removeEventListener('mousemove', _terminalComposeResizeMove);
+  document.removeEventListener('mouseup', _terminalComposeResizeEnd);
+  if (document && document.body) {
+    if (document.body.classList) document.body.classList.remove('terminal-compose-resizing');
+    if (document.body.style) document.body.style.cursor = '';
+  }
+  _terminalComposeResizeDrag = null;
+}
+
+function _terminalComposeResizeEnd(event) {
+  const drag = _terminalComposeResizeDrag;
+  if (!drag) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  if (event && Number.isFinite(event.clientY)) {
+    const next = drag.startHeight - (event.clientY - drag.startY);
+    drag.currentHeight = _terminalComposeSetUserHeight(drag.input, next);
+    if (event.clientY !== drag.startY) drag.changed = true;
+  }
+  _terminalComposeClearResizeDrag();
+}
+
+function terminalComposeResizeKeydown(event, cellId) {
+  const key = event && (event.key || event.code);
+  const deltas = {
+    ArrowUp: 14,
+    Up: 14,
+    ArrowDown: -14,
+    Down: -14,
+    PageUp: 56,
+    PageDown: -56,
+  };
+  if (!Object.prototype.hasOwnProperty.call(deltas, key)) return false;
+  const input = _terminalComposeResizeInputFromEvent(event, cellId);
+  if (!input) return false;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  _terminalComposeSetUserHeight(input, _terminalComposeCurrentHeight(input) + deltas[key]);
+  if (typeof input.focus === 'function') input.focus();
+  return false;
 }
 
 function _terminalComposeSetButtonState(input) {
   if (!input) return;
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
   const button = _terminalComposeButtonFor(input, cellId);
-  if (button) button.disabled = !String(input.value || '').trim();
+  const attachments = _terminalComposeSortedAttachments(cellId);
+  if (button) button.disabled = !String(input.value || '').trim() && !attachments.length;
 }
 
 function _terminalMessageHistoryEntries(cellId) {
@@ -1690,6 +1867,7 @@ function _terminalComposeSetValue(input, cellId, value, options) {
   input.value = String(value || '');
   const preserveAttachments = !!(options && options.preserveAttachments);
   if (id && !preserveAttachments) _terminalComposePruneAttachments(id, input.value);
+  if (id && preserveAttachments) _terminalComposePruneAttachments(id, input.value);
   if (id) _terminalComposeTaskDropdownHide(id);
   if (id) _terminalComposeDrafts[id] = input.value;
   const end = input.value.length;
@@ -1702,6 +1880,7 @@ function _terminalComposeSetValue(input, cellId, value, options) {
   }
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
+  if (id) _terminalComposeRefreshAttachmentChips(id);
 }
 
 function _terminalComposeCaretAtFirstLine(input) {
@@ -1836,6 +2015,110 @@ function _terminalComposeAttachmentToken(number) {
   return '[ Image #' + number + ' ]';
 }
 
+function _terminalComposeAttachmentLabel(entry) {
+  if (!entry) return 'Image';
+  const filename = String(entry.filename || '').trim();
+  if (filename) return filename;
+  const path = String(entry.path || '').trim();
+  if (path) return path.replace(/\\/g, '/').split('/').pop() || 'Image';
+  return 'Image';
+}
+
+function _terminalComposeAttachmentPreviewUrl(entry) {
+  if (!entry) return '';
+  return String(entry.preview_url || entry.previewUrl || '').trim();
+}
+
+function _terminalComposeMakePreviewUrl(file) {
+  const urlApi = (typeof URL !== 'undefined' && URL) || (
+    typeof window !== 'undefined' && window ? window.URL : null
+  );
+  if (urlApi && typeof urlApi.createObjectURL === 'function') {
+    try {
+      return urlApi.createObjectURL(file);
+    } catch (_e) {
+      return '';
+    }
+  }
+  return '';
+}
+
+function _terminalComposeRevokePreviewUrl(url) {
+  const value = String(url || '');
+  if (!value || value.indexOf('blob:') !== 0) return;
+  const urlApi = (typeof URL !== 'undefined' && URL) || (
+    typeof window !== 'undefined' && window ? window.URL : null
+  );
+  if (urlApi && typeof urlApi.revokeObjectURL === 'function') {
+    try { urlApi.revokeObjectURL(value); } catch (_e) {}
+  }
+}
+
+function _terminalComposeSortedAttachments(cellId) {
+  const stateForCell = _terminalComposeAttachments[String(cellId || '')];
+  const entries = stateForCell && Array.isArray(stateForCell.entries)
+    ? stateForCell.entries.slice()
+    : [];
+  entries.sort(function(a, b) {
+    const ap = Number(a && a.position);
+    const bp = Number(b && b.position);
+    const at = Number(String((a && a.token) || '').match(/\d+/));
+    const bt = Number(String((b && b.token) || '').match(/\d+/));
+    if ((Number.isFinite(ap) ? ap : 0) !== (Number.isFinite(bp) ? bp : 0)) {
+      return (Number.isFinite(ap) ? ap : 0) - (Number.isFinite(bp) ? bp : 0);
+    }
+    return (Number.isFinite(at) ? at : 0) - (Number.isFinite(bt) ? bt : 0);
+  });
+  return entries;
+}
+
+function _terminalComposeAttachmentIndex(cellId, token) {
+  const entries = _terminalComposeSortedAttachments(cellId);
+  const needle = String(token || '');
+  for (let i = 0; i < entries.length; i++) {
+    if (String(entries[i].token || '') === needle) return i;
+  }
+  return -1;
+}
+
+function _terminalComposeRenderAttachmentChips(form, cellId) {
+  if (!form || typeof form.querySelector !== 'function') return;
+  const row = form.querySelector('.terminal-compose-attachments');
+  if (!row) return;
+  const entries = _terminalComposeSortedAttachments(cellId);
+  if (!entries.length) {
+    row.innerHTML = '';
+    row.hidden = true;
+    return;
+  }
+  const selected = String(_terminalComposeSelectedAttachmentByCell[String(cellId || '')] || '');
+  let html = '';
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] || {};
+    const token = String(entry.token || '');
+    const label = _terminalComposeAttachmentLabel(entry);
+    const title = (entry.path ? String(entry.path) : label);
+    html += '<button type="button" class="terminal-compose-attachment-chip'
+      + (selected && selected === token ? ' selected' : '')
+      + '" data-attachment-token="' + esc(token) + '"'
+      + ' onclick="return terminalComposeAttachmentPreview(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
+      + ' onkeydown="return terminalComposeAttachmentChipKeydown(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
+      + ' title="' + esc(title) + '" aria-label="Preview attached image ' + esc(label) + '">'
+      + '<span class="terminal-compose-attachment-icon" aria-hidden="true">▧</span>'
+      + '<span class="terminal-compose-attachment-label">' + esc(label) + '</span>'
+      + '</button>';
+  }
+  row.hidden = false;
+  if (row.innerHTML !== html) row.innerHTML = html;
+}
+
+function _terminalComposeRefreshAttachmentChips(cellId) {
+  const id = String(cellId || '');
+  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
+  const form = input ? _terminalComposeContainerFor(input) : null;
+  if (form) _terminalComposeRenderAttachmentChips(form, id);
+}
+
 function _terminalComposeAttachmentState(cellId) {
   var id = String(cellId || '');
   if (!id) return null;
@@ -1860,26 +2143,67 @@ function _terminalComposeHighestAttachmentTokenNumber(text) {
   return highest;
 }
 
-function _terminalComposeRegisterAttachmentPaths(cellId, paths, displayText) {
+function _terminalComposeAdjustAttachmentPositions(cellId, oldText, newText) {
+  const id = String(cellId || '');
+  const stateForCell = id ? _terminalComposeAttachments[id] : null;
+  if (!stateForCell || !Array.isArray(stateForCell.entries)) return;
+  oldText = String(oldText || '');
+  newText = String(newText || '');
+  if (oldText === newText) return;
+  let prefix = 0;
+  const prefixMax = Math.min(oldText.length, newText.length);
+  while (prefix < prefixMax && oldText[prefix] === newText[prefix]) prefix += 1;
+  let oldSuffix = oldText.length;
+  let newSuffix = newText.length;
+  while (oldSuffix > prefix
+      && newSuffix > prefix
+      && oldText[oldSuffix - 1] === newText[newSuffix - 1]) {
+    oldSuffix -= 1;
+    newSuffix -= 1;
+  }
+  const delta = newText.length - oldText.length;
+  for (let i = 0; i < stateForCell.entries.length; i++) {
+    const entry = stateForCell.entries[i];
+    if (!entry) continue;
+    let pos = Number(entry.position);
+    if (!Number.isFinite(pos)) pos = oldText.length;
+    if (pos >= oldSuffix) pos += delta;
+    else if (pos >= prefix) pos = prefix;
+    entry.position = Math.max(0, Math.min(newText.length, Math.floor(pos)));
+  }
+}
+
+function _terminalComposeRegisterAttachmentEntries(cellId, entries, displayText, position) {
   var stateForCell = _terminalComposeAttachmentState(cellId);
   if (!stateForCell) {
-    return (paths || []).map(function(path) { return String(path || ''); })
-      .filter(Boolean);
+    return [];
   }
   stateForCell.next = Math.max(
     stateForCell.next || 1,
     _terminalComposeHighestAttachmentTokenNumber(displayText) + 1
   );
-  var tokens = [];
-  for (var i = 0; i < (paths || []).length; i++) {
-    var path = String(paths[i] || '');
+  var registered = [];
+  var text = String(displayText || '');
+  var insertAt = Math.max(0, Math.min(text.length, Number(position) || 0));
+  for (var i = 0; i < (entries || []).length; i++) {
+    var raw = entries[i] || {};
+    var path = String(raw.path || '');
     if (!path) continue;
     var token = _terminalComposeAttachmentToken(stateForCell.next);
     stateForCell.next += 1;
-    stateForCell.entries.push({ token: token, path: path });
-    tokens.push(token);
+    var entry = {
+      token: token,
+      path: path,
+      filename: String(raw.filename || '').trim(),
+      mime_type: String(raw.mime_type || raw.mime || '').trim(),
+      size_bytes: Number(raw.size_bytes || raw.size || 0) || 0,
+      preview_url: String(raw.preview_url || raw.previewUrl || '').trim(),
+      position: insertAt,
+    };
+    stateForCell.entries.push(entry);
+    registered.push(entry);
   }
-  return tokens;
+  return registered;
 }
 
 function _terminalComposePruneAttachments(cellId, displayText) {
@@ -1887,8 +2211,10 @@ function _terminalComposePruneAttachments(cellId, displayText) {
   var stateForCell = id ? _terminalComposeAttachments[id] : null;
   if (!stateForCell || !Array.isArray(stateForCell.entries)) return;
   var text = String(displayText || '');
-  stateForCell.entries = stateForCell.entries.filter(function(entry) {
-    return !!(entry && entry.token && text.indexOf(entry.token) !== -1);
+  stateForCell.entries.forEach(function(entry) {
+    if (!entry) return;
+    var pos = Number(entry.position);
+    entry.position = Math.max(0, Math.min(text.length, Number.isFinite(pos) ? Math.floor(pos) : text.length));
   });
   if (!stateForCell.entries.length) delete _terminalComposeAttachments[id];
 }
@@ -1898,34 +2224,49 @@ function _terminalComposePayloadText(cellId, displayText) {
   var text = String(displayText || '');
   if (!id || !_terminalComposeAttachments[id]) return text;
   _terminalComposePruneAttachments(id, text);
-  var stateForCell = _terminalComposeAttachments[id];
-  var entries = stateForCell && Array.isArray(stateForCell.entries)
-    ? stateForCell.entries
-    : [];
+  var entries = _terminalComposeSortedAttachments(id);
+  var groups = [];
   for (var i = 0; i < entries.length; i++) {
     var entry = entries[i];
-    if (!entry || !entry.token) continue;
-    text = text.split(entry.token).join(String(entry.path || ''));
+    if (!entry || !entry.path) continue;
+    var pos = Number(entry.position);
+    pos = Math.max(0, Math.min(text.length, Number.isFinite(pos) ? Math.floor(pos) : text.length));
+    var group = groups.length ? groups[groups.length - 1] : null;
+    if (!group || group.position !== pos) {
+      group = { position: pos, paths: [] };
+      groups.push(group);
+    }
+    group.paths.push(String(entry.path || ''));
   }
-  return text;
+  var out = '';
+  var cursor = 0;
+  for (var gi = 0; gi < groups.length; gi++) {
+    var g = groups[gi];
+    out += text.slice(cursor, g.position);
+    out += g.paths.join('\n');
+    cursor = g.position;
+  }
+  out += text.slice(cursor);
+  return out;
 }
 
-function _terminalComposeInsertPaths(input, paths) {
-  if (!input || !paths || !paths.length) return;
+function _terminalComposeInsertAttachments(input, entries) {
+  if (!input || !entries || !entries.length) return;
   var cellId = input.dataset ? (input.dataset.cellId || '') : '';
-  var insertText = _terminalComposeRegisterAttachmentPaths(
-    cellId,
-    paths,
-    input.value
-  ).join('\n');
-  if (!insertText) return;
   var value = String(input.value || '');
   var start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
   var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
   start = Math.max(0, Math.min(value.length, start));
   end = Math.max(start, Math.min(value.length, end));
-  input.value = value.slice(0, start) + insertText + value.slice(end);
-  var cursor = start + insertText.length;
+  if (end > start) input.value = value.slice(0, start) + value.slice(end);
+  if (cellId) _terminalComposeDrafts[cellId] = String(input.value || '');
+  _terminalComposeRegisterAttachmentEntries(
+    cellId,
+    entries,
+    input.value,
+    start
+  );
+  var cursor = start;
   if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(cursor, cursor);
   } else {
@@ -1934,6 +2275,173 @@ function _terminalComposeInsertPaths(input, paths) {
   }
   terminalComposeInput(input);
   if (typeof input.focus === 'function') input.focus();
+}
+
+function _terminalComposeRemoveAttachment(cellId, token) {
+  const id = String(cellId || '');
+  const stateForCell = id ? _terminalComposeAttachments[id] : null;
+  if (!stateForCell || !Array.isArray(stateForCell.entries)) return false;
+  const needle = String(token || '');
+  let removed = false;
+  stateForCell.entries = stateForCell.entries.filter(function(entry) {
+    if (!entry || String(entry.token || '') !== needle) return true;
+    _terminalComposeRevokePreviewUrl(_terminalComposeAttachmentPreviewUrl(entry));
+    removed = true;
+    return false;
+  });
+  if (!stateForCell.entries.length) delete _terminalComposeAttachments[id];
+  if (_terminalComposeSelectedAttachmentByCell[id] === needle) {
+    delete _terminalComposeSelectedAttachmentByCell[id];
+  }
+  _terminalComposeRefreshAttachmentChips(id);
+  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
+  if (input) {
+    _terminalComposeSetButtonState(input);
+    if (typeof input.focus === 'function') input.focus();
+  }
+  return removed;
+}
+
+function _terminalComposeAttachmentEntry(cellId, token) {
+  const entries = _terminalComposeSortedAttachments(cellId);
+  const needle = String(token || '');
+  for (let i = 0; i < entries.length; i++) {
+    if (String(entries[i].token || '') === needle) return entries[i];
+  }
+  return null;
+}
+
+function _terminalComposeAttachmentAtCaret(input, direction) {
+  if (!input) return null;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const entries = _terminalComposeSortedAttachments(cellId);
+  if (!entries.length) return null;
+  const caret = typeof input.selectionStart === 'number'
+    ? input.selectionStart
+    : String(input.value || '').length;
+  let candidate = null;
+  if (direction < 0) {
+    for (let i = 0; i < entries.length; i++) {
+      const pos = Math.max(0, Number(entries[i].position) || 0);
+      if (pos <= caret) candidate = entries[i];
+      else break;
+    }
+  } else {
+    for (let j = 0; j < entries.length; j++) {
+      const nextPos = Math.max(0, Number(entries[j].position) || 0);
+      if (nextPos >= caret) {
+        candidate = entries[j];
+        break;
+      }
+    }
+  }
+  return candidate;
+}
+
+function _terminalComposeHandleAttachmentDeleteKey(evt, cellId) {
+  if (!evt || (evt.key !== 'Backspace' && evt.key !== 'Delete')) return false;
+  if (evt.metaKey || evt.ctrlKey || evt.altKey) return false;
+  const input = evt.target && typeof evt.target.value === 'string'
+    ? evt.target
+    : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
+  if (!input) return false;
+  const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
+  const selected = String(_terminalComposeSelectedAttachmentByCell[id] || '');
+  let entry = selected ? _terminalComposeAttachmentEntry(id, selected) : null;
+  if (!entry && typeof input.selectionStart === 'number'
+      && typeof input.selectionEnd === 'number'
+      && input.selectionStart === input.selectionEnd) {
+    entry = _terminalComposeAttachmentAtCaret(input, evt.key === 'Backspace' ? -1 : 1);
+  }
+  if (!entry) return false;
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  return _terminalComposeRemoveAttachment(id, entry.token);
+}
+
+function closeTerminalComposeAttachmentPreview() {
+  if (_terminalComposePreviewKeyHandler) {
+    document.removeEventListener('keydown', _terminalComposePreviewKeyHandler, true);
+    _terminalComposePreviewKeyHandler = null;
+  }
+  if (_terminalComposePreviewOverlay) {
+    if (typeof _terminalComposePreviewOverlay.remove === 'function') {
+      _terminalComposePreviewOverlay.remove();
+    } else if (_terminalComposePreviewOverlay.parentNode) {
+      _terminalComposePreviewOverlay.parentNode.removeChild(_terminalComposePreviewOverlay);
+    }
+    _terminalComposePreviewOverlay = null;
+  }
+}
+
+function _terminalComposeOpenAttachmentPreview(entry) {
+  if (!entry || typeof document === 'undefined' || !document.createElement) return false;
+  closeTerminalComposeAttachmentPreview();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-terminal-compose-attachment-preview';
+  overlay.className = 'overlay terminal-compose-attachment-preview-overlay visible';
+  if (overlay.classList) {
+    overlay.classList.add('overlay', 'terminal-compose-attachment-preview-overlay', 'visible');
+  }
+  const label = _terminalComposeAttachmentLabel(entry);
+  const url = _terminalComposeAttachmentPreviewUrl(entry);
+  overlay.innerHTML = ''
+    + '<div class="modal terminal-compose-attachment-preview-modal" role="dialog" aria-modal="true"'
+    + ' aria-label="Attached image preview">'
+    + '  <div class="terminal-compose-attachment-preview-head">'
+    + '    <div class="terminal-compose-attachment-preview-title">' + esc(label) + '</div>'
+    + '    <button type="button" class="terminal-compose-attachment-preview-close"'
+    + ' onclick="closeTerminalComposeAttachmentPreview()" aria-label="Close">&times;</button>'
+    + '  </div>'
+    + '  <div class="terminal-compose-attachment-preview-body">'
+    + (url
+      ? '<img class="terminal-compose-attachment-preview-image" src="' + esc(url) + '" alt="' + esc(label) + '">'
+      : '<div class="terminal-compose-attachment-preview-unavailable">Preview unavailable for this image in the current session.</div>')
+    + '  </div>'
+    + '</div>';
+  overlay.addEventListener('mousedown', function(e) {
+    if (e.target === overlay) closeTerminalComposeAttachmentPreview();
+  });
+  _terminalComposePreviewKeyHandler = function(e) {
+    if (!e || e.key !== 'Escape') return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    closeTerminalComposeAttachmentPreview();
+  };
+  document.addEventListener('keydown', _terminalComposePreviewKeyHandler, true);
+  document.body.appendChild(overlay);
+  _terminalComposePreviewOverlay = overlay;
+  const closeButton = overlay.querySelector
+    ? overlay.querySelector('.terminal-compose-attachment-preview-close')
+    : null;
+  if (closeButton && typeof closeButton.focus === 'function') closeButton.focus();
+  return false;
+}
+
+function terminalComposeAttachmentPreview(evt, cellId, token) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const id = String(cellId || '');
+  const needle = String(token || '');
+  if (id && needle) _terminalComposeSelectedAttachmentByCell[id] = needle;
+  _terminalComposeRefreshAttachmentChips(id);
+  const entry = _terminalComposeAttachmentEntry(id, needle);
+  return _terminalComposeOpenAttachmentPreview(entry);
+}
+
+function terminalComposeAttachmentChipKeydown(evt, cellId, token) {
+  if (!evt) return true;
+  const key = evt.key || evt.code;
+  if (key === 'Backspace' || key === 'Delete') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    _terminalComposeRemoveAttachment(cellId, token);
+    return false;
+  }
+  if (key === 'Enter' || key === ' ') {
+    return terminalComposeAttachmentPreview(evt, cellId, token);
+  }
+  return true;
 }
 
 async function _terminalComposeUploadAttachments(cellId, files) {
@@ -1951,7 +2459,16 @@ async function _terminalComposeUploadAttachments(cellId, files) {
     throw new Error('Attachment upload failed.');
   }
   return res.data
-    .map(function(entry) { return entry && entry.path ? entry.path : ''; })
+    .map(function(entry, index) {
+      if (!entry || !entry.path) return null;
+      var file = files[index] || null;
+      return Object.assign({}, entry, {
+        filename: entry.filename || (file && file.name) || '',
+        mime_type: entry.mime_type || (file && file.type) || '',
+        size_bytes: entry.size_bytes || (file && file.size) || 0,
+        preview_url: _terminalComposeMakePreviewUrl(file),
+      });
+    })
     .filter(Boolean);
 }
 
@@ -2024,7 +2541,7 @@ function _renderTerminalCompose(root, cell) {
   const error = Object.prototype.hasOwnProperty.call(_terminalComposeErrors, cellId)
     ? _terminalComposeErrors[cellId]
     : '';
-  const disabled = !String(draft || '').trim();
+  const disabled = !String(draft || '').trim() && !_terminalComposeSortedAttachments(cellId).length;
   const placeholder = 'Send a message to ' + ((directAgent && directAgent.name) || cell.name || 'terminal') + '\u2026';
   const replyToId = directAgentId
     ? String(_terminalDirectMessageReplyToByAgent[directAgentId] || '')
@@ -2064,6 +2581,7 @@ function _renderTerminalCompose(root, cell) {
       _terminalComposeAutoResize(input);
       _terminalComposeSetButtonState(input);
     }
+    _terminalComposeRenderAttachmentChips(existingForm, cellId);
     const errorEl = existingForm.querySelector
       ? existingForm.querySelector('.terminal-compose-error')
       : null;
@@ -2083,6 +2601,12 @@ function _renderTerminalCompose(root, cell) {
     + ' onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
     + '  <div class="terminal-compose-input-wrap">'
     + replyHtml
+    + '  <div class="terminal-compose-attachments" aria-label="Image attachments" hidden></div>'
+    + '  <button type="button" class="terminal-compose-resize-handle"'
+    + ' aria-label="Resize message composer" title="Drag to resize composer"'
+    + ' onmousedown="return terminalComposeResizeStart(event, \'' + esc(cellId) + '\')"'
+    + ' onkeydown="return terminalComposeResizeKeydown(event, \'' + esc(cellId) + '\')">'
+    + '<span aria-hidden="true"></span></button>'
     + '  <textarea id="' + esc(inputId) + '" class="terminal-compose-input" rows="1"'
     + ' data-cell-id="' + esc(cellId) + '"'
     + (directAgentId ? ' data-agent-id="' + esc(directAgentId) + '"' : '')
@@ -2117,14 +2641,20 @@ function _renderTerminalCompose(root, cell) {
     _terminalComposeAutoResize(input);
     _terminalComposeSetButtonState(input);
   }
+  const form = root.querySelector ? root.querySelector('.terminal-compose') : null;
+  if (form) _terminalComposeRenderAttachmentChips(form, cellId);
 }
 
 function terminalComposeInput(el) {
   if (!el) return;
   const cellId = el.dataset ? (el.dataset.cellId || '') : '';
   if (cellId) _terminalComposeResetRecall(cellId);
-  if (cellId) _terminalComposePruneAttachments(cellId, el.value);
-  if (cellId) _terminalComposeDrafts[cellId] = String(el.value || '');
+  if (cellId) {
+    _terminalComposeAdjustAttachmentPositions(cellId, _terminalComposeDrafts[cellId] || '', el.value);
+    _terminalComposePruneAttachments(cellId, el.value);
+    _terminalComposeDrafts[cellId] = String(el.value || '');
+    _terminalComposeRefreshAttachmentChips(cellId);
+  }
   if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
   _terminalComposeSetButtonState(el);
@@ -2140,9 +2670,16 @@ function terminalComposeClear(cellId) {
   _terminalComposeTaskDropdownHide(id);
   input.value = '';
   if (id) _terminalComposeDrafts[id] = '';
+  if (id && _terminalComposeAttachments[id] && Array.isArray(_terminalComposeAttachments[id].entries)) {
+    _terminalComposeAttachments[id].entries.forEach(function(entry) {
+      _terminalComposeRevokePreviewUrl(_terminalComposeAttachmentPreviewUrl(entry));
+    });
+  }
   if (id) delete _terminalComposeAttachments[id];
+  if (id) delete _terminalComposeSelectedAttachmentByCell[id];
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
+  _terminalComposeRefreshAttachmentChips(id);
 }
 
 function _terminalComposeActiveSelection(input) {
@@ -2242,7 +2779,8 @@ function terminalComposeSubmit(evt, cellId) {
   }
   if (!input) return false;
   const displayText = String(input.value || '');
-  if (!displayText.trim()) {
+  const hasAttachments = _terminalComposeSortedAttachments(id).length > 0;
+  if (!displayText.trim() && !hasAttachments) {
     terminalComposeClear(id);
     return false;
   }
@@ -2272,6 +2810,7 @@ function terminalComposeSubmit(evt, cellId) {
 
 function terminalComposeKeydown(evt, cellId) {
   if (!evt) return;
+  if (_terminalComposeHandleAttachmentDeleteKey(evt, cellId)) return;
   if (_terminalComposeTaskDropdownHandleKey(evt, cellId)) return;
   if (evt.key === 'Escape' && _terminalComposeHistoryIsOpen(cellId)) {
     if (typeof evt.preventDefault === 'function') evt.preventDefault();
@@ -2381,12 +2920,12 @@ async function terminalComposeDrop(evt, cellId) {
 
   try {
     _terminalComposeSetError(input, '');
-    var paths = await _terminalComposeUploadAttachments(id, validation.accepted);
-    if (!paths.length) {
+    var attachments = await _terminalComposeUploadAttachments(id, validation.accepted);
+    if (!attachments.length) {
       _terminalComposeSetError(input, 'Attachment upload failed.');
       return false;
     }
-    _terminalComposeInsertPaths(input, paths);
+    _terminalComposeInsertAttachments(input, attachments);
   } catch (e) {
     _terminalComposeSetError(input, (e && e.message) || 'Attachment upload failed.');
   }
