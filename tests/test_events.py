@@ -1743,7 +1743,7 @@ asyncio.run(main())
             timestamp=time.time(),
             event_type="context_update",
             data={
-                "provider_usage": {"five_hour": {"available": True, "used_percentage": 99}},
+                "provider_usage": {"five_hour": {"available": True, "used_percentage": 99, "resets_at": "2026-01-01T00:00:00Z"}},
                 "context_window": {"used_tokens": 10, "limit_tokens": 100},
             },
         ))
@@ -1756,7 +1756,7 @@ asyncio.run(main())
             event_type="context_update",
             data={
                 "usage_source": "codex-sdk",
-                "provider_usage": {"source": "codex-sdk", "five_hour": {"available": True, "used_percentage": 11}},
+                "provider_usage": {"source": "codex-sdk", "five_hour": {"available": True, "used_percentage": 11, "resets_at": "2026-01-01T00:00:00Z"}},
                 "context_window": {"used_tokens": 10, "limit_tokens": 100},
             },
         ))

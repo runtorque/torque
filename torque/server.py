@@ -171,6 +171,7 @@ from .memory import (
     normalize_retention_kind,
 )
 from .roles import RoleManager
+from .runner_backends import is_codex_sdk_readonly
 from .specializations import SpecializationManager
 from .external_tickets import (
     ExternalTicketError,

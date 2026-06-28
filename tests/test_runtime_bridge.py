@@ -1,6 +1,13 @@
 import types
 import unittest
 
+try:
+    from helpers import install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import install_aiohttp_stub
+
+install_aiohttp_stub()
+
 from torque.runtime_bridge import AgentRuntimeBridge
 from torque.runner_backends import CODEX_SDK_READONLY_BACKEND
 from torque.state import AgentCell, MatrixState

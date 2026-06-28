@@ -1772,6 +1772,13 @@ class TorqueDBTests(unittest.TestCase):
             ).fetchone()[0],
             "pty",
         )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT default_terminal_backend FROM group_settings "
+                "WHERE group_name='g'"
+            ).fetchone()[0],
+            "pty",
+        )
 
     def test_runner_backend_schema_defaults_to_pty_and_round_trips_sdk(self):
         def column_default(table: str, column: str) -> str:
@@ -1803,13 +1810,6 @@ class TorqueDBTests(unittest.TestCase):
         ))
         loaded = self.db.load_all()["agents"]["agent-sdk"]
         self.assertEqual(loaded["runner_backend"], "codex-sdk-readonly")
-        self.assertEqual(
-            self.db._conn.execute(
-                "SELECT default_terminal_backend FROM group_settings "
-                "WHERE group_name='g'"
-            ).fetchone()[0],
-            "pty",
-        )
 
     def test_terminal_backend_migration_rewrites_iterm2_rows_idempotently(self):
         legacy_path = Path(self.tmp.name) / "legacy-terminal-backend.db"
