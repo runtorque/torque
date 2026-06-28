@@ -399,7 +399,8 @@ test('Help panel loads topics, preserves search order, shows detail, and queries
   assert.equal(vm.runInContext('_helpState.browserOpen', sandbox), true);
   assert.equal(JSON.stringify(document.getElementById('help-browser-selected-detail-anchor').scrollIntoViewOptions), JSON.stringify({ block: 'start', inline: 'nearest' }));
 
-  await vm.runInContext(`helpQueryInputChanged('How do I derive review?'); helpRunQuery()`, sandbox);
+  document.getElementById('help-query-input').value = 'How do I derive review?';
+  await vm.runInContext(`helpRunQuery()`, sandbox);
   html = document.getElementById('panel-help').innerHTML;
   assert.equal(fetchCalls.at(-1).cmd, 'help_query');
   assert.equal(fetchCalls.at(-1).question, 'How do I derive review?');
@@ -417,7 +418,8 @@ test('Help panel renders no-answer, not-found, and API error states', async () =
   vm.runInContext('helpOpenTopicBrowser()', empty.sandbox);
   let html = empty.document.getElementById('panel-help').innerHTML;
   assert.match(html, /No maintained Torque Help docs matched/);
-  await vm.runInContext(`helpQueryInputChanged('zzzz'); helpRunQuery()`, empty.sandbox);
+  empty.document.getElementById('help-query-input').value = 'zzzz';
+  await vm.runInContext(`helpRunQuery()`, empty.sandbox);
   await vm.runInContext(`helpSelectBrowserReference('missing-topic')`, empty.sandbox);
   html = empty.document.getElementById('panel-help').innerHTML;
   assert.match(html, /No answer found/);

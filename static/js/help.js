@@ -260,8 +260,7 @@ function helpSearchInputChanged(value) {
 
 function helpSearchSubmit(event) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  helpRunSearch();
-  return false;
+  return helpRunSearch();
 }
 
 function helpSearchKeydown(event) {
@@ -328,8 +327,7 @@ function helpQueryInputChanged(value) {
 
 function helpQuerySubmit(event) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  helpRunQuery();
-  return false;
+  return helpRunQuery();
 }
 
 function helpQueryKeydown(event) {
