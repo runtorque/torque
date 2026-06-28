@@ -12929,6 +12929,10 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   flex: 0 0 auto;
   padding: 8px 12px 0;
 }
+.help-browser-toolbar {
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--border);
+}
 .help-search-input,
 .help-query-input,
 .help-audience-select {
@@ -12966,19 +12970,28 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   border-color: var(--accent);
 }
 .help-query-panel {
-  flex: 0 0 auto;
+  flex: 0 1 min(42%, 380px);
+  min-height: 138px;
   margin: 8px 12px 0;
   padding: 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-bg, rgba(255,255,255,.03));
-  max-height: 34%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.help-query-result-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 8px;
   overflow: auto;
+  padding-right: 2px;
 }
 .help-query-title { color: var(--text); font-size: 12px; font-weight: 800; }
 .help-query-subtitle { margin: 2px 0 8px; color: var(--text-dim); font-size: 10px; line-height: 1.35; }
 .help-query-answer {
-  margin-top: 8px;
+  margin-top: 0;
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   border-radius: 7px;
@@ -13013,30 +13026,69 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .help-source-button:hover { border-color: var(--accent); }
 .help-source-button code { color: var(--text-dim); overflow-wrap: anywhere; }
+.help-topic-launcher {
+  flex: 0 0 auto;
+  margin: 8px 12px 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg, rgba(255,255,255,.025));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.help-topic-launcher-copy { flex: 1 1 auto; min-width: 0; }
+.help-topic-launcher-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.help-topic-launcher-title {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.help-topic-launcher-meta {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.help-topic-launcher .btn-primary { flex: 0 0 auto; min-height: 30px; }
 .help-workspace {
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(260px, 34%) minmax(0, 1fr);
-  gap: 10px;
   padding: 10px 12px 12px;
   overflow: hidden;
 }
+
 .help-browser,
 .help-detail {
   min-height: 0;
   min-width: 0;
   overflow: auto;
 }
-.help-browser { display: flex; flex-direction: column; gap: 10px; }
+.help-browser { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr); gap: 10px; }
 .help-browser-section,
 .help-topic-detail {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-bg, rgba(255,255,255,.025));
 }
-.help-browser-section { overflow: hidden; }
+.help-browser-section { overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
+.help-browser-section .help-topic-list { flex: 1 1 auto; overflow: auto; }
+.help-browser-section .help-state,
+.help-browser-section .help-search-meta { flex: 0 0 auto; }
 .help-section-heading {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
@@ -13070,7 +13122,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   overflow-wrap: anywhere;
   white-space: normal;
 }
-.help-detail { border-radius: 8px; }
+.help-detail { border-radius: 8px; height: 100%; }
 .help-topic-detail { padding: 12px; }
 .help-detail-topline { justify-content: space-between; align-items: flex-start; gap: 8px; }
 .help-detail h2 {
@@ -13168,17 +13220,20 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .help-freshness-grid code { color: var(--text); overflow-wrap: anywhere; }
 
 #panel-help[data-panel-placement="right"] .help-query-panel {
-  max-height: none;
+  flex-basis: min(44%, 360px);
 }
 #panel-help[data-panel-placement="right"] .help-workspace {
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
+}
+#panel-help[data-panel-placement="right"] .help-detail {
   overflow: auto;
 }
-#panel-help[data-panel-placement="right"] .help-browser,
-#panel-help[data-panel-placement="right"] .help-detail {
-  flex: 0 0 auto;
-  overflow: visible;
+#panel-help[data-panel-placement="right"] .help-topic-launcher {
+  align-items: stretch;
+  flex-direction: column;
+}
+#panel-help[data-panel-placement="right"] .help-topic-launcher .btn-primary {
+  width: 100%;
 }
 #panel-help[data-panel-placement="right"] .help-toolbar,
 #panel-help[data-panel-placement="right"] .help-query-row {
@@ -13198,17 +13253,12 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 
 @container (max-width: 760px) {
-  .help-query-panel { max-height: none; }
-  .help-workspace {
-    display: flex;
-    flex-direction: column;
-    overflow: auto;
-  }
-  .help-browser,
-  .help-detail {
-    flex: 0 0 auto;
-    overflow: visible;
-  }
+  .help-query-panel { flex-basis: min(44%, 360px); }
+  .help-workspace { overflow: hidden; }
+  .help-detail { overflow: auto; }
+  .help-topic-launcher { align-items: stretch; flex-direction: column; }
+  .help-topic-launcher .btn-primary { width: 100%; }
+  .help-browser { grid-template-columns: 1fr; }
   .help-search-input,
   .help-query-input,
   .help-audience-select {
@@ -13219,6 +13269,75 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   .help-toolbar .btn-secondary,
   .help-query-row .btn-primary,
   .help-query-row .btn-secondary {
+    flex: 1 1 calc(50% - 3px);
+  }
+}
+
+
+.help-topic-browser-overlay { padding: 18px; }
+.help-topic-browser-modal {
+  width: min(1040px, calc(100vw - 36px));
+  max-width: min(1040px, calc(100vw - 36px));
+  height: min(84vh, 820px);
+  min-height: min(560px, calc(100vh - 36px));
+  overflow: hidden;
+}
+.help-topic-browser-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.help-topic-browser-head h2 { margin: 0 0 4px; }
+.help-topic-browser-close { flex: 0 0 auto; }
+.help-topic-browser-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.help-topic-browser-modal .help-browser-toolbar {
+  align-items: center;
+}
+.help-topic-browser-modal .help-search-input {
+  flex: 1 1 320px;
+  min-width: 220px;
+  width: auto;
+}
+.help-topic-browser-modal .help-audience-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.help-topic-browser-modal .help-browser-toolbar .btn-primary,
+.help-topic-browser-modal .help-browser-toolbar .btn-secondary {
+  flex: 0 0 auto;
+}
+.help-topic-browser-body .help-browser {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+}
+.help-topic-browser-body .help-browser-section { min-height: 0; }
+.help-topic-browser-body .help-topic-list { min-height: 0; }
+@media (max-width: 720px) {
+  .help-topic-browser-overlay { padding: 8px; }
+  .help-topic-browser-modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    min-height: 0;
+  }
+  .help-topic-browser-head { flex-direction: column; }
+  .help-topic-browser-close { width: 100%; }
+  .help-topic-browser-body .help-browser { grid-template-columns: 1fr; }
+  .help-topic-browser-modal .help-search-input,
+  .help-topic-browser-modal .help-audience-select {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .help-topic-browser-modal .help-browser-toolbar .btn-primary,
+  .help-topic-browser-modal .help-browser-toolbar .btn-secondary {
     flex: 1 1 calc(50% - 3px);
   }
 }
