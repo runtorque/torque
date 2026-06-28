@@ -1128,6 +1128,7 @@ function _embeddedTerminalCanTakeFocus(force) {
   if (!active || active === document.body) return true;
   const workspace = document.getElementById('terminal-workspace');
   if (workspace && typeof workspace.contains === 'function' && workspace.contains(active)) {
+    if (!force && _terminalWorkspaceFocusBelongsToComposerOrDirectMessage(active)) return false;
     return true;
   }
   if (force) return true;
@@ -1136,6 +1137,16 @@ function _embeddedTerminalCanTakeFocus(force) {
     return false;
   }
   return true;
+}
+
+function _terminalWorkspaceFocusBelongsToComposerOrDirectMessage(active) {
+  if (!active) return false;
+  if (active.classList && active.classList.contains('terminal-compose-input')) return true;
+  if (typeof active.closest !== 'function') return false;
+  return !!(
+    active.closest('.terminal-compose')
+    || active.closest('.terminal-direct-messages')
+  );
 }
 
 function focusEmbeddedTerminalWorkspace(force) {

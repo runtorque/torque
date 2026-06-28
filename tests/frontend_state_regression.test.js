@@ -11560,6 +11560,157 @@ test('focused DM compose rerender preserves terminal tail, DM tail, draft, and c
   assert.equal(input.selectionEnd, 17);
 });
 
+test('embedded terminal DM compose focus blocks terminal refocus and preserves bottom scroll', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const term = terminals[0];
+  const viewport = new FakeElement('xterm-viewport');
+  viewport.classList.add('xterm-viewport');
+  viewport.scrollHeight = 1000;
+  viewport.clientHeight = 250;
+  viewport.scrollTop = 750;
+  dom.surface.setQuerySelector('.xterm-viewport', viewport);
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 42;
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.tagName = 'TEXTAREA';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = '';
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__composeInput = input;
+
+  input.value = 'x';
+  runInContext(context, `terminalComposeInput(__composeInput);`);
+
+  assert.equal(viewport.scrollTop, 750, 'typing in DM compose must not move terminal viewport');
+  assert.equal(term.scrollToBottomCount || 0, 0, 'typing alone should not poke tail scrolling');
+
+  runInContext(context, `_embeddedTerminalPendingFocusKey = 'agent-1:sess-1';`);
+  assert.equal(
+    runInContext(context, `focusEmbeddedTerminalWorkspace(false);`),
+    false,
+    'non-forced terminal focus should be refused while DM compose owns focus',
+  );
+  assert.equal(term.focusCount || 0, 0, 'DM compose focus must not be stolen by xterm');
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-1', data: 'snapshot while typing' }),
+  });
+
+  assert.equal(term.focusCount || 0, 0, 'snapshot focus path must not steal DM compose focus');
+  assert.equal(input.focused, false, 'no synthetic compose refocus was needed');
+  assert.equal(document.activeElement, input);
+  assert.equal(viewport.scrollTop, 750, 'terminal remains pinned at the same bottom scrollTop');
+  assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY);
+});
+
+test('embedded terminal output after DM typing does not yank a scrolled-up terminal', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const term = terminals[0];
+  const viewport = new FakeElement('xterm-viewport');
+  viewport.classList.add('xterm-viewport');
+  viewport.scrollHeight = 1000;
+  viewport.clientHeight = 250;
+  viewport.scrollTop = 420;
+  dom.surface.setQuerySelector('.xterm-viewport', viewport);
+  term.buffer.active.baseY = 42;
+  term.buffer.active.viewportY = 30;
+  term.writeBaseGrowth = 7;
+  runInContext(context, `_embeddedTerminalSetTailPinned(_embeddedTerminalSessions['agent-1:sess-1'], false);`);
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.tagName = 'TEXTAREA';
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = 'draft';
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__composeInput = input;
+  runInContext(context, `terminalComposeInput(__composeInput);`);
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-1', data: 'output while typing\r\n' }),
+  });
+
+  assert.equal(term.focusCount || 0, 0, 'live output should not steal focus from DM compose');
+  assert.equal(term.scrollToBottomCount || 0, 0, 'scrolled-up terminal must not be yanked to tail');
+  assert.equal(term.buffer.active.viewportY, 30);
+  assert.equal(viewport.scrollTop, 420);
+  assert.equal(runInContext(context, `_embeddedTerminalSessions['agent-1:sess-1'].tailPinned`), false);
+});
+
 test('embedded terminal output preserves viewport when user has scrolled up', () => {
   const { context, sockets, terminals } = setupEmbeddedTerminalOutputHarness();
   const term = terminals[0];
