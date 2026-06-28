@@ -596,7 +596,7 @@ function _statusBarSupervisorStateView(payload) {
   return {
     visible: true,
     state: rawState || 'unknown',
-    label: 'Supervisor ' + info.label,
+    label: rawState === 'up' ? 'Supervisor' : 'Supervisor ' + info.label,
     level: info.level,
     dotColor: info.dotColor,
     title: lines.join('\n'),

@@ -291,7 +291,7 @@ test('supervisor status indicator maps health states to neutral/warn/danger styl
   sandbox.state.global_settings.status_bar_visibility = { daemon_status: true };
 
   const cases = [
-    ['up', 'normal', 'green', 'Supervisor up'],
+    ['up', 'normal', 'green', 'Supervisor'],
     ['degraded', 'warn', 'amber', 'Supervisor degraded'],
     ['restarting', 'warn', 'amber', 'Supervisor restarting'],
     ['down', 'danger', 'red', 'Supervisor down'],
