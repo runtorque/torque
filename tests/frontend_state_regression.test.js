@@ -11550,14 +11550,103 @@ test('focused DM compose rerender preserves terminal tail, DM tail, draft, and c
   runInContext(context, `renderTerminalWorkspace();`);
 
   assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY,
-    'same-session rerender should re-pin the xterm tail after fit()');
-  assert.equal(term.scrollToBottomCount, 1);
+    'same-session rerender should leave the xterm tail pinned without a refit');
+  assert.equal(term.scrollToBottomCount, 0,
+    'same-session DM rerender must not refit/scroll the terminal per keypress');
   assert.equal(list.scrollTop, 920,
     'DM list should keep following the newly grown tail');
   assert.equal(input.focused, true);
   assert.equal(input.value, 'line one\nline two typing');
   assert.equal(input.selectionStart, 9);
   assert.equal(input.selectionEnd, 17);
+
+  runInContext(context, `
+    (function() {
+      var __e = _embeddedTerminalSessions['agent-1:sess-1'];
+      __e.resizeObserver.callback([{ contentRect: { width: 800, height: 360 } }]);
+    })();
+  `);
+  assert.equal(term.buffer.active.viewportY, term.buffer.active.baseY,
+    'actual terminal surface resize should still re-pin the xterm tail');
+  assert.equal(term.scrollToBottomCount, 1,
+    'ResizeObserver preserves PR #770 tail behavior without same-session render coupling');
+});
+
+test('focused rich DM composer workspace refresh does not rewrite editor DOM or refit terminal', () => {
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = { 'agent-1': [] };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const term = terminals[0];
+  assert.ok(term && term.addon, 'terminal should be connected before the refresh proof');
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = 'line one\nline two';
+  input.selectionStart = 9;
+  input.selectionEnd = 9;
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__composeInput = input;
+  runInContext(context, `terminalComposeInput(__composeInput);`);
+
+  let editorHtml = '<div>line one</div><div>line two</div>';
+  let editorHtmlWrites = 0;
+  Object.defineProperty(input, 'innerHTML', {
+    configurable: true,
+    get() { return editorHtml; },
+    set(value) {
+      editorHtmlWrites += 1;
+      editorHtml = String(value);
+    },
+  });
+
+  term.addon.fitCalls = 0;
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(term.addon.fitCalls, 0,
+    'workspace refresh while typing must not refit/flicker the active terminal');
+  assert.equal(editorHtmlWrites, 0,
+    'focused contenteditable draft DOM must not be canonicalized on generic rerender');
+  assert.equal(input.value, 'line one\nline two');
+  assert.equal(input.selectionStart, 9);
+  assert.equal(input.selectionEnd, 9);
+  assert.equal(document.activeElement, input);
 });
 
 test('embedded terminal DM compose focus blocks terminal refocus and preserves bottom scroll', () => {
