@@ -64,7 +64,12 @@ class FakeElement {
     this.focusCalls.push(opts === undefined ? null : opts);
     this.ownerDocument.activeElement = this;
   }
+
+  scrollIntoView(opts) {
+    this.scrollIntoViewOptions = opts === undefined ? null : opts;
+  }
 }
+
 
 class FakeDocument {
   constructor() {
@@ -349,9 +354,12 @@ test('Help panel is wired as a first-class panel app', () => {
   assert.match(main, /helpEnsureLoaded/);
   assert.match(render, /surface === 'help'/);
   assert.match(css, /#panel-help\s*\{[\s\S]*container-type:\s*inline-size;/);
-  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-workspace\s*\{[\s\S]*flex-direction:\s*column;/);
+  assert.match(css, /\.help-query-result-scroll\s*\{[\s\S]*overflow:\s*auto;/);
+  assert.match(css, /\.help-topic-browser-modal\s*\{[\s\S]*height:\s*min\(84vh, 820px\);/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-detail\s*\{[\s\S]*overflow:\s*auto;/);
   assert.match(css, /\.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*min-width:\s*64px;[\s\S]*justify-content:\s*center;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*flex:\s*1 1 calc\(50% - 3px\);/);
+  assert.match(css, /\.help-topic-launcher \.btn-primary/);
 });
 
 test('Help panel loads topics, preserves search order, shows detail, and queries sources', async () => {
@@ -367,19 +375,25 @@ test('Help panel loads topics, preserves search order, shows detail, and queries
   assert.match(html, /Excerpt/);
   assert.match(html, /torque help query/);
   assert.match(html, /Freshness and source model/);
+  assert.match(html, /Browse topics…/);
+  assert.doesNotMatch(html, /class="help-browser"/);
 
   await vm.runInContext(`helpSearchInputChanged('review'); helpRunSearch()`, sandbox);
+  vm.runInContext('helpOpenTopicBrowser()', sandbox);
   html = document.getElementById('panel-help').innerHTML;
   assert.equal(fetchCalls.at(-1).cmd, 'help_search');
   assert.equal(fetchCalls.at(-1).query, 'review');
-  assert.ok(html.indexOf('Review required') < html.indexOf('Wave B UI brief'));
+  assert.ok(html.indexOf('Review required') < html.lastIndexOf('Wave B UI brief'));
   assert.match(html, /AGENTS\.md#worker-dispatch-and-reporting/);
+  assert.match(html, /id="modal-help-topic-browser"/);
 
   await vm.runInContext(`helpSelectReference('docs/reference/help.md#wave-b-ui-brief')`, sandbox);
   html = document.getElementById('panel-help').innerHTML;
   assert.equal(fetchCalls.at(-1).cmd, 'help_show');
   assert.equal(fetchCalls.at(-1).topic, 'docs/reference/help.md#wave-b-ui-brief');
   assert.match(html, /Panelsmith can build a Help panel/);
+  assert.doesNotMatch(html, /id="modal-help-topic-browser"/);
+  assert.equal(JSON.stringify(document.getElementById('help-selected-detail-anchor').scrollIntoViewOptions), JSON.stringify({ block: 'start', inline: 'nearest' }));
 
   await vm.runInContext(`helpQueryInputChanged('How do I derive review?'); helpRunQuery()`, sandbox);
   html = document.getElementById('panel-help').innerHTML;
@@ -396,16 +410,19 @@ test('Help panel renders no-answer, not-found, and API error states', async () =
   const empty = createSandbox({ searchNoAnswer: true, queryNoAnswer: true });
   await vm.runInContext('helpEnsureLoaded({ force: true })', empty.sandbox);
   await vm.runInContext(`helpSearchInputChanged('zzzz'); helpRunSearch()`, empty.sandbox);
-  await vm.runInContext(`helpQueryInputChanged('zzzz'); helpRunQuery()`, empty.sandbox);
-  await vm.runInContext(`helpSelectReference('missing-topic')`, empty.sandbox);
+  vm.runInContext('helpOpenTopicBrowser()', empty.sandbox);
   let html = empty.document.getElementById('panel-help').innerHTML;
   assert.match(html, /No maintained Torque Help docs matched/);
+  await vm.runInContext(`helpQueryInputChanged('zzzz'); helpRunQuery()`, empty.sandbox);
+  await vm.runInContext(`helpSelectReference('missing-topic')`, empty.sandbox);
+  html = empty.document.getElementById('panel-help').innerHTML;
   assert.match(html, /No answer found/);
   assert.match(html, /No Torque Help topic matched/);
 
   const errored = createSandbox({ errors: { help_search: 'search backend exploded' } });
   await vm.runInContext('helpEnsureLoaded({ force: true })', errored.sandbox);
   await vm.runInContext(`helpSearchInputChanged('boom'); helpRunSearch()`, errored.sandbox);
+  vm.runInContext('helpOpenTopicBrowser()', errored.sandbox);
   html = errored.document.getElementById('panel-help').innerHTML;
   assert.match(html, /search backend exploded/);
 });
@@ -419,6 +436,8 @@ test('Help panel rerender preserves query draft, focus/caret, selected topic, sc
     helpToggleDetailSection('docs-reference-help-md::wave-b-ui-brief');
   `, sandbox);
 
+  vm.runInContext('helpOpenTopicBrowser()', sandbox);
+
   const query = document.getElementById('help-query-input');
   query.value = 'How do I derive review?';
   query.selectionStart = 4;
@@ -427,6 +446,7 @@ test('Help panel rerender preserves query draft, focus/caret, selected topic, sc
   query.focus();
   document.getElementById('help-browser-scroll').scrollTop = 42;
   document.getElementById('help-detail-scroll').scrollTop = 77;
+  document.getElementById('help-query-result-scroll').scrollTop = 12;
 
   vm.runInContext('renderHelpPanel()', sandbox);
 
@@ -438,27 +458,35 @@ test('Help panel rerender preserves query draft, focus/caret, selected topic, sc
   assert.equal(nextQuery.focusCalls.at(-1).preventScroll, true);
   assert.equal(document.getElementById('help-browser-scroll').scrollTop, 42);
   assert.equal(document.getElementById('help-detail-scroll').scrollTop, 77);
+  assert.equal(document.getElementById('help-query-result-scroll').scrollTop, 12);
   assert.equal(vm.runInContext('_helpState.selectedRef', sandbox), 'docs-reference-help-md');
   const html = document.getElementById('panel-help').innerHTML;
   assert.match(html, /Open section/);
   assert.match(html, /docs\/reference\/help\.md#wave-b-ui-brief/);
 });
 
-test('Help topic selection preserves narrow workspace scroll and loads selected detail', async () => {
+test('Help topic browser opens in a popup and selection brings detail into view', async () => {
   const { sandbox, document, fetchCalls } = createSandbox();
   await vm.runInContext('helpEnsureLoaded({ force: true })', sandbox);
 
   let html = document.getElementById('panel-help').innerHTML;
   assert.match(html, /id="help-workspace-scroll"/);
+  assert.match(html, /id="help-topic-browser-button"/);
+  assert.doesNotMatch(html, /data-help-ref="agents-md"/);
+
+  vm.runInContext(`
+    helpSearchInputChanged('review');
+    helpQueryInputChanged('How do I derive review?');
+    helpOpenTopicBrowser();
+  `, sandbox);
+  html = document.getElementById('panel-help').innerHTML;
+  assert.match(html, /id="modal-help-topic-browser"/);
   assert.match(html, /data-help-ref="agents-md"[\s\S]*onclick="helpSelectReference\(&quot;agents-md&quot;\)"/);
+  assert.equal(document.activeElement, document.getElementById('help-search-input'));
 
   document.getElementById('help-workspace-scroll').scrollTop = 318;
   document.getElementById('help-browser-scroll').scrollTop = 42;
   document.getElementById('help-detail-scroll').scrollTop = 7;
-  vm.runInContext(`
-    helpSearchInputChanged('review');
-    helpQueryInputChanged('How do I derive review?');
-  `, sandbox);
 
   await vm.runInContext(`helpSelectReference('agents-md')`, sandbox);
 
@@ -466,11 +494,12 @@ test('Help topic selection preserves narrow workspace scroll and loads selected 
   assert.equal(fetchCalls.at(-1).cmd, 'help_show');
   assert.equal(fetchCalls.at(-1).topic, 'agents-md');
   assert.equal(vm.runInContext('_helpState.selectedRef', sandbox), 'agents-md');
-  assert.equal(document.getElementById('help-workspace-scroll').scrollTop, 318);
-  assert.equal(document.getElementById('help-browser-scroll').scrollTop, 42);
-  assert.equal(document.getElementById('help-search-input').value, 'review');
+  assert.equal(vm.runInContext('_helpState.browserOpen', sandbox), false);
+  assert.equal(document.getElementById('help-workspace-scroll').scrollTop, 0);
+  assert.equal(document.getElementById('help-detail-scroll').scrollTop, 0);
   assert.equal(document.getElementById('help-query-input').value, 'How do I derive review?');
   assert.match(html, /AGENTS instructions/);
   assert.match(html, /Workers report through Torque MCP tools/);
-  assert.match(html, /class="help-topic-card selected" data-help-ref="agents-md"/);
+  assert.doesNotMatch(html, /id="modal-help-topic-browser"/);
+  assert.equal(JSON.stringify(document.getElementById('help-selected-detail-anchor').scrollIntoViewOptions), JSON.stringify({ block: 'start', inline: 'nearest' }));
 });
