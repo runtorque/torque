@@ -1006,6 +1006,8 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   border-radius: 10px;
   resize: none;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
   background: rgba(13,17,23,.58);
   color: var(--text);
   font: 12px/1.35 ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Consolas, monospace;
@@ -1013,6 +1015,17 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   font-variant-numeric: tabular-nums;
   outline: none;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.terminal-compose-input[contenteditable="true"]:empty::before {
+  content: attr(data-placeholder);
+  color: color-mix(in srgb, var(--text-dim) 78%, transparent);
+  pointer-events: none;
+}
+.terminal-compose-inline-attachment-chip {
+  max-width: min(220px, calc(100% - 8px));
+  margin: 0 3px 2px;
+  vertical-align: baseline;
+  user-select: all;
 }
 body.terminal-compose-resizing,
 body.terminal-compose-resizing * {

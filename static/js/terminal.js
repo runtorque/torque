@@ -1307,6 +1307,297 @@ function _terminalComposeTextarea(root) {
   return root && root.querySelector ? root.querySelector('.terminal-compose-input') : null;
 }
 
+function _terminalComposeIsRichInput(input) {
+  if (!input) return false;
+  const editable = typeof input.getAttribute === 'function'
+    ? input.getAttribute('contenteditable')
+    : '';
+  return editable === 'true';
+}
+
+function _terminalComposeEscapeText(value) {
+  return esc(String(value || '')).replace(/\n/g, '<br>');
+}
+
+function _terminalComposeNodeTextLength(node) {
+  if (!node) return 0;
+  if (node.nodeType === 3) return String(node.nodeValue || '').length;
+  if (node.nodeType !== 1) return 0;
+  if (node.getAttribute && node.getAttribute('data-attachment-token')) return 0;
+  if (String(node.nodeName || '').toUpperCase() === 'BR') return 1;
+  let total = 0;
+  const children = node.childNodes || [];
+  for (let i = 0; i < children.length; i++) {
+    total += _terminalComposeNodeTextLength(children[i]);
+  }
+  return total;
+}
+
+function _terminalComposeRichHtml(cellId, text) {
+  const entries = _terminalComposeSortedAttachments(cellId);
+  const value = String(text || '');
+  let html = '';
+  let cursor = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] || {};
+    const token = String(entry.token || '');
+    if (!token) continue;
+    let pos = Number(entry.position);
+    pos = Math.max(0, Math.min(value.length, Number.isFinite(pos) ? Math.floor(pos) : value.length));
+    if (pos > cursor) {
+      html += _terminalComposeEscapeText(value.slice(cursor, pos));
+      cursor = pos;
+    }
+    const label = _terminalComposeAttachmentLabel(entry);
+    const title = entry.path ? String(entry.path) : label;
+    const selected = String(_terminalComposeSelectedAttachmentByCell[String(cellId || '')] || '') === token;
+    html += '<span class="terminal-compose-attachment-chip terminal-compose-inline-attachment-chip'
+      + (selected ? ' selected' : '')
+      + '" contenteditable="false" role="button" tabindex="0"'
+      + ' data-attachment-token="' + esc(token) + '"'
+      + ' onclick="return terminalComposeAttachmentPreview(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
+      + ' onkeydown="return terminalComposeAttachmentChipKeydown(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
+      + ' title="' + esc(title) + '" aria-label="Preview attached image ' + esc(label) + '">'
+      + '<span class="terminal-compose-attachment-icon" aria-hidden="true">▧</span>'
+      + '<span class="terminal-compose-attachment-label">' + esc(label) + '</span>'
+      + '</span>';
+  }
+  html += _terminalComposeEscapeText(value.slice(cursor));
+  return html;
+}
+
+function _terminalComposeSelectionOffsets(input) {
+  const value = String(input && input.value || '');
+  const fallbackStart = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+  const fallbackEnd = typeof input.selectionEnd === 'number' ? input.selectionEnd : fallbackStart;
+  if (!_terminalComposeIsRichInput(input)
+      || typeof window === 'undefined'
+      || !window.getSelection
+      || !input.contains) {
+    return {
+      start: Math.max(0, Math.min(value.length, fallbackStart)),
+      end: Math.max(0, Math.min(value.length, fallbackEnd)),
+      direction: input && input.selectionDirection ? input.selectionDirection : 'none',
+    };
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount <= 0) {
+    return { start: value.length, end: value.length, direction: 'none' };
+  }
+  const anchorInside = input.contains(selection.anchorNode) || selection.anchorNode === input;
+  const focusInside = input.contains(selection.focusNode) || selection.focusNode === input;
+  if (!anchorInside || !focusInside) {
+    return { start: value.length, end: value.length, direction: 'none' };
+  }
+  const anchor = _terminalComposeOffsetForNode(input, selection.anchorNode, selection.anchorOffset);
+  const focus = _terminalComposeOffsetForNode(input, selection.focusNode, selection.focusOffset);
+  return {
+    start: Math.min(anchor, focus),
+    end: Math.max(anchor, focus),
+    direction: focus < anchor ? 'backward' : (focus > anchor ? 'forward' : 'none'),
+  };
+}
+
+function _terminalComposeOffsetForNode(root, target, targetOffset) {
+  let found = false;
+  let total = 0;
+  function walk(node) {
+    if (!node || found) return;
+    if (node === target) {
+      found = true;
+      if (node.nodeType === 3) {
+        total += Math.max(0, Math.min(String(node.nodeValue || '').length, Number(targetOffset) || 0));
+      } else if (node.nodeType === 1) {
+        if (node.getAttribute && node.getAttribute('data-attachment-token')) {
+          return;
+        }
+        const children = node.childNodes || [];
+        const count = Math.max(0, Math.min(children.length, Number(targetOffset) || 0));
+        for (let i = 0; i < count; i++) total += _terminalComposeNodeTextLength(children[i]);
+      }
+      return;
+    }
+    if (node.nodeType === 3) {
+      total += String(node.nodeValue || '').length;
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    if (node.getAttribute && node.getAttribute('data-attachment-token')) return;
+    if (String(node.nodeName || '').toUpperCase() === 'BR') {
+      total += 1;
+      return;
+    }
+    const children = node.childNodes || [];
+    for (let i = 0; i < children.length; i++) walk(children[i]);
+  }
+  walk(root);
+  return total;
+}
+
+function _terminalComposeSetRichSelection(input, start, end, direction, options) {
+  if (!_terminalComposeIsRichInput(input)
+      || typeof document === 'undefined'
+      || !document.createRange
+      || typeof window === 'undefined'
+      || !window.getSelection) {
+    return false;
+  }
+  const valueLength = String(input.value || '').length;
+  start = Math.max(0, Math.min(valueLength, start));
+  end = Math.max(0, Math.min(valueLength, end));
+  const afterAttachments = !!(options && options.afterAttachments);
+  function boundaryFor(pos) {
+    let best = { node: input, offset: 0 };
+    let consumed = 0;
+    const children = input.childNodes || [];
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      const len = _terminalComposeNodeTextLength(child);
+      if (len === 0) {
+        if (consumed === pos && afterAttachments
+            && child.nodeType === 1
+            && child.getAttribute
+            && child.getAttribute('data-attachment-token')) {
+          best = { node: input, offset: i + 1 };
+        }
+        continue;
+      }
+      if (consumed + len === pos) {
+        if (!afterAttachments) {
+          if (child.nodeType === 3) return { node: child, offset: len };
+          return { node: input, offset: i + 1 };
+        }
+        consumed += len;
+        best = { node: input, offset: i + 1 };
+        continue;
+      }
+      if (consumed + len > pos) {
+        if (child.nodeType === 3) {
+          return { node: child, offset: Math.max(0, Math.min(len, pos - consumed)) };
+        }
+        if (String(child.nodeName || '').toUpperCase() === 'BR') {
+          return { node: input, offset: pos <= consumed ? i : i + 1 };
+        }
+        return _terminalComposeDescendantBoundary(child, pos - consumed) || { node: input, offset: i };
+      }
+      consumed += len;
+      best = { node: input, offset: i + 1 };
+    }
+    return best;
+  }
+  const range = document.createRange();
+  const first = boundaryFor(start);
+  const last = boundaryFor(end);
+  range.setStart(first.node, first.offset);
+  range.setEnd(last.node, last.offset);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  if (direction === 'backward' && selection.extend) {
+    const reverse = document.createRange();
+    reverse.setStart(last.node, last.offset);
+    reverse.collapse(true);
+    selection.addRange(reverse);
+    selection.extend(first.node, first.offset);
+  } else {
+    selection.addRange(range);
+  }
+  return true;
+}
+
+function _terminalComposeDescendantBoundary(node, offset) {
+  const children = node && node.childNodes ? node.childNodes : [];
+  let consumed = 0;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    const len = _terminalComposeNodeTextLength(child);
+    if (consumed + len >= offset) {
+      if (child.nodeType === 3) return { node: child, offset: Math.max(0, Math.min(len, offset - consumed)) };
+      if (String(child.nodeName || '').toUpperCase() === 'BR') return { node: node, offset: offset <= consumed ? i : i + 1 };
+      return _terminalComposeDescendantBoundary(child, offset - consumed) || { node: node, offset: i };
+    }
+    consumed += len;
+  }
+  return { node: node, offset: children.length };
+}
+
+function _terminalComposeSyncValueFromDom(input) {
+  if (!_terminalComposeIsRichInput(input)) return String(input && input.value || '');
+  if (!input.childNodes) return String(input.value || '');
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const stateForCell = cellId ? _terminalComposeAttachments[cellId] : null;
+  const seen = {};
+  let text = '';
+  function appendText(value) {
+    text += String(value || '').replace(/\u00a0/g, ' ');
+  }
+  function walk(node) {
+    if (!node) return;
+    if (node.nodeType === 3) {
+      appendText(node.nodeValue || '');
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const token = node.getAttribute ? String(node.getAttribute('data-attachment-token') || '') : '';
+    if (token) {
+      seen[token] = true;
+      const entry = _terminalComposeAttachmentEntry(cellId, token);
+      if (entry) entry.position = text.length;
+      return;
+    }
+    const name = String(node.nodeName || '').toUpperCase();
+    if (name === 'BR') {
+      appendText('\n');
+      return;
+    }
+    const before = text.length;
+    const children = node.childNodes || [];
+    for (let i = 0; i < children.length; i++) walk(children[i]);
+    if ((name === 'DIV' || name === 'P') && text.length > before && !text.endsWith('\n')) {
+      appendText('\n');
+    }
+  }
+  const children = input.childNodes || [];
+  for (let i = 0; i < children.length; i++) walk(children[i]);
+  if (text.endsWith('\n')) text = text.slice(0, -1);
+  input.value = text;
+  if (stateForCell && Array.isArray(stateForCell.entries)) {
+    stateForCell.entries = stateForCell.entries.filter(function(entry) {
+      if (!entry || seen[String(entry.token || '')]) return !!entry;
+      _terminalComposeRevokePreviewUrl(_terminalComposeAttachmentPreviewUrl(entry));
+      return false;
+    });
+    if (!stateForCell.entries.length) delete _terminalComposeAttachments[cellId];
+  }
+  return text;
+}
+
+function _terminalComposeRenderRichInput(input, options) {
+  if (!_terminalComposeIsRichInput(input)) return;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const text = String(input.value || '');
+  const preserve = !!(options && options.preserveSelection);
+  const selection = preserve ? _terminalComposeSelectionOffsets(input) : null;
+  const html = _terminalComposeRichHtml(cellId, text);
+  if (input.innerHTML !== html) input.innerHTML = html;
+  if (preserve && selection) {
+    _terminalComposeSetRichSelection(input, selection.start, selection.end, selection.direction, options);
+  }
+}
+
+function _terminalComposeSetInputText(input, text, options) {
+  if (!input) return;
+  input.value = String(text || '');
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeRenderRichInput(input, options || {});
+  }
+}
+
+function _terminalComposeInputText(input) {
+  if (!input) return '';
+  if (_terminalComposeIsRichInput(input)) return _terminalComposeSyncValueFromDom(input);
+  return String(input.value || '');
+}
+
 function _terminalComposeButtonFor(el, cellId) {
   const container = _terminalComposeContainerFor(el);
   if (container && container.querySelector) {
@@ -1499,7 +1790,7 @@ function _terminalComposeSetButtonState(input) {
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
   const button = _terminalComposeButtonFor(input, cellId);
   const attachments = _terminalComposeSortedAttachments(cellId);
-  if (button) button.disabled = !String(input.value || '').trim() && !attachments.length;
+  if (button) button.disabled = !_terminalComposeInputText(input).trim() && !attachments.length;
 }
 
 function _terminalMessageHistoryEntries(cellId) {
@@ -1655,7 +1946,7 @@ function terminalComposeHistoryPick(evt, cellId, index) {
     : null;
   if (input) {
     const recall = _terminalComposeRecallState(id);
-    recall.draft = String(input.value || '');
+    recall.draft = _terminalComposeInputText(input);
     recall.index = idx;
     _terminalComposeSetValue(input, id, entry.message, { preserveAttachments: true });
     if (typeof input.focus === 'function') input.focus();
@@ -1671,14 +1962,14 @@ function _terminalComposeTaskDropdownFor(cellId) {
 }
 
 function _terminalComposeTaskTrigger(input) {
-  if (!input || typeof input.value !== 'string') return null;
-  var start = typeof input.selectionStart === 'number'
-    ? input.selectionStart
-    : input.value.length;
-  var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  if (!input) return null;
+  var value = _terminalComposeInputText(input);
+  var selection = _terminalComposeSelectionOffsets(input);
+  var start = selection.start;
+  var end = selection.end;
   if (start !== end) return null;
-  start = Math.max(0, Math.min(input.value.length, start));
-  var before = input.value.slice(0, start);
+  start = Math.max(0, Math.min(value.length, start));
+  var before = value.slice(0, start);
   var match = before.match(/(^|\s):([\w:-]*)$/);
   if (!match) return null;
   return {
@@ -1828,14 +2119,11 @@ function terminalComposePickTaskRef(evt, cellId, taskId) {
     ? document.getElementById(_terminalComposeInputId(id))
     : null;
   if (!input) return false;
-  var value = String(input.value || '');
+  var value = _terminalComposeInputText(input);
+  var selection = _terminalComposeSelectionOffsets(input);
   var trigger = _terminalComposeTaskTrigger(input);
-  var start = trigger ? trigger.start : (
-    typeof input.selectionStart === 'number' ? input.selectionStart : value.length
-  );
-  var end = trigger ? trigger.end : (
-    typeof input.selectionEnd === 'number' ? input.selectionEnd : start
-  );
+  var start = trigger ? trigger.start : selection.start;
+  var end = trigger ? trigger.end : selection.end;
   start = Math.max(0, Math.min(value.length, start));
   end = Math.max(start, Math.min(value.length, end));
   var insertText = String(taskId || '').trim();
@@ -1844,9 +2132,11 @@ function terminalComposePickTaskRef(evt, cellId, taskId) {
     return false;
   }
   insertText += ' ';
-  input.value = value.slice(0, start) + insertText + value.slice(end);
+  _terminalComposeSetInputText(input, value.slice(0, start) + insertText + value.slice(end));
   var cursor = start + insertText.length;
-  if (typeof input.setSelectionRange === 'function') {
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true });
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(cursor, cursor);
   } else {
     input.selectionStart = cursor;
@@ -1875,14 +2165,17 @@ function _terminalComposeResetRecall(cellId) {
 function _terminalComposeSetValue(input, cellId, value, options) {
   if (!input) return;
   const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
-  input.value = String(value || '');
+  _terminalComposeSetInputText(input, String(value || ''));
   const preserveAttachments = !!(options && options.preserveAttachments);
-  if (id && !preserveAttachments) _terminalComposePruneAttachments(id, input.value);
-  if (id && preserveAttachments) _terminalComposePruneAttachments(id, input.value);
+  const text = _terminalComposeInputText(input);
+  if (id && !preserveAttachments) _terminalComposePruneAttachments(id, text);
+  if (id && preserveAttachments) _terminalComposePruneAttachments(id, text);
   if (id) _terminalComposeTaskDropdownHide(id);
-  if (id) _terminalComposeDrafts[id] = input.value;
-  const end = input.value.length;
-  if (typeof input.setSelectionRange === 'function') {
+  if (id) _terminalComposeDrafts[id] = text;
+  const end = text.length;
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeSetRichSelection(input, end, end, 'none', { afterAttachments: true });
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(end, end);
   } else {
     input.selectionStart = end;
@@ -1895,15 +2188,17 @@ function _terminalComposeSetValue(input, cellId, value, options) {
 }
 
 function _terminalComposeCaretAtFirstLine(input) {
-  if (!input || typeof input.value !== 'string') return true;
+  if (!input) return true;
+  const value = _terminalComposeInputText(input);
   const caret = _terminalComposeActiveSelection(input);
-  return input.value.lastIndexOf('\n', Math.max(0, caret - 1)) < 0;
+  return value.lastIndexOf('\n', Math.max(0, caret - 1)) < 0;
 }
 
 function _terminalComposeCaretAtLastLine(input) {
-  if (!input || typeof input.value !== 'string') return true;
+  if (!input) return true;
+  const value = _terminalComposeInputText(input);
   const caret = _terminalComposeActiveSelection(input);
-  return input.value.indexOf('\n', caret) < 0;
+  return value.indexOf('\n', caret) < 0;
 }
 
 function _terminalComposeHistoryNavigate(input, cellId, direction) {
@@ -1913,7 +2208,7 @@ function _terminalComposeHistoryNavigate(input, cellId, direction) {
   const recall = _terminalComposeRecallState(id);
   if (recall.index < 0) {
     if (direction > 0) return false;
-    recall.draft = String(input.value || '');
+    recall.draft = _terminalComposeInputText(input);
     recall.index = 0;
   } else if (direction < 0) {
     recall.index = Math.min(entries.length - 1, recall.index + 1);
@@ -2094,6 +2389,11 @@ function _terminalComposeAttachmentIndex(cellId, token) {
 
 function _terminalComposeRenderAttachmentChips(form, cellId) {
   if (!form || typeof form.querySelector !== 'function') return;
+  const input = form.querySelector('.terminal-compose-input');
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeRenderRichInput(input, { preserveSelection: true });
+    return;
+  }
   const row = form.querySelector('.terminal-compose-attachments');
   if (!row) return;
   const entries = _terminalComposeSortedAttachments(cellId);
@@ -2127,7 +2427,9 @@ function _terminalComposeRefreshAttachmentChips(cellId) {
   const id = String(cellId || '');
   const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
   const form = input ? _terminalComposeContainerFor(input) : null;
-  if (form) _terminalComposeRenderAttachmentChips(form, id);
+  if (input && _terminalComposeIsRichInput(input)) {
+    _terminalComposeRenderRichInput(input, { preserveSelection: true });
+  } else if (form) _terminalComposeRenderAttachmentChips(form, id);
 }
 
 function _terminalComposeAttachmentState(cellId) {
@@ -2264,21 +2566,25 @@ function _terminalComposePayloadText(cellId, displayText) {
 function _terminalComposeInsertAttachments(input, entries) {
   if (!input || !entries || !entries.length) return;
   var cellId = input.dataset ? (input.dataset.cellId || '') : '';
-  var value = String(input.value || '');
-  var start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
-  var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  var value = _terminalComposeInputText(input);
+  var selection = _terminalComposeSelectionOffsets(input);
+  var start = selection.start;
+  var end = selection.end;
   start = Math.max(0, Math.min(value.length, start));
   end = Math.max(start, Math.min(value.length, end));
-  if (end > start) input.value = value.slice(0, start) + value.slice(end);
-  if (cellId) _terminalComposeDrafts[cellId] = String(input.value || '');
+  if (end > start) _terminalComposeSetInputText(input, value.slice(0, start) + value.slice(end));
+  if (cellId) _terminalComposeDrafts[cellId] = _terminalComposeInputText(input);
   _terminalComposeRegisterAttachmentEntries(
     cellId,
     entries,
-    input.value,
+    _terminalComposeInputText(input),
     start
   );
   var cursor = start;
-  if (typeof input.setSelectionRange === 'function') {
+  _terminalComposeRenderRichInput(input, { preserveSelection: false });
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true });
+  } else if (typeof input.setSelectionRange === 'function') {
     input.setSelectionRange(cursor, cursor);
   } else {
     input.selectionStart = cursor;
@@ -2294,8 +2600,10 @@ function _terminalComposeRemoveAttachment(cellId, token) {
   if (!stateForCell || !Array.isArray(stateForCell.entries)) return false;
   const needle = String(token || '');
   let removed = false;
+  let removedPosition = 0;
   stateForCell.entries = stateForCell.entries.filter(function(entry) {
     if (!entry || String(entry.token || '') !== needle) return true;
+    removedPosition = Math.max(0, Number(entry.position) || 0);
     _terminalComposeRevokePreviewUrl(_terminalComposeAttachmentPreviewUrl(entry));
     removed = true;
     return false;
@@ -2307,6 +2615,10 @@ function _terminalComposeRemoveAttachment(cellId, token) {
   _terminalComposeRefreshAttachmentChips(id);
   const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
   if (input) {
+    _terminalComposeRenderRichInput(input, { preserveSelection: false });
+    if (_terminalComposeIsRichInput(input)) {
+      _terminalComposeSetRichSelection(input, removedPosition, removedPosition, 'none');
+    }
     _terminalComposeSetButtonState(input);
     if (typeof input.focus === 'function') input.focus();
   }
@@ -2327,26 +2639,94 @@ function _terminalComposeAttachmentAtCaret(input, direction) {
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
   const entries = _terminalComposeSortedAttachments(cellId);
   if (!entries.length) return null;
-  const caret = typeof input.selectionStart === 'number'
-    ? input.selectionStart
-    : String(input.value || '').length;
+  const caret = _terminalComposeSelectionOffsets(input).start;
   let candidate = null;
   if (direction < 0) {
     for (let i = 0; i < entries.length; i++) {
       const pos = Math.max(0, Number(entries[i].position) || 0);
-      if (pos <= caret) candidate = entries[i];
+      if (pos === caret) candidate = entries[i];
+      else if (pos < caret) candidate = null;
       else break;
     }
   } else {
     for (let j = 0; j < entries.length; j++) {
       const nextPos = Math.max(0, Number(entries[j].position) || 0);
-      if (nextPos >= caret) {
+      if (nextPos === caret) {
         candidate = entries[j];
         break;
       }
+      if (nextPos > caret) break;
     }
   }
   return candidate;
+}
+
+function _terminalComposeSiblingAttachment(node) {
+  if (!node || node.nodeType !== 1 || !node.getAttribute) return null;
+  const token = String(node.getAttribute('data-attachment-token') || '');
+  return token ? node : null;
+}
+
+function _terminalComposeAdjacentAttachmentNode(input, direction) {
+  if (!_terminalComposeIsRichInput(input)
+      || typeof window === 'undefined'
+      || !window.getSelection) return null;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount <= 0 || !selection.isCollapsed) return null;
+  let node = selection.focusNode;
+  let offset = selection.focusOffset;
+  if (!node || !(input.contains(node) || node === input)) return null;
+
+  function deepestLast(candidate) {
+    let n = candidate;
+    while (n && n.lastChild) n = n.lastChild;
+    return n;
+  }
+  function deepestFirst(candidate) {
+    let n = candidate;
+    while (n && n.firstChild) n = n.firstChild;
+    return n;
+  }
+  function previousCandidate(n, off) {
+    if (n.nodeType === 3) {
+      if (off > 0) return null;
+      return n.previousSibling ? deepestLast(n.previousSibling) : previousFromParent(n.parentNode);
+    }
+    const children = n.childNodes || [];
+    if (off > 0) return deepestLast(children[off - 1]);
+    return previousFromParent(n);
+  }
+  function previousFromParent(n) {
+    if (!n || n === input) return null;
+    if (n.previousSibling) return deepestLast(n.previousSibling);
+    return previousFromParent(n.parentNode);
+  }
+  function nextCandidate(n, off) {
+    if (n.nodeType === 3) {
+      if (off < String(n.nodeValue || '').length) return null;
+      return n.nextSibling ? deepestFirst(n.nextSibling) : nextFromParent(n.parentNode);
+    }
+    const children = n.childNodes || [];
+    if (off < children.length) return deepestFirst(children[off]);
+    return nextFromParent(n);
+  }
+  function nextFromParent(n) {
+    if (!n || n === input) return null;
+    if (n.nextSibling) return deepestFirst(n.nextSibling);
+    return nextFromParent(n.parentNode);
+  }
+  let candidate = direction < 0 ? previousCandidate(node, offset) : nextCandidate(node, offset);
+  while (candidate && candidate.nodeType === 3 && !String(candidate.nodeValue || '').length) {
+    candidate = direction < 0
+      ? (candidate.previousSibling ? deepestLast(candidate.previousSibling) : previousFromParent(candidate.parentNode))
+      : (candidate.nextSibling ? deepestFirst(candidate.nextSibling) : nextFromParent(candidate.parentNode));
+  }
+  if (candidate && candidate.nodeType === 1) {
+    if (_terminalComposeSiblingAttachment(candidate)) return candidate;
+    const chip = candidate.closest ? candidate.closest('.terminal-compose-attachment-chip') : null;
+    if (chip && input.contains(chip)) return chip;
+  }
+  return null;
 }
 
 function _terminalComposeHandleAttachmentDeleteKey(evt, cellId) {
@@ -2359,10 +2739,15 @@ function _terminalComposeHandleAttachmentDeleteKey(evt, cellId) {
   const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
   const selected = String(_terminalComposeSelectedAttachmentByCell[id] || '');
   let entry = selected ? _terminalComposeAttachmentEntry(id, selected) : null;
-  if (!entry && typeof input.selectionStart === 'number'
-      && typeof input.selectionEnd === 'number'
-      && input.selectionStart === input.selectionEnd) {
-    entry = _terminalComposeAttachmentAtCaret(input, evt.key === 'Backspace' ? -1 : 1);
+  const selection = _terminalComposeSelectionOffsets(input);
+  if (!entry && selection.start === selection.end) {
+    const richNode = _terminalComposeAdjacentAttachmentNode(input, evt.key === 'Backspace' ? -1 : 1);
+    const richToken = richNode && richNode.getAttribute
+      ? richNode.getAttribute('data-attachment-token')
+      : '';
+    entry = richToken
+      ? _terminalComposeAttachmentEntry(id, richToken)
+      : _terminalComposeAttachmentAtCaret(input, evt.key === 'Backspace' ? -1 : 1);
   }
   if (!entry) return false;
   if (typeof evt.preventDefault === 'function') evt.preventDefault();
@@ -2486,7 +2871,7 @@ async function _terminalComposeUploadAttachments(cellId, files) {
 function _terminalComposePersistFromDom(root) {
   const input = _terminalComposeTextarea(root);
   if (!input || !input.dataset || !input.dataset.cellId) return;
-  _terminalComposeDrafts[input.dataset.cellId] = String(input.value || '');
+  _terminalComposeDrafts[input.dataset.cellId] = _terminalComposeInputText(input);
 }
 
 function _captureTerminalWorkspaceState(root, cell) {
@@ -2508,7 +2893,7 @@ function _terminalWorkspaceFocusedComposeHasDraft(root) {
   if (!active) return false;
   if (typeof root.contains === 'function' && !root.contains(active)) return false;
   if (!(active.classList && active.classList.contains('terminal-compose-input'))) return false;
-  return String(active.value || '').length > 0;
+  return _terminalComposeInputText(active).length > 0;
 }
 
 function _restoreTerminalWorkspaceState(root, snapshot, cell) {
@@ -2525,9 +2910,10 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
   // just performed.
   if (cell && cellId === String(cell.id || '')
       && Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
-      && input.value !== _terminalComposeDrafts[cellId]) {
-    input.value = _terminalComposeDrafts[cellId];
+      && _terminalComposeInputText(input) !== _terminalComposeDrafts[cellId]) {
+    _terminalComposeSetInputText(input, _terminalComposeDrafts[cellId], { preserveSelection: true });
   }
+  _terminalComposeRenderRichInput(input, { preserveSelection: true });
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
 }
@@ -2569,7 +2955,7 @@ function _renderTerminalCompose(root, cell) {
 
   // Idempotent path: if the form already exists for this cell, update only
   // the dynamic bits (placeholder, error, button disabled, draft value if it
-  // drifted) without clobbering the textarea \u2014 clobbering destroys focus and
+  // drifted) without clobbering the editor \u2014 clobbering destroys focus and
   // produces the TORQUE:264 textbox-border flicker under multi-agent activity.
   const existingForm = root.querySelector ? root.querySelector('.terminal-compose') : null;
   const existingCellId = existingForm && existingForm.dataset
@@ -2588,7 +2974,14 @@ function _renderTerminalCompose(root, cell) {
     const input = _terminalComposeTextarea(root);
     if (input) {
       if (input.placeholder !== placeholder) input.placeholder = placeholder;
-      if (input.value !== draft) input.value = draft;
+      if (_terminalComposeIsRichInput(input)
+          && typeof input.setAttribute === 'function'
+          && input.getAttribute('data-placeholder') !== placeholder) {
+        input.setAttribute('data-placeholder', placeholder);
+      }
+      if (_terminalComposeInputText(input) !== draft) {
+        _terminalComposeSetInputText(input, draft, { preserveSelection: true });
+      }
       _terminalComposeAutoResize(input);
       _terminalComposeSetButtonState(input);
     }
@@ -2612,22 +3005,23 @@ function _renderTerminalCompose(root, cell) {
     + ' onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
     + '  <div class="terminal-compose-input-wrap">'
     + replyHtml
-    + '  <div class="terminal-compose-attachments" aria-label="Image attachments" hidden></div>'
     + '  <button type="button" class="terminal-compose-resize-handle"'
     + ' aria-label="Resize message composer" title="Drag to resize composer"'
     + ' onmousedown="return terminalComposeResizeStart(event, \'' + esc(cellId) + '\')"'
     + ' onkeydown="return terminalComposeResizeKeydown(event, \'' + esc(cellId) + '\')">'
     + '<span aria-hidden="true"></span></button>'
-    + '  <textarea id="' + esc(inputId) + '" class="terminal-compose-input" rows="1"'
+    + '  <div id="' + esc(inputId) + '" class="terminal-compose-input"'
+    + ' contenteditable="true" role="textbox" aria-multiline="true"'
     + ' data-cell-id="' + esc(cellId) + '"'
     + (directAgentId ? ' data-agent-id="' + esc(directAgentId) + '"' : '')
-    + ' placeholder="' + esc(placeholder) + '"'
+    + ' data-placeholder="' + esc(placeholder) + '"'
+    + ' aria-label="' + esc(placeholder) + '"'
     + ' oninput="terminalComposeInput(this)"'
     + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
     + ' ondragenter="terminalComposeDragenter(event, \'' + esc(cellId) + '\')"'
     + ' ondragover="terminalComposeDragover(event, \'' + esc(cellId) + '\')"'
     + ' ondragleave="terminalComposeDragleave(event, \'' + esc(cellId) + '\')"'
-    + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
+    + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')"></div>'
     + '  <div class="terminal-compose-error" aria-live="polite">' + esc(error) + '</div>'
     + '  <div id="' + esc(taskDropdownId) + '"'
     + ' class="deps-dropdown terminal-compose-task-dropdown"'
@@ -2648,7 +3042,7 @@ function _renderTerminalCompose(root, cell) {
     + '</form>';
   const input = _terminalComposeTextarea(root);
   if (input) {
-    input.value = draft;
+    _terminalComposeSetInputText(input, draft);
     _terminalComposeAutoResize(input);
     _terminalComposeSetButtonState(input);
   }
@@ -2661,10 +3055,14 @@ function terminalComposeInput(el) {
   const cellId = el.dataset ? (el.dataset.cellId || '') : '';
   if (cellId) _terminalComposeResetRecall(cellId);
   if (cellId) {
-    _terminalComposeAdjustAttachmentPositions(cellId, _terminalComposeDrafts[cellId] || '', el.value);
-    _terminalComposePruneAttachments(cellId, el.value);
-    _terminalComposeDrafts[cellId] = String(el.value || '');
-    _terminalComposeRefreshAttachmentChips(cellId);
+    const oldText = _terminalComposeDrafts[cellId] || '';
+    const newText = _terminalComposeInputText(el);
+    if (!_terminalComposeIsRichInput(el)) {
+      _terminalComposeAdjustAttachmentPositions(cellId, oldText, newText);
+    }
+    _terminalComposePruneAttachments(cellId, newText);
+    _terminalComposeDrafts[cellId] = newText;
+    if (!_terminalComposeIsRichInput(el)) _terminalComposeRefreshAttachmentChips(cellId);
   }
   if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
@@ -2679,7 +3077,7 @@ function terminalComposeClear(cellId) {
   _terminalComposeResetRecall(id);
   _terminalComposeHistoryClose(id);
   _terminalComposeTaskDropdownHide(id);
-  input.value = '';
+  _terminalComposeSetInputText(input, '');
   if (id) _terminalComposeDrafts[id] = '';
   if (id && _terminalComposeAttachments[id] && Array.isArray(_terminalComposeAttachments[id].entries)) {
     _terminalComposeAttachments[id].entries.forEach(function(entry) {
@@ -2691,10 +3089,12 @@ function terminalComposeClear(cellId) {
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
   _terminalComposeRefreshAttachmentChips(id);
+  if (_terminalComposeIsRichInput(input)) _terminalComposeRenderRichInput(input);
 }
 
 function _terminalComposeActiveSelection(input) {
   if (!input) return 0;
+  if (_terminalComposeIsRichInput(input)) return _terminalComposeSelectionOffsets(input).end;
   if (input.selectionDirection === 'backward' && typeof input.selectionStart === 'number') {
     return input.selectionStart;
   }
@@ -2703,6 +3103,10 @@ function _terminalComposeActiveSelection(input) {
 
 function _terminalComposeSelectionAnchor(input) {
   if (!input) return 0;
+  if (_terminalComposeIsRichInput(input)) {
+    const selection = _terminalComposeSelectionOffsets(input);
+    return selection.direction === 'backward' ? selection.end : selection.start;
+  }
   if (input.selectionDirection === 'backward' && typeof input.selectionEnd === 'number') {
     return input.selectionEnd;
   }
@@ -2720,6 +3124,10 @@ function _terminalComposeLineBoundary(value, caret, toEnd) {
 
 function _terminalComposeSetSelection(input, start, end, direction) {
   if (!input) return;
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeSetRichSelection(input, start, end, direction);
+    return;
+  }
   var valueLength = typeof input.value === 'string' ? input.value.length : 0;
   start = Math.max(0, Math.min(valueLength, start));
   end = Math.max(0, Math.min(valueLength, end));
@@ -2733,12 +3141,13 @@ function _terminalComposeSetSelection(input, start, end, direction) {
 }
 
 function _terminalComposeMoveCaret(input, evt, toEnd, wholeBuffer) {
-  if (!input || typeof input.value !== 'string') return false;
+  if (!input) return false;
+  var value = _terminalComposeInputText(input);
   var active = _terminalComposeActiveSelection(input);
   var anchor = _terminalComposeSelectionAnchor(input);
   var target = wholeBuffer
-    ? (toEnd ? input.value.length : 0)
-    : _terminalComposeLineBoundary(input.value, active, toEnd);
+    ? (toEnd ? value.length : 0)
+    : _terminalComposeLineBoundary(value, active, toEnd);
   if (typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt.shiftKey) {
     _terminalComposeSetSelection(
@@ -2789,7 +3198,7 @@ function terminalComposeSubmit(evt, cellId) {
     input = document.getElementById(_terminalComposeInputId(id));
   }
   if (!input) return false;
-  const displayText = String(input.value || '');
+  const displayText = _terminalComposeInputText(input);
   const hasAttachments = _terminalComposeSortedAttachments(id).length > 0;
   if (!displayText.trim() && !hasAttachments) {
     terminalComposeClear(id);

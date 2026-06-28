@@ -13272,6 +13272,9 @@ test('embedded terminal compose renders only for standalone runtime and preserve
   const composeHtml = dom.compose.innerHTML;
   assert.match(composeHtml, /class="terminal-compose"/);
   assert.match(composeHtml, /Send a message to Builder/);
+  assert.match(composeHtml, /contenteditable="true"/);
+  assert.match(composeHtml, /role="textbox"/);
+  assert.doesNotMatch(composeHtml, /terminal-compose-attachments/);
   assert.match(composeHtml, /terminal-compose-history-toggle/);
   assert.match(composeHtml, /aria-label="Message history"/);
   assert.match(composeHtml, /title="Message history \(use ↑\/↓ to recall\)"/);
@@ -14046,6 +14049,125 @@ test('terminal compose image drop displays chips and sends returned paths', asyn
   assert.equal(sandbox.sendCalls[0].text, 'prefix-' + secondPath + ' suffix');
   assert.equal(input.value, '');
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+});
+
+test('terminal compose image drop renders inline attachment tokens in the editable text flow', async () => {
+  class FakeFormData {
+    constructor() {
+      this.entries = [];
+    }
+
+    append(name, value) {
+      this.entries.push([name, value]);
+    }
+  }
+
+  const fullPath = '/home/testuser/.torque/attachments/agent-1-inline.png';
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    FormData: FakeFormData,
+    URL: {
+      createObjectURL(file) {
+        return 'blob:inline-' + (file && file.name);
+      },
+      revokeObjectURL() {},
+    },
+    fetch() {
+      return Promise.resolve({
+        json() {
+          return Promise.resolve({
+            ok: true,
+            data: [{ path: fullPath }],
+          });
+        },
+      });
+    },
+  });
+
+  const form = new FakeElement('compose-form-inline');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = 'before after';
+  input.selectionStart = 'before '.length;
+  input.selectionEnd = input.selectionStart;
+  const error = new FakeElement('compose-error-inline');
+  error.classList.add('terminal-compose-error');
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-error', error);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  const image = { type: 'image/png', name: 'inline.png', size: 1200 };
+  await context.terminalComposeDrop({
+    currentTarget: input,
+    dataTransfer: { types: ['Files'], files: [image] },
+    preventDefault() {},
+    stopPropagation() {},
+  }, 'agent-1');
+
+  assert.equal(input.value, 'before after');
+  assert.match(input.innerHTML, /terminal-compose-inline-attachment-chip/);
+  assert.match(input.innerHTML, /data-attachment-token="\[ Image #1 \]"/);
+  assert.match(input.innerHTML, /inline\.png/);
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), 'before after');
+  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
+    { token: '[ Image #1 ]', path: fullPath, position: 'before '.length },
+  ]);
+  assert.equal(
+    runInContext(context, `_terminalComposePayloadText('agent-1', ${JSON.stringify(input.value)})`),
+    'before ' + fullPath + 'after',
+  );
+  assert.equal(button.disabled, false);
+  assert.equal(input.focused, true);
+
+  const previewEvt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__inlinePreviewEvt = previewEvt;
+  runInContext(context, `terminalComposeAttachmentPreview(__inlinePreviewEvt, 'agent-1', '[ Image #1 ]');`);
+  assert.equal(previewEvt.preventDefaultCalled, true);
+  assert.equal(previewEvt.stopPropagationCalled, true);
+  assert.match(document.body.children.at(-1).innerHTML, /blob:inline-inline\.png/);
+
+  input.selectionStart = 'before '.length;
+  input.selectionEnd = input.selectionStart;
+  const deleteEvt = {
+    key: 'Backspace',
+    target: input,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__inlineDeleteEvt = deleteEvt;
+  runInContext(context, `terminalComposeKeydown(__inlineDeleteEvt, 'agent-1');`);
+  assert.equal(deleteEvt.preventDefaultCalled, true);
+  assert.equal(deleteEvt.stopPropagationCalled, true);
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
+  assert.doesNotMatch(input.innerHTML, /terminal-compose-inline-attachment-chip/);
+
+  context.__inlineSubmitEvt = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  input.value = 'plain after delete';
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  runInContext(context, `terminalComposeSubmit(__inlineSubmitEvt, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].text, 'plain after delete');
 });
 
 test('terminal compose preserves image chip payload through history recall restore', async () => {
