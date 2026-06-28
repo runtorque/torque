@@ -256,7 +256,7 @@ Proceed with **Wave B: UI/onboarding preview (non-mutating)** after backend/scop
 
 ## 12. Wave B operating brief addendum
 
-Date: 2026-06-28  
+Date: 2026-06-28
 Anchor: TORQUE:958 / TORQUE:964
 
 Wave B keeps the Wave A authority ceiling and adds a deterministic read-only
