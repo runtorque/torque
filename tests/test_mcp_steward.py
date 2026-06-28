@@ -1,0 +1,212 @@
+import importlib
+import json
+import tempfile
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    from helpers import FakeRequest, install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import FakeRequest, install_aiohttp_stub
+
+
+class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub(include_json_helpers=True)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db_mod = importlib.import_module("torque.db")
+        self.state_mod = importlib.import_module("torque.state")
+        self.mcp_mod = importlib.import_module("torque.mcp")
+        self.mcp_mod = importlib.reload(self.mcp_mod)
+        self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
+        self.db.init()
+        self.addCleanup(self.db.close)
+        self.state = self.state_mod.MatrixState(db=self.db)
+        self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
+        self.state.groups["g"] = []
+        self.calls = []
+
+        self.steward = self._add_agent("steward-1", "Steward", kind="architect")
+        self.torqly = self._add_agent("torqly-1", "Torqly", kind="architect")
+        self.engineer = self._add_agent(
+            "engineer-1",
+            "Forge",
+            kind="engineer",
+            hired_by_architect_id=self.torqly.id,
+            engineer_specializations=["runtime-maintenance"],
+        )
+        self.state.assign_agent_class(
+            self.steward.id,
+            "torque-steward",
+            actor_kind="user",
+            base_dir=self.tmp.name,
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            self.steward,
+            base_dir=self.tmp.name,
+        )
+
+    def _add_agent(self, agent_id, name, *, kind="architect", group="g", **kwargs):
+        cell = self.state_mod.AgentCell(
+            id=agent_id,
+            name=name,
+            group=group,
+            cell_type="agent",
+            kind=kind,
+            **kwargs,
+        )
+        self.state.agents[cell.id] = cell
+        self.state.groups.setdefault(group, []).append(cell.id)
+        self.state._db_save_agent(cell)
+        return cell
+
+    async def _handle_command(self, payload):
+        self.calls.append(dict(payload))
+        return {"type": "ok"}
+
+    def _handler(self):
+        return self.mcp_mod.create_mcp_handler(self._handle_command, self.state)
+
+    async def _call(self, tool_name, arguments=None, *, req_id=1, agent_id=None):
+        return await self._handler()(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": arguments or {}},
+                },
+                headers={"X-Torque-Cell-Id": agent_id or self.steward.id},
+            )
+        )
+
+    async def _list_tools(self):
+        response = await self._handler()(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Torque-Cell-Id": self.steward.id},
+            )
+        )
+        return {tool["name"] for tool in response.payload["result"]["tools"]}
+
+    def _payload(self, response):
+        self.assertNotIn("error", response.payload)
+        result = response.payload["result"]
+        self.assertFalse(result["isError"], result["content"][0]["text"])
+        return json.loads(result["content"][0]["text"])
+
+    def _error_text(self, response):
+        if "error" in response.payload:
+            return response.payload["error"]["message"]
+        result = response.payload["result"]
+        self.assertTrue(result["isError"], result["content"][0]["text"])
+        return result["content"][0]["text"]
+
+    async def test_steward_projection_exposes_operating_brief_but_no_mutations(self):
+        tools = await self._list_tools()
+
+        self.assertIn("architect_steward_operating_brief", tools)
+        self.assertIn("architect_help_query", tools)
+        self.assertIn("architect_board_summary", tools)
+        for denied in {
+            "architect_tool_search",
+            "architect_task_create",
+            "architect_task_update",
+            "architect_engineer_hire",
+            "architect_engineer_message",
+            "architect_message_user",
+            "architect_decision_create",
+            "architect_deploy_state",
+            "architect_get_architect_settings",
+        }:
+            self.assertNotIn(denied, tools)
+            response = await self._call(denied, {"title": "nope"})
+            self.assertIn("Unknown tool", self._error_text(response))
+        self.assertEqual([], self.calls)
+
+    async def test_operating_brief_reports_anomalies_and_responsible_actors_read_only(self):
+        now_ts = 2_000_000_000
+        old = datetime.fromtimestamp(now_ts - 48 * 3600, tz=timezone.utc).isoformat()
+
+        parent = self.state.board_add_task(
+            "Ship release card",
+            "g",
+            lane="In Progress",
+            assigned_engineer_id=self.engineer.id,
+            labels=["release"],
+            suggested_specialization="runtime-maintenance",
+        )
+        parent.updated_at = old
+        parent.health_state = "stale-in-progress"
+        parent.worktree_boundary = {
+            "repo_root": "/repo",
+            "branch": "torque/forge/release",
+            "base_branch": "main",
+            "status": "open",
+            "recorded_at": old,
+        }
+        child = self.state.board_add_task(
+            "Review release card",
+            "g",
+            lane="Done",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            action_name="feature/review",
+            labels=["review"],
+        )
+        child.updated_at = old
+        ask = self.state.board_add_task(
+            "Need operator smoke answer",
+            "g",
+            lane="Backlog",
+            labels=["torque:human", "operator-smoke"],
+            status="Awaiting Input",
+        )
+        ask.updated_at = old
+        review = self.state.board_add_task(
+            "Review slow implementation",
+            "g",
+            lane="In Progress",
+            action_name="feature/review",
+            labels=["review"],
+        )
+        review.updated_at = old
+        worker = self._add_agent(
+            "worker-1",
+            "Silent Worker",
+            kind="worker",
+            owner_engineer_id=self.engineer.id,
+            status="running",
+            last_progress_at=now_ts - 5 * 3600,
+        )
+        worker.current_task_id = parent.id
+        parent.agent_id = worker.id
+        unused = self._add_agent("worker-2", "Unused Worker", kind="worker", status="idle")
+        unused.tasks_dispatched = 0
+
+        response = await self._call(
+            "architect_steward_operating_brief",
+            {"mode": "onboarding", "now_ts": now_ts, "limit_per_section": 3, "stale_after_hours": 24, "silent_after_hours": 2},
+        )
+        payload = self._payload(response)
+
+        self.assertEqual("steward_operating_brief", payload["type"])
+        self.assertEqual("onboarding", payload["mode"])
+        self.assertTrue(payload["authority_contract"]["mutation_performed"] is False)
+        self.assertIn("observed_facts", payload)
+        self.assertIn("inferred_risks", payload)
+        self.assertIn("suggested_next_steps", payload)
+        self.assertEqual(1, payload["anomalies"]["blocked_asks"]["count"])
+        self.assertGreaterEqual(payload["anomalies"]["stale_handoffs"]["count"], 1)
+        self.assertEqual(1, payload["anomalies"]["stale_reviews"]["count"])
+        self.assertEqual(1, payload["anomalies"]["branch_boundary_merge_gates"]["count"])
+        self.assertEqual(1, payload["anomalies"]["silent_agents_workstreams"]["count"])
+        self.assertEqual(1, payload["anomalies"]["dangling_unused_workers"]["count"])
+        actors = {item["responsible_actor"] for item in payload["responsible_agent_suggestions"]}
+        self.assertIn("user", actors)
+        self.assertTrue(any("Forge" in actor for actor in actors))
+        self.assertTrue(payload["scoping"]["reads_only"])
+        self.assertIn("docs/reference/help.md", {ref["source_path"] for ref in payload["onboarding"]["help_refs"]})
+        self.assertEqual([], self.calls)

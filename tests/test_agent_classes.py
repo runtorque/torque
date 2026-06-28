@@ -800,6 +800,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
 
         self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_steward_operating_brief", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", policy))

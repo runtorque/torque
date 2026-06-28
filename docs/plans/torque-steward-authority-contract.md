@@ -253,3 +253,42 @@ This wave did **not** implement:
 ## 11. Recommended next wave
 
 Proceed with **Wave B: UI/onboarding preview (non-mutating)** after backend/scoping/security review ships Wave A. Wave B should make the class understandable and non-surprising in the Agent Class UI and group onboarding surfaces, while preserving `auto_create_enabled: false` and no mutating powers.
+
+## 12. Wave B operating brief addendum
+
+Date: 2026-06-28
+Anchor: TORQUE:958 / TORQUE:964
+
+Wave B keeps the Wave A authority ceiling and adds a deterministic read-only
+operating-brief helper for Steward-style sessions:
+
+- `architect_steward_operating_brief` is projected only when the effective
+  policy grants the same read atoms already allowed to `torque-steward@1`:
+  board/task summaries and detail, events, MCP-call telemetry, Areas,
+  Initiatives, and Decisions.
+- The helper returns structured `observed_facts`, `inferred_risks`,
+  `suggested_next_steps`, and `responsible_agent_suggestions` sections, plus
+  Help references for Torque concept explanations.
+- It reports bounded read-only anomalies: blocked asks, stale handoffs, stale
+  reviews, missed user-update candidates, dangling/unused workers, silent
+  agents/workstreams, unhealthy tasks, and visible branch-boundary/merge gates.
+- It does **not** route, dispatch, message, create/update/move/assign tasks,
+  hire/dismiss, accept decisions, merge/rebase/checkpoint worktrees, deploy,
+  restart, schedule, notify, edit classes/profiles, or otherwise mutate state.
+- The prompt now tells Steward sessions to prefer the helper when visible and to
+  keep user-facing output structured as observed facts vs inferred risks vs
+  suggested next steps.
+
+Wave B implementation evidence:
+
+- `torque/steward_brief.py` — pure read-only brief/anomaly builder.
+- `torque/mcp_architect.py` / `torque/mcp_tools_shared.py` — Architect MCP spec
+  and dispatch for `architect_steward_operating_brief`.
+- `torque/agent_profiles.py` — projection mapping requiring only the Steward's
+  existing read atoms; Product Manager and other narrower profiles do not get
+  the helper unless they carry the full read set.
+- `torque/architect.py` and `torque/builtin_agent_classes/torque-steward.yaml`
+  — prompt guidance for structured brief use without broadening authority.
+- Tests: `tests/test_mcp_steward.py`, plus projection/prompt assertions in
+  `tests/test_agent_profiles.py`, `tests/test_agent_classes.py`, and
+  `tests/test_architect_prompt.py`.

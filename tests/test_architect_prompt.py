@@ -309,6 +309,8 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("conservative operational steward", prompt)
         self.assertIn("observing, explaining, and recommending", prompt)
         self.assertIn("Operational context", prompt)
+        self.assertIn("architect_steward_operating_brief", prompt)
+        self.assertIn("observed facts, inferred risks, and suggested next steps", prompt)
         self.assertIn("stale/stuck tasks", prompt)
         self.assertIn("missed handoffs", prompt)
         self.assertIn("Wave A Steward authority is observation/recommendation only", prompt)

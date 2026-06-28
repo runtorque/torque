@@ -553,6 +553,15 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     # Architect MCP surface.
     "architect_tool_search": frozenset({"observe.self_context"}),
     "architect_attention_digest": frozenset({"observe.board_summary"}),
+    "architect_steward_operating_brief": frozenset({
+        "observe.board_summary",
+        "observe.task_detail",
+        "observe.events",
+        "observe.mcp_calls",
+        "planning.area_read",
+        "planning.initiative_read",
+        "decision.list",
+    }),
     "architect_board_summary": frozenset({"observe.board_summary"}),
     "architect_wave_summary": frozenset({"observe.task_detail", "decision.list"}),
     "architect_completion_audit": frozenset({"observe.task_detail", "decision.list"}),
