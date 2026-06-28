@@ -736,14 +736,14 @@ function _helpRenderQueryPanel() {
   return '<section class="help-query-panel" id="help-query-scroll">'
     + '<div class="help-query-title">Ask Help</div>'
     + '<div class="help-query-subtitle">Extractive lookup over maintained Torque docs. Answers cite source paths and do not inspect board, journal, user, or runtime state.</div>'
-    + '<form class="help-query-row" onsubmit="return helpQuerySubmit(event)">'
+    + '<form class="help-query-row" onsubmit="helpQuerySubmit(event); return false">'
     + '<input id="help-query-input" class="help-query-input" value="' + _helpEsc(_helpState.queryDraft) + '" '
     + 'placeholder="Ask a docs question…" autocomplete="off" '
     + 'oninput="helpQueryInputChanged(this.value)" onkeydown="helpQueryKeydown(event)">'
-    + '<button type="submit" class="btn-primary">Ask</button>'
+    + '<button type="button" class="btn-primary" onclick="helpQuerySubmit(event); return false">Ask</button>'
     + '<button type="button" class="btn-secondary" onclick="helpClearQuery()">Clear</button>'
     + '</form>'
-    + '<div class="help-query-result-scroll" id="help-query-result-scroll">' + body + '</div>'
+    + '<div class="help-query-result-scroll" id="help-query-result-scroll" aria-live="polite">' + body + '</div>'
     + '</section>';
 }
 
