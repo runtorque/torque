@@ -1,5 +1,7 @@
 import asyncio
+import builtins
 import unittest
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -8,7 +10,11 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from torque.codex_sdk_runner import CodexSdkReadonlyRunner, CodexSdkSetupError
+from torque.codex_sdk_runner import (
+    CodexSdkReadonlyRunner,
+    CodexSdkSetupError,
+    DefaultCodexSdkClientFactory,
+)
 from torque.runner_backends import CODEX_SDK_READONLY_BACKEND
 from torque.state import AgentCell, MatrixState
 
@@ -105,6 +111,21 @@ class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.sessions, {})
         self.assertEqual(runner.active_runs, {})
         self.assertEqual(events[-1].event_type, "error")
+
+    def test_default_factory_missing_sdk_dependency_is_actionable_setup_error(self):
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "openai_codex":
+                raise ModuleNotFoundError(name)
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaises(CodexSdkSetupError) as ctx:
+                DefaultCodexSdkClientFactory()()
+
+        self.assertIn("Codex SDK is not installed", str(ctx.exception))
+        self.assertIn("runner_backend='codex-sdk-readonly'", str(ctx.exception))
 
     async def test_ready_before_prompt_is_idle_with_sdk_ids_no_worktree(self):
         state, cell = self._state_cell()
