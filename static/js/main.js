@@ -1195,6 +1195,21 @@ function _handleTextEditingShortcut(e) {
   return true;
 }
 
+function _isGlobalShortcutEditingTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  var tag = String(target.tagName || '').toLowerCase();
+  // Preserve the long-standing guard for selects; they are not covered by the
+  // text-editing helper because they are not freeform text surfaces.
+  if (tag === 'select') return true;
+  if (typeof _isTextEditingTarget === 'function' && _isTextEditingTarget(target)) return true;
+  return !!_textShortcutEditingTarget(target);
+}
+
+function _isGlobalShortcutEditingEvent(e) {
+  return _isGlobalShortcutEditingTarget(e && e.target)
+    || _isGlobalShortcutEditingTarget(document.activeElement);
+}
+
 /* -- Main keyboard handler ----------------------------------------------- */
 
 function _handleTorqueGlobalKeydown(e) {
@@ -1215,6 +1230,13 @@ function _handleTorqueGlobalKeydown(e) {
     }
     return;
   }
+
+  // Do not let global shortcuts/keybindings run while the operator is typing
+  // in text-editing surfaces. This includes contenteditable composers such as
+  // the embedded DM composer; Delete/Backspace there must edit content/tokens,
+  // not delete focused agents or board tasks. Modal/diff Escape handling above
+  // remains available, and text-editing Cmd+A/Cmd+Z is handled before this.
+  if (_isGlobalShortcutEditingEvent(e)) return;
 
   if (e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey
       && (e.key === 'e' || e.key === 'E')) {
@@ -1241,10 +1263,6 @@ function _handleTorqueGlobalKeydown(e) {
     if (typeof openCheatsheet === 'function') openCheatsheet();
     return;
   }
-
-  // Skip shortcuts when any input/select/textarea is focused
-  const tag = document.activeElement && document.activeElement.tagName;
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
   // Board keyboard shortcuts (when board is open, arrows/enter/delete go to board)
   if (_boardShortcutsEnabled()) {

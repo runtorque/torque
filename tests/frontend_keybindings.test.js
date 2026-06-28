@@ -21,6 +21,7 @@ function keyEvent(key, opts = {}) {
     shiftKey: !!opts.shift,
     defaultPrevented: false,
     propagationStopped: false,
+    target: opts.target || null,
     preventDefault() { this.defaultPrevented = true; },
     stopPropagation() { this.propagationStopped = true; },
   };
@@ -174,6 +175,7 @@ function createMainHarness() {
     openAddEngineerModal() { calls.push('engineer'); },
     openAddArchitectModal() { calls.push('architect'); },
     openAddTask(lane) { calls.push(['task', lane]); },
+    removeAgent(id) { calls.push(['remove', id]); },
     _terminalComposeInputId(cellId) { return `terminal-compose-input-${cellId}`; },
     connect() {},
     setupDrag() {},
@@ -254,6 +256,51 @@ test('main keydown composer.focus moves focus from non-input state and respects 
     assert.deepEqual(calls, []);
     assert.equal(inputFocusEvent.defaultPrevented, false);
   });
+});
+
+test('main keydown suppresses global shortcuts from contenteditable composer', () => {
+  const { context, document, calls } = createMainHarness();
+  const composer = {
+    tagName: 'DIV',
+    isContentEditable: true,
+    classList: { contains(name) { return name === 'terminal-compose-input'; } },
+  };
+  const composerChild = {
+    tagName: 'SPAN',
+    isContentEditable: false,
+  };
+
+  document.activeElement = composer;
+  ['n', 'c', 'Delete', 'Backspace'].forEach((key) => {
+    const event = keyEvent(key, { target: composer });
+    document._keydown(event);
+    assert.deepEqual(calls, []);
+    assert.equal(event.defaultPrevented, false);
+  });
+
+  context._activePanelApp = 'board';
+  const boardDeleteEvent = keyEvent('Delete', { target: composer });
+  document._keydown(boardDeleteEvent);
+  assert.deepEqual(calls, []);
+  assert.equal(boardDeleteEvent.defaultPrevented, false);
+  context._activePanelApp = '';
+
+  const childTargetEvent = keyEvent('n', { target: composerChild });
+  document._keydown(childTargetEvent);
+  assert.deepEqual(calls, []);
+  assert.equal(childTargetEvent.defaultPrevented, false);
+
+  document.activeElement = document.body;
+  const outsideTaskEvent = keyEvent('n', { target: document.body });
+  document._keydown(outsideTaskEvent);
+  assert.deepEqual(calls, [['task', '']]);
+  assert.equal(outsideTaskEvent.defaultPrevented, true);
+
+  calls.length = 0;
+  const outsideDeleteEvent = keyEvent('Delete', { target: document.body });
+  document._keydown(outsideDeleteEvent);
+  assert.deepEqual(calls, [['remove', 'agent-1']]);
+  assert.equal(outsideDeleteEvent.defaultPrevented, true);
 });
 
 function createModalHarness() {
