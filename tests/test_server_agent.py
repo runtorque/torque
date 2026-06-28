@@ -140,6 +140,7 @@ class _FakeTemplateManager:
             "command": getattr(gs, "agent_boot_command", ""),
             "model": getattr(gs, "agent_model", ""),
             "reasoning_effort": getattr(gs, "agent_reasoning_effort", ""),
+            "runner_backend": getattr(gs, "runner_backend", ""),
         }
         data.update(overrides or {})
         return data
@@ -734,6 +735,83 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                 "restore_focus_to_prev_tab"
             ]
         )
+
+    async def test_resolve_agent_launch_config_defaults_runner_backend_to_pty(self):
+        service = self._launch_service(_FakeState(agent_provider="codex"), _FakeBridge())
+
+        resolved = service.resolve_agent_launch_config("backend")
+
+        self.assertEqual(resolved["agent_type"], "codex")
+        self.assertEqual(resolved["runner_backend"], "pty")
+
+    async def test_resolve_agent_launch_config_rejects_sdk_for_non_codex(self):
+        service = self._launch_service(_FakeState(agent_provider="claude-code"), _FakeBridge())
+
+        with self.assertRaises(ValueError):
+            service.resolve_agent_launch_config(
+                "backend",
+                overrides={"runner_backend": "codex-sdk-readonly"},
+            )
+
+    async def test_create_agent_with_config_sdk_forces_no_worktree_and_skips_prompt_files(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        worktree_mgr = mock.AsyncMock()
+        worktree_mgr.get_repo_root.return_value = "/tmp/project"
+        service = self._launch_service(state, bridge, worktree_mgr=worktree_mgr)
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "SDK",
+            {
+                "profile": "Default",
+                "command": "codex",
+                "directory": "/tmp/project",
+                "tab_color": "",
+                "agent_type": "codex",
+                "runner_backend": "codex-sdk-readonly",
+                "worktree": True,
+                "worktree_auto_checkpoint": True,
+                "checkpoint_on_progress": True,
+            },
+            persistent_prompt_text="SYSTEM",
+        )
+
+        self.assertEqual(cell.runner_backend, "codex-sdk-readonly")
+        self.assertFalse(cell.worktree_auto_checkpoint)
+        self.assertFalse(cell.checkpoint_on_progress)
+        self.assertEqual(cell.worktree_path, "")
+        worktree_mgr.create.assert_not_called()
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        call = bridge.create_session_calls[0]["kwargs"]
+        self.assertEqual(call["sdk_system_prompt"], "SYSTEM")
+        self.assertEqual(call["system_prompt"], "")
+
+    async def test_create_agent_with_config_sdk_rejects_inherited_worktree_before_side_effects(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        service = self._launch_service(state, bridge, worktree_mgr=mock.AsyncMock())
+        inherited = types.SimpleNamespace(worktree_path="/tmp/wt")
+
+        with self.assertRaises(ValueError):
+            await service.create_agent_with_config(
+                "backend",
+                "SDK",
+                {
+                    "profile": "Default",
+                    "command": "codex",
+                    "directory": "/tmp/project",
+                    "tab_color": "",
+                    "agent_type": "codex",
+                    "runner_backend": "codex-sdk-readonly",
+                },
+                inherited_worktree_from=inherited,
+            )
+
+        self.assertEqual(state.agents, {})
+        self.assertEqual(bridge.create_session_calls, [])
 
     async def test_create_agent_with_config_appends_explicit_agent_class_prompt(self):
         state = self.state_mod.MatrixState()

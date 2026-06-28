@@ -4430,6 +4430,24 @@ function renderTerminalWorkspace(opts) {
   }
 
   const sessionKey = cell.id + ':' + (cell.session_id || '');
+  if (String(cell.runner_backend || '').trim() === 'codex-sdk-readonly') {
+    _renderTerminalDirectMessages(dom.directMessages, cell);
+    _renderTerminalCompose(dom.compose, cell);
+    const sdkHtml = ''
+      + '<div class="terminal-empty">'
+      + '  <div class="terminal-empty-title">Codex SDK · read-only beta</div>'
+      + '  <div class="terminal-empty-body">This session uses the Codex SDK read-only runner. Terminal controls are disabled; prompts run as read-only SDK turns and transcript output is advisory.</div>'
+      + '  <div class="terminal-empty-meta">No PTY, project config, worktree, checkpoint, or merge authority is attached.</div>'
+      + '</div>';
+    _activateEmbeddedTerminalSurface(dom.stage, sessionKey, {
+      preserveTail: preserveTerminalTailOnFit,
+    });
+    _renderEmbeddedTerminalStagePlaceholder(dom.stage, sdkHtml);
+    const sdkStatus = 'Codex SDK read-only beta  |  ' + _terminalStatusLabel(cell);
+    if (dom.statusbar.textContent !== sdkStatus) dom.statusbar.textContent = sdkStatus;
+    _restoreTerminalWorkspaceState(root, workspaceState, cell);
+    return;
+  }
   if (!cell.session_id) {
     _renderTerminalDirectMessages(dom.directMessages, cell);
     _renderTerminalCompose(dom.compose, cell);

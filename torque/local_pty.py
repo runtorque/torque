@@ -36,6 +36,7 @@ from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
 from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
 from .worktree import ensure_git_exclude
+from .runner_backends import is_codex_sdk_readonly
 
 
 @dataclass
@@ -103,6 +104,8 @@ class LocalPtyAdapter:
     async def reconnect_orphans(self) -> None:
         cleared = 0
         for cell in self.state.iter_active_agents():
+            if is_codex_sdk_readonly(cell):
+                continue
             if not cell.session_id and cell.status == "stopped":
                 continue
             if cell.session_id or cell.status != "stopped":
@@ -136,12 +139,13 @@ class LocalPtyAdapter:
         init_script: str = "",
         shell: str = "",
         system_prompt: str = "",
+        sdk_system_prompt: str = "",
         mcp_entrypoint: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
         restore_focus_to_prev_tab: bool = False,
     ) -> None:
-        del target_session_id, target_window_id, restore_focus_to_prev_tab
+        del sdk_system_prompt, target_session_id, target_window_id, restore_focus_to_prev_tab
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
 
@@ -1219,6 +1223,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         init_script: str = "",
         shell: str = "",
         system_prompt: str = "",
+        sdk_system_prompt: str = "",
         mcp_entrypoint: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
@@ -1227,7 +1232,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         if self._supervisor_restart_active():
             raise RuntimeError(
                 "PTY supervisor is restarting; try again shortly.")
-        del target_session_id, target_window_id, restore_focus_to_prev_tab
+        del sdk_system_prompt, target_session_id, target_window_id, restore_focus_to_prev_tab
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
         session = _PtySession(

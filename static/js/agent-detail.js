@@ -356,7 +356,10 @@ function renderAgentDetails(a) {
   h += `<div class="detail-hdr">`;
   h += `  <span class="detail-name">${esc(a.name)}</span>`;
   if (typeInfo && typeInfo.label) {
-    h += `  <span class="detail-type">${esc(typeInfo.label)}</span>`;
+    const runtimeLabel = String(a.runner_backend || '').trim() === 'codex-sdk-readonly'
+      ? 'Codex SDK · read-only beta'
+      : typeInfo.label;
+    h += `  <span class="detail-type">${esc(runtimeLabel)}</span>`;
   }
   h += `  <span class="detail-status ${statusCls}">`;
   if (statusCls === 'attention') h += esc(a.error_message || 'Needs attention');

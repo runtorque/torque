@@ -1772,6 +1772,37 @@ class TorqueDBTests(unittest.TestCase):
             ).fetchone()[0],
             "pty",
         )
+
+    def test_runner_backend_schema_defaults_to_pty_and_round_trips_sdk(self):
+        def column_default(table: str, column: str) -> str:
+            for row in self.db._conn.execute(f"PRAGMA table_info({table})"):
+                if row[1] == column:
+                    return row[4]
+            self.fail(f"{table}.{column} not found")
+
+        self.assertEqual(column_default("agents", "runner_backend"), "'pty'")
+        self.db._conn.execute(
+            "INSERT INTO agents (id, name, slug, group_name) "
+            "VALUES ('agent-default', 'Worker', 'worker', 'g')"
+        )
+        self.db._conn.commit()
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT runner_backend FROM agents WHERE id='agent-default'"
+            ).fetchone()[0],
+            "pty",
+        )
+
+        self.db.save_agent(AgentCell(
+            id="agent-sdk",
+            name="SDK",
+            group="g",
+            slug="sdk",
+            agent_type="codex",
+            runner_backend="codex-sdk-readonly",
+        ))
+        loaded = self.db.load_all()["agents"]["agent-sdk"]
+        self.assertEqual(loaded["runner_backend"], "codex-sdk-readonly")
         self.assertEqual(
             self.db._conn.execute(
                 "SELECT default_terminal_backend FROM group_settings "

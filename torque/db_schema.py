@@ -557,6 +557,7 @@ CREATE TABLE IF NOT EXISTS agents (
     group_name            TEXT NOT NULL,
     cell_type             TEXT NOT NULL DEFAULT 'agent',
     terminal_backend      TEXT NOT NULL DEFAULT 'pty',
+    runner_backend        TEXT NOT NULL DEFAULT 'pty',
     session_id            TEXT,
     profile               TEXT NOT NULL DEFAULT 'Default',
     command               TEXT NOT NULL DEFAULT '',
@@ -2743,6 +2744,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     for col, col_type, default in [
         ("tasks_dispatched", "INTEGER", "0"),
         ("queue_empty_emitted", "INTEGER", "1"),
+        ("runner_backend", "TEXT", "'pty'"),
         ("worktree_base_dir", "TEXT", "'.torque/worktrees'"),
         ("worktree_auto_checkpoint", "INTEGER", "0"),
         ("checkpoint_on_progress", "INTEGER", "0"),

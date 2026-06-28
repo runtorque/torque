@@ -364,3 +364,50 @@ class CodexUsageBackfillTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CodexUsageSdkSkipTests(unittest.TestCase):
+    def test_sdk_cells_are_skipped_before_session_or_workdir_inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp)
+            rollout = _write_rollout(codex_home, cwd="/same/repo")
+            os.utime(rollout, (1779804000.0, 1779804000.0))
+            sdk = _codex_cell(
+                "sdk",
+                agent_session_id=_CODEX_SESSION_ID,
+                status="running",
+                session_id="sdk-runtime",
+            )
+            sdk.runner_backend = "codex-sdk-readonly"
+            sdk.directory = "/same/repo"
+            state = _make_state(sdk)
+
+            report = refresh_codex_provider_usage_for_agents(
+                state,
+                codex_home=codex_home,
+                include_session_inference=True,
+            )
+
+            self.assertEqual(report.changed, 0)
+            self.assertEqual(report.skipped["sdk_runner"], 1)
+            self.assertIsNone(sdk.provider_usage)
+            self.assertEqual(sdk.context_window, {})
+            self.assertEqual(sdk.agent_session_id, _CODEX_SESSION_ID)
+
+    def test_sdk_cells_with_no_thread_id_do_not_infer_from_same_workdir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp)
+            _write_rollout(codex_home, cwd="/same/repo")
+            sdk = _codex_cell("sdk", agent_session_id="", session_id="sdk-runtime")
+            sdk.runner_backend = "codex-sdk-readonly"
+            sdk.directory = "/same/repo"
+            state = _make_state(sdk)
+
+            changed = refresh_codex_provider_usage_for_agents(
+                state,
+                codex_home=codex_home,
+                include_session_inference=True,
+            )
+
+            self.assertEqual(changed.changed, 0)
+            self.assertEqual(sdk.agent_session_id, "")
+            self.assertIsNone(sdk.provider_usage)

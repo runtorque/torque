@@ -15,6 +15,7 @@ from .provider_usage import (
     normalize_provider_usage,
     provider_usage_fingerprint,
 )
+from .runner_backends import CODEX_SDK_READONLY_BACKEND, is_codex_sdk_readonly
 from .task_health import HEALTH_SEVERITY
 from . import profiling
 
@@ -86,6 +87,11 @@ def _cell_kind(cell) -> str:
 
 def _apply_context_window(cell, data: dict | None, timestamp: float | None,
                           *, clear_on_empty: bool = False) -> bool:
+    if is_codex_sdk_readonly(cell) and (
+            not isinstance(data, dict)
+            or str(data.get("usage_source", "") or "").strip()
+            not in {CODEX_SDK_READONLY_BACKEND, "codex-sdk"}):
+        return False
     context_window = normalize_context_window_usage(
         (data or {}).get("context_window"),
         now=timestamp,
@@ -105,6 +111,14 @@ def _apply_context_window(cell, data: dict | None, timestamp: float | None,
 def _apply_provider_usage(cell, data: dict | None) -> bool:
     if not isinstance(data, dict) or "provider_usage" not in data:
         return False
+    if is_codex_sdk_readonly(cell):
+        usage = data.get("provider_usage")
+        source = ""
+        if isinstance(usage, dict):
+            source = str(usage.get("source", "") or "").strip()
+        source = source or str(data.get("usage_source", "") or "").strip()
+        if source != "codex-sdk":
+            return False
     provider_usage = normalize_provider_usage(data.get("provider_usage"))
     if provider_usage is None:
         return False

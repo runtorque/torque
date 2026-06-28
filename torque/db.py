@@ -528,6 +528,7 @@ _AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY = (
 
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
+    "runner_backend",
     "session_id", "profile",
     "command", "directory", "tab_color", "icon", "window_id",
     "parent_id", "status", "worktree_path", "worktree_branch",
@@ -842,6 +843,7 @@ def _serialize_agent_cell(cell):
         group_name,
         d.get("cell_type", "agent"),
         d.get("terminal_backend", "pty"),
+        d.get("runner_backend", "pty") or "pty",
         d.get("session_id"),
         d.get("profile", "Default"),
         d.get("command", ""),

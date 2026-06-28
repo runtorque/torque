@@ -1087,6 +1087,7 @@ class AgentCell:
     slug: str = ""              # auto-generated from name
     cell_type: str = "agent"  # "agent" | "terminal"
     terminal_backend: str = "pty"  # current default; reserved for future backends
+    runner_backend: str = "pty"  # agent runtime backend: pty | codex-sdk-readonly
     session_id: Optional[str] = None
     profile: str = "Default"
     command: str = ""
@@ -1203,6 +1204,7 @@ class AgentCell:
         elif progress and not heartbeat:
             self.last_heartbeat_at = progress
         self._sync_activity_alias()
+        self.runner_backend = str(self.runner_backend or "pty").strip() or "pty"
 
     def _sync_activity_alias(self) -> bool:
         """Keep compatibility clocks equal to max(progress, heartbeat)."""
@@ -11185,6 +11187,7 @@ class MatrixState:
         group: str,
         cell_type: str,
         terminal_backend: str = "",
+        runner_backend: str = "",
         profile: str = "Default",
         command: str = "",
         directory: str = "",
@@ -11226,6 +11229,7 @@ class MatrixState:
             terminal_backend=terminal_backend
             or gs.default_terminal_backend
             or "pty",
+            runner_backend=runner_backend or "pty",
             profile=profile,
             command=command or (self.get_default_command() if cell_type == "agent" else ""),
             directory=directory,
