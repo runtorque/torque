@@ -56,6 +56,13 @@ function _helpText(value) {
   return String(value == null ? '' : value).trim();
 }
 
+function _helpLiveInputValue(id, fallback) {
+  if (typeof document === 'undefined' || !document.getElementById) return String(fallback == null ? '' : fallback);
+  var el = document.getElementById(id);
+  if (!el || !('value' in el)) return String(fallback == null ? '' : fallback);
+  return String(el.value == null ? '' : el.value);
+}
+
 function _helpDate(value) {
   var raw = _helpText(value);
   if (!raw) return 'unknown';
@@ -127,14 +134,16 @@ function _helpFocusElementById(id, opts) {
   try { el.focus(opts || { preventScroll: true }); } catch (_err) { try { el.focus(); } catch (_err2) {} }
 }
 
-function _helpBringDetailIntoView() {
+function _helpBringDetailIntoView(opts) {
+  opts = opts || {};
   if (typeof document === 'undefined' || !document.getElementById) return;
-  var detail = document.getElementById('help-detail-scroll');
+  var inBrowser = opts.target === 'browser' || opts.browser === true;
+  var detail = document.getElementById(inBrowser ? 'help-browser-detail-scroll' : 'help-detail-scroll');
   if (!detail) return;
-  var workspace = document.getElementById('help-workspace-scroll');
+  var workspace = inBrowser ? document.getElementById('help-topic-browser-detail-pane') : document.getElementById('help-workspace-scroll');
   try { if (workspace) workspace.scrollTop = 0; } catch (_err0) {}
   try { detail.scrollTop = 0; } catch (_err) {}
-  var anchor = document.getElementById('help-selected-detail-anchor') || detail;
+  var anchor = document.getElementById(inBrowser ? 'help-browser-selected-detail-anchor' : 'help-selected-detail-anchor') || detail;
   if (anchor && typeof anchor.scrollIntoView === 'function') {
     try { anchor.scrollIntoView({ block: 'start', inline: 'nearest' }); } catch (_err2) { try { anchor.scrollIntoView(); } catch (_err3) {} }
   }
@@ -234,7 +243,7 @@ async function helpSelectReference(ref, opts) {
     _helpState.indexHash = _helpText(data.index_hash) || _helpState.indexHash;
     _helpState.sourceModel = data.source_model || _helpState.sourceModel;
     _helpRenderIfPresent();
-    if (opts.scrollDetail !== false) _helpBringDetailIntoView();
+    if (opts.scrollDetail !== false) _helpBringDetailIntoView({ target: opts.detailTarget || (opts.browser ? 'browser' : 'main') });
     return data;
   } catch (err) {
     if (seq !== _helpRequestSeq.detail) return _helpState.detail;
@@ -249,6 +258,11 @@ function helpSearchInputChanged(value) {
   _helpState.searchDraft = String(value == null ? '' : value);
 }
 
+function helpSearchSubmit(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  return helpRunSearch();
+}
+
 function helpSearchKeydown(event) {
   if (!event) return;
   if (event.key === 'Enter') {
@@ -261,7 +275,9 @@ function helpSearchKeydown(event) {
 }
 
 async function helpRunSearch() {
-  var query = _helpText(_helpState.searchDraft);
+  var rawQuery = _helpLiveInputValue('help-search-input', _helpState.searchDraft);
+  _helpState.searchDraft = rawQuery;
+  var query = _helpText(rawQuery);
   _helpState.searchQuery = query;
   _helpState.searchError = '';
   _helpState.searchMessage = '';
@@ -309,6 +325,11 @@ function helpQueryInputChanged(value) {
   _helpState.queryDraft = String(value == null ? '' : value);
 }
 
+function helpQuerySubmit(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  return helpRunQuery();
+}
+
 function helpQueryKeydown(event) {
   if (!event) return;
   if (event.key === 'Enter') {
@@ -321,7 +342,9 @@ function helpQueryKeydown(event) {
 }
 
 async function helpRunQuery() {
-  var question = _helpText(_helpState.queryDraft);
+  var rawQuestion = _helpLiveInputValue('help-query-input', _helpState.queryDraft);
+  _helpState.queryDraft = rawQuestion;
+  var question = _helpText(rawQuestion);
   _helpState.queryQuestion = question;
   _helpState.queryError = '';
   _helpState.queryMessage = '';
@@ -400,6 +423,10 @@ function helpTopicBrowserKeydown(event) {
   }
 }
 
+function helpSelectBrowserReference(ref) {
+  return helpSelectReference(ref, { keepBrowserOpen: true, detailTarget: 'browser' });
+}
+
 function helpToggleDetailSection(key) {
   var id = _helpText(key);
   if (!id) return;
@@ -447,7 +474,7 @@ function _helpRenderTopicCard(item, kind, index) {
   return ''
     + '<button type="button" class="help-topic-card' + (selected ? ' selected' : '') + '"'
     + ' data-help-ref="' + _helpEsc(ref) + '"'
-    + ' onclick="helpSelectReference(' + _helpJsArg(ref) + ')">'
+    + ' onclick="' + (_helpState.browserOpen ? 'helpSelectBrowserReference' : 'helpSelectReference') + '(' + _helpJsArg(ref) + ')">'
     + '  <span class="help-topic-card-title">' + _helpEsc(title) + '</span>'
     + '  <span class="help-topic-card-summary">' + _helpEsc(summary || 'No summary available.') + '</span>'
     + '  ' + _helpRenderSourceLine(item)
@@ -521,24 +548,27 @@ function _helpRenderTopicBrowserModal() {
     + '<div class="modal modal-wide modal-tall help-topic-browser-modal" role="dialog" aria-modal="true" aria-labelledby="help-topic-browser-title">'
     + '<div class="help-topic-browser-head">'
     + '<div><h2 id="help-topic-browser-title">Browse Help topics</h2>'
-    + '<div class="modal-summary">Search, filter, and select maintained Torque Help topics. Selecting a card updates the detail pane and closes this browser.</div></div>'
+    + '<div class="modal-summary">Search, filter, and select maintained Torque Help topics. Selecting a card keeps the detail pane inside this browser.</div></div>'
     + '<button type="button" class="btn-secondary help-topic-browser-close" onclick="helpCloseTopicBrowser()" aria-label="Close Help topic browser">Close</button>'
     + '</div>'
     + _helpRenderBrowserControls()
-    + '<div class="help-topic-browser-body">' + _helpRenderTopicBrowser() + '</div>'
+    + '<div class="help-topic-browser-body">'
+    + '<div class="help-topic-browser-results-pane">' + _helpRenderTopicBrowser() + '</div>'
+    + '<div class="help-topic-browser-detail-pane" id="help-topic-browser-detail-pane">' + _helpRenderDetail({ browser: true }) + '</div>'
+    + '</div>'
     + '</div>'
     + '</div>';
 }
 
 function _helpRenderBrowserControls() {
-  return '<div class="help-toolbar help-browser-toolbar">'
+  return '<form class="help-toolbar help-browser-toolbar" onsubmit="return helpSearchSubmit(event)">'
     + '<input id="help-search-input" class="help-search-input" value="' + _helpEsc(_helpState.searchDraft) + '" '
     + 'placeholder="Search maintained docs…" autocomplete="off" '
     + 'oninput="helpSearchInputChanged(this.value)" onkeydown="helpSearchKeydown(event)">'
-    + '<button type="button" class="btn-primary" onclick="helpRunSearch()">Search</button>'
+    + '<button type="submit" class="btn-primary">Search</button>'
     + '<button type="button" class="btn-secondary" onclick="helpClearSearch()">Clear</button>'
     + _helpRenderAudienceSelect()
-    + '</div>';
+    + '</form>';
 }
 
 function _helpRenderTopicLauncher() {
@@ -557,7 +587,8 @@ function _helpRenderTopicLauncher() {
     + '</div>';
 }
 
-function _helpRenderSections(topic) {
+function _helpRenderSections(topic, opts) {
+  opts = opts || {};
   var sections = _helpArray(topic && topic.sections);
   if (!sections.length) return '<div class="help-muted">No section index is available for this topic.</div>';
   var html = '<div class="help-section-index">';
@@ -573,9 +604,10 @@ function _helpRenderSections(topic) {
       + '<span class="help-section-lines">lines ' + _helpEsc(section.line_start || '?') + '–' + _helpEsc(section.line_end || '?') + '</span>'
       + '</button>';
     if (expanded) {
+      var openFn = opts.browser ? 'helpSelectBrowserReference' : 'helpSelectReference';
       html += '<div class="help-section-expanded">'
         + '<div class="help-source-line"><code>' + _helpEsc(ref) + '</code></div>'
-        + '<button type="button" class="btn-secondary help-inline-action" onclick="helpSelectReference(' + _helpJsArg(ref) + ')">Open section</button>'
+        + '<button type="button" class="btn-secondary help-inline-action" onclick="' + openFn + '(' + _helpJsArg(ref) + ')">Open section</button>'
         + '</div>';
     }
     html += '</div>';
@@ -613,8 +645,11 @@ function _helpRenderFreshness(topic) {
     + '</details>';
 }
 
-function _helpRenderDetail() {
-  var html = '<div class="help-detail" id="help-detail-scroll">';
+function _helpRenderDetail(opts) {
+  opts = opts || {};
+  var detailId = opts.browser ? 'help-browser-detail-scroll' : 'help-detail-scroll';
+  var anchorId = opts.browser ? 'help-browser-selected-detail-anchor' : 'help-selected-detail-anchor';
+  var html = '<div class="help-detail" id="' + detailId + '">';
   if (!_helpState.selectedRef) {
     html += '<div class="help-state help-empty">Select a Help topic or search result to read maintained docs.</div>';
     return html + '</div>';
@@ -636,7 +671,7 @@ function _helpRenderDetail() {
     html += '<div class="help-state help-empty">Select a Help topic or search result to read maintained docs.</div>';
     return html + '</div>';
   }
-  html += '<article class="help-topic-detail" id="help-selected-detail-anchor" tabindex="-1">'
+  html += '<article class="help-topic-detail" id="' + anchorId + '" tabindex="-1">'
     + '<div class="help-detail-topline">'
     + '<h2>' + _helpEsc(_helpTopicTitle(topic)) + '</h2>'
     + '<span class="help-chip-row">' + _helpRenderChips(topic) + '</span>'
@@ -654,7 +689,7 @@ function _helpRenderDetail() {
     + '</section>';
   html += '<section class="help-detail-block">'
     + '<div class="help-detail-block-title">Sections</div>'
-    + _helpRenderSections(topic)
+    + _helpRenderSections(topic, opts)
     + '</section>';
   html += '<section class="help-detail-block">'
     + '<div class="help-detail-block-title">Examples</div>'
@@ -701,13 +736,13 @@ function _helpRenderQueryPanel() {
   return '<section class="help-query-panel" id="help-query-scroll">'
     + '<div class="help-query-title">Ask Help</div>'
     + '<div class="help-query-subtitle">Extractive lookup over maintained Torque docs. Answers cite source paths and do not inspect board, journal, user, or runtime state.</div>'
-    + '<div class="help-query-row">'
+    + '<form class="help-query-row" onsubmit="return helpQuerySubmit(event)">'
     + '<input id="help-query-input" class="help-query-input" value="' + _helpEsc(_helpState.queryDraft) + '" '
     + 'placeholder="Ask a docs question…" autocomplete="off" '
     + 'oninput="helpQueryInputChanged(this.value)" onkeydown="helpQueryKeydown(event)">'
-    + '<button type="button" class="btn-primary" onclick="helpRunQuery()">Ask</button>'
+    + '<button type="submit" class="btn-primary">Ask</button>'
     + '<button type="button" class="btn-secondary" onclick="helpClearQuery()">Clear</button>'
-    + '</div>'
+    + '</form>'
     + '<div class="help-query-result-scroll" id="help-query-result-scroll">' + body + '</div>'
     + '</section>';
 }
@@ -733,7 +768,7 @@ function renderHelpPanel() {
   var snapshot = null;
   if (typeof _captureSurfaceState === 'function') {
     snapshot = _captureSurfaceState(root, {
-      scrollSelectors: ['#help-workspace-scroll', '#help-browser-scroll', '#help-detail-scroll', '#help-query-scroll', '#help-query-result-scroll'],
+      scrollSelectors: ['#help-workspace-scroll', '#help-browser-scroll', '#help-detail-scroll', '#help-browser-detail-scroll', '#help-query-scroll', '#help-query-result-scroll'],
     });
   }
   root.innerHTML = '<div class="help-panel">'
