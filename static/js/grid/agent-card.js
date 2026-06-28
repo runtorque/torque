@@ -1045,7 +1045,12 @@ function renderAgentCell(a, options) {
   else if (_isEngineerKind || _isDesignatedEngineer) h += _renderEngineerCardBody(a, _engineerAsking ? _engineerWs.pending_question : '');
   else if (_isArchitect) h += _renderArchitectCellBody(a);
   else h += _renderGenericAgentCardBody(a);
-  h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
+  if (String(a.runner_backend || '').trim() === 'codex-sdk-readonly') {
+    h += '<span class="agent-card-provider agent-card-provider--sdk cell-provider"'
+      + ' title="Codex SDK read-only beta runtime">Codex SDK · read-only beta</span>';
+  } else {
+    h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
+  }
   h += _renderAgentContextMeter(a);
   const badge = _agentCardKindBadge(a, _isDismissed);
   h += '<div class="agent-card-kind ' + esc(badge.cls) + '"'

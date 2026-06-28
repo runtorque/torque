@@ -1729,3 +1729,37 @@ asyncio.run(main())
         )
 
         self.assertEqual(cell.current_task_id, parent.id)
+
+    async def test_sdk_provider_usage_requires_sdk_source(self):
+        state = self._make_state()
+        cell = self._make_cell("sdk")
+        cell.agent_type = "codex"
+        cell.runner_backend = "codex-sdk-readonly"
+        state.agents[cell.id] = cell
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(self.base_mod.AgentEvent(
+            cell_id=cell.id,
+            timestamp=time.time(),
+            event_type="context_update",
+            data={
+                "provider_usage": {"five_hour": {"available": True, "used_percentage": 99, "resets_at": "2026-01-01T00:00:00Z"}},
+                "context_window": {"used_tokens": 10, "limit_tokens": 100},
+            },
+        ))
+        self.assertIsNone(cell.provider_usage)
+        self.assertEqual(cell.context_window, {})
+
+        await bus.emit(self.base_mod.AgentEvent(
+            cell_id=cell.id,
+            timestamp=time.time(),
+            event_type="context_update",
+            data={
+                "usage_source": "codex-sdk",
+                "provider_usage": {"source": "codex-sdk", "five_hour": {"available": True, "used_percentage": 11, "resets_at": "2026-01-01T00:00:00Z"}},
+                "context_window": {"used_tokens": 10, "limit_tokens": 100},
+            },
+        ))
+        self.assertIsNotNone(cell.provider_usage)
+        self.assertEqual(cell.provider_usage["five_hour"]["used_percentage"], 11)
+        self.assertEqual(cell.context_window["used_tokens"], 10)

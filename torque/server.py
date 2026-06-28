@@ -171,6 +171,7 @@ from .memory import (
     normalize_retention_kind,
 )
 from .roles import RoleManager
+from .runner_backends import is_codex_sdk_readonly
 from .specializations import SpecializationManager
 from .external_tickets import (
     ExternalTicketError,
@@ -1116,6 +1117,7 @@ def _relay_agent_state_snapshot(state: MatrixState) -> list[dict]:
             "name": getattr(cell, "name", ""),
             "kind": getattr(cell, "kind", ""),
             "agent_type": getattr(cell, "agent_type", ""),
+            "runner_backend": getattr(cell, "runner_backend", "pty"),
             "status": getattr(cell, "status", ""),
             "activity_detail": getattr(cell, "activity_detail", ""),
             "needs_attention": bool(getattr(cell, "needs_attention", False)),
@@ -1735,6 +1737,15 @@ async def _preflight_worktree_merge_gates(
     publish_nested_submodule_branches: bool = False,
 ) -> dict:
     """Run shared local merge gates before either direct or PR merge paths."""
+    from .runner_backends import is_codex_sdk_readonly
+    if is_codex_sdk_readonly(cell):
+        return {
+            "ok": False,
+            "result": _worktree_merge_error(
+                aid,
+                "Codex SDK read-only beta agents cannot merge worktrees.",
+            ),
+        }
     if not (cell and cell.worktree_path and cell.worktree_branch):
         return {
             "ok": False,
@@ -10865,6 +10876,21 @@ async def _relaunch_agent_after_worktree_removal(
         explicit_template=cell.template,
         overrides={},
     )
+    if getattr(cell, "runner_backend", ""):
+        launch_cfg["runner_backend"] = getattr(cell, "runner_backend", "")
+    from .runner_backends import CODEX_SDK_READONLY_BACKEND, is_codex_sdk_readonly
+    if is_codex_sdk_readonly(cell) or launch_cfg.get("runner_backend") == CODEX_SDK_READONLY_BACKEND:
+        cell.runner_backend = CODEX_SDK_READONLY_BACKEND
+        launch_cfg["runner_backend"] = CODEX_SDK_READONLY_BACKEND
+        launch_cfg["worktree"] = False
+        launch_cfg["worktree_auto_checkpoint"] = False
+        launch_cfg["checkpoint_on_progress"] = False
+        cell.worktree_path = ""
+        cell.worktree_branch = ""
+        cell.worktree_repo_root = ""
+        cell.worktree_base_branch = ""
+        cell.worktree_auto_checkpoint = False
+        cell.checkpoint_on_progress = False
     persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
     apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)
@@ -14797,7 +14823,7 @@ async def _handle_relaunch_agent_command(
                 cell.worktree_base_branch = ""
                 state._emit_agent(cell)
                 state._db_save_agent(cell)
-        if not cell.worktree_path and launch_cfg.get("worktree") and cell.directory:
+        if not is_codex_sdk_readonly(cell) and not cell.worktree_path and launch_cfg.get("worktree") and cell.directory:
             repo_root = await worktree_mgr.get_repo_root(cell.directory)
             if repo_root:
                 wt_path = await worktree_mgr.create(
@@ -14816,7 +14842,8 @@ async def _handle_relaunch_agent_command(
                     cell.directory = wt_path
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
-        if (cell.agent_type and prev_directory and prev_directory != cell.directory):
+        if (not is_codex_sdk_readonly(cell)
+                and cell.agent_type and prev_directory and prev_directory != cell.directory):
             get_adapter(cell.agent_type).uninstall_persistent_prompt(
                 os.path.expanduser(prev_directory),
                 persistent_prompt_filename(cell),
@@ -14832,6 +14859,7 @@ async def _handle_relaunch_agent_command(
         init_script=init_script,
         shell=shell,
         system_prompt=launch_cfg.get("system_prompt", ""),
+        sdk_system_prompt=launch_cfg.get("sdk_system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
 
@@ -14987,7 +15015,8 @@ async def _handle_restart_agent_command(
             cell.worktree_base_branch = ""
             state._emit_agent(cell)
             state._db_save_agent(cell)
-    if (cell.agent_type and prev_directory
+    if (not is_codex_sdk_readonly(cell)
+            and cell.agent_type and prev_directory
             and prev_directory != cell.directory):
         get_adapter(cell.agent_type).uninstall_persistent_prompt(
             os.path.expanduser(prev_directory),
@@ -15010,6 +15039,7 @@ async def _handle_restart_agent_command(
         env_file=launch_cfg.get("env_file", ""),
         shell=launch_cfg.get("shell", ""),
         system_prompt=launch_cfg.get("system_prompt", ""),
+        sdk_system_prompt=launch_cfg.get("sdk_system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
 
@@ -15164,15 +15194,15 @@ async def main(connection=None):
     from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter
 
     if torque_config.PROFILE_SKIP_PTY:
-        bridge = LocalPtyAdapter(state)
+        pty_bridge = LocalPtyAdapter(state)
         log.info("Profile mode — PTY supervisor skipped")
     else:
         from . import pty_supervisor
 
-        bridge = None
+        pty_bridge = None
         try:
             sock_path = pty_supervisor.ensure_running(DATA_DIR)
-            bridge = SupervisedPtyAdapter(state, sock_path)
+            pty_bridge = SupervisedPtyAdapter(state, sock_path)
             log.info(
                 "Standalone mode — using PTY supervisor at %s", sock_path)
         except Exception as exc:
@@ -15187,7 +15217,9 @@ async def main(connection=None):
                 ),
                 "detail": str(exc),
             }
-            bridge = LocalPtyAdapter(state)
+            pty_bridge = LocalPtyAdapter(state)
+    from .runtime_bridge import AgentRuntimeBridge
+    bridge = AgentRuntimeBridge(state, pty_bridge)
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
     template_mgr = RoleManager()
@@ -15585,6 +15617,9 @@ async def main(connection=None):
     async def _on_agent_session_end(cell):
         """Handle agent turn completion: auto-checkpoint."""
         state.history_snapshot_tokens(cell)
+        from .runner_backends import is_codex_sdk_readonly
+        if is_codex_sdk_readonly(cell):
+            return
         # Auto-checkpoint
         if cell.worktree_path and cell.cell_type == "agent":
             if not cell.worktree_auto_checkpoint:
@@ -15606,6 +15641,9 @@ async def main(connection=None):
 
     async def _checkpoint_on_report(cell, message: str = ""):
         """Checkpoint worktree on ai progress/done if enabled and throttled."""
+        from .runner_backends import is_codex_sdk_readonly
+        if is_codex_sdk_readonly(cell):
+            return
         if not cell.worktree_path or cell.cell_type != "agent":
             return
         if not cell.checkpoint_on_progress:
@@ -15843,6 +15881,7 @@ async def main(connection=None):
     # Handle codex turn completion detected by the PTY idle-screen backstop.
     if hasattr(bridge, "on_agent_session_end_detected"):
         bridge.on_agent_session_end_detected = _on_agent_session_end_detected
+    bridge.on_agent_event = event_bus.emit
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
     event_ingest_drainer.start()
@@ -19176,6 +19215,16 @@ async def main(connection=None):
 
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])
+                from .runner_backends import is_codex_sdk_readonly
+                if is_codex_sdk_readonly(cell):
+                    result = {
+                        "type": "error",
+                        "message": (
+                            "Codex SDK read-only beta agents cannot "
+                            "checkpoint worktrees."
+                        ),
+                    }
+                    return result
                 block_reason = _shared_review_checkpoint_block_reason(
                     state,
                     cell,
@@ -19234,6 +19283,16 @@ async def main(connection=None):
                     return result
                 cell = target
                 aid = target.id
+                from .runner_backends import is_codex_sdk_readonly
+                if is_codex_sdk_readonly(cell):
+                    return {
+                        "type": "worktree_check_merge",
+                        "id": aid,
+                        "error": (
+                            "Codex SDK read-only beta agents cannot "
+                            "merge worktrees."
+                        ),
+                    }
                 if cell and cell.worktree_path \
                         and cell.worktree_branch:
                     boundary_state = await _latest_boundary_state_for_cell(
@@ -19754,6 +19813,16 @@ async def main(connection=None):
                     group=str(data.get("group", "") or ""),
                 )
                 cell = target
+                from .runner_backends import is_codex_sdk_readonly
+                if is_codex_sdk_readonly(cell):
+                    result = {
+                        "type": "worktree_pr",
+                        "error": (
+                            "Codex SDK read-only beta agents cannot create "
+                            "worktree PRs."
+                        ),
+                    }
+                    return result
                 if error_result or not cell or not cell.worktree_path:
                     result = {
                         "type": "worktree_pr",
@@ -19849,6 +19918,14 @@ async def main(connection=None):
                 )
                 cell = target
                 aid = getattr(target, "id", "") if target else data.get("id", "")
+                from .runner_backends import is_codex_sdk_readonly
+                if is_codex_sdk_readonly(cell):
+                    result = _worktree_merge_error(
+                        aid,
+                        "Codex SDK read-only beta agents cannot merge worktrees.",
+                        phase="target_resolution",
+                    )
+                    return result
                 requested_force_direct = bool(data.get("force_direct"))
                 merge_mode = _engineer_merge_mode_for_cell(state, cell)
                 direct_merge_breach_event = None
@@ -22821,7 +22898,9 @@ async def main(connection=None):
                         # work lands on the branch before the MCP
                         # reply returns, mirroring the pre-merge
                         # checkpoint in worktree_merge.
-                        if (cell.worktree_path
+                        from .runner_backends import is_codex_sdk_readonly
+                        if (not is_codex_sdk_readonly(cell)
+                                and cell.worktree_path
                                 and cell.cell_type == "agent"
                                 and cell.worktree_auto_checkpoint):
                             block_reason = (
