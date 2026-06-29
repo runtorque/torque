@@ -389,7 +389,17 @@ function _renderTerminalDirectMessages(root, cell) {
   root.hidden = false;
   if (root.dataset) root.dataset.agentId = String(agent.id || '');
   let changed = false;
-  if (root._torqueLastHtml !== html || root.innerHTML !== html) {
+  // Browser DOM serialization is not byte-stable with the generated string:
+  // whitespace/boolean attributes may normalize after the first assignment.
+  // PR #809 made the composer itself idempotent, but this `innerHTML !== html`
+  // fallback still rewrote the entire Direct Messages slot on every
+  // main-surface render while an agent was outputting. That below-terminal DOM
+  // rewrite can perturb layout, fire xterm's ResizeObserver/fit path, and make
+  // the terminal visibly flash while the user types in the DM composer even
+  // though neither the selected session nor the message list changed. Trust the
+  // explicit render cache for this owned slot; if the node is recreated, its
+  // cache is recreated too.
+  if (root._torqueLastHtml !== html) {
     root.innerHTML = html;
     root._torqueLastHtml = html;
     changed = true;
@@ -3903,9 +3913,14 @@ function _updateEmbeddedTerminalTailButton(entry) {
   const button = entry && entry.tailButton;
   if (!button) return;
   const hidden = _embeddedTerminalTailPinned(entry) && _embeddedTerminalAtTail(entry);
-  button.hidden = !!hidden;
+  const nextHidden = !!hidden;
+  if (button.hidden !== nextHidden) button.hidden = nextHidden;
   if (typeof button.setAttribute === 'function') {
-    button.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+    const ariaHidden = hidden ? 'true' : 'false';
+    if (typeof button.getAttribute !== 'function'
+        || button.getAttribute('aria-hidden') !== ariaHidden) {
+      button.setAttribute('aria-hidden', ariaHidden);
+    }
   }
 }
 
@@ -4480,8 +4495,14 @@ function _activateEmbeddedTerminalSurface(stage, sessionKey, opts) {
         && typeof stage.appendChild === 'function') {
       stage.appendChild(candidate.surface);
     }
-    candidate.surface.hidden = !active;
-    if (candidate.surface.style) candidate.surface.style.display = active ? '' : 'none';
+    const nextHidden = !active;
+    if (candidate.surface.hidden !== nextHidden) candidate.surface.hidden = nextHidden;
+    if (candidate.surface.style) {
+      const nextDisplay = active ? '' : 'none';
+      if (candidate.surface.style.display !== nextDisplay) {
+        candidate.surface.style.display = nextDisplay;
+      }
+    }
   }
   _setActiveEmbeddedTerminalEntry(entry);
   if (entry) {

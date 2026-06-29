@@ -11706,6 +11706,134 @@ test('focused rich DM composer workspace refresh does not rewrite editor DOM or 
   assert.equal(document.activeElement, input);
 });
 
+test('unchanged DM list browser-normalized HTML does not rewrite or refit terminal while typing', () => {
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [{
+      message_id: 'dm-existing',
+      message_type: 'message',
+      message: 'Existing message',
+      sender_id: 'user',
+      sender_kind: 'user',
+      recipient_id: 'agent-1',
+      recipient_kind: 'worker',
+      created_at: 100,
+    }],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const term = terminals[0];
+  assert.ok(term && term.addon, 'terminal should be connected before proving no refit');
+  const entry = runInContext(context, `_embeddedTerminalSessions['agent-1:sess-1']`);
+
+  const form = new FakeElement('terminal-compose-form');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  form.dataset.agentId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = 'typing during output';
+  input.selectionStart = 6;
+  input.selectionEnd = 6;
+  dom.compose.appendChild(form);
+  form.appendChild(input);
+  dom.compose.setQuerySelector('.terminal-compose', form);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+  context.__composeInput = input;
+  runInContext(context, `terminalComposeInput(__composeInput);`);
+
+  // Real browsers do not guarantee `element.innerHTML` serializes byte-for-byte
+  // to the generated template string. Before this regression fix, the unchanged
+  // DM slot compared both `_torqueLastHtml` and `innerHTML`, so this normalized
+  // serialization forced a full DM DOM rewrite on every agent-output-driven
+  // workspace render. That rewrite can perturb the terminal stage and trigger
+  // the xterm ResizeObserver/fit path: the observed flashing while typing.
+  let directMessageHtmlWrites = 0;
+  const normalizedBrowserHtml = '<section class="terminal-direct-messages" data-agent-id="agent-1"><div>normalized browser serialization</div></section>';
+  Object.defineProperty(dom.directMessages, 'innerHTML', {
+    configurable: true,
+    get() { return normalizedBrowserHtml; },
+    set(value) {
+      directMessageHtmlWrites += 1;
+      this._innerHTML = String(value);
+      entry.resizeObserver.callback([{ contentRect: { width: 801 + directMessageHtmlWrites, height: 360 } }]);
+    },
+  });
+
+  let surfaceHiddenWrites = 0;
+  let surfaceDisplayWrites = 0;
+  let tailButtonHiddenWrites = 0;
+  let tailButtonAriaWrites = 0;
+  Object.defineProperty(dom.surface, 'hidden', {
+    configurable: true,
+    get() { return false; },
+    set() { surfaceHiddenWrites += 1; },
+  });
+  Object.defineProperty(dom.surface.style, 'display', {
+    configurable: true,
+    get() { return ''; },
+    set() { surfaceDisplayWrites += 1; },
+  });
+  const tailButton = entry.tailButton;
+  assert.ok(tailButton, 'tail affordance should exist before same-session refresh');
+  tailButton.setAttribute('aria-hidden', 'true');
+  Object.defineProperty(tailButton, 'hidden', {
+    configurable: true,
+    get() { return true; },
+    set() { tailButtonHiddenWrites += 1; },
+  });
+  const originalTailButtonSetAttribute = tailButton.setAttribute.bind(tailButton);
+  tailButton.setAttribute = function setAttribute(name, value) {
+    if (name === 'aria-hidden') tailButtonAriaWrites += 1;
+    return originalTailButtonSetAttribute(name, value);
+  };
+
+  term.addon.fitCalls = 0;
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(directMessageHtmlWrites, 0,
+    'unchanged Direct Messages slot must trust its render cache instead of browser-normalized innerHTML');
+  assert.equal(surfaceHiddenWrites, 0, 'same-session refresh must not rewrite active xterm hidden state');
+  assert.equal(surfaceDisplayWrites, 0, 'same-session refresh must not rewrite active xterm display style');
+  assert.equal(tailButtonHiddenWrites, 0, 'same-session refresh must not rewrite unchanged tail affordance visibility');
+  assert.equal(tailButtonAriaWrites, 0, 'same-session refresh must not rewrite unchanged tail affordance aria state');
+  assert.equal(term.addon.fitCalls, 0,
+    'DM typing/workspace refresh must not cause layout-triggered xterm fit flicker');
+  assert.equal(document.activeElement, input);
+  assert.equal(input.value, 'typing during output');
+  assert.equal(input.selectionStart, 6);
+  assert.equal(input.selectionEnd, 6);
+});
+
 test('embedded terminal DM compose focus blocks terminal refocus and preserves bottom scroll', () => {
   const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
