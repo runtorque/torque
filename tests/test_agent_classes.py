@@ -61,7 +61,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "default-architect": ("architect", "full-architect", "1"),
             "default-engineer": ("engineer", "full-engineer", "1"),
             "default-worker": ("worker", "full-worker", "1"),
-            "product-manager": ("architect", "class-policy-product-manager", "2"),
+            "product-manager": ("architect", "class-policy-product-manager", "3"),
             "torque-steward": ("architect", "class-policy-torque-steward", "1"),
         }
         self.assertEqual(set(expected), set(by_id))
@@ -84,7 +84,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(preview["primary_identity_label"], "Product Manager")
         self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
         self.assertEqual(preview["lifecycle"], "stable")
-        self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "2"})
+        self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "3"})
         self.assertEqual(preview["agent_profile"]["id"], "class-policy-product-manager")
         self.assertEqual(preview["agent_profile"]["status"], "restricted")
         self.assertEqual(preview["internal_policy"]["mode"], "compile")
@@ -689,7 +689,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertEqual(snapshot["id"], "product-manager")
         self.assertEqual(snapshot["display_name"], "Product Manager")
         self.assertEqual(snapshot["primary_identity_label"], "Product Manager")
-        self.assertEqual(snapshot["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "2"})
+        self.assertEqual(snapshot["agent_profile_ref"], {"id": "class-policy-product-manager", "version": "3"})
         self.assertEqual(snapshot["agent_profile"]["id"], "class-policy-product-manager")
         self.assertEqual(snapshot["internal_policy"]["mode"], "compile")
         self.assertEqual(snapshot["status"], "restricted")
@@ -697,7 +697,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertEqual(snapshot["product_manager_status"]["authority_model"], "pm_safe_restricted")
         self.assertEqual(cell.effective_agent_class_id, "product-manager")
         self.assertEqual(cell.effective_agent_profile_id, "class-policy-product-manager")
-        self.assertEqual(cell.effective_agent_profile_version, "2")
+        self.assertEqual(cell.effective_agent_profile_version, "3")
         self.assertEqual(
             cell.effective_agent_profile_snapshot["metadata"]["generated_by_agent_class"]["id"],
             "product-manager",
@@ -715,6 +715,48 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         loaded = self.db.load_all()["agents"][cell.id]
         self.assertEqual(loaded["effective_agent_class_snapshot"]["id"], "product-manager")
         self.assertEqual(loaded["effective_agent_profile_snapshot"]["id"], "class-policy-product-manager")
+
+    def test_product_manager_builtin_version_change_marks_existing_assignment_pending(self):
+        cell = self._add_agent(kind="architect")
+        self.state.assign_agent_class(
+            cell.id,
+            "product-manager",
+            actor_kind="user",
+            base_dir=str(self.project),
+        )
+        self.state.apply_effective_agent_class_for_launch(
+            cell,
+            base_dir=str(self.project),
+        )
+
+        # Simulate a live agent assigned/launched before the Product Manager
+        # built-in class gained behavior-overlay self grants.  The persisted
+        # desired/effective versions can both be old even though the next launch
+        # resolves the latest built-in definition by id.
+        cell.agent_class_version = "2"
+        cell.effective_agent_class_version = "2"
+        cell.effective_agent_profile_version = "2"
+        cell.effective_agent_class_snapshot["version"] = "2"
+        cell.effective_agent_class_snapshot["agent_profile_ref"]["version"] = "2"
+        cell.effective_agent_class_snapshot["agent_profile"]["version"] = "2"
+        cell.effective_agent_profile_snapshot["version"] = "2"
+
+        class_status = self.state.agent_class_status_for_cell(
+            cell,
+            base_dir=str(self.project),
+        )
+        profile_status = self.state.agent_profile_status_for_cell(
+            cell,
+            base_dir=str(self.project),
+        )
+
+        self.assertEqual(class_status["assigned_class_version"], "2")
+        self.assertEqual(class_status["effective_class_version"], "2")
+        self.assertEqual(class_status["next_launch_class_version"], "3")
+        self.assertEqual(class_status["next_launch_profile_version"], "3")
+        self.assertTrue(class_status["pending_next_launch"])
+        self.assertTrue(class_status["apply_state"]["relaunch_required"])
+        self.assertTrue(profile_status["pending_next_launch"])
 
     def test_direct_profile_launch_after_class_clear_clears_effective_class(self):
         cell = self._add_agent(kind="architect")
@@ -912,7 +954,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
 
         self.assertIn("## Agent Class", prompt_block)
         self.assertIn("Product Manager", prompt_block)
-        self.assertIn("Internal Agent Profile policy: class-policy-product-manager@2", prompt_block)
+        self.assertIn("Internal Agent Profile policy: class-policy-product-manager@3", prompt_block)
         self.assertEqual(context["id"], "product-manager")
         self.assertEqual(context["primary_identity_label"], "Product Manager")
         self.assertEqual(context["agent_profile_id"], "class-policy-product-manager")

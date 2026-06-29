@@ -2538,7 +2538,8 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             assigned_preview = enriched_agent_class_preview(assigned_class, base_dir=base_dir)
 
     next_launch_class_id = "" if direct_profile_without_class else assigned_id or default_agent_class_id_for_kind(kind)
-    next_launch_class_version = str(getattr(cell, "agent_class_version", "") or "") if assigned_id else ""
+    assigned_version = str(getattr(cell, "agent_class_version", "") or "")
+    next_launch_class_version = assigned_version if assigned_id else ""
     next_launch_profile_id = ""
     next_launch_profile_version = ""
     if direct_profile_without_class:
@@ -2551,8 +2552,13 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
             include_archived=True,
         )
         if next_class:
-            if not next_launch_class_version:
-                next_launch_class_version = next_class.version
+            # ``apply_effective_agent_class_for_launch`` resolves the current
+            # class definition by id and freezes that latest definition.  Do
+            # the same for status: a built-in class can gain a new version
+            # while existing agents still store the older assignment version,
+            # and operators need to see that the next launch will refresh the
+            # frozen class/profile snapshot.
+            next_launch_class_version = next_class.version or next_launch_class_version
             next_launch_profile_id = next_class.agent_profile_ref.id
             next_launch_profile_version = next_class.agent_profile_ref.version
 

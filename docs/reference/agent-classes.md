@@ -29,7 +29,7 @@ Torque ships built-in Agent Classes in `torque/builtin_agent_classes/`:
   `class-policy-creative-architect@1`
 - `product-manager.yaml` → primary label **Product Manager**, schema v3,
   uses operator capability buckets, and compiles to generated/internal
-  `class-policy-product-manager@2`
+  `class-policy-product-manager@3`
 - `torque-steward.yaml` → primary label **Torque Steward**, schema v3,
   draft/read-only foundation for operational stewardship, and compiles to
   generated/internal `class-policy-torque-steward@1`
@@ -192,7 +192,7 @@ The built-in Product Manager class has primary identity label **Product Manager*
 warning/chip, not part of the name.
 
 Product Manager compiles PM-safe policy from class-owned operator buckets to the
-internal generated profile `class-policy-product-manager@2`. The selected
+internal generated profile `class-policy-product-manager@3`. The selected
 buckets match the existing PM-safe wrapper surface: planning reads, PM-owned
 proposed decisions, queued product task intake, selected product-peer wrappers,
 PM-safe user communication, and private journal. Explicit restriction buckets
