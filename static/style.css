@@ -979,6 +979,33 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   -webkit-user-select: text;
   user-select: text;
 }
+.terminal-direct-message-code-block {
+  position: relative;
+  margin: 0.45em 0;
+}
+.terminal-direct-message-code-block .torque-md-code-block {
+  margin: 0;
+  padding-right: 4.6em;
+}
+.terminal-direct-message-code-copy {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 1;
+  padding: 2px 6px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px;
+  color: var(--text-dim);
+  background: rgba(13,17,23,.86);
+  font: 9px/1.2 ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Consolas, monospace;
+}
+.terminal-direct-message-code-copy:hover,
+.terminal-direct-message-code-copy:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 50%, rgba(255,255,255,.14));
+  background: rgba(20,28,38,.95);
+  outline: none;
+}
 .terminal-direct-message-actions {
   margin-top: 7px;
 }
@@ -1118,8 +1145,8 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 32px;
-  max-height: var(--terminal-compose-user-height, 88px);
+  min-height: 68px;
+  max-height: var(--terminal-compose-user-height, 96px);
   padding: 8px 10px;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 10px;

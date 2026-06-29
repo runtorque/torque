@@ -2580,6 +2580,7 @@ class MatrixState:
         self.window_bounds: dict[str, dict] = {}
         self.workspace_sidebar_width: int = 0
         self.terminal_direct_messages_height: int = 0
+        self.terminal_compose_height: int = 0
         self.engineer_panel_split_fraction: float = 0.30
         self.context_panel_split_ratio: float = 0.38
         self.supervisor_panel_state: dict = {}
@@ -4466,6 +4467,7 @@ class MatrixState:
             "terminal_direct_messages_height": (
                 self.terminal_direct_messages_height
             ),
+            "terminal_compose_height": self.terminal_compose_height,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "context_panel_split_ratio": self.context_panel_split_ratio,
             "supervisor_panel_state": self.supervisor_panel_state,
@@ -4793,6 +4795,7 @@ class MatrixState:
             "terminal_direct_messages_height": (
                 self.terminal_direct_messages_height
             ),
+            "terminal_compose_height": self.terminal_compose_height,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "context_panel_split_ratio": self.context_panel_split_ratio,
             "supervisor_panel_state": self.supervisor_panel_state,
@@ -6646,6 +6649,13 @@ class MatrixState:
                 )
             except (TypeError, ValueError):
                 self.terminal_direct_messages_height = 0
+            try:
+                self.terminal_compose_height = max(
+                    0,
+                    int(data.get("terminal_compose_height", 0) or 0),
+                )
+            except (TypeError, ValueError):
+                self.terminal_compose_height = 0
             try:
                 self.engineer_panel_split_fraction = float(
                     data.get("engineer_panel_split_fraction", 0.30) or 0.30

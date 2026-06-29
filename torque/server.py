@@ -22091,6 +22091,22 @@ async def main(connection=None):
                     state.terminal_direct_messages_height,
                 )
 
+            elif cmd == "ui_set_terminal_compose_height":
+                try:
+                    height = int(data.get("height", 0) or 0)
+                except (TypeError, ValueError):
+                    height = 0
+                state.terminal_compose_height = max(0, height)
+                state._emit(
+                    "ui_update",
+                    key="terminal_compose_height",
+                    value=state.terminal_compose_height,
+                )
+                state._db_save_ui(
+                    "terminal_compose_height",
+                    state.terminal_compose_height,
+                )
+
             elif cmd == "standalone_set_panel_layout":
                 layout = data.get("layout", {})
                 if not isinstance(layout, dict):

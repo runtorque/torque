@@ -37,6 +37,7 @@ let state = {
   window_bounds: {},
   workspace_sidebar_width: 0,
   terminal_direct_messages_height: 0,
+  terminal_compose_height: 0,
   engineer_panel_split_fraction: 0.30,
   context_panel_split_ratio: 0.38,
   supervisor_panel_state: {},
@@ -1206,6 +1207,12 @@ function _handleFullState(msg) {
     var _terminalDirectMessagesHeight = Number(state.terminal_direct_messages_height);
     state.terminal_direct_messages_height = Number.isFinite(_terminalDirectMessagesHeight)
       ? Math.max(0, _terminalDirectMessagesHeight)
+      : 0;
+  }
+  if (typeof state.terminal_compose_height !== 'number') {
+    var _terminalComposeHeight = Number(state.terminal_compose_height);
+    state.terminal_compose_height = Number.isFinite(_terminalComposeHeight)
+      ? Math.max(0, _terminalComposeHeight)
       : 0;
   }
   if (typeof state.engineer_panel_split_fraction !== 'number') {
@@ -2663,6 +2670,9 @@ function _applyUiSurfaceInvalidation(flags, key) {
     _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'terminal_direct_messages_height') {
+    _markSurface(flags, 'main');
+  }
+  if (key === 'terminal_compose_height') {
     _markSurface(flags, 'main');
   }
   if (key === 'context_panel_split_ratio') {

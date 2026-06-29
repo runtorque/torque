@@ -50,8 +50,8 @@ var TERMINAL_DIRECT_MESSAGES_MAX_HEIGHT_FALLBACK = 420;
 var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_THRESHOLD_PX = 4;
 var TERMINAL_DIRECT_MESSAGE_CLICK_DRAG_DURATION_MS = 650;
 
-var TERMINAL_COMPOSE_MIN_HEIGHT = 32;
-var TERMINAL_COMPOSE_DEFAULT_MAX_HEIGHT = 88;
+var TERMINAL_COMPOSE_MIN_HEIGHT = 68;
+var TERMINAL_COMPOSE_DEFAULT_MAX_HEIGHT = 96;
 var TERMINAL_COMPOSE_MAX_HEIGHT_FALLBACK = 260;
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
@@ -229,10 +229,27 @@ function _terminalDirectMessageType(row) {
 
 function _terminalDirectMessageBodyHtml(row) {
   const text = _terminalDirectMessageText(row);
+  let html = '';
   if (typeof torqueRenderMarkdownMessage === 'function') {
-    return torqueRenderMarkdownMessage(text);
+    html = torqueRenderMarkdownMessage(text);
+  } else {
+    html = esc(text).replace(/\n/g, '<br>');
   }
-  return esc(text).replace(/\n/g, '<br>');
+  return _terminalDirectMessageEnhanceCodeBlocks(html);
+}
+
+function _terminalDirectMessageEnhanceCodeBlocks(html) {
+  return String(html || '').replace(
+    /<pre class="torque-md-code-block"><code>([\s\S]*?)<\/code><\/pre>/g,
+    function(_match, codeHtml) {
+      return '<div class="terminal-direct-message-code-block">'
+        + '<button type="button" class="terminal-direct-message-code-copy"'
+        + ' onmousedown="return terminalDirectMessageCopyCodeBlockMouseDown(event)"'
+        + ' onclick="return terminalDirectMessageCopyCodeBlock(event)">Copy</button>'
+        + '<pre class="torque-md-code-block"><code>' + codeHtml + '</code></pre>'
+        + '</div>';
+    }
+  );
 }
 
 function _terminalDirectMessageDirection(row, agent) {
@@ -697,6 +714,31 @@ function terminalDirectMessageCopy(agentId, messageId) {
     }
   } else {
     close();
+  }
+  return false;
+}
+
+function terminalDirectMessageCopyCodeBlockMouseDown(event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  return true;
+}
+
+function terminalDirectMessageCopyCodeBlock(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const target = event && (event.currentTarget || event.target);
+  const wrapper = target && typeof target.closest === 'function'
+    ? target.closest('.terminal-direct-message-code-block')
+    : null;
+  const code = wrapper && typeof wrapper.querySelector === 'function'
+    ? wrapper.querySelector('pre code')
+    : null;
+  const text = code ? String(code.textContent || '') : '';
+  const clipboard = (typeof navigator !== 'undefined' && navigator) ? navigator.clipboard : null;
+  if (clipboard && typeof clipboard.writeText === 'function') {
+    try {
+      clipboard.writeText(text);
+    } catch (_e) {}
   }
   return false;
 }
@@ -1793,7 +1835,12 @@ function _terminalComposeClampHeight(input, height) {
 }
 
 function _terminalComposeStoredHeight(cellId) {
-  const value = Number(_terminalComposeHeights[String(cellId || '')] || 0);
+  const id = String(cellId || '');
+  const value = Number(
+    _terminalComposeHeights[id]
+    || (state ? state.terminal_compose_height : 0)
+    || 0
+  );
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
@@ -1843,6 +1890,15 @@ function _terminalComposeSetUserHeight(input, height) {
   input.style.height = clamped + 'px';
   _terminalComposeApplyHeight(input);
   return clamped;
+}
+
+function _terminalComposePersistHeight(input, height) {
+  const applied = _terminalComposeClampHeight(input || null, height);
+  if (state) state.terminal_compose_height = applied;
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_set_terminal_compose_height', height: applied });
+  }
+  return applied;
 }
 
 function _terminalComposeResizeInputFromEvent(event, cellId) {
@@ -1911,7 +1967,10 @@ function _terminalComposeResizeEnd(event) {
     drag.currentHeight = _terminalComposeSetUserHeight(drag.input, next);
     if (event.clientY !== drag.startY) drag.changed = true;
   }
+  const shouldPersist = !!drag.changed;
+  const height = drag.currentHeight;
   _terminalComposeClearResizeDrag();
+  if (shouldPersist) _terminalComposePersistHeight(drag.input, height);
 }
 
 function terminalComposeResizeKeydown(event, cellId) {
@@ -1929,7 +1988,8 @@ function terminalComposeResizeKeydown(event, cellId) {
   if (!input) return false;
   if (typeof event.preventDefault === 'function') event.preventDefault();
   if (typeof event.stopPropagation === 'function') event.stopPropagation();
-  _terminalComposeSetUserHeight(input, _terminalComposeCurrentHeight(input) + deltas[key]);
+  const applied = _terminalComposeSetUserHeight(input, _terminalComposeCurrentHeight(input) + deltas[key]);
+  _terminalComposePersistHeight(input, applied);
   if (typeof input.focus === 'function') input.focus();
   return false;
 }
@@ -2132,16 +2192,28 @@ function _terminalComposeTaskTitle(task) {
   return String((task && (task.task || task.title)) || '').trim();
 }
 
-function _terminalComposeTaskCandidates(query) {
+function _terminalComposeTaskGroup(cellId) {
+  const id = String(cellId || '').trim();
+  const cell = id && state && state.agents ? state.agents[id] : null;
+  if (cell && cell.group) return String(cell.group || '');
+  const agent = _terminalComposeDirectAgentForCellId(id);
+  if (agent && agent.group) return String(agent.group || '');
+  return _terminalCurrentGroupName();
+}
+
+function _terminalComposeTaskCandidates(query, cellId) {
   var needle = String(query || '').trim().toLowerCase();
   var tasks = state && state.board_tasks ? state.board_tasks : {};
+  var group = _terminalComposeTaskGroup(cellId);
   var matches = [];
+  if (!group) return matches;
   for (var id in tasks) {
     var task = tasks[id];
     if (!task || String(task.archived_at || '').trim()
         || String(task.lane || '') === 'Archived') {
       continue;
     }
+    if (String(task.group || '') !== group) continue;
     var taskId = String(task.id || id || '').trim();
     if (!taskId) continue;
     var title = _terminalComposeTaskTitle(task);
@@ -2190,7 +2262,7 @@ function _terminalComposeUpdateTaskDropdown(input) {
     _terminalComposeTaskDropdownHide(cellId);
     return;
   }
-  var results = _terminalComposeTaskCandidates(trigger.query);
+  var results = _terminalComposeTaskCandidates(trigger.query, cellId);
   if (!results.length) {
     _terminalComposeTaskDropdownHide(cellId);
     return;
