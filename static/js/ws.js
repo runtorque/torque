@@ -3795,7 +3795,13 @@ function _rebuildChildren() {
 /* -- Helpers -------------------------------------------------------------- */
 
 function send(obj) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  try {
+    ws.send(JSON.stringify(obj));
+    return true;
+  } catch (_e) {
+    return false;
+  }
 }
 
 function _syncSelectionToActiveSession() {

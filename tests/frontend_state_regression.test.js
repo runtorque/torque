@@ -14197,6 +14197,138 @@ test('terminal compose image drop displays chips and sends returned paths', asyn
   assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
 });
 
+
+test('terminal direct compose routes to selected non-SDK agent while SDK cell is active', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.active_session_id = 'sdk-session';
+    state.agents = {
+      'sdk-smoke': {
+        id: 'sdk-smoke',
+        name: 'SDK Smoke',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: 'sdk-session',
+        runner_backend: 'codex-sdk-readonly'
+      },
+      'blueprint': {
+        id: 'blueprint',
+        name: 'Blueprint',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'architect',
+        session_id: 'blueprint-session',
+        runner_backend: 'pty'
+      }
+    };
+    selectedTerminalId = 'sdk-smoke';
+    selectedAgentId = 'sdk-smoke';
+    renderTerminalWorkspace = function() {};
+  `);
+
+  const form = new FakeElement('compose-form-blueprint');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-blueprint');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'blueprint';
+  input.value = 'hello Blueprint';
+  const error = new FakeElement('compose-error-blueprint');
+  error.classList.add('terminal-compose-error');
+  const button = document.register('terminal-compose-submit-blueprint');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-error', error);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  context.__blueprintSubmitEvt = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeSubmit(__blueprintSubmitEvt, 'blueprint');`);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].agent_id, 'blueprint');
+  assert.equal(sandbox.sendCalls[0].thread_id, 'user-agent:user:blueprint');
+  assert.equal(sandbox.sendCalls[0].message, 'hello Blueprint');
+  assert.match(sandbox.sendCalls[0].idempotency_key, /^terminal-direct:blueprint:/);
+  assert.equal(input.value, '');
+  assert.equal(error.textContent, '');
+});
+
+test('terminal direct compose keeps draft when websocket send fails before persistence', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.active_session_id = 'sdk-session';
+    state.agents = {
+      'sdk-smoke': {
+        id: 'sdk-smoke',
+        name: 'SDK Smoke',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: 'sdk-session',
+        runner_backend: 'codex-sdk-readonly'
+      },
+      'blueprint': {
+        id: 'blueprint',
+        name: 'Blueprint',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'architect',
+        session_id: 'blueprint-session',
+        runner_backend: 'pty'
+      }
+    };
+    selectedTerminalId = 'sdk-smoke';
+    selectedAgentId = 'sdk-smoke';
+    renderTerminalWorkspace = function() {};
+    send = function(message) {
+      sendCalls.push(message);
+      return false;
+    };
+  `);
+
+  const form = new FakeElement('compose-form-blueprint-failed');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-blueprint');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'blueprint';
+  input.value = 'do not lose this';
+  const error = new FakeElement('compose-error-blueprint-failed');
+  error.classList.add('terminal-compose-error');
+  const button = document.register('terminal-compose-submit-blueprint');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-error', error);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-blueprint'));`);
+  context.__failedBlueprintSubmitEvt = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeSubmit(__failedBlueprintSubmitEvt, 'blueprint');`);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].agent_id, 'blueprint');
+  assert.equal(input.value, 'do not lose this');
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['blueprint'] || ''`), 'do not lose this');
+  assert.match(error.textContent, /Message was not sent/);
+});
+
 test('terminal compose image drop renders inline attachment tokens in the editable text flow', async () => {
   class FakeFormData {
     constructor() {
