@@ -3336,6 +3336,16 @@ function _terminalComposeNextIdempotencyKey(agentId) {
   ].join(':');
 }
 
+function _terminalComposeSendPayload(payload) {
+  if (typeof send !== 'function') return false;
+  try {
+    const result = send(payload);
+    return result !== false;
+  } catch (_e) {
+    return false;
+  }
+}
+
 function terminalComposeSubmit(evt, cellId) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -3356,9 +3366,12 @@ function terminalComposeSubmit(evt, cellId) {
   }
   const text = _terminalComposePayloadText(id, displayText);
   const directAgent = _terminalComposeDirectAgentForCellId(id);
+  let sent = false;
+  let directAgentId = '';
+  let replyToId = '';
   if (directAgent && directAgent.id) {
-    const directAgentId = String(directAgent.id || '');
-    const replyToId = String(_terminalDirectMessageReplyToByAgent[directAgentId] || '');
+    directAgentId = String(directAgent.id || '');
+    replyToId = String(_terminalDirectMessageReplyToByAgent[directAgentId] || '');
     const payload = {
       cmd: 'user_agent_message',
       agent_id: directAgentId,
@@ -3367,11 +3380,16 @@ function terminalComposeSubmit(evt, cellId) {
       idempotency_key: _terminalComposeNextIdempotencyKey(directAgentId),
     };
     if (replyToId) payload.reply_to_id = replyToId;
-    send(payload);
-    if (replyToId) delete _terminalDirectMessageReplyToByAgent[directAgentId];
+    sent = _terminalComposeSendPayload(payload);
   } else {
-    send({ cmd: 'send_user_message', cell_id: id, text: text });
+    sent = _terminalComposeSendPayload({ cmd: 'send_user_message', cell_id: id, text: text });
   }
+  if (!sent) {
+    _terminalComposeSetError(input, 'Message was not sent — connection is unavailable. Please retry.');
+    _terminalComposeSetButtonState(input);
+    return false;
+  }
+  if (replyToId && directAgentId) delete _terminalDirectMessageReplyToByAgent[directAgentId];
   _terminalComposeScrollToBottom(id);
   terminalComposeClear(id);
   if (directAgent && typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
