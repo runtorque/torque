@@ -1104,6 +1104,136 @@ function _terminalStatusLabel(cell) {
   return cell.status || 'idle';
 }
 
+function _terminalIsCodexSdkReadonly(cell) {
+  return String((cell && cell.runner_backend) || '').trim() === 'codex-sdk-readonly';
+}
+
+function _terminalFormatSdkDuration(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (total < 60) return total + 's';
+  const minutes = Math.floor(total / 60);
+  const secs = total % 60;
+  if (minutes < 60) return minutes + 'm ' + String(secs).padStart(2, '0') + 's';
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return hours + 'h ' + String(mins).padStart(2, '0') + 'm';
+}
+
+function _terminalSdkTimestamp(value) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function _terminalSdkTimeAgo(value, nowSeconds) {
+  const ts = _terminalSdkTimestamp(value);
+  if (!ts) return 'not observed yet';
+  const elapsed = Math.max(0, Number(nowSeconds || 0) - ts);
+  return _terminalFormatSdkDuration(elapsed) + ' ago';
+}
+
+function _terminalSdkShortId(value) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  if (text.length <= 18) return text;
+  return text.slice(0, 10) + '…' + text.slice(-6);
+}
+
+function _terminalRenderSdkMetaRow(label, value) {
+  return '<div class="codex-sdk-activity-meta-row">'
+    + '<span class="codex-sdk-activity-meta-label">' + esc(label) + '</span>'
+    + '<span class="codex-sdk-activity-meta-value">' + esc(value || '—') + '</span>'
+    + '</div>';
+}
+
+function _terminalSdkLifecycleLabel(cell) {
+  if (!cell) return 'Unknown';
+  if (cell.needs_attention || cell.status === 'error') return 'Error / needs attention';
+  if (cell.status === 'running') return 'Running read-only request';
+  if (cell.status === 'idle' && cell.session_id) return 'Ready for prompt';
+  if (cell.status === 'stopped') return 'Stopped';
+  return cell.status || 'Idle';
+}
+
+function _terminalRenderCodexSdkActivity(cell) {
+  const nowSeconds = (typeof Date !== 'undefined' && Date.now) ? Date.now() / 1000 : 0;
+  const progressAt = _terminalSdkTimestamp(cell && cell.last_progress_at);
+  const lastAt = Math.max(
+    progressAt,
+    _terminalSdkTimestamp(cell && cell.last_heartbeat_at),
+    _terminalSdkTimestamp(cell && cell.last_activity_at),
+    _terminalSdkTimestamp(cell && cell.last_event_at),
+  );
+  const running = !!(cell && cell.status === 'running');
+  const statusLabel = _terminalStatusLabel(cell);
+  const elapsed = running && progressAt
+    ? _terminalFormatSdkDuration(nowSeconds - progressAt)
+    : '—';
+  const lastActivity = _terminalSdkTimeAgo(lastAt, nowSeconds);
+  const lifecycle = _terminalSdkLifecycleLabel(cell);
+  const detail = String(
+    (cell && (cell.activity_detail || cell.last_event_text || cell.activity)) || ''
+  ).trim();
+  const error = String((cell && cell.error_message) || '').trim();
+  const summary = String((cell && cell.last_summary) || '').trim();
+  const transcript = error || summary;
+
+  let h = '<div class="codex-sdk-activity" role="region" aria-label="Codex SDK read-only activity">';
+  h += '<div class="codex-sdk-activity-header">';
+  h += '<div>';
+  h += '<div class="codex-sdk-activity-kicker">SDK activity · not a PTY shell</div>';
+  h += '<div class="codex-sdk-activity-title">Codex SDK · read-only beta</div>';
+  h += '</div>';
+  h += '<span class="codex-sdk-activity-state' + (error ? ' is-error' : running ? ' is-running' : '') + '">'
+    + esc(lifecycle) + '</span>';
+  h += '</div>';
+  h += '<div class="codex-sdk-activity-notice">'
+    + 'Shows safe lifecycle, progress, IDs, and final output only. Private reasoning / chain-of-thought is never displayed.'
+    + '</div>';
+  h += '<div class="codex-sdk-activity-grid">';
+  h += _terminalRenderSdkMetaRow('Status', statusLabel);
+  h += _terminalRenderSdkMetaRow('Activity', detail || lifecycle);
+  h += _terminalRenderSdkMetaRow('Elapsed', elapsed);
+  h += _terminalRenderSdkMetaRow('Last activity', lastActivity);
+  h += _terminalRenderSdkMetaRow('Torque session', _terminalSdkShortId(cell && cell.session_id));
+  h += _terminalRenderSdkMetaRow('SDK thread', _terminalSdkShortId(cell && cell.agent_session_id));
+  h += '</div>';
+  h += '<div class="codex-sdk-activity-log">';
+  h += '<div class="codex-sdk-activity-section-title">Progress</div>';
+  h += '<ul>';
+  if (cell && cell.session_id) {
+    h += '<li>Read-only SDK session is set up and ready.</li>';
+  } else if (cell && cell.status === 'stopped') {
+    h += '<li>SDK session is stopped; no live SDK session is attached.</li>';
+  } else {
+    h += '<li>Waiting for SDK setup.</li>';
+  }
+  if (progressAt) {
+    h += '<li>Prompt accepted; read-only request activity has been observed.</li>';
+  }
+  if (running) {
+    h += '<li>Request is currently running in read-only sandbox mode.</li>';
+  } else if (cell && cell.status === 'idle' && progressAt) {
+    h += '<li>Most recent request completed and the SDK session remains reusable.</li>';
+  }
+  if (error) {
+    h += '<li>Fail-closed error surfaced; attention is required before another run.</li>';
+  }
+  h += '</ul>';
+  h += '</div>';
+  if (transcript) {
+    h += '<div class="codex-sdk-activity-output">';
+    h += '<div class="codex-sdk-activity-section-title">'
+      + (error ? 'Error' : 'Final output') + '</div>';
+    h += '<pre>' + esc(transcript) + '</pre>';
+    h += '</div>';
+  }
+  h += '<div class="codex-sdk-activity-footer">'
+    + 'Terminal controls/input are disabled for this surface. Send prompts through Torque messaging; SDK turns remain read-only.'
+    + '</div>';
+  h += '</div>';
+  return h;
+}
+
 function _terminalDisplayPath(cell) {
   if (!cell) return '';
   const fullPath = cell.current_path || cell.directory || '';
@@ -4459,19 +4589,15 @@ function renderTerminalWorkspace(opts) {
   }
 
   const sessionKey = cell.id + ':' + (cell.session_id || '');
-  if (String(cell.runner_backend || '').trim() === 'codex-sdk-readonly') {
+  if (_terminalIsCodexSdkReadonly(cell)) {
     _renderTerminalDirectMessages(dom.directMessages, cell);
     _renderTerminalCompose(dom.compose, cell);
-    const sdkHtml = ''
-      + '<div class="terminal-empty">'
-      + '  <div class="terminal-empty-title">Codex SDK · read-only beta</div>'
-      + '  <div class="terminal-empty-body">This session uses the Codex SDK read-only runner. Terminal controls are disabled; prompts run as read-only SDK turns and transcript output is advisory.</div>'
-      + '  <div class="terminal-empty-meta">No PTY, project config, worktree, checkpoint, or merge authority is attached.</div>'
-      + '</div>';
-    _activateEmbeddedTerminalSurface(dom.stage, sessionKey, {
-      preserveTail: preserveTerminalTailOnFit,
-    });
-    _renderEmbeddedTerminalStagePlaceholder(dom.stage, sdkHtml);
+    const sdkHtml = _terminalRenderCodexSdkActivity(cell);
+    _deactivateEmbeddedTerminalWorkspace();
+    if (dom.stage._torqueLastHtml !== sdkHtml) {
+      dom.stage.innerHTML = sdkHtml;
+      dom.stage._torqueLastHtml = sdkHtml;
+    }
     const sdkStatus = 'Codex SDK read-only beta  |  ' + _terminalStatusLabel(cell);
     if (dom.statusbar.textContent !== sdkStatus) dom.statusbar.textContent = sdkStatus;
     _restoreTerminalWorkspaceState(root, workspaceState, cell);

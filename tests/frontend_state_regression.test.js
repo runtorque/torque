@@ -11208,6 +11208,63 @@ test('embedded terminal workspace removes the legacy tab strip regardless of ses
   assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
 });
 
+test('codex sdk readonly workspace renders activity panel instead of PTY terminal', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['sdk-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'sdk-a': {
+      id: 'sdk-a',
+      name: 'Codex SDK Smoke',
+      group: 'alpha',
+      cell_type: 'agent',
+      agent_type: 'codex',
+      runner_backend: 'codex-sdk-readonly',
+      session_id: 'sdk-1234567890abcdef',
+      agent_session_id: 'thread-safe-abcdef',
+      status: 'running',
+      current_process: 'codex-sdk',
+      activity: 'thinking',
+      activity_detail: 'Codex SDK read-only request running',
+      last_progress_at: 100,
+      last_activity_at: 110,
+      last_event_at: 110,
+    },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'sdk-a';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(terminals.length, 0);
+  assert.equal(sockets.length, 0);
+  assert.match(dom.stage.innerHTML, /SDK activity · not a PTY shell/);
+  assert.match(dom.stage.innerHTML, /Private reasoning \/ chain-of-thought is never displayed/);
+  assert.match(dom.stage.innerHTML, /Codex SDK read-only request running/);
+  assert.match(dom.stage.innerHTML, /Prompt accepted; read-only request activity has been observed/);
+  assert.match(dom.statusbar.textContent, /Codex SDK read-only beta/);
+  assert.match(dom.statusbar.textContent, /Codex SDK read-only request running/);
+
+  sandbox.state.agents['sdk-a'].status = 'idle';
+  sandbox.state.agents['sdk-a'].activity = '';
+  sandbox.state.agents['sdk-a'].activity_detail = '';
+  sandbox.state.agents['sdk-a'].last_event_text = 'Codex SDK read-only run completed';
+  sandbox.state.agents['sdk-a'].last_summary = 'final safe answer';
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals.length, 0);
+  assert.equal(sockets.length, 0);
+  assert.match(dom.stage.innerHTML, /Most recent request completed/);
+  assert.match(dom.stage.innerHTML, /Final output/);
+  assert.match(dom.stage.innerHTML, /final safe answer/);
+});
+
 test('embedded terminal workspace does not revive tabs for tombstoned cells', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,

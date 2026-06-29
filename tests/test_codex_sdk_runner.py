@@ -156,6 +156,8 @@ class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.create_calls[0]["system_prompt"], "sys")
         self.assertEqual(events[-1].event_type, "session_start")
         self.assertEqual(events[-1].data["runner_backend"], CODEX_SDK_READONLY_BACKEND)
+        self.assertEqual(events[-1].data["detail"], "Codex SDK read-only session ready")
+        self.assertEqual(cell.last_event_text, "Codex SDK read-only session ready")
 
     async def test_documented_async_codex_thread_start_and_thread_run_shape(self):
         state, cell = self._state_cell()
@@ -234,6 +236,17 @@ class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("final answer", runner.get_terminal_buffer(sid))
         self.assertEqual(fake.run_calls[0]["sandbox"], "read_only")
         self.assertIn("session_end", [event.event_type for event in events])
+        progress_details = [
+            event.data.get("detail")
+            for event in events
+            if event.event_type == "progress"
+        ]
+        self.assertEqual(progress_details, [
+            "Prompt accepted; Codex SDK read-only request starting",
+            "Codex SDK read-only request running",
+        ])
+        self.assertEqual(cell.last_event_text, "Codex SDK read-only run completed")
+        self.assertEqual(cell.last_summary, "final answer")
 
     async def test_run_error_fails_closed_and_clears_maps(self):
         state, cell = self._state_cell()
