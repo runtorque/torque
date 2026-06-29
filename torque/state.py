@@ -12647,6 +12647,7 @@ class MatrixState:
             actor_name: str = "Torque",
             actor_id: str = "",
             actor_kind: str = "",
+            authorization: dict | None = None,
             move_to_done: bool = False) -> dict:
         """Record durable evidence that one card is covered elsewhere.
 
@@ -12709,6 +12710,8 @@ class MatrixState:
         ):
             if value:
                 covered_by[key] = value
+        if isinstance(authorization, dict) and authorization:
+            covered_by["authorization"] = dict(authorization)
 
         completion_evidence = _normalize_completion_evidence(
             getattr(task, "completion_evidence", {}) or {}

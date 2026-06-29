@@ -177,6 +177,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     actor_name=payload.get("actor_name", ""),
                     actor_id=payload.get("actor_id", ""),
                     actor_kind=payload.get("actor_kind", ""),
+                    authorization=payload.get("authorization", {}),
                     move_to_done=payload.get("move_to_done", False),
                 )
             except ValueError as exc:
@@ -3414,6 +3415,162 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, "Task was not created by this architect")
         self.assertEqual(self.state.board_tasks[task.id].completion_evidence, {})
         self.assertEqual(self.state.board_tasks[task.id].lane, "Backlog")
+
+    async def test_architect_task_mark_covered_allows_routed_pm_root(self):
+        pm = self._add_architect("pm-1", "Blueprint")
+        torqly = self._add_architect("arch-1", "Torqly")
+        root = self._add_task(
+            "TORQUE:991",
+            "PM product root",
+            lane="In Progress",
+            status="Covered elsewhere",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        self.db.save_agent_peer_message({
+            "id": "route-msg-991",
+            "thread_id": "route-thread-991",
+            "group_name": "torque",
+            "sender_id": pm.id,
+            "sender_kind": "architect",
+            "recipient_id": torqly.id,
+            "recipient_kind": "architect",
+            "message": "Torqly, please route and manage this product root.",
+            "created_at": 1.0,
+            "context_task_ids": [root.id],
+            "context_summary": "Explicit route request for TORQUE:991.",
+            "context_snapshot": {
+                "product_peer": {"marker": "torque.product_peer.v1"},
+            },
+        })
+        covering = self._add_task(
+            "TORQUE:1200",
+            "Covering implementation",
+            lane="Done",
+            labels=["covers:TORQUE:991"],
+            created_by_architect_id=torqly.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/991",
+                "sha": "deadbeef",
+                "tests_run": "make test",
+                "notes": "Covered by routed implementation stream.",
+                "move_to_done": True,
+            },
+            torqly.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "task_marked_covered")
+        refreshed = self.state.board_tasks[root.id]
+        self.assertEqual(refreshed.lane, "Done")
+        evidence = refreshed.completion_evidence["covered_by"]
+        self.assertEqual(evidence["task_id"], covering.id)
+        self.assertEqual(evidence["pr_url"], "https://github.com/runtorque/torque/pull/991")
+        self.assertEqual(evidence["sha"], "deadbeef")
+        self.assertEqual(evidence["tests_run"], "make test")
+        self.assertEqual(evidence["recorded_by_id"], torqly.id)
+        self.assertEqual(evidence["recorded_by_kind"], "architect")
+        authorization = evidence["authorization"]
+        self.assertEqual(authorization["scope"], "routed_pm_product_root")
+        self.assertEqual(
+            authorization["source"],
+            "covering_task_label_and_product_peer",
+        )
+        self.assertEqual(authorization["root_creator_architect_id"], pm.id)
+        self.assertEqual(authorization["route_message_id"], "route-msg-991")
+        self.assertIn("pm-created", authorization["product_labels"])
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
+
+    async def test_architect_task_mark_covered_rejects_pm_root_without_route_evidence(self):
+        pm = self._add_architect("pm-1", "Blueprint")
+        torqly = self._add_architect("arch-1", "Torqly")
+        root = self._add_task(
+            "TORQUE:997",
+            "Unrouted PM product root",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:1201",
+            "Unlabeled implementation",
+            created_by_architect_id=torqly.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/997",
+            },
+            torqly.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("covers:<task> label", text)
+        self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
+        self.assertEqual(self.state.board_tasks[root.id].lane, "Backlog")
+
+    async def test_architect_task_mark_covered_rejects_non_pm_root_even_with_cover_label(self):
+        other_architect = self._add_architect("arch-other", "Other Architect")
+        torqly = self._add_architect("arch-1", "Torqly")
+        root = self._add_task(
+            "TORQUE:999",
+            "Non-PM root",
+            created_by_architect_id=other_architect.id,
+        )
+        covering = self._add_task(
+            "TORQUE:1202",
+            "Labeled implementation",
+            labels=["covers:TORQUE:999"],
+            created_by_architect_id=torqly.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/999",
+            },
+            torqly.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task was not created by this architect")
+        self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
+
+    async def test_architect_routed_pm_root_does_not_allow_reassign(self):
+        pm = self._add_architect("pm-1", "Blueprint")
+        torqly = self._add_architect("arch-1", "Torqly")
+        engineer = self._add_engineer(
+            "eng-1",
+            "Torqly Engineer",
+            hired_by_architect_id=torqly.id,
+        )
+        root = self._add_task(
+            "TORQUE:1001",
+            "PM product root",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_reassign",
+            {"task": root.id, "new_engineer_id": engineer.id},
+            torqly.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task was not created by this architect")
+        self.assertEqual(self.state.board_tasks[root.id].assigned_engineer_id, "")
 
     async def test_architect_and_engineer_messaging_respects_hiring_scope(self):
         architect = self._add_architect("arch-1", "Architect")

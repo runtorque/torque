@@ -20453,6 +20453,7 @@ async def main(connection=None):
                             actor_name=data.get("actor_name", "") or "Torque",
                             actor_id=data.get("actor_id", ""),
                             actor_kind=data.get("actor_kind", ""),
+                            authorization=data.get("authorization", {}),
                             move_to_done=bool(data.get("move_to_done", False)),
                         )
                     except ValueError as exc:
