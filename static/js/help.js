@@ -149,6 +149,16 @@ function _helpBringDetailIntoView(opts) {
   }
 }
 
+function _helpBringQueryResultIntoView() {
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  var result = document.getElementById('help-query-result-scroll');
+  if (!result) return;
+  try { result.scrollTop = 0; } catch (_err) {}
+  if (typeof result.scrollIntoView === 'function') {
+    try { result.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_err2) { try { result.scrollIntoView(); } catch (_err3) {} }
+  }
+}
+
 async function _helpApi(cmd, payload) {
   if (typeof fetch !== 'function') {
     throw new Error('Help API unavailable: fetch is not supported in this runtime.');
@@ -374,11 +384,13 @@ async function helpRunQuery() {
     _helpState.queryResult = null;
     _helpState.queryMessage = 'Ask a question to run an extractive lookup over maintained Torque docs.';
     _helpRenderIfPresent();
+    _helpBringQueryResultIntoView();
     return null;
   }
   var seq = ++_helpRequestSeq.query;
   _helpState.queryStatus = 'loading';
   _helpRenderIfPresent();
+  _helpBringQueryResultIntoView();
   try {
     var data = await _helpApi('help_query', { question: question, limit: 5 });
     if (seq !== _helpRequestSeq.query) return _helpState.queryResult;
@@ -388,6 +400,7 @@ async function helpRunQuery() {
     _helpState.indexHash = _helpText(data.index_hash) || _helpState.indexHash;
     _helpState.sourceModel = data.source_model || _helpState.sourceModel;
     _helpRenderIfPresent();
+    _helpBringQueryResultIntoView();
     return data;
   } catch (err) {
     if (seq !== _helpRequestSeq.query) return _helpState.queryResult;
@@ -395,6 +408,7 @@ async function helpRunQuery() {
     _helpState.queryError = err && err.message ? err.message : String(err || 'Help query failed.');
     _helpState.queryResult = null;
     _helpRenderIfPresent();
+    _helpBringQueryResultIntoView();
     return null;
   }
 }

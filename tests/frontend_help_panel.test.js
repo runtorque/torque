@@ -381,6 +381,9 @@ test('Help panel is wired as a first-class panel app', () => {
   assert.match(css, /\.help-query-result-scroll\s*\{[\s\S]*overflow:\s*auto;/);
   assert.match(css, /\.help-topic-browser-modal\s*\{[\s\S]*height:\s*min\(84vh, 820px\);/);
   assert.match(css, /\.help-markdown \.torque-md-link-disabled\s*\{[\s\S]*text-decoration:\s*none;/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-panel\s*\{[\s\S]*overflow-y:\s*auto;/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-panel\s*\{[\s\S]*flex:\s*0 0 220px;[\s\S]*min-height:\s*220px;/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-result-scroll\s*\{[\s\S]*min-height:\s*72px;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-detail\s*\{[\s\S]*overflow:\s*auto;/);
   assert.match(css, /\.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*min-width:\s*64px;[\s\S]*justify-content:\s*center;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*flex:\s*1 1 calc\(50% - 3px\);/);
@@ -562,6 +565,7 @@ test('Help Ask submit reads live input, invokes help_query, and renders answer s
   assert.match(html, /Extractive answer/);
   assert.match(html, /Sources/);
   assert.match(html, /AGENTS\.md#worker-dispatch-and-reporting/);
+  assert.equal(JSON.stringify(document.getElementById('help-query-result-scroll').scrollIntoViewOptions), JSON.stringify({ block: 'nearest', inline: 'nearest' }));
   assert.match(html, /<form class="help-query-row" id="help-query-form">/);
   assert.match(html, /<button type="button" class="btn-primary" id="help-query-ask-button">Ask<\/button>/);
   assert.match(html, /id="help-query-result-scroll" aria-live="polite"/);
@@ -595,7 +599,8 @@ test('Help Ask button DOM click calls help_query exactly once and preserves quer
   assert.equal(nextInput.value, 'How do I derive review?');
   assert.equal(nextInput.selectionStart, 7);
   assert.equal(nextInput.selectionEnd, 13);
-  assert.equal(document.getElementById('help-query-result-scroll').scrollTop, 22);
+  assert.equal(document.getElementById('help-query-result-scroll').scrollTop, 0);
+  assert.equal(JSON.stringify(document.getElementById('help-query-result-scroll').scrollIntoViewOptions), JSON.stringify({ block: 'nearest', inline: 'nearest' }));
   assert.match(html, /Extractive answer/);
   assert.match(html, /Sources/);
 });
