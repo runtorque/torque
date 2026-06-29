@@ -195,6 +195,16 @@ CAPABILITIES: dict[str, Capability] = {
     "admin.settings": Capability("admin.settings", "admin", "Change global/team/runtime settings.", "critical"),
     "profile.assign": Capability("profile.assign", "profile_admin", "Assign agent profiles.", "critical"),
     "profile.edit": Capability("profile.edit", "profile_admin", "Create/edit trusted profile definitions.", "critical"),
+    "behavior_overlay.read": Capability(
+        "behavior_overlay.read",
+        "behavior_overlay",
+        "Read visible Dynamic Behavior overlay state.",
+    ),
+    "behavior_overlay.propose_self": Capability(
+        "behavior_overlay.propose_self",
+        "behavior_overlay",
+        "Propose user-approved changes to this agent's own Dynamic Behavior overlay.",
+    ),
 }
 
 WORKER_CEILING = frozenset({
@@ -263,6 +273,8 @@ ARCHITECT_CEILING = frozenset(ENGINEER_CEILING | {
     "idea_brief.read",
     "idea_brief.write_own",
     "idea_brief.propose",
+    "behavior_overlay.read",
+    "behavior_overlay.propose_self",
 })
 
 BASE_KIND_CEILINGS = {
@@ -441,6 +453,7 @@ TOOL_CATEGORY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "worktree_merge": frozenset({"worktree.merge"}),
     "deploy_admin": frozenset({"deploy.apply", "admin.settings"}),
     "profile_admin": frozenset({"profile.assign", "profile.edit"}),
+    "behavior_overlay_self": frozenset({"behavior_overlay.read", "behavior_overlay.propose_self"}),
     "thinking_reads": frozenset({"thinking.read"}),
     "thinking_writes": frozenset({"thinking.read", "thinking.write_own"}),
     "idea_briefs": frozenset({"idea_brief.read", "idea_brief.write_own", "idea_brief.propose"}),
@@ -594,16 +607,16 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "architect_engineer_restore": frozenset({"agent.manage_engineer_roster"}),
     "architect_pending_hire_status": frozenset({"agent.hire_engineer"}),
     "architect_pending_hire_list": frozenset({"agent.hire_engineer"}),
-    "architect_behavior_overlay_read": frozenset({"profile.edit"}),
-    "architect_behavior_overlay_versions": frozenset({"profile.edit"}),
-    "architect_behavior_overlay_diff": frozenset({"profile.edit"}),
-    "architect_behavior_overlay_proposal_list": frozenset({"profile.edit"}),
-    "architect_behavior_overlay_propose": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_read": frozenset({"behavior_overlay.read"}),
+    "architect_behavior_overlay_versions": frozenset({"behavior_overlay.read"}),
+    "architect_behavior_overlay_diff": frozenset({"behavior_overlay.read"}),
+    "architect_behavior_overlay_proposal_list": frozenset({"behavior_overlay.read"}),
+    "architect_behavior_overlay_propose": frozenset({"behavior_overlay.propose_self"}),
     "architect_behavior_overlay_propose_for_engineer": frozenset({"profile.edit"}),
     "architect_behavior_overlay_propose_for_role": frozenset({"profile.edit"}),
     "architect_behavior_overlay_approve": frozenset({"profile.edit"}),
     "architect_behavior_overlay_reject": frozenset({"profile.edit"}),
-    "architect_behavior_overlay_rollback": frozenset({"profile.edit"}),
+    "architect_behavior_overlay_rollback": frozenset({"behavior_overlay.propose_self"}),
     "architect_behavior_overlay_rollback_role": frozenset({"profile.edit"}),
     "architect_engineer_message": frozenset({"comm.engineer_message"}),
     "architect_engineer_feedback_request": frozenset({"comm.engineer_message"}),

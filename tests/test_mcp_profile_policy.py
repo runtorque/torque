@@ -110,6 +110,15 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_product_board_summary", tool_names)
         self.assertIn("architect_product_peer_message", tool_names)
         self.assertIn("architect_product_decision_list", tool_names)
+        for allowed_overlay_tool in {
+            "architect_behavior_overlay_read",
+            "architect_behavior_overlay_versions",
+            "architect_behavior_overlay_diff",
+            "architect_behavior_overlay_proposal_list",
+            "architect_behavior_overlay_propose",
+            "architect_behavior_overlay_rollback",
+        }:
+            self.assertIn(allowed_overlay_tool, tool_names)
 
         denied_tools = {
             "architect_tool_search",
@@ -133,6 +142,11 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             "architect_area_create",
             "architect_initiative_create",
             "architect_mcp_calls",
+            "architect_behavior_overlay_propose_for_engineer",
+            "architect_behavior_overlay_propose_for_role",
+            "architect_behavior_overlay_approve",
+            "architect_behavior_overlay_reject",
+            "architect_behavior_overlay_rollback_role",
         }
         self.assertFalse(denied_tools & tool_names)
 
@@ -152,6 +166,55 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Unknown tool", response.payload["error"]["message"])
 
         self.assertEqual(calls, [])
+
+        proposed = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "overlay-propose",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_behavior_overlay_propose",
+                        "arguments": {
+                            "text": "Prefer product-safe proposal language.",
+                            "rationale": "PM class can propose its own behavior guidance.",
+                        },
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        self.assertFalse(proposed.payload["result"]["isError"])
+        self.assertEqual(calls[-1]["cmd"], "behavior_overlay_propose")
+        self.assertEqual(calls[-1]["agent_id"], architect.id)
+        self.assertEqual(calls[-1]["proposed_by_kind"], "architect")
+
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"].append(engineer.id)
+        cross_scope = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "overlay-cross",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_behavior_overlay_read",
+                        "arguments": {"agent_id": engineer.id},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": architect.id},
+            )
+        )
+        self.assertTrue(cross_scope.payload["result"]["isError"])
+        self.assertIn("own overlay", cross_scope.payload["result"]["content"][0]["text"])
 
     async def test_desired_assignment_alone_does_not_affect_running_session_until_effective_snapshot(self):
         state, architect = self._state_with_architect()
@@ -238,9 +301,13 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("torque_context", tool_names)
         self.assertIn("architect_product_board_summary", tool_names)
         self.assertIn("architect_product_peer_message", tool_names)
+        self.assertIn("architect_behavior_overlay_read", tool_names)
+        self.assertIn("architect_behavior_overlay_propose", tool_names)
         self.assertNotIn("architect_peer_inbox", tool_names)
         self.assertNotIn("architect_reply", tool_names)
         self.assertNotIn("architect_engineer_hire", tool_names)
+        self.assertNotIn("architect_behavior_overlay_propose_for_engineer", tool_names)
+        self.assertNotIn("architect_behavior_overlay_propose_for_role", tool_names)
 
     async def test_torque_steward_class_hides_tool_search_and_lists_read_observation_tools(self):
         state, architect = self._state_with_architect()
@@ -312,6 +379,11 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             "architect_deploy_state",
             "architect_get_architect_settings",
             "architect_behavior_overlay_read",
+            "architect_behavior_overlay_versions",
+            "architect_behavior_overlay_diff",
+            "architect_behavior_overlay_proposal_list",
+            "architect_behavior_overlay_propose",
+            "architect_behavior_overlay_rollback",
         }
         self.assertFalse(denied_tools & tool_names)
 

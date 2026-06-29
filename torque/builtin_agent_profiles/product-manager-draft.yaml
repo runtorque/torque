@@ -18,6 +18,8 @@ grants:
   - task.update_planning_fields
   - task.move_planning_safe
   - task.board_sync_read
+  - behavior_overlay.propose_self
+  - behavior_overlay.read
   - comm.user_ask
   - comm.user_message
   - comm.peer_architect_list

@@ -146,6 +146,12 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             "architect_product_peer_message",
             "architect_product_message_user",
             "architect_product_ask_user",
+            "architect_behavior_overlay_read",
+            "architect_behavior_overlay_versions",
+            "architect_behavior_overlay_diff",
+            "architect_behavior_overlay_proposal_list",
+            "architect_behavior_overlay_propose",
+            "architect_behavior_overlay_rollback",
             "architect_thinking_scratchpad_list",
             "architect_thinking_scratchpad_show",
             "architect_thinking_scratchpad_create",
@@ -188,7 +194,11 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             "architect_initiative_create",
             "architect_deploy_state",
             "architect_get_architect_settings",
+            "architect_behavior_overlay_propose_for_engineer",
+            "architect_behavior_overlay_propose_for_role",
             "architect_behavior_overlay_approve",
+            "architect_behavior_overlay_reject",
+            "architect_behavior_overlay_rollback_role",
             "architect_mcp_calls",
             "architect_merge",
         }
@@ -204,6 +214,24 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual(before_tasks, set(self.state.board_tasks))
         self.assertEqual([], self.calls)
+
+        own_effective = await self._call(
+            "architect_behavior_overlay_read",
+            {"scope_kind": "effective"},
+            req_id=90,
+        )
+        own_payload = self._result_payload(own_effective)
+        self.assertEqual("behavior_overlay_effective", own_payload["type"])
+        self.assertEqual(["role", "agent"], [
+            layer["scope_kind"] for layer in own_payload["layers"]
+        ])
+
+        cross_scope = await self._call(
+            "architect_behavior_overlay_read",
+            {"agent_id": self.engineer.id},
+            req_id=91,
+        )
+        self.assertIn("own overlay", self._error_text(cross_scope))
 
         allowed = await self._call(
             "architect_product_task_propose",
