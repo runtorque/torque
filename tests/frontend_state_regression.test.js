@@ -12957,6 +12957,7 @@ function setupTerminalDirectMessageClickHarness() {
   return {
     context,
     document,
+    sandbox,
     dom,
     list,
     terminalFocusCalls: () => terminalFocusCalls,
@@ -13030,12 +13031,12 @@ test('direct-message and chat message bodies explicitly allow native text select
   assert.match(css, /\.chat-message-body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
 });
 
-test('terminal composer uses a markdown-friendly monospace stack without changing sizing', () => {
+test('terminal composer defaults to at least three lines with markdown-friendly monospace stack', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const rule = css.match(/\.terminal-compose-input\s*\{[^}]+\}/);
   assert.ok(rule, 'terminal composer input CSS rule exists');
-  assert.match(rule[0], /min-height:\s*32px;/);
-  assert.match(rule[0], /max-height:\s*var\(--terminal-compose-user-height,\s*88px\);/);
+  assert.match(rule[0], /min-height:\s*68px;/);
+  assert.match(rule[0], /max-height:\s*var\(--terminal-compose-user-height,\s*96px\);/);
   assert.match(
     rule[0],
     /font:\s*12px\/1\.35 ui-monospace,\s*"SF Mono",\s*"Cascadia Mono",\s*"Segoe UI Mono",\s*"Liberation Mono",\s*Menlo,\s*Consolas,\s*monospace;/,
@@ -13080,12 +13081,30 @@ test('terminal composer drag handle resizes message box across rerenders', () =>
 
   document.listeners.mouseup({ clientY: 150, preventDefault() {}, stopPropagation() {} });
   assert.equal(document.body.classList.contains('terminal-compose-resizing'), false);
+  assert.equal(jsonValue(context, 'state.terminal_compose_height'), 138);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'ui_set_terminal_compose_height',
+    height: 138,
+  });
 
   input.style.height = '';
   input.style.maxHeight = '';
   runInContext(context, `_terminalComposeAutoResize(document.getElementById('terminal-compose-input-agent-1'));`);
   assert.equal(input.style.height, '138px');
   assert.equal(input.style.maxHeight, '138px');
+});
+
+test('terminal composer applies persisted resize height from UI state', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.terminal_compose_height = 124;
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+
+  runInContext(context, `_terminalComposeAutoResize(document.getElementById('terminal-compose-input-agent-1'));`);
+
+  assert.equal(input.style.height, '124px');
+  assert.equal(input.style.maxHeight, '124px');
 });
 
 test('embedded terminal markdown links do not select messages or refocus terminal', () => {
@@ -13142,6 +13161,63 @@ test('embedded terminal direct-message context menu copies raw message text', ()
   assert.equal(runInContext(context, `terminalDirectMessageCopy('agent-1', 'dm-anchor');`), false);
   assert.equal(copied, 'Anchored [docs](https://example.com)');
   assert.equal(menu.classList.contains('open'), false);
+});
+
+test('embedded terminal direct-message fenced code blocks render independent copy buttons', () => {
+  const { context, document, sandbox } = setupTerminalDirectMessageClickHarness();
+  sandbox.state.direct_messages_by_agent['agent-1'] = [{
+    message_id: 'dm-code',
+    message_type: 'message',
+    message: 'Blocks\n```js\nconsole.log("<one>");\n```\nText\n```\nsecond block\n```',
+    sender_id: 'agent-1',
+    sender_kind: 'worker',
+    recipient_id: 'user',
+    recipient_kind: 'user',
+    created_at: 20,
+  }];
+
+  const html = runInContext(context, `_terminalDirectMessageBodyHtml(state.direct_messages_by_agent['agent-1'][0]);`);
+  assert.equal((html.match(/terminal-direct-message-code-copy/g) || []).length, 2);
+  assert.match(html, /onclick="return terminalDirectMessageCopyCodeBlock\(event\)"/);
+  assert.match(html, /console\.log\(&quot;&lt;one&gt;&quot;\);/);
+
+  const wrapperOne = new FakeElement('code-wrapper-one');
+  wrapperOne.classList.add('terminal-direct-message-code-block');
+  const buttonOne = new FakeElement('code-copy-one');
+  buttonOne.classList.add('terminal-direct-message-code-copy');
+  const codeOne = new FakeElement('code-one');
+  codeOne.textContent = 'console.log("<one>");';
+  wrapperOne.appendChild(buttonOne);
+  wrapperOne.appendChild(codeOne);
+  wrapperOne.setQuerySelector('pre code', codeOne);
+
+  const wrapperTwo = new FakeElement('code-wrapper-two');
+  wrapperTwo.classList.add('terminal-direct-message-code-block');
+  const buttonTwo = new FakeElement('code-copy-two');
+  buttonTwo.classList.add('terminal-direct-message-code-copy');
+  const codeTwo = new FakeElement('code-two');
+  codeTwo.textContent = 'second block';
+  wrapperTwo.appendChild(buttonTwo);
+  wrapperTwo.appendChild(codeTwo);
+  wrapperTwo.setQuerySelector('pre code', codeTwo);
+
+  const copied = [];
+  context.navigator.clipboard.writeText = function(value) {
+    copied.push(String(value));
+  };
+  const clickOne = terminalClickEvent();
+  clickOne.currentTarget = buttonOne;
+  context.__clickOne = clickOne;
+  assert.equal(runInContext(context, `terminalDirectMessageCopyCodeBlock(__clickOne);`), false);
+  assert.equal(clickOne.preventDefaultCalled, true);
+  assert.equal(clickOne.stopPropagationCalled, true);
+
+  const clickTwo = terminalClickEvent();
+  clickTwo.currentTarget = buttonTwo;
+  context.__clickTwo = clickTwo;
+  assert.equal(runInContext(context, `terminalDirectMessageCopyCodeBlock(__clickTwo);`), false);
+
+  assert.deepEqual(copied, ['console.log("<one>");', 'second block']);
 });
 
 test('embedded terminal direct-message reply click preserves list scroll and focuses compose without terminal flash', () => {
@@ -14706,6 +14782,14 @@ test('terminal compose preserves image chip payload through history recall resto
 
 test('terminal compose ticket typeahead filters tasks and inserts selected reference', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'Torque',
+      cell_type: 'agent',
+    },
+  };
   sandbox.state.board_tasks = {
     'TORQUE:735': {
       id: 'TORQUE:735',
@@ -14724,6 +14808,12 @@ test('terminal compose ticket typeahead filters tasks and inserts selected refer
       task: 'Archived match should stay hidden',
       lane: 'Archived',
       group: 'Torque',
+    },
+    'OTHER:100': {
+      id: 'OTHER:100',
+      task: 'DM image task from another group',
+      lane: 'In Progress',
+      group: 'Other',
     },
   };
 
@@ -14753,6 +14843,8 @@ test('terminal compose ticket typeahead filters tasks and inserts selected refer
   assert.match(dropdown.innerHTML, /DM image drag token display/);
   assert.doesNotMatch(dropdown.innerHTML, /TORQUE:736/);
   assert.doesNotMatch(dropdown.innerHTML, /TORQUE:900/);
+  assert.doesNotMatch(dropdown.innerHTML, /OTHER:100/);
+  assert.doesNotMatch(dropdown.innerHTML, /another group/);
 
   input.value = 'Please check :736';
   input.selectionStart = input.value.length;
