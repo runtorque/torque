@@ -604,9 +604,12 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_task_mark_covered",
         "description": (
             "Mark a user-created task or a task created by this architect as "
-            "covered by another visible task or PR. Records durable completion "
-            "evidence and an activity message; set move_to_done=true to close "
-            "the covered card."
+            "covered by another visible task or PR. Also allows a PM-created "
+            "product root created by another architect only when it has "
+            "explicit route/coverage evidence (for example a caller-created "
+            "covers:<task> covering task or inbound product-peer route). "
+            "Records durable completion evidence and an activity message; set "
+            "move_to_done=true to close the covered card."
         ),
         "inputSchema": {
             "type": "object",

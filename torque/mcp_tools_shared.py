@@ -4621,6 +4621,174 @@ def _task_has_product_label(task) -> bool:
     return bool(labels & set(_PRODUCT_TASK_LABELS))
 
 
+def _task_has_covers_label(task, covered_task_id: str) -> bool:
+    covered_task_id = str(covered_task_id or "").strip().lower()
+    if not task or not covered_task_id:
+        return False
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    return f"covers:{covered_task_id}" in labels
+
+
+def _parse_timestampish(value) -> float:
+    if isinstance(value, (int, float)):
+        return float(value or 0)
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        pass
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        return datetime.fromisoformat(normalized).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _product_peer_route_message_for_task(
+        state,
+        caller_id: str,
+        task,
+        *,
+        covering_task=None) -> dict:
+    """Return durable product-peer evidence routing ``task`` to caller.
+
+    Product Manager/Creative Architect wrappers persist product-peer markers
+    plus product-scoped task context in ``agent_peer_messages``.  Treat only
+    inbound architect→architect product-peer rows, anchored to the PM-created
+    root, as route/management evidence for cross-architect coverage closure.
+    If a caller-created covering task is supplied, prefer rows sent before the
+    covering task was created, but do not require timestamp parsing when older
+    rows lack normalized timestamps.
+    """
+    caller_id = str(caller_id or "").strip()
+    task_id = str(getattr(task, "id", "") or "").strip()
+    creator_id = str(getattr(task, "created_by_architect_id", "") or "").strip()
+    if not caller_id or not task_id or not creator_id:
+        return {}
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_agent_peer_messages_for_agent", None) if db else None
+    if not callable(loader):
+        return {}
+
+    covering_created_at = 0.0
+    if covering_task is not None:
+        covering_created_at = _parse_timestampish(
+            getattr(covering_task, "created_at", "") or ""
+        )
+
+    for row in loader(caller_id, limit=1000):
+        if str((row or {}).get("recipient_id", "") or "").strip() != caller_id:
+            continue
+        if str((row or {}).get("sender_id", "") or "").strip() != creator_id:
+            continue
+        if {
+            str((row or {}).get("sender_kind", "") or "").strip(),
+            str((row or {}).get("recipient_kind", "") or "").strip(),
+        } != {"architect"}:
+            continue
+        if not _row_has_product_peer_marker(row):
+            continue
+        context_task_ids = {
+            str(item or "").strip()
+            for item in ((row or {}).get("context_task_ids", []) or [])
+        }
+        if task_id not in context_task_ids:
+            continue
+        if covering_created_at:
+            route_created_at = _parse_timestampish(
+                (row or {}).get("created_at", 0) or 0
+            )
+            if route_created_at and route_created_at > covering_created_at:
+                continue
+        return dict(row or {})
+    return {}
+
+
+def _routed_product_root_coverage_authorization(
+        state,
+        caller_id: str,
+        task,
+        covering_task_id: str) -> tuple[dict, str]:
+    """Authorize a non-owner architect to close a routed PM-created root.
+
+    This deliberately grants only the ``task_mark_covered``/Done transition
+    path.  Broader task edits, reassignments, deletion, or dispatch remain
+    guarded by their existing owner-created checks.
+    """
+    caller_id = str(caller_id or "").strip()
+    task_id = str(getattr(task, "id", "") or "").strip()
+    creator_id = str(getattr(task, "created_by_architect_id", "") or "").strip()
+    if not caller_id or not task_id:
+        return {}, "Task was not created by this architect"
+    caller = state.agents.get(caller_id)
+    caller_group = str(getattr(caller, "group", "") or "").strip()
+    if (
+            not _task_has_product_label(task)
+            or not creator_id
+            or creator_id == caller_id
+            or not caller_group
+            or str(getattr(task, "group", "") or "").strip() != caller_group):
+        return {}, "Task was not created by this architect"
+    if not covering_task_id:
+        return {}, (
+            "Routed PM-created product roots require a covering_task created "
+            "by this architect"
+        )
+    covering_task = state.board_tasks.get(str(covering_task_id or "").strip())
+    if not covering_task:
+        return {}, "covering_task not found in scope"
+    if str(getattr(covering_task, "group", "") or "").strip() != caller_group:
+        return {}, "covering_task not found in scope"
+    if str(getattr(covering_task, "created_by_architect_id", "") or "").strip() != caller_id:
+        return {}, (
+            "Routed PM-created product roots require a covering_task created "
+            "by this architect"
+        )
+
+    has_cover_label = _task_has_covers_label(covering_task, task_id)
+    route_row = _product_peer_route_message_for_task(
+        state,
+        caller_id,
+        task,
+        covering_task=covering_task,
+    )
+    if not has_cover_label and not route_row:
+        return {}, (
+            "Routed PM-created product roots require covers:<task> label "
+            "or inbound product-peer route evidence"
+        )
+
+    labels = [
+        str(label or "").strip()
+        for label in (getattr(task, "labels", []) or [])
+        if str(label or "").strip() in _PRODUCT_TASK_LABELS
+    ]
+    authorization = {
+        "scope": "routed_pm_product_root",
+        "source": (
+            "covering_task_label_and_product_peer"
+            if has_cover_label and route_row else
+            "covering_task_label"
+            if has_cover_label else
+            "product_peer_route"
+        ),
+        "covered_task_id": task_id,
+        "root_creator_architect_id": creator_id,
+        "covering_task_id": str(covering_task_id or "").strip(),
+        "product_labels": labels,
+    }
+    if route_row:
+        authorization["route_message_id"] = str(route_row.get("id", "") or "")
+        authorization["route_thread_id"] = str(route_row.get("thread_id", "") or "")
+        authorization["route_sender_id"] = str(route_row.get("sender_id", "") or "")
+    return authorization, ""
+
+
 def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
     if not task:
         return False
@@ -11866,8 +12034,24 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             creator_architect_id = str(
                 getattr(task, "created_by_architect_id", "") or ""
             ).strip()
+            coverage_authorization = {}
             if creator_class != "user" and creator_architect_id != caller_id_str:
-                return "Task was not created by this architect", True
+                coverage_authorization, auth_error = (
+                    _routed_product_root_coverage_authorization(
+                        real_state,
+                        caller_id_str,
+                        task,
+                        _resolve_task(
+                            real_state,
+                            args.get("covering_task", "")
+                            or args.get("covering_task_id", ""),
+                        ) or "",
+                    )
+                )
+                if auth_error:
+                    return auth_error, True
+        if caller_kind == "engineer":
+            coverage_authorization = {}
 
         covering_ident = (
             args.get("covering_task", "")
@@ -11878,6 +12062,17 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             covering_task_id = _resolve_task(state, covering_ident)
             if not covering_task_id:
                 return "covering_task not found in scope", True
+        if (
+                caller_kind == "architect"
+                and coverage_authorization
+                and not any(
+                    str(args.get(key, "") or "").strip()
+                    for key in ("pr_url", "sha", "tests_run", "evidence", "notes")
+                )):
+            return (
+                "Routed PM-created product root coverage requires PR/SHA/tests "
+                "or notes evidence"
+            ), True
 
         move_to_done, move_error = _optional_bool_arg(
             args,
@@ -11901,6 +12096,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "actor_kind": caller_kind,
             "move_to_done": move_to_done,
         }
+        if coverage_authorization:
+            payload["authorization"] = coverage_authorization
         for key in ("pr_url", "sha", "tests_run", "evidence", "notes"):
             if key in args:
                 payload[key] = args[key]
