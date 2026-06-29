@@ -7941,7 +7941,8 @@ def _agent_user_direct_message_conflicts_with_existing(
         sender,
         *,
         message: str,
-        reply_to_id: str) -> bool:
+        reply_to_id: str,
+        reply_to_was_explicit: bool = True) -> bool:
     if not existing or not sender:
         return False
     if str(existing.get("sender_id", "") or "").strip() != str(
@@ -7956,8 +7957,13 @@ def _agent_user_direct_message_conflicts_with_existing(
         return True
     if str(existing.get("message", "") or "") != str(message or ""):
         return True
-    if str(existing.get("reply_to_id", "") or "").strip() != str(
-            reply_to_id or "").strip():
+    # When the original call omitted reply_to_id and Torque inferred one,
+    # idempotent retries must return the existing row instead of treating the
+    # now-populated stored reply target as a conflicting argument. Explicit
+    # reply_to_id reuse remains strict.
+    if reply_to_was_explicit and str(
+            existing.get("reply_to_id", "") or "").strip() != str(
+                reply_to_id or "").strip():
         return True
     return False
 
@@ -8014,6 +8020,150 @@ def _agent_user_direct_message_reply_thread_id(
     }:
         return ""
     return str(parent.get("thread_id", "") or "").strip()
+
+
+def _validate_agent_user_direct_message_reply_to_id(
+        state,
+        reply_to_id: str,
+        sender_id: str) -> tuple[dict | None, str]:
+    """Return the parent direct-message row or an error for unsafe replies."""
+    reply_to_id = str(reply_to_id or "").strip()
+    sender_id = str(sender_id or "").strip()
+    if not reply_to_id:
+        return None, ""
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_direct_message", None) if db else None
+    parent = loader(reply_to_id) if callable(loader) else None
+    if not parent:
+        return None, f"reply_to_id not found: {reply_to_id}"
+    kinds = {
+        str(parent.get("sender_kind", "") or "").strip(),
+        str(parent.get("recipient_kind", "") or "").strip(),
+    }
+    if "user" not in kinds:
+        return None, (
+            "reply_to_id must reference a direct user-message row, not an "
+            "Architect/Engineer peer thread"
+        )
+    participant_ids = {
+        str(parent.get("sender_id", "") or "").strip(),
+        str(parent.get("recipient_id", "") or "").strip(),
+    }
+    if sender_id not in participant_ids:
+        return None, (
+            "reply_to_id does not belong to this agent's user lane; pass a "
+            "message id from the current architect↔user conversation"
+        )
+    return parent, ""
+
+
+def _agent_user_direct_message_timestamp(row: dict) -> float:
+    try:
+        return float((row or {}).get("created_at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _agent_user_direct_message_is_archived(row: dict) -> bool:
+    try:
+        return float((row or {}).get("archived_at", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return bool((row or {}).get("archived_at", 0))
+
+
+def _incoming_user_reply_candidate(row: dict, sender_id: str) -> bool:
+    return (
+        str((row or {}).get("sender_kind", "") or "").strip() == "user"
+        and str((row or {}).get("recipient_id", "") or "").strip()
+        == str(sender_id or "").strip()
+        and str((row or {}).get("message_type", "message") or "message").strip()
+        == "message"
+        and not bool((row or {}).get("blocking", False))
+        and not _agent_user_direct_message_is_archived(row or {})
+    )
+
+
+def _outgoing_agent_reply_to_user_message(row: dict, *,
+                                          sender_id: str,
+                                          reply_to_id: str) -> bool:
+    return (
+        str((row or {}).get("sender_id", "") or "").strip()
+        == str(sender_id or "").strip()
+        and str((row or {}).get("recipient_kind", "") or "").strip() == "user"
+        and str((row or {}).get("recipient_id", "") or "").strip() == "user"
+        and str((row or {}).get("reply_to_id", "") or "").strip()
+        == str(reply_to_id or "").strip()
+        and not _agent_user_direct_message_is_archived(row or {})
+    )
+
+
+def _infer_architect_user_reply_to_id(state, sender) -> tuple[str, str]:
+    """Infer one pending direct user message for architect_message_user.
+
+    The default is intentionally narrow: only Architect callers get inference,
+    only ordinary user→this-architect direct-message rows are candidates, and
+    an incoming row stops being pending once this Architect has sent a direct
+    user reply with ``reply_to_id`` pointing at it.
+    """
+    if not sender or _direct_message_agent_kind(sender) != "architect":
+        return "", ""
+    sender_id = str(getattr(sender, "id", "") or "").strip()
+    if not sender_id:
+        return "", ""
+    db = getattr(state, "db", None)
+    loader = getattr(db, "load_direct_messages_for_agent", None) if db else None
+    if not callable(loader):
+        return "", ""
+
+    rows = loader(sender_id, peer_id="user", limit=1000)
+    incoming = [
+        row for row in rows
+        if _incoming_user_reply_candidate(row or {}, sender_id)
+    ]
+    if not incoming:
+        # Preserve proactive architect→user status/context messages when there
+        # is no prior direct user message in this architect lane at all.
+        return "", ""
+
+    replied_ids = {
+        str((row or {}).get("reply_to_id", "") or "").strip()
+        for row in rows
+        if str((row or {}).get("reply_to_id", "") or "").strip()
+        and _outgoing_agent_reply_to_user_message(
+            row or {},
+            sender_id=sender_id,
+            reply_to_id=str((row or {}).get("reply_to_id", "") or "").strip(),
+        )
+    }
+    pending = [
+        row for row in incoming
+        if str((row or {}).get("id", "") or "").strip() not in replied_ids
+    ]
+    pending.sort(
+        key=lambda row: (
+            _agent_user_direct_message_timestamp(row),
+            str((row or {}).get("id", "") or ""),
+        ),
+        reverse=True,
+    )
+    if len(pending) == 1:
+        return str(pending[0].get("id", "") or "").strip(), ""
+    if not pending:
+        return "", (
+            "No pending direct user message is available to infer reply_to_id; "
+            "pass explicit reply_to_id to thread a follow-up, or start a fresh "
+            "status message only before any direct user thread is pending."
+        )
+    ids = ", ".join(
+        str((row or {}).get("id", "") or "").strip()
+        for row in pending[:5]
+        if str((row or {}).get("id", "") or "").strip()
+    )
+    extra = "" if len(pending) <= 5 else f" (+{len(pending) - 5} more)"
+    return "", (
+        "Multiple pending direct user messages could be reply targets; pass "
+        f"explicit reply_to_id. Candidates: {ids}{extra}"
+    )
 
 
 def _direct_user_message_response(row: dict, *,
@@ -8073,6 +8223,7 @@ def save_agent_user_direct_message_from_mcp(
         reply_to_id: str = "",
         context: dict | None = None,
         idempotency_key: str = "",
+        infer_architect_reply_to: bool = False,
         notify: bool = True) -> tuple[dict, bool]:
     """Persist one agent→user direct message from an MCP tool call.
 
@@ -8088,6 +8239,7 @@ def save_agent_user_direct_message_from_mcp(
         raise ValueError("Direct message store is unavailable")
 
     reply_to = str(reply_to_id or "").strip()
+    reply_to_was_explicit = bool(reply_to)
     message_id = _agent_user_direct_message_id_from_idempotency_key(
         idempotency_key
     )
@@ -8104,7 +8256,8 @@ def save_agent_user_direct_message_from_mcp(
                 existing,
                 sender,
                 message=message_text,
-                reply_to_id=reply_to):
+                reply_to_id=reply_to,
+                reply_to_was_explicit=reply_to_was_explicit):
             raise ValueError(
                 "idempotency key was reused for a different message_user call"
             )
@@ -8117,6 +8270,18 @@ def save_agent_user_direct_message_from_mcp(
 
     context = dict(context or {})
     sender_id = str(getattr(sender, "id", "") or "").strip()
+    if not reply_to and infer_architect_reply_to:
+        reply_to, infer_error = _infer_architect_user_reply_to_id(state, sender)
+        if infer_error:
+            raise ValueError(infer_error)
+    if reply_to:
+        _parent, reply_error = _validate_agent_user_direct_message_reply_to_id(
+            state,
+            reply_to,
+            sender_id,
+        )
+        if reply_error:
+            raise ValueError(reply_error)
     requested_thread_id = str(thread_id or "").strip()
     mismatched, expected_thread_id = _requested_user_agent_thread_mismatch(
         requested_thread_id,
@@ -9821,7 +9986,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if length_error:
             return length_error, True
         try:
-            saved, created = save_agent_user_direct_message_from_mcp(real_state, sender, message=message, thread_id=str(args.get("thread_id", "") or "").strip(), reply_to_id=str(args.get("reply_to_id", "") or "").strip(), context=context, idempotency_key=idempotency_key, notify=True)
+            saved, created = save_agent_user_direct_message_from_mcp(real_state, sender, message=message, thread_id=str(args.get("thread_id", "") or "").strip(), reply_to_id=str(args.get("reply_to_id", "") or "").strip(), context=context, idempotency_key=idempotency_key, infer_architect_reply_to=True, notify=True)
         except ValueError as exc:
             return str(exc), True
         payload = _direct_user_message_response(saved, deduped=not created)
@@ -13414,6 +13579,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 reply_to_id=str(args.get("reply_to_id", "") or "").strip(),
                 context=context,
                 idempotency_key=idempotency_key,
+                infer_architect_reply_to=caller_kind == "architect",
                 notify=True,
             )
         except ValueError as exc:

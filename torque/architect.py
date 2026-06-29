@@ -120,8 +120,11 @@ architect_decision_link
 - **Direct user messages** are non-blocking conversation. Use
   `architect_message_user(message=..., reply_to_id=...)` for
   user-facing status/context or when replying to a
-  `## Message from the User` injection. Do not rely on free-text
-  terminal output for user-facing replies.
+  `## Message from the User` injection. For ordinary direct-user replies,
+  `reply_to_id` may be omitted only when exactly one pending direct user
+  message is unambiguous; pass the prompt's explicit id when multiple user
+  messages are pending or when you need exact threading. Do not rely on
+  free-text terminal output for user-facing replies.
 
 ## Session boot checklist
 

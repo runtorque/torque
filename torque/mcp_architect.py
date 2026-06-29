@@ -689,8 +689,12 @@ _ARCHITECT_TOOL_SPECS = [
                 "reply_to_id": {
                     "type": "string",
                     "description": (
-                        "Optional message id this is replying to. Torque "
-                        "derives the user lane from the calling architect."
+                        "Optional message id this is replying to. If omitted, "
+                        "Torque infers it only when this architect has exactly "
+                        "one pending direct user message; pass it explicitly "
+                        "for threading or when multiple user messages are "
+                        "pending. Torque derives the user lane from the "
+                        "calling architect."
                     ),
                 },
                 "context_task_ids": {
@@ -1796,8 +1800,8 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_product_message_user",
-        "description": "Send a PM-safe direct user message after validating product-scoped context attachments.",
-        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string"}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
+        "description": "Send a PM-safe direct user message after validating product-scoped context attachments. If reply_to_id is omitted, Torque infers it only when this architect has exactly one pending direct user message.",
+        "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string", "description": "Optional direct user-message id; omit only when exactly one pending direct user message is unambiguous."}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
     },
     {
         "name": "architect_product_ask_user",

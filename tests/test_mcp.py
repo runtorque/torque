@@ -881,6 +881,243 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(torqly.id, state.direct_messages_by_agent)
             db.close()
 
+    async def test_architect_message_user_infers_single_pending_user_reply(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            architect = self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            state.agents[architect.id] = architect
+            state.groups["g"] = [architect.id]
+            thread_id = db_mod.canonical_user_agent_thread_id(architect.id)
+            state.save_direct_message({
+                "id": "msg-user-1",
+                "thread_id": thread_id,
+                "group_name": "g",
+                "sender_id": "user",
+                "sender_kind": "user",
+                "sender_name": "User",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "recipient_name": "Architect",
+                "message": "Can you give me a quick status?",
+                "message_type": "message",
+                "created_at": 10.0,
+                "delivery_state": "delivered",
+            })
+            notifications = []
+            state.on_direct_user_message = lambda row: notifications.append(dict(row))
+
+            async def fake_handle_command(payload):
+                self.fail(f"architect_message_user should not call command: {payload}")
+
+            body = {
+                "jsonrpc": "2.0",
+                "id": 401,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_message_user",
+                    "arguments": {"message": "Yes — implementation is underway."},
+                },
+            }
+            result, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+                body,
+                cell_id=architect.id,
+                handle_command=fake_handle_command,
+                state=state,
+            )
+            self.assertEqual(status, 200)
+            self.assertFalse(result["result"]["isError"])
+            payload = json.loads(result["result"]["content"][0]["text"])
+            row = db.load_direct_message(payload["message_id"])
+            self.assertEqual(payload["reply_to_id"], "msg-user-1")
+            self.assertEqual(row["reply_to_id"], "msg-user-1")
+            self.assertEqual(row["thread_id"], thread_id)
+            self.assertEqual(row["sender_id"], architect.id)
+            self.assertEqual(row["recipient_id"], "user")
+            self.assertEqual([item["id"] for item in notifications], [row["id"]])
+            db.close()
+
+    async def test_architect_message_user_requires_explicit_reply_when_ambiguous(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            architect = self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            state.agents[architect.id] = architect
+            state.groups["g"] = [architect.id]
+            thread_id = db_mod.canonical_user_agent_thread_id(architect.id)
+            for idx, created_at in (("1", 10.0), ("2", 20.0)):
+                state.save_direct_message({
+                    "id": f"msg-user-{idx}",
+                    "thread_id": thread_id,
+                    "group_name": "g",
+                    "sender_id": "user",
+                    "sender_kind": "user",
+                    "recipient_id": architect.id,
+                    "recipient_kind": "architect",
+                    "message": f"Question {idx}",
+                    "message_type": "message",
+                    "created_at": created_at,
+                    "delivery_state": "delivered",
+                })
+
+            async def fake_handle_command(payload):
+                self.fail(f"architect_message_user should not call command: {payload}")
+
+            text, is_error = await self.mcp_mod._dispatch_architect_tool(
+                "architect_message_user",
+                {"message": "Need an explicit target."},
+                fake_handle_command,
+                state,
+                caller_id=architect.id,
+            )
+            self.assertTrue(is_error)
+            self.assertIn("Multiple pending direct user messages", text)
+            self.assertIn("msg-user-1", text)
+            self.assertIn("msg-user-2", text)
+            self.assertEqual(
+                [row["id"] for row in db.load_direct_messages_for_thread(thread_id)],
+                ["msg-user-1", "msg-user-2"],
+            )
+            db.close()
+
+    async def test_architect_message_user_errors_when_user_thread_has_no_pending_reply(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            architect = self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            state.agents[architect.id] = architect
+            state.groups["g"] = [architect.id]
+            thread_id = db_mod.canonical_user_agent_thread_id(architect.id)
+            state.save_direct_message({
+                "id": "msg-user-1",
+                "thread_id": thread_id,
+                "group_name": "g",
+                "sender_id": "user",
+                "sender_kind": "user",
+                "recipient_id": architect.id,
+                "recipient_kind": "architect",
+                "message": "Can you answer this?",
+                "message_type": "message",
+                "created_at": 10.0,
+                "delivery_state": "delivered",
+            })
+            state.save_direct_message({
+                "id": "msg-arch-reply",
+                "thread_id": thread_id,
+                "reply_to_id": "msg-user-1",
+                "group_name": "g",
+                "sender_id": architect.id,
+                "sender_kind": "architect",
+                "recipient_id": "user",
+                "recipient_kind": "user",
+                "message": "Already answered.",
+                "message_type": "message",
+                "created_at": 20.0,
+                "delivery_state": "delivered",
+            })
+
+            async def fake_handle_command(payload):
+                self.fail(f"architect_message_user should not call command: {payload}")
+
+            text, is_error = await self.mcp_mod._dispatch_architect_tool(
+                "architect_message_user",
+                {"message": "No inferred target should exist."},
+                fake_handle_command,
+                state,
+                caller_id=architect.id,
+            )
+            self.assertTrue(is_error)
+            self.assertIn("No pending direct user message", text)
+            self.assertEqual(len(db.load_direct_messages_for_thread(thread_id)), 2)
+            db.close()
+
+    async def test_architect_message_user_rejects_other_architect_reply_to_id(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            blueprint = self.state_mod.AgentCell(
+                id="88b5b1ee",
+                name="Blueprint",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            torqly = self.state_mod.AgentCell(
+                id="a5a7fc9e",
+                name="Torqly",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+            )
+            state.agents[blueprint.id] = blueprint
+            state.agents[torqly.id] = torqly
+            state.groups["g"] = [blueprint.id, torqly.id]
+            blueprint_thread = db_mod.canonical_user_agent_thread_id(blueprint.id)
+            state.save_direct_message({
+                "id": "msg-blueprint-user",
+                "thread_id": blueprint_thread,
+                "group_name": "g",
+                "sender_id": "user",
+                "sender_kind": "user",
+                "recipient_id": blueprint.id,
+                "recipient_kind": "architect",
+                "message": "Question for Blueprint only.",
+                "message_type": "message",
+                "created_at": 10.0,
+                "delivery_state": "delivered",
+            })
+
+            async def fake_handle_command(payload):
+                self.fail(f"architect_message_user should not call command: {payload}")
+
+            text, is_error = await self.mcp_mod._dispatch_architect_tool(
+                "architect_message_user",
+                {
+                    "message": "Torqly must not hijack Blueprint's thread.",
+                    "reply_to_id": "msg-blueprint-user",
+                },
+                fake_handle_command,
+                state,
+                caller_id=torqly.id,
+            )
+            self.assertTrue(is_error)
+            self.assertIn("reply_to_id does not belong to this agent", text)
+            self.assertEqual(
+                [
+                    row["id"] for row in db.load_direct_messages_for_thread(
+                        blueprint_thread
+                    )
+                ],
+                ["msg-blueprint-user"],
+            )
+            db.close()
+
     async def test_message_user_rejects_other_agent_thread_for_worker_and_engineer(self):
         db_mod = importlib.import_module("torque.db")
         with tempfile.TemporaryDirectory() as tmp:

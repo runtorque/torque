@@ -343,7 +343,15 @@ V1 normalizes user↔agent messages to one thread per viewed agent based on the
 bound caller. The MCP implementations still reject an explicit canonical
 `thread_id` for a different agent as a spoof/stale-binding guard, but callers
 should not pass thread ids in the common path. User replies from the panel use
-`user_agent_message(agent_id|cell_id|target_agent_id,
+`sender_kind=user` and are scoped to the addressed agent lane. For
+`architect_message_user` / `architect_product_message_user`, omitted
+`reply_to_id` is inferred only when the calling Architect has exactly one
+pending direct user message; multiple pending user messages, an already-answered
+user thread, or an explicit `reply_to_id` outside the current Architect↔user
+lane returns a clear error. Proactive Architect status messages without any
+prior direct user thread may still omit `reply_to_id`.
+
+The UI command is `user_agent_message(agent_id|cell_id|target_agent_id,
 message|text, thread_id?, reply_to_id?, idempotency_key?)`; the send is
 persisted first, queued non-interruptively, and buffered for replay when the
 agent is down, dismissed, or temporarily unavailable.

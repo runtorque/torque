@@ -7520,6 +7520,11 @@ def _format_user_direct_message_prompt(
     parts.extend([
         "Reply to this user-facing conversation with:",
         f"  mcp__torque__{tool_name}(message=\"...\", reply_to_id={reply_arg})",
+        (
+            "Architect sessions may omit reply_to_id only when this is the "
+            "single unambiguous pending direct user message; pass the id above "
+            "when in doubt or when multiple user messages are pending."
+        ) if tool_name == "architect_message_user" else "",
         "",
     ])
     if include_free_text_reply_hint:
