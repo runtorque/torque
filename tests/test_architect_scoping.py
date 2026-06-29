@@ -2,6 +2,7 @@ import importlib
 import json
 import stat
 import tempfile
+import types
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -256,6 +257,88 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             tool_name,
             args,
             self._handle_command,
+            self.state,
+            caller_id=caller_id,
+        )
+
+    @staticmethod
+    def _make_cell(value):
+        return (lambda x: lambda: x)(value).__closure__[0]
+
+    def _extract_server_handle_command(self):
+        """Return the real server handle_command closure for live-path tests."""
+        main_code = self.server_mod.main.__code__
+        handle_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "handle_command"
+        )
+
+        class DummyBridge:
+            async def list_profiles(self):
+                return []
+
+            async def get_launch_context(self):
+                return types.SimpleNamespace(current_path="", current_profile="")
+
+            async def update_session(self, *_args, **_kwargs):
+                return None
+
+        class DummyWorktreeManager:
+            async def diff_summary(self, _cell, *, non_test_only=False):
+                return {"files": 0, "insertions": 0, "deletions": 0}
+
+            async def checkpoint(self, _cell, *, message=""):
+                return ""
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+
+        closure_values = {name: None for name in handle_code.co_freevars}
+        closure_values.update({
+            "_broadcast_toast": noop_async,
+            "_checkpoint_message": lambda _cell: "checkpoint",
+            "_checkpoint_on_report": noop_async,
+            "_cleanup_after_merge": noop_async,
+            "_close_agent_session_only": noop_async,
+            "_panel_event": lambda *args, **kwargs: None,
+            "_record_task_boundary": noop_async,
+            "_resolve_base_dir": noop_async,
+            "_runtime_payload": lambda: {},
+            "action_mgr": None,
+            "board_sync_manager": None,
+            "bridge": DummyBridge(),
+            "db": self.db,
+            "handle_command": None,
+            "panel_log": types.SimpleNamespace(
+                replace_last=lambda *args, **kwargs: {}
+            ),
+            "state": self.state,
+            "template_mgr": types.SimpleNamespace(
+                resolve_agent_config=lambda *args, **kwargs: {},
+                list_templates=lambda *args, **kwargs: [],
+            ),
+            "worktree_mgr": DummyWorktreeManager(),
+        })
+        closure = tuple(
+            self._make_cell(closure_values[name])
+            for name in handle_code.co_freevars
+        )
+        return types.FunctionType(
+            handle_code,
+            self.server_mod.__dict__,
+            "handle_command",
+            None,
+            closure,
+        )
+
+    async def _call_with_server_handle(
+            self, tool_name: str, args: dict, caller_id: str):
+        return await self.mcp_architect_mod._dispatch_architect_tool(
+            tool_name,
+            args,
+            self._extract_server_handle_command(),
             self.state,
             caller_id=caller_id,
         )
@@ -3487,6 +3570,161 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(authorization["route_message_id"], "route-msg-991")
         self.assertIn("pm-created", authorization["product_labels"])
         self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
+
+    async def test_architect_task_mark_covered_live_handler_accepts_covering_task(self):
+        pm = self._add_architect("pm-live", "Blueprint")
+        torqly = self._add_architect("arch-live", "Torqly")
+        root = self._add_task(
+            "TORQUE:1036",
+            "PM-created product root",
+            lane="Backlog",
+            status="queued",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        self.db.save_agent_peer_message({
+            "id": "route-msg-1036",
+            "thread_id": "route-thread-1036",
+            "group_name": "torque",
+            "sender_id": pm.id,
+            "sender_kind": "architect",
+            "recipient_id": torqly.id,
+            "recipient_kind": "architect",
+            "message": "Torqly, please accept and route this PM product root.",
+            "created_at": 1.0,
+            "context_task_ids": [root.id],
+            "context_summary": "Explicit PM route request for TORQUE:1036.",
+            "context_snapshot": {
+                "product_peer": {"marker": "torque.product_peer.v1"},
+            },
+        })
+        covering = self._add_task(
+            "TORQUE:1037",
+            "Torqly covering implementation",
+            lane="In Progress",
+            labels=["covers:TORQUE:1036"],
+            created_by_architect_id=torqly.id,
+        )
+
+        text, is_error = await self._call_with_server_handle(
+            "architect_task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/836",
+                "sha": "1036feed",
+                "tests_run": "live validation",
+                "notes": "One-root validation: TORQUE:1037 covers TORQUE:1036.",
+                "move_to_done": False,
+            },
+            torqly.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "task_marked_covered")
+        refreshed = self.state.board_tasks[root.id]
+        self.assertEqual(refreshed.lane, "Backlog")
+        evidence = refreshed.completion_evidence["covered_by"]
+        self.assertEqual(evidence["task_id"], covering.id)
+        self.assertEqual(evidence["authorization"]["scope"], "routed_pm_product_root")
+        self.assertEqual(evidence["authorization"]["route_message_id"], "route-msg-1036")
+
+    async def test_architect_task_mark_covered_live_handler_accepts_covering_task_id_alias(self):
+        pm = self._add_architect("pm-alias", "Blueprint")
+        torqly = self._add_architect("arch-alias", "Torqly")
+        root = self._add_task(
+            "TORQUE:1046",
+            "PM-created alias product root",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:1047",
+            "Torqly alias covering implementation",
+            labels=["covers:TORQUE:1046"],
+            created_by_architect_id=torqly.id,
+        )
+
+        text, is_error = await self._call_with_server_handle(
+            "architect_task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task_id": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/1047",
+                "notes": "Explicit cover-label evidence is present.",
+            },
+            torqly.id,
+        )
+
+        self.assertFalse(is_error, text)
+        evidence = self.state.board_tasks[root.id].completion_evidence["covered_by"]
+        self.assertEqual(evidence["task_id"], covering.id)
+        self.assertEqual(
+            evidence["authorization"]["source"],
+            "covering_task_label",
+        )
+
+    async def test_architect_task_mark_covered_rejects_routed_pm_root_without_completion_evidence(self):
+        pm = self._add_architect("pm-no-evidence", "Blueprint")
+        torqly = self._add_architect("arch-no-evidence", "Torqly")
+        root = self._add_task(
+            "TORQUE:1048",
+            "PM-created product root without completion evidence",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:1049",
+            "Torqly covering task",
+            labels=["covers:TORQUE:1048"],
+            created_by_architect_id=torqly.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {"task": root.id, "covering_task": covering.id},
+            torqly.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("requires PR/SHA/tests or notes evidence", text)
+        self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
+
+    async def test_architect_task_mark_covered_rejects_pm_root_with_non_caller_covering_task(self):
+        pm = self._add_architect("pm-non-caller", "Blueprint")
+        torqly = self._add_architect("arch-non-caller", "Torqly")
+        other_architect = self._add_architect("arch-cover-owner", "Other Architect")
+        root = self._add_task(
+            "TORQUE:1050",
+            "PM-created product root with other covering owner",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:1051",
+            "Other architect covering task",
+            labels=["covers:TORQUE:1050"],
+            created_by_architect_id=other_architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_mark_covered",
+            {
+                "task": root.id,
+                "covering_task": covering.id,
+                "pr_url": "https://github.com/runtorque/torque/pull/1051",
+            },
+            torqly.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(
+            text,
+            "Routed PM-created product roots require a covering_task created "
+            "by this architect",
+        )
+        self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
     async def test_architect_task_mark_covered_rejects_pm_root_without_route_evidence(self):
         pm = self._add_architect("pm-1", "Blueprint")

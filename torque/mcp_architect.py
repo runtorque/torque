@@ -608,8 +608,11 @@ _ARCHITECT_TOOL_SPECS = [
             "product root created by another architect only when it has "
             "explicit route/coverage evidence (for example a caller-created "
             "covers:<task> covering task or inbound product-peer route). "
-            "Records durable completion evidence and an activity message; set "
-            "move_to_done=true to close the covered card."
+            "When accepting a PM-created proposal into a covering task, use "
+            "this to link and advance the PM root with an audit trail rather "
+            "than leaving a duplicate. Records durable completion evidence "
+            "and an activity message; set move_to_done=true to close the "
+            "covered card."
         ),
         "inputSchema": {
             "type": "object",
