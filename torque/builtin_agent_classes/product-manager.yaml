@@ -1,6 +1,6 @@
 agent_class_schema_version: 3
 id: product-manager
-version: "2"
+version: "3"
 display_name: Product Manager
 description: Product planning and intake agent with PM-safe authority; approved for live dogfood while remaining authority-bounded.
 lifecycle: stable

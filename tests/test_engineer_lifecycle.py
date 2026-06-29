@@ -1738,7 +1738,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ARCH BASE", applied_prompts[0])
         self.assertIn("## Agent Class", applied_prompts[0])
         self.assertIn(
-            "Internal Agent Profile policy: class-policy-product-manager@2",
+            "Internal Agent Profile policy: class-policy-product-manager@3",
             applied_prompts[0],
         )
         self.assertEqual(architect.effective_agent_class_id, "product-manager")
