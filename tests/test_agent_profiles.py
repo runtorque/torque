@@ -81,6 +81,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         categories = {entry["category"]: entry for entry in preview["projected_tool_categories"]}
         self.assertEqual(categories["pm_decisions"]["status"], "allowed")
         self.assertEqual(categories["pm_queued_tasks"]["status"], "allowed")
+        self.assertEqual(categories["behavior_overlay_self"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         self.assertEqual(preview["runtime_enforcement"], "mcp_projection_when_effective_profile_is_set")
 
@@ -101,11 +102,16 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(pm_policy.is_full_base_kind_profile)
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_board_summary", pm_policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_peer_message", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_behavior_overlay_read", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose", pm_policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_behavior_overlay_rollback", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_engineer", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_role", pm_policy))
 
     def test_profile_policy_evaluator_allows_full_and_denies_pm_dangerous_tools(self):
         full_architect = profile_policy_by_id("full-architect", base_dir=str(self.project))
@@ -120,6 +126,9 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(pm.is_full_base_kind_profile)
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_board_summary", pm))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_peer_message", pm))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_behavior_overlay_read", pm))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose", pm))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_behavior_overlay_rollback", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", pm))
@@ -129,6 +138,8 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_engineer", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_role", pm))
 
 
     def test_torque_steward_policy_denies_raw_tool_picker_only_allows_read_observation(self):
@@ -176,6 +187,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_move", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_read", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_create", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_update", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("engineer_merge", steward))

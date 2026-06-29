@@ -95,6 +95,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "planning_reads",
             "proposed_decisions",
             "board_task_proposals",
+            "behavior_overlay_self",
             "user_messages",
             "product_peer_messages",
             "private_journal",
@@ -122,9 +123,12 @@ class AgentClassRegistryTests(unittest.TestCase):
             for entry in preview["agent_profile"]["projected_tool_categories"]
         }
         self.assertEqual(categories["pm_decisions"]["status"], "allowed")
+        self.assertEqual(categories["behavior_overlay_self"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         compiled = compile_agent_class_profile(pm)
         self.assertEqual(compiled.id, "class-policy-product-manager")
+        self.assertIn("behavior_overlay.read", compiled.grants)
+        self.assertIn("behavior_overlay.propose_self", compiled.grants)
         self.assertEqual(set(compiled.grants) & {
             "agent.hire_engineer",
             "agent.dispatch_worker",
@@ -166,6 +170,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "idea_briefs",
             "proposed_decisions",
             "board_task_proposals",
+            "behavior_overlay_self",
             "user_messages",
             "product_peer_messages",
             "private_journal",
@@ -190,6 +195,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(categories["thinking_reads"]["status"], "allowed")
         self.assertEqual(categories["thinking_writes"]["status"], "allowed")
         self.assertEqual(categories["idea_briefs"]["status"], "allowed")
+        self.assertEqual(categories["behavior_overlay_self"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         self.assertEqual(categories["deploy_admin"]["status"], "denied")
         warnings = "\n".join(preview["warnings"])
@@ -205,6 +211,8 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertIn("idea_brief.read", compiled.grants)
         self.assertIn("idea_brief.write_own", compiled.grants)
         self.assertIn("idea_brief.propose", compiled.grants)
+        self.assertIn("behavior_overlay.read", compiled.grants)
+        self.assertIn("behavior_overlay.propose_self", compiled.grants)
         self.assertEqual(set(compiled.grants) & {
             "agent.hire_engineer",
             "agent.dispatch_worker",

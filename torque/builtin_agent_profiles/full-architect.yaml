@@ -10,6 +10,8 @@ grants:
   - agent.engineer_roster_read
   - agent.hire_engineer
   - agent.manage_engineer_roster
+  - behavior_overlay.propose_self
+  - behavior_overlay.read
   - comm.engineer_message
   - comm.peer_architect_list
   - comm.peer_architect_message

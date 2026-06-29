@@ -5084,6 +5084,63 @@ def _caller_profile_allows_capability(state, caller_id: str,
     return str(capability or "").strip() in set(policy.grants)
 
 
+def _caller_has_behavior_overlay_admin(state, caller_id: str) -> bool:
+    """Return whether caller has the legacy broad overlay/profile-admin surface."""
+
+    return _caller_profile_allows_capability(state, caller_id, "profile.edit")
+
+
+def _restricted_behavior_overlay_scope_allowed(
+        state,
+        caller_id: str,
+        scope: BehaviorOverlayScope | None) -> bool:
+    """Restrict non-admin Architect-derived overlay access to self + own role.
+
+    Product Manager/Creative classes may inspect their effective overlay and
+    propose user-approved changes to their own agent overlay.  They must not
+    use the broad Architect overlay tools to reach hired Engineer overlays or
+    worker/engineer role overlays, because those scopes are not part of their
+    Agent Class authority.
+    """
+
+    if not scope:
+        return False
+    if _caller_has_behavior_overlay_admin(state, caller_id):
+        return True
+    if not _caller_profile_allows_capability(
+            state, caller_id, "behavior_overlay.read"):
+        return False
+    if scope.scope_kind == "agent":
+        return str(scope.scope_key or "").strip() == str(caller_id or "").strip()
+    if scope.scope_kind == "role":
+        return (
+            str(scope.scope_group or "").strip() == _caller_group(state, caller_id)
+            and str(scope.scope_key or "").strip() == "architect"
+        )
+    return False
+
+
+def _restricted_behavior_overlay_proposal_allowed(
+        state,
+        caller_id: str,
+        proposal: dict | None) -> bool:
+    if not proposal:
+        return False
+    if _caller_has_behavior_overlay_admin(state, caller_id):
+        return True
+    scope_kind = str(proposal.get("scope_kind", "") or "agent").strip()
+    if scope_kind == "role":
+        return (
+            str(proposal.get("scope_group", "") or "").strip()
+            == _caller_group(state, caller_id)
+            and str(proposal.get("scope_key", "") or "").strip() == "architect"
+        )
+    return (
+        str(proposal.get("agent_id", "") or proposal.get("scope_key", "") or "").strip()
+        == str(caller_id or "").strip()
+    )
+
+
 def _add_product_peer_marker(context: dict, *, source: str,
                              caller_id: str) -> dict:
     enriched = dict(context or {})
@@ -10702,6 +10759,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 )
                 if not target_id:
                     return target_error, True
+                if (
+                        not _caller_has_behavior_overlay_admin(real_state, caller_id)
+                        and target_id != str(caller_id or "").strip()):
+                    return "behavior overlay access is limited to this architect's own effective overlay", True
             else:
                 return "behavior overlay tools are not available to this caller", True
             target = real_state.agents.get(target_id)
@@ -10729,6 +10790,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if not scope:
             return scope_error, True
+        if (
+                caller_kind == "architect"
+                and not _restricted_behavior_overlay_scope_allowed(
+                    real_state, caller_id, scope)):
+            return "behavior overlay access is limited to this architect's own overlay and architect role overlay", True
         version = real_state.db.load_behavior_overlay_active_version(scope) if real_state.db else None
         active = real_state.db.load_behavior_overlay_active(scope) if real_state.db else {}
         return json.dumps({
@@ -10745,6 +10811,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if not scope:
             return scope_error, True
+        if (
+                caller_kind == "architect"
+                and not _restricted_behavior_overlay_scope_allowed(
+                    real_state, caller_id, scope)):
+            return "behavior overlay access is limited to this architect's own overlay and architect role overlay", True
         return json.dumps({
             "type": "behavior_overlay_versions",
             **scope.as_row_fields(),
@@ -10779,6 +10850,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     if not _behavior_overlay_visible_to_architect(
                             real_state, caller_id, proposal):
                         return "behavior overlay proposal not found", True
+                    if not _restricted_behavior_overlay_proposal_allowed(
+                            real_state, caller_id, proposal):
+                        return "behavior overlay access is limited to this architect's own overlay and architect role overlay", True
                 payload = real_state.behavior_overlay_diff_payload(
                     proposal_id=proposal_id,
                 )
@@ -10788,6 +10862,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 )
                 if not scope:
                     return scope_error, True
+                if (
+                        caller_kind == "architect"
+                        and not _restricted_behavior_overlay_scope_allowed(
+                            real_state, caller_id, scope)):
+                    return "behavior overlay access is limited to this architect's own overlay and architect role overlay", True
                 payload = real_state.behavior_overlay_diff_payload(
                     agent_id=scope.agent_id,
                     scope_kind=scope.scope_kind,
@@ -10817,6 +10896,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
             if not target_filter:
                 return target_error, True
+            if (
+                    not _caller_has_behavior_overlay_admin(real_state, caller_id)
+                    and target_filter != str(caller_id or "").strip()):
+                return "behavior overlay access is limited to this architect's own overlay and architect role overlay", True
         proposals = []
         for proposal in real_state.list_behavior_overlay_proposals(
                 status_filter=str(args.get("status_filter", "") or ""),
@@ -10826,7 +10909,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 scope_key=scope_filter.scope_key if scope_filter else "",
                 limit=int(args.get("limit", 100) or 100)):
             if _behavior_overlay_visible_to_architect(
-                    real_state, caller_id, proposal):
+                    real_state, caller_id, proposal) and (
+                        _restricted_behavior_overlay_proposal_allowed(
+                            real_state, caller_id, proposal)):
                 proposals.append(proposal_summary(proposal))
         return json.dumps({
             "type": "behavior_overlay_proposals",
@@ -11252,6 +11337,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if not target_id:
             return target_error, True
+        if (
+                not _caller_has_behavior_overlay_admin(real_state, caller_id)
+                and target_id != str(caller_id or "").strip()):
+            return "behavior overlay rollback is limited to this architect's own overlay", True
         target_cell = real_state.agents.get(target_id)
         is_engineer_target = (
             str(getattr(target_cell, "kind", "") or "").strip() == "engineer"

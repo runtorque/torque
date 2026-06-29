@@ -363,6 +363,14 @@ CAPABILITY_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
             category="decision",
         ),
         _bucket(
+            "behavior_overlay_self",
+            "Own behavior overlay proposals",
+            "Read visible Dynamic Behavior overlay state and propose user-approved changes to this agent's own overlay; does not grant role, Engineer, profile, or class administration.",
+            {"behavior_overlay.read", "behavior_overlay.propose_self"},
+            base_kinds={"architect"},
+            category="behavior_overlay",
+        ),
+        _bucket(
             "decision_authority",
             "Accepted decision authority",
             "Create, update, and accept product/architecture decisions.",

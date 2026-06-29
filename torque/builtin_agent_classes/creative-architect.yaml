@@ -54,6 +54,7 @@ capabilities:
     - idea_briefs
     - proposed_decisions
     - board_task_proposals
+    - behavior_overlay_self
     - user_messages
     - product_peer_messages
     - private_journal

@@ -136,6 +136,12 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_product_message_user",
             "architect_product_ask_user",
             "architect_product_journal",
+            "architect_behavior_overlay_read",
+            "architect_behavior_overlay_versions",
+            "architect_behavior_overlay_diff",
+            "architect_behavior_overlay_proposal_list",
+            "architect_behavior_overlay_propose",
+            "architect_behavior_overlay_rollback",
         }:
             self.assertIn(name, tool_names)
 
@@ -152,8 +158,11 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_reassign",
             "architect_engineer_message",
             "architect_engineer_feedback_request",
-            "architect_behavior_overlay_read",
+            "architect_behavior_overlay_propose_for_engineer",
+            "architect_behavior_overlay_propose_for_role",
             "architect_behavior_overlay_approve",
+            "architect_behavior_overlay_reject",
+            "architect_behavior_overlay_rollback_role",
             "architect_deploy_state",
             "architect_get_architect_settings",
             "architect_mcp_calls",
