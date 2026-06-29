@@ -13373,10 +13373,20 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .help-freshness-grid code { color: var(--text); overflow-wrap: anywhere; }
 
+#panel-help[data-panel-placement="right"] .help-panel {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 #panel-help[data-panel-placement="right"] .help-query-panel {
-  flex-basis: min(44%, 360px);
+  flex: 0 0 220px;
+  min-height: 220px;
+}
+#panel-help[data-panel-placement="right"] .help-query-result-scroll {
+  min-height: 72px;
 }
 #panel-help[data-panel-placement="right"] .help-workspace {
+  flex: 0 0 auto;
+  min-height: 260px;
   overflow: hidden;
 }
 #panel-help[data-panel-placement="right"] .help-detail {
