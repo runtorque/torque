@@ -281,6 +281,7 @@ class CodexSdkReadonlyRunner:
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
+            cell.last_event_text = "Codex SDK read-only session ready"
             cell.worktree_path = ""
             cell.worktree_branch = ""
             cell.worktree_repo_root = ""
@@ -294,6 +295,7 @@ class CodexSdkReadonlyRunner:
                 "torque_session_id": runtime_session_id,
                 "sdk_thread_id": thread_id,
                 "session_id": thread_id,
+                "detail": "Codex SDK read-only session ready",
             })
         except Exception as exc:
             self.sessions.pop(str(getattr(cell, "session_id", "") or ""), None)
@@ -389,9 +391,14 @@ class CodexSdkReadonlyRunner:
             try:
                 cell.status = "running"
                 cell.activity = "thinking"
-                cell.activity_detail = "Codex SDK read-only run started"
+                cell.activity_detail = "Prompt accepted; Codex SDK read-only request starting"
                 cell.error_message = ""
                 cell.needs_attention = False
+                cell.last_event_text = cell.activity_detail
+                self.state.mark_agent_progress(cell, emit=False)
+                self._save_emit(cell, coalesce_ephemeral=True)
+                await self._emit_event(cell.id, "progress", {"detail": cell.activity_detail})
+                cell.activity_detail = "Codex SDK read-only request running"
                 cell.last_event_text = cell.activity_detail
                 self.state.mark_agent_progress(cell, emit=False)
                 self._save_emit(cell, coalesce_ephemeral=True)
@@ -415,6 +422,9 @@ class CodexSdkReadonlyRunner:
                     cell.activity_detail = ""
                     cell.error_message = ""
                     cell.needs_attention = False
+                    cell.last_event_text = "Codex SDK read-only run completed"
+                    if response:
+                        cell.last_summary = response[:1000]
                     self.state.mark_agent_heartbeat(cell, emit=False)
                     self._save_emit(cell)
             except asyncio.CancelledError:
