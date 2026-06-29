@@ -95,6 +95,36 @@ def _has_supported_run_surface(client: Any, thread: Any) -> bool:
     return callable(getattr(threads, "run", None)) if threads is not None else False
 
 
+def _read_only_sandbox_token(value: Any) -> str:
+    return str(value).strip().lower().replace("_", "-")
+
+
+def _is_read_only_sandbox(value: Any) -> bool:
+    """Return whether an SDK sandbox sentinel represents read-only mode.
+
+    The official Codex SDK exposes Sandbox.read_only as a string-like enum whose
+    value is ``read-only`` while ``str(enum_member)`` may be ``Sandbox.read_only``.
+    Prefer the string payload and enum-like ``value``/``name`` attributes over a
+    blind ``str(...)`` check so that fail-closed validation accepts only the
+    SDK's read-only sentinel and keeps broader sandbox modes rejected.
+    """
+    if value in (None, False):
+        return False
+
+    candidates: list[str] = []
+    if isinstance(value, str):
+        candidates.append(value)
+    for attr in ("value", "name"):
+        candidate = getattr(value, attr, None)
+        if isinstance(candidate, str):
+            candidates.append(candidate)
+
+    return any(
+        _read_only_sandbox_token(candidate) in {"read-only", "readonly"}
+        for candidate in candidates
+    )
+
+
 class DefaultCodexSdkClientFactory:
     """Best-effort optional import boundary for the real Codex SDK."""
 
@@ -210,8 +240,7 @@ class CodexSdkReadonlyRunner:
                 raise CodexSdkSetupError(
                     "Codex SDK read-only sandbox is unavailable."
                 )
-            if isinstance(read_only, str) and read_only.lower() not in {
-                    "read_only", "readonly"}:
+            if not _is_read_only_sandbox(read_only):
                 raise CodexSdkSetupError(
                     "Codex SDK runner only supports read-only sandbox mode."
                 )

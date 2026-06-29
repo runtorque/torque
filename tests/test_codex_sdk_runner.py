@@ -1,6 +1,7 @@
 import asyncio
 import builtins
 import unittest
+from enum import Enum
 from unittest import mock
 
 try:
@@ -77,6 +78,14 @@ class DocLikeAsyncCodex:
     async def thread_start(self, **kwargs):
         self.thread_start_calls.append(kwargs)
         return self.thread
+
+
+class StringLikeSandbox(str, Enum):
+    read_only = "read-only"
+    workspace_write = "workspace-write"
+
+    def __str__(self):
+        return f"{type(self).__name__}.{self.name}"
 
 
 class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
@@ -294,6 +303,43 @@ class CodexSdkRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(cell.session_id)
         self.assertEqual(cell.agent_session_id, "")
         self.assertEqual(cell.last_event_text, "SDK session not resumed after restart")
+
+
+    async def test_hyphenated_read_only_sandbox_values_are_accepted(self):
+        for sandbox in ("read-only", StringLikeSandbox.read_only):
+            with self.subTest(sandbox=repr(sandbox)):
+                state, cell = self._state_cell()
+                fake = FakeClient(thread_id="thread-x")
+                runner = CodexSdkReadonlyRunner(
+                    state,
+                    client_factory=lambda sandbox=sandbox: (fake, sandbox),
+                )
+                await runner.create_session(cell)
+                self.assertEqual(cell.status, "idle")
+                self.assertEqual(fake.create_calls[0]["sandbox"], sandbox)
+                self.assertEqual(runner.sessions[cell.session_id].sandbox, sandbox)
+
+    async def test_broader_sandbox_values_are_rejected(self):
+        rejected = (
+            "workspace_write",
+            "workspace-write",
+            "danger-full-access",
+            StringLikeSandbox.workspace_write,
+            True,
+            object(),
+        )
+        for sandbox in rejected:
+            with self.subTest(sandbox=repr(sandbox)):
+                state, cell = self._state_cell()
+                fake = FakeClient()
+                runner = CodexSdkReadonlyRunner(
+                    state,
+                    client_factory=lambda sandbox=sandbox: (fake, sandbox),
+                )
+                with self.assertRaises(CodexSdkSetupError):
+                    await runner.create_session(cell)
+                self.assertEqual(cell.status, "error")
+                self.assertEqual(fake.create_calls, [])
 
     async def test_write_sandbox_sentinel_rejected(self):
         state, cell = self._state_cell()
