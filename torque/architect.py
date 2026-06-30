@@ -506,6 +506,41 @@ def _allows_category(authority: dict, category: str) -> bool:
     return set(required).issubset(grants)
 
 
+def _allows_engineer_roster_read(authority: dict) -> bool:
+    """Whether the projected surface can read the Engineer roster.
+
+    The ``engineer_roster`` category intentionally groups roster read, hiring,
+    and roster-management powers for high-level previews. Prompt boot guidance
+    needs the narrower MCP/tool fact: ``architect_engineer_list`` is visible
+    when ``agent.engineer_roster_read`` is granted, even if hire/manage tools
+    remain denied.
+    """
+
+    return (
+        authority.get("is_full")
+        or _has_capability(
+            authority,
+            "agent.engineer_roster_read",
+        )
+        or _allows_category(authority, "engineer_roster")
+    )
+
+
+def _allows_engineer_hire_or_management(authority: dict) -> bool:
+    return (
+        authority.get("is_full")
+        or _has_capability(
+            authority,
+            "agent.hire_engineer",
+        )
+        or _has_capability(
+            authority,
+            "agent.manage_engineer_roster",
+        )
+        or _allows_category(authority, "engineer_roster")
+    )
+
+
 def _restricted_identity_sentence(authority: dict) -> str:
     label = authority.get("label") or "Restricted Architect"
     if authority.get("is_creative"):
@@ -599,16 +634,22 @@ def _restricted_tool_lines(authority: dict) -> list[str]:
         lines.append(
             "- Executable task control: if explicitly visible, use it only inside this class's policy and do not assume Worker dispatch or merge authority."
         )
-    if _allows_category(authority, "engineer_roster"):
+    if _allows_engineer_roster_read(authority):
         lines.append(
-            "- Engineer roster/hiring: if explicitly visible, follow user-approval gates before treating a staffing change as live."
+            "- Engineer roster reads: when `architect_engineer_list` is visible, use it only for roster context inside this class's projected authority."
+        )
+    if _allows_engineer_hire_or_management(authority):
+        lines.append(
+            "- Engineer hiring/management: if explicitly visible, follow user-approval gates before treating a staffing change as live."
         )
     return lines
 
 
 def _restricted_unavailable_line(authority: dict) -> str:
     unavailable: list[str] = []
-    if not _allows_category(authority, "engineer_roster"):
+    if not _allows_engineer_roster_read(authority):
+        unavailable.append("Engineer roster reads")
+    if not _allows_engineer_hire_or_management(authority):
         unavailable.append("Engineer hiring/roster management")
     if not _allows_category(authority, "engineer_worker_comm"):
         unavailable.append("direct Engineer/Worker messaging or control")
@@ -665,6 +706,11 @@ def _restricted_boot_lines(authority: dict) -> list[str]:
     if _allows_category(authority, "pm_decisions"):
         lines.append(
             f"{index}. Re-read proposed decisions you own before drafting new or updated proposals."
+        )
+        index += 1
+    if _allows_engineer_roster_read(authority):
+        lines.append(
+            f"{index}. Read `architect_engineer_list` to understand the visible Engineer roster before making staffing or ownership recommendations; do not infer hire/manage authority unless those tools are also visible."
         )
         index += 1
     if _allows_category(authority, "peer_architect_comm"):
