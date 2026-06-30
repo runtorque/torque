@@ -759,16 +759,18 @@ async def _fire_due_agent_message_loops(
 
     ts = float(now_ts if now_ts is not None else time.time())
     fired: list[dict] = []
+    loop_state_changed = False
     for loop in state.due_agent_message_loops(ts):
         agent = state.agents.get(loop.agent_id)
         if not agent or state.agent_is_tombstoned(agent):
-            state.agent_message_loop_stop(
+            stopped = state.agent_message_loop_stop(
                 loop.id,
                 status="stopped",
                 stopped_by="system",
                 reason="Target agent is unavailable",
                 now=ts,
             )
+            loop_state_changed = loop_state_changed or bool(stopped)
             continue
         run_number = int(loop.run_count or 0) + 1
         result = await handle_command({
@@ -793,13 +795,14 @@ async def _fire_due_agent_message_loops(
             and result.get("delivery_state") != "delivered"
         ):
             reason = str(result.get("delivery_reason", "") or "").strip()
-            state.agent_message_loop_stop(
+            stopped = state.agent_message_loop_stop(
                 loop.id,
                 status="stopped",
                 stopped_by="system",
                 reason=reason or "Loop delivery was buffered",
                 now=ts,
             )
+            loop_state_changed = loop_state_changed or bool(stopped)
             _save_loop_audit(
                 agent,
                 loop,
@@ -819,6 +822,7 @@ async def _fire_due_agent_message_loops(
             last_message_id=message_id,
             updated_at=ts,
         )
+        loop_state_changed = loop_state_changed or bool(updated)
         fired.append({
             "loop_id": loop.id,
             "agent_id": loop.agent_id,
@@ -833,6 +837,11 @@ async def _fire_due_agent_message_loops(
                 str(getattr(agent, "group", "") or ""),
                 f"/loop fired ({run_number})",
             )
+    if loop_state_changed:
+        # Loop CRUD persists and emits deltas synchronously; the scheduler is
+        # otherwise idle until the next timed cycle, so flush exactly once per
+        # cycle with loop mutations to keep UI banners fresh without spam.
+        await state.broadcast()
     return fired
 
 
