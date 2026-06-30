@@ -756,7 +756,7 @@ function _helpRenderDetail(opts) {
   return html;
 }
 
-function _helpRenderQueryPanel() {
+function _helpRenderQueryResultBody() {
   var body = '';
   if (_helpState.queryStatus === 'idle') {
     body += '<div class="help-state help-empty">Ask Help returns extractive answers with visible sources.</div>';
@@ -789,6 +789,10 @@ function _helpRenderQueryPanel() {
     }
     body += '</div>';
   }
+  return body;
+}
+
+function _helpRenderQueryPanel() {
   return '<section class="help-query-panel" id="help-query-scroll">'
     + '<div class="help-query-title">Ask Help</div>'
     + '<div class="help-query-subtitle">Extractive lookup over maintained Torque docs. Answers cite source paths and do not inspect board, journal, user, or runtime state.</div>'
@@ -798,7 +802,13 @@ function _helpRenderQueryPanel() {
     + '<button type="button" class="btn-primary" id="help-query-ask-button">Ask</button>'
     + '<button type="button" class="btn-secondary" id="help-query-clear-button">Clear</button>'
     + '</form>'
-    + '<div class="help-query-result-scroll" id="help-query-result-scroll" aria-live="polite">' + body + '</div>'
+    + '</section>';
+}
+
+function _helpRenderQueryResultCard() {
+  return '<section class="help-query-result-card help-query-result-scroll" id="help-query-result-scroll" aria-live="polite">'
+    + '<div class="help-query-answer-label">Ask Help result</div>'
+    + _helpRenderQueryResultBody()
     + '</section>';
 }
 
@@ -830,6 +840,7 @@ function renderHelpPanel() {
     + _helpRenderHeader()
     + _helpRenderTopicLauncher()
     + _helpRenderQueryPanel()
+    + _helpRenderQueryResultCard()
     + '<div class="help-workspace" id="help-workspace-scroll">'
     + _helpRenderDetail()
     + '</div>'

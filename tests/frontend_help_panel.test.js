@@ -323,8 +323,8 @@ function searchPayload() {
   };
 }
 
-function queryPayload() {
-  return {
+function queryPayload(overrides = {}) {
+  return Object.assign({
     type: 'help_query',
     schema_version: 1,
     status: 'answered',
@@ -343,7 +343,7 @@ function queryPayload() {
     results: [],
     index_hash: 'idx-query',
     source_model: { restricted_safe: true },
-  };
+  }, overrides);
 }
 
 function createSandbox(options = {}) {
@@ -385,7 +385,7 @@ function createSandbox(options = {}) {
           type: 'help_query', schema_version: 1, status: 'no_answer', question: body.question,
           answer: 'No maintained Torque Help documentation matched this question. Try `help_search` with broader terms or inspect `help_list`.',
           sources: [], results: [], index_hash: 'idx-no-answer', source_model: {},
-        } : queryPayload();
+        } : queryPayload(options.query || {});
       } else {
         data = { type: 'error', message: 'unexpected command' };
       }
@@ -421,12 +421,13 @@ test('Help panel is wired as a first-class panel app', () => {
   assert.match(main, /helpEnsureLoaded/);
   assert.match(render, /surface === 'help'/);
   assert.match(css, /#panel-help\s*\{[\s\S]*container-type:\s*inline-size;/);
-  assert.match(css, /\.help-query-result-scroll\s*\{[\s\S]*overflow:\s*auto;/);
+  assert.match(css, /\.help-query-result-card\s*\{[\s\S]*overflow:\s*visible;/);
+  assert.match(css, /\.help-panel\s*\{[\s\S]*overflow-y:\s*auto;/);
   assert.match(css, /\.help-topic-browser-modal\s*\{[\s\S]*height:\s*min\(84vh, 820px\);/);
   assert.match(css, /\.help-markdown \.torque-md-link-disabled\s*\{[\s\S]*text-decoration:\s*none;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-panel\s*\{[\s\S]*overflow-y:\s*auto;/);
-  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-panel\s*\{[\s\S]*flex:\s*0 0 220px;[\s\S]*min-height:\s*220px;/);
-  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-result-scroll\s*\{[\s\S]*min-height:\s*72px;/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-panel\s*\{[\s\S]*min-height:\s*0;/);
+  assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-result-card\s*\{[\s\S]*min-height:\s*72px;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-detail\s*\{[\s\S]*overflow:\s*auto;/);
   assert.match(css, /\.help-search-input,[\s\S]*\.help-audience-select\s*\{[\s\S]*box-sizing:\s*border-box;[\s\S]*height:\s*30px;/);
   assert.match(css, /\.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*justify-content:\s*center;[\s\S]*box-sizing:\s*border-box;[\s\S]*height:\s*30px;/);
@@ -450,6 +451,7 @@ test('Help panel loads topics, preserves search order, shows detail, and queries
   assert.match(html, /Freshness and source model/);
   assert.match(html, /Browse topics…/);
   assert.doesNotMatch(html, /class="help-browser"/);
+  assert.doesNotMatch(html, /class="help-topic-card/);
 
   await vm.runInContext(`helpSearchInputChanged('review'); helpRunSearch()`, sandbox);
   vm.runInContext('helpOpenTopicBrowser()', sandbox);
@@ -651,7 +653,29 @@ test('Help Ask submit reads live input, invokes help_query, and renders answer s
   assert.equal(JSON.stringify(document.getElementById('help-query-result-scroll').scrollIntoViewOptions), JSON.stringify({ block: 'nearest', inline: 'nearest' }));
   assert.match(html, /<form class="help-query-row" id="help-query-form">/);
   assert.match(html, /<button type="button" class="btn-primary" id="help-query-ask-button">Ask<\/button>/);
-  assert.match(html, /id="help-query-result-scroll" aria-live="polite"/);
+  assert.match(html, /class="help-query-panel"[\s\S]*<\/section>[\s\S]*class="help-query-result-card help-query-result-scroll" id="help-query-result-scroll" aria-live="polite"/);
+});
+
+
+test('Help Ask renders long answers in a separate result card below the input card', async () => {
+  const longAnswer = Array.from({ length: 30 }, (_value, index) => `Long answer paragraph ${index + 1}: derive review, cite sources, and keep enough text visible for panel scrolling.`).join('\n\n');
+  const { sandbox, document, fetchCalls } = createSandbox({ query: { answer: longAnswer } });
+  await vm.runInContext('helpEnsureLoaded({ force: true })', sandbox);
+
+  document.getElementById('help-query-input').value = 'How do I derive review?';
+  await vm.runInContext('helpRunQuery()', sandbox);
+
+  const html = document.getElementById('panel-help').innerHTML;
+  const queryPanelStart = html.indexOf('class="help-query-panel"');
+  const queryPanelEnd = html.indexOf('</section>', queryPanelStart);
+  const resultCardStart = html.indexOf('class="help-query-result-card help-query-result-scroll"');
+  assert.equal(fetchCalls.at(-1).cmd, 'help_query');
+  assert.ok(queryPanelStart >= 0, 'expected Ask Help input card');
+  assert.ok(resultCardStart > queryPanelEnd, 'expected result card after Ask Help input card');
+  assert.doesNotMatch(html.slice(queryPanelStart, queryPanelEnd), /Long answer paragraph 30/);
+  assert.match(html.slice(resultCardStart), /Ask Help result/);
+  assert.match(html.slice(resultCardStart), /Long answer paragraph 30/);
+  assert.match(html.slice(resultCardStart), /AGENTS\.md#worker-dispatch-and-reporting/);
 });
 
 test('Help Ask button DOM click calls help_query exactly once and preserves query focus state', async () => {
