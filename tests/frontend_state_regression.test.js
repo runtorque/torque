@@ -12383,6 +12383,99 @@ test('embedded terminal direct-message panel renders blocking asks, ask replies,
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--ask selected/);
 });
 
+test('embedded terminal direct-message System rows render as right-aligned green status cards without changing order or text', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [
+      {
+        message_id: 'dm-user',
+        message_type: 'message',
+        message: 'Please run /loop every 5m',
+        sender_id: 'user',
+        sender_kind: 'user',
+        recipient_id: 'agent-1',
+        recipient_kind: 'worker',
+        created_at: 10,
+      },
+      {
+        message_id: 'dm-system',
+        message_type: 'system',
+        message: '/loop started: Every 5m — run checks',
+        sender_id: 'system',
+        sender_kind: 'system',
+        recipient_id: 'agent-1',
+        recipient_kind: 'worker',
+        created_at: 11,
+      },
+      {
+        message_id: 'dm-agent',
+        message_type: 'message',
+        message: 'Acknowledged',
+        sender_id: 'agent-1',
+        sender_kind: 'worker',
+        sender_name: 'Builder',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+        created_at: 12,
+      },
+    ],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace();
+  `);
+
+  const html = dom.directMessages.innerHTML;
+  assert.ok(
+    html.indexOf('Please run /loop every 5m')
+      < html.indexOf('/loop started: Every 5m — run checks'),
+    'user message remains before System audit row',
+  );
+  assert.ok(
+    html.indexOf('/loop started: Every 5m — run checks')
+      < html.indexOf('Acknowledged'),
+    'System audit row remains before subsequent agent message',
+  );
+  assert.match(html, /terminal-direct-message--user-to-agent/);
+  assert.match(html, /terminal-direct-message--agent-to-user/);
+  assert.match(html, /terminal-direct-message--system/);
+  assert.match(html, /terminal-direct-message--status-card/);
+  assert.equal((html.match(/terminal-direct-message--status-card/g) || []).length, 1);
+  assert.match(html, /<span class="terminal-direct-message-sender">System<\/span>/);
+  assert.match(html, /<span class="terminal-direct-message-badge">System<\/span>/);
+  assert.match(html, /<div class="terminal-direct-message-body torque-markdown"><p>\/loop started: Every 5m — run checks<\/p><\/div>/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const systemRule = css.match(/\.terminal-direct-message--system\s*\{[^}]+\}/);
+  assert.ok(systemRule, 'System direct-message CSS rule exists');
+  assert.match(systemRule[0], /align-self:\s*flex-end;/);
+  assert.match(systemRule[0], /var\(--green\)/);
+  assert.doesNotMatch(systemRule[0], /align-self:\s*center;/);
+  assert.match(css, /\.terminal-direct-message--user-to-agent\s*\{[^}]*align-self:\s*flex-end;/s);
+  assert.match(css, /\.terminal-direct-message--agent-to-user\s*\{[^}]*align-self:\s*flex-start;/s);
+});
+
 test('embedded terminal direct-message body renders shared markdown safely', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
