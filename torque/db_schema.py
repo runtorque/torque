@@ -849,7 +849,9 @@ CREATE TABLE IF NOT EXISTS agent_message_loops (
     next_run_at      REAL NOT NULL DEFAULT 0,
     last_run_at      REAL NOT NULL DEFAULT 0,
     run_count        INTEGER NOT NULL DEFAULT 0,
-    last_message_id  TEXT NOT NULL DEFAULT ''
+    last_message_id  TEXT NOT NULL DEFAULT '',
+    deferred_at      REAL NOT NULL DEFAULT 0,
+    deferred_reason  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_agent_message_loops_agent_status
     ON agent_message_loops(agent_id, status, updated_at DESC);

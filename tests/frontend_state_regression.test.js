@@ -14615,6 +14615,13 @@ test('terminal direct slash loop validates, sends, renders state, and cancel aff
   assert.match(html, /Every 10m/);
   assert.match(html, /Cancel/);
 
+  const deferredHtml = runInContext(context, `
+    state.agent_message_loops['loop-1'].deferred_at = 1893456010;
+    state.agent_message_loops['loop-1'].deferred_reason = 'agent_busy';
+    _renderTerminalAgentMessageLoopHtml(state.agents['agent-1']);
+  `);
+  assert.match(deferredHtml, /deferred until idle/);
+
   context.__cancelLoopEvt = {
     preventDefaultCalled: false,
     stopPropagationCalled: false,

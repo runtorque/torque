@@ -898,6 +898,8 @@ class TorqueDBTests(unittest.TestCase):
             next_run_at=610.0,
             last_run_at=0,
             run_count=0,
+            deferred_at=12.0,
+            deferred_reason="agent_busy",
         )
 
         self.db.save_agent_message_loop(loop)
@@ -910,6 +912,8 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(restored["message"], "check in")
         self.assertEqual(restored["status"], "active")
         self.assertEqual(restored["next_run_at"], 610.0)
+        self.assertEqual(restored["deferred_at"], 12.0)
+        self.assertEqual(restored["deferred_reason"], "agent_busy")
 
     def test_direct_and_peer_buffered_helpers_do_not_cross_return_rows(self):
         self.db.save_agent_peer_message({

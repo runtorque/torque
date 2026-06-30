@@ -721,6 +721,14 @@ def _should_handoff_shared_worktree(owner, *,
     )
 
 
+def _agent_message_loop_defer_reason(agent) -> str:
+    """Return a stable reason when /loop delivery would interrupt work."""
+    activity = str(getattr(agent, "activity", "") or "").strip()
+    if activity and activity != "waiting":
+        return "agent_busy"
+    return ""
+
+
 async def _fire_due_agent_message_loops(
         state: MatrixState,
         handle_command,
@@ -772,6 +780,20 @@ async def _fire_due_agent_message_loops(
             )
             loop_state_changed = loop_state_changed or bool(stopped)
             continue
+        defer_reason = _agent_message_loop_defer_reason(agent)
+        if defer_reason:
+            if (
+                not float(getattr(loop, "deferred_at", 0) or 0)
+                or str(getattr(loop, "deferred_reason", "") or "") != defer_reason
+            ):
+                deferred = state.agent_message_loop_update(
+                    loop.id,
+                    deferred_at=ts,
+                    deferred_reason=defer_reason,
+                    updated_at=ts,
+                )
+                loop_state_changed = loop_state_changed or bool(deferred)
+            continue
         run_number = int(loop.run_count or 0) + 1
         result = await handle_command({
             "cmd": "user_agent_message",
@@ -820,6 +842,8 @@ async def _fire_due_agent_message_loops(
             next_run_at=ts + max(1, int(loop.interval_seconds or 0)),
             run_count=run_number,
             last_message_id=message_id,
+            deferred_at=0,
+            deferred_reason="",
             updated_at=ts,
         )
         loop_state_changed = loop_state_changed or bool(updated)

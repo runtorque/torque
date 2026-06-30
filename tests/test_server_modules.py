@@ -3420,6 +3420,8 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         updated_loop = state.agent_message_loops[loop['id']]
         self.assertEqual(updated_loop.run_count, 1)
         self.assertGreater(updated_loop.next_run_at, 10.0)
+        self.assertEqual(updated_loop.deferred_at, 0)
+        self.assertEqual(updated_loop.deferred_reason, '')
         loop_row = self.db.load_direct_message(fired[0]['message_id'])
         self.assertEqual(loop_row['message_type'], 'loop')
         self.assertEqual(loop_row['context_snapshot']['loop_id'], loop['id'])
@@ -3473,6 +3475,234 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             any('System stopped /loop because delivery was not live' in row['message']
                 for row in offline_rows)
         )
+
+    async def test_due_agent_message_loop_defers_busy_target_then_fires_once_when_idle(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='running',
+            activity='tool_call',
+            activity_detail='sleep 120',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        async def handle_command(payload):
+            return await self.server_mod._handle_user_agent_message_command(
+                payload,
+                state,
+                fake_send_prompt,
+            )
+
+        loop = state.agent_message_loop_add(
+            agent_id=worker.id,
+            group_name='g',
+            interval_seconds=60,
+            message='please report after sleep',
+            created_by='user',
+            now=0.0,
+        )
+        state.agent_message_loop_update(loop.id, next_run_at=10.0)
+        state._delta_ops.clear()
+        broadcasts = []
+
+        async def capture_broadcast():
+            broadcasts.append([dict(op) for op in state._delta_ops])
+            state._delta_ops = []
+
+        state.broadcast = capture_broadcast
+        server_dispatch = importlib.import_module('torque.server_dispatch')
+        server_dispatch = importlib.reload(server_dispatch)
+
+        busy_first = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=10.0,
+        )
+        busy_second = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=40.0,
+        )
+
+        self.assertEqual(busy_first, [])
+        self.assertEqual(busy_second, [])
+        self.assertEqual(sent, [])
+        deferred = state.agent_message_loops[loop.id]
+        self.assertEqual(deferred.status, 'active')
+        self.assertEqual(deferred.run_count, 0)
+        self.assertEqual(deferred.next_run_at, 10.0)
+        self.assertEqual(deferred.deferred_at, 10.0)
+        self.assertEqual(deferred.deferred_reason, 'agent_busy')
+        self.assertEqual(len(broadcasts), 1)
+        loop_ops = [
+            op for op in broadcasts[0]
+            if op.get('op') == 'agent_message_loop_upsert'
+        ]
+        self.assertEqual(len(loop_ops), 1)
+        self.assertEqual(loop_ops[0]['loop']['deferred_reason'], 'agent_busy')
+
+        worker.activity = ''
+        worker.activity_detail = ''
+        fired = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=45.0,
+        )
+        duplicate = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=46.0,
+        )
+
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(duplicate, [])
+        self.assertEqual(len(sent), 1)
+        self.assertIn('please report after sleep', sent[0][1])
+        updated = state.agent_message_loops[loop.id]
+        self.assertEqual(updated.run_count, 1)
+        self.assertEqual(updated.last_run_at, 45.0)
+        self.assertEqual(updated.next_run_at, 105.0)
+        self.assertEqual(updated.deferred_at, 0)
+        self.assertEqual(updated.deferred_reason, '')
+
+    async def test_due_agent_message_loop_cancel_while_deferred_prevents_later_delivery(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='running',
+            activity='thinking',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        async def handle_command(payload):
+            return await self.server_mod._handle_user_agent_message_command(
+                payload,
+                state,
+                fake_send_prompt,
+            )
+
+        loop = state.agent_message_loop_add(
+            agent_id=worker.id,
+            group_name='g',
+            interval_seconds=60,
+            message='should not deliver after cancel',
+            created_by='user',
+            now=0.0,
+        )
+        state.agent_message_loop_update(loop.id, next_run_at=10.0)
+        server_dispatch = importlib.import_module('torque.server_dispatch')
+        server_dispatch = importlib.reload(server_dispatch)
+
+        deferred = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=10.0,
+        )
+        self.assertEqual(deferred, [])
+        self.assertEqual(state.agent_message_loops[loop.id].deferred_reason,
+                         'agent_busy')
+
+        cancelled = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/loop cancel',
+                'idempotency_key': 'loop-cancel-while-deferred',
+            },
+            state,
+            fake_send_prompt,
+        )
+        self.assertEqual(cancelled['type'], 'agent_message_loop')
+        self.assertEqual(cancelled['loop']['status'], 'cancelled')
+        self.assertEqual(cancelled['loop']['next_run_at'], 0)
+        self.assertEqual(cancelled['loop']['deferred_at'], 0)
+        self.assertEqual(cancelled['loop']['deferred_reason'], '')
+
+        worker.activity = ''
+        later = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=70.0,
+        )
+        self.assertEqual(later, [])
+        self.assertEqual(sent, [])
+        self.assertIsNone(state.active_agent_message_loop_for_agent(worker.id))
+
+    async def test_user_agent_message_busy_target_still_delivers_normal_dm(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='running',
+            activity='tool_call',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': 'Normal direct messages are unchanged.',
+                'idempotency_key': 'normal-dm-busy-target',
+            },
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['delivery_state'], 'delivered')
+        self.assertEqual(len(sent), 1)
+        self.assertIn('Normal direct messages are unchanged.', sent[0][1])
 
     async def test_due_agent_message_loop_fire_broadcasts_fresh_loop_delta_once(self):
         state = self._make_state()

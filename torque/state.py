@@ -1086,6 +1086,8 @@ class AgentMessageLoop:
     last_run_at: float = 0
     run_count: int = 0
     last_message_id: str = ""
+    deferred_at: float = 0
+    deferred_reason: str = ""
 
 
 @dataclass
@@ -13743,6 +13745,8 @@ class MatrixState:
         loop.stopped_by = str(stopped_by or "").strip()
         loop.stop_reason = str(reason or "").strip()
         loop.next_run_at = 0
+        loop.deferred_at = 0
+        loop.deferred_reason = ""
         loop.updated_at = ts
         self._emit("agent_message_loop_upsert", loop=asdict(loop))
         self._db_save_agent_message_loop(loop)
