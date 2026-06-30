@@ -939,10 +939,58 @@ function onGroupTabContextMenu(e, group) {
   ]);
 }
 
+function _isTorqueStewardAgent(cell) {
+  if (!cell) return false;
+  const metadata = cell.effective_agent_class_snapshot && cell.effective_agent_class_snapshot.metadata
+    ? cell.effective_agent_class_snapshot.metadata : {};
+  return (cell.kind || '') === 'architect'
+    && (String(cell.agent_class_id || '') === 'torque-steward'
+      || String(cell.effective_agent_class_id || '') === 'torque-steward'
+      || String(metadata.archetype || '') === 'torque_steward'
+      || String(cell.name || '').trim() === 'Torque Steward');
+}
+
+function _findTorqueStewardInGroup(group) {
+  const groupName = String(group || '').trim();
+  if (!groupName || !state || !state.agents) return null;
+  const ids = (state.groups && state.groups[groupName]) || Object.keys(state.agents);
+  for (const id of ids) {
+    const cell = state.agents[id];
+    if (!cell || cell.group !== groupName) continue;
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) continue;
+    if (_isTorqueStewardAgent(cell)) return cell;
+  }
+  return null;
+}
+
+function launchTorqueStewardForGroup(group) {
+  const groupName = String(group || '').trim();
+  if (!groupName) return;
+  const existing = _findTorqueStewardInGroup(groupName);
+  if (existing) {
+    if (typeof focusAgent === 'function') focusAgent(existing.id);
+    if (!existing.session_id && Number(existing.dismissed_at || 0) <= 0 && typeof relaunchAgent === 'function') {
+      relaunchAgent(existing.id);
+    } else if (Number(existing.dismissed_at || 0) > 0 && typeof rehireArchitect === 'function') {
+      rehireArchitect(existing.id);
+    }
+    return;
+  }
+  send({
+    cmd: 'create_agent_from_class',
+    class_id: 'torque-steward',
+    kind: 'architect',
+    name: 'Torque Steward',
+    group: groupName,
+  });
+}
+
 function _agentGridNewMenuItems(group) {
   const groupName = String(group || '').trim();
   if (!groupName) return [];
+  const steward = _findTorqueStewardInGroup(groupName);
   return [
+    { label: steward ? 'Open Torque Steward' : 'Launch Torque Steward', action: 'launchTorqueStewardForGroup(' + JSON.stringify(groupName) + ')' },
     { label: 'New architect', action: 'openAddArchitectForGroup(' + JSON.stringify(groupName) + ')' },
     { label: 'New engineer', action: 'openAddEngineerForSection(' + JSON.stringify(groupName) + ', "")' },
     { label: 'New worker', action: 'openAddWorkerForSection(' + JSON.stringify(groupName) + ')' },

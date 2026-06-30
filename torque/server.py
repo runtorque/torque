@@ -11698,10 +11698,35 @@ def _agent_overrides_from_role_settings(kind: str, settings) -> dict:
     return out
 
 
+TORQUE_STEWARD_AGENT_CLASS_ID = "torque-steward"
+TORQUE_STEWARD_DISPLAY_NAME = "Torque Steward"
+
+
 def _requested_agent_class_id(data: dict) -> str:
     return str(
         data.get("agent_class_id", data.get("class_id", "")) or ""
     ).strip()
+
+
+def _is_torque_steward_class_id(class_id: str) -> bool:
+    return str(class_id or "").strip() == TORQUE_STEWARD_AGENT_CLASS_ID
+
+
+def _apply_steward_launch_identity(data: dict) -> dict:
+    """Return a launch payload with the built-in Steward's stable identity.
+
+    The Steward MVP is explicitly launched by class selection, but its visible
+    identity is intentionally not user-renamable in this bounded wave: the
+    Architect-derived session should appear as ``Torque Steward`` everywhere.
+    """
+
+    if not isinstance(data, dict):
+        return data
+    if not _is_torque_steward_class_id(_requested_agent_class_id(data)):
+        return data
+    payload = dict(data)
+    payload["name"] = TORQUE_STEWARD_DISPLAY_NAME
+    return payload
 
 
 def _apply_agent_class_launch_selection(
@@ -11905,6 +11930,7 @@ async def _handle_add_architect_command(
         send_agent_prompt,
         resolve_architect_launch_config=None) -> dict:
     """Create and launch a persistent architect agent."""
+    data = _apply_steward_launch_identity(data)
     name = str(data.get("name", "") or "").strip()
     if not name:
         return {"type": "error", "message": "Architect name is required"}
@@ -12167,6 +12193,7 @@ async def _handle_agent_class_launch_command(
     payload = dict(data)
     payload["group"] = group
     payload["agent_class_id"] = definition.id
+    payload = _apply_steward_launch_identity(payload)
     payload.pop("class_id", None)
     if definition.base_kind == "architect":
         created = await _handle_add_architect_command(

@@ -2005,6 +2005,7 @@ function _agentClassOperatorAccessHtml(preview) {
   preview = preview || {};
   if (_agentClassIsProductManager(preview)) return _agentClassProductManagerCompactPolicyHtml(preview);
   if (_agentClassIsCreativeArchitect(preview)) return _agentClassCreativeArchitectCompactPolicyHtml(preview);
+  if (_agentClassIsTorqueSteward(preview)) return _agentClassTorqueStewardCompactPolicyHtml(preview);
   var summary = (preview.operator_access_summary && typeof preview.operator_access_summary === 'object')
     ? preview.operator_access_summary
     : ((preview.capability_bucket_summary && typeof preview.capability_bucket_summary === 'object') ? preview.capability_bucket_summary : {});
@@ -2121,12 +2122,12 @@ function _agentClassPreviewHtml(preview, validation) {
   var issues = [];
   if (validation && Array.isArray(validation.errors)) issues = issues.concat(validation.errors);
   if (validation && Array.isArray(validation.warnings)) issues = issues.concat(validation.warnings);
-  if (!isProductManager && !isCreativeArchitect && Array.isArray(preview.warnings)) {
+  if (!isProductManager && !isCreativeArchitect && !_agentClassIsTorqueSteward(preview) && Array.isArray(preview.warnings)) {
     issues = issues.concat(_agentClassUniqueWarnings(preview));
   }
   if (issues.length) html += _agentClassIssuesHtml(issues, 'Warnings / validation');
   if (disabledReason) html += '<div class="agent-class-error">' + esc(disabledReason) + '</div>';
-  var filteredRestrictions = (isProductManager || _agentClassIsCreativeArchitect(preview)) ? [] : _agentClassFilteredOperatorRestrictions(preview);
+  var filteredRestrictions = (isProductManager || _agentClassIsCreativeArchitect(preview) || _agentClassIsTorqueSteward(preview)) ? [] : _agentClassFilteredOperatorRestrictions(preview);
   if (filteredRestrictions.length) {
     html += '<div class="agent-class-restrictions"><div class="agent-class-block-title">Additional restrictions</div><ul>';
     for (var i = 0; i < filteredRestrictions.length; i++) html += '<li>' + esc(filteredRestrictions[i]) + '</li>';
@@ -2186,6 +2187,15 @@ function _agentClassIsCreativeArchitect(item, rawLabel) {
   return String(item.id || '') === 'creative-architect'
     || String(metadata.archetype || '') === 'creative_architect'
     || label === 'Creative Architect';
+}
+
+function _agentClassIsTorqueSteward(item, rawLabel) {
+  item = item || {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  var label = String(rawLabel || _agentClassRawDisplayName(item, '') || '').trim();
+  return String(item.id || '') === 'torque-steward'
+    || String(metadata.archetype || '') === 'torque_steward'
+    || label === 'Torque Steward';
 }
 
 function _agentClassDogfoodApproved(item) {
@@ -2264,6 +2274,26 @@ function _agentClassCreativeArchitectCompactPolicyHtml(item) {
   html += '<div class="agent-class-compact-access">'
     + '<div><span>Allowed</span><strong>same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad/Mind Map writes, caller-owned Idea Brief drafts/refinements, proposed decisions, queued task ideas, user + product-peer messages</strong></div>'
     + '<div><span>Denied</span><strong>hire/assign/dispatch, execution task control, merge/deploy/admin/settings, direct Engineer/Worker messages, accepted decisions, arbitrary tool access, connector governance</strong></div>'
+    + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentClassTorqueStewardCompactPolicyHtml(item) {
+  item = item || {};
+  var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="torque-steward">';
+  html += '<div class="agent-class-compact-chips">';
+  html += '<span>Torque Steward</span>';
+  html += '<span class="agent-profile-chip-full">Read-only</span>';
+  html += '<span>Operating brief</span>';
+  html += '<span>Architect-derived</span>';
+  html += '</div>';
+  html += '<div class="agent-class-compact-note">'
+    + 'Conservative group operations steward for launchable read-only briefs: what is happening, what is stuck, what needs attention, and who should handle it next.'
+    + '</div>';
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>visible same-group board/task summaries, recent events/tool activity, Planning/Decision reads, onboarding explanations, anomaly and handoff recommendations</strong></div>'
+    + '<div><span>Denied</span><strong>dispatch/assign/hire, task mutation, Engineer/Worker control, messages, merge/rebase, restart/compact/deploy/admin, class/profile edits, accepted decisions</strong></div>'
     + '</div>';
   html += '</div>';
   return html;

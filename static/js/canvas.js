@@ -96,9 +96,24 @@ function _canvasBuildTrees(groupName) {
     if (av !== bv) return av - bv;
     return String(a.id || '').localeCompare(String(b.id || ''));
   };
+  const isStewardArchitect = function(a) {
+    const metadata = a && a.effective_agent_class_snapshot && a.effective_agent_class_snapshot.metadata
+      ? a.effective_agent_class_snapshot.metadata : {};
+    return !!(a && (a.kind || '') === 'architect'
+      && (String(a.agent_class_id || '') === 'torque-steward'
+        || String(a.effective_agent_class_id || '') === 'torque-steward'
+        || String(metadata.archetype || '') === 'torque_steward'
+        || String(a.name || '').trim() === 'Torque Steward'));
+  };
+  const architectSort = function(a, b) {
+    const ap = isStewardArchitect(a) ? 0 : 1;
+    const bp = isStewardArchitect(b) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return archByName(a, b);
+  };
 
   const architects = all.filter(function(a) { return (a.kind || '') === 'architect'; });
-  architects.sort(archByName);
+  architects.sort(architectSort);
 
   for (const arch of architects) {
     const engineers = all.filter(function(e) {
