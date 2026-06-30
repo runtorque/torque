@@ -86,6 +86,7 @@ class FakeElement {
       });
     }
     this.children = [];
+    if (Object.prototype.hasOwnProperty.call(this, 'childNodes')) this.childNodes = [];
   }
 
   appendChild(child) {
@@ -13718,6 +13719,7 @@ test('embedded terminal rich direct-message composer preserves block-created new
     textNode('line one'),
     elementNode('DIV', [textNode('line two')]),
   ];
+  input._innerHTML = 'line one<div>line two</div>';
   const button = document.register('terminal-compose-submit-agent-1');
   button.classList.add('terminal-compose-submit');
   form.appendChild(input);
