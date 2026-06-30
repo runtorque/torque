@@ -1291,6 +1291,108 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(mismatch["type"], "error")
         self.assertEqual(mismatch["code"], "agent_class_base_kind_mismatch")
 
+    def test_torque_steward_launch_defaults_to_stable_identity_and_read_only_policy(self):
+        from torque.server import _handle_agent_class_launch_command
+
+        async def resolve_base_dir(_group):
+            return str(self.project)
+
+        def resolve_launch_config(_group, *, base_dir="", explicit_template="", overrides=None):
+            del explicit_template, overrides
+            return {
+                "profile": "Default",
+                "command": "codex",
+                "directory": base_dir or str(self.project),
+                "tab_color": "",
+                "icon": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "",
+                "system_prompt": "",
+                "agent_type": "codex",
+                "session_resume": True,
+                "idle_timeout": 0,
+                "worktree": False,
+                "worktree_base_dir": ".torque/worktrees",
+                "worktree_auto_checkpoint": False,
+                "checkpoint_on_progress": False,
+                "worktree_merge_squash": True,
+                "terminals": [],
+            }
+
+        created_prompt = {}
+
+        async def create_agent_with_config(group, name, launch_cfg, **kwargs):
+            kind = kwargs.get("kind", "")
+            created_prompt["persistent_prompt_text"] = kwargs.get("persistent_prompt_text", "")
+            cell = AgentCell(
+                id=f"{kind}-steward",
+                name=name,
+                group=group,
+                cell_type="agent",
+                kind=kind,
+                directory=launch_cfg.get("directory", ""),
+                profile=launch_cfg.get("profile", ""),
+                command=launch_cfg.get("command", ""),
+            )
+            cell.agent_class_id = launch_cfg.get("agent_class_id", "")
+            cell.agent_class_version = launch_cfg.get("agent_class_version", "")
+            self.state.agents[cell.id] = cell
+            self.state.groups.setdefault(group, []).append(cell.id)
+            self.state.apply_effective_agent_class_for_launch(
+                cell,
+                base_dir=cell.directory,
+            )
+            self.state._db_save_agent(cell)
+            return cell
+
+        async def send_agent_prompt(*_args, **_kwargs):
+            return None
+
+        async def run_launch():
+            return await _handle_agent_class_launch_command(
+                {
+                    "cmd": "create_agent_from_class",
+                    "class_id": "torque-steward",
+                    "name": "Custom Steward Name",
+                    "group": "g",
+                },
+                self.state,
+                resolve_base_dir=resolve_base_dir,
+                resolve_agent_launch_config=resolve_launch_config,
+                resolve_engineer_launch_config=resolve_launch_config,
+                resolve_architect_launch_config=resolve_launch_config,
+                resolve_worker_launch_config=resolve_launch_config,
+                create_agent_with_config=create_agent_with_config,
+                specialization_mgr=None,
+                send_agent_prompt=send_agent_prompt,
+            )
+
+        launched = asyncio.run(run_launch())
+
+        self.assertEqual(launched["type"], "agent_class_launch")
+        self.assertEqual(launched["agent"]["name"], "Torque Steward")
+        self.assertEqual(launched["agent"]["kind"], "architect")
+        cell = self.state.agents["architect-steward"]
+        self.assertEqual(cell.name, "Torque Steward")
+        self.assertEqual(cell.effective_agent_class_id, "torque-steward")
+        self.assertEqual(cell.effective_agent_profile_id, "class-policy-torque-steward")
+        status = cell.effective_agent_class_snapshot.get("torque_steward_status", {})
+        self.assertEqual(status.get("authority_model"), "conservative_observer_suggester")
+        self.assertFalse(status.get("raw_architect_authority"))
+        self.assertFalse(status.get("autonomous_mutation_authority"))
+        projected = {
+            item.get("category"): item.get("status")
+            for item in cell.effective_agent_profile_snapshot.get("projected_tool_categories", [])
+        }
+        self.assertEqual(projected.get("worker_dispatch"), "denied")
+        self.assertEqual(projected.get("execution_task_control"), "denied")
+        self.assertEqual(projected.get("deploy_admin"), "denied")
+        self.assertEqual(projected.get("profile_admin"), "denied")
+        self.assertEqual(projected.get("planning_reads"), "allowed")
+        self.assertIn("Torque Steward", created_prompt["persistent_prompt_text"])
+        self.assertIn("observation/recommendation only", created_prompt["persistent_prompt_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

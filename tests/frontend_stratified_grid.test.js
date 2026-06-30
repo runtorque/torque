@@ -197,7 +197,7 @@ test('empty strata are hidden while the grid-level new menu remains', () => {
 });
 
 test('grid-level + New menu opens standalone architect, engineer, and worker flows', () => {
-  const { context, mainEl } = createHarness();
+  const { context, sandbox, mainEl } = createHarness();
   const menuCalls = [];
   context.showContextMenu = function(x, y, items) {
     menuCalls.push({ x, y, items });
@@ -224,6 +224,7 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
 
   assert.equal(menuCalls.length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(menuCalls[0].items.map(item => item.label))), [
+    'Launch Torque Steward',
     'New architect',
     'New engineer',
     'New worker',
@@ -239,6 +240,28 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
     { type: 'engineer', group: 'torque', architectId: '' },
     { type: 'worker', group: 'torque' },
   ]);
+  assert.ok(sandbox.sendCalls.some(c => c.cmd === 'create_agent_from_class'
+    && c.class_id === 'torque-steward'
+    && c.name === 'Torque Steward'
+    && c.group === 'torque'));
+});
+
+test('stratified grid pins Torque Steward before older architects when present', () => {
+  const { context, sandbox } = createHarness();
+  sandbox.state.groups.torque = ['arch-old', 'arch-steward', 'arch-late'];
+  sandbox.state.agents['arch-old'] = architect('arch-old', 'Torqly', 1);
+  sandbox.state.agents['arch-steward'] = Object.assign(architect('arch-steward', 'Torque Steward', 20), {
+    agent_class_id: 'torque-steward',
+    effective_agent_class_id: 'torque-steward',
+  });
+  sandbox.state.agents['arch-late'] = architect('arch-late', 'Blueprint', 30);
+
+  vm.runInContext('render();', context);
+
+  assert.deepEqual(JSON.parse(vm.runInContext(
+    'JSON.stringify((window._navGridRows || []).filter(function(row) { return row.rowType === "architect-empty-row"; }).map(function(row) { return row.architectId; }))',
+    context,
+  )), ['arch-steward', 'arch-old', 'arch-late']);
 });
 
 test('navigation model includes all visible strata in visual order without legacy principal rows', () => {

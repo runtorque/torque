@@ -538,6 +538,24 @@ function sampleClasses() {
       external_connector_caveat: 'External connector caveat.',
       restrictions: ['Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.'],
     },
+    {
+      id: 'torque-steward', version: '1', base_kind: 'architect', display_name: 'Torque Steward',
+      primary_identity_label: 'Torque Steward', secondary_base_kind_label: 'Architect-derived',
+      description: 'Conservative built-in group operations steward foundation; observes, explains, and recommends without mutating authority.',
+      purpose: 'Conservative group operations steward for launchable read-only briefs: what is happening, what is stuck, what needs attention, and who should handle it next.',
+      lifecycle: 'draft', builtin: true, custom: false, source: 'builtin', status: 'draft', scratch_only: true, launchable: true,
+      metadata: { archetype: 'torque_steward', foundation_wave: 'A', authority_model: 'conservative_observer_suggester' },
+      torque_steward_status: { authority_model: 'conservative_observer_suggester', auto_create_enabled: false, raw_architect_authority: false, autonomous_mutation_authority: false },
+      agent_profile_ref: { id: 'class-policy-torque-steward', version: '1' },
+      agent_profile: { id: 'class-policy-torque-steward', version: '1', status: 'draft', capability_count: 9 },
+      internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
+      prompt_summary: { has_prompt: true, char_count: 500, preview: 'You are using the Torque Steward Agent Class foundation. Observe and recommend only.' },
+      capability_bucket_selection: ['self_context', 'planning_reads', 'recent_context_reads', 'board_task_reads'],
+      restriction_bucket_selection: ['deny_engineer_management', 'deny_worker_dispatch', 'deny_execution_task_control', 'deny_engineer_worker_messages', 'deny_worktree_merge', 'deny_deploy_admin', 'deny_class_profile_admin', 'deny_decision_acceptance', 'deny_raw_tool_picker', 'deny_high_risk_operations'],
+      warnings: ['Torque Steward Wave A is a read-only/draft foundation. It must not be auto-created, auto-run, or treated as broad user-delegated authority until later review approves those powers.'],
+      external_connector_caveat: 'External connector caveat.',
+      restrictions: ['Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.'],
+    },
   ];
 }
 
@@ -553,6 +571,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(classUi(document, panel), /Old Worker/);
   assert.match(classUi(document, panel), /Product Manager/);
   assert.match(classUi(document, panel), /Creative/);
+  assert.match(classUi(document, panel), /Torque Steward/);
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
@@ -590,6 +609,27 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
     class_id: 'creative-architect',
     kind: 'architect',
     name: 'Spark Partner',
+    group: 'alpha',
+    base_dir: '/repo',
+  });
+
+  run(context, `agentClassManagerSelect('torque-steward')`);
+  run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[5])} })`);
+  const stewardHtml = classUi(document, panel);
+  assert.match(stewardHtml, /Torque Steward@1/);
+  assert.match(stewardHtml, /Read-only/);
+  assert.match(stewardHtml, /Operating brief/);
+  assert.match(stewardHtml, /what is happening, what is stuck, what needs attention, and who should handle it next/);
+  assert.match(stewardHtml, /Denied[\s\S]*dispatch\/assign\/hire, task mutation, Engineer\/Worker control/);
+  assert.doesNotMatch(stewardHtml, /Additional restrictions[\s\S]*Agent Profile-compatible internal policy/);
+  document.getElementById('agent-class-launch-name').value = 'Torque Steward';
+  document.getElementById('agent-class-launch-group').value = 'alpha';
+  run(context, `agentClassManagerLaunchSelected()`);
+  assert.deepEqual(sendCalls.at(-1), {
+    cmd: 'create_agent_from_class',
+    class_id: 'torque-steward',
+    kind: 'architect',
+    name: 'Torque Steward',
     group: 'alpha',
     base_dir: '/repo',
   });
@@ -848,6 +888,15 @@ test('Agent Class pickers filter by base kind and preserve no-class default add 
   run(context, `submitAddArchitect();`);
   assert.equal(sendCalls.at(-1).cmd, 'add_architect');
   assert.equal(sendCalls.at(-1).agent_class_id, 'creative-architect');
+
+  run(context, `openAddArchitectModal({ group: 'alpha' }); agentClassPickerSelect('add-architect', 'torque-steward');`);
+  assert.match(document.getElementById('architect-agent-class-select').innerHTML, /Torque Steward@1 · Architect-derived/);
+  assert.match(document.getElementById('architect-agent-class-hint').textContent, /Launch freezes Torque Steward@1/);
+  document.getElementById('architect-name-input').value = 'Torque Steward';
+  run(context, `submitAddArchitect();`);
+  assert.equal(sendCalls.at(-1).cmd, 'add_architect');
+  assert.equal(sendCalls.at(-1).agent_class_id, 'torque-steward');
+  assert.equal(sendCalls.at(-1).name, 'Torque Steward');
 });
 
 test('Agent Class add-worker picker blocks stale archived selections instead of defaulting', () => {

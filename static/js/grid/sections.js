@@ -1,3 +1,23 @@
+function _agentGridIsTorqueSteward(agent) {
+  if (!agent) return false;
+  const metadata = agent.effective_agent_class_snapshot && agent.effective_agent_class_snapshot.metadata
+    ? agent.effective_agent_class_snapshot.metadata : {};
+  return (agent.kind || '') === 'architect'
+    && (String(agent.agent_class_id || '') === 'torque-steward'
+      || String(agent.effective_agent_class_id || '') === 'torque-steward'
+      || String(metadata.archetype || '') === 'torque_steward'
+      || String(agent.name || '').trim() === 'Torque Steward');
+}
+
+function _sortArchitectsWithStewardPinned(architects, indexById) {
+  return _sortAgentsByCreation(architects, indexById).sort(function(a, b) {
+    const av = _agentGridIsTorqueSteward(a) ? 0 : 1;
+    const bv = _agentGridIsTorqueSteward(b) ? 0 : 1;
+    if (av !== bv) return av - bv;
+    return 0;
+  });
+}
+
 function _buildHierarchicalAgentSections(agents) {
   const visibleById = {};
   const architects = [];
@@ -71,7 +91,7 @@ function _buildHierarchicalAgentSections(agents) {
     rows: engineerRows(userEngineers),
   }];
 
-  const sortedArchitects = _sortAgentsByCreation(architects, indexById);
+  const sortedArchitects = _sortArchitectsWithStewardPinned(architects, indexById);
   for (const architect of sortedArchitects) {
     sections.push({
       key: 'architect:' + String(architect.id || ''),

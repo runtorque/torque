@@ -1459,6 +1459,15 @@ function _agentPanelClassIsCreativeArchitect(item, rawLabel) {
     || label === 'Creative Architect';
 }
 
+function _agentPanelClassIsTorqueSteward(item, rawLabel) {
+  item = item || {};
+  var metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  var label = String(rawLabel || _agentPanelClassRawDisplayName(item, '') || '').trim();
+  return String(item.id || '') === 'torque-steward'
+    || String(metadata.archetype || '') === 'torque_steward'
+    || label === 'Torque Steward';
+}
+
 function _agentPanelClassDogfoodApproved(item) {
   item = item || {};
   var draft = item.draft && typeof item.draft === 'object' ? item.draft : {};
@@ -1539,6 +1548,26 @@ function _agentPanelCreativeArchitectCompactPolicyHtml(item) {
   html += '<div class="agent-class-compact-access">'
     + '<div><span>Allowed</span><strong>same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad/Mind Map writes, caller-owned Idea Brief drafts/refinements, proposed decisions, queued task ideas, user + product-peer messages</strong></div>'
     + '<div><span>Denied</span><strong>hire/assign/dispatch, execution task control, merge/deploy/admin/settings, direct Engineer/Worker messages, accepted decisions, arbitrary tool access, connector governance</strong></div>'
+    + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelTorqueStewardCompactPolicyHtml(item) {
+  item = item || {};
+  var html = '<div class="agent-class-compact-status" data-agent-class-compact-status="torque-steward">';
+  html += '<div class="agent-class-compact-chips">';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Torque Steward</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip agent-profile-chip-full">Read-only</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Operating brief</span>';
+  html += '<span class="agent-profile-chip agent-class-compact-chip">Architect-derived</span>';
+  html += '</div>';
+  html += '<div class="agent-class-compact-note">'
+    + 'Conservative group operations steward for launchable read-only briefs: what is happening, what is stuck, what needs attention, and who should handle it next.'
+    + '</div>';
+  html += '<div class="agent-class-compact-access">'
+    + '<div><span>Allowed</span><strong>visible same-group board/task summaries, recent events/tool activity, Planning/Decision reads, onboarding explanations, anomaly and handoff recommendations</strong></div>'
+    + '<div><span>Denied</span><strong>dispatch/assign/hire, task mutation, Engineer/Worker control, messages, merge/rebase, restart/compact/deploy/admin, class/profile edits, accepted decisions</strong></div>'
     + '</div>';
   html += '</div>';
   return html;
@@ -1834,7 +1863,7 @@ function _agentPanelClassBadgeHtml(agent) {
     titleParts.push('desired next launch: ' + state.desiredLabel + _agentPanelClassVersionSuffix(state.desiredVersion));
   }
   var snapshot = _agentPanelClassSnapshot(agent);
-  var badgeWarnings = (_agentPanelClassIsProductManager(snapshot) || _agentPanelClassIsCreativeArchitect(snapshot))
+  var badgeWarnings = (_agentPanelClassIsProductManager(snapshot) || _agentPanelClassIsCreativeArchitect(snapshot) || _agentPanelClassIsTorqueSteward(snapshot))
     ? []
     : _agentPanelClassUniqueWarnings(snapshot);
   for (var i = 0; i < badgeWarnings.length && i < 3; i++) {
@@ -3504,6 +3533,9 @@ function _agentPanelClassWarningsHtml(item) {
   if (_agentPanelClassIsCreativeArchitect(item)) {
     return _agentPanelCreativeArchitectCompactPolicyHtml(item);
   }
+  if (_agentPanelClassIsTorqueSteward(item)) {
+    return _agentPanelTorqueStewardCompactPolicyHtml(item);
+  }
   var warnings = _agentPanelClassUniqueWarnings(item);
   var html = '';
   if (warnings.length) {
@@ -3642,6 +3674,7 @@ function _agentPanelClassOperatorAccessHtml(item) {
   item = item || {};
   if (_agentPanelClassIsProductManager(item)) return _agentPanelProductManagerCompactPolicyHtml(item);
   if (_agentPanelClassIsCreativeArchitect(item)) return _agentPanelCreativeArchitectCompactPolicyHtml(item);
+  if (_agentPanelClassIsTorqueSteward(item)) return _agentPanelTorqueStewardCompactPolicyHtml(item);
   var summary = (item.operator_access_summary && typeof item.operator_access_summary === 'object')
     ? item.operator_access_summary
     : ((item.capability_bucket_summary && typeof item.capability_bucket_summary === 'object') ? item.capability_bucket_summary : {});
@@ -3722,7 +3755,7 @@ function _agentPanelClassPreviewHtml(agent, ui) {
     + '</div>';
   html += _agentPanelClassOperatorAccessHtml(item);
   html += _agentPanelClassApplyStateHtml(item);
-  if (!_agentPanelClassIsProductManager(item) && !_agentPanelClassIsCreativeArchitect(item)) {
+  if (!_agentPanelClassIsProductManager(item) && !_agentPanelClassIsCreativeArchitect(item) && !_agentPanelClassIsTorqueSteward(item)) {
     html += _agentPanelClassWarningsHtml(item);
   }
   return html + '</div>';
@@ -6814,6 +6847,23 @@ function _engineerSortByCreatedAt(a, b) {
   return _engineerCreatedSortValue(a).localeCompare(_engineerCreatedSortValue(b));
 }
 
+function _agentPanelIsTorqueStewardArchitect(agent) {
+  var metadata = agent && agent.effective_agent_class_snapshot && agent.effective_agent_class_snapshot.metadata
+    ? agent.effective_agent_class_snapshot.metadata : {};
+  return !!(agent && (agent.kind || '') === 'architect'
+    && (String(agent.agent_class_id || '') === 'torque-steward'
+      || String(agent.effective_agent_class_id || '') === 'torque-steward'
+      || String(metadata.archetype || '') === 'torque_steward'
+      || String(agent.name || '').trim() === 'Torque Steward'));
+}
+
+function _engineerSortArchitectsWithStewardPinned(a, b) {
+  var ap = _agentPanelIsTorqueStewardArchitect(a) ? 0 : 1;
+  var bp = _agentPanelIsTorqueStewardArchitect(b) ? 0 : 1;
+  if (ap !== bp) return ap - bp;
+  return _engineerSortByCreatedAt(a, b);
+}
+
 var _engineerArchitectExpanded = {};
 var _engineerArchitectDecisionUi = {};
 var _ENGINEER_DECISION_STATUSES = ['proposed', 'accepted', 'revised', 'rejected'];
@@ -6839,7 +6889,7 @@ function _engineerGroupAgents(group) {
 function _engineerArchitectAgents(group) {
   return _engineerGroupAgents(group).filter(function(agent) {
     return (agent.kind || '') === 'architect';
-  });
+  }).sort(_engineerSortArchitectsWithStewardPinned);
 }
 
 function _engineerEngineerAgents(group, architectId) {

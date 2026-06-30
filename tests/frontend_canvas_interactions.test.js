@@ -372,6 +372,26 @@ test('canvas tree model orders architects, engineers, and workers by created_at 
   assert.deepEqual(engA.workers.map((w) => w.id), ['worker-y', 'worker-z']);
 });
 
+
+test('canvas tree model pins Torque Steward before older architects when present', () => {
+  const context = createContext();
+  const steward = architect('arch-steward', 'Torque Steward', 30);
+  steward.agent_class_id = 'torque-steward';
+  steward.effective_agent_class_id = 'torque-steward';
+  seed(context, [
+    architect('arch-early', 'Early Architect', 1),
+    steward,
+    architect('arch-late', 'Late Architect', 40),
+  ]);
+
+  const model = buildTrees(context, 'alpha');
+
+  assert.deepEqual(
+    model.trees.map((t) => t.architect.id),
+    ['arch-steward', 'arch-early', 'arch-late'],
+  );
+});
+
 test('canvas tree model handles multiple architects, engineers, and workers without duplicating cards', () => {
   const context = createContext();
   seed(context, [
