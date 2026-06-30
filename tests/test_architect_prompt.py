@@ -232,8 +232,12 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("architect_product_peer_*", prompt)
         self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
         self.assertIn("Unavailable powers in this session", prompt)
+        self.assertIn("Engineer roster reads", prompt)
+        self.assertIn("Engineer hiring/roster management", prompt)
         self.assertIn("accepted-decision authority", prompt)
         self.assertNotIn("## Shared memory", prompt)
+        self.assertNotIn("architect_engineer_list", prompt)
+        self.assertNotIn("visible Engineer roster", prompt)
         self.assertNotIn("architect_engineer_hire", prompt)
         self.assertNotIn("architect_pending_hire_status", prompt)
         self.assertNotIn("architect_engineer_message", prompt)
@@ -248,6 +252,55 @@ class ArchitectPromptTests(unittest.TestCase):
             "permission to route work, reassign scope, and message engineers",
             prompt,
         )
+
+    def test_restricted_prompt_retains_roster_boot_guidance_when_roster_read_projected(self):
+        class_snapshot = {
+            "id": "roster-reader",
+            "base_kind": "architect",
+            "display_name": "Roster Reader",
+            "lifecycle": "stable",
+            "status": "restricted",
+        }
+        profile_snapshot = {
+            "id": "roster-reader-profile",
+            "base_kind": "architect",
+            "display_name": "Roster Reader",
+            "status": "restricted",
+            "grants": [
+                "observe.self_context",
+                "agent.engineer_roster_read",
+            ],
+            "projected_tool_categories": [
+                {
+                    "category": "context_read",
+                    "status": "allowed",
+                    "missing_capabilities": [],
+                },
+                {
+                    "category": "engineer_roster",
+                    "status": "denied",
+                    "missing_capabilities": [
+                        "agent.hire_engineer",
+                        "agent.manage_engineer_roster",
+                    ],
+                },
+            ],
+        }
+
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Torque",
+            agent_class_snapshot=class_snapshot,
+            agent_profile_snapshot=profile_snapshot,
+        )
+
+        self.assertIn("Roster Reader", prompt)
+        self.assertIn("architect_engineer_list", prompt)
+        self.assertIn("visible Engineer roster", prompt)
+        self.assertIn("do not infer hire/manage authority", prompt)
+        self.assertNotIn("Engineer roster reads; Engineer hiring", prompt)
+        self.assertIn("Engineer hiring/roster management", prompt)
+        self.assertNotIn("architect_engineer_hire", prompt)
+        self.assertNotIn("architect_pending_hire_status", prompt)
 
     def test_creative_prompt_emphasizes_thinking_and_proposals_without_management_guidance(self):
         class_snapshot, profile_snapshot = self._class_prompt_context(
