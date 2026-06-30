@@ -280,12 +280,17 @@ function _renderTerminalAgentMessageLoopHtml(agent) {
   if (!loop) return '';
   const agentId = String((agent && agent.id) || '');
   const nextLabel = _terminalLoopTimeLabel(loop.next_run_at);
+  const isDeferred = Number(loop.deferred_at || 0) > 0
+    && String(loop.deferred_reason || '').trim() === 'agent_busy';
+  const deliveryLabel = isDeferred
+    ? ' · deferred until idle'
+    : (nextLabel ? ' · next ' + esc(nextLabel) : '');
   return ''
     + '<div class="terminal-direct-loop" data-loop-id="' + esc(loop.id || '') + '">'
     + '  <div class="terminal-direct-loop-main">'
     + '    <span class="terminal-direct-loop-badge">/loop</span>'
     + '    <span class="terminal-direct-loop-text">Every ' + esc(_terminalLoopIntervalLabel(loop.interval_seconds))
-    + (nextLabel ? ' · next ' + esc(nextLabel) : '')
+    + deliveryLabel
     + ' · ' + esc(_terminalLoopPreview(loop.message)) + '</span>'
     + '  </div>'
     + '  <button type="button" class="terminal-direct-loop-cancel"'

@@ -1587,6 +1587,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._ensure_agent_peer_messages_schema()
         self._ensure_board_task_engineer_provenance_column()
         self._ensure_agent_queue_empty_emitted_column()
+        self._ensure_agent_message_loop_deferred_columns()
         self._migrate_agent_activity_timestamps_if_needed()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
@@ -1605,6 +1606,21 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._backfill_empty_worker_kinds_if_needed()
         self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
+
+    def _ensure_agent_message_loop_deferred_columns(self):
+        for col, col_type, default in [
+            ("deferred_at", "REAL", "0"),
+            ("deferred_reason", "TEXT", "''"),
+        ]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM agent_message_loops LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agent_message_loops ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}"
+                )
+                self._conn.commit()
 
     def _ensure_board_task_engineer_provenance_column(self):
         try:
@@ -3178,8 +3194,9 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             INSERT OR REPLACE INTO agent_message_loops
                 (id, agent_id, group_name, interval_seconds, message, status,
                  created_by, stopped_by, stop_reason, created_at, updated_at,
-                 next_run_at, last_run_at, run_count, last_message_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 next_run_at, last_run_at, run_count, last_message_id,
+                 deferred_at, deferred_reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 str(d.get("id", "") or ""),
@@ -3197,6 +3214,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 float(d.get("last_run_at", 0) or 0),
                 int(d.get("run_count", 0) or 0),
                 str(d.get("last_message_id", "") or ""),
+                float(d.get("deferred_at", 0) or 0),
+                str(d.get("deferred_reason", "") or ""),
             ),
         )
         self._conn.commit()
@@ -3206,8 +3225,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         rows = self._conn.execute(
             "SELECT id, agent_id, group_name, interval_seconds, message, "
             "status, created_by, stopped_by, stop_reason, created_at, "
-            "updated_at, next_run_at, last_run_at, run_count, last_message_id "
-            "FROM agent_message_loops"
+            "updated_at, next_run_at, last_run_at, run_count, last_message_id, "
+            "deferred_at, deferred_reason FROM agent_message_loops"
         ).fetchall()
         loops: dict[str, dict] = {}
         for row in rows:
@@ -3227,6 +3246,8 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "last_run_at": float(row[12] or 0),
                 "run_count": int(row[13] or 0),
                 "last_message_id": str(row[14] or ""),
+                "deferred_at": float(row[15] or 0),
+                "deferred_reason": str(row[16] or ""),
             }
             if item["id"]:
                 loops[item["id"]] = item
