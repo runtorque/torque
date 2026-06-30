@@ -1312,7 +1312,8 @@ body.terminal-compose-resizing * {
 .terminal-compose-error:not(:empty) {
   display: block;
 }
-.terminal-compose-task-dropdown {
+.terminal-compose-task-dropdown,
+.terminal-compose-slash-dropdown {
   bottom: calc(100% + 4px);
   margin-top: 0;
   z-index: 45;
@@ -1334,6 +1335,32 @@ body.terminal-compose-resizing * {
   color: var(--text-dim);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.terminal-compose-slash-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.terminal-compose-slash-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.terminal-compose-slash-label {
+  color: var(--accent);
+  font-weight: 700;
+}
+.terminal-compose-slash-usage {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-compose-slash-help {
+  color: var(--text-dim);
+  line-height: 1.25;
 }
 .terminal-compose-history-wrap {
   position: relative;
