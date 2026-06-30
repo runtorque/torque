@@ -20443,6 +20443,7 @@ async def main(connection=None):
                         group=_covered_task.group,
                     )
                     _covering_task_id = _resolve_task_id(
+                        state,
                         data.get("covering_task_id", "")
                         or data.get("covering_task", "")
                     )
