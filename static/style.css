@@ -13220,6 +13220,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
   color: var(--fg);
   background: var(--bg);
 }
@@ -13321,9 +13323,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   outline: none;
   border-color: var(--accent);
 }
-.help-query-panel {
-  flex: 0 1 min(42%, 380px);
-  min-height: 138px;
+.help-query-panel,
+.help-query-result-card {
+  flex: 0 0 auto;
   margin: 8px 12px 0;
   padding: 9px;
   border: 1px solid var(--border);
@@ -13331,14 +13333,21 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: var(--panel-bg, rgba(255,255,255,.03));
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+}
+.help-query-panel {
+  min-height: 0;
+  overflow: visible;
+}
+.help-query-result-card {
+  gap: 7px;
+  overflow: visible;
+}
+.help-query-result-card > .help-state,
+.help-query-result-card > .help-query-answer {
+  margin: 0;
 }
 .help-query-result-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  margin-top: 8px;
-  overflow: auto;
-  padding-right: 2px;
+  scroll-margin-top: 8px;
 }
 .help-query-title { color: var(--text); font-size: 12px; font-weight: 800; }
 .help-query-subtitle { margin: 2px 0 8px; color: var(--text-dim); font-size: 10px; line-height: 1.35; }
@@ -13580,10 +13589,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   overflow-x: hidden;
 }
 #panel-help[data-panel-placement="right"] .help-query-panel {
-  flex: 0 0 220px;
-  min-height: 220px;
+  min-height: 0;
 }
-#panel-help[data-panel-placement="right"] .help-query-result-scroll {
+#panel-help[data-panel-placement="right"] .help-query-result-card {
   min-height: 72px;
 }
 #panel-help[data-panel-placement="right"] .help-workspace {
@@ -13619,7 +13627,6 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 
 @container (max-width: 760px) {
-  .help-query-panel { flex-basis: min(44%, 360px); }
   .help-workspace { overflow: hidden; }
   .help-detail { overflow: auto; }
   .help-topic-launcher { align-items: stretch; flex-direction: column; }
