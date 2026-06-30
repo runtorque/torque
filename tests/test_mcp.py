@@ -142,6 +142,55 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_direct_mcp_call_notifies_observer_for_agent_mcp_panel(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        observations = []
+
+        async def fake_handle_command(payload):
+            raise AssertionError(f"unexpected command: {payload}")
+
+        async def observe_mcp_call(observation):
+            observations.append(dict(observation))
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": "ctx-1",
+            "method": "tools/call",
+            "params": {
+                "name": "torque_context",
+                "arguments": {"_torque_idempotency_key": "hidden"},
+            },
+        }
+        response, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            body,
+            cell_id=cell.id,
+            handle_command=fake_handle_command,
+            state=state,
+            mcp_session_id="sess-1",
+            mcp_call_observer=observe_mcp_call,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("error", response)
+        self.assertEqual(len(observations), 1)
+        observed = observations[0]
+        self.assertEqual(observed["cell_id"], "agent-1")
+        self.assertEqual(observed["tool_name"], "mcp__torque__torque_context")
+        self.assertEqual(observed["raw_tool_name"], "torque_context")
+        self.assertEqual(observed["hook_event_name"], "PostToolUse")
+        self.assertEqual(observed["session_id"], "sess-1")
+        self.assertEqual(observed["request_id"], "ctx-1")
+        self.assertEqual(observed["arguments"], {})
+        self.assertFalse(observed["is_error"])
+        self.assertIn("result", observed)
+
     async def test_dispatch_tool_forwards_task_artifact_uploads(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
