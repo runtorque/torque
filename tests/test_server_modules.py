@@ -4132,6 +4132,11 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             ),
             prompt,
         )
+        self.assertNotIn(
+            'Architect sessions may omit reply_to_id only when this is the '
+            'single unambiguous pending direct user message',
+            prompt,
+        )
         replayed_row = self.db.load_direct_message(result['message_id'])
         self.assertEqual(replayed_row['delivery_state'], 'delivered')
         self.assertEqual(replayed_row['delivery_reason'], '')
