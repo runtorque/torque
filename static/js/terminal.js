@@ -23,6 +23,9 @@ let _terminalComposeHistoryOpenCellId = '';
 let _terminalComposeTaskDropdownCellId = '';
 let _terminalComposeTaskDropdownIdx = -1;
 let _terminalComposeTaskDropdownResults = [];
+let _terminalComposeSlashDropdownCellId = '';
+let _terminalComposeSlashDropdownIdx = -1;
+let _terminalComposeSlashDropdownResults = [];
 let _terminalDirectMessageSelectedByAgent = Object.create(null);
 let _terminalDirectMessageReplyToByAgent = Object.create(null);
 let _terminalDirectMessageVisibleCountByAgent = Object.create(null);
@@ -60,6 +63,32 @@ var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
   'image/webp': true,
   'image/gif': true,
 };
+var TERMINAL_COMPOSE_SLASH_COMMANDS = [
+  {
+    id: 'compact',
+    label: '/compact',
+    usage: '/compact',
+    insert: '/compact',
+    help: 'Ask the agent to compact its context before continuing.',
+    search: 'compact /compact context summary',
+  },
+  {
+    id: 'loop-every',
+    label: '/loop every <interval> <message>',
+    usage: '/loop every 10m check status',
+    insert: '/loop every 10m ',
+    help: 'Start a recurring user message. Use 1m–24h with s/m/h units, then add the message.',
+    search: 'loop every interval message recurring schedule /loop every',
+  },
+  {
+    id: 'loop-cancel',
+    label: '/loop cancel',
+    usage: '/loop cancel',
+    insert: '/loop cancel',
+    help: 'Cancel the active user-message loop for this agent.',
+    search: 'loop cancel stop recurring schedule /loop cancel',
+  },
+];
 
 var XTERM_SCROLLBACK_DEFAULT = 2000;
 var XTERM_SCROLLBACK_MIN = 100;
@@ -1549,6 +1578,10 @@ function _terminalComposeTaskDropdownId(cellId) {
   return 'terminal-compose-task-dropdown-' + _terminalComposeDomId(cellId);
 }
 
+function _terminalComposeSlashDropdownId(cellId) {
+  return 'terminal-compose-slash-dropdown-' + _terminalComposeDomId(cellId);
+}
+
 function _terminalComposeContainerFor(el) {
   for (let node = el; node; node = node.parentNode) {
     if (node.classList && node.classList.contains('terminal-compose')) {
@@ -2238,6 +2271,212 @@ function terminalComposeHistoryPick(evt, cellId, index) {
     if (typeof input.focus === 'function') input.focus();
   }
   _terminalComposeHistoryClose(id);
+  return false;
+}
+
+function _terminalComposeSlashDropdownFor(cellId) {
+  return document.getElementById
+    ? document.getElementById(_terminalComposeSlashDropdownId(cellId))
+    : null;
+}
+
+function _terminalComposeSlashEnabled(input) {
+  if (!input) return false;
+  var cellId = input.dataset ? String(input.dataset.cellId || '') : '';
+  if (input.dataset && String(input.dataset.agentId || '').trim()) return true;
+  return !!_terminalComposeDirectAgentForCellId(cellId);
+}
+
+function _terminalComposeSlashTrigger(input) {
+  if (!_terminalComposeSlashEnabled(input)) return null;
+  var value = _terminalComposeInputText(input);
+  var selection = _terminalComposeSelectionOffsets(input);
+  var start = selection.start;
+  var end = selection.end;
+  if (start !== end) return null;
+  start = Math.max(0, Math.min(value.length, start));
+  var before = value.slice(0, start);
+  var lineStart = before.lastIndexOf('\n') + 1;
+  if (lineStart !== 0) return null;
+  var prefix = before.slice(lineStart);
+  if (!prefix || prefix.charAt(0) !== '/') return null;
+  return {
+    start: 0,
+    end: value.length,
+    query: prefix.slice(1).toLowerCase(),
+  };
+}
+
+function _terminalComposeSlashCandidates(query) {
+  var needle = String(query || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  var results = [];
+  for (var i = 0; i < TERMINAL_COMPOSE_SLASH_COMMANDS.length; i++) {
+    var item = TERMINAL_COMPOSE_SLASH_COMMANDS[i];
+    var search = String((item.search || '') + ' ' + (item.label || '') + ' ' + (item.usage || ''))
+      .toLowerCase()
+      .replace(/^\//, '')
+      .replace(/\s+/g, ' ');
+    if (!needle || search.indexOf(needle) >= 0) results.push(item);
+  }
+  return results;
+}
+
+function _terminalComposeSlashDropdownHide(cellId) {
+  var id = String(cellId || _terminalComposeSlashDropdownCellId || '');
+  var dropdown = id ? _terminalComposeSlashDropdownFor(id) : null;
+  if (dropdown) dropdown.style.display = 'none';
+  if (!id || _terminalComposeSlashDropdownCellId === id) {
+    _terminalComposeSlashDropdownCellId = '';
+    _terminalComposeSlashDropdownIdx = -1;
+    _terminalComposeSlashDropdownResults = [];
+  }
+}
+
+function _terminalComposeSlashDropdownVisible(cellId) {
+  var id = String(cellId || '');
+  var dropdown = id ? _terminalComposeSlashDropdownFor(id) : null;
+  return !!(id
+    && _terminalComposeSlashDropdownCellId === id
+    && dropdown
+    && dropdown.style.display !== 'none');
+}
+
+function _terminalComposeHighlightSlashOpt(opts) {
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].classList.toggle('active', i === _terminalComposeSlashDropdownIdx);
+  }
+}
+
+function _terminalComposeUpdateSlashDropdown(input) {
+  if (!input) return false;
+  var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  var dropdown = cellId ? _terminalComposeSlashDropdownFor(cellId) : null;
+  if (!dropdown) {
+    _terminalComposeSlashDropdownHide(cellId);
+    return false;
+  }
+  var trigger = _terminalComposeSlashTrigger(input);
+  if (!trigger) {
+    _terminalComposeSlashDropdownHide(cellId);
+    return false;
+  }
+  var results = _terminalComposeSlashCandidates(trigger.query);
+  if (!results.length) {
+    _terminalComposeSlashDropdownHide(cellId);
+    return false;
+  }
+  _terminalComposeSlashDropdownCellId = cellId;
+  _terminalComposeSlashDropdownIdx = -1;
+  _terminalComposeSlashDropdownResults = results;
+  var html = '';
+  for (var i = 0; i < results.length; i++) {
+    var item = results[i] || {};
+    html += '<div class="deps-option terminal-compose-slash-option"'
+      + ' role="option" data-slash-command="' + esc(item.id || '') + '"'
+      + ' onmousedown="return terminalComposePickSlashCommand(event, \''
+      + esc(cellId).replace(/'/g, "\\'") + '\', ' + i + ')">'
+      + '<div class="terminal-compose-slash-main">'
+      + '<span class="terminal-compose-slash-label">' + esc(item.label || '') + '</span>'
+      + (item.usage && item.usage !== item.label
+        ? '<span class="terminal-compose-slash-usage">' + esc(item.usage) + '</span>'
+        : '')
+      + '</div>'
+      + (item.help ? '<div class="terminal-compose-slash-help">' + esc(item.help) + '</div>' : '')
+      + '</div>';
+  }
+  dropdown.innerHTML = html;
+  dropdown.style.display = '';
+  return true;
+}
+
+function _terminalComposeUpdateAutocomplete(input) {
+  if (!input) return;
+  var cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  if (_terminalComposeUpdateSlashDropdown(input)) {
+    _terminalComposeTaskDropdownHide(cellId);
+    return;
+  }
+  _terminalComposeUpdateTaskDropdown(input);
+}
+
+function _terminalComposeSlashDropdownHandleKey(evt, cellId) {
+  var id = String(cellId || '');
+  if (!_terminalComposeSlashDropdownVisible(id)) return false;
+  var count = _terminalComposeSlashDropdownResults.length;
+  if (!count) {
+    _terminalComposeSlashDropdownHide(id);
+    return false;
+  }
+  var dropdown = _terminalComposeSlashDropdownFor(id);
+  var opts = dropdown && dropdown.querySelectorAll
+    ? dropdown.querySelectorAll('.deps-option')
+    : [];
+  if (evt.key === 'ArrowDown') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    _terminalComposeSlashDropdownIdx = (_terminalComposeSlashDropdownIdx + 1) % count;
+    _terminalComposeHighlightSlashOpt(opts);
+    return true;
+  }
+  if (evt.key === 'ArrowUp') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    _terminalComposeSlashDropdownIdx = _terminalComposeSlashDropdownIdx <= 0
+      ? count - 1
+      : _terminalComposeSlashDropdownIdx - 1;
+    _terminalComposeHighlightSlashOpt(opts);
+    return true;
+  }
+  if (evt.key === 'Enter' || evt.key === 'Tab') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    var idx = _terminalComposeSlashDropdownIdx >= 0 ? _terminalComposeSlashDropdownIdx : 0;
+    terminalComposePickSlashCommand(evt, id, idx);
+    return true;
+  }
+  if (evt.key === 'Escape') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    _terminalComposeSlashDropdownHide(id);
+    return true;
+  }
+  return false;
+}
+
+function terminalComposePickSlashCommand(evt, cellId, index) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var id = String(cellId || '');
+  var input = document.getElementById
+    ? document.getElementById(_terminalComposeInputId(id))
+    : null;
+  if (!input) return false;
+  var idx = Math.max(0, Math.min(_terminalComposeSlashDropdownResults.length - 1, Number(index) || 0));
+  var item = _terminalComposeSlashDropdownResults[idx] || null;
+  var insertText = item ? String(item.insert || item.label || '').trimStart() : '';
+  if (!insertText) {
+    _terminalComposeSlashDropdownHide(id);
+    return false;
+  }
+  _terminalComposeSetInputText(input, insertText);
+  var cursor = insertText.length;
+  if (_terminalComposeIsRichInput(input)) {
+    _terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true });
+  } else if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(cursor, cursor);
+  } else {
+    input.selectionStart = cursor;
+    input.selectionEnd = cursor;
+    if ('selectionDirection' in input) input.selectionDirection = 'none';
+  }
+  if (id) {
+    _terminalComposePruneAttachments(id, insertText);
+    _terminalComposeDrafts[id] = insertText;
+    if (!_terminalComposeIsRichInput(input)) _terminalComposeRefreshAttachmentChips(id);
+    if (_terminalComposeErrors[id]) _terminalComposeSetError(input, '');
+  }
+  _terminalComposeAutoResize(input);
+  _terminalComposeSetButtonState(input);
+  _terminalComposeSlashDropdownHide(id);
+  if (typeof input.focus === 'function') input.focus();
   return false;
 }
 
@@ -3241,6 +3480,7 @@ function _renderTerminalCompose(root, cell) {
   const historyButtonId = _terminalComposeHistoryButtonId(cellId);
   const historyMenuId = _terminalComposeHistoryMenuId(cellId);
   const taskDropdownId = _terminalComposeTaskDropdownId(cellId);
+  const slashDropdownId = _terminalComposeSlashDropdownId(cellId);
   const draft = Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
     ? _terminalComposeDrafts[cellId]
     : '';
@@ -3335,6 +3575,9 @@ function _renderTerminalCompose(root, cell) {
     + '  <div id="' + esc(taskDropdownId) + '"'
     + ' class="deps-dropdown terminal-compose-task-dropdown"'
     + ' role="listbox" aria-label="Matching tickets" style="display:none"></div>'
+    + '  <div id="' + esc(slashDropdownId) + '"'
+    + ' class="deps-dropdown terminal-compose-slash-dropdown"'
+    + ' role="listbox" aria-label="Slash commands" style="display:none"></div>'
     + '  </div>'
     + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
     + (disabled ? ' disabled' : '')
@@ -3376,7 +3619,7 @@ function terminalComposeInput(el) {
   if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
   _terminalComposeSetButtonState(el);
-  _terminalComposeUpdateTaskDropdown(el);
+  _terminalComposeUpdateAutocomplete(el);
 }
 
 function terminalComposeClear(cellId) {
@@ -3385,6 +3628,7 @@ function terminalComposeClear(cellId) {
   if (!input) return;
   _terminalComposeResetRecall(id);
   _terminalComposeHistoryClose(id);
+  _terminalComposeSlashDropdownHide(id);
   _terminalComposeTaskDropdownHide(id);
   _terminalComposeSetInputText(input, '');
   if (id) _terminalComposeDrafts[id] = '';
@@ -3613,6 +3857,7 @@ function terminalComposeSubmit(evt, cellId) {
 function terminalComposeKeydown(evt, cellId) {
   if (!evt) return;
   if (_terminalComposeHandleAttachmentDeleteKey(evt, cellId)) return;
+  if (_terminalComposeSlashDropdownHandleKey(evt, cellId)) return;
   if (_terminalComposeTaskDropdownHandleKey(evt, cellId)) return;
   if (evt.key === 'Escape' && _terminalComposeHistoryIsOpen(cellId)) {
     if (typeof evt.preventDefault === 'function') evt.preventDefault();
@@ -3645,7 +3890,7 @@ function terminalComposeKeydown(evt, cellId) {
       ? evt.target
       : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
     if (_terminalComposeMoveCaret(input, evt, evt.key === 'End', !!(evt.metaKey || evt.ctrlKey))) {
-      _terminalComposeUpdateTaskDropdown(input);
+      _terminalComposeUpdateAutocomplete(input);
       return;
     }
   }

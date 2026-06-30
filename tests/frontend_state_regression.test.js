@@ -14951,6 +14951,135 @@ test('terminal compose preserves image chip payload through history recall resto
   await runRecallRestoreFlow('Escape');
 });
 
+test('terminal compose slash command autocomplete filters and fills without sending', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'Torque',
+      cell_type: 'agent',
+      kind: 'worker',
+    },
+  };
+
+  const form = new FakeElement('compose-form');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  const taskDropdown = document.register('terminal-compose-task-dropdown-agent-1');
+  taskDropdown.classList.add('deps-dropdown');
+  taskDropdown.classList.add('terminal-compose-task-dropdown');
+  taskDropdown.style.display = 'none';
+  const slashDropdown = document.register('terminal-compose-slash-dropdown-agent-1');
+  slashDropdown.classList.add('deps-dropdown');
+  slashDropdown.classList.add('terminal-compose-slash-dropdown');
+  slashDropdown.style.display = 'none';
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(taskDropdown);
+  form.appendChild(slashDropdown);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  input.value = '/';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+
+  assert.equal(slashDropdown.style.display, '');
+  assert.equal(taskDropdown.style.display, 'none');
+  assert.match(slashDropdown.innerHTML, /\/compact/);
+  assert.match(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
+  assert.match(slashDropdown.innerHTML, /\/loop cancel/);
+  assert.match(slashDropdown.innerHTML, /recurring user message/i);
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  input.value = '/loop c';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, '');
+  assert.match(slashDropdown.innerHTML, /\/loop cancel/);
+  assert.doesNotMatch(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
+  assert.doesNotMatch(slashDropdown.innerHTML, /\/compact/);
+
+  function keyEvent(key) {
+    return {
+      key,
+      target: input,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefaultCalled: false,
+      stopPropagationCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+      stopPropagation() { this.stopPropagationCalled = true; },
+    };
+  }
+
+  const enterCancel = keyEvent('Enter');
+  context.__enterCancel = enterCancel;
+  runInContext(context, `terminalComposeKeydown(__enterCancel, 'agent-1');`);
+  assert.equal(enterCancel.preventDefaultCalled, true);
+  assert.equal(enterCancel.stopPropagationCalled, true);
+  assert.equal(input.value, '/loop cancel');
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(input.focused, true);
+  assert.equal(slashDropdown.style.display, 'none');
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), '/loop cancel');
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  input.focused = false;
+  input.value = '/lo';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  const optionEvery = new FakeElement('slash-opt-every');
+  const optionCancel = new FakeElement('slash-opt-cancel');
+  optionEvery.classList.add('deps-option');
+  optionCancel.classList.add('deps-option');
+  slashDropdown.setQuerySelectorAll('.deps-option', [optionEvery, optionCancel]);
+
+  const arrowDown = keyEvent('ArrowDown');
+  context.__slashArrowDown = arrowDown;
+  runInContext(context, `terminalComposeKeydown(__slashArrowDown, 'agent-1');`);
+  assert.equal(arrowDown.preventDefaultCalled, true);
+  assert.equal(optionEvery.classList.contains('active'), true);
+  assert.equal(optionCancel.classList.contains('active'), false);
+
+  const enterEvery = keyEvent('Enter');
+  context.__enterEvery = enterEvery;
+  runInContext(context, `terminalComposeKeydown(__enterEvery, 'agent-1');`);
+  assert.equal(enterEvery.preventDefaultCalled, true);
+  assert.equal(enterEvery.stopPropagationCalled, true);
+  assert.equal(input.value, '/loop every 10m ');
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  input.value = '/not-a-command';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, 'none');
+  context.__invalidSlashSubmit = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeSubmit(__invalidSlashSubmit, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].agent_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[0].message, '/not-a-command');
+});
+
 test('terminal compose ticket typeahead filters tasks and inserts selected reference', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
   sandbox.state.agents = {
