@@ -834,6 +834,28 @@ CREATE TABLE IF NOT EXISTS schedules (
     updated_at      TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS agent_message_loops (
+    id               TEXT PRIMARY KEY,
+    agent_id         TEXT NOT NULL DEFAULT '',
+    group_name       TEXT NOT NULL DEFAULT '',
+    interval_seconds INTEGER NOT NULL DEFAULT 0,
+    message          TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'active',
+    created_by       TEXT NOT NULL DEFAULT 'user',
+    stopped_by       TEXT NOT NULL DEFAULT '',
+    stop_reason      TEXT NOT NULL DEFAULT '',
+    created_at       REAL NOT NULL DEFAULT 0,
+    updated_at       REAL NOT NULL DEFAULT 0,
+    next_run_at      REAL NOT NULL DEFAULT 0,
+    last_run_at      REAL NOT NULL DEFAULT 0,
+    run_count        INTEGER NOT NULL DEFAULT 0,
+    last_message_id  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_message_loops_agent_status
+    ON agent_message_loops(agent_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_message_loops_due
+    ON agent_message_loops(status, next_run_at);
+
 CREATE TABLE IF NOT EXISTS board_lanes (
     name     TEXT PRIMARY KEY,
     position INTEGER NOT NULL DEFAULT 0

@@ -721,6 +721,71 @@ def _should_handoff_shared_worktree(owner, *,
     )
 
 
+async def _fire_due_agent_message_loops(
+        state: MatrixState,
+        handle_command,
+        panel_event,
+        *,
+        now_ts: float | None = None) -> list[dict]:
+    """Deliver due user-scheduled /loop messages without widening authority."""
+    import time
+
+    ts = float(now_ts if now_ts is not None else time.time())
+    fired: list[dict] = []
+    for loop in state.due_agent_message_loops(ts):
+        agent = state.agents.get(loop.agent_id)
+        if not agent or state.agent_is_tombstoned(agent):
+            state.agent_message_loop_stop(
+                loop.id,
+                status="stopped",
+                stopped_by="system",
+                reason="Target agent is unavailable",
+                now=ts,
+            )
+            continue
+        run_number = int(loop.run_count or 0) + 1
+        result = await handle_command({
+            "cmd": "user_agent_message",
+            "agent_id": loop.agent_id,
+            "message": loop.message,
+            "thread_id": f"user-agent:user:{loop.agent_id}",
+            "idempotency_key": f"user-agent-loop:{loop.id}:{run_number}",
+            "_loop_delivery": True,
+            "_loop_id": loop.id,
+        })
+        if result and result.get("type") == "error":
+            log.warning(
+                "User message loop %s delivery failed: %s",
+                loop.id,
+                result.get("message", "unknown error"),
+            )
+            continue
+        message_id = str((result or {}).get("message_id", "") or "")
+        updated = state.agent_message_loop_update(
+            loop.id,
+            last_run_at=ts,
+            next_run_at=ts + max(1, int(loop.interval_seconds or 0)),
+            run_count=run_number,
+            last_message_id=message_id,
+            updated_at=ts,
+        )
+        fired.append({
+            "loop_id": loop.id,
+            "agent_id": loop.agent_id,
+            "message_id": message_id,
+            "run_count": run_number,
+        })
+        if panel_event and updated:
+            panel_event(
+                "agent_message_loop_fired",
+                loop.agent_id,
+                str(getattr(agent, "name", "") or ""),
+                str(getattr(agent, "group", "") or ""),
+                f"/loop fired ({run_number})",
+            )
+    return fired
+
+
 async def _scheduler_loop(state: MatrixState, handle_command, panel_event):
     """Periodically check for due schedules and scheduled tasks."""
     from datetime import datetime, timezone as dt_tz
@@ -730,6 +795,16 @@ async def _scheduler_loop(state: MatrixState, handle_command, panel_event):
         await asyncio.sleep(30)
         now = datetime.now(dt_tz.utc)
         now_iso = now.isoformat()
+
+        try:
+            await _fire_due_agent_message_loops(
+                state,
+                handle_command,
+                panel_event,
+                now_ts=now.timestamp(),
+            )
+        except Exception:
+            log.exception("User message loop scheduler cycle failed")
 
         task_changed = False
         for task in list(state.board_tasks.values()):

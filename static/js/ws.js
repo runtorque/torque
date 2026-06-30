@@ -43,6 +43,7 @@ let state = {
   supervisor_panel_state: {},
   agent_message_history: {},
   direct_messages_by_agent: {},
+  agent_message_loops: {},
   agent_peer_threads: {},
 };
 let dragInProgress = false;
@@ -1134,6 +1135,7 @@ function _handleFullState(msg) {
   }
   if (!state.agent_message_history) state.agent_message_history = {};
   if (!state.direct_messages_by_agent) state.direct_messages_by_agent = {};
+  if (!state.agent_message_loops) state.agent_message_loops = {};
   state.agent_peer_threads = _sortAgentPeerThreadMap(state.agent_peer_threads || {});
   if (typeof state.active_group !== 'string') {
     state.active_group = '';
@@ -1856,6 +1858,14 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         if (_pmFocused && _pmIds.indexOf(String(_pmFocused.id || '')) >= 0) {
           _markSurface(flags, 'focus', 'engineer');
+        }
+        break;
+      }
+      case 'agent_message_loop_upsert': {
+        const _loopAgentId = String((op.loop && op.loop.agent_id) || op.agent_id || '');
+        const _terminalViewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
+        if (_terminalViewedAgentId && _loopAgentId === _terminalViewedAgentId) {
+          _markSurface(flags, 'main');
         }
         break;
       }
@@ -3046,6 +3056,19 @@ function _applyDelta(ops) {
             state.direct_messages_by_agent[directAgentId] =
               state.direct_messages_by_agent[directAgentId].slice(-directLimit);
           }
+        }
+        break;
+      }
+
+      case 'agent_message_loop_upsert': {
+        if (!state.agent_message_loops || typeof state.agent_message_loops !== 'object') {
+          state.agent_message_loops = {};
+        }
+        var loop = Object.assign({}, op.loop || {});
+        var loopId = String(loop.id || op.id || '').trim();
+        if (loopId) {
+          if (!loop.id) loop.id = loopId;
+          state.agent_message_loops[loopId] = loop;
         }
         break;
       }

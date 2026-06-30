@@ -1069,6 +1069,26 @@ class Schedule:
 
 
 @dataclass
+class AgentMessageLoop:
+    """A user-scheduled direct-message loop for one agent."""
+    id: str
+    agent_id: str
+    group_name: str = ""
+    interval_seconds: int = 0
+    message: str = ""
+    status: str = "active"
+    created_by: str = "user"
+    stopped_by: str = ""
+    stop_reason: str = ""
+    created_at: float = 0
+    updated_at: float = 0
+    next_run_at: float = 0
+    last_run_at: float = 0
+    run_count: int = 0
+    last_message_id: str = ""
+
+
+@dataclass
 class AutoDispatchQueueEntry:
     task_id: str
     agent_group: str = ""
@@ -2562,6 +2582,7 @@ class MatrixState:
         self.task_id_counters: dict[str, int] = {}
         self.pipeline_task_counters: dict[str, int] = {}
         self.schedules: dict[str, Schedule] = {}
+        self.agent_message_loops: dict[str, AgentMessageLoop] = {}
         self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
@@ -4451,6 +4472,7 @@ class MatrixState:
             "schedules": {
                 sid: asdict(s) for sid, s in self.schedules.items()
             },
+            "agent_message_loops": self.agent_message_loops_snapshot(),
             "auto_dispatch_queues": {
                 group: [asdict(entry) for entry in entries]
                 for group, entries in self.auto_dispatch_queues.items()
@@ -4779,6 +4801,7 @@ class MatrixState:
             "schedules": {
                 sid: asdict(s) for sid, s in self.schedules.items()
             },
+            "agent_message_loops": self.agent_message_loops_snapshot(),
             "auto_dispatch_queues": {
                 group: [asdict(entry) for entry in entries]
                 for group, entries in self.auto_dispatch_queues.items()
@@ -5193,6 +5216,17 @@ class MatrixState:
                 self.db.delete_schedule(sid)
             except Exception:
                 log.exception("Failed to delete schedule %s", sid)
+
+    def _db_save_agent_message_loop(self, loop: AgentMessageLoop):
+        if self.db:
+            try:
+                self.db.defer_write(
+                    "agent_message_loops",
+                    "save_agent_message_loop",
+                    loop,
+                )
+            except Exception:
+                log.exception("Failed to save agent message loop %s", loop.id)
 
     def _db_save_lanes(self):
         if self.db:
@@ -6736,6 +6770,19 @@ class MatrixState:
                         sched.name, exclude_id=sid)
                     self._db_save_schedule(sched)
                     slug_dirty = True
+            loop_fields = set(AgentMessageLoop.__dataclass_fields__)
+            for loop_id, raw in data.get("agent_message_loops", {}).items():
+                if not isinstance(raw, dict):
+                    continue
+                filtered = {k: v for k, v in raw.items()
+                            if k in loop_fields}
+                if not filtered.get("id"):
+                    filtered["id"] = str(loop_id or "").strip()
+                if not filtered.get("id") or not filtered.get("agent_id"):
+                    continue
+                self.agent_message_loops[filtered["id"]] = (
+                    AgentMessageLoop(**filtered)
+                )
             adq_fields = set(AutoDispatchQueueEntry.__dataclass_fields__)
             for gname, entries in data.get("auto_dispatch_queues", {}).items():
                 if gname not in self.groups or not isinstance(entries, list):
@@ -13587,6 +13634,134 @@ class MatrixState:
                 changed = True
         if changed:
             self.recompute_task_health()
+
+    # -- User direct-message loop CRUD --------------------------------------
+
+    def agent_message_loops_snapshot(self) -> dict[str, dict]:
+        """Return persisted user→agent /loop state for UI snapshots."""
+        return {
+            loop_id: asdict(loop)
+            for loop_id, loop in sorted(
+                self.agent_message_loops.items(),
+                key=lambda item: (
+                    str(getattr(item[1], "agent_id", "") or ""),
+                    float(getattr(item[1], "updated_at", 0) or 0),
+                    str(item[0]),
+                ),
+            )
+        }
+
+    def active_agent_message_loop_for_agent(
+        self,
+        agent_id: str,
+    ) -> AgentMessageLoop | None:
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return None
+        active = [
+            loop for loop in self.agent_message_loops.values()
+            if loop.agent_id == aid and loop.status == "active"
+        ]
+        if not active:
+            return None
+        return sorted(
+            active,
+            key=lambda loop: (float(loop.created_at or 0), loop.id),
+        )[-1]
+
+    def agent_message_loop_add(
+        self,
+        *,
+        agent_id: str,
+        group_name: str,
+        interval_seconds: int,
+        message: str,
+        created_by: str = "user",
+        now: float | None = None,
+    ) -> AgentMessageLoop:
+        aid = str(agent_id or "").strip()
+        if not aid:
+            raise ValueError("agent_id is required")
+        if self.active_agent_message_loop_for_agent(aid):
+            raise ValueError("An active /loop already exists for this agent")
+        interval = int(interval_seconds or 0)
+        if interval <= 0:
+            raise ValueError("interval_seconds must be positive")
+        text = str(message or "").strip()
+        if not text:
+            raise ValueError("loop message is required")
+        ts = float(now if now is not None else time.time())
+        loop = AgentMessageLoop(
+            id="loop-" + uuid.uuid4().hex[:12],
+            agent_id=aid,
+            group_name=str(group_name or "").strip(),
+            interval_seconds=interval,
+            message=text,
+            status="active",
+            created_by=str(created_by or "user").strip() or "user",
+            created_at=ts,
+            updated_at=ts,
+            next_run_at=ts + interval,
+        )
+        self.agent_message_loops[loop.id] = loop
+        self._emit("agent_message_loop_upsert", loop=asdict(loop))
+        self._db_save_agent_message_loop(loop)
+        return loop
+
+    def agent_message_loop_update(
+        self,
+        loop_id: str,
+        **fields,
+    ) -> AgentMessageLoop | None:
+        loop = self.agent_message_loops.get(str(loop_id or "").strip())
+        if not loop:
+            return None
+        valid = set(AgentMessageLoop.__dataclass_fields__) - {"id", "created_at"}
+        for key, value in fields.items():
+            if key in valid:
+                setattr(loop, key, value)
+        if "updated_at" not in fields:
+            loop.updated_at = time.time()
+        self._emit("agent_message_loop_upsert", loop=asdict(loop))
+        self._db_save_agent_message_loop(loop)
+        return loop
+
+    def agent_message_loop_stop(
+        self,
+        loop_id: str,
+        *,
+        status: str = "cancelled",
+        stopped_by: str = "user",
+        reason: str = "",
+        now: float | None = None,
+    ) -> AgentMessageLoop | None:
+        loop = self.agent_message_loops.get(str(loop_id or "").strip())
+        if not loop:
+            return None
+        ts = float(now if now is not None else time.time())
+        loop.status = str(status or "cancelled").strip() or "cancelled"
+        loop.stopped_by = str(stopped_by or "").strip()
+        loop.stop_reason = str(reason or "").strip()
+        loop.next_run_at = 0
+        loop.updated_at = ts
+        self._emit("agent_message_loop_upsert", loop=asdict(loop))
+        self._db_save_agent_message_loop(loop)
+        return loop
+
+    def due_agent_message_loops(
+        self,
+        now: float | None = None,
+    ) -> list[AgentMessageLoop]:
+        ts = float(now if now is not None else time.time())
+        return sorted(
+            [
+                loop for loop in self.agent_message_loops.values()
+                if loop.status == "active"
+                and float(loop.next_run_at or 0) > 0
+                and float(loop.next_run_at or 0) <= ts
+            ],
+            key=lambda loop: (float(loop.next_run_at or 0), loop.id),
+        )
 
     # -- Schedule CRUD ------------------------------------------------------
 

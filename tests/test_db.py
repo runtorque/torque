@@ -18,6 +18,7 @@ from torque.db import TorqueDB, canonical_user_agent_thread_id
 install_aiohttp_stub()
 from torque.state import (
     AgentCell,
+    AgentMessageLoop,
     BoardTask,
     GlobalSettings,
     GroupSettings,

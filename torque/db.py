@@ -3170,6 +3170,68 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             snapshot_args=False,
         )
 
+    def save_agent_message_loop(self, loop):
+        """Upsert one user→agent direct-message loop."""
+        d = asdict(loop) if not isinstance(loop, dict) else dict(loop)
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO agent_message_loops
+                (id, agent_id, group_name, interval_seconds, message, status,
+                 created_by, stopped_by, stop_reason, created_at, updated_at,
+                 next_run_at, last_run_at, run_count, last_message_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                str(d.get("id", "") or ""),
+                str(d.get("agent_id", "") or ""),
+                str(d.get("group_name", "") or ""),
+                int(d.get("interval_seconds", 0) or 0),
+                str(d.get("message", "") or ""),
+                str(d.get("status", "active") or "active"),
+                str(d.get("created_by", "user") or "user"),
+                str(d.get("stopped_by", "") or ""),
+                str(d.get("stop_reason", "") or ""),
+                float(d.get("created_at", 0) or 0),
+                float(d.get("updated_at", 0) or 0),
+                float(d.get("next_run_at", 0) or 0),
+                float(d.get("last_run_at", 0) or 0),
+                int(d.get("run_count", 0) or 0),
+                str(d.get("last_message_id", "") or ""),
+            ),
+        )
+        self._conn.commit()
+
+    def load_agent_message_loops(self) -> dict[str, dict]:
+        """Load all persisted user→agent direct-message loops."""
+        rows = self._conn.execute(
+            "SELECT id, agent_id, group_name, interval_seconds, message, "
+            "status, created_by, stopped_by, stop_reason, created_at, "
+            "updated_at, next_run_at, last_run_at, run_count, last_message_id "
+            "FROM agent_message_loops"
+        ).fetchall()
+        loops: dict[str, dict] = {}
+        for row in rows:
+            item = {
+                "id": str(row[0] or ""),
+                "agent_id": str(row[1] or ""),
+                "group_name": str(row[2] or ""),
+                "interval_seconds": int(row[3] or 0),
+                "message": str(row[4] or ""),
+                "status": str(row[5] or "active"),
+                "created_by": str(row[6] or "user"),
+                "stopped_by": str(row[7] or ""),
+                "stop_reason": str(row[8] or ""),
+                "created_at": float(row[9] or 0),
+                "updated_at": float(row[10] or 0),
+                "next_run_at": float(row[11] or 0),
+                "last_run_at": float(row[12] or 0),
+                "run_count": int(row[13] or 0),
+                "last_message_id": str(row[14] or ""),
+            }
+            if item["id"]:
+                loops[item["id"]] = item
+        return loops
+
     def save_ui_state(self, key: str, value):
         self._conn.execute(
             "INSERT OR REPLACE INTO ui_state (key, value) VALUES (?,?)",
@@ -10409,6 +10471,11 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except Exception:
             pass  # table may not exist yet on first load
 
+        try:
+            agent_message_loops = self.load_agent_message_loops()
+        except Exception:
+            agent_message_loops = {}
+
         auto_dispatch_queues = {}
         try:
             rows = c.execute(
@@ -10433,6 +10500,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "board_lanes": board_lanes,
             "board_tasks": board_tasks,
             "schedules": schedules,
+            "agent_message_loops": agent_message_loops,
             "auto_dispatch_queues": auto_dispatch_queues,
             "panel_active": ui.get("panel_active", "")
                 or ("board" if ui.get("board_panel_open", "False") == "True"

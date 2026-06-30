@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from datetime import datetime, timezone
 
 from aiohttp import web
@@ -610,6 +611,23 @@ TOOLS = [
         },
     },
     {
+        "name": "torque_stop_user_message_loop",
+        "description": (
+            "Stop the active user-scheduled /loop for this agent. This only "
+            "affects the caller's own direct-message loop and adds a visible "
+            "audit message for the user/operator."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Optional reason why the loop is no longer actionable.",
+                },
+            },
+        },
+    },
+    {
         "name": "torque_reply",
         "description": (
             "Reply to a message from the engineer (orchestrator agent). "
@@ -1059,6 +1077,63 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         return json.dumps(
             _direct_user_message_response(saved, deduped=not created)
         ), False
+
+    if name == "torque_stop_user_message_loop":
+        cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+        if not cell:
+            return f"Agent {cell_id} not found", True
+        if state.agent_is_tombstoned(cell):
+            return f"Agent {cell_id} is tombstoned", True
+        loop = state.active_agent_message_loop_for_agent(cell.id)
+        if not loop:
+            return "No active user-scheduled /loop exists for this agent", True
+        reason = str(args.get("reason", "") or "").strip()
+        stopped = state.agent_message_loop_stop(
+            loop.id,
+            status="stopped",
+            stopped_by=str(getattr(cell, "kind", "") or "agent").strip() or "agent",
+            reason=reason or "Stopped by receiving agent",
+        )
+        now = time.time()
+        audit = {
+            "id": "msg-" + uuid.uuid4().hex[:12],
+            "thread_id": f"user-agent:user:{cell.id}",
+            "reply_to_id": "",
+            "idempotency_key": "",
+            "group_name": str(getattr(cell, "group", "") or "").strip(),
+            "sender_id": "system",
+            "sender_kind": "system",
+            "sender_name": "System",
+            "recipient_id": cell.id,
+            "recipient_kind": str(getattr(cell, "kind", "") or "worker").strip() or "worker",
+            "recipient_name": str(getattr(cell, "name", "") or "").strip(),
+            "message": (
+                "Receiving agent stopped /loop."
+                + (f" Reason: {reason}" if reason else "")
+            ),
+            "message_type": "system",
+            "created_at": now,
+            "context_snapshot": {
+                "loop_id": loop.id,
+                "loop_status": "stopped",
+            },
+            "delivery_state": "delivered",
+            "delivered_at": now,
+        }
+        saved_audit = state.save_direct_message(audit)
+        await state.broadcast()
+        return json.dumps({
+            "type": "agent_message_loop_stopped",
+            "loop": {
+                "id": stopped.id,
+                "agent_id": stopped.agent_id,
+                "status": stopped.status,
+                "stopped_by": stopped.stopped_by,
+                "stop_reason": stopped.stop_reason,
+                "run_count": stopped.run_count,
+            } if stopped else {},
+            "audit_message_id": str((saved_audit or {}).get("id", "") or ""),
+        }), False
 
     if name in {
         "torque_memory_publish",

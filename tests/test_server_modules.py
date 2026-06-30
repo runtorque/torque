@@ -3214,6 +3214,171 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(direct_notifications, [])
 
+    async def test_user_agent_compact_passthrough_and_other_slash_is_normal_message(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        compact = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/compact',
+                'idempotency_key': 'compact-submit',
+            },
+            state,
+            fake_send_prompt,
+        )
+        other = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/compact now please',
+                'idempotency_key': 'other-slash-submit',
+            },
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(compact['type'], 'ok')
+        self.assertEqual(other['type'], 'ok')
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[0][1], '/compact')
+        self.assertIn('## Message from the User', sent[1][1])
+        self.assertIn('/compact now please', sent[1][1])
+        compact_row = self.db.load_direct_message(compact['message_id'])
+        other_row = self.db.load_direct_message(other['message_id'])
+        self.assertEqual(compact_row['message_type'], 'slash_command')
+        self.assertEqual(compact_row['context_snapshot']['slash_command'], 'compact')
+        self.assertEqual(other_row['message_type'], 'message')
+
+    async def test_user_agent_loop_create_fire_cancel_and_invalid_no_spam(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        invalid = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/loop every 1s too fast',
+                'idempotency_key': 'loop-invalid',
+            },
+            state,
+            fake_send_prompt,
+        )
+        self.assertEqual(invalid['type'], 'error')
+        self.assertIn('at least 1m', invalid['message'])
+        self.assertEqual(state.agent_message_loops, {})
+        self.assertEqual(sent, [])
+        self.assertEqual(self.db.load_direct_messages_for_agent(worker.id), [])
+
+        created = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/loop every 1m please report progress',
+                'idempotency_key': 'loop-create',
+            },
+            state,
+            fake_send_prompt,
+        )
+        self.assertEqual(created['type'], 'agent_message_loop')
+        loop = created['loop']
+        self.assertEqual(loop['agent_id'], worker.id)
+        self.assertEqual(loop['interval_seconds'], 60)
+        self.assertEqual(loop['message'], 'please report progress')
+        self.assertEqual(loop['status'], 'active')
+        self.assertEqual(len(sent), 0)
+        audit_rows = self.db.load_direct_messages_for_agent(worker.id)
+        self.assertEqual(len(audit_rows), 1)
+        self.assertEqual(audit_rows[0]['message_type'], 'system')
+        self.assertIn('User started /loop every 1m', audit_rows[0]['message'])
+
+        server_dispatch = importlib.import_module('torque.server_dispatch')
+        server_dispatch = importlib.reload(server_dispatch)
+
+        async def handle_command(payload):
+            return await self.server_mod._handle_user_agent_message_command(
+                payload,
+                state,
+                fake_send_prompt,
+            )
+
+        state.agent_message_loop_update(loop['id'], next_run_at=10.0)
+        fired = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=10.0,
+        )
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(len(sent), 1)
+        self.assertIn('This message was sent by a user-scheduled /loop.', sent[0][1])
+        self.assertIn('please report progress', sent[0][1])
+        self.assertIn('torque_stop_user_message_loop', sent[0][1])
+        updated_loop = state.agent_message_loops[loop['id']]
+        self.assertEqual(updated_loop.run_count, 1)
+        self.assertGreater(updated_loop.next_run_at, 10.0)
+        loop_row = self.db.load_direct_message(fired[0]['message_id'])
+        self.assertEqual(loop_row['message_type'], 'loop')
+        self.assertEqual(loop_row['context_snapshot']['loop_id'], loop['id'])
+
+        cancelled = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/loop cancel',
+                'idempotency_key': 'loop-cancel',
+            },
+            state,
+            fake_send_prompt,
+        )
+        self.assertEqual(cancelled['type'], 'agent_message_loop')
+        self.assertEqual(cancelled['loop']['status'], 'cancelled')
+        self.assertIsNone(state.active_agent_message_loop_for_agent(worker.id))
+        after_cancel_rows = self.db.load_direct_messages_for_agent(worker.id)
+        self.assertTrue(
+            any('User cancelled /loop' in row['message']
+                for row in after_cancel_rows)
+        )
+
     async def test_user_agent_message_marks_agent_running_before_delivery_finishes(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
