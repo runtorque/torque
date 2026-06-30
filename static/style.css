@@ -886,6 +886,55 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   color: var(--text-dim);
   font-size: 10px;
 }
+.terminal-direct-loop {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.055);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.terminal-direct-loop-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+}
+.terminal-direct-loop-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border) 62%);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 800;
+}
+.terminal-direct-loop-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.terminal-direct-loop-cancel {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255,255,255,.04);
+  font-size: 10px;
+  font-weight: 700;
+}
+.terminal-direct-loop-cancel:hover,
+.terminal-direct-loop-cancel:focus-visible {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  outline: none;
+}
 .terminal-direct-messages-list {
   flex: 1 1 auto;
   min-height: 0;

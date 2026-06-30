@@ -18,6 +18,7 @@ from torque.db import TorqueDB, canonical_user_agent_thread_id
 install_aiohttp_stub()
 from torque.state import (
     AgentCell,
+    AgentMessageLoop,
     BoardTask,
     GlobalSettings,
     GroupSettings,
@@ -883,6 +884,32 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(delivered["read_at"], 20.0)
         self.assertEqual(delivered["delivery_state"], "delivered")
         self.assertEqual(delivered["delivered_at"], 30.0)
+
+    def test_agent_message_loops_round_trip_through_load_all(self):
+        loop = AgentMessageLoop(
+            id="loop-1",
+            agent_id="worker-1",
+            group_name="g",
+            interval_seconds=600,
+            message="check in",
+            status="active",
+            created_at=10.0,
+            updated_at=11.0,
+            next_run_at=610.0,
+            last_run_at=0,
+            run_count=0,
+        )
+
+        self.db.save_agent_message_loop(loop)
+        snapshot = self.db.load_all()
+
+        self.assertIn("loop-1", snapshot["agent_message_loops"])
+        restored = snapshot["agent_message_loops"]["loop-1"]
+        self.assertEqual(restored["agent_id"], "worker-1")
+        self.assertEqual(restored["interval_seconds"], 600)
+        self.assertEqual(restored["message"], "check in")
+        self.assertEqual(restored["status"], "active")
+        self.assertEqual(restored["next_run_at"], 610.0)
 
     def test_direct_and_peer_buffered_helpers_do_not_cross_return_rows(self):
         self.db.save_agent_peer_message({

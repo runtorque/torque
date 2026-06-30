@@ -227,6 +227,73 @@ function _terminalDirectMessageType(row) {
   return String((row && row.message_type) || 'message').trim().toLowerCase() || 'message';
 }
 
+function _terminalAgentMessageLoopsForAgent(agentId) {
+  const id = String(agentId || '').trim();
+  const loops = state && state.agent_message_loops && typeof state.agent_message_loops === 'object'
+    ? state.agent_message_loops
+    : {};
+  return Object.keys(loops).map(function(key) {
+    return Object.assign({}, loops[key] || {});
+  }).filter(function(loop) {
+    return String(loop.agent_id || '').trim() === id;
+  }).sort(function(a, b) {
+    const at = Number(a.updated_at || a.created_at || 0) || 0;
+    const bt = Number(b.updated_at || b.created_at || 0) || 0;
+    if (at !== bt) return bt - at;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+function _terminalActiveAgentMessageLoop(agentId) {
+  const rows = _terminalAgentMessageLoopsForAgent(agentId);
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i].status || '').trim() === 'active') return rows[i];
+  }
+  return null;
+}
+
+function _terminalLoopIntervalLabel(seconds) {
+  const value = Math.max(0, Math.floor(Number(seconds || 0) || 0));
+  if (value && value % 3600 === 0) return (value / 3600) + 'h';
+  if (value && value % 60 === 0) return (value / 60) + 'm';
+  return value + 's';
+}
+
+function _terminalLoopTimeLabel(secondsValue) {
+  const ts = Number(secondsValue || 0) || 0;
+  if (!ts) return '';
+  try {
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (_e) {
+    return '';
+  }
+}
+
+function _terminalLoopPreview(text) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return 'message';
+  return value.length > 96 ? value.slice(0, 93) + '\u2026' : value;
+}
+
+function _renderTerminalAgentMessageLoopHtml(agent) {
+  const loop = _terminalActiveAgentMessageLoop(agent && agent.id);
+  if (!loop) return '';
+  const agentId = String((agent && agent.id) || '');
+  const nextLabel = _terminalLoopTimeLabel(loop.next_run_at);
+  return ''
+    + '<div class="terminal-direct-loop" data-loop-id="' + esc(loop.id || '') + '">'
+    + '  <div class="terminal-direct-loop-main">'
+    + '    <span class="terminal-direct-loop-badge">/loop</span>'
+    + '    <span class="terminal-direct-loop-text">Every ' + esc(_terminalLoopIntervalLabel(loop.interval_seconds))
+    + (nextLabel ? ' · next ' + esc(nextLabel) : '')
+    + ' · ' + esc(_terminalLoopPreview(loop.message)) + '</span>'
+    + '  </div>'
+    + '  <button type="button" class="terminal-direct-loop-cancel"'
+    + ' onclick="return terminalCancelUserMessageLoop(event, \'' + esc(agentId) + '\')">'
+    + 'Cancel</button>'
+    + '</div>';
+}
+
 function _terminalDirectMessageBodyHtml(row) {
   const text = _terminalDirectMessageText(row);
   let html = '';
@@ -385,6 +452,7 @@ function _renderTerminalDirectMessagesHtml(agent) {
     + '    <span class="terminal-direct-messages-title">Direct messages</span>'
     + '    <span class="terminal-direct-messages-peer">' + esc((agent && agent.name) || 'Agent') + '</span>'
     + '  </div>'
+    + _renderTerminalAgentMessageLoopHtml(agent)
     + '  <div class="terminal-direct-messages-list" role="log" aria-live="polite" data-agent-id="' + esc(agentId) + '">'
     + body
     + '  </div>'
@@ -3428,6 +3496,57 @@ function _terminalComposeSendPayload(payload) {
   }
 }
 
+function _terminalValidateLoopComposerInput(input, text, directAgent) {
+  const raw = String(text || '').trim();
+  if (!(raw === '/loop' || raw.startsWith('/loop '))) return true;
+  if (!directAgent || !directAgent.id) {
+    _terminalComposeSetError(input, 'Select an agent to use /loop.');
+    return false;
+  }
+  if (raw === '/loop cancel') return true;
+  const match = raw.match(/^\/loop\s+every\s+(\S+)\s+([\s\S]+)$/);
+  if (!match) {
+    _terminalComposeSetError(input, 'Usage: /loop every 10m <message>, or /loop cancel.');
+    return false;
+  }
+  const intervalMatch = String(match[1] || '').toLowerCase().match(/^(\d+)\s*([smh])$/);
+  if (!intervalMatch) {
+    _terminalComposeSetError(input, 'Loop interval must look like 1m, 10m, or 2h.');
+    return false;
+  }
+  const amount = Number(intervalMatch[1] || 0) || 0;
+  const unit = intervalMatch[2];
+  const seconds = amount * (unit === 'h' ? 3600 : (unit === 'm' ? 60 : 1));
+  if (seconds < 60) {
+    _terminalComposeSetError(input, 'Loop interval must be at least 1m.');
+    return false;
+  }
+  if (seconds > 86400) {
+    _terminalComposeSetError(input, 'Loop interval must be 24h or less.');
+    return false;
+  }
+  if (!String(match[2] || '').trim()) {
+    _terminalComposeSetError(input, 'Loop message is required.');
+    return false;
+  }
+  return true;
+}
+
+function terminalCancelUserMessageLoop(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const id = String(agentId || '').trim();
+  if (!id) return false;
+  _terminalComposeSendPayload({
+    cmd: 'user_agent_message',
+    agent_id: id,
+    message: '/loop cancel',
+    thread_id: 'user-agent:user:' + id,
+    idempotency_key: _terminalComposeNextIdempotencyKey(id),
+  });
+  return false;
+}
+
 function terminalComposeSubmit(evt, cellId) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -3448,6 +3567,10 @@ function terminalComposeSubmit(evt, cellId) {
   }
   const text = _terminalComposePayloadText(id, displayText);
   const directAgent = _terminalComposeDirectAgentForCellId(id);
+  if (!_terminalValidateLoopComposerInput(input, text, directAgent)) {
+    _terminalComposeSetButtonState(input);
+    return false;
+  }
   let sent = false;
   let directAgentId = '';
   let replyToId = '';

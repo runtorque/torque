@@ -39,6 +39,7 @@ _TORQUE_WRITE_TOOLS = {
     "torque_derive",
     "torque_ask",
     "torque_message_user",
+    "torque_stop_user_message_loop",
     "torque_reply",
     "torque_memory_publish",
     "torque_memory_pin",

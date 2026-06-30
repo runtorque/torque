@@ -691,6 +691,9 @@ class WorktreeCommandTarget:
 GUIDANCE_HINT_USER_DIRECT_REPLY = "user_message.reply_hint"
 GUIDANCE_HINT_IDENTITY_DISPATCH = "agent_identity_anchor.dispatch"
 GUIDANCE_HINT_IDENTITY_LAUNCH = "agent_identity_anchor.launch"
+USER_AGENT_LOOP_MIN_INTERVAL_SECONDS = 60
+USER_AGENT_LOOP_MAX_INTERVAL_SECONDS = 24 * 60 * 60
+USER_AGENT_LOOP_MAX_MESSAGE_CHARS = 4000
 
 from .server_actions import _action_to_yaml
 from .server_agent import (
@@ -7470,6 +7473,77 @@ def _user_agent_message_idempotency_key(data: dict) -> str:
     return ""
 
 
+def _parse_user_agent_loop_interval(raw: str) -> tuple[int, str]:
+    """Parse a bounded /loop interval token into seconds."""
+    token = str(raw or "").strip().lower()
+    match = re.fullmatch(r"(\d+)\s*([smh])", token)
+    if not match:
+        return 0, "Interval must look like 1m, 10m, or 2h"
+    amount = int(match.group(1))
+    unit = match.group(2)
+    multiplier = {"s": 1, "m": 60, "h": 3600}[unit]
+    seconds = amount * multiplier
+    if seconds < USER_AGENT_LOOP_MIN_INTERVAL_SECONDS:
+        return (
+            0,
+            (
+                "Interval must be at least "
+                f"{USER_AGENT_LOOP_MIN_INTERVAL_SECONDS // 60}m"
+            ),
+        )
+    if seconds > USER_AGENT_LOOP_MAX_INTERVAL_SECONDS:
+        return 0, "Interval must be 24h or less"
+    return seconds, ""
+
+
+def _format_user_agent_loop_interval(seconds: int) -> str:
+    value = max(0, int(seconds or 0))
+    if value and value % 3600 == 0:
+        amount = value // 3600
+        return f"{amount}h"
+    if value and value % 60 == 0:
+        amount = value // 60
+        return f"{amount}m"
+    return f"{value}s"
+
+
+def _parse_user_agent_loop_command(message_text: str) -> dict:
+    """Parse the tiny supported /loop grammar.
+
+    Supported syntax:
+      /loop every <interval> <message>
+      /loop cancel
+    """
+    raw = str(message_text or "").strip()
+    if raw == "/loop cancel":
+        return {"action": "cancel"}
+    match = re.fullmatch(r"/loop\s+every\s+(\S+)\s+([\s\S]+)", raw)
+    if not match:
+        return {
+            "type": "error",
+            "message": (
+                "Usage: /loop every <interval> <message> "
+                "(for example: /loop every 10m check status), "
+                "or /loop cancel"
+            ),
+        }
+    seconds, error = _parse_user_agent_loop_interval(match.group(1))
+    if error:
+        return {"type": "error", "message": error}
+    message = str(match.group(2) or "").strip()
+    if not message:
+        return {"type": "error", "message": "Loop message is required"}
+    if len(message) > USER_AGENT_LOOP_MAX_MESSAGE_CHARS:
+        return {
+            "type": "error",
+            "message": (
+                "Loop message is too long "
+                f"(max {USER_AGENT_LOOP_MAX_MESSAGE_CHARS} characters)"
+            ),
+        }
+    return {"action": "create", "interval_seconds": seconds, "message": message}
+
+
 def _user_direct_message_reply_tool(recipient_kind: str) -> str:
     kind = str(recipient_kind or "").strip()
     if kind == "architect":
@@ -7509,12 +7583,28 @@ def _format_user_direct_message_prompt(
         return _format_ask_reply_direct_message_prompt(state, row)
     message_id = str(row.get("id", "") or "").strip()
     message = str(row.get("message", "") or "").strip("\n")
+    message_type = str(row.get("message_type", "") or "").strip()
+    context_snapshot = row.get("context_snapshot", {})
+    if not isinstance(context_snapshot, dict):
+        context_snapshot = {}
+    if (
+        message_type == "slash_command"
+        and context_snapshot.get("slash_command") == "compact"
+    ):
+        return message
     tool_name = _user_direct_message_reply_tool(recipient_kind)
     reply_arg = json.dumps(message_id)
     parts = [
         "## Message from the User",
         "",
     ]
+    if message_type == "loop":
+        parts.extend([
+            "This message was sent by a user-scheduled /loop.",
+            "If the loop is no longer actionable, stop it with:",
+            "  mcp__torque__torque_stop_user_message_loop(reason=\"...\")",
+            "",
+        ])
     if message:
         parts.extend([message, ""])
     parts.extend([
@@ -7705,6 +7795,113 @@ async def _queue_user_direct_message_to_agent(
         "delivered",
         emit=emit,
     ) or row
+
+
+def _save_user_agent_loop_audit_message(
+        state: MatrixState,
+        target,
+        message: str,
+        *,
+        loop_id: str = "",
+        status: str = "",
+        now: float | None = None) -> dict | None:
+    """Persist a visible system/audit row in the user↔agent DM lane."""
+    if not getattr(state, "db", None) or not target:
+        return None
+    ts = float(now if now is not None else time.time())
+    row = {
+        "id": "msg-" + uuid.uuid4().hex[:12],
+        "thread_id": canonical_user_agent_thread_id(target.id),
+        "reply_to_id": "",
+        "idempotency_key": "",
+        "group_name": str(getattr(target, "group", "") or "").strip(),
+        "sender_id": "system",
+        "sender_kind": "system",
+        "sender_name": "System",
+        "recipient_id": target.id,
+        "recipient_kind": str(getattr(target, "kind", "") or "").strip()
+            or "worker",
+        "recipient_name": str(getattr(target, "name", "") or "").strip(),
+        "message": str(message or "").strip(),
+        "message_type": "system",
+        "created_at": ts,
+        "ack_required": False,
+        "blocking": False,
+        "context_snapshot": {
+            "loop_id": str(loop_id or "").strip(),
+            "loop_status": str(status or "").strip(),
+        },
+        "delivery_state": "delivered",
+        "delivery_reason": "",
+        "delivered_at": ts,
+    }
+    return state.save_direct_message(row)
+
+
+def _user_agent_loop_response(loop, *, audit_row: dict | None = None) -> dict:
+    payload = {
+        "type": "agent_message_loop",
+        "loop": asdict(loop) if loop else {},
+    }
+    if audit_row:
+        payload["audit_message_id"] = str(audit_row.get("id", "") or "")
+    return payload
+
+
+def _handle_user_agent_loop_command(
+        data: dict,
+        state: MatrixState,
+        target,
+        message_text: str) -> dict:
+    parsed = _parse_user_agent_loop_command(message_text)
+    if parsed.get("type") == "error":
+        return parsed
+    action = parsed.get("action")
+    if action == "cancel":
+        loop = state.active_agent_message_loop_for_agent(target.id)
+        if not loop:
+            return {
+                "type": "error",
+                "message": "No active /loop exists for this agent",
+            }
+        stopped = state.agent_message_loop_stop(
+            loop.id,
+            status="cancelled",
+            stopped_by="user",
+            reason="Cancelled by user",
+        )
+        audit = _save_user_agent_loop_audit_message(
+            state,
+            target,
+            "User cancelled /loop.",
+            loop_id=loop.id,
+            status="cancelled",
+        )
+        return _user_agent_loop_response(stopped, audit_row=audit)
+    if action != "create":
+        return {"type": "error", "message": "Unsupported /loop command"}
+    try:
+        loop = state.agent_message_loop_add(
+            agent_id=target.id,
+            group_name=str(getattr(target, "group", "") or "").strip(),
+            interval_seconds=int(parsed["interval_seconds"]),
+            message=str(parsed["message"]),
+            created_by="user",
+        )
+    except ValueError as exc:
+        return {"type": "error", "message": str(exc)}
+    interval_label = _format_user_agent_loop_interval(loop.interval_seconds)
+    audit = _save_user_agent_loop_audit_message(
+        state,
+        target,
+        (
+            f"User started /loop every {interval_label}: "
+            f"{loop.message}"
+        ),
+        loop_id=loop.id,
+        status="active",
+    )
+    return _user_agent_loop_response(loop, audit_row=audit)
 
 
 async def _replay_buffered_cross_kind_messages(
@@ -9095,6 +9292,14 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
             "type": "error",
             "message": "Direct message store is unavailable",
         }
+    stripped_message = message_text.strip()
+    if stripped_message == "/loop" or stripped_message.startswith("/loop "):
+        return _handle_user_agent_loop_command(
+            data,
+            state,
+            target,
+            stripped_message,
+        )
 
     idempotency_key = _user_agent_message_idempotency_key(data)
     message_id = _user_direct_message_id_from_idempotency_key(idempotency_key)
@@ -9105,6 +9310,17 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
     thread_id = requested_thread_id or canonical_user_agent_thread_id(target.id)
     recipient_kind = str(getattr(target, "kind", "") or "").strip() or "worker"
     recipient_name = str(getattr(target, "name", "") or "").strip()
+    message_type = "message"
+    context_snapshot = {}
+    if stripped_message == "/compact":
+        message_text = "/compact"
+        message_type = "slash_command"
+        context_snapshot = {"slash_command": "compact"}
+    elif bool(data.get("_loop_delivery")):
+        message_type = "loop"
+        context_snapshot = {
+            "loop_id": str(data.get("_loop_id", "") or "").strip(),
+        }
 
     existing = (
         state.db.load_direct_message(message_id)
@@ -9142,9 +9358,10 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
         "recipient_kind": recipient_kind,
         "recipient_name": recipient_name,
         "message": message_text,
-        "message_type": "message",
+        "message_type": message_type,
         "created_at": time.time(),
         "blocking": False,
+        "context_snapshot": context_snapshot,
         "delivery_state": "buffered",
         "delivery_reason": "",
     }
