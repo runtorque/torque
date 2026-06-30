@@ -196,6 +196,191 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [assigned.id, architect.id])
 
+    def test_task_completion_routes_to_creator_architect_by_default(self):
+        state, group = self._make_state()
+        creator = self._add_agent(
+            state,
+            agent_id="arch-creator",
+            name="Creator Architect",
+            group=group,
+            kind="architect",
+        )
+        hiring_architect = self._add_agent(
+            state,
+            agent_id="arch-hiring",
+            name="Hiring Architect",
+            group=group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=hiring_architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=assigned.id,
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+            created_by_architect_id=creator.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(assigned.id)
+        state.update_agent_digest_settings(creator.id)
+        state.update_agent_digest_settings(
+            hiring_architect.id,
+            enabled_events=["task_completed"],
+        )
+
+        event = {
+            "cell_id": worker.id,
+            "group": group,
+            "kind": "task_completed",
+            "task_id": task.id,
+        }
+
+        self.assertEqual(
+            self.routing_mod.candidate_digest_recipients(state, event),
+            [assigned.id, hiring_architect.id, creator.id],
+        )
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [assigned.id, hiring_architect.id, creator.id],
+        )
+
+    def test_task_completion_creator_route_deduplicates_existing_recipient(self):
+        state, group = self._make_state()
+        creator = self._add_agent(
+            state,
+            agent_id="arch-creator",
+            name="Creator Architect",
+            group=group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=creator.id,
+        )
+        task = state.board_add_task(
+            "Creator-owned task",
+            group,
+            id="task-1",
+            assigned_engineer_id=assigned.id,
+            created_by_architect_id=creator.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(assigned.id)
+        state.update_agent_digest_settings(creator.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": "",
+                "group": group,
+                "kind": "task_completed",
+                "task_id": task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [assigned.id, creator.id])
+        self.assertEqual(recipients.count(creator.id), 1)
+
+    def test_task_creator_architect_not_notified_for_unrelated_events(self):
+        state, group = self._make_state()
+        creator = self._add_agent(
+            state,
+            agent_id="arch-creator",
+            name="Creator Architect",
+            group=group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            assigned_engineer_id=assigned.id,
+            created_by_architect_id=creator.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(assigned.id)
+        state.update_agent_digest_settings(creator.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": "",
+                "group": group,
+                "kind": "task_verification_updated",
+                "task_id": task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [assigned.id])
+
+    def test_task_creator_architect_not_notified_across_groups(self):
+        state, group = self._make_state()
+        other_group = "other"
+        state.groups[other_group] = []
+        creator = self._add_agent(
+            state,
+            agent_id="arch-creator",
+            name="Creator Architect",
+            group=other_group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+        )
+        task = state.board_add_task(
+            "Cross-group creator task",
+            group,
+            id="task-1",
+            assigned_engineer_id=assigned.id,
+            created_by_architect_id=creator.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(assigned.id)
+        state.update_agent_digest_settings(creator.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": "",
+                "group": group,
+                "kind": "task_completed",
+                "task_id": task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [assigned.id])
+
     def test_child_task_event_routes_via_parent_assigned_engineer(self):
         state, group = self._make_state()
         architect = self._add_agent(
@@ -1230,3 +1415,62 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(settings.paused)
         self.assertEqual(settings.push_interval, 300)
         self.assertFalse(settings.wake_on_digest)
+
+    async def test_creator_completion_event_buffers_for_architect_digest(self):
+        state, group = self._make_state()
+        creator = self._add_agent(
+            state,
+            agent_id="arch-creator",
+            name="Creator Architect",
+            group=group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            assigned_engineer_id=assigned.id,
+            created_by_architect_id=creator.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(
+            assigned.id,
+            push_interval=0,
+            max_interval=0,
+        )
+        state.update_agent_digest_settings(
+            creator.id,
+            push_interval=0,
+            max_interval=0,
+        )
+
+        bridge = FakeBridge()
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer.on_panel_event(
+            {
+                "id": 1,
+                "cell_id": "",
+                "group": group,
+                "kind": "task_completed",
+                "task_id": task.id,
+                "message": "Creator task completed",
+            }
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(
+            [event[0] for event in bridge.sent],
+            [assigned.session_id, creator.session_id],
+        )
+        self.assertEqual(
+            [event["message"] for event in buffer.get_sent_events(creator.id)],
+            ["Creator task completed"],
+        )

@@ -76,22 +76,32 @@ def _effective_owner_engineer_id(cell) -> str:
     return str(getattr(cell, "created_by_engineer_id", "") or "").strip()
 
 
-def _task_routing_source(state, event: dict):
-    task_id = str(event.get("task_id", "") or "").strip()
-    if not task_id:
-        return None
-    task = getattr(state, "board_tasks", {}).get(task_id)
-    if not task:
-        return None
-
+def _event_task_chain(state, event: dict) -> list:
+    task_id = str((event or {}).get("task_id", "") or "").strip()
+    task = getattr(state, "board_tasks", {}).get(task_id) if task_id else None
+    chain = []
     seen_task_ids: set[str] = set()
-    current = task
-    while current:
-        current_id = str(getattr(current, "id", "") or "").strip()
+    while task:
+        current_id = str(getattr(task, "id", "") or "").strip()
         if current_id:
             if current_id in seen_task_ids:
                 break
             seen_task_ids.add(current_id)
+        chain.append(task)
+        next_id = str(getattr(task, "parent_task_id", "") or "").strip()
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        if not next_id and root_id and root_id != current_id:
+            next_id = root_id
+        task = getattr(state, "board_tasks", {}).get(next_id) if next_id else None
+    return chain
+
+
+def _task_routing_source(state, event: dict):
+    task_chain = _event_task_chain(state, event)
+    if not task_chain:
+        return None
+
+    for current in task_chain:
         assigned_engineer_id = str(
             getattr(current, "assigned_engineer_id", "") or ""
         ).strip()
@@ -100,12 +110,8 @@ def _task_routing_source(state, event: dict):
             if engineer and not _is_tombstoned(state, engineer):
                 return engineer
             return _NO_ROUTING_SOURCE
-        next_id = str(getattr(current, "parent_task_id", "") or "").strip()
-        root_id = str(getattr(current, "pipeline_root_id", "") or "").strip()
-        if not next_id and root_id and root_id != current_id:
-            next_id = root_id
-        current = getattr(state, "board_tasks", {}).get(next_id) if next_id else None
 
+    task = task_chain[0]
     for field_name in ("agent_id", "reply_agent_id"):
         cell_id = str(getattr(task, field_name, "") or "").strip()
         if not cell_id:
@@ -114,6 +120,49 @@ def _task_routing_source(state, event: dict):
         if source and not _is_tombstoned(state, source):
             return source
     return None
+
+
+def _task_completion_creator_architect_id(state, event: dict) -> str:
+    """Return the task creator architect for the built-in completion route."""
+    if _event_kind(event) != "task_completed":
+        return ""
+    task_chain = _event_task_chain(state, event)
+    if not task_chain:
+        return ""
+
+    event_group = str((event or {}).get("group", "") or "").strip()
+    source_task_group = str(getattr(task_chain[0], "group", "") or "").strip()
+    if event_group and source_task_group and event_group != source_task_group:
+        return ""
+
+    for task in task_chain:
+        architect_id = str(
+            getattr(task, "created_by_architect_id", "") or ""
+        ).strip()
+        if not architect_id:
+            continue
+        architect = state.agents.get(architect_id)
+        if not architect or _is_tombstoned(state, architect):
+            return ""
+        if _cell_kind(architect) != "architect":
+            return ""
+        architect_group = str(getattr(architect, "group", "") or "").strip()
+        task_group = str(getattr(task, "group", "") or "").strip()
+        if event_group and architect_group and architect_group != event_group:
+            return ""
+        if task_group and architect_group and architect_group != task_group:
+            return ""
+        return architect.id
+    return ""
+
+
+def _is_task_completion_creator_subscription(
+        state, recipient_id: str, event: dict) -> bool:
+    recipient_id = str(recipient_id or "").strip()
+    return bool(
+        recipient_id
+        and _task_completion_creator_architect_id(state, event) == recipient_id
+    )
 
 
 def _event_routing_source(state, event: dict):
@@ -138,44 +187,66 @@ def _event_routing_source(state, event: dict):
 def candidate_digest_recipients(state, event: dict) -> list[str]:
     """Return possible recipients before pause/enabled-events filters."""
     source = _event_routing_source(state, event)
-    if not source:
-        return []
-    if _is_tombstoned(state, source):
-        return []
-
-    kind = _cell_kind(source)
     recipients: list[str] = []
-    architect_eligible = _is_architect_coarse_event(event)
 
-    if kind == "worker":
-        owner_id = _effective_owner_engineer_id(source)
-        owner = state.agents.get(owner_id) if owner_id else None
-        if owner and not _is_tombstoned(state, owner) and _cell_kind(owner) == "engineer":
-            recipients.append(owner.id)
-            if architect_eligible:
-                architect_id = str(
-                    getattr(owner, "hired_by_architect_id", "") or ""
-                ).strip()
-                architect = state.agents.get(architect_id) if architect_id else None
-                if architect and not _is_tombstoned(state, architect) and _cell_kind(architect) == "architect":
+    if source and not _is_tombstoned(state, source):
+        kind = _cell_kind(source)
+        architect_eligible = _is_architect_coarse_event(event)
+
+        if kind == "worker":
+            owner_id = _effective_owner_engineer_id(source)
+            owner = state.agents.get(owner_id) if owner_id else None
+            if (
+                    owner
+                    and not _is_tombstoned(state, owner)
+                    and _cell_kind(owner) == "engineer"
+            ):
+                recipients.append(owner.id)
+                if architect_eligible:
+                    architect_id = str(
+                        getattr(owner, "hired_by_architect_id", "") or ""
+                    ).strip()
+                    architect = (
+                        state.agents.get(architect_id)
+                        if architect_id
+                        else None
+                    )
+                    if (
+                            architect
+                            and not _is_tombstoned(state, architect)
+                            and _cell_kind(architect) == "architect"
+                    ):
+                        recipients.append(architect.id)
+        elif kind == "engineer":
+            architect_id = str(
+                getattr(source, "hired_by_architect_id", "") or ""
+            ).strip()
+            architect = state.agents.get(architect_id) if architect_id else None
+            if _event_kind(event) in ENGINEER_ASK_EVENT_KINDS:
+                if (
+                        architect
+                        and not _is_tombstoned(state, architect)
+                        and _cell_kind(architect) == "architect"
+                ):
                     recipients.append(architect.id)
-    elif kind == "engineer":
-        architect_id = str(
-            getattr(source, "hired_by_architect_id", "") or ""
-        ).strip()
-        architect = state.agents.get(architect_id) if architect_id else None
-        if _event_kind(event) in ENGINEER_ASK_EVENT_KINDS:
-            if architect and not _is_tombstoned(state, architect) and _cell_kind(architect) == "architect":
-                recipients.append(architect.id)
-        else:
+            else:
+                recipients.append(source.id)
+                if architect_eligible:
+                    if (
+                            architect
+                            and not _is_tombstoned(state, architect)
+                            and _cell_kind(architect) == "architect"
+                    ):
+                        recipients.append(architect.id)
+        elif (
+                kind != "architect"
+                and str(getattr(source, "id", "") or "").strip()
+        ):
             recipients.append(source.id)
-            if architect_eligible:
-                if architect and not _is_tombstoned(state, architect) and _cell_kind(architect) == "architect":
-                    recipients.append(architect.id)
-    elif kind == "architect":
-        return []
-    elif str(getattr(source, "id", "") or "").strip():
-        recipients.append(source.id)
+
+    creator_architect_id = _task_completion_creator_architect_id(state, event)
+    if creator_architect_id:
+        recipients.append(creator_architect_id)
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -230,6 +301,8 @@ def recipient_wants_digest_event(state, recipient_id: str, event: dict, *,
     if _cell_kind(recipient) == "architect":
         if kind not in ARCHITECT_COARSE_EVENTS:
             return False
+        if _is_task_completion_creator_subscription(state, recipient_id, event):
+            return True
         if kind in ARCHITECT_MANDATORY_EVENTS:
             return True
         enabled = list(getattr(settings, "enabled_events", []) or [])
