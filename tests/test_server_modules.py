@@ -3214,6 +3214,56 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(direct_notifications, [])
 
+    async def test_user_agent_message_preserves_multiline_storage_and_prompt(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        message = 'First line of the DM\nSecond line stays separate'
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': message,
+                'idempotency_key': 'browser-submit-multiline',
+            },
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(len(sent), 1)
+        prompt = sent[0][1]
+        self.assertIn('First line of the DM\nSecond line stays separate', prompt)
+        self.assertIn(
+            'First line of the DM\nSecond line stays separate\n\nReply to this user-facing conversation',
+            prompt,
+        )
+        self.assertNotIn('First line of the DMSecond line stays separate', prompt)
+
+        persisted = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(persisted['message'], message)
+        self.assertEqual(state.direct_messages_by_agent[worker.id][0]['message'], message)
+        self.assertIn('\n', persisted['message'])
+
     async def test_user_agent_compact_passthrough_and_other_slash_is_normal_message(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(

@@ -1808,10 +1808,14 @@ function _terminalComposeSyncValueFromDom(input) {
       appendText('\n');
       return;
     }
+    const isBlockLine = name === 'DIV' || name === 'P';
+    if (isBlockLine && text.length && !text.endsWith('\n')) {
+      appendText('\n');
+    }
     const before = text.length;
     const children = node.childNodes || [];
     for (let i = 0; i < children.length; i++) walk(children[i]);
-    if ((name === 'DIV' || name === 'P') && text.length > before && !text.endsWith('\n')) {
+    if (isBlockLine && text.length > before && !text.endsWith('\n')) {
       appendText('\n');
     }
   }

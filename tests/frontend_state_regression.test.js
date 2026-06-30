@@ -13677,6 +13677,81 @@ test('embedded terminal compose renders only for standalone runtime and preserve
   assert.doesNotMatch(dom.workspace.innerHTML, /terminal-compose/);
 });
 
+
+test('embedded terminal rich direct-message composer preserves block-created newline on send', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+
+  function textNode(value) {
+    return { nodeType: 3, nodeValue: value };
+  }
+  function elementNode(name, children) {
+    return {
+      nodeType: 1,
+      nodeName: name,
+      childNodes: children || [],
+      getAttribute() { return null; },
+    };
+  }
+
+  const form = new FakeElement('terminal-compose-form-agent-1');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = 'line oneline two';
+  input.childNodes = [
+    textNode('line one'),
+    elementNode('DIV', [textNode('line two')]),
+  ];
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-submit', button);
+  document.activeElement = input;
+
+  assert.equal(
+    runInContext(context, `_terminalComposeInputText(document.getElementById('terminal-compose-input-agent-1'))`),
+    'line one\nline two',
+    'contenteditable text followed by a block line serializes with a newline',
+  );
+
+  const submitEvt = {
+    currentTarget: form,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__submitEvt = submitEvt;
+  runInContext(context, `terminalComposeSubmit(__submitEvt, 'agent-1');`);
+
+  assert.equal(submitEvt.preventDefaultCalled, true);
+  assert.equal(submitEvt.stopPropagationCalled, true);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].message, 'line one\nline two');
+  assert.doesNotMatch(sandbox.sendCalls[0].message, /line oneline two/);
+  assert.equal(input.value, '');
+  assert.equal(button.disabled, true);
+});
+
 test('embedded terminal agent-targeted compose submits durable direct message on Enter and clears on Escape', () => {
   const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
