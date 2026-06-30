@@ -3393,6 +3393,37 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 for row in after_cancel_rows)
         )
 
+        worker.session_id = ''
+        stopped_when_buffered = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/loop every 1m do not spam offline',
+                'idempotency_key': 'loop-offline-create',
+            },
+            state,
+            fake_send_prompt,
+        )
+        offline_loop_id = stopped_when_buffered['loop']['id']
+        state.agent_message_loop_update(offline_loop_id, next_run_at=20.0)
+        offline_fired = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=20.0,
+        )
+        self.assertEqual(offline_fired, [])
+        self.assertEqual(
+            state.agent_message_loops[offline_loop_id].status,
+            'stopped',
+        )
+        self.assertIsNone(state.active_agent_message_loop_for_agent(worker.id))
+        offline_rows = self.db.load_direct_messages_for_agent(worker.id)
+        self.assertTrue(
+            any('System stopped /loop because delivery was not live' in row['message']
+                for row in offline_rows)
+        )
+
     async def test_user_agent_message_marks_agent_running_before_delivery_finishes(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(

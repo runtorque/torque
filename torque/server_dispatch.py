@@ -729,6 +729,33 @@ async def _fire_due_agent_message_loops(
         now_ts: float | None = None) -> list[dict]:
     """Deliver due user-scheduled /loop messages without widening authority."""
     import time
+    import uuid
+
+    def _save_loop_audit(agent, loop, message: str, status: str) -> None:
+        if not getattr(state, "db", None) or not agent:
+            return
+        state.save_direct_message({
+            "id": "msg-" + uuid.uuid4().hex[:12],
+            "thread_id": f"user-agent:user:{agent.id}",
+            "reply_to_id": "",
+            "idempotency_key": "",
+            "group_name": str(getattr(agent, "group", "") or "").strip(),
+            "sender_id": "system",
+            "sender_kind": "system",
+            "sender_name": "System",
+            "recipient_id": agent.id,
+            "recipient_kind": str(getattr(agent, "kind", "") or "worker").strip() or "worker",
+            "recipient_name": str(getattr(agent, "name", "") or "").strip(),
+            "message": message,
+            "message_type": "system",
+            "created_at": ts,
+            "context_snapshot": {
+                "loop_id": loop.id,
+                "loop_status": status,
+            },
+            "delivery_state": "delivered",
+            "delivered_at": ts,
+        })
 
     ts = float(now_ts if now_ts is not None else time.time())
     fired: list[dict] = []
@@ -758,6 +785,29 @@ async def _fire_due_agent_message_loops(
                 "User message loop %s delivery failed: %s",
                 loop.id,
                 result.get("message", "unknown error"),
+            )
+            continue
+        if (
+            result
+            and result.get("delivery_state")
+            and result.get("delivery_state") != "delivered"
+        ):
+            reason = str(result.get("delivery_reason", "") or "").strip()
+            state.agent_message_loop_stop(
+                loop.id,
+                status="stopped",
+                stopped_by="system",
+                reason=reason or "Loop delivery was buffered",
+                now=ts,
+            )
+            _save_loop_audit(
+                agent,
+                loop,
+                (
+                    "System stopped /loop because delivery was not live"
+                    + (f": {reason}" if reason else ".")
+                ),
+                "stopped",
             )
             continue
         message_id = str((result or {}).get("message_id", "") or "")
