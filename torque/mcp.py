@@ -1332,6 +1332,30 @@ def _idempotency_conflict_result(req_id, tool_name: str):
     )
 
 
+def _qualified_mcp_tool_name(tool_name: str) -> str:
+    name = str(tool_name or "").strip()
+    if not name:
+        return ""
+    if name.startswith("mcp__"):
+        return name
+    return "mcp__torque__" + name
+
+
+async def _notify_mcp_call_observer(observer, observation: dict) -> None:
+    """Best-effort MCP call telemetry hook for the Agent Events MCP panel."""
+    if not observer:
+        return
+    try:
+        maybe_awaitable = observer(observation)
+        if hasattr(maybe_awaitable, "__await__"):
+            await maybe_awaitable
+    except Exception:
+        log.exception(
+            "Failed to record MCP call observation for %s",
+            observation.get("tool_name", ""),
+        )
+
+
 async def dispatch_mcp_rpc_body(
     body: dict,
     *,
@@ -1340,6 +1364,7 @@ async def dispatch_mcp_rpc_body(
     state,
     idempotency_header: str = "",
     mcp_session_id: str = "",
+    mcp_call_observer=None,
 ) -> tuple[dict, int]:
     """Dispatch one parsed MCP JSON-RPC body and return (payload, HTTP status).
 
@@ -1481,6 +1506,7 @@ async def dispatch_mcp_rpc_body(
         # is a recoverable refusal (e.g. deliverable_missing) that the
         # worker can flip to passing by retrying after side-effects.
         cacheable = True
+        dispatch_started_at = time.time()
         if tool_name.startswith("engineer_"):
             if not cell_id:
                 result = {
@@ -1647,12 +1673,29 @@ async def dispatch_mcp_rpc_body(
                 caller_kind=caller_kind,
                 first_tool_call_ts=first_tool_call_ts,
             )
+        duration_ms = int(max(0.0, (time.time() - dispatch_started_at) * 1000))
+        await _notify_mcp_call_observer(
+            mcp_call_observer,
+            {
+                "cell_id": str(cell_id or ""),
+                "tool_name": _qualified_mcp_tool_name(tool_name),
+                "raw_tool_name": str(tool_name or ""),
+                "hook_event_name": "PostToolUse",
+                "session_id": str(mcp_session_id or ""),
+                "request_id": req_id,
+                "idempotency_key": idempotency_key,
+                "arguments": arguments,
+                "result": result,
+                "is_error": bool(result.get("isError")) if isinstance(result, dict) else False,
+                "duration_ms": duration_ms,
+            },
+        )
         return _jsonrpc_ok(req_id, result), 200
 
     return _jsonrpc_error(req_id, -32601, f"Method not found: {method}"), 200
 
 
-def create_mcp_handler(handle_command, state):
+def create_mcp_handler(handle_command, state, *, mcp_call_observer=None):
     """Return an aiohttp POST handler for the /mcp endpoint."""
 
     async def handle_mcp(request):
@@ -1672,6 +1715,7 @@ def create_mcp_handler(handle_command, state):
             state=state,
             idempotency_header=request.headers.get(IDEMPOTENCY_HEADER, ""),
             mcp_session_id=request.headers.get(MCP_SESSION_HEADER, ""),
+            mcp_call_observer=mcp_call_observer,
         )
         if status == 202:
             return web.Response(status=202)

@@ -5033,5 +5033,156 @@ class TorqueAiMcpReportToolNamesTests(unittest.TestCase):
         )
 
 
+class DirectMcpCallObservationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('torque.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('torque.server')
+        self.server_mod = importlib.reload(self.server_mod)
+
+    async def test_direct_mcp_observation_persists_and_live_emits_panel_row(self):
+        state = self.state_mod.MatrixState()
+        state.agents["worker-1"] = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="alpha",
+            cell_type="agent",
+            kind="worker",
+        )
+
+        class FakeIngestClient:
+            def __init__(self):
+                self.append_calls = []
+
+            async def append(self, envelope, *, idempotency_key=""):
+                self.append_calls.append((envelope, idempotency_key))
+                return {"type": "ok", "cursor": 42, "duplicate": False}
+
+        class FakeWS:
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, message):
+                self.messages.append(json.loads(message))
+
+        client = FakeIngestClient()
+        ws = FakeWS()
+        state._ws_clients.add(ws)
+
+        await self.server_mod._record_mcp_call_observation(
+            state,
+            client,
+            {
+                "cell_id": "worker-1",
+                "tool_name": "mcp__torque__torque_context",
+                "hook_event_name": "PostToolUse",
+                "session_id": "sess-1",
+                "request_id": "ctx-1",
+                "arguments": {"include": "summary"},
+                "result": {"content": [{"type": "text", "text": "{}"}]},
+                "is_error": False,
+                "duration_ms": 7,
+            },
+        )
+
+        self.assertEqual(len(client.append_calls), 1)
+        envelope, event_id = client.append_calls[0]
+        self.assertTrue(event_id.startswith(
+            "mcp-direct:worker-1:mcp__torque__torque_context:"
+        ))
+        self.assertEqual(envelope["headers"]["X-Torque-Cell-Id"], "worker-1")
+        self.assertEqual(
+            envelope["raw"]["tool_name"],
+            "mcp__torque__torque_context",
+        )
+        self.assertEqual(envelope["raw"]["tool_input"], {"include": "summary"})
+
+        self.assertEqual(len(ws.messages), 1)
+        ops = ws.messages[0]["ops"]
+        self.assertEqual([op["op"] for op in ops], ["mcp_call_append"])
+        call = ops[0]["call"]
+        self.assertEqual(call["cursor"], 42)
+        self.assertEqual(call["cell_id"], "worker-1")
+        self.assertEqual(call["tool_name"], "mcp__torque__torque_context")
+        self.assertEqual(call["hook_event_name"], "PostToolUse")
+        self.assertEqual(call["agent_name"], "Worker")
+        self.assertEqual(call["group"], "alpha")
+        self.assertTrue(call["args_redacted"])
+        self.assertEqual(call["args"]["arg_keys"], ["include"])
+
+    async def test_report_tool_observation_persists_without_duplicate_live_delta(self):
+        state = self.state_mod.MatrixState()
+        state.agents["worker-1"] = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="alpha",
+            cell_type="agent",
+            kind="worker",
+        )
+
+        class FakeIngestClient:
+            async def append(self, envelope, *, idempotency_key=""):
+                return {"type": "ok", "cursor": 1, "duplicate": False}
+
+        class FakeWS:
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, message):
+                self.messages.append(json.loads(message))
+
+        ws = FakeWS()
+        state._ws_clients.add(ws)
+
+        await self.server_mod._record_mcp_call_observation(
+            state,
+            FakeIngestClient(),
+            {
+                "cell_id": "worker-1",
+                "tool_name": "mcp__torque__torque_progress",
+                "arguments": {"message": "working"},
+                "result": {"content": [{"type": "text", "text": "{}"}]},
+                "is_error": False,
+            },
+        )
+
+        self.assertEqual(ws.messages, [])
+
+    async def test_claude_code_direct_observation_skips_existing_hook_path(self):
+        state = self.state_mod.MatrixState()
+        state.agents["worker-1"] = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="alpha",
+            cell_type="agent",
+            kind="worker",
+            agent_type="claude-code",
+        )
+
+        class FakeIngestClient:
+            def __init__(self):
+                self.append_calls = []
+
+            async def append(self, envelope, *, idempotency_key=""):
+                self.append_calls.append((envelope, idempotency_key))
+                return {"type": "ok", "cursor": 1, "duplicate": False}
+
+        client = FakeIngestClient()
+        await self.server_mod._record_mcp_call_observation(
+            state,
+            client,
+            {
+                "cell_id": "worker-1",
+                "tool_name": "mcp__torque__torque_context",
+                "arguments": {},
+                "result": {"content": [{"type": "text", "text": "{}"}]},
+                "is_error": False,
+            },
+        )
+
+        self.assertEqual(client.append_calls, [])
+
+
 if __name__ == '__main__':
     unittest.main()

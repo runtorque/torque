@@ -14003,6 +14003,133 @@ async def _configure_event_ingest_client(event_ingest_client, state: MatrixState
         )
 
 
+def _mcp_observation_event_id(observation: dict) -> str:
+    cell_id = str(observation.get("cell_id") or "").strip()
+    tool_name = str(observation.get("tool_name") or "").strip()
+    idempotency_key = str(observation.get("idempotency_key") or "").strip()
+    session_id = str(observation.get("session_id") or "").strip()
+    request_id = str(observation.get("request_id") or "").strip()
+    if idempotency_key:
+        return f"mcp-direct:{cell_id}:{tool_name}:{idempotency_key}"
+    if session_id or request_id:
+        return f"mcp-direct:{cell_id}:{tool_name}:{session_id}:{request_id}:{uuid.uuid4().hex}"
+    return f"mcp-direct:{cell_id}:{tool_name}:{uuid.uuid4().hex}"
+
+
+async def _record_mcp_call_observation(
+    state: MatrixState,
+    event_ingest_client,
+    observation: dict,
+    *,
+    ensure_configured=None,
+) -> None:
+    """Persist and live-emit direct /mcp calls for Agent Events > MCP.
+
+    Claude-style hook envelopes still flow through ``/events``. Codex and
+    other clients that call Torque's MCP endpoint directly do not have that
+    provider hook, so this records the same UI shape without changing tool
+    authority or the redaction policy used by the existing MCP call log.
+    """
+    if not event_ingest_client or not isinstance(observation, dict):
+        return
+    tool_name = str(observation.get("tool_name") or "").strip()
+    cell_id = str(observation.get("cell_id") or "").strip()
+    if not tool_name.startswith("mcp__") or not cell_id:
+        return
+    cell = state.agents.get(cell_id)
+    if str(getattr(cell, "agent_type", "") or "").strip() == "claude-code":
+        # Claude Code already supplies PostToolUse envelopes to /events. The
+        # direct /mcp observer exists for clients without that hook path
+        # (notably Codex); recording Claude calls here would duplicate both
+        # historical rows and live deltas from the established hook stream.
+        return
+
+    is_error = bool(observation.get("is_error"))
+    result = observation.get("result")
+    error_text = ""
+    if is_error and isinstance(result, dict):
+        content = result.get("content")
+        if isinstance(content, list) and content:
+            first = content[0] if isinstance(content[0], dict) else {}
+            error_text = str(first.get("text") or "")[:500]
+    raw = {
+        "hook_event_name": str(
+            observation.get("hook_event_name") or "PostToolUse"
+        ),
+        "tool_name": tool_name,
+        "session_id": str(observation.get("session_id") or ""),
+        "duration_ms": observation.get("duration_ms"),
+        "success": not is_error,
+        "tool_input": observation.get("arguments", {}),
+        "tool_response": result,
+    }
+    if error_text:
+        raw["error"] = error_text
+    envelope = build_event_ingest_envelope(
+        raw,
+        headers={"X-Torque-Cell-Id": cell_id},
+    )
+    event_id = _mcp_observation_event_id(observation)
+    try:
+        if ensure_configured:
+            await ensure_configured()
+        response = await event_ingest_client.append(
+            envelope,
+            idempotency_key=event_id,
+        )
+    except Exception as exc:
+        log.exception("Failed to persist direct MCP call observation")
+        db = getattr(state, "db", None)
+        if db and hasattr(db, "record_mcp_health_event_safe"):
+            db.record_mcp_health_event_safe(
+                surface="mcp",
+                event="drop",
+                tool_name=tool_name,
+                error=str(exc) or type(exc).__name__,
+            )
+        return
+    if response.get("type") == "error":
+        message = str(response.get("message") or "event ingest error")
+        log.warning("Failed to persist direct MCP call observation: %s", message)
+        db = getattr(state, "db", None)
+        if db and hasattr(db, "record_mcp_health_event_safe"):
+            db.record_mcp_health_event_safe(
+                surface="mcp",
+                event="drop",
+                tool_name=tool_name,
+                error=message,
+            )
+        return
+    if response.get("duplicate"):
+        return
+
+    # Worker report tools already emit a coalesced live delta from ai_report.
+    # Persist the direct MCP observation for history, but do not reintroduce
+    # the second live MCP delta that TORQUE:236 removed.
+    if tool_name in _TORQUE_AI_MCP_REPORT_TOOL_NAMES:
+        return
+
+    redacted_envelope = redact_event_for_mcp_call_log(
+        envelope,
+        args_capture=state.global_settings.mcp_call_log_args_capture,
+        full_capture_tools=state.global_settings.mcp_call_log_full_capture_tools,
+    )
+    rows = _mcp_call_rows_for_ui(state, [{
+        "cursor": int(response.get("cursor") or 0),
+        "idempotency_key": event_id,
+        "event": redacted_envelope,
+        "appended_at": time.time(),
+    }])
+    if not rows:
+        return
+    state._emit(
+        "mcp_call_append",
+        group=rows[0].get("group", ""),
+        call=rows[0],
+    )
+    await state.broadcast()
+
+
 # Worker actions that route through the `cmd=ai_report` server logic.
 # A worker invokes one of these via the corresponding MCP tool
 # (`mcp__torque__torque_<action>`). The MCP server in `torque/mcp.py` maps the
@@ -25738,7 +25865,22 @@ async def main(connection=None):
             "/api/profile/synthetic_agents",
             handle_profile_synthetic_agents,
         )
-    app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
+    async def _observe_direct_mcp_call(observation):
+        await _record_mcp_call_observation(
+            state,
+            event_ingest_client,
+            observation,
+            ensure_configured=_ensure_event_ingest_configured,
+        )
+
+    app_server.router.add_post(
+        "/mcp",
+        create_mcp_handler(
+            handle_command,
+            state,
+            mcp_call_observer=_observe_direct_mcp_call,
+        ),
+    )
     app_server.router.add_post("/api/upload", handle_upload)
     app_server.router.add_post("/api/upload/cleanup", handle_upload_cleanup)
     app_server.router.add_post("/api/attachment/upload", handle_attachment_upload)
