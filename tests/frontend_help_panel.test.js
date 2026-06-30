@@ -26,12 +26,16 @@ class FakeClassList {
     else this._set.delete(name);
     return next;
   }
+  setFromString(value) {
+    this._set = new Set(String(value || '').split(/\s+/).filter(Boolean));
+  }
 }
 
 class FakeElement {
-  constructor(id, doc) {
+  constructor(id, doc, tagName = '') {
     this.id = id || '';
     this.ownerDocument = doc;
+    this.tagName = String(tagName || '').toUpperCase();
     this._innerHTML = '';
     this.value = '';
     this.checked = false;
@@ -41,6 +45,7 @@ class FakeElement {
     this.selectionStart = 0;
     this.selectionEnd = 0;
     this.focusCalls = [];
+    this.className = '';
     this.classList = new FakeClassList();
     this._listeners = new Map();
   }
@@ -59,7 +64,7 @@ class FakeElement {
     return null;
   }
 
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) { return this.ownerDocument.querySelectorAll(selector); }
 
   addEventListener(type, handler) {
     if (!this._listeners.has(type)) this._listeners.set(type, []);
@@ -98,13 +103,18 @@ class FakeElement {
 class FakeDocument {
   constructor() {
     this.elements = new Map();
+    this.allElements = [];
     this.activeElement = null;
     this.body = new FakeElement('body', this);
     this.ensure('panel-help');
   }
 
   ensure(id) {
-    if (!this.elements.has(id)) this.elements.set(id, new FakeElement(id, this));
+    if (!this.elements.has(id)) {
+      const el = new FakeElement(id, this);
+      this.elements.set(id, el);
+      this.allElements.push(el);
+    }
     return this.elements.get(id);
   }
 
@@ -113,17 +123,44 @@ class FakeDocument {
     if (selector && selector.startsWith('#')) return this.getElementById(selector.slice(1));
     return null;
   }
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) {
+    if (!selector) return [];
+    if (selector.startsWith('#')) {
+      const el = this.getElementById(selector.slice(1));
+      return el ? [el] : [];
+    }
+    if (selector.startsWith('.')) {
+      const className = selector.slice(1);
+      return this.allElements.filter((el) => el.classList.contains(className));
+    }
+    const dataMatches = [...String(selector).matchAll(/\[data-([a-z0-9-]+)(?:="([^"]*)")?\]/gi)];
+    if (dataMatches.length) {
+      return this.allElements.filter((el) => dataMatches.every((match) => {
+        const key = match[1].replace(/-([a-z0-9])/g, (_m, ch) => ch.toUpperCase());
+        if (!(key in el.dataset)) return false;
+        return match[2] === undefined || String(el.dataset[key]) === decodeEntities(match[2]);
+      }));
+    }
+    return [];
+  }
 
   rebuildFromPanelHtml(html, panel) {
     this.elements = new Map([['panel-help', panel]]);
+    this.allElements = [panel];
     const tagRe = /<(form|input|select|div|section|article|button|details|summary|pre|code)\b([^>]*)>/g;
     let match;
     while ((match = tagRe.exec(html))) {
+      const tagName = match[1];
       const attrs = match[2] || '';
       const idMatch = attrs.match(/\bid="([^"]+)"/);
-      if (!idMatch) continue;
-      const el = this.ensure(decodeEntities(idMatch[1]));
+      const el = idMatch ? this.ensure(decodeEntities(idMatch[1])) : new FakeElement('', this, tagName);
+      if (!idMatch) this.allElements.push(el);
+      el.tagName = String(tagName || '').toUpperCase();
+      const classMatch = attrs.match(/\bclass="([^"]*)"/);
+      if (classMatch) {
+        el.className = decodeEntities(classMatch[1]);
+        el.classList.setFromString(el.className);
+      }
       const value = attrs.match(/\bvalue="([^"]*)"/);
       if (value) {
         el.value = decodeEntities(value[1]);
@@ -132,6 +169,12 @@ class FakeDocument {
       }
       const dataPlacement = attrs.match(/\bdata-panel-placement="([^"]*)"/);
       if (dataPlacement) el.dataset.panelPlacement = decodeEntities(dataPlacement[1]);
+      const dataRe = /\bdata-([a-z0-9-]+)="([^"]*)"/gi;
+      let dataMatch;
+      while ((dataMatch = dataRe.exec(attrs))) {
+        const key = dataMatch[1].replace(/-([a-z0-9])/g, (_m, ch) => ch.toUpperCase());
+        el.dataset[key] = decodeEntities(dataMatch[2]);
+      }
     }
   }
 }
@@ -385,7 +428,8 @@ test('Help panel is wired as a first-class panel app', () => {
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-panel\s*\{[\s\S]*flex:\s*0 0 220px;[\s\S]*min-height:\s*220px;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-query-result-scroll\s*\{[\s\S]*min-height:\s*72px;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-detail\s*\{[\s\S]*overflow:\s*auto;/);
-  assert.match(css, /\.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*min-width:\s*64px;[\s\S]*justify-content:\s*center;/);
+  assert.match(css, /\.help-search-input,[\s\S]*\.help-audience-select\s*\{[\s\S]*box-sizing:\s*border-box;[\s\S]*height:\s*30px;/);
+  assert.match(css, /\.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*justify-content:\s*center;[\s\S]*box-sizing:\s*border-box;[\s\S]*height:\s*30px;/);
   assert.match(css, /#panel-help\[data-panel-placement="right"\] \.help-toolbar \.btn-primary,[\s\S]*\.help-query-row \.btn-secondary\s*\{[\s\S]*flex:\s*1 1 calc\(50% - 3px\);/);
   assert.match(css, /\.help-topic-launcher \.btn-primary/);
 });
@@ -424,7 +468,7 @@ test('Help panel loads topics, preserves search order, shows detail, and queries
   assert.match(html, /Panelsmith can build a Help panel/);
   assert.match(html, /id="modal-help-topic-browser"/);
   assert.equal(vm.runInContext('_helpState.browserOpen', sandbox), true);
-  assert.equal(JSON.stringify(document.getElementById('help-browser-selected-detail-anchor').scrollIntoViewOptions), JSON.stringify({ block: 'start', inline: 'nearest' }));
+  assert.equal(document.getElementById('help-browser-detail-scroll').scrollTop, 0);
 
   document.getElementById('help-query-input').value = 'How do I derive review?';
   await vm.runInContext(`helpRunQuery()`, sandbox);
@@ -515,7 +559,7 @@ test('Help topic browser keeps selection detail inside the popup and brings it i
   `, sandbox);
   html = document.getElementById('panel-help').innerHTML;
   assert.match(html, /id="modal-help-topic-browser"/);
-  assert.match(html, /data-help-ref="agents-md"[\s\S]*onclick="helpSelectBrowserReference\(&quot;agents-md&quot;\)"/);
+  assert.match(html, /data-help-ref="agents-md"[\s\S]*data-help-target="browser"/);
   assert.match(html, /id="help-browser-detail-scroll"/);
   assert.equal(document.activeElement, document.getElementById('help-search-input'));
 
@@ -538,7 +582,46 @@ test('Help topic browser keeps selection detail inside the popup and brings it i
   assert.match(html, /AGENTS instructions/);
   assert.match(html, /Workers report through Torque MCP tools/);
   assert.match(html, /id="modal-help-topic-browser"/);
-  assert.equal(JSON.stringify(document.getElementById('help-browser-selected-detail-anchor').scrollIntoViewOptions), JSON.stringify({ block: 'start', inline: 'nearest' }));
+  assert.equal(document.getElementById('help-browser-selected-detail-anchor').scrollIntoViewOptions, undefined);
+});
+
+test('Help topic card DOM click selects detail and preserves browser list scroll state', async () => {
+  const { sandbox, document, fetchCalls } = createSandbox();
+  await vm.runInContext('helpEnsureLoaded({ force: true })', sandbox);
+  await vm.runInContext(`helpSearchInputChanged('review'); helpRunSearch()`, sandbox);
+  vm.runInContext('helpOpenTopicBrowser()', sandbox);
+
+  document.getElementById('help-topic-list-scroll').scrollTop = 123;
+  document.getElementById('help-search-results-scroll').scrollTop = 45;
+  document.getElementById('help-workspace-scroll').scrollTop = 222;
+  document.getElementById('help-detail-scroll').scrollTop = 33;
+  document.getElementById('help-browser-detail-scroll').scrollTop = 88;
+
+  const cards = document.querySelectorAll('.help-topic-card');
+  const agentsCard = cards.find((card) => card.dataset.helpRef === 'agents-md');
+  assert.ok(agentsCard, 'expected AGENTS topic card');
+
+  const before = fetchCalls.length;
+  agentsCard.click();
+  let html = document.getElementById('panel-help').innerHTML;
+  assert.match(html, /Loading Help topic/);
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  html = document.getElementById('panel-help').innerHTML;
+  assert.equal(fetchCalls.slice(before).filter((call) => call.cmd === 'help_show').length, 1);
+  assert.equal(fetchCalls.at(-1).topic, 'agents-md');
+  assert.equal(vm.runInContext('_helpState.selectedRef', sandbox), 'agents-md');
+  assert.equal(vm.runInContext('_helpState.browserOpen', sandbox), true);
+  assert.equal(document.getElementById('help-topic-list-scroll').scrollTop, 123);
+  assert.equal(document.getElementById('help-search-results-scroll').scrollTop, 45);
+  assert.equal(document.getElementById('help-workspace-scroll').scrollTop, 222);
+  assert.equal(document.getElementById('help-detail-scroll').scrollTop, 33);
+  assert.equal(document.getElementById('help-browser-detail-scroll').scrollTop, 0);
+  assert.match(html, /AGENTS instructions/);
+  assert.match(html, /Workers report through Torque MCP tools/);
+  assert.match(html, /data-help-target="browser"/);
+  assert.equal(document.getElementById('help-browser-selected-detail-anchor').scrollIntoViewOptions, undefined);
 });
 
 test('Help Ask submit reads live input, invokes help_query, and renders answer states with sources', async () => {

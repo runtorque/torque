@@ -143,6 +143,7 @@ function _helpBringDetailIntoView(opts) {
   var workspace = inBrowser ? document.getElementById('help-topic-browser-detail-pane') : document.getElementById('help-workspace-scroll');
   try { if (workspace) workspace.scrollTop = 0; } catch (_err0) {}
   try { detail.scrollTop = 0; } catch (_err) {}
+  if (inBrowser && opts.scrollIntoView !== true) return;
   var anchor = document.getElementById(inBrowser ? 'help-browser-selected-detail-anchor' : 'help-selected-detail-anchor') || detail;
   if (anchor && typeof anchor.scrollIntoView === 'function') {
     try { anchor.scrollIntoView({ block: 'start', inline: 'nearest' }); } catch (_err2) { try { anchor.scrollIntoView(); } catch (_err3) {} }
@@ -372,6 +373,27 @@ function _helpBindQueryControls() {
   }
 }
 
+function _helpBindNavigationControls() {
+  var root = _helpPanelRoot();
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  var nodes = root.querySelectorAll('[data-help-ref]');
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i];
+    if (!node || !node.dataset || node.dataset.helpBound === '1' || typeof node.addEventListener !== 'function') continue;
+    node.dataset.helpBound = '1';
+    node.addEventListener('click', function (event) {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      var ref = this && this.dataset ? this.dataset.helpRef : '';
+      if (!ref) return;
+      if (this.dataset.helpTarget === 'browser') {
+        helpSelectBrowserReference(ref);
+      } else {
+        helpSelectReference(ref);
+      }
+    });
+  }
+}
+
 async function helpRunQuery() {
   var rawQuestion = _helpLiveInputValue('help-query-input', _helpState.queryDraft);
   _helpState.queryDraft = rawQuestion;
@@ -509,7 +531,7 @@ function _helpRenderTopicCard(item, kind, index) {
   return ''
     + '<button type="button" class="help-topic-card' + (selected ? ' selected' : '') + '"'
     + ' data-help-ref="' + _helpEsc(ref) + '"'
-    + ' onclick="' + (_helpState.browserOpen ? 'helpSelectBrowserReference' : 'helpSelectReference') + '(' + _helpJsArg(ref) + ')">'
+    + ' data-help-target="' + (_helpState.browserOpen ? 'browser' : 'main') + '">'
     + '  <span class="help-topic-card-title">' + _helpEsc(title) + '</span>'
     + '  <span class="help-topic-card-summary">' + _helpEsc(summary || 'No summary available.') + '</span>'
     + '  ' + _helpRenderSourceLine(item)
@@ -532,7 +554,7 @@ function _helpRenderTopicBrowser() {
   } else if (!_helpState.topics.length) {
     html += '<div class="help-state help-empty">No maintained Torque Help topics matched this audience filter.</div>';
   } else {
-    html += '<div class="help-topic-list">';
+    html += '<div class="help-topic-list" id="help-topic-list-scroll">';
     for (var i = 0; i < _helpState.topics.length; i++) {
       html += _helpRenderTopicCard(_helpState.topics[i], 'topic', i);
     }
@@ -554,7 +576,7 @@ function _helpRenderTopicBrowser() {
     html += '<div class="help-state help-empty">' + _helpEsc(_helpState.searchMessage || 'No maintained Torque Help docs matched. Try broader terms or inspect topics.') + '</div>';
   } else {
     html += '<div class="help-search-meta">' + _helpEsc(_helpState.searchResults.length) + ' result(s) for “' + _helpEsc(_helpState.searchQuery) + '”</div>';
-    html += '<div class="help-topic-list">';
+    html += '<div class="help-topic-list" id="help-search-results-scroll">';
     for (var j = 0; j < _helpState.searchResults.length; j++) {
       html += _helpRenderTopicCard(_helpState.searchResults[j], 'search', j);
     }
@@ -639,10 +661,9 @@ function _helpRenderSections(topic, opts) {
       + '<span class="help-section-lines">lines ' + _helpEsc(section.line_start || '?') + '–' + _helpEsc(section.line_end || '?') + '</span>'
       + '</button>';
     if (expanded) {
-      var openFn = opts.browser ? 'helpSelectBrowserReference' : 'helpSelectReference';
       html += '<div class="help-section-expanded">'
         + '<div class="help-source-line"><code>' + _helpEsc(ref) + '</code></div>'
-        + '<button type="button" class="btn-secondary help-inline-action" onclick="' + openFn + '(' + _helpJsArg(ref) + ')">Open section</button>'
+        + '<button type="button" class="btn-secondary help-inline-action" data-help-ref="' + _helpEsc(ref) + '" data-help-target="' + (opts.browser ? 'browser' : 'main') + '">Open section</button>'
         + '</div>';
     }
     html += '</div>';
@@ -757,7 +778,7 @@ function _helpRenderQueryPanel() {
       for (var i = 0; i < sources.length; i++) {
         var source = sources[i] || {};
         var ref = _helpPathRef(source);
-        body += '<button type="button" class="help-source-button" onclick="helpSelectReference(' + _helpJsArg(ref) + ')">'
+        body += '<button type="button" class="help-source-button" data-help-ref="' + _helpEsc(ref) + '" data-help-target="main">'
           + '<span>' + _helpEsc(source.title || ref || 'Source') + '</span>'
           + '<code>' + _helpEsc(ref || source.source_path || '—') + '</code>'
           + '</button>';
@@ -802,7 +823,7 @@ function renderHelpPanel() {
   var snapshot = null;
   if (typeof _captureSurfaceState === 'function') {
     snapshot = _captureSurfaceState(root, {
-      scrollSelectors: ['#help-workspace-scroll', '#help-browser-scroll', '#help-detail-scroll', '#help-browser-detail-scroll', '#help-query-scroll', '#help-query-result-scroll'],
+      scrollSelectors: ['#help-workspace-scroll', '#help-browser-scroll', '#help-topic-list-scroll', '#help-search-results-scroll', '#help-detail-scroll', '#help-browser-detail-scroll', '#help-query-scroll', '#help-query-result-scroll'],
     });
   }
   root.innerHTML = '<div class="help-panel">'
@@ -818,4 +839,5 @@ function renderHelpPanel() {
     _restoreSurfaceState(root, snapshot);
   }
   _helpBindQueryControls();
+  _helpBindNavigationControls();
 }
