@@ -14466,6 +14466,93 @@ test('terminal direct compose routes to selected non-SDK agent while SDK cell is
   assert.equal(error.textContent, '');
 });
 
+test('terminal direct slash loop validates, sends, renders state, and cancel affordance sends cancel', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Worker',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: 'worker-session',
+        runner_backend: 'pty'
+      }
+    };
+    state.agent_message_loops = {
+      'loop-1': {
+        id: 'loop-1',
+        agent_id: 'agent-1',
+        status: 'active',
+        interval_seconds: 600,
+        message: 'please check status',
+        next_run_at: 1893456000,
+        updated_at: 100
+      }
+    };
+    selectedTerminalId = 'agent-1';
+    selectedAgentId = 'agent-1';
+    renderTerminalWorkspace = function() {};
+  `);
+
+  const form = new FakeElement('compose-form-loop');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  const error = new FakeElement('compose-error-loop');
+  error.classList.add('terminal-compose-error');
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-error', error);
+  form.setQuerySelector('.terminal-compose-submit', button);
+  context.__loopSubmitEvt = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+
+  input.value = '/loop every 1s too fast';
+  runInContext(context, `terminalComposeSubmit(__loopSubmitEvt, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 0);
+  assert.match(error.textContent, /at least 1m/);
+  assert.equal(input.value, '/loop every 1s too fast');
+
+  input.value = '/loop every 10m please check status';
+  error.textContent = '';
+  runInContext(context, `terminalComposeSubmit(__loopSubmitEvt, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].agent_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[0].message, '/loop every 10m please check status');
+  assert.equal(input.value, '');
+
+  const html = runInContext(context, `_renderTerminalAgentMessageLoopHtml(state.agents['agent-1']);`);
+  assert.match(html, /terminal-direct-loop/);
+  assert.match(html, /Every 10m/);
+  assert.match(html, /Cancel/);
+
+  context.__cancelLoopEvt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  runInContext(context, `terminalCancelUserMessageLoop(__cancelLoopEvt, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 2);
+  assert.equal(sandbox.sendCalls[1].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[1].agent_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[1].message, '/loop cancel');
+  assert.equal(context.__cancelLoopEvt.preventDefaultCalled, true);
+  assert.equal(context.__cancelLoopEvt.stopPropagationCalled, true);
+});
+
 test('terminal direct compose keeps draft when websocket send fails before persistence', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
   runInContext(context, `

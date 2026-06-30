@@ -535,6 +535,66 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(db.load_direct_message(payload["message_id"]))
             db.close()
 
+    async def test_torque_stop_user_message_loop_only_stops_callers_loop(self):
+        db_mod = importlib.import_module("torque.db")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = db_mod.TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            state = self.state_mod.MatrixState(db=db)
+            worker = self.state_mod.AgentCell(
+                id="worker-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+            )
+            other = self.state_mod.AgentCell(
+                id="worker-2",
+                name="Other",
+                group="g",
+                cell_type="agent",
+                kind="worker",
+            )
+            state.agents[worker.id] = worker
+            state.agents[other.id] = other
+            state.groups["g"] = [worker.id, other.id]
+            loop = state.agent_message_loop_add(
+                agent_id=worker.id,
+                group_name="g",
+                interval_seconds=600,
+                message="check in",
+            )
+            state.agent_message_loop_add(
+                agent_id=other.id,
+                group_name="g",
+                interval_seconds=600,
+                message="other check in",
+            )
+
+            async def fake_handle_command(_payload):
+                raise AssertionError("self-stop must not dispatch commands")
+
+            text, is_error = await self.mcp_mod._dispatch_tool(
+                "torque_stop_user_message_loop",
+                {"reason": "done now"},
+                worker.id,
+                fake_handle_command,
+                state,
+            )
+
+            self.assertFalse(is_error, text)
+            payload = json.loads(text)
+            self.assertEqual(payload["loop"]["id"], loop.id)
+            self.assertEqual(payload["loop"]["status"], "stopped")
+            self.assertEqual(state.agent_message_loops[loop.id].status, "stopped")
+            self.assertIsNotNone(state.active_agent_message_loop_for_agent(other.id))
+            audit = db.load_direct_message(payload["audit_message_id"])
+            self.assertIsNotNone(audit)
+            self.assertEqual(audit["message_type"], "system")
+            self.assertIn("Receiving agent stopped /loop", audit["message"])
+            self.assertIn("done now", audit["message"])
+            db.close()
+
     async def test_architect_and_engineer_message_user_persist_direct_rows(self):
         db_mod = importlib.import_module("torque.db")
         with tempfile.TemporaryDirectory() as tmp:

@@ -9293,7 +9293,7 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
             "message": "Direct message store is unavailable",
         }
     stripped_message = message_text.strip()
-    if stripped_message.startswith("/loop"):
+    if stripped_message == "/loop" or stripped_message.startswith("/loop "):
         return _handle_user_agent_loop_command(
             data,
             state,

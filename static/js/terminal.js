@@ -3498,7 +3498,7 @@ function _terminalComposeSendPayload(payload) {
 
 function _terminalValidateLoopComposerInput(input, text, directAgent) {
   const raw = String(text || '').trim();
-  if (!raw.startsWith('/loop')) return true;
+  if (!(raw === '/loop' || raw.startsWith('/loop '))) return true;
   if (!directAgent || !directAgent.id) {
     _terminalComposeSetError(input, 'Select an agent to use /loop.');
     return false;

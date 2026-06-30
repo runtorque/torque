@@ -3257,18 +3257,32 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             state,
             fake_send_prompt,
         )
+        unsupported = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/loopy every 1m should stay natural language',
+                'idempotency_key': 'unsupported-slash-submit',
+            },
+            state,
+            fake_send_prompt,
+        )
 
         self.assertEqual(compact['type'], 'ok')
         self.assertEqual(other['type'], 'ok')
-        self.assertEqual(len(sent), 2)
+        self.assertEqual(unsupported['type'], 'ok')
+        self.assertEqual(len(sent), 3)
         self.assertEqual(sent[0][1], '/compact')
         self.assertIn('## Message from the User', sent[1][1])
         self.assertIn('/compact now please', sent[1][1])
+        self.assertIn('/loopy every 1m should stay natural language', sent[2][1])
         compact_row = self.db.load_direct_message(compact['message_id'])
         other_row = self.db.load_direct_message(other['message_id'])
+        unsupported_row = self.db.load_direct_message(unsupported['message_id'])
         self.assertEqual(compact_row['message_type'], 'slash_command')
         self.assertEqual(compact_row['context_snapshot']['slash_command'], 'compact')
         self.assertEqual(other_row['message_type'], 'message')
+        self.assertEqual(unsupported_row['message_type'], 'message')
 
     async def test_user_agent_loop_create_fire_cancel_and_invalid_no_spam(self):
         state = self._make_state()
