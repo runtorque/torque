@@ -3424,6 +3424,163 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 for row in offline_rows)
         )
 
+    async def test_due_agent_message_loop_fire_broadcasts_fresh_loop_delta_once(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        async def handle_command(payload):
+            return await self.server_mod._handle_user_agent_message_command(
+                payload,
+                state,
+                fake_send_prompt,
+            )
+
+        loop = state.agent_message_loop_add(
+            agent_id=worker.id,
+            group_name='g',
+            interval_seconds=60,
+            message='please report progress',
+            created_by='user',
+            now=0.0,
+        )
+        state.agent_message_loop_update(loop.id, next_run_at=10.0)
+        state._delta_ops.clear()
+        broadcasts = []
+
+        async def capture_broadcast():
+            broadcasts.append([dict(op) for op in state._delta_ops])
+            state._delta_ops = []
+
+        state.broadcast = capture_broadcast
+        server_dispatch = importlib.import_module('torque.server_dispatch')
+        server_dispatch = importlib.reload(server_dispatch)
+
+        fired = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=10.0,
+        )
+
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(len(broadcasts), 1)
+        loop_ops = [
+            op for op in broadcasts[0]
+            if op.get('op') == 'agent_message_loop_upsert'
+        ]
+        self.assertEqual(len(loop_ops), 1)
+        loop_delta = loop_ops[0]['loop']
+        self.assertEqual(loop_delta['id'], loop.id)
+        self.assertEqual(loop_delta['status'], 'active')
+        self.assertEqual(loop_delta['run_count'], 1)
+        self.assertEqual(loop_delta['last_run_at'], 10.0)
+        self.assertEqual(loop_delta['next_run_at'], 70.0)
+        self.assertEqual(loop_delta['last_message_id'], fired[0]['message_id'])
+        self.assertEqual(state._delta_ops, [])
+
+    async def test_due_agent_message_loop_offline_stop_broadcasts_once_for_cycle(self):
+        state = self._make_state()
+        workers = []
+        for idx in (1, 2):
+            worker = self.state_mod.AgentCell(
+                id=f'agent-{idx}',
+                name=f'Worker {idx}',
+                group='g',
+                cell_type='agent',
+                kind='worker',
+                session_id='',
+                status='idle',
+            )
+            state.agents[worker.id] = worker
+            workers.append(worker)
+        state.groups['g'] = [worker.id for worker in workers]
+
+        async def fake_send_prompt(*_args, **_kwargs):
+            raise AssertionError('offline /loop delivery must not prompt-send')
+
+        async def handle_command(payload):
+            return await self.server_mod._handle_user_agent_message_command(
+                payload,
+                state,
+                fake_send_prompt,
+            )
+
+        loops = []
+        for worker in workers:
+            loop = state.agent_message_loop_add(
+                agent_id=worker.id,
+                group_name='g',
+                interval_seconds=60,
+                message=f'check offline {worker.id}',
+                created_by='user',
+                now=0.0,
+            )
+            state.agent_message_loop_update(loop.id, next_run_at=20.0)
+            loops.append(loop)
+        state._delta_ops.clear()
+        broadcasts = []
+
+        async def capture_broadcast():
+            broadcasts.append([dict(op) for op in state._delta_ops])
+            state._delta_ops = []
+
+        state.broadcast = capture_broadcast
+        server_dispatch = importlib.import_module('torque.server_dispatch')
+        server_dispatch = importlib.reload(server_dispatch)
+
+        fired = await server_dispatch._fire_due_agent_message_loops(
+            state,
+            handle_command,
+            panel_event=None,
+            now_ts=20.0,
+        )
+
+        self.assertEqual(fired, [])
+        self.assertEqual(len(broadcasts), 1)
+        loop_ops = [
+            op for op in broadcasts[0]
+            if op.get('op') == 'agent_message_loop_upsert'
+        ]
+        self.assertEqual(len(loop_ops), 2)
+        self.assertEqual(
+            {op['loop']['id'] for op in loop_ops},
+            {loop.id for loop in loops},
+        )
+        for op in loop_ops:
+            self.assertEqual(op['loop']['status'], 'stopped')
+            self.assertEqual(op['loop']['stopped_by'], 'system')
+            self.assertEqual(op['loop']['stop_reason'], 'no_session')
+            self.assertEqual(op['loop']['next_run_at'], 0)
+        self.assertEqual(state._delta_ops, [])
+        for loop in loops:
+            self.assertEqual(state.agent_message_loops[loop.id].status, 'stopped')
+        for worker in workers:
+            offline_rows = self.db.load_direct_messages_for_agent(worker.id)
+            self.assertTrue(
+                any('System stopped /loop because delivery was not live' in row['message']
+                    for row in offline_rows)
+            )
+
     async def test_user_agent_message_marks_agent_running_before_delivery_finishes(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
