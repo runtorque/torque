@@ -197,7 +197,7 @@ test('empty strata are hidden while the grid-level new menu remains', () => {
 });
 
 test('grid-level + New menu opens standalone architect, engineer, and worker flows', () => {
-  const { context, mainEl } = createHarness();
+  const { context, sandbox, mainEl } = createHarness();
   const menuCalls = [];
   context.showContextMenu = function(x, y, items) {
     menuCalls.push({ x, y, items });

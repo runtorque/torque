@@ -2304,7 +2304,9 @@ function _agentClassLaunchBoxHtml(preview, disabledReason) {
   var classId = String(preview.id || '');
   var draft = _agentClassLaunchDrafts[classId] || {};
   var group = draft.group || (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
-  var name = draft.name || _agentClassDisplayName(preview, classId);
+  var name = _agentClassIsTorqueSteward(preview)
+    ? 'Torque Steward'
+    : (draft.name || _agentClassDisplayName(preview, classId));
   var kind = String(preview.base_kind || (preview.runtime && preview.runtime.base_kind) || 'agent').trim() || 'agent';
   var kindLabel = _agentClassSecondaryLabel(preview, kind);
   var html = '<div class="agent-class-launch-box">';
@@ -2626,7 +2628,9 @@ function agentClassManagerLaunchSelected() {
   }
   agentClassManagerLaunchDraftChanged();
   var draft = _agentClassLaunchDrafts[item.id] || {};
-  var name = String(draft.name || _agentClassDisplayName(item, item.id)).trim();
+  var name = String(_agentClassIsTorqueSteward(item)
+    ? 'Torque Steward'
+    : (draft.name || _agentClassDisplayName(item, item.id))).trim();
   var group = String(draft.group || (typeof _currentGroup === 'function' ? _currentGroup() : '') || '').trim();
   if (!name) {
     var nameEl = document.getElementById('agent-class-launch-name');

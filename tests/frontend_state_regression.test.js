@@ -29009,6 +29009,7 @@ test('grid-level + New dropdown exposes standalone creation flows', () => {
 
   assert.equal(menuCalls.length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(menuCalls[0].items.map(item => item.label))), [
+    'Launch Torque Steward',
     'New architect',
     'New engineer',
     'New worker',
@@ -29023,6 +29024,10 @@ test('grid-level + New dropdown exposes standalone creation flows', () => {
     { group: 'torque', architectId: '' },
   ]);
   assert.deepEqual(jsonValue(context, `architectNewCalls`), [{ group: 'torque' }]);
+  assert.ok(jsonValue(context, `sendCalls`).some(c => c.cmd === 'create_agent_from_class'
+    && c.class_id === 'torque-steward'
+    && c.name === 'Torque Steward'
+    && c.group === 'torque'));
 });
 
 

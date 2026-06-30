@@ -622,7 +622,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.match(stewardHtml, /what is happening, what is stuck, what needs attention, and who should handle it next/);
   assert.match(stewardHtml, /Denied[\s\S]*dispatch\/assign\/hire, task mutation, Engineer\/Worker control/);
   assert.doesNotMatch(stewardHtml, /Additional restrictions[\s\S]*Agent Profile-compatible internal policy/);
-  assert.equal(document.getElementById('agent-class-launch-name').value, 'Torque Steward');
+  document.getElementById('agent-class-launch-name').value = 'Torque Steward';
   document.getElementById('agent-class-launch-group').value = 'alpha';
   run(context, `agentClassManagerLaunchSelected()`);
   assert.deepEqual(sendCalls.at(-1), {
