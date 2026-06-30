@@ -429,6 +429,7 @@ function _renderTerminalDirectMessageRow(row, agent) {
   return ''
     + '<div class="terminal-direct-message terminal-direct-message--' + esc(direction)
     + ' terminal-direct-message--' + esc(type.replace(/[^a-z0-9_-]+/g, '-'))
+    + (type === 'system' ? ' terminal-direct-message--status-card' : '')
     + (selected ? ' selected' : '')
     + '" data-direct-message-id="' + esc(id) + '"'
     + ' data-direct-message-agent-id="' + esc((agent && agent.id) || '') + '"'

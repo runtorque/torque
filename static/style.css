@@ -985,10 +985,20 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   align-self: flex-start;
 }
 .terminal-direct-message--system {
-  align-self: center;
-  max-width: 92%;
-  color: var(--text-dim);
-  background: rgba(255,255,255,.025);
+  align-self: flex-end;
+  max-width: min(88%, 760px);
+  color: color-mix(in srgb, var(--green) 78%, var(--text) 22%);
+  border-color: color-mix(in srgb, var(--green) 46%, rgba(255,255,255,.08));
+  background: color-mix(in srgb, var(--green) 13%, rgba(255,255,255,.025));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--green) 72%, transparent);
+}
+.terminal-direct-message--system .terminal-direct-message-sender,
+.terminal-direct-message--system .terminal-direct-message-badge {
+  color: color-mix(in srgb, var(--green) 86%, white);
+}
+.terminal-direct-message--system .terminal-direct-message-badge {
+  border-color: color-mix(in srgb, var(--green) 40%, rgba(255,255,255,.08));
+  background: color-mix(in srgb, var(--green) 14%, rgba(255,255,255,.035));
 }
 .terminal-direct-message--ask {
   border-color: color-mix(in srgb, var(--amber) 42%, rgba(255,255,255,.08));
