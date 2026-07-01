@@ -2099,9 +2099,9 @@ body.runtime-embedded .agent-focus-header {
 }
 .engineer-row-workers,
 .loose-workers-strip {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--agent-grid-card-min), 1fr));
+  justify-content: stretch;
   align-items: stretch;
   align-content: flex-start;
   gap: 6px;
@@ -2123,9 +2123,9 @@ body.runtime-embedded .agent-focus-header {
 .engineer-row-workers > .cell,
 .loose-workers-strip > .cell,
 .ghost-card--worker {
-  flex: 0 1 var(--agent-grid-card-basis);
-  min-width: var(--agent-grid-card-min);
-  max-width: var(--agent-grid-card-max);
+  width: 100%;
+  min-width: 0;
+  max-width: none;
   box-sizing: border-box;
 }
 .agent-section-user-card {
@@ -3354,8 +3354,8 @@ body.runtime-embedded .agent-grid {
 body.runtime-embedded .engineer-row-workers > .cell,
 body.runtime-embedded .loose-workers-strip > .cell,
 body.runtime-embedded .ghost-card--worker {
-  flex-basis: var(--agent-grid-card-basis);
-  max-width: var(--agent-grid-card-max);
+  width: 100%;
+  max-width: none;
 }
 body.runtime-embedded .agent-section-user-card,
 body.runtime-embedded .cell {

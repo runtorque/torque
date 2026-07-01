@@ -27521,7 +27521,7 @@ test('main render places architects in a flat strip and shows selected execution
 });
 
 
-test('main render keeps wrapped workers inside their engineer row and fixes architect column width via CSS', () => {
+test('main render keeps responsive worker cards inside their engineer row and fixes architect column width via CSS', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -27585,7 +27585,13 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
   assert.match(css, /\.agent-section\s*\{[^}]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(0,\s*1fr\)/s);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*flex/s);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
-  assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*flex-wrap:\s*wrap/s);
+  const workerRowsBlock = (css.match(/\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*\}/) || [''])[0];
+  const workerCardsBlock = (css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/) || [''])[0];
+  assert.match(workerRowsBlock, /display:\s*grid/);
+  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(var\(--agent-grid-card-min\),\s*1fr\)\)/);
+  assert.doesNotMatch(workerRowsBlock, /flex-wrap/);
+  assert.match(workerCardsBlock, /width:\s*100%/);
+  assert.match(workerCardsBlock, /max-width:\s*none/);
 });
 
 
