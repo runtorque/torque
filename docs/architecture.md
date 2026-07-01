@@ -107,7 +107,7 @@ The same daemon serves several deployment shapes:
 
 - **Native desktop** — the primary app surface. `make run` launches a native
   shell backed by a standalone-mode daemon on port `18933` with data under
-  `~/.torque/profiles/desktop`.
+  `~/.torque/profiles/default` by default.
 - **Standalone browser** — `make standalone` runs the PTY-backed daemon and
   `make open` opens the browser UI. This is the primary browser-only path and
   supports headless development setups.

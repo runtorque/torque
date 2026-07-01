@@ -49,7 +49,7 @@ These answer three different questions:
 
 ### Recovery
 
-1. For the primary desktop app, run `make run` and check `~/.torque/profiles/desktop/torque.log`.
+1. For the primary desktop app, run `make run` and check `~/.torque/profiles/default/torque.log`.
 2. For standalone/browser mode, run `make open` after `make standalone`.
 3. Confirm the port with `TORQUE_PORT` if you changed it from the default.
 4. Check the daemon log for startup or bind errors.
@@ -244,8 +244,8 @@ The most useful operator-level diagnostics are:
 - `torque logs` and `torque logs -f`
 - `torque status`
 - `make check`
-- the primary daemon log at `~/.torque/profiles/desktop/torque.log` or `~/.torque/profiles/standalone/torque.log`
-- the primary state database at `~/.torque/profiles/desktop/torque.db` or `~/.torque/profiles/standalone/torque.db`
+- the primary daemon log at `~/.torque/profiles/default/torque.log`
+- the primary state database at `~/.torque/profiles/default/torque.db`
 - the legacy Toolbelt log/database under `~/Library/Application Support/iTerm2/Scripts/torque/torque/` when you are migrating old data
 
 !!! note

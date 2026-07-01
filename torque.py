@@ -20,6 +20,9 @@ if str(SCRIPT_DIR) not in sys.path:
 # torque.config/torque.server so their module-level STANDALONE checks match
 # the entrypoint path even when inherited environments omit or override it.
 os.environ["TORQUE_STANDALONE"] = "1"
+if not os.environ.get("TORQUE_PROFILE", "").strip() and not os.environ.get(
+        "TORQUE_DATA_DIR", "").strip():
+    os.environ["TORQUE_PROFILE"] = "default"
 
 from torque.config import init_paths  # noqa: E402
 init_paths(SCRIPT_DIR)

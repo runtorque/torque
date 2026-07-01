@@ -82,6 +82,7 @@ def _profile_enabled_env() -> bool:
 
 PROFILE_ENABLED: bool = _profile_enabled_env()
 PROFILE_SKIP_PTY: bool = _truthy_env("TORQUE_PROFILE_SKIP_PTY")
+DEFAULT_RUNTIME_PROFILE = "default"
 
 
 def _slugify_profile(name: str) -> str:
@@ -97,7 +98,7 @@ def resolve_data_dir(script_dir: Path) -> Path:
 
     profile = os.environ.get("TORQUE_PROFILE", "").strip()
     if not profile and _truthy_env("TORQUE_STANDALONE"):
-        profile = "standalone"
+        profile = DEFAULT_RUNTIME_PROFILE
     if profile:
         return Path.home() / ".torque" / "profiles" / _slugify_profile(profile)
     return script_dir

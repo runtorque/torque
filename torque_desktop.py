@@ -18,9 +18,21 @@ def _slugify_profile(name: str) -> str:
 
 if not os.environ.get("TORQUE_STANDALONE"):
     os.environ["TORQUE_STANDALONE"] = "1"
-desktop_profile = (os.environ.get("TORQUE_DESKTOP_PROFILE", "") or "").strip() or "desktop"
-desktop_port = (os.environ.get("TORQUE_DESKTOP_PORT", "") or "").strip() or "18933"
-desktop_data_dir = (os.environ.get("TORQUE_DESKTOP_DATA_DIR", "") or "").strip()
+DEFAULT_RUNTIME_PROFILE = "default"
+desktop_profile = (
+    (os.environ.get("TORQUE_DESKTOP_PROFILE", "") or "").strip()
+    or (os.environ.get("TORQUE_PROFILE", "") or "").strip()
+    or DEFAULT_RUNTIME_PROFILE
+)
+desktop_port = (
+    (os.environ.get("TORQUE_DESKTOP_PORT", "") or "").strip()
+    or (os.environ.get("TORQUE_PORT", "") or "").strip()
+    or "18933"
+)
+desktop_data_dir = (
+    (os.environ.get("TORQUE_DESKTOP_DATA_DIR", "") or "").strip()
+    or (os.environ.get("TORQUE_DATA_DIR", "") or "").strip()
+)
 if not desktop_data_dir:
     desktop_data_dir = str(
         Path.home() / ".torque" / "profiles" / _slugify_profile(desktop_profile)

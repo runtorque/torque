@@ -12,7 +12,7 @@ Primary operator surfaces are standalone/browser and desktop app modes. The old 
 
 ```bash
 make deploy          # Primary install/update: ~/.torque/app + CLI refresh
-make run             # Launch the desktop app (standalone daemon, desktop profile)
+make run             # Launch the desktop app (standalone daemon, default profile)
 make standalone      # Foreground browser-only daemon (then make open)
 make stop            # Free TORQUE_PORT (18932 unless overridden)
 make check           # Python path, dependency, install status
@@ -31,7 +31,7 @@ The Makefile refuses `stop` / `deploy` / `restart` when `TORQUE_CELL_ID` is set 
 Safe alternatives:
 
 - Commit your change and ask the user to deploy/relaunch from their own shell.
-- Test on a different port/profile, e.g. `make standalone-bg TORQUE_PORT=18933 TORQUE_PROFILE=desktop`.
+- Test on a different port/profile, e.g. `make standalone-bg TORQUE_PORT=18934 TORQUE_PROFILE=qa-dev`.
 - Ship code/logging and let it take effect on the next natural restart.
 
 ## Architecture map

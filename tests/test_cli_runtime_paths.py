@@ -32,7 +32,7 @@ class CliRuntimePathTests(unittest.TestCase):
         env.update(extra)
         return mock.patch.dict(os.environ, env, clear=False)
 
-    def test_default_runtime_dir_is_desktop_profile(self):
+    def test_default_runtime_dir_is_shared_default_profile(self):
         with tempfile.TemporaryDirectory() as home, self._patch_home(Path(home)):
             self.cli._configure_runtime_paths(
                 SimpleNamespace(command="status", port=self.cli.DESKTOP_DEFAULT_PORT)
@@ -40,14 +40,14 @@ class CliRuntimePathTests(unittest.TestCase):
 
             self.assertEqual(
                 self.cli.RUNTIME_DIR,
-                Path(home) / ".torque" / "profiles" / "desktop",
+                Path(home) / ".torque" / "profiles" / "default",
             )
             self.assertEqual(
                 self.cli.TORQUE_DB,
-                str(Path(home) / ".torque" / "profiles" / "desktop" / "torque.db"),
+                str(Path(home) / ".torque" / "profiles" / "default" / "torque.db"),
             )
 
-    def test_default_port_uses_standalone_profile(self):
+    def test_default_port_uses_shared_default_profile(self):
         with tempfile.TemporaryDirectory() as home, self._patch_home(Path(home)):
             self.cli._configure_runtime_paths(
                 SimpleNamespace(command="status", port=self.cli.DEFAULT_PORT)
@@ -55,8 +55,29 @@ class CliRuntimePathTests(unittest.TestCase):
 
             self.assertEqual(
                 self.cli.RUNTIME_DIR,
-                Path(home) / ".torque" / "profiles" / "standalone",
+                Path(home) / ".torque" / "profiles" / "default",
             )
+
+    def test_default_resolution_leaves_existing_desktop_and_standalone_profiles_in_place(self):
+        with tempfile.TemporaryDirectory() as home, self._patch_home(Path(home)):
+            home_path = Path(home)
+            desktop_marker = home_path / ".torque" / "profiles" / "desktop" / "marker.txt"
+            standalone_marker = home_path / ".torque" / "profiles" / "standalone" / "marker.txt"
+            desktop_marker.parent.mkdir(parents=True)
+            standalone_marker.parent.mkdir(parents=True)
+            desktop_marker.write_text("desktop", encoding="utf-8")
+            standalone_marker.write_text("standalone", encoding="utf-8")
+
+            self.cli._configure_runtime_paths(
+                SimpleNamespace(command="status", port=self.cli.DEFAULT_PORT)
+            )
+
+            self.assertEqual(
+                self.cli.RUNTIME_DIR,
+                home_path / ".torque" / "profiles" / "default",
+            )
+            self.assertEqual(desktop_marker.read_text(encoding="utf-8"), "desktop")
+            self.assertEqual(standalone_marker.read_text(encoding="utf-8"), "standalone")
 
     def test_profile_and_data_dir_override_port(self):
         with tempfile.TemporaryDirectory() as home:
@@ -96,7 +117,7 @@ class CliRuntimePathTests(unittest.TestCase):
             )
             self.assertEqual(self.cli.RUNTIME_DIR, legacy_db.parent)
 
-            primary_db = home_path / ".torque" / "profiles" / "desktop" / "torque.db"
+            primary_db = home_path / ".torque" / "profiles" / "default" / "torque.db"
             primary_db.parent.mkdir(parents=True)
             primary_db.write_text("primary", encoding="utf-8")
             self.cli._configure_runtime_paths(

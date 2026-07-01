@@ -23,15 +23,12 @@ operator.
 Primary runtime data is profile-scoped:
 
 ```text
-~/.torque/profiles/desktop/torque.db       # make run / desktop profile
-~/.torque/profiles/desktop/torque.log
-~/.torque/profiles/standalone/torque.db    # make standalone
-~/.torque/profiles/standalone/torque.log
+~/.torque/profiles/default/torque.db       # make run and make standalone defaults
+~/.torque/profiles/default/torque.log
 ```
 
-CLI offline reads and `torque logs` default to the desktop profile. Use
-`TORQUE_PORT=18932`, `torque --port 18932 ...`, `TORQUE_PROFILE`, or
-`TORQUE_DATA_DIR` to target another profile/data directory. If no primary
+CLI offline reads and `torque logs` default to the shared default profile. Use
+`TORQUE_PROFILE` or `TORQUE_DATA_DIR` to target another profile/data directory. If no primary
 profile DB/log exists and no profile/data-dir was requested, the CLI may fall
 back to an existing legacy Toolbelt DB/log so old installs remain inspectable
 long enough to migrate.

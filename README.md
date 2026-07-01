@@ -190,8 +190,10 @@ make tauri-dev
 
 `make deps` creates or repairs Torque's owned runtime venv at
 `~/.torque/runtime/venv`. `make tauri-dev` builds and launches the native
-desktop window on its own profile and port (defaults: `desktop` profile, port
-`18933`), so it does not collide with other standalone profiles.
+desktop window on the shared default runtime profile and desktop port (defaults:
+`default` profile at `~/.torque/profiles/default`, port `18933`). Set
+`TORQUE_PROFILE` / `TORQUE_DATA_DIR` when you intentionally want an isolated
+profile.
 
 ### Standalone browser mode
 

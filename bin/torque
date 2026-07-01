@@ -40,7 +40,8 @@ from torque.behavior_overlay import behavior_overlay_diff, behavior_overlay_scop
 
 DEFAULT_PORT = 18932
 DESKTOP_DEFAULT_PORT = 18933
-DESKTOP_DEFAULT_PROFILE = "desktop"
+DEFAULT_RUNTIME_PROFILE = "default"
+DESKTOP_DEFAULT_PROFILE = DEFAULT_RUNTIME_PROFILE
 
 
 def _resolve_global_default_port():
@@ -84,13 +85,7 @@ def _legacy_runtime_dir():
 
 
 def _runtime_profile_for_port(port=None):
-    try:
-        port_value = int(port) if port is not None else _resolve_global_default_port()
-    except (TypeError, ValueError):
-        port_value = DESKTOP_DEFAULT_PORT
-    if port_value == DEFAULT_PORT:
-        return "standalone"
-    return DESKTOP_DEFAULT_PROFILE
+    return DEFAULT_RUNTIME_PROFILE
 
 
 def _runtime_port_from_args(args=None):
@@ -126,7 +121,7 @@ def _preferred_runtime_dir(port=None):
 
     profile = os.environ.get("TORQUE_PROFILE", "").strip()
     if not profile and _truthy_env("TORQUE_STANDALONE"):
-        profile = "standalone"
+        profile = DEFAULT_RUNTIME_PROFILE
     if not profile:
         profile = _runtime_profile_for_port(port)
     return install_locations.profile_data_dir(profile)
@@ -180,12 +175,20 @@ def _resolve_desktop_port(args):
 
 
 def _resolve_desktop_profile(explicit=""):
-    profile = (explicit or "").strip() or os.environ.get("TORQUE_DESKTOP_PROFILE", "").strip()
+    profile = (
+        (explicit or "").strip()
+        or os.environ.get("TORQUE_DESKTOP_PROFILE", "").strip()
+        or os.environ.get("TORQUE_PROFILE", "").strip()
+    )
     return profile or DESKTOP_DEFAULT_PROFILE
 
 
 def _resolve_desktop_data_dir(profile, explicit=""):
-    path = (explicit or "").strip() or os.environ.get("TORQUE_DESKTOP_DATA_DIR", "").strip()
+    path = (
+        (explicit or "").strip()
+        or os.environ.get("TORQUE_DESKTOP_DATA_DIR", "").strip()
+        or os.environ.get("TORQUE_DATA_DIR", "").strip()
+    )
     if path:
         return Path(os.path.expanduser(path))
     return Path.home() / ".torque" / "profiles" / _slugify_profile(profile)
@@ -1059,7 +1062,7 @@ def _daemon_stop_pid_from_file(port):
     if int(port) == DESKTOP_DEFAULT_PORT:
         directories.append(_resolve_desktop_data_dir(_resolve_desktop_profile()))
     if int(port) == DEFAULT_PORT:
-        directories.append(install_locations.profile_data_dir("standalone"))
+        directories.append(install_locations.profile_data_dir(DEFAULT_RUNTIME_PROFILE))
         directories.append(PROJECT_ROOT)
     if _allow_legacy_runtime_fallback():
         directories.append(_legacy_runtime_dir())

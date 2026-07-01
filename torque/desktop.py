@@ -19,7 +19,8 @@ from typing import Mapping
 
 from .config import SCRIPT_DIR, log
 
-DESKTOP_DEFAULT_PROFILE = "desktop"
+DEFAULT_RUNTIME_PROFILE = "default"
+DESKTOP_DEFAULT_PROFILE = DEFAULT_RUNTIME_PROFILE
 DESKTOP_DEFAULT_PORT = 18933
 DESKTOP_MODE_SPAWN = "spawn"
 DESKTOP_MODE_ATTACH = "attach"
@@ -292,8 +293,8 @@ class DesktopLauncher:
                 raise RuntimeError(
                     f"Port {self.settings.port} is already serving an "
                     "unsupported Torque instance. The desktop shell uses its "
-                    "own standalone profile and port by default so it does not "
-                    "attach to another live daemon."
+                    "configured standalone profile/data dir and port so it does "
+                    "not attach to another live daemon."
                 )
 
             matches_target, mismatches = self._runtime_matches_target(runtime)

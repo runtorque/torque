@@ -46,7 +46,7 @@ class TorqueEntrypointTests(unittest.TestCase):
             },
         ), mock.patch.dict(
             os.environ,
-            {"TORQUE_STANDALONE": "0"},
+            {"TORQUE_STANDALONE": "0", "TORQUE_PROFILE": "", "TORQUE_DATA_DIR": ""},
             clear=False,
         ), mock.patch.object(
             builtins,
@@ -55,10 +55,42 @@ class TorqueEntrypointTests(unittest.TestCase):
         ):
             runpy.run_path(str(self._entrypoint_path()), run_name="__main__")
             standalone_value = os.environ["TORQUE_STANDALONE"]
+            profile_value = os.environ["TORQUE_PROFILE"]
 
         self.assertEqual(standalone_value, "1")
+        self.assertEqual(profile_value, "default")
         self.assertEqual(init_calls, [self._entrypoint_path().parent])
         self.assertEqual(main_calls, [None])
+
+    def test_entrypoint_does_not_invent_profile_when_data_dir_is_explicit(self):
+        config_mod = types.ModuleType("torque.config")
+        config_mod.init_paths = lambda _script_dir: None
+
+        server_mod = types.ModuleType("torque.server")
+
+        async def main(_connection):
+            return None
+
+        server_mod.main = main
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "torque.config": config_mod,
+                "torque.server": server_mod,
+            },
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "TORQUE_STANDALONE": "",
+                "TORQUE_PROFILE": "",
+                "TORQUE_DATA_DIR": "/tmp/torque-explicit",
+            },
+            clear=False,
+        ):
+            runpy.run_path(str(self._entrypoint_path()), run_name="__main__")
+            self.assertEqual(os.environ["TORQUE_STANDALONE"], "1")
+            self.assertEqual(os.environ["TORQUE_PROFILE"], "")
 
 
 if __name__ == "__main__":

@@ -89,15 +89,15 @@ Launch Torque in the native desktop shell.
 
 ```bash
 torque desktop
-torque desktop --attach --profile desktop --port 18933
+torque desktop --attach --profile default --port 18933
 torque desktop --python "/path/to/python3"
 ```
 
-Default desktop values are intentionally profile-scoped:
+Default desktop values use the shared runtime profile:
 
-- profile: `desktop`
+- profile: `default`
 - port: `18933`
-- data dir: `~/.torque/profiles/desktop`
+- data dir: `~/.torque/profiles/default`
 
 Attach mode only reuses an existing **matching standalone** Torque server. It
 will refuse non-standalone runtimes or standalone servers with a different
@@ -115,10 +115,9 @@ legacy `TORQUE_DESKTOP_PYTHON` override, then the Torque-owned runtime at
 `~/.torque/runtime/venv/bin/python`, then any legacy Toolbelt Python kept for
 old installs, and finally the current interpreter.
 
-Offline SQLite reads and `torque logs` default to the primary desktop profile
-(`~/.torque/profiles/desktop`). Use `TORQUE_PORT=18932` or `torque --port
-18932 ...` for the standalone profile, or set `TORQUE_PROFILE` /
-`TORQUE_DATA_DIR` for a custom profile. Legacy Toolbelt DB/log fallback is
+Offline SQLite reads and `torque logs` default to the shared default profile
+(`~/.torque/profiles/default`) for both desktop and standalone/browser ports.
+Set `TORQUE_PROFILE` / `TORQUE_DATA_DIR` for a custom profile. Legacy Toolbelt DB/log fallback is
 only used when no primary profile artifact exists and no explicit
 profile/data-dir was requested.
 
