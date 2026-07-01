@@ -6,7 +6,7 @@ routes on the existing server.
 
 Agent identity comes from the ``X-Torque-Cell-Id`` header.  Claude Code
 populates it from ``${TORQUE_CELL_ID}`` in ``.mcp.json``; Codex uses
-``env_http_headers`` in ``.codex/config.toml``.
+``env_http_headers`` in Torque-owned generated per-agent config.
 """
 
 import asyncio

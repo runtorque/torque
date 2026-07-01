@@ -13,6 +13,7 @@ from pathlib import Path
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 from ..context_window import normalize_context_window_usage
 from ..provider_usage import normalize_provider_usage_rate_limits
+from .. import config as torque_config
 
 _TORQUE_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
@@ -67,6 +68,9 @@ _CODEX_HOOK_EVENT_LABELS = {
     "PermissionRequest": "permission_request",
     "Stop": "stop",
 }
+
+_CODEX_TORQUE_CONFIG_ROOT = "codex/agents"
+
 
 
 def _agents_marker(filename: str) -> str:
@@ -254,6 +258,147 @@ def _codex_home() -> Path:
     return Path.home() / ".codex"
 
 
+def _torque_data_dir() -> Path:
+    explicit = (os.environ.get("TORQUE_DATA_DIR") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    return Path(torque_config.DATA_DIR).expanduser()
+
+
+def _codex_agent_config_dir(cell_id: str) -> Path:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(cell_id or "agent")).strip(".-")
+    return _torque_data_dir() / _CODEX_TORQUE_CONFIG_ROOT / (safe_id or "agent")
+
+
+def _codex_agent_config_file(cell_id: str) -> Path:
+    return _codex_agent_config_dir(cell_id) / "config.toml"
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(str(value or ""))
+
+
+def _toml_inline_string_map(values: dict[str, str]) -> str:
+    return "{ " + ", ".join(
+        f"{_toml_string(k)} = {_toml_string(v)}"
+        for k, v in values.items()
+    ) + " }"
+
+
+def _toml_inline_hook(hook: dict) -> str:
+    parts = []
+    for key in ("type", "command", "command_windows", "statusMessage"):
+        if key in hook and hook.get(key) is not None:
+            parts.append(f"{key} = {_toml_string(str(hook.get(key) or ''))}")
+    if "timeout" in hook:
+        parts.append(f"timeout = {int(hook.get('timeout') or 600)}")
+    if "async" in hook:
+        parts.append(f"async = {str(bool(hook.get('async'))).lower()}")
+    return "{ " + ", ".join(parts) + " }"
+
+
+def _toml_inline_hook_group(group: dict) -> str:
+    parts = []
+    if group.get("matcher") is not None:
+        parts.append(f"matcher = {_toml_string(str(group.get('matcher') or ''))}")
+    hooks = group.get("hooks", []) or []
+    parts.append("hooks = [" + ", ".join(_toml_inline_hook(h) for h in hooks) + "]")
+    return "{ " + ", ".join(parts) + " }"
+
+
+def _codex_config_cli_flags(config: dict, *, config_path: Path) -> list[str]:
+    flags = [
+        f"features.hooks=true",
+        (
+            "mcp_servers.torque.url="
+            + _toml_string(config["mcp_servers"]["torque"]["url"])
+        ),
+        (
+            "mcp_servers.torque.env_http_headers="
+            + _toml_inline_string_map(
+                config["mcp_servers"]["torque"]["env_http_headers"]
+            )
+        ),
+    ]
+    instructions_file = str(config.get("model_instructions_file") or "")
+    if instructions_file:
+        flags.append("model_instructions_file=" + _toml_string(instructions_file))
+    for event_name, groups in (config.get("hooks") or {}).items():
+        flags.append(
+            f"hooks.{event_name}=["
+            + ", ".join(_toml_inline_hook_group(group) for group in groups or [])
+            + "]"
+        )
+    result: list[str] = []
+    for flag in flags:
+        result.extend(["--config", flag])
+    return result
+
+
+def _append_codex_config_cli_flags(command: str, config: dict, config_path: Path) -> str:
+    parts = shlex.split(command) if command else ["codex"]
+    if not parts:
+        parts = ["codex"]
+    flags = _codex_config_cli_flags(config, config_path=config_path)
+    opts, prompt = _split_boot_args(command or parts[0])
+    assembled = [parts[0], *opts, *flags]
+    if prompt:
+        assembled.append(prompt)
+    return " ".join(shlex.quote(p) for p in assembled)
+
+
+def _render_codex_agent_config(config: dict, *, source_path: str = "") -> str:
+    lines = [
+        "# Torque-owned Codex agent config (generated; do not edit)",
+    ]
+    instructions_file = str(config.get("model_instructions_file") or "")
+    if instructions_file:
+        lines.append(f"model_instructions_file = {_toml_string(instructions_file)}")
+        lines.append("")
+    lines.extend([
+        "[features]",
+        "hooks = true",
+        "",
+        "[mcp_servers.torque]",
+        f"url = {_toml_string(config['mcp_servers']['torque']['url'])}",
+        (
+            "env_http_headers = "
+            + _toml_inline_string_map(
+                config["mcp_servers"]["torque"]["env_http_headers"]
+            )
+        ),
+        "",
+    ])
+    hooks = config.get("hooks") or {}
+    if hooks:
+        lines.append("[hooks]")
+        lines.append("")
+    for event_name, groups in hooks.items():
+        for group in groups or []:
+            lines.append(f"[[hooks.{event_name}]]")
+            if group.get("matcher") is not None:
+                lines.append(f"matcher = {_toml_string(str(group.get('matcher') or ''))}")
+            for hook in group.get("hooks", []) or []:
+                lines.append(f"[[hooks.{event_name}.hooks]]")
+                for key in ("type", "command", "command_windows", "statusMessage"):
+                    if key in hook and hook.get(key) is not None:
+                        lines.append(f"{key} = {_toml_string(str(hook.get(key) or ''))}")
+                if "timeout" in hook:
+                    lines.append(f"timeout = {int(hook.get('timeout') or 600)}")
+                if "async" in hook:
+                    lines.append(f"async = {str(bool(hook.get('async'))).lower()}")
+            lines.append("")
+    if source_path:
+        _source, trust_entries = _codex_hook_trust_entries_for_source(
+            source_path, hooks
+        )
+        for key, trusted_hash in trust_entries:
+            lines.append(f"[hooks.state.{_toml_string(key)}]")
+            lines.append(f"trusted_hash = {_toml_string(trusted_hash)}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _codex_absolute_path(path: Path) -> str:
     # Match Codex's AbsolutePathBuf hook source key for project config:
     # expand ~ and remove dot components without resolving symlinked prefixes.
@@ -264,13 +409,17 @@ def _resolved_codex_absolute_path(path: Path) -> str:
     return str(Path(path).expanduser().resolve(strict=False))
 
 
-def _codex_hook_source_paths(working_dir: str) -> list[str]:
-    hooks_path = Path(working_dir) / ".codex" / "hooks.json"
-    paths = [_codex_absolute_path(hooks_path)]
-    resolved_path = _resolved_codex_absolute_path(hooks_path)
+def _codex_source_paths(path: Path) -> list[str]:
+    paths = [_codex_absolute_path(path)]
+    resolved_path = _resolved_codex_absolute_path(path)
     if resolved_path not in paths:
         paths.append(resolved_path)
     return paths
+
+
+def _codex_hook_source_paths(working_dir: str) -> list[str]:
+    hooks_path = Path(working_dir) / ".codex" / "hooks.json"
+    return _codex_source_paths(hooks_path)
 
 
 def _hook_trust_marker(source_path: str) -> str:
@@ -321,8 +470,10 @@ def _codex_command_hook_hash(
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
-def _codex_hook_trust_entries(working_dir: str, hooks: dict) -> tuple[str, list[tuple[str, str]]]:
-    source_paths = _codex_hook_source_paths(working_dir)
+def _codex_hook_trust_entries_for_source(
+    source_path: str, hooks: dict
+) -> tuple[str, list[tuple[str, str]]]:
+    source_paths = _codex_source_paths(Path(source_path))
     source_path = source_paths[0]
     entries: list[tuple[str, str]] = []
     for event_name, groups in hooks.items():
@@ -339,6 +490,11 @@ def _codex_hook_trust_entries(working_dir: str, hooks: dict) -> tuple[str, list[
                     key = f"{path}:{event_label}:{group_index}:{handler_index}"
                     entries.append((key, trusted_hash))
     return source_path, entries
+
+
+def _codex_hook_trust_entries(working_dir: str, hooks: dict) -> tuple[str, list[tuple[str, str]]]:
+    source_paths = _codex_hook_source_paths(working_dir)
+    return _codex_hook_trust_entries_for_source(source_paths[0], hooks)
 
 
 def _update_codex_user_config(update) -> bool:
@@ -670,7 +826,7 @@ class CodexAdapter(AgentAdapter):
 
     def inject_persistent_prompt(self, working_dir: str,
                                  filename: str, text: str) -> str:
-        """Persist Torque instructions via model_instructions_file config."""
+        """Persist Torque instructions for the per-agent Codex config layer."""
         if not text or not working_dir or not filename:
             return ""
         try:
@@ -678,31 +834,13 @@ class CodexAdapter(AgentAdapter):
             torque_dir.mkdir(parents=True, exist_ok=True)
             prompt_path = torque_dir / filename
             prompt_path.write_text(text.rstrip() + "\n")
-
-            config_dir = Path(working_dir) / ".codex"
-            config_dir.mkdir(parents=True, exist_ok=True)
-            config_file = config_dir / "config.toml"
-            content = config_file.read_text() if config_file.exists() else ""
-            config_file.write_text(
-                _set_model_instructions_file(content, str(prompt_path))
-            )
-
-            # Clean up any stale Torque-managed AGENTS.md sections left by older
-            # versions so Codex only sees the configured instructions file.
-            agents_file = Path(working_dir) / ".codex" / "AGENTS.md"
-            if agents_file.exists():
-                cleaned = _remove_agents_section(agents_file.read_text(), "")
-                if cleaned.strip():
-                    agents_file.write_text(cleaned.strip() + "\n")
-                else:
-                    agents_file.unlink(missing_ok=True)
         except Exception:
             return ""
         return ""
 
     def uninstall_persistent_prompt(self, working_dir: str,
                                     filename: str = "") -> None:
-        """Remove Torque-managed prompt file and stale AGENTS.md sections."""
+        """Remove only Torque-owned prompt files; leave project .codex alone."""
         try:
             torque_dir = Path(working_dir) / ".torque"
             if filename:
@@ -710,25 +848,6 @@ class CodexAdapter(AgentAdapter):
             else:
                 for f in torque_dir.glob("torque-system-prompt-*.md"):
                     f.unlink(missing_ok=True)
-
-            config_file = Path(working_dir) / ".codex" / "config.toml"
-            if config_file.exists():
-                updated = _set_model_instructions_file(
-                    config_file.read_text(), ""
-                ).strip()
-                if updated:
-                    config_file.write_text(updated + "\n")
-                else:
-                    config_file.unlink(missing_ok=True)
-
-            agents_file = Path(working_dir) / ".codex" / "AGENTS.md"
-            if not agents_file.exists():
-                return
-            content = _remove_agents_section(agents_file.read_text(), filename)
-            if content.strip():
-                agents_file.write_text(content.strip() + "\n")
-            else:
-                agents_file.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -827,157 +946,95 @@ class CodexAdapter(AgentAdapter):
         }
 
     def install_hooks(self, working_dir: str) -> bool:
-        """Write Torque hooks into .codex/hooks.json.
-
-        Merges with any existing hooks — Torque hooks are identified by
-        the localhost /events target in their command string.
-        Returns True if hooks were installed successfully.
-        """
-        hooks_dir = Path(working_dir) / ".codex"
-        hooks_file = hooks_dir / "hooks.json"
-
-        try:
-            hooks_dir.mkdir(parents=True, exist_ok=True)
-
-            existing = {}
-            if hooks_file.exists():
-                text = hooks_file.read_text().strip()
-                if text:
-                    existing = json.loads(text)
-
-            # Remove any stale Torque hooks first
-            existing_hooks = existing.get("hooks", {})
-            for event in list(existing_hooks):
-                existing_hooks[event] = [
-                    entry for entry in existing_hooks[event]
-                    if not any(_is_torque_hook(h) for h in entry.get("hooks", []))
-                ]
-                if not existing_hooks[event]:
-                    del existing_hooks[event]
-
-            # Add fresh Torque hooks
-            torque_config = self.get_hook_config(None)
-            for event, entries in torque_config["hooks"].items():
-                if event in existing_hooks:
-                    existing_hooks[event].extend(entries)
-                else:
-                    existing_hooks[event] = entries
-
-            existing["hooks"] = existing_hooks
-            hooks_file.write_text(json.dumps(existing, indent=2))
-            return _install_codex_hook_trust(working_dir, existing_hooks)
-        except Exception:
-            return False
+        """Codex hooks are generated into Torque-owned per-agent config."""
+        del working_dir
+        return True
 
     def uninstall_hooks(self, working_dir: str):
-        """Remove Torque hooks from .codex/hooks.json.
-
-        If the file only contained Torque hooks, deletes it entirely.
-        """
-        hooks_file = Path(working_dir) / ".codex" / "hooks.json"
-        if not hooks_file.exists():
-            _uninstall_codex_hook_trust(working_dir)
-            return
-
-        try:
-            text = hooks_file.read_text().strip()
-            if not text:
-                hooks_file.unlink(missing_ok=True)
-                _uninstall_codex_hook_trust(working_dir)
-                return
-
-            existing = json.loads(text)
-            hooks = existing.get("hooks", {})
-
-            for event in list(hooks):
-                hooks[event] = [
-                    entry for entry in hooks[event]
-                    if not any(_is_torque_hook(h) for h in entry.get("hooks", []))
-                ]
-                if not hooks[event]:
-                    del hooks[event]
-
-            if hooks:
-                existing["hooks"] = hooks
-            else:
-                existing.pop("hooks", None)
-
-            if not existing:
-                hooks_file.unlink(missing_ok=True)
-            else:
-                hooks_file.write_text(json.dumps(existing, indent=2))
-            _uninstall_codex_hook_trust(working_dir)
-        except Exception:
-            pass  # Best-effort cleanup
+        """Leave user/project .codex hook files untouched."""
+        del working_dir
 
     def install_mcp_config(self, working_dir: str, *,
                            mcp_entrypoint: str = "",
                            mcp_env: dict[str, str] | None = None) -> bool:
-        """Write Torque MCP server entry into .codex/config.toml.
+        """Codex MCP config is generated into Torque-owned per-agent config."""
+        del working_dir, mcp_entrypoint, mcp_env
+        return True
 
-        Codex's project config is shared by working directory, while Torque can
-        run multiple same-directory Codex Architects and Engineers at once.
-        Always use the role-neutral HTTP MCP endpoint and Codex's
-        ``env_http_headers`` indirection so each live Codex process supplies
-        its own ``TORQUE_CELL_ID`` at request time.  Do not persist
-        role-specific stdio entrypoints or per-cell env here.
+    def uninstall_mcp_config(self, working_dir: str):
+        """Leave user/project .codex config files untouched."""
+        del working_dir
 
-        Uses regex text manipulation for both reading and writing to
-        avoid needing a TOML writer dependency.
-        Returns True if config was installed successfully.
-        """
-        config_dir = Path(working_dir) / ".codex"
-        config_file = config_dir / "config.toml"
-
-        torque_section = (
-            f"\n{_MCP_MARKER}\n"
-            "[mcp_servers.torque]\n"
-            f'url = "{_torque_mcp_url()}"\n'
-            'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }\n'
+    def _agent_config_payload(self, cell, working_dir: str) -> tuple[Path, dict]:
+        config_file = _codex_agent_config_file(getattr(cell, "id", ""))
+        prompt_file = (
+            Path(working_dir) / ".torque" / f"torque-system-prompt-{getattr(cell, 'id', '')}.md"
         )
+        payload = {
+            "mcp_servers": {
+                "torque": {
+                    "url": _torque_mcp_url(),
+                    "env_http_headers": {
+                        "X-Torque-Cell-Id": "TORQUE_CELL_ID",
+                    },
+                },
+            },
+            "hooks": (self.get_hook_config(cell) or {}).get("hooks", {}),
+        }
+        if prompt_file.exists():
+            payload["model_instructions_file"] = str(prompt_file)
+        return config_file, payload
 
+    def refresh_agent_config(self, cell, working_dir: str, *,
+                             mcp_entrypoint: str = "",
+                             mcp_env: dict[str, str] | None = None) -> bool:
+        """Write Torque-owned per-agent Codex config under the Torque data dir."""
+        del mcp_entrypoint, mcp_env
         try:
-            config_dir.mkdir(parents=True, exist_ok=True)
-
-            content = ""
-            if config_file.exists():
-                content = config_file.read_text()
-
-            # Remove existing Torque MCP section before mutating the rest of the
-            # file so we don't accidentally consume adjacent managed blocks.
-            content = _MCP_SECTION_RE.sub("", content)
-
-            # Enable Codex hooks so hooks.json is actually loaded.
-            content = _ensure_codex_hooks_enabled(content)
-
-            # Append fresh section
-            content = content.rstrip("\n") + "\n" + torque_section
-            config_file.write_text(content)
+            config_file, payload = self._agent_config_payload(cell, working_dir)
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(
+                _render_codex_agent_config(
+                    payload,
+                    source_path=str(config_file),
+                )
+            )
             return True
         except Exception:
             return False
 
-    def uninstall_mcp_config(self, working_dir: str):
-        """Remove Torque MCP server entry from .codex/config.toml.
-
-        If the file becomes empty, deletes it entirely.
-        """
-        config_file = Path(working_dir) / ".codex" / "config.toml"
-        if not config_file.exists():
-            return
-
+    def prepare_launch_command(self, cell, working_dir: str, command: str, *,
+                               mcp_entrypoint: str = "",
+                               mcp_env: dict[str, str] | None = None) -> str:
+        """Generate per-agent config and launch Codex with explicit config flags."""
+        del mcp_entrypoint, mcp_env
         try:
-            content = config_file.read_text()
-            content = _remove_codex_hooks_enabled(content)
-            content = _MCP_SECTION_RE.sub("", content)
-            content = content.strip()
-
-            if not content:
-                config_file.unlink(missing_ok=True)
-            else:
-                config_file.write_text(content + "\n")
+            config_file, payload = self._agent_config_payload(cell, working_dir)
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(
+                _render_codex_agent_config(
+                    payload,
+                    source_path=str(config_file),
+                )
+            )
+            return _append_codex_config_cli_flags(command or "codex", payload, config_file)
         except Exception:
-            pass  # Best-effort cleanup
+            return command
+
+    def cleanup_agent_config(self, cell, working_dir: str) -> None:
+        """Remove only Torque-owned generated Codex config for this agent."""
+        del working_dir
+        try:
+            config_dir = _codex_agent_config_dir(getattr(cell, "id", ""))
+            config_file = config_dir / "config.toml"
+            config_file.unlink(missing_ok=True)
+            try:
+                config_dir.rmdir()
+                config_dir.parent.rmdir()
+            except OSError:
+                pass
+        except Exception:
+            pass
 
     def parse_event(self, raw: dict, cell) -> AgentEvent | None:
         """Parse a Codex hook payload into a normalized AgentEvent.

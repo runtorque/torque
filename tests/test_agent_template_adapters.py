@@ -968,22 +968,36 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         )
 
     def test_codex_persistent_prompts_use_cli_args(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
             adapter = CodexAdapter()
             result = adapter.inject_persistent_prompt(
                 tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
             self.assertEqual(result, "")
-            self.assertEqual(
-                (Path(tmp) / ".torque" / "torque-system-prompt-agent-1.md").read_text(),
-                "First prompt.\n",
-            )
-            config = (Path(tmp) / ".codex" / "config.toml").read_text()
+            prompt_file = Path(tmp) / ".torque" / "torque-system-prompt-agent-1.md"
+            self.assertEqual(prompt_file.read_text(), "First prompt.\n")
+            self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
+            self.assertFalse((Path(tmp) / ".codex" / "AGENTS.md").exists())
+
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                command = adapter.prepare_launch_command(cell, tmp, "codex --model gpt-5")
+
+            config_file = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
+            config = config_file.read_text()
             self.assertIn("model_instructions_file =", config)
             self.assertIn("torque-system-prompt-agent-1.md", config)
-            self.assertFalse(
-                (Path(tmp) / ".codex" / "AGENTS.md").exists()
-            )
+            self.assertIn("[mcp_servers.torque]", config)
+            self.assertIn('url = "http://127.0.0.1:18933/mcp"', config)
+            self.assertIn("[[hooks.SessionStart]]", config)
+            self.assertIn("--config", command)
+            self.assertIn("mcp_servers.torque.url", command)
+            self.assertIn("model_instructions_file", command)
+
 
     def test_codex_persistent_prompt_bootstraps_startup_prompt(self):
         adapter = CodexAdapter()
@@ -993,7 +1007,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             "First prompt.",
         )
 
-    def test_codex_persistent_prompt_cleanup_removes_only_targeted_section(self):
+    def test_codex_persistent_prompt_cleanup_leaves_project_agents_file_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
             agents_file = Path(tmp) / ".codex" / "AGENTS.md"
@@ -1013,16 +1027,17 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 ])
             )
 
+            before = agents_file.read_text()
             adapter.uninstall_persistent_prompt(tmp, "torque-system-prompt-agent-1.md")
 
-            content = agents_file.read_text()
-            self.assertNotIn("First prompt.", content)
-            self.assertIn("User notes stay here.", content)
-            self.assertIn("Second prompt.", content)
+            self.assertEqual(agents_file.read_text(), before)
 
-    def test_codex_persistent_prompt_cleanup_removes_managed_prompt_file_and_config(self):
+    def test_codex_persistent_prompt_cleanup_removes_prompt_file_not_project_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
+            config_file = Path(tmp) / ".codex" / "config.toml"
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text('[profiles.default]\nmodel = "gpt-5"\n')
             adapter.inject_persistent_prompt(
                 tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
@@ -1032,9 +1047,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertFalse(
                 (Path(tmp) / ".torque" / "torque-system-prompt-agent-1.md").exists()
             )
-            self.assertFalse(
-                (Path(tmp) / ".codex" / "config.toml").exists()
-            )
+            self.assertEqual(config_file.read_text(), '[profiles.default]\nmodel = "gpt-5"\n')
+
 
     def test_codex_resume_command_preserves_flags(self):
         adapter = CodexAdapter()
@@ -1052,187 +1066,20 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             adapter = CodexAdapter()
             hooks_file = Path(tmp) / ".codex" / "hooks.json"
             hooks_file.parent.mkdir(parents=True, exist_ok=True)
-            hooks_file.write_text(
-                json.dumps(
-                    {
-                        "hooks": {
-                            "Stop": [{
-                                "hooks": [{"type": "command", "command": "echo user-stop"}]
-                            }],
-                            "PreToolUse": [{
-                                "hooks": [{
-                                    "type": "command",
-                                    "command": "curl -s -X POST http://localhost:18932/events -d '{}' ",
-                                }]
-                            }],
-                        }
-                    }
-                )
-            )
-
-            with mock.patch.dict(
-                os.environ,
-                {"TORQUE_PORT": "18933", "CODEX_HOME": codex_home},
-                clear=False,
-            ):
-                self.assertTrue(adapter.install_hooks(tmp))
-
-            installed = json.loads(hooks_file.read_text())
-            self.assertEqual(len(installed["hooks"]["Stop"]), 2)
-            self.assertEqual(
-                installed["hooks"]["Stop"][0]["hooks"][0]["command"],
-                "echo user-stop",
-            )
-            self.assertEqual(len(installed["hooks"]["PreToolUse"]), 1)
-            self.assertEqual(len(installed["hooks"]["PermissionRequest"]), 1)
-            session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
-            self.assertIn("http://localhost:18933/events", session_start_hook["command"])
-            self.assertIn("--fail", session_start_hook["command"])
-            self.assertIn("--retry 3", session_start_hook["command"])
-            self.assertIn("event_id", session_start_hook["command"])
-            self.assertNotIn("> /dev/null", session_start_hook["command"])
-            self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
-            permission_hook = installed["hooks"]["PermissionRequest"][0]["hooks"][0]
-            self.assertIn("--output /dev/null", permission_hook["command"])
-            self.assertNotIn("decision", permission_hook["command"])
-
-            with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
-                adapter.uninstall_hooks(tmp)
-
-            cleaned = json.loads(hooks_file.read_text())
-            self.assertEqual(
-                cleaned,
-                {
-                    "hooks": {
-                        "Stop": [{
-                            "hooks": [{"type": "command", "command": "echo user-stop"}]
+            original = {
+                "hooks": {
+                    "Stop": [{
+                        "hooks": [{"type": "command", "command": "echo user-stop"}]
+                    }],
+                    "PreToolUse": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": "curl -s -X POST http://localhost:18932/events -d '{}' ",
                         }]
-                    }
-                },
-            )
-
-    def test_codex_mcp_config_install_and_cleanup_restore_user_config(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            adapter = CodexAdapter()
-            config_file = Path(tmp) / ".codex" / "config.toml"
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            config_file.write_text(
-                "[profiles.default]\nmodel = \"gpt-5\"\n"
-            )
-
-            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
-                self.assertTrue(adapter.install_mcp_config(tmp))
-
-            installed = config_file.read_text()
-            self.assertIn("[profiles.default]", installed)
-            self.assertIn("[mcp_servers.torque]", installed)
-            self.assertIn("hooks = true", installed)
-            self.assertNotIn("codex_hooks = true", installed)
-            self.assertIn('url = "http://127.0.0.1:18933/mcp"', installed)
-
-            adapter.uninstall_mcp_config(tmp)
-
-            self.assertEqual(
-                config_file.read_text(),
-                "[profiles.default]\nmodel = \"gpt-5\"\n",
-            )
-
-    def test_codex_mcp_config_preserves_model_instructions_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            adapter = CodexAdapter()
-            adapter.inject_persistent_prompt(
-                tmp, "torque-system-prompt-agent-1.md", "First prompt."
-            )
-
-            self.assertTrue(adapter.install_mcp_config(tmp))
-
-            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
-            self.assertIn("model_instructions_file =", installed)
-            self.assertIn("torque-system-prompt-agent-1.md", installed)
-            self.assertIn("[mcp_servers.torque]", installed)
-            self.assertIn("hooks = true", installed)
-            self.assertNotIn("codex_hooks = true", installed)
-
-    def test_codex_mcp_config_cleanup_removes_new_and_legacy_managed_features(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            adapter = CodexAdapter()
-            config_file = Path(tmp) / ".codex" / "config.toml"
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            config_file.write_text(
-                "\n".join([
-                    "[features]",
-                    "web_search = true",
-                    "# -- Torque Codex hooks feature (managed by Torque, do not edit) --",
-                    "hooks = true",
-                    "# -- Torque Codex hooks feature (managed by Torque, do not edit) --",
-                    "codex_hooks = true",
-                    "",
-                    "# -- Torque MCP server (managed by Torque, do not edit) --",
-                    "[mcp_servers.torque]",
-                    'url = "http://127.0.0.1:18932/mcp"',
-                    'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }',
-                    "",
-                    "[profiles.default]",
-                    'model = "gpt-5"',
-                    "",
-                ])
-            )
-
-            adapter.uninstall_mcp_config(tmp)
-
-            cleaned = config_file.read_text()
-            self.assertIn("[features]\nweb_search = true", cleaned)
-            self.assertIn("[profiles.default]", cleaned)
-            self.assertNotIn("Torque Codex hooks feature", cleaned)
-            self.assertNotIn("hooks = true", cleaned)
-            self.assertNotIn("codex_hooks = true", cleaned)
-            self.assertNotIn("[mcp_servers.torque]", cleaned)
-
-    def test_codex_mcp_config_cleanup_removes_orphaned_legacy_feature_section(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            adapter = CodexAdapter()
-            config_file = Path(tmp) / ".codex" / "config.toml"
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            config_file.write_text(
-                "\n".join([
-                    "# -- Torque Codex hooks feature (managed by Torque, do not edit) --",
-                    "[features]",
-                    "codex_hooks = true",
-                    "",
-                    "# -- Torque MCP server (managed by Torque, do not edit) --",
-                    "[mcp_servers.torque]",
-                    'url = "http://127.0.0.1:18932/mcp"',
-                    'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }',
-                    "",
-                ])
-            )
-
-            adapter.uninstall_mcp_config(tmp)
-
-            self.assertFalse(config_file.exists())
-
-    def test_codex_hook_install_writes_trusted_state_and_removes_stale_hooks(self):
-        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as codex_home:
-            adapter = CodexAdapter()
-            hooks_file = Path(tmp) / ".codex" / "hooks.json"
-            hooks_file.parent.mkdir(parents=True, exist_ok=True)
-            hooks_file.write_text(
-                json.dumps(
-                    {
-                        "hooks": {
-                            "Stop": [{
-                                "hooks": [{"type": "command", "command": "echo user-stop"}]
-                            }],
-                            "PreToolUse": [{
-                                "hooks": [{
-                                    "type": "command",
-                                    "command": "curl -s -X POST http://localhost:18932/events -d '{}' ",
-                                }]
-                            }],
-                        }
-                    }
-                )
-            )
+                    }],
+                }
+            }
+            hooks_file.write_text(json.dumps(original))
             user_config = Path(codex_home) / "config.toml"
             user_config.write_text('model = "gpt-5"\n')
 
@@ -1242,64 +1089,171 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 clear=False,
             ):
                 self.assertTrue(adapter.install_hooks(tmp))
-
-            installed = json.loads(hooks_file.read_text())
-            self.assertEqual(len(installed["hooks"]["Stop"]), 2)
-            self.assertEqual(
-                installed["hooks"]["Stop"][0]["hooks"][0]["command"],
-                "echo user-stop",
-            )
-            self.assertEqual(len(installed["hooks"]["PreToolUse"]), 1)
-            session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
-            self.assertIn("http://localhost:18933/events", session_start_hook["command"])
-            self.assertNotIn("http://localhost:18932/events", hooks_file.read_text())
-
-            source = os.path.abspath(str(hooks_file))
-            source_paths = {source, str(hooks_file.expanduser().resolve(strict=False))}
-            trust_config = user_config.read_text()
-            self.assertIn('model = "gpt-5"', trust_config)
-            self.assertIn(
-                "# -- Torque Codex hook trust: "
-                f"{source} (managed by Torque, do not edit) --",
-                trust_config,
-            )
-            self.assertIn(f'[hooks.state."{source}:session_start:0:0"]', trust_config)
-            self.assertIn(f'[hooks.state."{source}:pre_tool_use:0:0"]', trust_config)
-            self.assertIn(
-                f'[hooks.state."{source}:permission_request:0:0"]',
-                trust_config,
-            )
-            self.assertIn(f'[hooks.state."{source}:stop:1:0"]', trust_config)
-            self.assertEqual(
-                len(re.findall(r'trusted_hash = "sha256:[0-9a-f]{64}"', trust_config)),
-                4 * len(source_paths),
-            )
-
-            with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
                 adapter.uninstall_hooks(tmp)
 
-            cleaned_hooks = json.loads(hooks_file.read_text())
-            self.assertEqual(
-                cleaned_hooks,
-                {
-                    "hooks": {
-                        "Stop": [{
-                            "hooks": [{"type": "command", "command": "echo user-stop"}]
-                        }]
-                    }
-                },
-            )
+            self.assertEqual(json.loads(hooks_file.read_text()), original)
             self.assertEqual(user_config.read_text(), 'model = "gpt-5"\n')
+
+
+    def test_codex_mcp_config_install_and_cleanup_leave_project_config_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+            config_file = Path(tmp) / ".codex" / "config.toml"
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            original = "[profiles.default]\nmodel = \"gpt-5\"\n"
+            config_file.write_text(original)
+
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
+                self.assertTrue(adapter.install_mcp_config(tmp))
+
+            self.assertEqual(config_file.read_text(), original)
+
+            adapter.uninstall_mcp_config(tmp)
+
+            self.assertEqual(config_file.read_text(), original)
+
+
+    def test_codex_mcp_config_preserves_model_instructions_file(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+            adapter = CodexAdapter()
+            adapter.inject_persistent_prompt(
+                tmp, "torque-system-prompt-agent-1.md", "First prompt."
+            )
+
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(os.environ, {"TORQUE_DATA_DIR": data_dir}, clear=False):
+                self.assertTrue(adapter.refresh_agent_config(cell, tmp))
+
+            installed = (
+                Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
+            ).read_text()
+            self.assertIn("model_instructions_file =", installed)
+            self.assertIn("torque-system-prompt-agent-1.md", installed)
+            self.assertIn("[mcp_servers.torque]", installed)
+            self.assertIn("hooks = true", installed)
+            self.assertNotIn("codex_hooks = true", installed)
+            self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
+
+
+    def test_codex_mcp_config_cleanup_preserves_legacy_project_features(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+            config_file = Path(tmp) / ".codex" / "config.toml"
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            original = "\n".join([
+                "[features]",
+                "web_search = true",
+                "# -- Torque Codex hooks feature (managed by Torque, do not edit) --",
+                "hooks = true",
+                "# -- Torque Codex hooks feature (managed by Torque, do not edit) --",
+                "codex_hooks = true",
+                "",
+                "# -- Torque MCP server (managed by Torque, do not edit) --",
+                "[mcp_servers.torque]",
+                'url = "http://127.0.0.1:18932/mcp"',
+                'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }',
+                "",
+                "[profiles.default]",
+                'model = "gpt-5"',
+                "",
+            ])
+            config_file.write_text(original)
+
+            adapter.uninstall_mcp_config(tmp)
+
+            self.assertEqual(config_file.read_text(), original)
+
+
+    def test_codex_mcp_config_cleanup_preserves_orphaned_legacy_project_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+            config_file = Path(tmp) / ".codex" / "config.toml"
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            original = "\n".join([
+                "# -- Torque Codex hooks feature (managed by Torque, do not edit) --",
+                "[features]",
+                "codex_hooks = true",
+                "",
+                "# -- Torque MCP server (managed by Torque, do not edit) --",
+                "[mcp_servers.torque]",
+                'url = "http://127.0.0.1:18932/mcp"',
+                'env_http_headers = { "X-Torque-Cell-Id" = "TORQUE_CELL_ID" }',
+                "",
+            ])
+            config_file.write_text(original)
+
+            adapter.uninstall_mcp_config(tmp)
+
+            self.assertEqual(config_file.read_text(), original)
+
+
+    def test_codex_generated_config_writes_trusted_state_without_touching_project_hooks(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir, tempfile.TemporaryDirectory() as codex_home:
+            adapter = CodexAdapter()
+            hooks_file = Path(tmp) / ".codex" / "hooks.json"
+            hooks_file.parent.mkdir(parents=True, exist_ok=True)
+            original = {
+                "hooks": {
+                    "Stop": [{
+                        "hooks": [{"type": "command", "command": "echo user-stop"}]
+                    }],
+                    "PreToolUse": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": "curl -s -X POST http://localhost:18932/events -d '{}' ",
+                        }]
+                    }],
+                }
+            }
+            hooks_file.write_text(json.dumps(original))
+            user_config = Path(codex_home) / "config.toml"
+            user_config.write_text('model = "gpt-5"\n')
+
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "TORQUE_PORT": "18933",
+                    "TORQUE_DATA_DIR": data_dir,
+                    "CODEX_HOME": codex_home,
+                },
+                clear=False,
+            ):
+                command = adapter.prepare_launch_command(cell, tmp, "codex")
+
+            generated_file = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
+            generated = generated_file.read_text()
+            self.assertIn("http://localhost:18933/events", generated)
+            self.assertIn("--retry 3", generated)
+            self.assertIn("event_id", generated)
+            self.assertIn("--output /dev/null", generated)
+            self.assertIn("[hooks.state.", generated)
+            self.assertIn("trusted_hash = \"sha256:", generated)
+            source = os.path.abspath(str(generated_file))
+            self.assertIn(f'{source}:session_start:0:0', generated)
+            self.assertIn(f'{source}:pre_tool_use:0:0', generated)
+            self.assertIn(f'{source}:permission_request:0:0', generated)
+            self.assertIn(f'{source}:stop:0:0', generated)
+            self.assertIn("--config", command)
+            self.assertEqual(json.loads(hooks_file.read_text()), original)
+            self.assertEqual(user_config.read_text(), 'model = "gpt-5"\n')
+
 
     def test_codex_mcp_config_uses_role_neutral_http_endpoint_for_role_entrypoints(self):
         import tomllib
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
             adapter = CodexAdapter()
+            cell = SimpleNamespace(id="agent-1")
 
-            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_PORT": "18933", "TORQUE_DATA_DIR": data_dir},
+                clear=False,
+            ):
                 self.assertTrue(
-                    adapter.install_mcp_config(
+                    adapter.refresh_agent_config(
+                        cell,
                         tmp,
                         mcp_entrypoint="torque/mcp_engineer.py",
                         mcp_env={
@@ -1311,7 +1265,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     )
                 )
 
-            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
+            installed = (
+                Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
+            ).read_text()
             parsed = tomllib.loads(installed)
             torque_cfg = parsed["mcp_servers"]["torque"]
             self.assertEqual(torque_cfg["url"], "http://127.0.0.1:18933/mcp")
@@ -1327,40 +1283,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn("TORQUE_ENGINEER_ID", installed)
             self.assertNotIn("TORQUE_ARCHITECT_ID", installed)
             self.assertNotIn("TORQUE_DATA_DIR", installed)
-
-            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18934"}, clear=False):
-                self.assertTrue(
-                    adapter.install_mcp_config(
-                        tmp,
-                        mcp_entrypoint="torque/mcp_architect.py",
-                        mcp_env={
-                            "TORQUE_CELL_ID": "arch-1",
-                            "TORQUE_ARCHITECT_ID": "arch-1",
-                            "TORQUE_PORT": "18999",
-                            "TORQUE_DATA_DIR": "/tmp/torque-architect",
-                        },
-                    )
-                )
-
-            reinstalled = (Path(tmp) / ".codex" / "config.toml").read_text()
-            reparsed = tomllib.loads(reinstalled)
-            torque_cfg = reparsed["mcp_servers"]["torque"]
-            self.assertEqual(torque_cfg["url"], "http://127.0.0.1:18934/mcp")
-            self.assertEqual(
-                torque_cfg["env_http_headers"],
-                {"X-Torque-Cell-Id": "TORQUE_CELL_ID"},
-            )
-            self.assertNotIn("command", torque_cfg)
-            self.assertNotIn("args", torque_cfg)
-            self.assertNotIn("env", torque_cfg)
-            self.assertNotIn("torque.mcp_engineer", reinstalled)
-            self.assertNotIn("torque.mcp_architect", reinstalled)
-            self.assertNotIn("TORQUE_ENGINEER_ID", reinstalled)
-            self.assertNotIn("TORQUE_ARCHITECT_ID", reinstalled)
-            self.assertNotIn("TORQUE_DATA_DIR", reinstalled)
-
-            adapter.uninstall_mcp_config(tmp)
             self.assertFalse((Path(tmp) / ".codex" / "config.toml").exists())
+
+            with mock.patch.dict(os.environ, {"TORQUE_DATA_DIR": data_dir}, clear=False):
+                adapter.cleanup_agent_config(cell, tmp)
+            self.assertFalse(
+                (Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml").exists()
+            )
+
 
     def test_codex_shared_mcp_config_install_order_preserves_each_role_discovery(self):
         import tomllib
@@ -1417,8 +1347,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         thread.start()
 
         try:
-            def install_sequence(tmp: str, entrypoints: tuple[str, str]) -> dict:
+            def install_sequence(tmp: str, entrypoints: tuple[str, str], data_dir: str) -> tuple[dict, str]:
                 adapter = CodexAdapter()
+                cell = SimpleNamespace(id="agent-1")
                 for entrypoint in entrypoints:
                     is_architect = entrypoint.endswith("mcp_architect.py")
                     mcp_env = {
@@ -1432,26 +1363,31 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                         mcp_env["TORQUE_ENGINEER_ID"] = "eng-1"
                     with mock.patch.dict(
                         os.environ,
-                        {"TORQUE_PORT": str(server.server_port)},
+                        {
+                            "TORQUE_PORT": str(server.server_port),
+                            "TORQUE_DATA_DIR": data_dir,
+                        },
                         clear=False,
                     ):
                         self.assertTrue(
-                            adapter.install_mcp_config(
+                            adapter.refresh_agent_config(
+                                cell,
                                 tmp,
                                 mcp_entrypoint=entrypoint,
                                 mcp_env=mcp_env,
                             )
                         )
 
-                config = tomllib.loads(
-                    (Path(tmp) / ".codex" / "config.toml").read_text()
-                )
+                config_text = (
+                    Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
+                ).read_text()
+                config = tomllib.loads(config_text)
                 torque_cfg = config["mcp_servers"]["torque"]
                 self.assertIn("url", torque_cfg)
                 self.assertNotIn("command", torque_cfg)
                 self.assertNotIn("args", torque_cfg)
                 self.assertNotIn("env", torque_cfg)
-                return torque_cfg
+                return torque_cfg, config_text
 
             def codex_tools_list(torque_cfg: dict, cell_id: str, request_id: int):
                 body = json.dumps(
@@ -1481,8 +1417,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 ),
                 start=1,
             ):
-                with tempfile.TemporaryDirectory() as tmp:
-                    torque_cfg = install_sequence(tmp, entrypoints)
+                with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+                    torque_cfg, config_text = install_sequence(tmp, entrypoints, data_dir)
                     arch_response = codex_tools_list(
                         torque_cfg, "arch-1", order * 10 + 1
                     )
@@ -1506,7 +1442,6 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     # uses the shared HTTP config and never launches
                     # torque.mcp_engineer, so it cannot exit with
                     # "TORQUE_ENGINEER_ID is required".
-                    config_text = (Path(tmp) / ".codex" / "config.toml").read_text()
                     self.assertNotIn("torque.mcp_engineer", config_text)
                     self.assertNotIn("torque.mcp_architect", config_text)
                     self.assertNotIn("TORQUE_ENGINEER_ID", config_text)

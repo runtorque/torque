@@ -15928,14 +15928,15 @@ async def main(connection=None):
             if c.agent_type and c.directory:
                 adapter = get_adapter(c.agent_type)
                 try:
+                    expanded_dir = os.path.expanduser(c.directory)
+                    if hasattr(adapter, "cleanup_agent_config"):
+                        adapter.cleanup_agent_config(c, expanded_dir)
                     if hasattr(adapter, "uninstall_hooks"):
-                        adapter.uninstall_hooks(
-                            os.path.expanduser(c.directory))
+                        adapter.uninstall_hooks(expanded_dir)
                     if hasattr(adapter, "uninstall_mcp_config"):
-                        adapter.uninstall_mcp_config(
-                            os.path.expanduser(c.directory))
+                        adapter.uninstall_mcp_config(expanded_dir)
                     adapter.uninstall_persistent_prompt(
-                        os.path.expanduser(c.directory),
+                        expanded_dir,
                         _persistent_prompt_filename(c))
                 except Exception:
                     log.exception(
@@ -18562,14 +18563,15 @@ async def main(connection=None):
                         await bridge.close_session(c.session_id)
                     if c.agent_type and c.directory:
                         adapter = get_adapter(c.agent_type)
+                        expanded_dir = os.path.expanduser(c.directory)
+                        if hasattr(adapter, "cleanup_agent_config"):
+                            adapter.cleanup_agent_config(c, expanded_dir)
                         if hasattr(adapter, "uninstall_hooks"):
-                            adapter.uninstall_hooks(
-                                os.path.expanduser(c.directory))
+                            adapter.uninstall_hooks(expanded_dir)
                         if hasattr(adapter, "uninstall_mcp_config"):
-                            adapter.uninstall_mcp_config(
-                                os.path.expanduser(c.directory))
+                            adapter.uninstall_mcp_config(expanded_dir)
                         adapter.uninstall_persistent_prompt(
-                            os.path.expanduser(c.directory),
+                            expanded_dir,
                             _persistent_prompt_filename(c))
                     event_bus.cleanup_cell(c.id)
                     worktree_mgr.forget_refresh_state(c.id)

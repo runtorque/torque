@@ -183,17 +183,18 @@ def runtime_env_vars_for_cell(cell, env_vars: dict[str, str] | None = None):
 def mcp_env_vars_for_cell(cell) -> dict[str, str] | None:
     """Return env vars safe to persist in provider MCP config files.
 
-    Some provider config files (notably Codex's project-local
-    ``.codex/config.toml``) are shared by every same-directory Torque cell.
-    They must therefore never persist per-cell identity bindings such as
+    Some provider config files can be shared by same-directory Torque cells;
+    Codex now receives Torque-owned per-agent config, while other adapters may
+    still use project-local files. These configs must therefore never persist
+    per-cell identity bindings such as
     ``TORQUE_CELL_ID`` / ``TORQUE_ARCHITECT_ID`` / ``TORQUE_ENGINEER_ID``:
     whichever Architect/Engineer wrote the file last would otherwise bind
     another same-directory session's stdio MCP proxy to the wrong lane.
 
     Per-cell identity is supplied by the PTY process environment via
     :func:`runtime_env_vars_for_cell` and ``LocalPTYBridge._session_environment``;
-    the generated MCP config carries only daemon/profile values that are stable
-    across cells sharing the working directory.
+    generated MCP config carries only daemon/profile values that are stable
+    across same-directory cells.
     """
     if getattr(cell, "cell_type", "") != "agent":
         return None
