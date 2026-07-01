@@ -71,6 +71,10 @@ from .state import (
 from .task_health import HEALTH_SEVERITY
 from .engineer_hints import compute_engineer_hints
 from .engineer_session_map import build_engineer_session_map
+from .execution_scope import (
+    engineer_architect_task_routing_denied_message,
+    is_architect_execution_target,
+)
 from .worktree_streams import (
     compute_worktree_streams,
     member_task_ids_for_stream,
@@ -12380,6 +12384,22 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
             if not agent_id:
                 return agent_error, True
+            target_cell = real_state.agents.get(agent_id)
+            if (
+                    caller_kind == "engineer"
+                    and is_architect_execution_target(target_cell)
+            ):
+                message = engineer_architect_task_routing_denied_message(
+                    target_cell
+                )
+                log.warning(
+                    "Denied engineer task dispatch to architect target: "
+                    "engineer=%s task=%s target=%s",
+                    caller_id,
+                    tid,
+                    agent_id,
+                )
+                return message, True
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
