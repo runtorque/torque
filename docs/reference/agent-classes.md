@@ -112,11 +112,12 @@ diagnostics. Product Manager-style classes cannot select buckets that grant
 dangerous execution/admin capabilities such as hire, dispatch, merge, deploy,
 settings, accepted-decision authority, direct Engineer/Worker messaging, or
 profile-admin.
-Torque Steward-style Wave A classes are stricter: they may select only
-read-only operational observation capabilities, and validation rejects
-communication, task mutation, planning writes, memory publication, or any
-other non-observation atoms until a later reviewed authority wave changes that
-contract.
+Torque Steward-style classes are stricter: they may select only operational
+observation capabilities plus the explicit Steward communication, private
+journal, and same-group Architect peer-coordination capabilities. Validation
+rejects task mutation, planning writes, memory publication, Engineer/Worker
+messaging, admin, or any other non-approved atoms until a later reviewed
+authority wave changes that contract.
 
 Draft classes must set `draft.scratch_only: true` and must not claim live dogfood
 approval.
@@ -235,15 +236,17 @@ classes, but connector access must be managed separately.
 ## Torque Steward class
 
 The built-in Torque Steward class has primary identity label **Torque Steward**
-and stable internal id `torque-steward`. Wave B still keeps it lifecycle
+and stable internal id `torque-steward`. The communication/journal wave still keeps it lifecycle
 `draft` and `draft.scratch_only: true`; it must not be auto-created, auto-run,
 or treated as broad user-delegated authority.
 
 Torque Steward is Architect-derived because it will eventually represent the
-user's operational wishes for a group, but its Wave A compiled policy is
-read-only/observational. It can read projected self context, board/task
+user's operational wishes for a group, but its compiled policy remains
+conservative. It can read projected self context, board/task
 summaries and details, recent events, MCP-call telemetry, Areas, Initiatives,
-Decisions, and board-sync state. It explicitly denies Engineer management,
+Decisions, and board-sync state. It can also ask/message the user, read/write
+its own private Architect journal, and list/message same-group Architect peers
+for coordination and handoff nudges. It explicitly denies Engineer management,
 Worker dispatch, execution task control, direct Engineer/Worker messaging,
 worktree/merge, deploy/admin/settings, class/profile admin, accepted-decision
 authority, raw tool-picker authority, and all remaining high-risk operations.
@@ -251,10 +254,12 @@ authority, raw tool-picker authority, and all remaining high-risk operations.
 The prompt and preview status contract define the Steward as an operations
 observer/suggester: summarize health, anomaly, stale/stuck work, missed
 handoff, review/fix-loop, and cleanup risks; separate evidence from inference;
-recommend the smallest safe next step and the authorized actor. Wave A Steward
+recommend the smallest safe next step and the authorized actor. Torque Steward
 must not restart, compact, notify, schedule, dispatch, assign, hire, merge,
 deploy, edit Agent Classes/Profiles, change settings, accept decisions, or
-message/control Engineers or Workers. Explicit user-directed powerful actions
+message/control Engineers or Workers. The only write surfaces in this wave are
+communication/journal records: user asks/messages, own-journal entries, and
+same-group Architect peer messages. Explicit user-directed powerful actions
 remain future reviewed waves that need confirmation, auditability, visibility,
 and rollback expectations before enablement.
 

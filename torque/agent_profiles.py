@@ -397,11 +397,16 @@ CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST = frozenset({
 })
 
 TORQUE_STEWARD_RAW_TOOL_DENYLIST = frozenset({
-    # Torque Steward Wave A is observation/recommendation only. It can use
-    # projected read tools, but not raw tool-picker/search surfaces that could
-    # reveal or invite denied full-Architect workflows.
+    # Torque Steward has a purpose-built Architect-derived projection. Keep it
+    # off raw tool-picker/search, duplicate generic communication aliases, and
+    # product/creative wrapper families so the visible surface stays
+    # operational-steward-shaped instead of drifting into PM/Creative authority.
     "architect_tool_search",
+    "architect_digest_filter",
     "engineer_tool_search",
+    "torque_ask",
+    "torque_message_user",
+    "torque_reply",
 })
 
 HIGH_RISK_CAPABILITIES = frozenset(
@@ -1132,8 +1137,14 @@ def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None
         return False
     if _policy_is_creative_architect(policy) and normalized_name in CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST:
         return False
-    if _policy_is_torque_steward(policy) and normalized_name in TORQUE_STEWARD_RAW_TOOL_DENYLIST:
-        return False
+    if _policy_is_torque_steward(policy):
+        if normalized_name in TORQUE_STEWARD_RAW_TOOL_DENYLIST:
+            return False
+        if (
+            normalized_name.startswith("architect_product_")
+            or normalized_name.startswith("architect_thinking_")
+        ):
+            return False
     requirements = mcp_tool_capability_requirements(normalized_name)
     if not requirements:
         return False

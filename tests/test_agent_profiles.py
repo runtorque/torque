@@ -142,7 +142,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_role", pm))
 
 
-    def test_torque_steward_policy_denies_raw_tool_picker_only_allows_read_observation(self):
+    def test_torque_steward_policy_denies_raw_tool_picker_but_allows_approved_communication(self):
         steward = profile_policy_from_definition(AgentProfileDefinition(
             id="class-policy-torque-steward",
             version="1",
@@ -158,6 +158,11 @@ class AgentProfileRegistryTests(unittest.TestCase):
                 "planning.initiative_read",
                 "decision.list",
                 "task.board_sync_read",
+                "comm.user_ask",
+                "comm.user_message",
+                "comm.peer_architect_list",
+                "comm.peer_architect_message",
+                "journal.private",
             ],
             metadata={
                 "archetype": "torque_steward",
@@ -175,11 +180,21 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_ask", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_message_user", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_list", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_journal", steward))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_journal_read", steward))
 
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("engineer_tool_search", steward))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", steward))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("torque_ask", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("torque_message_user", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_message_user", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_peer_message", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_journal", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_digest_filter", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_message", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", steward))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", steward))
