@@ -1648,6 +1648,7 @@ function _terminalComposeRichHtml(cellId, text) {
     }
     const label = _terminalComposeAttachmentLabel(entry);
     const title = entry.path ? String(entry.path) : label;
+    const tokenLabel = token || label;
     const selected = String(_terminalComposeSelectedAttachmentByCell[String(cellId || '')] || '') === token;
     html += '<span class="terminal-compose-attachment-chip terminal-compose-inline-attachment-chip'
       + (selected ? ' selected' : '')
@@ -1655,9 +1656,8 @@ function _terminalComposeRichHtml(cellId, text) {
       + ' data-attachment-token="' + esc(token) + '"'
       + ' onclick="return terminalComposeAttachmentPreview(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
       + ' onkeydown="return terminalComposeAttachmentChipKeydown(event, \'' + esc(cellId).replace(/'/g, "\\'") + '\', \'' + esc(token).replace(/'/g, "\\'") + '\')"'
-      + ' title="' + esc(title) + '" aria-label="Preview attached image ' + esc(label) + '">'
-      + '<span class="terminal-compose-attachment-icon" aria-hidden="true">▧</span>'
-      + '<span class="terminal-compose-attachment-label">' + esc(label) + '</span>'
+      + ' title="' + esc(title) + '" aria-label="Preview attached image ' + esc(tokenLabel) + ' (' + esc(label) + ')">'
+      + esc(tokenLabel)
       + '</span>';
   }
   html += _terminalComposeEscapeText(value.slice(cursor));
