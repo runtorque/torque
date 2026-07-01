@@ -995,9 +995,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("[mcp_servers.torque]", config)
             self.assertIn('url = "http://127.0.0.1:18933/mcp"', config)
             self.assertIn("[[hooks.SessionStart]]", config)
-            self.assertIn("--config", command)
-            self.assertIn("mcp_servers.torque.url", command)
-            self.assertIn("model_instructions_file", command)
+            launch_script = Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+            self.assertEqual(command, shlex.quote(str(launch_script)))
+            launch_text = launch_script.read_text()
+            self.assertIn("exec codex --model gpt-5", launch_text)
+            self.assertIn("--config", launch_text)
+            self.assertIn("mcp_servers.torque.url", launch_text)
+            self.assertIn("model_instructions_file", launch_text)
+            self.assertLess(len(command), 256)
 
 
     def test_codex_persistent_prompt_bootstraps_startup_prompt(self):
@@ -1236,8 +1241,13 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn(f'{source}:pre_tool_use:0:0', generated)
             self.assertIn(f'{source}:permission_request:0:0', generated)
             self.assertIn(f'{source}:stop:0:0', generated)
-            self.assertIn("--config", command)
-            command_parts = shlex.split(command)
+            launch_script = Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+            self.assertEqual(command, shlex.quote(str(launch_script)))
+            launch_text = launch_script.read_text()
+            self.assertIn("--config", launch_text)
+            self.assertLess(len(command), 256)
+            launch_command = launch_text.splitlines()[-1].removeprefix("exec ")
+            command_parts = shlex.split(launch_command)
             config_values = [
                 value
                 for index, value in enumerate(command_parts)
@@ -1318,6 +1328,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 adapter.cleanup_agent_config(cell, tmp)
             self.assertFalse(
                 (Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml").exists()
+            )
+            self.assertFalse(
+                (Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh").exists()
             )
 
 

@@ -279,6 +279,10 @@ def _codex_agent_config_file(cell_id: str) -> Path:
     return _codex_agent_config_dir(cell_id) / "config.toml"
 
 
+def _codex_agent_launch_script_file(cell_id: str) -> Path:
+    return _codex_agent_config_dir(cell_id) / "launch.sh"
+
+
 def _toml_string(value: str) -> str:
     return json.dumps(str(value or ""))
 
@@ -370,6 +374,20 @@ def _append_codex_config_cli_flags(command: str, config: dict, config_path: Path
     if prompt:
         assembled.append(prompt)
     return " ".join(shlex.quote(p) for p in assembled)
+
+
+def _codex_resume_config_cli_command(command: str, config: dict, config_path: Path) -> str:
+    parts = shlex.split(command) if command else ["codex"]
+    if not parts:
+        parts = ["codex"]
+    flags = _codex_config_cli_flags(config, config_path=config_path)
+    opts, prompt = _split_boot_args(command or parts[0])
+    assembled = [parts[0], "resume", *opts, *flags]
+    rendered = " ".join(shlex.quote(p) for p in assembled)
+    rendered += ' "$@"'
+    if prompt:
+        rendered += " " + shlex.quote(prompt)
+    return rendered
 
 
 def _render_codex_agent_config(config: dict, *, source_path: str = "") -> str:
@@ -1031,7 +1049,16 @@ class CodexAdapter(AgentAdapter):
     def prepare_launch_command(self, cell, working_dir: str, command: str, *,
                                mcp_entrypoint: str = "",
                                mcp_env: dict[str, str] | None = None) -> str:
-        """Generate per-agent config and launch Codex with explicit config flags."""
+        """Generate per-agent config and a short Torque-owned launch shim.
+
+        The effective Codex invocation still uses explicit ``--config``
+        overrides so the generated hooks/MCP/trust state are in Codex's active
+        launch layer.  The full command is written into a per-agent script
+        under ``TORQUE_DATA_DIR`` and the PTY only receives that short script
+        path.  Sending the full hook config inline through a zsh PTY can exceed
+        the terminal's canonical input-line limit, leaving only ``/bin/zsh``
+        running with no Codex child.
+        """
         del mcp_entrypoint, mcp_env
         try:
             config_file, payload = self._agent_config_payload(cell, working_dir)
@@ -1042,7 +1069,22 @@ class CodexAdapter(AgentAdapter):
                     source_path=str(config_file),
                 )
             )
-            return _append_codex_config_cli_flags(command or "codex", payload, config_file)
+            full_command = _append_codex_config_cli_flags(
+                command or "codex", payload, config_file)
+            resume_command = _codex_resume_config_cli_command(
+                command or "codex", payload, config_file)
+            launch_script = _codex_agent_launch_script_file(getattr(cell, "id", ""))
+            launch_script.write_text(
+                "#!/bin/sh\n"
+                "# Torque-owned Codex launch shim (generated; do not edit).\n"
+                'if [ "${1:-}" = "resume" ]; then\n'
+                "  shift\n"
+                "  exec " + resume_command + "\n"
+                "fi\n"
+                "exec " + full_command + "\n"
+            )
+            launch_script.chmod(0o700)
+            return shlex.quote(str(launch_script))
         except Exception:
             return command
 
@@ -1051,8 +1093,8 @@ class CodexAdapter(AgentAdapter):
         del working_dir
         try:
             config_dir = _codex_agent_config_dir(getattr(cell, "id", ""))
-            config_file = config_dir / "config.toml"
-            config_file.unlink(missing_ok=True)
+            for filename in ("config.toml", "launch.sh"):
+                (config_dir / filename).unlink(missing_ok=True)
             try:
                 config_dir.rmdir()
                 config_dir.parent.rmdir()
