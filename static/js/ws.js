@@ -1016,6 +1016,11 @@ function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
   }
 }
 
+
+function _clientScopedFocusOwnsSelectedAgent() {
+  return !!_clientScopedFocusActive;
+}
+
 function _applyFocusUpdatePayload(payload) {
   payload = payload || {};
   const clientScoped = !!payload.client_scoped;
@@ -2706,6 +2711,7 @@ function _applyUiSurfaceInvalidation(flags, key) {
     _markSurface(flags, 'main');
   }
   if (key === 'selected_agent_id') {
+    if (_clientScopedFocusOwnsSelectedAgent()) return;
     _markSurface(flags, 'main', 'focus', 'context', 'events', 'engineer');
   }
 }
@@ -3295,6 +3301,16 @@ function _applyDelta(ops) {
           && _standalonePanelsEnabled())
           ? _standaloneVisiblePanelApps().slice()
           : [];
+        if (op.key === 'selected_agent_id'
+            && _clientScopedFocusOwnsSelectedAgent()) {
+          // Browser terminal focus is client-local once an embedded terminal
+          // has sent a client-scoped focus_update.  Do not let a global
+          // persisted selected_agent_id update from another/background launch
+          // split the UI by moving the agent/focus panels while this client
+          // keeps its existing terminal/DM target.
+          state.selected_agent_id = selectedAgentId || '';
+          break;
+        }
         state[op.key] = op.value;
         if (op.key === 'selected_agent_id') {
           _applySelectedAgentFromServer(op.value || '');
