@@ -644,7 +644,8 @@ test('sections extraction preserves section HTML, collapsed groups, scroll, focu
     'loose-worker',
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(context.window._navByGroup.beta)), []);
-  assert.equal(context.window._navGridRows.length, 3);
+  assert.equal(context.window._navGridRows.length, 4);
+  assert.equal(context.window._navGridRows[0].rowType, 'architect-strip-row');
   assert.equal(context.window._navGridItemMeta['worker-user'].rowKey, 'user:engineer:eng-user');
   assert.equal(context.window._navGridItemMeta['worker-user'].colIndex, 1);
   assert.ok(context.window._navFocusableItems.includes('worker-user'));

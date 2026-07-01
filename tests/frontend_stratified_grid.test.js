@@ -106,7 +106,8 @@ function createSandbox() {
   return { sandbox, mainEl };
 }
 
-function createHarness() {
+function createHarness(options) {
+  options = options || {};
   const { sandbox, mainEl } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/constants.js');
@@ -118,15 +119,19 @@ function createHarness() {
   loadScript(context, 'static/js/agent-detail.js');
   loadScript(context, 'static/js/agent-focus.js');
   loadScript(context, 'static/js/grid/main.js');
-  vm.runInContext(
-    'renderAgentCell = function(a) {'
-    + ' var kind = String(a.kind || "");'
-    + ' return "<div class=\\"cell " + esc(kind) + "\\" draggable=\\"true\\" data-drag-id=\\""'
-    + ' + esc(a.id) + "\\" data-agent-kind=\\""'
-    + ' + esc(kind) + "\\">" + esc(a.name || a.id) + "</div>";'
-    + ' };',
-    context,
-  );
+  if (options.stubCells !== false) {
+    vm.runInContext(`
+      renderAgentCell = function(a) {
+        var kind = String(a.kind || '');
+        var classes = ['cell', kind];
+        if (a.id === selectedAgentId) classes.push('selected');
+        if (a.id === focusedItemId) classes.push('focused');
+        return '<div class="' + esc(classes.join(' ')) + '" draggable="true" data-drag-id="'
+          + esc(a.id) + '" data-agent-kind="'
+          + esc(kind) + '">' + esc(a.name || a.id) + '</div>';
+      };
+    `, context);
+  }
   loadScript(context, 'static/js/commands.js');
   loadScript(context, 'static/js/main.js');
   return { context, sandbox, mainEl };
@@ -159,6 +164,37 @@ function seedMixedAgents(sandbox) {
   sandbox.state.agents['loose-worker'] = worker('loose-worker', 'Loose Worker', '', 6);
 }
 
+
+function seedRetainedArchitectScenario(sandbox) {
+  sandbox.state.groups.torque = [
+    'arch-a', 'eng-a', 'worker-a',
+    'arch-steward',
+    'arch-b', 'eng-b', 'worker-b',
+  ];
+  sandbox.state.agents['arch-a'] = Object.assign(architect('arch-a', 'Torqly', 1), {
+    effective_agent_class_id: 'default-architect',
+  });
+  sandbox.state.agents['eng-a'] = engineer('eng-a', 'Torqly Engineer', 'arch-a', 2);
+  sandbox.state.agents['worker-a'] = worker('worker-a', 'Torqly Worker', 'eng-a', 3);
+  sandbox.state.agents['arch-steward'] = Object.assign(architect('arch-steward', 'Torque Steward', 4), {
+    agent_class_id: 'torque-steward',
+    effective_agent_class_id: 'torque-steward',
+    effective_agent_class_version: '1',
+    effective_agent_class_snapshot: {
+      id: 'torque-steward',
+      version: '1',
+      base_kind: 'architect',
+      primary_identity_label: 'Torque Steward',
+      secondary_base_kind_label: 'Architect-derived',
+      status: 'full',
+      metadata: { archetype: 'torque_steward' },
+    },
+  });
+  sandbox.state.agents['arch-b'] = architect('arch-b', 'Blueprint', 5);
+  sandbox.state.agents['eng-b'] = engineer('eng-b', 'Blueprint Engineer', 'arch-b', 6);
+  sandbox.state.agents['worker-b'] = worker('worker-b', 'Blueprint Worker', 'eng-b', 7);
+}
+
 test('stratified grid renders architects, orphan engineers, and orphan workers regardless of selected_principal_id', () => {
   const { context, sandbox, mainEl } = createHarness();
   seedMixedAgents(sandbox);
@@ -174,7 +210,8 @@ test('stratified grid renders architects, orphan engineers, and orphan workers r
   for (const id of ['arch-a', 'eng-arch', 'worker-arch', 'eng-user', 'worker-user', 'loose-worker']) {
     assert.match(mainEl.innerHTML, new RegExp('data-drag-id="' + id + '"'));
   }
-  assert.match(mainEl.innerHTML, /data-agent-section="architect:arch-a"[\s\S]*class="cell architect"[\s\S]*Productmind/);
+  assert.match(mainEl.innerHTML, /data-agent-strata="architects"[\s\S]*data-agent-architect-strip[\s\S]*class="cell architect"[\s\S]*Productmind/);
+  assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"[\s\S]*Architect Engineer[\s\S]*Architect Worker/);
   assert.match(mainEl.innerHTML, /data-agent-strata="engineers"[\s\S]*Orphan Engineer[\s\S]*Orphan Engineer Worker/);
   assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*loose-workers-strip[\s\S]*Loose Worker/);
   assert.doesNotMatch(mainEl.innerHTML, /agent-strata-heading/);
@@ -247,7 +284,7 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
 });
 
 test('stratified grid pins Torque Steward before older architects when present', () => {
-  const { context, sandbox } = createHarness();
+  const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.torque = ['arch-old', 'arch-steward', 'arch-late'];
   sandbox.state.agents['arch-old'] = architect('arch-old', 'Torqly', 1);
   sandbox.state.agents['arch-steward'] = Object.assign(architect('arch-steward', 'Torque Steward', 20), {
@@ -259,9 +296,10 @@ test('stratified grid pins Torque Steward before older architects when present',
   vm.runInContext('render();', context);
 
   assert.deepEqual(JSON.parse(vm.runInContext(
-    'JSON.stringify((window._navGridRows || []).filter(function(row) { return row.rowType === "architect-empty-row"; }).map(function(row) { return row.architectId; }))',
+    'JSON.stringify(((window._navGridRows || []).find(function(row) { return row.rowType === "architect-strip-row"; }) || { items: [] }).items.map(function(item) { return item.id; }))',
     context,
   )), ['arch-steward', 'arch-old', 'arch-late']);
+  assert.match(mainEl.innerHTML, /data-agent-architect-strip[\s\S]*arch-steward[\s\S]*arch-old[\s\S]*arch-late/);
 });
 
 test('navigation model includes all visible strata in visual order without legacy principal rows', () => {
@@ -277,7 +315,8 @@ test('navigation model includes all visible strata in visual order without legac
   ));
   assert.equal(rows.some(row => row.rowType === 'principals-row'), false);
   assert.deepEqual(rows, [
-    { rowKey: 'architect:arch-a:engineer:eng-arch', rowType: 'engineer-row', sectionKey: 'architect:arch-a', items: ['arch-a', 'eng-arch', 'worker-arch'] },
+    { rowKey: 'architects:strip', rowType: 'architect-strip-row', sectionKey: 'architects', items: ['arch-a'] },
+    { rowKey: 'architect:arch-a:engineer:eng-arch', rowType: 'engineer-row', sectionKey: 'architect:arch-a', items: ['eng-arch', 'worker-arch'] },
     { rowKey: 'user:engineer:eng-user', rowType: 'engineer-row', sectionKey: 'user', items: ['eng-user', 'worker-user'] },
     { rowKey: 'workers:standalone-workers', rowType: 'standalone-workers-row', sectionKey: 'workers', items: ['loose-worker'] },
   ]);
@@ -286,6 +325,49 @@ test('navigation model includes all visible strata in visual order without legac
   ]);
   assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(window._navCreationControls.map(function(c) { return c.id; }))', context)), []);
   assert.equal(JSON.parse(vm.runInContext('JSON.stringify(window._navGridRows.some(function(row) { return /creation/.test(row.rowType); }))', context)), false);
+});
+
+test('selecting a no-engineer Architect preserves the last execution hierarchy and selection state', () => {
+  const { context, sandbox, mainEl } = createHarness({ stubCells: false });
+  seedRetainedArchitectScenario(sandbox);
+
+  vm.runInContext("selectedAgentId = 'arch-a'; focusedItemId = 'arch-a'; render();", context);
+  assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"/);
+  assert.match(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
+
+  vm.runInContext("selectedAgentId = 'arch-steward'; focusedItemId = 'arch-steward'; render();", context);
+
+  assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"[\s\S]*data-execution-selected-architect-id="arch-steward"[\s\S]*data-execution-retained="true"/);
+  assert.match(mainEl.innerHTML, /agent-execution-retained-note[\s\S]*Showing Torqly execution hierarchy while Torque Steward is selected/);
+  assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*selected[^"]*focused[^"]*architect[^"]*"[\s\S]*Torque Steward/);
+  assert.match(mainEl.innerHTML, /cell-agent-class-badge[\s\S]*Torque Steward/);
+  assert.match(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
+  assert.doesNotMatch(mainEl.innerHTML, /Blueprint Engineer[\s\S]*Blueprint Worker/);
+});
+
+test('switching between execution-owning Architects updates the retained hierarchy target', () => {
+  const { context, sandbox, mainEl } = createHarness();
+  seedRetainedArchitectScenario(sandbox);
+
+  vm.runInContext("selectedAgentId = 'arch-a'; focusedItemId = 'arch-a'; render();", context);
+  assert.match(mainEl.innerHTML, /data-execution-architect-id="arch-a"/);
+  assert.match(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
+
+  vm.runInContext("selectedAgentId = 'arch-b'; focusedItemId = 'arch-b'; render();", context);
+
+  assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-b"/);
+  assert.doesNotMatch(mainEl.innerHTML, /data-execution-retained="true"/);
+  assert.match(mainEl.innerHTML, /Blueprint Engineer[\s\S]*Blueprint Worker/);
+  assert.doesNotMatch(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
+
+  const rows = JSON.parse(vm.runInContext(
+    'JSON.stringify((window._navGridRows || []).map(function(row) { return { rowKey: row.rowKey, rowType: row.rowType, sectionKey: row.sectionKey, items: row.items.map(function(item) { return item.id; }) }; }))',
+    context,
+  ));
+  assert.deepEqual(rows.slice(0, 2), [
+    { rowKey: 'architects:strip', rowType: 'architect-strip-row', sectionKey: 'architects', items: ['arch-steward', 'arch-a', 'arch-b'] },
+    { rowKey: 'architect:arch-b:engineer:eng-b', rowType: 'engineer-row', sectionKey: 'architect:arch-b', items: ['eng-b', 'worker-b'] },
+  ]);
 });
 
 test('legacy selectPrincipal persists compatibility state without filtering the grid', () => {
@@ -312,7 +394,7 @@ test('legacy selectPrincipal persists compatibility state without filtering the 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{ cmd: 'ui_select_principal', principal_id: '' }]);
 });
 
-test('stratified grid CSS defines strata, architect bands, wrapping workers, and no full-width empty engineer override', () => {
+test('stratified grid CSS defines flat architect strip, retained execution area, wrapping workers, and responsive behavior', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const paneBlock = (css.match(/\.agents-grid-pane\s*\{[^}]*\}/) || [''])[0];
   const toolbarBlock = (css.match(/\.agent-grid-toolbar\s*\{[^}]*\}/) || [''])[0];
@@ -326,17 +408,13 @@ test('stratified grid CSS defines strata, architect bands, wrapping workers, and
   assert.match(toolbarBlock, /top:\s*var\(--agents-grid-pane-pad-y\);/);
   assert.match(toolbarBlock, /right:\s*var\(--agents-grid-pane-pad-x\);/);
   assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*999px;/);
-  assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(var\(--agent-engineer-column-width\),\s*1fr\)/);
-  const architectBandBlocks = [...css.matchAll(/\.agent-band--architect\s*\{[^}]*\}/g)].map(match => match[0]);
-  assert.ok(architectBandBlocks.length >= 1, 'architect band CSS should be present');
-  for (const block of architectBandBlocks) {
-    assert.match(block, /align-items:\s*start;/);
-    assert.doesNotMatch(block, /align-items:\s*stretch;/);
-  }
-  assert.match(css, /\.agent-band-anchor--architect\s*\{[^}]*align-items:\s*flex-start;/s);
-  assert.match(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*96px\);/s);
-  assert.doesNotMatch(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*100%;/s);
+  assert.match(css, /\.agent-architect-strip\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/);
+  assert.match(css, /\.agent-architect-strip > \.cell\s*\{[\s\S]*flex:\s*0 1 var\(--agent-architect-column-width\);/);
+  assert.match(css, /\.agent-strata--architect-execution\s*\{[\s\S]*gap:\s*5px;/);
+  assert.match(css, /\.agent-execution-retained-note,\s*\.agent-execution-empty\s*\{[\s\S]*border:\s*1px solid/);
+  assert.match(css, /\.agent-band--architect-execution\s*\{[\s\S]*display:\s*block;/);
   assert.match(css, /\.agent-band-body\.agent-section-body\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
+  assert.match(css, /\.agent-execution-body\.agent-section-body\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-card-body\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-card-line\s*\{[\s\S]*text-overflow:\s*ellipsis;/);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[\s\S]*align-items:\s*stretch;/);

@@ -169,36 +169,41 @@ function _buildAgentGridNavigationModel(groupContexts) {
       const firstRowIndex = model.gridRows.length;
       const layout = ctx.agentLayout || {};
 
-      for (const section of layout.architects || []) {
-        if (!section || !section.architect) continue;
-        const sectionKey = _agentGridSectionKey(section);
-        const rows = Array.isArray(section.rows) ? section.rows : [];
-        if (rows.length) {
-          for (let sectionRowIndex = 0; sectionRowIndex < rows.length; sectionRowIndex++) {
-            const row = rows[sectionRowIndex];
-            if (!row || !row.engineer) continue;
-            const rowItems = [];
-            if (sectionRowIndex === 0) rowItems.push(agentItem(section.architect, 'architect'));
-            rowItems.push(agentItem(row.engineer, 'engineer'));
-            for (const worker of row.workers || []) rowItems.push(agentItem(worker, 'worker'));
-            addRow({
-              group: ctx.gname,
-              sectionKey,
-              rowKey: sectionKey + ':engineer:' + String(row.engineer.id || ''),
-              rowType: 'engineer-row',
-              architectId: section.architect.id || '',
-              engineerId: row.engineer.id,
-              items: rowItems,
-            });
-          }
-        } else {
-          const rowItems = [agentItem(section.architect, 'architect')];
+      const architectSections = Array.isArray(layout.architects) ? layout.architects : [];
+      const architectStripItems = [];
+      for (const section of architectSections) {
+        if (section && section.architect) architectStripItems.push(agentItem(section.architect, 'architect'));
+      }
+      if (architectStripItems.length) {
+        addRow({
+          group: ctx.gname,
+          sectionKey: 'architects',
+          rowKey: 'architects:strip',
+          rowType: 'architect-strip-row',
+          items: architectStripItems,
+        });
+      }
+
+      const executionInfo = _agentGridResolveExecutionArchitect(ctx.gname, architectSections);
+      const executionSection = executionInfo && executionInfo.executionSection;
+      if (executionSection && executionSection.architect) {
+        const sectionKey = _agentGridSectionKey(executionSection);
+        const rows = Array.isArray(executionSection.rows) ? executionSection.rows : [];
+        for (let sectionRowIndex = 0; sectionRowIndex < rows.length; sectionRowIndex++) {
+          const row = rows[sectionRowIndex];
+          if (!row || !row.engineer) continue;
+          const rowItems = [agentItem(row.engineer, 'engineer')];
+          for (const worker of row.workers || []) rowItems.push(agentItem(worker, 'worker'));
           addRow({
             group: ctx.gname,
             sectionKey,
-            rowKey: sectionKey + ':empty',
-            rowType: 'architect-empty-row',
-            architectId: section.architect.id || '',
+            rowKey: sectionKey + ':engineer:' + String(row.engineer.id || ''),
+            rowType: 'engineer-row',
+            architectId: executionSection.architect.id || '',
+            engineerId: row.engineer.id,
+            retainedArchitectSelection: !!(executionInfo && executionInfo.retained),
+            selectedArchitectId: executionInfo && executionInfo.selectedSection && executionInfo.selectedSection.architect
+              ? String(executionInfo.selectedSection.architect.id || '') : '',
             items: rowItems,
           });
         }
