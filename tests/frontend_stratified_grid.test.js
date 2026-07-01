@@ -333,13 +333,18 @@ test('selecting a no-engineer Architect preserves the last execution hierarchy a
 
   vm.runInContext("selectedAgentId = 'arch-a'; focusedItemId = 'arch-a'; render();", context);
   assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"/);
+  assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*selected[^"]*focused[^"]*architect[^"]*"[\s\S]*Torqly/);
+  assert.doesNotMatch(mainEl.innerHTML, /retained-execution-owner|data-retained-execution-owner|data-execution-retained="true"/);
   assert.match(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
 
   vm.runInContext("selectedAgentId = 'arch-steward'; focusedItemId = 'arch-steward'; render();", context);
 
   assert.match(mainEl.innerHTML, /data-agent-strata="architect-execution"[\s\S]*data-execution-architect-id="arch-a"[\s\S]*data-execution-selected-architect-id="arch-steward"[\s\S]*data-execution-retained="true"/);
-  assert.match(mainEl.innerHTML, /agent-execution-retained-note[\s\S]*Showing Torqly execution hierarchy while Torque Steward is selected/);
+  assert.doesNotMatch(mainEl.innerHTML, /agent-execution-retained-note|Showing [^<]*execution hierarchy while/);
+  assert.match(mainEl.innerHTML, /data-drag-id="arch-a"[^>]*data-retained-execution-owner="true"/);
+  assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*architect[^"]*retained-execution-owner[^"]*"/);
   assert.match(mainEl.innerHTML, /class="[^"]*cell[^"]*selected[^"]*focused[^"]*architect[^"]*"[\s\S]*Torque Steward/);
+  assert.doesNotMatch(mainEl.innerHTML, /data-drag-id="arch-steward"[^>]*data-retained-execution-owner="true"/);
   assert.match(mainEl.innerHTML, /cell-agent-class-badge[\s\S]*Torque Steward/);
   assert.match(mainEl.innerHTML, /Torqly Engineer[\s\S]*Torqly Worker/);
   assert.doesNotMatch(mainEl.innerHTML, /Blueprint Engineer[\s\S]*Blueprint Worker/);
@@ -411,7 +416,9 @@ test('stratified grid CSS defines flat architect strip, retained execution area,
   assert.match(css, /\.agent-architect-strip\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/);
   assert.match(css, /\.agent-architect-strip > \.cell\s*\{[\s\S]*flex:\s*0 1 var\(--agent-architect-column-width\);/);
   assert.match(css, /\.agent-strata--architect-execution\s*\{[\s\S]*gap:\s*5px;/);
-  assert.match(css, /\.agent-execution-retained-note,\s*\.agent-execution-empty\s*\{[\s\S]*border:\s*1px solid/);
+  assert.doesNotMatch(css, /\.agent-execution-retained-note\b/);
+  assert.match(css, /\.agent-execution-empty\s*\{[\s\S]*border:\s*1px solid/);
+  assert.match(css, /\.cell\.architect\.retained-execution-owner\s*\{[\s\S]*border-color:\s*color-mix\(in srgb, var\(--accent\) 48%, transparent\);/);
   assert.match(css, /\.agent-band--architect-execution\s*\{[\s\S]*display:\s*block;/);
   assert.match(css, /\.agent-band-body\.agent-section-body\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-execution-body\.agent-section-body\s*\{[\s\S]*flex-direction:\s*column;/);

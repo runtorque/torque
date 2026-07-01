@@ -993,10 +993,12 @@ function renderAgentCell(a, options) {
     ? state.agent_digest_settings[String(a.id || '')] : null;
   let _digestPaused = !!(_cardDigestSettings && _cardDigestSettings.paused);
   if (!_cardDigestSettings && _isDigestRecipient && _isDesignatedEngineer) _digestPaused = _engineerPaused;
+  const _isRetainedExecutionOwner = !!(options.retainedExecutionOwner && _isArchitect && !selected);
   if (_isArchitect) cls.push('architect');
   if (_isEngineerKind) cls.push('engineer');
   if (_isWorker) cls.push('worker');
   if (_isDismissed) cls.push('dismissed');
+  if (_isRetainedExecutionOwner) cls.push('retained-execution-owner');
 
   const statusCls = _isDismissed ? 'dismissed' : agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -1017,6 +1019,7 @@ function renderAgentCell(a, options) {
   }
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" data-nav-id="${esc(a.id)}"`;
+  if (_isRetainedExecutionOwner) h += ' data-retained-execution-owner="true"';
   if (_isDismissed) h += ` data-dismissed-at="${esc(_agentDismissedAt(a))}"`;
   h += ` onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
   h += `<div class="${statusClasses.join(' ')}"${statusAttrs.length ? ' ' + statusAttrs.join(' ') : ''}>`;
