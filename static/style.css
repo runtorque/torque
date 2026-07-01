@@ -1166,6 +1166,29 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.terminal-compose-inline-attachment-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  max-width: none;
+  min-height: 0;
+  margin: 0 1px;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.terminal-compose-inline-attachment-chip:hover,
+.terminal-compose-inline-attachment-chip:focus-visible,
+.terminal-compose-inline-attachment-chip.selected {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
 .terminal-compose-reply {
   display: flex;
   align-items: center;
@@ -1225,12 +1248,6 @@ body.terminal-direct-messages-resizing .terminal-direct-messages-resizer-grip {
   content: attr(data-placeholder);
   color: color-mix(in srgb, var(--text-dim) 78%, transparent);
   pointer-events: none;
-}
-.terminal-compose-inline-attachment-chip {
-  max-width: min(220px, calc(100% - 8px));
-  margin: 0 3px 2px;
-  vertical-align: baseline;
-  user-select: all;
 }
 body.terminal-compose-resizing,
 body.terminal-compose-resizing * {

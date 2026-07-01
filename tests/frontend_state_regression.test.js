@@ -14957,6 +14957,9 @@ test('terminal compose image drop renders inline attachment tokens in the editab
   assert.equal(input.value, 'before after');
   assert.match(input.innerHTML, /terminal-compose-inline-attachment-chip/);
   assert.match(input.innerHTML, /data-attachment-token="\[ Image #1 \]"/);
+  assert.match(input.innerHTML, /contenteditable="false"/);
+  assert.match(input.innerHTML, />\[ Image #1 \]<\/span>/);
+  assert.doesNotMatch(input.innerHTML, /terminal-compose-attachment-icon/);
   assert.match(input.innerHTML, /inline\.png/);
   assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), 'before after');
   assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
@@ -15011,6 +15014,80 @@ test('terminal compose image drop renders inline attachment tokens in the editab
   runInContext(context, `terminalComposeSubmit(__inlineSubmitEvt, 'agent-1');`);
   assert.equal(sandbox.sendCalls.length, 1);
   assert.equal(sandbox.sendCalls[0].text, 'plain after delete');
+});
+
+test('terminal compose inline image tokens stay text-like and serialize multiple attachments in token order', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+
+  const form = new FakeElement('compose-form-inline-multi');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = 'a b';
+  input.selectionStart = 1;
+  input.selectionEnd = 1;
+  const error = new FakeElement('compose-error-inline-multi');
+  error.classList.add('terminal-compose-error');
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-error', error);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  runInContext(context, `
+    _terminalComposeRegisterAttachmentEntries('agent-1', [
+      { path: '/tmp/one.png', filename: 'one.png', mime_type: 'image/png' },
+      { path: '/tmp/two.jpg', filename: 'two.jpg', mime_type: 'image/jpeg' }
+    ], document.getElementById('terminal-compose-input-agent-1').value, 1);
+    _terminalComposeRenderRichInput(document.getElementById('terminal-compose-input-agent-1'));
+  `);
+
+  assert.match(input.innerHTML, /contenteditable="false"/);
+  assert.match(input.innerHTML, />\[ Image #1 \]<\/span>/);
+  assert.match(input.innerHTML, />\[ Image #2 \]<\/span>/);
+  assert.doesNotMatch(input.innerHTML, /terminal-compose-attachment-icon/);
+  assert.equal(
+    runInContext(context, `_terminalComposePayloadText('agent-1', ${JSON.stringify(input.value)})`),
+    'a/tmp/one.png\n/tmp/two.jpg b',
+  );
+
+  const deleteEvt = {
+    key: 'Delete',
+    target: input,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__inlineMultiDeleteEvt = deleteEvt;
+  runInContext(context, `terminalComposeKeydown(__inlineMultiDeleteEvt, 'agent-1');`);
+  assert.equal(deleteEvt.preventDefaultCalled, true);
+  assert.equal(deleteEvt.stopPropagationCalled, true);
+  assert.deepEqual(jsonValue(context, `_terminalComposeAttachments['agent-1'].entries.map(function(e) { return { token: e.token, path: e.path, position: e.position }; })`), [
+    { token: '[ Image #2 ]', path: '/tmp/two.jpg', position: 1 },
+  ]);
+  assert.doesNotMatch(input.innerHTML, />\[ Image #1 \]<\/span>/);
+  assert.match(input.innerHTML, />\[ Image #2 \]<\/span>/);
+
+  context.__inlineMultiSubmitEvt = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeSubmit(__inlineMultiSubmitEvt, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'send_user_message');
+  assert.equal(sandbox.sendCalls[0].cell_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[0].text, 'a/tmp/two.jpg b');
+  assert.equal(jsonValue(context, `_terminalComposeAttachments['agent-1'] || null`), null);
 });
 
 test('terminal compose preserves image chip payload through history recall restore', async () => {
