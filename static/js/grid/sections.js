@@ -1,3 +1,72 @@
+
+var _agentGridRetainedExecutionArchitectByGroup = (typeof window !== 'undefined' && window._agentGridRetainedExecutionArchitectByGroup)
+  ? window._agentGridRetainedExecutionArchitectByGroup
+  : {};
+if (typeof window !== 'undefined') window._agentGridRetainedExecutionArchitectByGroup = _agentGridRetainedExecutionArchitectByGroup;
+
+function _agentGridSectionKey(section) {
+  if (!section) return '';
+  if (section.key) return String(section.key || '');
+  if (section.type === 'user') return 'user';
+  if (section.architect && section.architect.id) return 'architect:' + String(section.architect.id || '');
+  return String(section.type || '');
+}
+
+function _agentGridArchitectSectionHasExecution(section) {
+  return !!(section && section.architect && Array.isArray(section.rows) && section.rows.length > 0);
+}
+
+function _agentGridFindArchitectSectionById(sections, architectId) {
+  const wanted = String(architectId || '').trim();
+  if (!wanted) return null;
+  const list = Array.isArray(sections) ? sections : [];
+  for (const section of list) {
+    if (section && section.architect && String(section.architect.id || '') === wanted) return section;
+  }
+  return null;
+}
+
+function _agentGridFirstExecutionArchitectSection(sections) {
+  const list = Array.isArray(sections) ? sections : [];
+  for (const section of list) {
+    if (_agentGridArchitectSectionHasExecution(section)) return section;
+  }
+  return null;
+}
+
+function _agentGridResolveExecutionArchitect(groupName, architectSections) {
+  const group = String(groupName || '').trim();
+  const sections = Array.isArray(architectSections) ? architectSections : [];
+  const selectedId = String((typeof selectedAgentId !== 'undefined' && selectedAgentId) || '').trim();
+  const selectedSection = _agentGridFindArchitectSectionById(sections, selectedId);
+  const previousId = group ? String(_agentGridRetainedExecutionArchitectByGroup[group] || '').trim() : '';
+  let executionSection = null;
+  let retained = false;
+  let reason = '';
+
+  if (selectedSection && _agentGridArchitectSectionHasExecution(selectedSection)) {
+    executionSection = selectedSection;
+    if (group) _agentGridRetainedExecutionArchitectByGroup[group] = String(selectedSection.architect.id || '');
+  } else {
+    executionSection = _agentGridFindArchitectSectionById(sections, previousId);
+    if (!_agentGridArchitectSectionHasExecution(executionSection)) {
+      executionSection = _agentGridFirstExecutionArchitectSection(sections);
+      if (executionSection && group && !previousId) {
+        _agentGridRetainedExecutionArchitectByGroup[group] = String(executionSection.architect.id || '');
+      }
+    }
+    retained = !!(selectedSection && !_agentGridArchitectSectionHasExecution(selectedSection) && executionSection);
+    if (retained) reason = 'selected-architect-has-no-engineers';
+  }
+
+  return {
+    selectedSection,
+    executionSection,
+    retained,
+    reason,
+  };
+}
+
 function _agentGridIsTorqueSteward(agent) {
   if (!agent) return false;
   const metadata = agent.effective_agent_class_snapshot && agent.effective_agent_class_snapshot.metadata
@@ -171,24 +240,71 @@ function _sortAgentsHierarchically(agents) {
   return _buildStratifiedAgentGridModel(agents).orderedAgents;
 }
 
-function _renderArchitectBand(groupName, section, renderCell, opts) {
+function _renderArchitectStrip(groupName, model, renderCell, opts) {
   opts = opts || {};
-  if (!section || !section.architect) return '';
-  const sectionKey = _agentGridSectionKey(section);
-  const rows = Array.isArray(section.rows) ? section.rows : [];
-  const bandClasses = [
-    'agent-band',
-    'agent-band--architect',
-    'agent-section',
-    'agent-section-architect',
-  ];
-  if (!rows.length) bandClasses.push('agent-band--empty');
-  let html = '<section class="' + esc(bandClasses.join(' ')) + '"'
-    + ' data-agent-section="' + esc(sectionKey) + '">';
-  html += '<div class="agent-band-anchor agent-band-anchor--architect">'
-    + renderCell(section.architect)
+  const architectSections = (model && Array.isArray(model.architects))
+    ? model.architects
+    : [];
+  if (!architectSections.length) return '';
+  let html = '<section class="agent-strata agent-strata--architects agent-strata--architect-strip" data-agent-strata="architects">';
+  html += '<div class="agent-architect-strip" data-agent-architect-strip data-agent-row-shape="architect-strip-row">';
+  for (const section of architectSections) {
+    if (section && section.architect) html += renderCell(section.architect);
+  }
+  html += '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _renderArchitectRetainedNotice(executionInfo) {
+  if (!executionInfo || !executionInfo.retained || !executionInfo.executionSection) return '';
+  const selected = executionInfo.selectedSection && executionInfo.selectedSection.architect
+    ? executionInfo.selectedSection.architect : null;
+  const retained = executionInfo.executionSection.architect || null;
+  const selectedName = selected ? (selected.name || selected.slug || selected.id || 'selected Architect') : 'selected Architect';
+  const retainedName = retained ? (retained.name || retained.slug || retained.id || 'previous Architect') : 'previous Architect';
+  return '<div class="agent-execution-retained-note" data-agent-execution-retained="true">'
+    + 'Showing ' + esc(retainedName) + ' execution hierarchy while '
+    + esc(selectedName) + ' is selected — this Architect has no Engineers yet.'
     + '</div>';
-  html += '<div class="agent-band-body agent-section-body"'
+}
+
+function _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, opts) {
+  opts = opts || {};
+  executionInfo = executionInfo || {};
+  const section = executionInfo.executionSection || null;
+  const selectedSection = executionInfo.selectedSection || null;
+  if (!section || !section.architect) {
+    if (selectedSection && selectedSection.architect) {
+      return '<section class="agent-strata agent-strata--architect-execution agent-strata--architect-execution-empty"'
+        + ' data-agent-strata="architect-execution"'
+        + ' data-execution-selected-architect-id="' + esc(selectedSection.architect.id || '') + '">'
+        + '<div class="agent-execution-empty" data-agent-execution-empty="true">'
+        + esc((selectedSection.architect.name || selectedSection.architect.slug || selectedSection.architect.id || 'Selected Architect'))
+        + ' has no Engineers yet. No retained execution hierarchy is available.'
+        + '</div></section>';
+    }
+    return '';
+  }
+  const rows = Array.isArray(section.rows) ? section.rows : [];
+  const sectionKey = _agentGridSectionKey(section);
+  const selectedId = selectedSection && selectedSection.architect ? String(selectedSection.architect.id || '') : '';
+  const executionId = String(section.architect.id || '');
+  let html = '<section class="agent-strata agent-strata--architect-execution"'
+    + ' data-agent-strata="architect-execution"'
+    + ' data-agent-section="' + esc(sectionKey) + '"'
+    + ' data-execution-architect-id="' + esc(executionId) + '"'
+    + (selectedId ? ' data-execution-selected-architect-id="' + esc(selectedId) + '"' : '')
+    + (executionInfo.retained ? ' data-execution-retained="true"' : '')
+    + '>';
+  html += _renderArchitectRetainedNotice(executionInfo);
+  html += '<div class="agent-execution-heading" data-agent-execution-heading>'
+    + '<span class="agent-execution-heading-label">Execution hierarchy</span>'
+    + '<span class="agent-execution-heading-owner">' + esc(section.architect.name || section.architect.slug || section.architect.id || 'Architect') + '</span>'
+    + '</div>';
+  html += '<section class="agent-band agent-band--architect-execution agent-section agent-section-architect"'
+    + ' data-agent-section="' + esc(sectionKey) + '">';
+  html += '<div class="agent-band-body agent-section-body agent-execution-body"'
     + ' data-agent-section-column="body"'
     + ' data-section-key="' + esc(sectionKey) + '">';
   if (rows.length) {
@@ -196,19 +312,6 @@ function _renderArchitectBand(groupName, section, renderCell, opts) {
   }
   html += '</div>';
   html += '</section>';
-  return html;
-}
-
-function _renderArchitectsStrata(groupName, model, renderCell, opts) {
-  opts = opts || {};
-  const architectSections = (model && Array.isArray(model.architects))
-    ? model.architects
-    : [];
-  if (!architectSections.length) return '';
-  let html = '<section class="agent-strata agent-strata--architects" data-agent-strata="architects">';
-  for (const section of architectSections) {
-    html += _renderArchitectBand(groupName, section, renderCell, opts);
-  }
   html += '</section>';
   return html;
 }
@@ -269,7 +372,9 @@ function _renderStratifiedAgentGrid(groupName, model, renderCell, opts) {
   let html = '<div class="agent-grid agent-grid-stratified"'
     + ' data-drop-group="' + esc(groupName) + '"'
     + ' data-drop-type="agent">';
-  html += _renderArchitectsStrata(groupName, model, renderCell, opts);
+  html += _renderArchitectStrip(groupName, model, renderCell, opts);
+  const executionInfo = _agentGridResolveExecutionArchitect(groupName, (model && model.architects) || []);
+  html += _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, opts);
   html += _renderOrphanEngineersStrata(groupName, userSection, renderCell, opts);
   html += _renderOrphanWorkersStrata(groupName, userSection, renderCell, opts);
   html += '</div>';

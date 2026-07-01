@@ -1906,6 +1906,70 @@ body.runtime-embedded .agent-focus-header {
 .agent-band {
   min-width: 0;
 }
+
+.agent-strata--architect-strip {
+  padding-bottom: 7px;
+}
+.agent-architect-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-architect-strip > .cell {
+  flex: 0 1 var(--agent-architect-column-width);
+  min-width: var(--agent-architect-column-width);
+  max-width: var(--agent-architect-column-width);
+  min-height: var(--agent-card-height, 96px);
+  box-sizing: border-box;
+}
+.agent-strata--architect-execution {
+  gap: 5px;
+}
+.agent-strata--architect-execution-empty {
+  padding: 6px 0 9px;
+}
+.agent-execution-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.agent-execution-heading-owner {
+  color: var(--text);
+  min-width: 0;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.agent-execution-retained-note,
+.agent-execution-empty {
+  border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--border));
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.agent-band--architect-execution {
+  display: block;
+  min-width: 0;
+}
+.agent-execution-body.agent-section-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
 .agent-band--architect {
   display: grid;
   grid-template-columns: var(--agent-architect-column-width) minmax(var(--agent-engineer-column-width), 1fr);
