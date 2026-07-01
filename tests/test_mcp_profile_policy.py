@@ -346,21 +346,29 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             "architect_initiative_list",
             "architect_initiative_show",
             "architect_decision_list",
+            "architect_ask",
+            "architect_message_user",
+            "architect_peer_list",
+            "architect_peer_message",
+            "architect_journal",
+            "architect_journal_read",
         }:
             self.assertIn(tool_name, tool_names)
 
         # Steward grants telemetry reads, but architect_mcp_calls is deferred
-        # today. With raw tool search denied, it is not part of the Wave A
+        # today. With raw tool search denied, it is not part of the Steward
         # user-facing tools/list surface until a narrower wrapper is designed.
         self.assertNotIn("architect_mcp_calls", tool_names)
 
         denied_tools = {
             "architect_tool_search",
             "engineer_tool_search",
-            "architect_ask",
-            "architect_message_user",
-            "architect_peer_list",
-            "architect_peer_message",
+            "torque_ask",
+            "torque_message_user",
+            "architect_product_message_user",
+            "architect_product_peer_message",
+            "architect_product_journal",
+            "architect_digest_filter",
             "architect_peer_inbox",
             "architect_reply",
             "architect_engineer_hire",

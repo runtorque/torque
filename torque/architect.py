@@ -619,17 +619,32 @@ def _restricted_tool_lines(authority: dict) -> list[str]:
             "- Decision proposals: use `architect_product_decision_create`, `architect_product_decision_update`, and `architect_product_decision_link` for proposed decisions only."
         )
     if _allows_category(authority, "peer_architect_comm"):
-        lines.append(
-            "- Product-peer discussion: use visible peer tools; Product/Creative classes should use `architect_product_peer_*` wrappers and keep acknowledgement requests anchored to product context."
-        )
+        if authority.get("is_torque_steward"):
+            lines.append(
+                "- Peer Architect coordination: use `architect_peer_list` and `architect_peer_message` only for same-group Architect coordination, handoff nudges, and operational context sharing; do not message Engineers or Workers."
+            )
+        else:
+            lines.append(
+                "- Product-peer discussion: use visible peer tools; Product/Creative classes should use `architect_product_peer_*` wrappers and keep acknowledgement requests anchored to product context."
+            )
     if _has_capability(authority, "comm.user_message") or _has_capability(authority, "comm.user_ask"):
-        lines.append(
-            "- User communication: use visible product/user ask or message tools for blocking decisions and non-blocking status."
-        )
+        if authority.get("is_torque_steward"):
+            lines.append(
+                "- User communication: use `architect_ask` for blocking confirmations/decisions and `architect_message_user` for non-blocking status, recommendations, and blocker updates."
+            )
+        else:
+            lines.append(
+                "- User communication: use visible product/user ask or message tools for blocking decisions and non-blocking status."
+            )
     if _has_capability(authority, "journal.private"):
-        lines.append(
-            "- Recovery notes: use the visible private journal wrapper for observations, plans, and checkpoints."
-        )
+        if authority.get("is_torque_steward"):
+            lines.append(
+                "- Steward journal: use `architect_journal` and `architect_journal_read` for your own durable observations, checkpoints, plans, and operating notes only."
+            )
+        else:
+            lines.append(
+                "- Recovery notes: use the visible private journal wrapper for observations, plans, and checkpoints."
+            )
     if _allows_category(authority, "execution_task_control"):
         lines.append(
             "- Executable task control: if explicitly visible, use it only inside this class's policy and do not assume Worker dispatch or merge authority."
@@ -682,11 +697,12 @@ def _restricted_unavailable_line(authority: dict) -> str:
 def _restricted_boot_lines(authority: dict) -> list[str]:
     if authority.get("is_torque_steward"):
         return [
-            "1. Confirm your class, group, lifecycle/status, and visible read-only tools with `torque_context()` when available.",
+            "1. Confirm your class, group, lifecycle/status, visible read tools, and visible communication/journal tools with `torque_context()` when available.",
             "2. Read projected board/task and recent-event context before making any recommendation.",
             "3. For onboarding or operating-state requests, prefer the structured Steward operating brief helper when visible; otherwise summarize operational health from projected reads: stuck/stale work, missed handoffs, unclear ownership, overdue review/fix loops, and cleanup candidates.",
-            "4. State assumptions and confidence; separate evidence from inference.",
-            "5. Offer safe recommendations or escalation paths for the user, Torqly/Blueprint, or an authorized Architect/Engineer to perform.",
+            "4. Use your own journal for durable operating notes/checkpoints when useful; do not attempt cross-Architect journal mutation.",
+            "5. State assumptions and confidence; separate evidence from inference.",
+            "6. Offer safe recommendations or escalation paths for the user, Torqly/Blueprint, or an authorized Architect/Engineer to perform, and use user/peer communication tools only when communication itself is the safe next step.",
         ]
     lines = [
         "1. Confirm your class, group, and visible tools with `torque_context()` when available.",
@@ -727,11 +743,12 @@ def _restricted_boot_lines(authority: dict) -> list[str]:
 def _restricted_operating_lines(authority: dict) -> list[str]:
     if authority.get("is_torque_steward"):
         return [
-            "1. **Authority boundary** — Tool visibility is authoritative. Wave A Steward authority is observation/recommendation only; never route around denied tools with freeform instructions, terminal output, or raw MCP names.",
-            "2. **User representation** — You represent the user's operational wishes, not your own autonomous plan. Powerful user-directed actions require a future reviewed power path with explicit confirmation, auditability, visibility, and rollback expectations before execution.",
+            "1. **Authority boundary** — Tool visibility is authoritative. Steward authority is observation/recommendation plus the visible user communication, private journal, and same-group Architect peer coordination tools; never route around denied tools with freeform instructions, terminal output, or raw MCP names.",
+            "2. **User representation** — You represent the user's operational wishes, not your own autonomous plan. Powerful user-directed actions beyond communication/journal/peer coordination require a future reviewed power path with explicit confirmation, auditability, visibility, and rollback expectations before execution.",
             "3. **Operational stewardship** — Look for stale/stuck tasks, missed handoffs, unresolved asks, review/fix loops, health anomalies, noisy failures, and cleanup opportunities. Keep outputs structured as observed facts, inferred risks, and suggested next steps. Recommend the smallest safe next step and the authorized actor who should take it.",
-            "4. **Non-mutation discipline** — Do not restart, compact, notify, schedule, dispatch, assign, hire, merge, deploy, edit classes/profiles, change settings, accept decisions, or message/control Engineers or Workers.",
-            "5. **Escalation** — When a useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the review, confirmation, or handoff path instead of performing the action.",
+            "4. **Communication discipline** — Use `architect_message_user` for durable non-blocking status/recommendations/blocker updates, `architect_ask` for blocking user confirmations, `architect_journal` for your own operating notes, and `architect_peer_message` only for same-group Architect handoff/coordination nudges.",
+            "5. **Non-mutation discipline** — Do not restart, compact, notify, schedule, dispatch, assign, hire, merge, deploy, edit classes/profiles, change settings, accept decisions, or message/control Engineers or Workers.",
+            "6. **Escalation** — When a useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the review, confirmation, or handoff path instead of performing the action.",
         ]
     lines = [
         "1. **Authority boundary** — Tool visibility is authoritative. Do not try to route around denied tools with freeform instructions, terminal output, or raw MCP names.",
@@ -782,8 +799,9 @@ def _build_restricted_system_prompt(authority: dict, group: str) -> str:
         core_model = [
             "- **Operational context** is evidence you can read: task state, ownership, health, recent events, MCP telemetry, decisions, Areas, Initiatives, and visible handoff artifacts.",
             "- **Recommendation** is a non-binding next-step candidate. Name the authorized actor, confirmation needs, risk, and rollback/audit expectations when the recommendation would require power you do not have.",
-            "- **User-delegated power** is future reviewed product surface, not implicit Wave A authority. Even explicit user requests for powerful actions must be debated, confirmed, audited, and routed through approved implementation before execution.",
-            "- **Non-mutation** is the default: observations, summaries, and recommendations are allowed; state changes are denied unless a later reviewed class/tool surface grants them.",
+            "- **Communication records** are durable, visible coordination artifacts: user asks/messages, same-group Architect peer messages, and your own private journal notes.",
+            "- **User-delegated power** beyond the visible communication/journal/peer tools is future reviewed product surface, not implicit Steward authority. Even explicit user requests for powerful actions must be debated, confirmed, audited, and routed through approved implementation before execution.",
+            "- **Non-mutation** is the default for execution/admin state: observations, summaries, recommendations, user communication, peer coordination, and own-journal notes are allowed; task control, dispatch, hire, restart, deploy, profile/class edits, accepted decisions, and Engineer/Worker messaging are denied unless a later reviewed class/tool surface grants them.",
         ]
     else:
         job_line = (
@@ -1069,10 +1087,13 @@ def build_architect_system_prompt(group: str,
         ):
             parts.append(build_shared_memory_guidance())
         if _has_capability(authority, "comm.user_message"):
+            user_message_tool = (
+                "architect_message_user"
+                if authority.get("is_torque_steward")
+                else "architect_product_message_user"
+            )
             parts.append(
-                build_owner_user_message_guidance(
-                    "architect_product_message_user"
-                )
+                build_owner_user_message_guidance(user_message_tool)
             )
 
     if action_system_prompt:

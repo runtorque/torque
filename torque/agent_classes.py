@@ -168,11 +168,12 @@ CREATIVE_ARCHITECT_AUTHORITY_CAVEAT = (
     "queued tasks, peer messages, or proposed decisions as accepted plans."
 )
 TORQUE_STEWARD_AUTHORITY_CAVEAT = (
-    "Torque Steward Wave A is a read-only/draft foundation: it represents "
-    "the user's operational wishes, but has no autonomous mutating, restart, "
-    "compaction, notification, scheduling, dispatch, hire, merge, deploy, "
-    "class/profile admin, settings, accepted-decision, or direct "
-    "Engineer/Worker messaging authority."
+    "Torque Steward is a draft conservative operations steward: it represents "
+    "the user's operational wishes and may use approved user communication, "
+    "private journal, and same-group Architect peer coordination surfaces, "
+    "but has no autonomous mutating, restart, compaction, notification, "
+    "scheduling, dispatch, hire, merge, deploy, class/profile admin, settings, "
+    "accepted-decision, or direct Engineer/Worker messaging authority."
 )
 CREATIVE_ARCHITECT_NORMAL_LABEL = "Creative"
 CREATIVE_ARCHITECT_INTERNAL_POLICY_LABEL = "Creative Architect"
@@ -187,6 +188,11 @@ TORQUE_STEWARD_FOUNDATION_ALLOWED_CAPABILITIES = frozenset({
     "planning.initiative_read",
     "decision.list",
     "task.board_sync_read",
+    "comm.user_ask",
+    "comm.user_message",
+    "comm.peer_architect_list",
+    "comm.peer_architect_message",
+    "journal.private",
 })
 
 
@@ -391,6 +397,14 @@ CAPABILITY_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
             "Product peer Architect messages",
             "Coordinate with same-group Architect/product peers through product-scoped peer wrappers.",
             {"comm.peer_architect_list", "comm.peer_architect_message", "comm.product_ack_request"},
+            base_kinds={"architect"},
+            category="communication",
+        ),
+        _bucket(
+            "peer_architect_messages",
+            "Peer Architect messages",
+            "List and message same-group Architect peers for coordination and handoff nudges.",
+            {"comm.peer_architect_list", "comm.peer_architect_message"},
             base_kinds={"architect"},
             category="communication",
         ),
@@ -1437,7 +1451,7 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
         issues.append(ValidationIssue(
             "error",
             "dangerous_torque_steward_capability_buckets",
-            "Torque Steward Wave A Agent Classes must stay read-only/observational; disallowed capability atoms: "
+            "Torque Steward Agent Classes must stay limited to observation plus approved communication/journal/peer coordination; disallowed capability atoms: "
             + ", ".join(steward_disallowed),
             path=source,
             profile_id=class_id,
@@ -2121,7 +2135,10 @@ def _torque_steward_status_contract(class_preview: dict[str, Any],
         "auto_create_enabled": False,
         "raw_architect_authority": False,
         "autonomous_mutation_authority": False,
-        "user_delegated_power_surface": "future_reviewed_waves_only",
+        "user_delegated_power_surface": "communication_journal_peer_coordination_only",
+        "user_message_ask": True,
+        "private_journal": True,
+        "same_group_architect_peer_coordination": True,
         "direct_engineer_worker_messaging": False,
         "worker_dispatch": False,
         "restart_compaction": False,

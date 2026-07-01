@@ -264,13 +264,16 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertFalse(preview["torque_steward_status"]["profile_class_admin"])
         self.assertEqual(
             preview["torque_steward_status"]["user_delegated_power_surface"],
-            "future_reviewed_waves_only",
+            "communication_journal_peer_coordination_only",
         )
         self.assertEqual(preview["capability_bucket_selection"], [
             "self_context",
             "planning_reads",
             "recent_context_reads",
             "board_task_reads",
+            "user_messages",
+            "peer_architect_messages",
+            "private_journal",
         ])
         for restriction in {
             "deny_engineer_management",
@@ -290,12 +293,13 @@ class AgentClassRegistryTests(unittest.TestCase):
             for entry in preview["agent_profile"]["projected_tool_categories"]
         }
         self.assertEqual(categories["planning_reads"]["status"], "allowed")
+        self.assertEqual(categories["peer_architect_comm"]["status"], "allowed")
         self.assertEqual(categories["worker_dispatch"]["status"], "denied")
         self.assertEqual(categories["execution_task_control"]["status"], "denied")
         self.assertEqual(categories["deploy_admin"]["status"], "denied")
         self.assertEqual(categories["profile_admin"]["status"], "denied")
         warnings = "\n".join(preview["warnings"])
-        self.assertIn("read-only/draft foundation", warnings)
+        self.assertIn("conservative operations steward", warnings)
         self.assertIn("no autonomous mutating", warnings)
 
         compiled = compile_agent_class_profile(steward)
@@ -310,10 +314,13 @@ class AgentClassRegistryTests(unittest.TestCase):
             "planning.initiative_read",
             "decision.list",
             "task.board_sync_read",
-        })
-        self.assertEqual(set(compiled.grants) & {
             "comm.user_ask",
             "comm.user_message",
+            "comm.peer_architect_list",
+            "comm.peer_architect_message",
+            "journal.private",
+        })
+        self.assertEqual(set(compiled.grants) & {
             "comm.engineer_message",
             "comm.worker_message",
             "agent.hire_engineer",
@@ -419,17 +426,17 @@ class AgentClassRegistryTests(unittest.TestCase):
         _definition, pm_issues = validate_class_data(pm_with_dispatch, base_dir=str(self.project))
         self.assertIn("dangerous_product_manager_capability_buckets", {issue.code for issue in pm_issues})
 
-        steward_with_message = {
+        steward_with_dangerous_task_control = {
             "agent_class_schema_version": 3,
             "id": "custom-torque-steward",
             "version": "1",
             "display_name": "Custom Torque Steward",
             "runtime": {"base_kind": "architect"},
             "policy": {"mode": "compile"},
-            "capabilities": {"buckets": ["self_context", "user_messages"]},
+            "capabilities": {"buckets": ["self_context", "execution_task_control"]},
             "metadata": {"archetype": "torque_steward"},
         }
-        _definition, steward_issues = validate_class_data(steward_with_message, base_dir=str(self.project))
+        _definition, steward_issues = validate_class_data(steward_with_dangerous_task_control, base_dir=str(self.project))
         self.assertIn(
             "dangerous_torque_steward_capability_buckets",
             {issue.code for issue in steward_issues},
@@ -837,7 +844,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
 
-    def test_torque_steward_class_projection_denies_tool_search_and_mutations(self):
+    def test_torque_steward_class_projection_denies_tool_search_and_mutations_but_allows_communication(self):
         cell = self._add_agent(kind="architect")
         self.state.assign_agent_class(
             cell.id,
@@ -857,10 +864,19 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_ask", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_message_user", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_list", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_message", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_journal", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_journal_read", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("engineer_tool_search", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("torque_ask", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("torque_message_user", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_message_user", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_peer_message", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_digest_filter", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_message", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
@@ -1390,8 +1406,11 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(projected.get("deploy_admin"), "denied")
         self.assertEqual(projected.get("profile_admin"), "denied")
         self.assertEqual(projected.get("planning_reads"), "allowed")
+        self.assertEqual(projected.get("peer_architect_comm"), "allowed")
         self.assertIn("Torque Steward", created_prompt["persistent_prompt_text"])
-        self.assertIn("observation/recommendation only", created_prompt["persistent_prompt_text"])
+        self.assertIn("Steward authority is observation/recommendation plus", created_prompt["persistent_prompt_text"])
+        self.assertIn("architect_message_user", created_prompt["persistent_prompt_text"])
+        self.assertNotIn("architect_product_message_user", created_prompt["persistent_prompt_text"])
 
 
 if __name__ == "__main__":
