@@ -376,6 +376,20 @@ def _append_codex_config_cli_flags(command: str, config: dict, config_path: Path
     return " ".join(shlex.quote(p) for p in assembled)
 
 
+def _codex_resume_config_cli_command(command: str, config: dict, config_path: Path) -> str:
+    parts = shlex.split(command) if command else ["codex"]
+    if not parts:
+        parts = ["codex"]
+    flags = _codex_config_cli_flags(config, config_path=config_path)
+    opts, prompt = _split_boot_args(command or parts[0])
+    assembled = [parts[0], "resume", *opts, *flags]
+    rendered = " ".join(shlex.quote(p) for p in assembled)
+    rendered += ' "$@"'
+    if prompt:
+        rendered += " " + shlex.quote(prompt)
+    return rendered
+
+
 def _render_codex_agent_config(config: dict, *, source_path: str = "") -> str:
     lines = [
         "# Torque-owned Codex agent config (generated; do not edit)",
@@ -1057,10 +1071,16 @@ class CodexAdapter(AgentAdapter):
             )
             full_command = _append_codex_config_cli_flags(
                 command or "codex", payload, config_file)
+            resume_command = _codex_resume_config_cli_command(
+                command or "codex", payload, config_file)
             launch_script = _codex_agent_launch_script_file(getattr(cell, "id", ""))
             launch_script.write_text(
                 "#!/bin/sh\n"
                 "# Torque-owned Codex launch shim (generated; do not edit).\n"
+                'if [ "${1:-}" = "resume" ]; then\n'
+                "  shift\n"
+                "  exec " + resume_command + "\n"
+                "fi\n"
                 "exec " + full_command + "\n"
             )
             launch_script.chmod(0o700)

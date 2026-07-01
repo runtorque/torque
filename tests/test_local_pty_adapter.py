@@ -1350,6 +1350,72 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 if cell.session_id:
                     await adapter.close_session(cell.session_id)
 
+
+    async def test_codex_zsh_resume_uses_short_launch_shim_that_executes(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        with tempfile.TemporaryDirectory() as tmp, \
+                tempfile.TemporaryDirectory() as bin_dir, \
+                tempfile.TemporaryDirectory() as data_dir:
+            marker = Path(tmp) / "codex-resume-ran.txt"
+            fake_codex = Path(bin_dir) / "codex"
+            fake_codex.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\n' \"$@\" > {shlex.quote(str(marker))}\n"
+                "sleep 5\n"
+            )
+            fake_codex.chmod(0o755)
+            cell = state.add_agent(
+                name="Codex",
+                group="Torque",
+                terminal_backend="pty",
+                command=f"{shlex.quote(str(fake_codex))} --model gpt-5 'Resume prompt.'",
+                directory=tmp,
+            )
+            cell.id = "agent-1"
+            cell.agent_type = "codex"
+            cell.agent_session_id = "session-123"
+            cell.session_resume = True
+            adapter = self.pty_mod.LocalPtyAdapter(state)
+
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                await adapter.start()
+                await adapter.create_session(cell, shell="/bin/zsh")
+
+            try:
+                for _ in range(25):
+                    if marker.exists():
+                        break
+                    await asyncio.sleep(0.1)
+
+                self.assertTrue(marker.exists())
+                argv = marker.read_text().splitlines()
+                self.assertIn("resume", argv)
+                self.assertIn("session-123", argv)
+                self.assertIn("--model", argv)
+                self.assertIn("gpt-5", argv)
+                self.assertIn("--config", argv)
+                self.assertIn("Resume prompt.", argv)
+                self.assertTrue(
+                    any(value.startswith("mcp_servers.torque.url=") for value in argv)
+                )
+                self.assertTrue(any(value.startswith("hooks.SessionStart=") for value in argv))
+                launch_script = (
+                    Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+                )
+                self.assertTrue(launch_script.exists())
+                launch_text = launch_script.read_text()
+                self.assertIn('if [ "${1:-}" = "resume" ]; then', launch_text)
+                self.assertIn('"$@"', launch_text)
+                self.assertLess(len(shlex.quote(str(launch_script))), 256)
+            finally:
+                if cell.session_id:
+                    await adapter.close_session(cell.session_id)
+
     def test_claude_startup_commands_still_use_project_config(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")
