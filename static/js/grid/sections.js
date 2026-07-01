@@ -246,27 +246,20 @@ function _renderArchitectStrip(groupName, model, renderCell, opts) {
     ? model.architects
     : [];
   if (!architectSections.length) return '';
+  const retainedOwnerId = String(opts.retainedExecutionArchitectId || '').trim();
   let html = '<section class="agent-strata agent-strata--architects agent-strata--architect-strip" data-agent-strata="architects">';
   html += '<div class="agent-architect-strip" data-agent-architect-strip data-agent-row-shape="architect-strip-row">';
   for (const section of architectSections) {
-    if (section && section.architect) html += renderCell(section.architect);
+    if (section && section.architect) {
+      const architectId = String(section.architect.id || '');
+      html += renderCell(section.architect, {
+        retainedExecutionOwner: !!(retainedOwnerId && architectId === retainedOwnerId),
+      });
+    }
   }
   html += '</div>';
   html += '</section>';
   return html;
-}
-
-function _renderArchitectRetainedNotice(executionInfo) {
-  if (!executionInfo || !executionInfo.retained || !executionInfo.executionSection) return '';
-  const selected = executionInfo.selectedSection && executionInfo.selectedSection.architect
-    ? executionInfo.selectedSection.architect : null;
-  const retained = executionInfo.executionSection.architect || null;
-  const selectedName = selected ? (selected.name || selected.slug || selected.id || 'selected Architect') : 'selected Architect';
-  const retainedName = retained ? (retained.name || retained.slug || retained.id || 'previous Architect') : 'previous Architect';
-  return '<div class="agent-execution-retained-note" data-agent-execution-retained="true">'
-    + 'Showing ' + esc(retainedName) + ' execution hierarchy while '
-    + esc(selectedName) + ' is selected — this Architect has no Engineers yet.'
-    + '</div>';
 }
 
 function _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, opts) {
@@ -297,7 +290,6 @@ function _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, o
     + (selectedId ? ' data-execution-selected-architect-id="' + esc(selectedId) + '"' : '')
     + (executionInfo.retained ? ' data-execution-retained="true"' : '')
     + '>';
-  html += _renderArchitectRetainedNotice(executionInfo);
   html += '<div class="agent-execution-heading" data-agent-execution-heading>'
     + '<span class="agent-execution-heading-label">Execution hierarchy</span>'
     + '<span class="agent-execution-heading-owner">' + esc(section.architect.name || section.architect.slug || section.architect.id || 'Architect') + '</span>'
@@ -372,8 +364,12 @@ function _renderStratifiedAgentGrid(groupName, model, renderCell, opts) {
   let html = '<div class="agent-grid agent-grid-stratified"'
     + ' data-drop-group="' + esc(groupName) + '"'
     + ' data-drop-type="agent">';
-  html += _renderArchitectStrip(groupName, model, renderCell, opts);
   const executionInfo = _agentGridResolveExecutionArchitect(groupName, (model && model.architects) || []);
+  const stripOpts = Object.assign({}, opts || {});
+  if (executionInfo && executionInfo.retained && executionInfo.executionSection && executionInfo.executionSection.architect) {
+    stripOpts.retainedExecutionArchitectId = String(executionInfo.executionSection.architect.id || '');
+  }
+  html += _renderArchitectStrip(groupName, model, renderCell, stripOpts);
   html += _renderArchitectExecutionStrata(groupName, executionInfo, renderCell, opts);
   html += _renderOrphanEngineersStrata(groupName, userSection, renderCell, opts);
   html += _renderOrphanWorkersStrata(groupName, userSection, renderCell, opts);

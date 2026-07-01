@@ -543,8 +543,11 @@ function _renderMainGrid(opts, renderMode) {
     const agentLayout = ctx.agentLayout;
     const visibleAgentById = agentLayout.visibleAgentById;
     const visibleEngineerIds = agentLayout.visibleEngineerIds;
-    const renderCellForGrid = function(a) {
-      return renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
+    const renderCellForGrid = function(a, cellOptions) {
+      return renderAgentCell(a, Object.assign(
+        { visibleEngineerIds, visibleAgentById },
+        cellOptions || {},
+      ));
     };
     html += _renderStratifiedAgentGrid(
       gname,
