@@ -1406,8 +1406,11 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(projected.get("deploy_admin"), "denied")
         self.assertEqual(projected.get("profile_admin"), "denied")
         self.assertEqual(projected.get("planning_reads"), "allowed")
+        self.assertEqual(projected.get("peer_architect_comm"), "allowed")
         self.assertIn("Torque Steward", created_prompt["persistent_prompt_text"])
-        self.assertIn("observation/recommendation only", created_prompt["persistent_prompt_text"])
+        self.assertIn("Steward authority is observation/recommendation plus", created_prompt["persistent_prompt_text"])
+        self.assertIn("architect_message_user", created_prompt["persistent_prompt_text"])
+        self.assertNotIn("architect_product_message_user", created_prompt["persistent_prompt_text"])
 
 
 if __name__ == "__main__":

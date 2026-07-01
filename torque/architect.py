@@ -1087,10 +1087,13 @@ def build_architect_system_prompt(group: str,
         ):
             parts.append(build_shared_memory_guidance())
         if _has_capability(authority, "comm.user_message"):
+            user_message_tool = (
+                "architect_message_user"
+                if authority.get("is_torque_steward")
+                else "architect_product_message_user"
+            )
             parts.append(
-                build_owner_user_message_guidance(
-                    "architect_product_message_user"
-                )
+                build_owner_user_message_guidance(user_message_tool)
             )
 
     if action_system_prompt:
