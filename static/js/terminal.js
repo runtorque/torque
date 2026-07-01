@@ -1894,6 +1894,115 @@ function _terminalComposeSetInputText(input, text, options) {
   }
 }
 
+function _terminalComposeDecodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, function(_match, hex) {
+      const code = parseInt(hex, 16);
+      try {
+        return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+      } catch (_e) {
+        return '';
+      }
+    })
+    .replace(/&#(\d+);/g, function(_match, num) {
+      const code = parseInt(num, 10);
+      try {
+        return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+      } catch (_e) {
+        return '';
+      }
+    });
+}
+
+function _terminalComposePlainTextFromHtml(html) {
+  let text = String(html || '');
+  if (!text) return '';
+  text = text
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/\s*(div|p|li|tr|h[1-6]|blockquote|pre)\s*>/gi, '\n')
+    .replace(/<\s*(div|p|li|tr|h[1-6]|blockquote|pre)\b[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+  return _terminalComposeDecodeHtmlEntities(text)
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .replace(/^\n+|\n+$/g, '');
+}
+
+function _terminalComposeNormalizePastedText(text) {
+  return String(text || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00a0/g, ' ');
+}
+
+function _terminalComposeClipboardPlainText(dataTransfer) {
+  if (!dataTransfer || typeof dataTransfer.getData !== 'function') return '';
+  let text = '';
+  try {
+    text = dataTransfer.getData('text/plain') || dataTransfer.getData('text') || '';
+  } catch (_e) {
+    text = '';
+  }
+  if (!text) {
+    let html = '';
+    try {
+      html = dataTransfer.getData('text/html') || '';
+    } catch (_e) {
+      html = '';
+    }
+    if (html) text = _terminalComposePlainTextFromHtml(html);
+  }
+  return _terminalComposeNormalizePastedText(text);
+}
+
+function _terminalComposeInsertTextAtSelection(input, insertedText) {
+  if (!input) return;
+  const text = String(insertedText || '');
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const oldText = _terminalComposeInputText(input);
+  const selection = _terminalComposeSelectionOffsets(input);
+  const start = Math.max(0, Math.min(oldText.length, selection.start));
+  const end = Math.max(start, Math.min(oldText.length, selection.end));
+  const nextText = oldText.slice(0, start) + text + oldText.slice(end);
+  if (cellId) _terminalComposeAdjustAttachmentPositions(cellId, oldText, nextText);
+  _terminalComposeSetInputText(input, nextText);
+  const cursor = start + text.length;
+  if (_terminalComposeIsRichInput(input)) {
+    if (!_terminalComposeSetRichSelection(input, cursor, cursor, 'none', { afterAttachments: true })) {
+      input.selectionStart = cursor;
+      input.selectionEnd = cursor;
+      if ('selectionDirection' in input) input.selectionDirection = 'none';
+    }
+  } else if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(cursor, cursor);
+  } else {
+    input.selectionStart = cursor;
+    input.selectionEnd = cursor;
+    if ('selectionDirection' in input) input.selectionDirection = 'none';
+  }
+  terminalComposeInput(input);
+}
+
+function terminalComposePaste(evt, cellId) {
+  const input = (evt && (evt.currentTarget || evt.target)) || (
+    document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null
+  );
+  if (!input || !_terminalComposeIsRichInput(input)) return true;
+  const text = _terminalComposeClipboardPlainText(evt && evt.clipboardData);
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  _terminalComposeInsertTextAtSelection(input, text);
+  if (typeof input.focus === 'function') input.focus();
+  return false;
+}
+
 function _terminalComposeInputText(input) {
   if (!input) return '';
   if (_terminalComposeIsRichInput(input)) return _terminalComposeSyncValueFromDom(input);
@@ -3568,6 +3677,7 @@ function _renderTerminalCompose(root, cell) {
     + ' aria-label="' + esc(placeholder) + '"'
     + ' oninput="terminalComposeInput(this)"'
     + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
+    + ' onpaste="return terminalComposePaste(event, \'' + esc(cellId) + '\')"'
     + ' ondragenter="terminalComposeDragenter(event, \'' + esc(cellId) + '\')"'
     + ' ondragover="terminalComposeDragover(event, \'' + esc(cellId) + '\')"'
     + ' ondragleave="terminalComposeDragleave(event, \'' + esc(cellId) + '\')"'

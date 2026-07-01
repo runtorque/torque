@@ -13847,6 +13847,103 @@ test('embedded terminal rich direct-message composer preserves block-created new
   assert.equal(button.disabled, true);
 });
 
+test('embedded terminal rich direct-message composer pastes normalized plain text only', () => {
+  const { context, document } = createEmbeddedTerminalHarness();
+  const form = new FakeElement('terminal-compose-form-agent-1');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = 'before after';
+  input.selectionStart = 'before '.length;
+  input.selectionEnd = input.value.length;
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-submit', button);
+  document.activeElement = input;
+
+  const pasteEvent = {
+    currentTarget: input,
+    clipboardData: {
+      getData(type) {
+        if (type === 'text/plain') return 'Bold\r\nRed\u00a0Text';
+        if (type === 'text/html') {
+          return '<span style="font-size:48px;color:red"><b>Bold</b></span>';
+        }
+        return '';
+      },
+    },
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__richPasteEvent = pasteEvent;
+
+  runInContext(context, `terminalComposePaste(__richPasteEvent, 'agent-1');`);
+
+  assert.equal(pasteEvent.preventDefaultCalled, true);
+  assert.equal(pasteEvent.stopPropagationCalled, true);
+  assert.equal(input.value, 'before Bold\nRed Text');
+  assert.equal(input.innerHTML, 'before Bold<br>Red Text');
+  assert.doesNotMatch(input.innerHTML, /span|style=|font-size|<b>/i);
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(button.disabled, false);
+  assert.equal(input.focused, true);
+  assert.equal(
+    jsonValue(context, `_terminalComposeDrafts['agent-1']`),
+    'before Bold\nRed Text',
+  );
+});
+
+test('embedded terminal rich direct-message composer falls back to plain text from html paste', () => {
+  const { context, document } = createEmbeddedTerminalHarness();
+  const form = new FakeElement('terminal-compose-form-agent-1');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.setAttribute('contenteditable', 'true');
+  input.value = '';
+  input.selectionStart = 0;
+  input.selectionEnd = 0;
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-input', input);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  const pasteEvent = {
+    currentTarget: input,
+    clipboardData: {
+      getData(type) {
+        if (type === 'text/html') {
+          return '<div><span style="font-weight:700;color:red">Alpha</span></div>'
+            + '<p><font size="7">Beta</font><br><b>Gamma</b></p>';
+        }
+        return '';
+      },
+    },
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  context.__htmlOnlyPasteEvent = pasteEvent;
+
+  runInContext(context, `terminalComposePaste(__htmlOnlyPasteEvent, 'agent-1');`);
+
+  assert.equal(input.value, 'Alpha\nBeta\nGamma');
+  assert.equal(input.innerHTML, 'Alpha<br>Beta<br>Gamma');
+  assert.doesNotMatch(input.innerHTML, /span|style=|font|<b>|font-weight|color=/i);
+});
+
 test('embedded terminal agent-targeted compose submits durable direct message on Enter and clears on Escape', () => {
   const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
