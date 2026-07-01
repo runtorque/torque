@@ -182,6 +182,10 @@ from .external_tickets import (
     post_ticket_comment,
     push_ticket_status,
 )
+from .execution_scope import (
+    engineer_architect_task_routing_denied_message,
+    is_architect_execution_target,
+)
 from .board_sync import get_provider as get_board_sync_provider
 from .mcp import create_mcp_handler, dispatch_mcp_rpc_body
 from .mcp_retry import api_request_hash, is_api_write_command, replay_failed_writes
@@ -21438,6 +21442,38 @@ async def main(connection=None):
                             elif agent_id and not target_cell:
                                 result = {"type": "error",
                                           "message": "Agent not found"}
+                            elif (
+                                target_cell
+                                and data.get("_engineer_dispatch_id")
+                                and is_architect_execution_target(target_cell)
+                            ):
+                                message = (
+                                    engineer_architect_task_routing_denied_message(
+                                        target_cell
+                                    )
+                                )
+                                result = {
+                                    "type": "error",
+                                    "message": message,
+                                    "task_id": tid,
+                                    "agent_id": agent_id,
+                                }
+                                _panel_event(
+                                    "task_dispatch_denied",
+                                    target_cell.id,
+                                    target_cell.name,
+                                    target_cell.group,
+                                    message,
+                                    task_id=tid,
+                                )
+                                log.warning(
+                                    "Denied engineer-originated task dispatch "
+                                    "to architect target: engineer=%s task=%s "
+                                    "target=%s",
+                                    data.get("_engineer_dispatch_id", ""),
+                                    tid,
+                                    agent_id,
+                                )
                             elif (
                                 target_cell
                                 and str(getattr(target_cell, "kind", "") or "").strip()

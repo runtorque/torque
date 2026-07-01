@@ -925,6 +925,62 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(event["hintable"])
         self.assertEqual(event["metadata"]["parent_task_id"], "task-root")
 
+    async def test_engineer_origin_dispatch_command_rejects_architect_target(self):
+        state = self._make_state()
+        engineer = self._make_agent("engineer-1")
+        engineer.kind = "engineer"
+        architect = self._make_agent("arch-catalyst")
+        architect.kind = "architect"
+        architect.name = "Catalyst"
+        architect.slug = "catalyst"
+        architect.effective_agent_class_snapshot = {
+            "id": "creative-architect",
+            "base_kind": "architect",
+        }
+        state.agents[engineer.id] = engineer
+        state.agents[architect.id] = architect
+        state.groups["g"].extend([engineer.id, architect.id])
+        state.board_add_task(
+            "Invalid architect-routed review",
+            "g",
+            lane="Backlog",
+            id="task-review",
+            assigned_engineer_id=engineer.id,
+        )
+        panel_events = []
+
+        async def recursive_dispatch(_payload):
+            self.fail("denied dispatch should not recurse")
+
+        handle_command = self._extract_handle_command(
+            state,
+            recursive_dispatch,
+            closure_overrides={
+                "_panel_event": lambda *args, **kwargs: panel_events.append(
+                    (args, kwargs)
+                ),
+            },
+        )
+
+        result = await handle_command({
+            "cmd": "dispatch_task",
+            "id": "task-review",
+            "agent_id": architect.id,
+            "_engineer_dispatch_id": engineer.id,
+            "_engineer_dispatch_group": "g",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn(
+            "Engineer-originated executable task routing to Architect targets/classes is denied",
+            result["message"],
+        )
+        self.assertEqual(result["agent_id"], architect.id)
+        self.assertEqual(state.board_tasks["task-review"].agent_id, "")
+        self.assertEqual(state.board_tasks["task-review"].lane, "Backlog")
+        self.assertEqual(panel_events[0][0][0], "task_dispatch_denied")
+        self.assertEqual(panel_events[0][1]["task_id"], "task-review")
+
     async def test_derive_auto_dispatch_persists_auto_close_spawn_label(self):
         state = self._make_state()
         implementer = self._make_agent(

@@ -39,6 +39,21 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         state.groups["torque"].append(agent_id)
         return engineer
 
+    def _add_architect(self, state, agent_id, name):
+        architect = self.state_mod.AgentCell(
+            id=agent_id,
+            name=name,
+            slug=name.lower(),
+            group="torque",
+            cell_type="agent",
+            kind="architect",
+            status="idle",
+            persistent=True,
+        )
+        state.agents[agent_id] = architect
+        state.groups["torque"].append(agent_id)
+        return architect
+
     def _add_worker(self, state, agent_id, name, owner_id):
         worker = self.state_mod.AgentCell(
             id=agent_id,
@@ -1343,6 +1358,97 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(is_error)
         self.assertEqual(text, "agent not found in scope")
+
+    async def test_engineer_task_dispatch_rejects_architect_target(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        architect = self._add_architect(state, "arch-catalyst", "Catalyst")
+        architect.effective_agent_class_snapshot = {
+            "id": "creative-architect",
+            "base_kind": "architect",
+        }
+        task = self._add_task(
+            state,
+            "task-review",
+            "Review through invalid architect target",
+            assigned_engineer_id=alice.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("architect-targeted task dispatch should be denied before dispatch")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_dispatch",
+            {"task": task.id, "agent": architect.slug},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn(
+            "Engineer-originated executable task routing to Architect targets/classes is denied",
+            text,
+        )
+        self.assertEqual(state.board_tasks[task.id].agent_id, "")
+        self.assertEqual(state.board_tasks[task.id].lane, "Backlog")
+
+    async def test_engineer_task_dispatch_rejects_architect_class_target(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        target = self._add_worker(state, "worker-class", "Class Target", alice.id)
+        target.effective_agent_class_snapshot = {
+            "id": "creative-architect",
+            "base_kind": "architect",
+        }
+        task = self._add_task(
+            state,
+            "task-class",
+            "Invalid architect-class target",
+            assigned_engineer_id=alice.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("architect-class task dispatch should be denied before dispatch")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_dispatch",
+            {"task": task.id, "agent": target.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("Architect targets/classes is denied", text)
+        self.assertEqual(state.board_tasks[task.id].agent_id, "")
+
+    async def test_engineer_agent_message_still_allows_visible_architect(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        architect = self._add_architect(state, "arch-catalyst", "Catalyst")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {
+                "type": "queued",
+                "agent_id": payload["agent_id"],
+                "message": payload["message"],
+            }
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_agent_message",
+            {"agent": architect.slug, "message": "status only"},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(calls[0]["cmd"], "engineer_message")
+        self.assertEqual(calls[0]["agent_id"], architect.id)
+        self.assertEqual(json.loads(text)["agent_id"], architect.id)
 
     async def test_engineer_board_summary_excludes_unassigned_tasks(self):
         state = self._make_state()
