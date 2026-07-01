@@ -1204,6 +1204,23 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("add-zsh-hook precmd _torque_precmd", zshrc_text)
             self.assertIn("printf '\\033]7;file://%s%s\\007'", zshrc_text)
 
+    def test_prepare_zsh_bootstrap_preserves_original_zdotdir_across_nested_torque_sessions(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with tempfile.TemporaryDirectory() as original_zdotdir, \
+                tempfile.TemporaryDirectory(prefix="torque-zsh-bootstrap-parent-") as parent_bootstrap:
+            env = {
+                "ZDOTDIR": parent_bootstrap,
+                "TORQUE_ORIGINAL_ZDOTDIR": original_zdotdir,
+            }
+
+            bootstrap_dir = adapter._prepare_zsh_bootstrap(env)
+            self.addCleanup(shutil.rmtree, bootstrap_dir, ignore_errors=True)
+
+            self.assertEqual(env["ZDOTDIR"], bootstrap_dir)
+            self.assertEqual(env["TORQUE_ORIGINAL_ZDOTDIR"], original_zdotdir)
+            self.assertNotEqual(env["TORQUE_ORIGINAL_ZDOTDIR"], parent_bootstrap)
 
     def test_codex_startup_commands_use_torque_owned_config_and_leave_project_codex(self):
         state = self.state_mod.MatrixState()

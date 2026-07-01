@@ -518,7 +518,16 @@ class LocalPtyAdapter:
         return env
 
     def _prepare_zsh_bootstrap(self, env: dict[str, str]) -> str:
-        original_zdotdir = os.path.expanduser(env.get("ZDOTDIR") or "~")
+        # Child Torque sessions may inherit the parent agent's temporary
+        # bootstrap ``ZDOTDIR``.  Preserve the user's real original dotfile
+        # directory across nested launches instead of treating the parent
+        # bootstrap as original; otherwise the generated wrapper can source
+        # itself recursively and prevent the boot command from executing.
+        original_zdotdir = os.path.expanduser(
+            env.get("TORQUE_ORIGINAL_ZDOTDIR")
+            or env.get("ZDOTDIR")
+            or "~"
+        )
         bootstrap_dir = tempfile.mkdtemp(prefix="torque-zsh-bootstrap-")
         env["TORQUE_ORIGINAL_ZDOTDIR"] = original_zdotdir
         env["ZDOTDIR"] = bootstrap_dir
