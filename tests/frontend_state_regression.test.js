@@ -26452,7 +26452,7 @@ test('architect context menu New engineer opens a scoped modal and submits archi
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /data-agent-section="architect:arch-a"/);
+  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*data-drag-id="arch-a"/);
   assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-body--architect/);
   assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer"|data-hired-by-architect-id="arch-a"/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
@@ -27329,18 +27329,18 @@ test('main render orders sections user-first then architect creation order', () 
 
   runInContext(context, `render();`);
 
-  // The full stratified layout renders architects first, then orphan engineers, then orphan workers.
+  // The flat strip renders Architects first; execution rows show the first execution-owning Architect by default.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
     'arch-b',
-    'eng-hired-b',
     'arch-a',
-    'eng-hired-a',
-    'worker-hired-a',
+    'eng-hired-b',
     'eng-user',
     'worker-user-owned',
     'worker-user',
   ]);
-  assert.match(main.innerHTML, /Architect B[\s\S]*Alice B[\s\S]*Architect A[\s\S]*Alice A[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B[\s\S]*Loose Worker/);
+  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*Architect B[\s\S]*Architect A/);
+  assert.match(main.innerHTML, /data-agent-strata="architect-execution"[\s\S]*Alice B[\s\S]*Bob[\s\S]*Worker B[\s\S]*Loose Worker/);
+  assert.doesNotMatch(main.innerHTML, /Alice A[\s\S]*Worker A/);
   assert.doesNotMatch(main.innerHTML, /principals-row/);
 });
 
@@ -27423,7 +27423,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
   assert.doesNotMatch(css, /agent-section-header-row|architect-header-row/);
 });
 
-test('main render anchors each architect once in a fixed left column with engineer rows on the right', () => {
+test('main render places architects in a flat strip and shows selected execution rows below', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -27507,12 +27507,13 @@ test('main render anchors each architect once in a fixed left column with engine
     render();
   `);
 
-  const start = main.innerHTML.indexOf('data-agent-section="architect:arch-a"');
+  assert.match(main.innerHTML, /data-agent-architect-strip[\s\S]*data-drag-id="arch-a"[\s\S]*Productmind/);
+  const start = main.innerHTML.indexOf('data-agent-strata="architect-execution"');
   const end = main.innerHTML.indexOf('</section>', start);
   const sectionHtml = main.innerHTML.slice(start, end);
-  assert.ok(start >= 0 && end > start, 'architect section should render');
-  // Architect card is rendered as the real architect agent cell in the band anchor.
-  assert.match(sectionHtml, /agent-band-anchor--architect[\s\S]*data-drag-id="arch-a"[\s\S]*Productmind/);
+  assert.ok(start >= 0 && end > start, 'architect execution section should render');
+  assert.match(sectionHtml, /data-execution-architect-id="arch-a"/);
+  assert.match(sectionHtml, /agent-execution-heading-owner">Productmind</);
   assert.equal((sectionHtml.match(/class="[^"]*\bengineer-row\b[^"]*\bagent-grid-engineer-row\b[^"]*"/g) || []).length, 3);
   assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three/);
   assert.doesNotMatch(sectionHtml, /\+ New Engineer|ghost-card--engineer/);
@@ -28363,18 +28364,19 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
     });
   `);
 
-  // Full stratified ordering is stable: architects first, then orphan engineers, then orphan workers.
+  // Flat strip ordering is stable; the default execution pane shows the first execution-owning Architect.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
     'arch-b',
-    'eng-b',
     'arch-a',
-    'eng-a',
+    'eng-b',
     'eng-user',
     'worker-user',
     'loose',
   ]);
   const mainHtml = document.getElementById('main').innerHTML;
-  assert.match(mainHtml, /Architect B[\s\S]*Engineer B[\s\S]*Architect A[\s\S]*Engineer A[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Loose/);
+  assert.match(mainHtml, /data-agent-architect-strip[\s\S]*Architect B[\s\S]*Architect A/);
+  assert.match(mainHtml, /data-agent-strata="architect-execution"[\s\S]*Engineer B[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Loose/);
+  assert.doesNotMatch(mainHtml, /Engineer A/);
   assert.doesNotMatch(mainHtml, /principals-row/);
 });
 
@@ -28793,10 +28795,10 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
 
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
 
-  // Full stratified nav rows: architect bands first, then orphan engineers, and orphan workers.
+  // Flat Architect strip appears first; execution rows show the retained/selected execution Architect.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
-    { type: 'engineer-row', items: ['arch-a', 'eng-a', 'worker-a1', 'worker-a2'] },
-    { type: 'engineer-row', items: ['arch-b', 'eng-b', 'worker-b1'] },
+    { type: 'architect-strip-row', items: ['arch-a', 'arch-b'] },
+    { type: 'engineer-row', items: ['eng-a', 'worker-a1', 'worker-a2'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
     { type: 'standalone-workers-row', items: ['loose-1', 'loose-2'] },
@@ -28812,19 +28814,19 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
 
-  // Arrow-up from the first orphan engineer traverses only real agent rows.
+  // Arrow-up from the first orphan engineer traverses the visible execution row before the strip.
   runInContext(context, `_focusNavId('eng-user-a', { preserveColumn: false });`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'arch-b');
+  assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
   runInContext(context, `moveFocusUp();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'arch-a');
 
-  // Architect cards are real row items; horizontal navigation enters their engineer row.
+  // Architect strip cards are real row items; horizontal navigation stays within the flat strip.
   runInContext(context, `focusedItemId = 'arch-a'; render();`);
   runInContext(context, `moveFocusHorizontal(1);`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'arch-b');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'eng-b');
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-a1');
   assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
 });
 
