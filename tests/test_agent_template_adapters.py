@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from torque.adapters import detect_by_command, get_default_command_for_provider, get_providers
+from torque.adapters import codex as codex_adapter
 from torque.adapters.claude_code import ClaudeCodeAdapter
 from torque.adapters.codex import CodexAdapter
 from torque.adapters.generic import GenericAdapter
@@ -1220,6 +1221,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 clear=False,
             ):
                 command = adapter.prepare_launch_command(cell, tmp, "codex")
+                _config_file, payload = adapter._agent_config_payload(cell, tmp)
 
             generated_file = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
             generated = generated_file.read_text()
@@ -1235,6 +1237,33 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn(f'{source}:permission_request:0:0', generated)
             self.assertIn(f'{source}:stop:0:0', generated)
             self.assertIn("--config", command)
+            command_parts = shlex.split(command)
+            config_values = [
+                value
+                for index, value in enumerate(command_parts)
+                if index > 0 and command_parts[index - 1] == "--config"
+            ]
+            state_flags = [
+                value for value in config_values if value.startswith("hooks.state=")
+            ]
+            self.assertEqual(len(state_flags), 1)
+            session_source, session_entries = (
+                codex_adapter._codex_hook_trust_entries_for_source(
+                    "/config.toml",
+                    payload["hooks"],
+                )
+            )
+            self.assertEqual(session_source, "/config.toml")
+            self.assertNotIn(str(generated_file), state_flags[0])
+            self.assertGreaterEqual(len(session_entries), 4)
+            for key, trusted_hash in session_entries:
+                self.assertIn(json.dumps(key), state_flags[0])
+                self.assertIn(json.dumps(trusted_hash), state_flags[0])
+            self.assertIn(json.dumps("/config.toml:session_start:0:0"), state_flags[0])
+            self.assertIn(json.dumps("/config.toml:pre_tool_use:0:0"), state_flags[0])
+            self.assertIn(json.dumps("/config.toml:permission_request:0:0"), state_flags[0])
+            self.assertIn(json.dumps("/config.toml:stop:0:0"), state_flags[0])
+            self.assertNotIn("--dangerously-bypass-hook-trust", command)
             self.assertEqual(json.loads(hooks_file.read_text()), original)
             self.assertEqual(user_config.read_text(), 'model = "gpt-5"\n')
 

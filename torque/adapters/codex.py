@@ -70,6 +70,11 @@ _CODEX_HOOK_EVENT_LABELS = {
 }
 
 _CODEX_TORQUE_CONFIG_ROOT = "codex/agents"
+# Codex represents configuration supplied by repeated `--config key=value`
+# session flags as an unmanaged synthetic config layer. Hook trust keys for
+# hooks supplied through those same flags must therefore use this synthetic
+# source path, not the Torque-owned file where we persist an audit copy.
+_CODEX_SESSION_FLAGS_HOOK_SOURCE_PATH = "/config.toml"
 
 
 
@@ -306,6 +311,16 @@ def _toml_inline_hook_group(group: dict) -> str:
     return "{ " + ", ".join(parts) + " }"
 
 
+def _toml_inline_hook_state(entries: list[tuple[str, str]]) -> str:
+    return "{ " + ", ".join(
+        (
+            f"{_toml_string(key)} = "
+            f"{{ trusted_hash = {_toml_string(trusted_hash)} }}"
+        )
+        for key, trusted_hash in entries
+    ) + " }"
+
+
 def _codex_config_cli_flags(config: dict, *, config_path: Path) -> list[str]:
     flags = [
         f"features.hooks=true",
@@ -329,6 +344,16 @@ def _codex_config_cli_flags(config: dict, *, config_path: Path) -> list[str]:
             + ", ".join(_toml_inline_hook_group(group) for group in groups or [])
             + "]"
         )
+    _source, trust_entries = _codex_hook_trust_entries_for_source(
+        _CODEX_SESSION_FLAGS_HOOK_SOURCE_PATH,
+        config.get("hooks") or {},
+    )
+    if trust_entries:
+        # Codex's CLI override parser splits override paths on '.' literally,
+        # so keys containing `/config.toml` cannot be expressed as
+        # `hooks.state.<key>.trusted_hash=...`. Override the whole state table
+        # instead; the inline TOML value preserves the synthetic source key.
+        flags.append("hooks.state=" + _toml_inline_hook_state(trust_entries))
     result: list[str] = []
     for flag in flags:
         result.extend(["--config", flag])
@@ -443,7 +468,7 @@ def _codex_command_hook_hash(
     matcher: str | None,
     hook: dict,
 ) -> str:
-    """Return Codex v0.130 HookHandler current_hash for a command hook.
+    """Return Codex HookHandler current_hash for a command hook.
 
     Codex trusts unmanaged hooks by comparing hooks.state[*].trusted_hash to
     a SHA-256 over a normalized TOML-derived identity.  This mirrors

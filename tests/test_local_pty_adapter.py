@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import os
+import shlex
 import shutil
 import tempfile
 import unittest
@@ -1246,6 +1247,25 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("--config", boot_cmd)
             self.assertIn("mcp_servers.torque.url", boot_cmd)
             self.assertIn("hooks.SessionStart", boot_cmd)
+            command_parts = shlex.split(boot_cmd)
+            config_values = [
+                value
+                for index, value in enumerate(command_parts)
+                if index > 0 and command_parts[index - 1] == "--config"
+            ]
+            state_flags = [
+                value for value in config_values if value.startswith("hooks.state=")
+            ]
+            self.assertEqual(len(state_flags), 1)
+            self.assertIn(json.dumps("/config.toml:session_start:0:0"), state_flags[0])
+            self.assertIn(json.dumps("/config.toml:pre_tool_use:0:0"), state_flags[0])
+            self.assertIn(
+                json.dumps("/config.toml:permission_request:0:0"),
+                state_flags[0],
+            )
+            self.assertIn(json.dumps("/config.toml:stop:0:0"), state_flags[0])
+            self.assertIn("trusted_hash = \"sha256:", state_flags[0])
+            self.assertNotIn("--dangerously-bypass-hook-trust", boot_cmd)
             generated = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
             generated_text = generated.read_text()
             self.assertIn("[mcp_servers.torque]", generated_text)
