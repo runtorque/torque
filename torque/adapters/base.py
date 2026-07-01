@@ -129,6 +129,29 @@ class AgentAdapter:
         """Return supported reasoning-effort options for UI affordances."""
         return []
 
+
+    def prepare_launch_command(self, cell, working_dir: str, command: str, *,
+                               mcp_entrypoint: str = "",
+                               mcp_env: dict[str, str] | None = None) -> str:
+        """Prepare adapter-owned launch config and return the command to run.
+
+        Most adapters install any filesystem config through ``install_hooks`` or
+        ``install_mcp_config`` and do not need to alter the boot command.
+        """
+        del cell, working_dir, mcp_entrypoint, mcp_env
+        return command
+
+    def refresh_agent_config(self, cell, working_dir: str, *,
+                             mcp_entrypoint: str = "",
+                             mcp_env: dict[str, str] | None = None) -> bool:
+        """Refresh adapter-owned per-agent config for an existing session."""
+        del cell, working_dir, mcp_entrypoint, mcp_env
+        return True
+
+    def cleanup_agent_config(self, cell, working_dir: str) -> None:
+        """Remove adapter-owned per-agent config for a removed agent."""
+        del cell, working_dir
+
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         """Return the modified boot command for resuming a session.
 

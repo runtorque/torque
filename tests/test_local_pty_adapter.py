@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import os
+import shlex
 import shutil
 import tempfile
 import unittest
@@ -1202,6 +1203,97 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('source "$ZDOTDIR/.zshrc"', zshrc_text)
             self.assertIn("add-zsh-hook precmd _torque_precmd", zshrc_text)
             self.assertIn("printf '\\033]7;file://%s%s\\007'", zshrc_text)
+
+
+    def test_codex_startup_commands_use_torque_owned_config_and_leave_project_codex(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+            project_codex = Path(tmp) / ".codex"
+            project_codex.mkdir()
+            project_config = project_codex / "config.toml"
+            project_hooks = project_codex / "hooks.json"
+            project_config.write_text('[profiles.default]\nmodel = "gpt-5"\n')
+            project_hooks.write_text('{"hooks": {}}')
+            prompt_file = Path(tmp) / ".torque" / "torque-system-prompt-agent-1.md"
+            prompt_file.parent.mkdir()
+            prompt_file.write_text("Persistent prompt.\n")
+            cell = state.add_agent(
+                name="Codex",
+                group="Torque",
+                terminal_backend="pty",
+                command="codex --model gpt-5",
+                directory=tmp,
+            )
+            cell.id = "agent-1"
+            cell.agent_type = "codex"
+            adapter = self.pty_mod.LocalPtyAdapter(state)
+
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                commands = adapter._startup_commands(
+                    cell,
+                    shell_name="zsh",
+                    cwd=tmp,
+                    mcp_entrypoint="torque/mcp_engineer.py",
+                )
+
+            self.assertEqual(len(commands), 1)
+            boot_cmd = commands[0]
+            self.assertIn("codex --model gpt-5", boot_cmd)
+            self.assertIn("--config", boot_cmd)
+            self.assertIn("mcp_servers.torque.url", boot_cmd)
+            self.assertIn("hooks.SessionStart", boot_cmd)
+            command_parts = shlex.split(boot_cmd)
+            config_values = [
+                value
+                for index, value in enumerate(command_parts)
+                if index > 0 and command_parts[index - 1] == "--config"
+            ]
+            state_flags = [
+                value for value in config_values if value.startswith("hooks.state=")
+            ]
+            self.assertEqual(len(state_flags), 1)
+            self.assertIn(json.dumps("/config.toml:session_start:0:0"), state_flags[0])
+            self.assertIn(json.dumps("/config.toml:pre_tool_use:0:0"), state_flags[0])
+            self.assertIn(
+                json.dumps("/config.toml:permission_request:0:0"),
+                state_flags[0],
+            )
+            self.assertIn(json.dumps("/config.toml:stop:0:0"), state_flags[0])
+            self.assertIn("trusted_hash = \"sha256:", state_flags[0])
+            self.assertNotIn("--dangerously-bypass-hook-trust", boot_cmd)
+            generated = Path(data_dir) / "codex" / "agents" / "agent-1" / "config.toml"
+            generated_text = generated.read_text()
+            self.assertIn("[mcp_servers.torque]", generated_text)
+            self.assertIn("[[hooks.SessionStart]]", generated_text)
+            self.assertIn("model_instructions_file", generated_text)
+            self.assertIn("env_http_headers", generated_text)
+            self.assertEqual(project_config.read_text(), '[profiles.default]\nmodel = "gpt-5"\n')
+            self.assertEqual(project_hooks.read_text(), '{"hooks": {}}')
+
+    def test_claude_startup_commands_still_use_project_config(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = state.add_agent(
+                name="Claude",
+                group="Torque",
+                terminal_backend="pty",
+                command="claude",
+                directory=tmp,
+            )
+            cell.agent_type = "claude-code"
+            adapter = self.pty_mod.LocalPtyAdapter(state)
+
+            commands = adapter._startup_commands(cell, shell_name="zsh", cwd=tmp)
+
+            self.assertEqual(commands, ["claude"])
+            self.assertTrue((Path(tmp) / ".claude" / "settings.local.json").exists())
+            self.assertTrue((Path(tmp) / ".mcp.json").exists())
 
     def test_startup_commands_skip_typed_bootstrap_for_zsh_sessions(self):
         state = self.state_mod.MatrixState()

@@ -587,6 +587,7 @@ class LocalPtyAdapter:
             commands.append(
                 f"[ -f {shlex.quote(expanded)} ] && source {shlex.quote(expanded)}"
             )
+        prepared_boot_cmd = cell.command or ""
         if cell.agent_type:
             adapter = get_adapter(cell.agent_type)
             hook_dir = os.path.expanduser(cell.directory or cwd)
@@ -594,6 +595,9 @@ class LocalPtyAdapter:
                 extra_flags = adapter.inject_system_prompt(hook_dir, system_prompt)
                 if extra_flags and extra_flags not in cell.command:
                     cell.command = (cell.command + extra_flags).strip()
+                prepared_boot_cmd = cell.command or ""
+            effective_mcp_entrypoint = mcp_entrypoint or mcp_entrypoint_for_cell(cell)
+            effective_mcp_env = mcp_env_vars_for_cell(cell)
             if hook_dir and hasattr(adapter, "install_hooks"):
                 if adapter.install_hooks(hook_dir):
                     log.info("Installed hooks for '%s' (type=%s) in %s",
@@ -601,11 +605,17 @@ class LocalPtyAdapter:
             if hook_dir and hasattr(adapter, "install_mcp_config"):
                 if adapter.install_mcp_config(
                         hook_dir,
-                        mcp_entrypoint=(
-                            mcp_entrypoint or mcp_entrypoint_for_cell(cell)
-                        ),
-                        mcp_env=mcp_env_vars_for_cell(cell)):
+                        mcp_entrypoint=effective_mcp_entrypoint,
+                        mcp_env=effective_mcp_env):
                     log.info("Installed MCP config for '%s' in %s", cell.name, hook_dir)
+            if hook_dir:
+                prepared_boot_cmd = adapter.prepare_launch_command(
+                    cell,
+                    hook_dir,
+                    prepared_boot_cmd,
+                    mcp_entrypoint=effective_mcp_entrypoint,
+                    mcp_env=effective_mcp_env,
+                )
             if hook_dir and hasattr(adapter, "install_skills"):
                 if adapter.install_skills(hook_dir):
                     log.info("Installed skills for '%s' in %s", cell.name, hook_dir)
@@ -613,7 +623,7 @@ class LocalPtyAdapter:
                 ensure_git_exclude(hook_dir)
         if init_script:
             commands.append(f"source {shlex.quote(os.path.expanduser(init_script))}")
-        boot_cmd = cell.command or ""
+        boot_cmd = prepared_boot_cmd
         if boot_cmd and cell.agent_session_id and cell.agent_type and cell.session_resume:
             adapter = get_adapter(cell.agent_type)
             resumed = adapter.get_resume_command(boot_cmd, cell.agent_session_id)
@@ -1207,12 +1217,20 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
                     log.info("Re-installed hooks for '%s' in %s",
                              cell.name, hook_dir)
             if hook_dir and hasattr(adapter, "install_mcp_config"):
+                effective_mcp_entrypoint = mcp_entrypoint_for_cell(cell)
+                effective_mcp_env = mcp_env_vars_for_cell(cell)
                 if adapter.install_mcp_config(
                         hook_dir,
-                        mcp_entrypoint=mcp_entrypoint_for_cell(cell),
-                        mcp_env=mcp_env_vars_for_cell(cell)):
+                        mcp_entrypoint=effective_mcp_entrypoint,
+                        mcp_env=effective_mcp_env):
                     log.info("Re-installed MCP config for '%s' in %s",
                              cell.name, hook_dir)
+                adapter.refresh_agent_config(
+                    cell,
+                    hook_dir,
+                    mcp_entrypoint=effective_mcp_entrypoint,
+                    mcp_env=effective_mcp_env,
+                )
             if hook_dir and hasattr(adapter, "install_skills"):
                 if adapter.install_skills(hook_dir):
                     log.info("Re-installed skills for '%s' in %s",
