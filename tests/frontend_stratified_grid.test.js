@@ -425,7 +425,14 @@ test('stratified grid CSS defines flat architect strip, retained execution area,
   assert.match(css, /\.agent-card-body\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-card-line\s*\{[\s\S]*text-overflow:\s*ellipsis;/);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[\s\S]*align-items:\s*stretch;/);
-  assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[\s\S]*flex-wrap:\s*wrap;/);
+  const workerRowsBlock = (css.match(/\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*\}/) || [''])[0];
+  const workerCardsBlock = (css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/) || [''])[0];
+  assert.match(workerRowsBlock, /display:\s*grid;/);
+  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(var\(--agent-grid-card-min\),\s*1fr\)\);/);
+  assert.match(workerRowsBlock, /justify-content:\s*stretch;/);
+  assert.doesNotMatch(workerRowsBlock, /flex-wrap/);
+  assert.match(workerCardsBlock, /width:\s*100%;/);
+  assert.match(workerCardsBlock, /max-width:\s*none;/);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers \.engineer-row-anchor\s*\{[^}]*width:\s*100%/s);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-architect-column-width:\s*106px;/);
