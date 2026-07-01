@@ -145,7 +145,7 @@ class LocalPtyAdapter:
         target_window_id: str = "",
         restore_focus_to_prev_tab: bool = False,
     ) -> None:
-        del sdk_system_prompt, target_session_id, target_window_id, restore_focus_to_prev_tab
+        del sdk_system_prompt, target_session_id, target_window_id
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
 
@@ -189,6 +189,7 @@ class LocalPtyAdapter:
             init_script=init_script,
             system_prompt=system_prompt,
             mcp_entrypoint=mcp_entrypoint,
+            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
     def _prepare_create(
@@ -262,6 +263,7 @@ class LocalPtyAdapter:
         init_script: str,
         system_prompt: str,
         mcp_entrypoint: str = "",
+        restore_focus_to_prev_tab: bool = False,
     ) -> None:
         """Post-spawn cell state updates and startup commands.
 
@@ -299,15 +301,21 @@ class LocalPtyAdapter:
                 "".join(cmd + "\r" for cmd in setup_commands),
             )
 
-        # Quiet attach: only steal focus to the new session when nothing is
-        # currently active (first agent in a fresh UI, or the previously
-        # active session has since exited). Otherwise the browser keeps its
-        # current terminal focus — `agent_upsert` still surfaces the cell
-        # and the user can switch manually when they're ready. The quiet
+        # Quiet attach: background/dispatch launches pass
+        # restore_focus_to_prev_tab so they appear in the grid without
+        # changing the user's current agent/terminal/panel focus.  The quiet
         # path must still flush the queued `agent_upsert` delta so the UI
         # learns about the new cell right away; without the broadcast the
         # new session would stay invisible until some later unrelated
         # mutation flushed the accumulated ops.
+        if restore_focus_to_prev_tab:
+            await self.state.broadcast()
+            return
+
+        # User-created/opened sessions keep the existing auto-focus behavior
+        # only when nothing else is actively tracked (first agent in a fresh
+        # UI, or the previously active session has exited). Otherwise the
+        # browser keeps its current terminal focus and can switch manually.
         current_active = self.state.active_session_id or ""
         if not current_active or current_active not in self._sessions:
             await self.focus_session(session_id)
@@ -1232,7 +1240,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         if self._supervisor_restart_active():
             raise RuntimeError(
                 "PTY supervisor is restarting; try again shortly.")
-        del sdk_system_prompt, target_session_id, target_window_id, restore_focus_to_prev_tab
+        del sdk_system_prompt, target_session_id, target_window_id
         prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
         session_id = uuid.uuid4().hex
         session = _PtySession(
@@ -1282,6 +1290,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             init_script=init_script,
             system_prompt=system_prompt,
             mcp_entrypoint=mcp_entrypoint,
+            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
     async def list_supervisor_sessions(self) -> list:

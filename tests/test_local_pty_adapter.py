@@ -155,6 +155,58 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             if cell.session_id:
                 await adapter.close_session(cell.session_id)
 
+    async def test_create_session_restore_focus_to_prev_tab_never_steals_focus(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_terminal(
+            name="Background Worker",
+            group="Torque",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        state.active_session_id = "stale-session-id"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        emitted = []
+        flushed_batches: list[list[dict]] = []
+        orig_emit = state._emit
+        orig_broadcast = state.broadcast
+
+        def recording_emit(op, **payload):
+            emitted.append((op, payload))
+            return orig_emit(op, **payload)
+
+        async def recording_broadcast():
+            if state._delta_ops:
+                flushed_batches.append(list(state._delta_ops))
+            await orig_broadcast()
+
+        state._emit = recording_emit
+        state.broadcast = recording_broadcast
+
+        try:
+            await adapter.start()
+            await adapter.create_session(cell, restore_focus_to_prev_tab=True)
+            self.assertIsNotNone(cell.session_id)
+            self.assertEqual(state.active_session_id, "stale-session-id")
+            self.assertFalse(
+                any(op == "focus_update" for op, _payload in emitted),
+                f"background create emitted focus_update: {emitted}",
+            )
+            self.assertTrue(
+                any(
+                    op.get("op") == "agent_upsert" and op.get("id") == cell.id
+                    for batch in flushed_batches
+                    for op in batch
+                ),
+                f"background agent_upsert missing from flushed ops: {flushed_batches}",
+            )
+        finally:
+            state._emit = orig_emit
+            state.broadcast = orig_broadcast
+            if cell.session_id:
+                await adapter.close_session(cell.session_id)
+
     async def test_client_scoped_focus_does_not_broadcast_to_other_clients(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

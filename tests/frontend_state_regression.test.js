@@ -18728,6 +18728,65 @@ test('global focus_update delta does not clobber client-scoped focus override', 
   assert.equal(jsonValue(context, '_expectedSeq'), 18);
 });
 
+test('background selected_agent_id update does not split client-scoped focus', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Alpha',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-1',
+        status: 'running',
+      },
+    };
+    state.groups = { alpha: ['agent-1'] };
+    state.active_session_id = 'sess-1';
+    state.selected_agent_id = 'agent-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _expectedSeq = 23;
+  `);
+
+  context._handleClientFocusUpdate({
+    type: 'focus_update',
+    client_scoped: true,
+    active_session_id: 'sess-1',
+    current_window_id: 'standalone',
+  });
+
+  context._handleDelta({
+    seq: 23,
+    ops: [
+      {
+        op: 'agent_upsert',
+        id: 'agent-2',
+        name: 'Background Worker',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-2',
+        status: 'running',
+      },
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-2' },
+      {
+        op: 'focus_update',
+        active_session_id: 'sess-2',
+        current_window_id: 'standalone',
+      },
+    ],
+  });
+
+  assert.equal(jsonValue(context, 'state.agents["agent-2"].name'), 'Background Worker');
+  assert.equal(jsonValue(context, 'state.active_session_id'), 'sess-1');
+  assert.equal(jsonValue(context, 'state.selected_agent_id'), 'agent-1');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-1');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-1');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-1');
+  assert.equal(jsonValue(context, '_expectedSeq'), 24);
+});
+
 test('focus_update on an architect agent focuses the architect card agent id', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `
