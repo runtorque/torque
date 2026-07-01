@@ -105,7 +105,7 @@ class DesktopLauncherTests(unittest.TestCase):
         )
         self.assertFalse(patched)
 
-    def test_resolve_settings_defaults_to_desktop_profile_and_port(self):
+    def test_resolve_settings_defaults_to_shared_default_profile_and_desktop_port(self):
         with tempfile.TemporaryDirectory() as home_dir:
             settings = self.desktop_mod.resolve_desktop_settings(
                 env={"HOME": home_dir},
@@ -113,13 +113,13 @@ class DesktopLauncherTests(unittest.TestCase):
             )
 
         self.assertEqual(settings.launch_mode, self.desktop_mod.DESKTOP_MODE_SPAWN)
-        self.assertEqual(settings.profile, "desktop")
+        self.assertEqual(settings.profile, "default")
         self.assertEqual(settings.port, 18933)
         self.assertEqual(settings.url, "http://127.0.0.1:18933/")
         self.assertEqual(settings.script_path, Path("/repo/torque.py"))
         self.assertEqual(
             settings.data_dir,
-            Path(home_dir) / ".torque" / "profiles" / "desktop",
+            Path(home_dir) / ".torque" / "profiles" / "default",
         )
 
         env = self.desktop_mod.build_server_env(
@@ -129,7 +129,7 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertEqual(env["TORQUE_DESKTOP_MODE"], "spawn")
         self.assertEqual(env["TORQUE_DESKTOP_ATTACH"], "0")
         self.assertEqual(env["TORQUE_STANDALONE"], "1")
-        self.assertEqual(env["TORQUE_PROFILE"], "desktop")
+        self.assertEqual(env["TORQUE_PROFILE"], "default")
         self.assertEqual(env["TORQUE_PORT"], "18933")
         self.assertEqual(env["TORQUE_DATA_DIR"], str(settings.data_dir))
 

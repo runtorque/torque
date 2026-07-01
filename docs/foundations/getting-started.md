@@ -35,7 +35,7 @@ make run
 ```
 
 The Torque workspace should appear in a native desktop window. If it doesn't,
-check `~/.torque/profiles/desktop/torque.log` for errors.
+check `~/.torque/profiles/default/torque.log` for errors.
 
 ## Browser mode and legacy data migration
 

@@ -75,16 +75,15 @@ matter for legacy Toolbelt data and one-off migration.
 |---|---|
 | Primary app files | `~/.torque/app/` |
 | Primary Python runtime | `~/.torque/runtime/venv/bin/python` |
-| Desktop profile log / DB | `~/.torque/profiles/desktop/torque.log`, `~/.torque/profiles/desktop/torque.db` |
-| Standalone profile log / DB | `~/.torque/profiles/standalone/torque.log`, `~/.torque/profiles/standalone/torque.db` |
+| Default profile log / DB | `~/.torque/profiles/default/torque.log`, `~/.torque/profiles/default/torque.db` |
+| Explicit profile log / DB | `~/.torque/profiles/<profile>/torque.log`, `~/.torque/profiles/<profile>/torque.db` |
 | Legacy secondary Toolbelt install from older releases | `~/Library/Application Support/iTerm2/Scripts/torque/torque/` |
 | Deprecated secondary Toolbelt log / DB | `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log`, `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db` |
 | Legacy Toolbelt auto-launch symlink directory | `~/Library/Application Support/iTerm2/Scripts/AutoLaunch/` |
 
 Use `torque logs` to read the daemon log without remembering the full path.
-The CLI defaults to the desktop profile for offline reads/logs; select
-standalone with `TORQUE_PORT=18932` / `--port 18932`, or select an explicit
-profile/data-dir with `TORQUE_PROFILE` / `TORQUE_DATA_DIR`.
+The CLI defaults to the shared default profile for offline reads/logs; select
+an explicit profile/data-dir with `TORQUE_PROFILE` / `TORQUE_DATA_DIR`.
 
 ## Testing, updating, and deployment notes
 

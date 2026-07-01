@@ -15,12 +15,12 @@ make deploy
 make run
 ```
 
-By default, the desktop shell starts its own standalone Torque server with
-desktop-specific runtime values:
+By default, the desktop shell starts its own standalone Torque server on the
+shared default runtime profile:
 
-- profile: `desktop`
+- profile: `default`
 - port: `18933`
-- data dir: `~/.torque/profiles/desktop`
+- data dir: `~/.torque/profiles/default`
 
 ### Standalone browser mode
 
@@ -31,7 +31,8 @@ make standalone
 make open
 ```
 
-Runtime data defaults to `~/.torque/profiles/standalone`.
+Runtime data defaults to the shared default profile at
+`~/.torque/profiles/default`.
 
 ### Legacy Toolbelt data migration
 
@@ -47,7 +48,7 @@ If you already have a matching standalone server and want the native shell to
 reuse it, attach explicitly:
 
 ```bash
-torque desktop --attach --profile desktop --port 18933
+torque desktop --attach --profile default --port 18933
 # or
 make desktop-attach
 ```
@@ -97,8 +98,7 @@ Useful maintenance targets:
 Primary standalone/desktop logs live in the active profile data dir:
 
 ```text
-~/.torque/profiles/desktop/torque.log
-~/.torque/profiles/standalone/torque.log
+~/.torque/profiles/default/torque.log
 ```
 
 Legacy Toolbelt data from older releases may still include a log at:
@@ -114,10 +114,10 @@ torque logs
 torque logs -f
 ```
 
-By default the CLI targets the desktop profile (`~/.torque/profiles/desktop`).
-Use `TORQUE_PORT=18932` / `torque --port 18932 ...`, `TORQUE_PROFILE`, or
-`TORQUE_DATA_DIR` to inspect a standalone or custom profile. If the primary
-profile log is absent and no explicit profile/data-dir was requested, the CLI
+By default the CLI targets the shared default profile
+(`~/.torque/profiles/default`) for both desktop and standalone/browser ports.
+Use `TORQUE_PROFILE` or `TORQUE_DATA_DIR` to inspect a custom profile. If the
+primary profile log is absent and no explicit profile/data-dir was requested, the CLI
 can fall back to an existing legacy Toolbelt log for migration diagnostics.
 
 ## Notifications
@@ -135,12 +135,15 @@ These settings live in [Group Settings](group-settings.md).
 
 ## Runtime State
 
-Persistent state lives in SQLite. Primary standalone/desktop profiles use:
+Persistent state lives in SQLite. The default standalone/desktop profile uses:
 
 ```text
-~/.torque/profiles/desktop/torque.db
-~/.torque/profiles/standalone/torque.db
+~/.torque/profiles/default/torque.db
 ```
+
+Existing `desktop` or `standalone` profile directories are left in place; Torque
+only uses them when you select them explicitly (for example with
+`TORQUE_PROFILE=desktop`).
 
 Legacy Toolbelt data from older releases may still include a database at:
 
@@ -148,7 +151,7 @@ Legacy Toolbelt data from older releases may still include a database at:
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db
 ```
 
-Read-only CLI commands can fall back to SQLite directly, which is why commands like `torque task list` and `torque ai context` can still work even when the daemon is stopped. Offline reads use the desktop profile by default, or the selected profile/data-dir when you pass `TORQUE_PORT=18932`, `--port 18932`, `TORQUE_PROFILE`, or `TORQUE_DATA_DIR`. Legacy Toolbelt DB fallback is only for non-explicit migration diagnostics when no primary profile DB exists.
+Read-only CLI commands can fall back to SQLite directly, which is why commands like `torque task list` and `torque ai context` can still work even when the daemon is stopped. Offline reads use the shared default profile by default, or the selected profile/data-dir when you pass `TORQUE_PROFILE` or `TORQUE_DATA_DIR`. Legacy Toolbelt DB fallback is only for non-explicit migration diagnostics when no primary profile DB exists.
 
 ## Common Problems
 
@@ -203,11 +206,11 @@ Common runtime variables:
 | Variable | Description |
 |---|---|
 | `TORQUE_PORT` | HTTP/WebSocket port |
-| `TORQUE_STANDALONE` | Force standalone mode/profile defaults when set |
+| `TORQUE_STANDALONE` | Force standalone mode; when no profile/data-dir is explicit, data defaults to `~/.torque/profiles/default` |
 | `TORQUE_DEFAULT_CMD` | Default boot command |
 | `TORQUE_BIND_ALL` | Bind to `0.0.0.0` instead of localhost |
 | `TORQUE_DESKTOP_MODE` | Desktop shell lifecycle mode: `spawn` or `attach` |
-| `TORQUE_DESKTOP_PROFILE` | Desktop shell profile override (defaults to `desktop`) |
+| `TORQUE_DESKTOP_PROFILE` | Desktop shell profile override (defaults to `default`; `TORQUE_PROFILE` is also honored) |
 | `TORQUE_DESKTOP_PORT` | Desktop shell port override (defaults to `18933`) |
 | `TORQUE_DESKTOP_DATA_DIR` | Desktop shell data-dir override |
 | `TORQUE_DESKTOP_PYTHON` | Python runtime used by `torque desktop` |

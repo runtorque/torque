@@ -45,7 +45,7 @@ class CliDesktopTests(unittest.TestCase):
             self._orig_popen,
         )
 
-    def test_cmd_desktop_spawn_uses_desktop_defaults(self):
+    def test_cmd_desktop_spawn_uses_shared_default_profile(self):
         calls = []
         self.cli._resolve_desktop_entrypoint = lambda: self.entrypoint
         self.cli._resolve_desktop_python = lambda explicit="": Path("/python/bin/python3")
@@ -79,10 +79,10 @@ class CliDesktopTests(unittest.TestCase):
             ["/python/bin/python3", str(self.entrypoint)],
         )
         self.assertEqual(calls[0][1]["TORQUE_PORT"], "18933")
-        self.assertEqual(calls[0][1]["TORQUE_PROFILE"], "desktop")
+        self.assertEqual(calls[0][1]["TORQUE_PROFILE"], "default")
         self.assertEqual(calls[0][1]["TORQUE_DESKTOP_MODE"], "spawn")
         self.assertEqual(calls[0][1]["TORQUE_DESKTOP_ATTACH"], "0")
-        self.assertIn("/.torque/profiles/desktop", calls[0][1]["TORQUE_DATA_DIR"])
+        self.assertIn("/.torque/profiles/default", calls[0][1]["TORQUE_DATA_DIR"])
         self.assertIn("Torque desktop spawn", out.getvalue())
 
     def test_cmd_desktop_attach_honors_explicit_target(self):
@@ -183,14 +183,24 @@ class CliDesktopTests(unittest.TestCase):
 
         self.assertEqual(resolved, Path("/custom/torque-python"))
 
-    def test_resolve_desktop_profile_ignores_general_torque_profile(self):
+    def test_resolve_desktop_profile_honors_general_torque_profile(self):
         with mock.patch.dict(os.environ, {
-            "TORQUE_PROFILE": "toolbelt-profile",
+            "TORQUE_PROFILE": "qa-profile",
             "TORQUE_DESKTOP_PROFILE": "",
         }, clear=False):
             self.assertEqual(
                 self.cli._resolve_desktop_profile(""),
-                self.cli.DESKTOP_DEFAULT_PROFILE,
+                "qa-profile",
+            )
+
+    def test_resolve_desktop_data_dir_honors_general_torque_data_dir(self):
+        with mock.patch.dict(os.environ, {
+            "TORQUE_DATA_DIR": "/tmp/qa-runtime",
+            "TORQUE_DESKTOP_DATA_DIR": "",
+        }, clear=False):
+            self.assertEqual(
+                self.cli._resolve_desktop_data_dir("default", ""),
+                Path("/tmp/qa-runtime"),
             )
 
     def test_resolve_desktop_port_ignores_general_torque_port(self):

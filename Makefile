@@ -45,7 +45,7 @@ install-standalone:
 	fi
 	@echo ""
 	@echo "Installed primary standalone/desktop app files to $(PRIMARY_APP_DIR)"
-	@echo "Runtime data uses ~/.torque/profiles/<profile>/ (for example desktop or standalone)."
+	@echo "Runtime data uses ~/.torque/profiles/<profile>/ (default profile: default)."
 
 ## uninstall: Remove primary app files
 uninstall:
@@ -127,7 +127,7 @@ deploy: _check_not_in_worker deps
 	@echo ""
 	@echo "Primary standalone/desktop deploy complete."
 	@echo "Relaunch the primary app with: make run"
-	@echo "Primary deploy stops port $(or $(TORQUE_PORT),$(PRIMARY_PORT)); set TORQUE_PORT to deploy another standalone profile."
+	@echo "Primary deploy stops port $(or $(TORQUE_PORT),$(PRIMARY_PORT)); set TORQUE_PORT to deploy another runtime port."
 	@echo "Browser-only mode remains available with: make standalone (then make open)"
 
 ## restart: Deploy the primary app and launch it in one step
@@ -152,7 +152,7 @@ standalone: deps install-standalone
 		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
-	@profile="$(or $(TORQUE_PROFILE),standalone)"; \
+	@profile="$(or $(TORQUE_PROFILE),default)"; \
 	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
 		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
@@ -176,7 +176,7 @@ standalone-bg: deps install-standalone
 		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
-	@profile="$(or $(TORQUE_PROFILE),standalone)"; \
+	@profile="$(or $(TORQUE_PROFILE),default)"; \
 	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
 		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
@@ -204,7 +204,7 @@ desktop: deps install-standalone
 		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
-	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
+	@profile="$(or $(TORQUE_PROFILE),default)"; \
 	port="$(or $(TORQUE_PORT),18933)"; \
 	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
 		data_dir="$(TORQUE_DATA_DIR)"; \
@@ -216,7 +216,7 @@ desktop: deps install-standalone
 		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
 	echo "Starting Torque desktop shell on http://127.0.0.1:$$port/"; \
-	echo "Using desktop profile: $$profile"; \
+	echo "Using runtime profile: $$profile"; \
 	echo "Using desktop data dir: $$data_dir"; \
 	env TORQUE_DESKTOP_PORT="$$port" \
 		TORQUE_DESKTOP_PROFILE="$$profile" \
@@ -233,7 +233,7 @@ desktop-attach: deps install-standalone
 		echo "Error: Torque runtime Python not found. Run make deps first or set TORQUE_RUNTIME_PYTHON."; \
 		exit 1; \
 	fi
-	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
+	@profile="$(or $(TORQUE_PROFILE),default)"; \
 	port="$(or $(TORQUE_PORT),18933)"; \
 	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
 		data_dir="$(TORQUE_DATA_DIR)"; \
@@ -245,7 +245,7 @@ desktop-attach: deps install-standalone
 		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
 	echo "Attaching Torque desktop shell to http://127.0.0.1:$$port/"; \
-	echo "Expecting standalone profile: $$profile"; \
+	echo "Expecting runtime profile: $$profile"; \
 	echo "Expecting standalone data dir: $$data_dir"; \
 	env TORQUE_DESKTOP_PORT="$$port" \
 		TORQUE_DESKTOP_PROFILE="$$profile" \
@@ -258,7 +258,7 @@ desktop-attach: deps install-standalone
 
 ## tauri-dev: Run Tauri shell in dev mode (live reload, daemon spawned). Equivalent of `make desktop`.
 tauri-dev:
-	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
+	@profile="$(or $(TORQUE_PROFILE),default)"; \
 	port="$(or $(TORQUE_PORT),18933)"; \
 	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
 		data_dir="$(TORQUE_DATA_DIR)"; \
@@ -272,7 +272,7 @@ tauri-dev:
 	python="$(or $(TORQUE_PYTHON_EXECUTABLE),$(TORQUE_RUNTIME_PYTHON))"; \
 	mode="$${TORQUE_DESKTOP_MODE:-spawn}"; \
 	echo "Starting Torque Tauri shell on http://127.0.0.1:$$port/"; \
-	echo "Using desktop profile: $$profile"; \
+	echo "Using runtime profile: $$profile"; \
 	echo "Using desktop data dir: $$data_dir"; \
 	echo "Using Python executable: $$python"; \
 	cd src-tauri && env \

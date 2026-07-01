@@ -8,8 +8,8 @@ For manual runtime testing:
 2. Relaunch the primary app with `make run` (desktop) or `make standalone` + `make open` (browser)
 3. Check `torque.log` in the active profile data dir for errors:
    ```
-   ~/.torque/profiles/desktop/torque.log      # make run / desktop profile
-   ~/.torque/profiles/standalone/torque.log   # make standalone
+   ~/.torque/profiles/default/torque.log      # make run and make standalone defaults
+   ~/.torque/profiles/<profile>/torque.log    # explicit TORQUE_PROFILE/TORQUE_DATA_DIR runs
    ```
 4. Test in the primary desktop/browser UI: create groups, add agents, click agent to select → add child terminals, drag terminals between drawer and standalone, remove agent (cascade), relaunch, right-click → edit name/color, keyboard nav (arrows within group, Tab between groups)
 5. Test global settings: click gear icon → Settings modal. General > Server: change default command, toggle filter by window, toggle focus new tabs (uncheck → create agent → verify previous session stays selected). General > Board: edit default lanes. Save → restart daemon → confirm settings persist.

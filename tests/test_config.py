@@ -9,6 +9,15 @@ from unittest import mock
 
 
 class ConfigLoggingTests(unittest.TestCase):
+    def setUp(self):
+        self._env_patch = mock.patch.dict(os.environ, {
+            "TORQUE_DATA_DIR": "",
+            "TORQUE_PROFILE": "",
+            "TORQUE_STANDALONE": "",
+        }, clear=False)
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
     def _reload_default_config(self):
         config = importlib.import_module("torque.config")
         return importlib.reload(config)
@@ -201,7 +210,7 @@ class ConfigLoggingTests(unittest.TestCase):
             config.log.setLevel(logging.DEBUG)
             config.log.propagate = False
 
-    def test_init_paths_uses_standalone_profile_by_default(self):
+    def test_init_paths_uses_shared_default_profile_by_default(self):
         with tempfile.TemporaryDirectory() as home_dir:
             env = {
                 "HOME": home_dir,
@@ -216,7 +225,7 @@ class ConfigLoggingTests(unittest.TestCase):
                 script_dir = Path(home_dir) / "installed-runtime"
                 config.init_paths(script_dir)
 
-                expected = Path(home_dir) / ".torque" / "profiles" / "standalone"
+                expected = Path(home_dir) / ".torque" / "profiles" / "default"
                 self.assertEqual(config.DATA_DIR, expected)
                 self.assertEqual(config.DB_FILE, expected / "torque.db")
                 self.assertEqual(config.STATE_FILE, expected / "state.json")
@@ -226,6 +235,36 @@ class ConfigLoggingTests(unittest.TestCase):
                     config.ATTACHMENTS_DIR,
                     expected / "attachments",
                 )
+            self._reload_default_config()
+
+    def test_init_paths_default_profile_does_not_mutate_old_desktop_or_standalone_profiles(self):
+        with tempfile.TemporaryDirectory() as home_dir:
+            home_path = Path(home_dir)
+            desktop_marker = home_path / ".torque" / "profiles" / "desktop" / "marker.txt"
+            standalone_marker = home_path / ".torque" / "profiles" / "standalone" / "marker.txt"
+            desktop_marker.parent.mkdir(parents=True)
+            standalone_marker.parent.mkdir(parents=True)
+            desktop_marker.write_text("desktop", encoding="utf-8")
+            standalone_marker.write_text("standalone", encoding="utf-8")
+            env = {
+                "HOME": home_dir,
+                "TORQUE_STANDALONE": "1",
+                "TORQUE_PROFILE": "",
+                "TORQUE_DATA_DIR": "",
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                config = importlib.import_module("torque.config")
+                config = importlib.reload(config)
+
+                script_dir = Path(home_dir) / "installed-runtime"
+                config.init_paths(script_dir)
+
+                self.assertEqual(
+                    config.DATA_DIR,
+                    home_path / ".torque" / "profiles" / "default",
+                )
+                self.assertEqual(desktop_marker.read_text(encoding="utf-8"), "desktop")
+                self.assertEqual(standalone_marker.read_text(encoding="utf-8"), "standalone")
             self._reload_default_config()
 
     def test_init_paths_prefers_explicit_data_dir_over_profile(self):

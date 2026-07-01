@@ -129,6 +129,33 @@ class MakefileInstallTests(unittest.TestCase):
         self.assertNotIn("Application Support/iTerm2", proc.stdout)
         self.assertNotIn("SCRIPT_DIR", proc.stdout)
 
+    def test_runtime_launch_targets_default_profile_when_unset(self):
+        for target in ("standalone", "standalone-bg", "desktop", "desktop-attach"):
+            with self.subTest(target=target):
+                proc = self._run_make_dry(
+                    target,
+                    "TORQUE_RUNTIME_PYTHON=/usr/bin/python3",
+                    "PRIMARY_APP_DIR=/tmp/torque-primary-test",
+                    "TORQUE_DATA_DIR=",
+                    "TORQUE_PROFILE=",
+                    "TORQUE_PORT=",
+                )
+
+                self.assertIn('profile="default"', proc.stdout)
+                self.assertIn('data_dir="$HOME/.torque/profiles/$safe_profile"', proc.stdout)
+
+    def test_runtime_launch_preserves_explicit_profile(self):
+        proc = self._run_make_dry(
+            "desktop",
+            "TORQUE_RUNTIME_PYTHON=/usr/bin/python3",
+            "PRIMARY_APP_DIR=/tmp/torque-primary-test",
+            "TORQUE_DATA_DIR=",
+            "TORQUE_PROFILE=qa-profile",
+            "TORQUE_PORT=",
+        )
+
+        self.assertIn('profile="qa-profile"', proc.stdout)
+
     def test_removed_toolbelt_make_targets_not_advertised_in_first_party_docs(self):
         stale_target_re = re.compile(
             r"deploy-toolbelt|run-toolbelt|install-toolbelt|toolbelt-legacy|"
