@@ -20,6 +20,9 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.import_module("torque.state")
         self.mcp_mod = importlib.import_module("torque.mcp")
         self.mcp_mod = importlib.reload(self.mcp_mod)
+        self.old_data_dir = self.state_mod.DATA_DIR
+        self.state_mod.DATA_DIR = str(Path(self.tmp.name) / "data")
+        self.addCleanup(lambda: setattr(self.state_mod, "DATA_DIR", self.old_data_dir))
         self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
