@@ -183,6 +183,19 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 )
             except ValueError as exc:
                 return {"type": "error", "message": str(exc)}
+        if payload["cmd"] == "architect_pm_root_backlog_hygiene":
+            architect_id = str(payload.get("architect_id", "") or "").strip()
+            architect = self.state.agents.get(architect_id)
+            if not architect or getattr(architect, "kind", "") != "architect":
+                return {"type": "error", "message": "architect not found"}
+            return self.server_mod._finalize_already_covered_pm_roots(
+                self.state,
+                apply=bool(payload.get("apply", False)),
+                task_ids=payload.get("task_ids", []) or [],
+                limit=int(payload.get("limit", 0) or 0),
+                architect_id=architect_id,
+                group=getattr(architect, "group", "") or "",
+            )
         if payload["cmd"] == "list_actions":
             return {
                 "type": "actions", "group": payload.get("group", ""),
@@ -4185,6 +4198,120 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 ("completion_evidence", "messages", "lane"),
             )],
         )
+
+    async def test_architect_pm_root_backlog_hygiene_scopes_to_caller_covering_task(self):
+        pm = self._add_architect("pm-hygiene-scope", "Blueprint")
+        torqly = self._add_architect("arch-hygiene-scope", "Torqly")
+        other_architect = self._add_architect("arch-other-scope", "Other")
+        owned_root = self._add_task(
+            "TORQUE:3301",
+            "Already-covered root for Torqly",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        owned_covering = self._add_task(
+            "TORQUE:3302",
+            "Torqly covering work",
+            lane="Done",
+            labels=["covers:TORQUE:3301"],
+            created_by_architect_id=torqly.id,
+        )
+        other_root = self._add_task(
+            "TORQUE:3311",
+            "Already-covered root for another architect",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        other_covering = self._add_task(
+            "TORQUE:3312",
+            "Other covering work",
+            lane="Done",
+            labels=["covers:TORQUE:3311"],
+            created_by_architect_id=other_architect.id,
+        )
+
+        for root, covering, architect in (
+                (owned_root, owned_covering, torqly),
+                (other_root, other_covering, other_architect)):
+            self.state.board_mark_task_covered(
+                root.id,
+                covering_task_id=covering.id,
+                pr_url=f"https://github.com/runtorque/torque/pull/{covering.id[-4:]}",
+                sha=f"sha-{covering.id[-4:]}",
+                tests_run="make test",
+                notes="Durable final evidence.",
+                actor_name=architect.name,
+                actor_id=architect.id,
+                actor_kind="architect",
+                authorization={
+                    "scope": "routed_pm_product_root",
+                    "source": "covering_task_label_and_product_peer",
+                    "covered_task_id": root.id,
+                    "root_creator_architect_id": pm.id,
+                    "covering_task_id": covering.id,
+                    "product_labels": ["product-proposal", "pm-created"],
+                },
+                move_to_done=False,
+            )
+
+        text, is_error = await self._call(
+            "architect_pm_root_backlog_hygiene",
+            {"apply": False},
+            torqly.id,
+        )
+
+        self.assertFalse(is_error, text)
+        dry_run = json.loads(text)
+        reasons = {item["task_id"]: item["reason"] for item in dry_run["items"]}
+        self.assertEqual(dry_run["eligible_count"], 1)
+        self.assertEqual(
+            reasons[owned_root.id],
+            "eligible_final_covered_by_evidence",
+        )
+        self.assertEqual(
+            reasons[other_root.id],
+            "covering_task_not_created_by_architect",
+        )
+
+        text, is_error = await self._call(
+            "architect_pm_root_backlog_hygiene",
+            {"apply": True},
+            torqly.id,
+        )
+
+        self.assertFalse(is_error, text)
+        applied = json.loads(text)
+        self.assertEqual(applied["applied_count"], 1)
+        self.assertEqual(self.state.board_tasks[owned_root.id].lane, "Done")
+        self.assertEqual(self.state.board_tasks[other_root.id].lane, "Backlog")
+        self.assertEqual(
+            self.state.board_tasks[owned_root.id]
+            .completion_evidence["covered_by"]["finalized_by_id"],
+            torqly.id,
+        )
+
+    async def test_pm_root_backlog_hygiene_server_rejects_non_architect_actor(self):
+        worker = self.state_mod.AgentCell(
+            id="worker-hygiene",
+            name="Worker",
+            slug="worker",
+            group="torque",
+            cell_type="agent",
+            kind="worker",
+        )
+        self.state.agents[worker.id] = worker
+        self.state.groups["torque"].append(worker.id)
+
+        result = await self._extract_server_handle_command()({
+            "cmd": "architect_pm_root_backlog_hygiene",
+            "architect_id": worker.id,
+            "apply": True,
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["message"], "architect not found")
 
     async def test_architect_routed_pm_root_does_not_allow_reassign(self):
         pm = self._add_architect("pm-1", "Blueprint")

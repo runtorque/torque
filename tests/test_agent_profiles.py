@@ -110,6 +110,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_inbox", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm_policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_pm_root_backlog_hygiene", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_engineer", pm_policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_role", pm_policy))
 
@@ -136,6 +137,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertFalse(mcp_tool_allowed_by_policy("architect_reply", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", pm))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_pm_root_backlog_hygiene", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", pm))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_behavior_overlay_propose_for_engineer", pm))

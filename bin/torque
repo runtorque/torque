@@ -3236,58 +3236,6 @@ def _filter_tasks(tasks, args):
     return result
 
 
-def _print_pm_root_backlog_hygiene(data):
-    print(
-        "PM root backlog hygiene: "
-        f"{data.get('eligible_count', 0)} eligible, "
-        f"{data.get('ineligible_count', 0)} ineligible"
-    )
-    if data.get("apply"):
-        print(f"Finalized: {data.get('applied_count', 0)}")
-    else:
-        print("Dry run only. Re-run with --apply to finalize eligible roots.")
-
-    items = data.get("items", []) or []
-    if not items:
-        print("No Backlog PM/product roots found.")
-        return
-
-    for item in items:
-        mark = "✓" if item.get("eligible") else "·"
-        task_id = item.get("task_id", "")
-        title = item.get("task", "")
-        reason = item.get("reason", "")
-        cover = item.get("covering_task_id", "")
-        suffix = f" covered_by={cover}" if cover else ""
-        print(f"  {mark} {task_id} — {title}{suffix}")
-        print(f"      {reason}")
-        missing = item.get("missing_final_evidence") or []
-        if missing:
-            print(f"      missing final evidence: {', '.join(missing)}")
-
-    errors = data.get("errors", []) or []
-    if errors:
-        print("\nErrors:")
-        for error in errors:
-            print(f"  {error.get('task_id', '')}: {error.get('reason', '')}")
-
-
-def cmd_task_finalize_covered_pm_roots(args):
-    """Inventory/finalize already-covered PM-created Backlog roots."""
-    task_ids = list(getattr(args, "task_id", []) or [])
-    resp = api_call(
-        "board_pm_root_backlog_hygiene",
-        port=args.port,
-        apply=bool(getattr(args, "apply", False)),
-        task_ids=task_ids,
-        limit=int(getattr(args, "limit", 0) or 0),
-    )
-    data = check_ok(resp)
-    if getattr(args, "json", False):
-        print(json.dumps(data, indent=2))
-        return
-    _print_pm_root_backlog_hygiene(data)
-
 
 _TASK_EDIT_FIELDS = [
     "task", "lane", "group", "labels",
@@ -6412,21 +6360,6 @@ def build_parser():
     p.add_argument("-A", "--archived", action="store_true",
                    help="Include archived tasks in default output")
     p.set_defaults(func=cmd_task_list)
-
-    p = tsk_sub.add_parser(
-        "finalize-covered-pm-roots",
-        help="Inventory/finalize already-covered PM-created Backlog roots",
-    )
-    p.add_argument("--apply", action="store_true",
-                   help="Finalize eligible roots; default is dry-run only")
-    p.add_argument("--task-id", action="append", default=[],
-                   help="Restrict to a specific task ID/slug; repeatable")
-    p.add_argument("--limit", type=int, default=0,
-                   help="Apply at most N eligible roots (0 = no limit)")
-    p.add_argument("--json", action="store_true",
-                   help="Output raw JSON")
-    p.set_defaults(func=cmd_task_finalize_covered_pm_roots)
-
     p = tsk_sub.add_parser("edit", aliases=["e"],
                            help="Edit task fields")
     p.add_argument("identifier", help="Task ID, slug, or title")

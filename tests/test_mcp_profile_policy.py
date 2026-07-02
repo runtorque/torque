@@ -380,6 +380,7 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_reassign",
             "architect_task_move",
             "architect_task_mark_covered",
+            "architect_pm_root_backlog_hygiene",
             "architect_area_create",
             "architect_initiative_create",
             "architect_decision_create",

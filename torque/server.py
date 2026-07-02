@@ -11156,13 +11156,20 @@ def _pm_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
     return item
 
 
-def _pm_root_backlog_hygiene_inventory(state: MatrixState) -> list[dict]:
+def _pm_root_backlog_hygiene_inventory(
+        state: MatrixState,
+        *,
+        group: str = "",
+) -> list[dict]:
     """Inventory Backlog PM/product roots with eligibility reasons."""
+    group = _completion_evidence_text(group, limit=200)
     items = []
     for root in sorted(
             list(getattr(state, "board_tasks", {}).values()),
             key=lambda task: (getattr(task, "created_at", "") or "",
                               getattr(task, "id", "") or "")):
+        if group and str(getattr(root, "group", "") or "").strip() != group:
+            continue
         labels = {
             str(label or "").strip()
             for label in (getattr(root, "labels", []) or [])
@@ -11175,6 +11182,55 @@ def _pm_root_backlog_hygiene_inventory(state: MatrixState) -> list[dict]:
     return items
 
 
+def _pm_root_backlog_hygiene_authorized_for_architect(
+        state: MatrixState,
+        item: dict,
+        architect_id: str,
+        group: str,
+) -> tuple[bool, str]:
+    """Return whether an architect may finalize this inventory item.
+
+    Backlog hygiene is intentionally narrower than generic task ownership:
+    a caller may only finalize an eligible routed PM root in their own group
+    when the durable ``covered_by`` record points at a covering task that was
+    created by that same Architect/Torqly caller.
+    """
+    architect_id = _completion_evidence_text(architect_id, limit=120)
+    group = _completion_evidence_text(group, limit=200)
+    if not architect_id:
+        return False, "missing_architect_id"
+    if not group:
+        return False, "missing_architect_group"
+    task_id = _completion_evidence_text(item.get("task_id", ""), limit=120)
+    root = state.board_tasks.get(task_id)
+    if not root or str(getattr(root, "group", "") or "").strip() != group:
+        return False, "task_not_in_architect_group"
+    root_architect_id = str(
+        getattr(root, "created_by_architect_id", "") or ""
+    ).strip()
+    if root_architect_id == architect_id:
+        return False, "not_cross_architect_pm_root"
+    if not item.get("eligible"):
+        return False, str(item.get("reason", "") or "not_eligible")
+
+    covering_task_id = _completion_evidence_text(
+        item.get("covering_task_id", ""),
+        limit=120,
+    )
+    covering_task = state.board_tasks.get(covering_task_id)
+    if not covering_task:
+        return False, "covering_task_missing"
+    if str(getattr(covering_task, "group", "") or "").strip() != group:
+        return False, "covering_task_not_in_architect_group"
+    covering_architect_id = str(
+        getattr(covering_task, "created_by_architect_id", "") or ""
+    ).strip()
+    if covering_architect_id != architect_id:
+        return False, "covering_task_not_created_by_architect"
+
+    return True, ""
+
+
 def _finalize_already_covered_pm_roots(
         state: MatrixState,
         *,
@@ -11182,6 +11238,8 @@ def _finalize_already_covered_pm_roots(
         task_ids: list[str] | None = None,
         limit: int = 0,
         board_sync_manager=None,
+        architect_id: str = "",
+        group: str = "",
 ) -> dict:
     """Dry-run or apply backlog hygiene for already-covered PM roots."""
     requested = {
@@ -11189,12 +11247,30 @@ def _finalize_already_covered_pm_roots(
         for task_id in (task_ids or [])
         if str(task_id or "").strip()
     }
-    inventory = _pm_root_backlog_hygiene_inventory(state)
+    inventory = _pm_root_backlog_hygiene_inventory(state, group=group)
     if requested:
         inventory = [
             item for item in inventory
             if item.get("task_id") in requested
         ]
+    if architect_id:
+        scoped_inventory = []
+        for item in inventory:
+            authorized, reason = (
+                _pm_root_backlog_hygiene_authorized_for_architect(
+                    state,
+                    item,
+                    architect_id,
+                    group,
+                )
+            )
+            scoped_item = dict(item)
+            scoped_item["authorized_for_architect"] = bool(authorized)
+            if not authorized:
+                scoped_item["eligible"] = False
+                scoped_item["reason"] = reason
+            scoped_inventory.append(scoped_item)
+        inventory = scoped_inventory
     eligible = [item for item in inventory if item.get("eligible")]
     if limit and limit > 0:
         eligible_to_apply = eligible[:limit]
@@ -11237,6 +11313,9 @@ def _finalize_already_covered_pm_roots(
 
     return {
         "type": "pm_root_backlog_hygiene",
+        "scope": "architect" if architect_id else "internal",
+        "architect_id": _completion_evidence_text(architect_id, limit=120),
+        "group": _completion_evidence_text(group, limit=200),
         "apply": bool(apply),
         "eligible_count": len(eligible),
         "ineligible_count": len(inventory) - len(eligible),
@@ -21282,30 +21361,52 @@ async def main(connection=None):
                             group=_covered_task.group,
                         )
 
-            elif cmd == "board_pm_root_backlog_hygiene":
-                raw_task_ids = data.get("task_ids", []) or []
-                if isinstance(raw_task_ids, str):
-                    raw_task_ids = [
-                        part.strip()
-                        for part in raw_task_ids.split(",")
-                        if part.strip()
+            elif cmd == "architect_pm_root_backlog_hygiene":
+                architect_id = str(data.get("architect_id", "") or "").strip()
+                architect = state.agents.get(architect_id)
+                architect_group = str(
+                    getattr(architect, "group", "") or ""
+                ).strip()
+                if (
+                        not architect
+                        or str(getattr(architect, "kind", "") or "").strip()
+                        != "architect"
+                        or not architect_group):
+                    result = {
+                        "type": "error",
+                        "message": "architect not found",
+                    }
+                elif state.agent_is_tombstoned(architect):
+                    result = {
+                        "type": "error",
+                        "message": "architect is tombstoned",
+                    }
+                else:
+                    raw_task_ids = data.get("task_ids", []) or []
+                    if isinstance(raw_task_ids, str):
+                        raw_task_ids = [
+                            part.strip()
+                            for part in raw_task_ids.split(",")
+                            if part.strip()
+                        ]
+                    task_ids = [
+                        _resolve_task_id(state, task_id)
+                        for task_id in raw_task_ids
+                        if str(task_id or "").strip()
                     ]
-                task_ids = [
-                    _resolve_task_id(state, task_id)
-                    for task_id in raw_task_ids
-                    if str(task_id or "").strip()
-                ]
-                try:
-                    limit = int(data.get("limit", 0) or 0)
-                except (TypeError, ValueError):
-                    limit = 0
-                result = _finalize_already_covered_pm_roots(
-                    state,
-                    apply=bool(data.get("apply", False)),
-                    task_ids=task_ids,
-                    limit=limit,
-                    board_sync_manager=board_sync_manager,
-                )
+                    try:
+                        limit = int(data.get("limit", 0) or 0)
+                    except (TypeError, ValueError):
+                        limit = 0
+                    result = _finalize_already_covered_pm_roots(
+                        state,
+                        apply=bool(data.get("apply", False)),
+                        task_ids=task_ids,
+                        limit=limit,
+                        board_sync_manager=board_sync_manager,
+                        architect_id=architect_id,
+                        group=architect_group,
+                    )
 
             elif cmd == "board_verify_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
