@@ -23,11 +23,7 @@ from .agent_classes import append_agent_class_prompt_block
 from .behavior_overlay import behavior_overlay_block_marker, split_behavior_overlay_blocks
 from .config import log
 from .identity import prepend_agent_identity_anchor
-from .runner_backends import (
-    CODEX_SDK_READONLY_BACKEND,
-    is_codex_sdk_readonly,
-    normalize_runner_backend,
-)
+from .runner_backends import normalize_runner_backend
 
 DEFAULT_MCP_ENTRYPOINT = "torque/mcp.py"
 ARCHITECT_MCP_ENTRYPOINT = "torque/mcp_architect.py"
@@ -391,12 +387,6 @@ class AgentLaunchService:
             resolved.get("runner_backend", ""),
             effective_agent_type,
         )
-        if runner_backend == CODEX_SDK_READONLY_BACKEND:
-            resolved["worktree"] = False
-            resolved["worktree_auto_checkpoint"] = False
-            resolved["checkpoint_on_progress"] = False
-            resolved["terminals"] = []
-
         return {
             "provider": provider,
             "agent_type": effective_agent_type,
@@ -611,12 +601,6 @@ class AgentLaunchService:
     def apply_persistent_prompt(self, cell, launch_cfg: dict,
                                 prompt_text: str = "") -> None:
         """Inject adapter-managed persistent prompt flags into launch config."""
-        if is_codex_sdk_readonly(
-                launch_cfg.get("runner_backend", "")
-                or getattr(cell, "runner_backend", "")):
-            if prompt_text:
-                launch_cfg["sdk_system_prompt"] = prompt_text
-            return
         agent_type = launch_cfg.get("agent_type", "") or cell.agent_type
         if not prompt_text or not agent_type:
             return
@@ -689,19 +673,6 @@ class AgentLaunchService:
             launch_cfg.get("agent_type", ""),
         )
         launch_cfg["runner_backend"] = runner_backend
-        if runner_backend == CODEX_SDK_READONLY_BACKEND:
-            if getattr(inherited_worktree_from, "worktree_path", ""):
-                raise ValueError(
-                    "codex-sdk-readonly cannot inherit a Torque worktree"
-                )
-            if launch_cfg.get("adopted_worktree"):
-                raise ValueError(
-                    "codex-sdk-readonly cannot adopt a Torque worktree"
-                )
-            launch_cfg["worktree"] = False
-            launch_cfg["worktree_auto_checkpoint"] = False
-            launch_cfg["checkpoint_on_progress"] = False
-            launch_cfg["terminals"] = []
         cell = self.state.add_agent(
             name=name,
             group=group,
@@ -786,14 +757,6 @@ class AgentLaunchService:
                 if repo_root:
                     cell.directory = repo_root
                     launch_cfg["directory"] = repo_root
-        if runner_backend == CODEX_SDK_READONLY_BACKEND:
-            cell.worktree_path = ""
-            cell.worktree_branch = ""
-            cell.worktree_repo_root = ""
-            cell.worktree_base_branch = ""
-            cell.git_root = ""
-            cell.worktree_auto_checkpoint = False
-            cell.checkpoint_on_progress = False
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
         self.state.history_record_agent(cell)

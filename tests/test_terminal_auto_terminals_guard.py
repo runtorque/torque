@@ -202,7 +202,7 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
             any(cell.cell_type == "terminal" for cell in state.agents.values())
         )
 
-    async def test_add_agent_accepts_public_sdk_runner_backend_override(self):
+    async def test_add_agent_rejects_removed_sdk_runner_backend_override(self):
         state = self._state_with_hidden_auto_terminals(count=2)
         resolver_calls = []
         child_terminal_calls = []
@@ -219,10 +219,12 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
                 "explicit_template": explicit_template,
                 "overrides": dict(overrides or {}),
             })
+            if (overrides or {}).get("runner_backend") == "codex-sdk-readonly":
+                raise ValueError("runner_backend must be one of: pty")
             return {
                 "provider": "codex",
                 "agent_type": "codex",
-                "runner_backend": (overrides or {}).get("runner_backend", ""),
+                "runner_backend": "pty",
                 "profile": "Default",
                 "command": (overrides or {}).get("command", "codex"),
                 "directory": (overrides or {}).get("directory", "/repo"),
@@ -246,11 +248,10 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
             _resolve_agent_launch_config=resolve_launch_config,
         )
 
-        # Public /api/cmd shape used for operator SDK smoke after deploy/relaunch.
-        await handle_command({
+        result = await handle_command({
             "cmd": "add_agent",
             "group": "g",
-            "name": "Codex SDK Smoke",
+            "name": "Removed SDK Smoke",
             "provider": "codex",
             "command": "codex",
             "directory": "/repo",
@@ -262,15 +263,10 @@ class TerminalAutoTerminalsGuardTests(unittest.IsolatedAsyncioTestCase):
             resolver_calls[0]["overrides"]["runner_backend"],
             "codex-sdk-readonly",
         )
+        self.assertEqual(result["type"], "error")
+        self.assertIn("runner_backend must be one of: pty", result["message"])
         self.assertEqual(child_terminal_calls, [])
-        cell = next(iter(state.agents.values()))
-        self.assertEqual(cell.name, "Codex SDK Smoke")
-        self.assertEqual(cell.agent_type, "codex")
-        self.assertEqual(cell.runner_backend, "codex-sdk-readonly")
-        self.assertEqual(
-            state.to_dict()["agents"][cell.id]["runner_backend"],
-            "codex-sdk-readonly",
-        )
+        self.assertEqual(state.agents, {})
 
     async def test_add_agent_preserves_explicit_companion_terminals(self):
         state = self._state_with_hidden_auto_terminals(count=2)

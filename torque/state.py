@@ -1109,7 +1109,7 @@ class AgentCell:
     slug: str = ""              # auto-generated from name
     cell_type: str = "agent"  # "agent" | "terminal"
     terminal_backend: str = "pty"  # current default; reserved for future backends
-    runner_backend: str = "pty"  # agent runtime backend: pty | codex-sdk-readonly
+    runner_backend: str = "pty"  # agent runtime backend: pty
     session_id: Optional[str] = None
     profile: str = "Default"
     command: str = ""

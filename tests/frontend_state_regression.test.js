@@ -11261,29 +11261,27 @@ test('embedded terminal workspace removes the legacy tab strip regardless of ses
   assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
 });
 
-test('codex sdk readonly workspace renders activity panel instead of PTY terminal', () => {
+test('legacy removed sdk runner backend no longer renders dedicated activity panel', () => {
   const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
   const dom = attachTerminalWorkspaceDom(document);
   sandbox.state.runtime = { embedded_terminal: true };
-  sandbox.state.groups = { alpha: ['sdk-a'] };
+  sandbox.state.groups = { alpha: ['legacy-a'] };
   sandbox.state.group_settings = { alpha: {} };
   sandbox.state.children = {};
   sandbox.state.agents = {
-    'sdk-a': {
-      id: 'sdk-a',
-      name: 'Codex SDK Smoke',
+    'legacy-a': {
+      id: 'legacy-a',
+      name: 'Legacy removed runner record',
       group: 'alpha',
       cell_type: 'agent',
       agent_type: 'codex',
       runner_backend: 'codex-sdk-readonly',
-      session_id: 'sdk-1234567890abcdef',
-      agent_session_id: 'thread-safe-abcdef',
+      session_id: 'legacy-session',
       status: 'running',
-      current_process: 'codex-sdk',
       activity: 'thinking',
-      activity_detail: 'Codex SDK read-only request running',
+      activity_detail: 'Legacy removed runner activity',
       last_progress_at: 100,
       last_activity_at: 110,
       last_event_at: 110,
@@ -11291,31 +11289,16 @@ test('codex sdk readonly workspace renders activity panel instead of PTY termina
   };
 
   runInContext(context, `
-    selectedTerminalId = 'sdk-a';
+    selectedTerminalId = 'legacy-a';
     renderTerminalWorkspace();
   `);
 
-  assert.equal(terminals.length, 0);
-  assert.equal(sockets.length, 0);
-  assert.match(dom.stage.innerHTML, /SDK activity · not a PTY shell/);
-  assert.match(dom.stage.innerHTML, /Private reasoning \/ chain-of-thought is never displayed/);
-  assert.match(dom.stage.innerHTML, /Codex SDK read-only request running/);
-  assert.match(dom.stage.innerHTML, /Prompt accepted; read-only request activity has been observed/);
-  assert.match(dom.statusbar.textContent, /Codex SDK read-only beta/);
-  assert.match(dom.statusbar.textContent, /Codex SDK read-only request running/);
-
-  sandbox.state.agents['sdk-a'].status = 'idle';
-  sandbox.state.agents['sdk-a'].activity = '';
-  sandbox.state.agents['sdk-a'].activity_detail = '';
-  sandbox.state.agents['sdk-a'].last_event_text = 'Codex SDK read-only run completed';
-  sandbox.state.agents['sdk-a'].last_summary = 'final safe answer';
-  runInContext(context, `renderTerminalWorkspace();`);
-
-  assert.equal(terminals.length, 0);
-  assert.equal(sockets.length, 0);
-  assert.match(dom.stage.innerHTML, /Most recent request completed/);
-  assert.match(dom.stage.innerHTML, /Final output/);
-  assert.match(dom.stage.innerHTML, /final safe answer/);
+  assert.equal(terminals.length, 1);
+  assert.equal(sockets.length, 1);
+  assert.doesNotMatch(dom.stage.innerHTML, /SDK activity/);
+  assert.doesNotMatch(dom.stage.innerHTML, /Codex SDK/);
+  assert.doesNotMatch(dom.statusbar.textContent, /Codex SDK/);
+  assert.match(dom.statusbar.textContent, /Legacy removed runner activity/);
 });
 
 test('embedded terminal workspace does not revive tabs for tombstoned cells', () => {
@@ -14721,20 +14704,20 @@ test('terminal compose image drop displays chips and sends returned paths', asyn
 });
 
 
-test('terminal direct compose routes to selected non-SDK agent while SDK cell is active', () => {
+test('terminal direct compose routes to selected non-active agent while another cell is active', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
   runInContext(context, `
     state.runtime = { embedded_terminal: true };
-    state.active_session_id = 'sdk-session';
+    state.active_session_id = 'active-session';
     state.agents = {
-      'sdk-smoke': {
-        id: 'sdk-smoke',
-        name: 'SDK Smoke',
+      'active-worker': {
+        id: 'active-worker',
+        name: 'Active Worker',
         group: 'alpha',
         cell_type: 'agent',
         kind: 'worker',
-        session_id: 'sdk-session',
-        runner_backend: 'codex-sdk-readonly'
+        session_id: 'active-session',
+        runner_backend: 'pty'
       },
       'blueprint': {
         id: 'blueprint',
@@ -14746,8 +14729,8 @@ test('terminal direct compose routes to selected non-SDK agent while SDK cell is
         runner_backend: 'pty'
       }
     };
-    selectedTerminalId = 'sdk-smoke';
-    selectedAgentId = 'sdk-smoke';
+    selectedTerminalId = 'active-worker';
+    selectedAgentId = 'active-worker';
     renderTerminalWorkspace = function() {};
   `);
 
@@ -14883,16 +14866,16 @@ test('terminal direct compose keeps draft when websocket send fails before persi
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
   runInContext(context, `
     state.runtime = { embedded_terminal: true };
-    state.active_session_id = 'sdk-session';
+    state.active_session_id = 'active-session';
     state.agents = {
-      'sdk-smoke': {
-        id: 'sdk-smoke',
-        name: 'SDK Smoke',
+      'active-worker': {
+        id: 'active-worker',
+        name: 'Active Worker',
         group: 'alpha',
         cell_type: 'agent',
         kind: 'worker',
-        session_id: 'sdk-session',
-        runner_backend: 'codex-sdk-readonly'
+        session_id: 'active-session',
+        runner_backend: 'pty'
       },
       'blueprint': {
         id: 'blueprint',
@@ -14904,8 +14887,8 @@ test('terminal direct compose keeps draft when websocket send fails before persi
         runner_backend: 'pty'
       }
     };
-    selectedTerminalId = 'sdk-smoke';
-    selectedAgentId = 'sdk-smoke';
+    selectedTerminalId = 'active-worker';
+    selectedAgentId = 'active-worker';
     renderTerminalWorkspace = function() {};
     send = function(message) {
       sendCalls.push(message);

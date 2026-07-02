@@ -16,7 +16,6 @@ from .adapters.codex import (
 )
 from .config import log
 from .provider_usage import normalize_provider_usage, provider_usage_fingerprint
-from .runner_backends import is_codex_sdk_readonly
 
 _ROLLOUT_SESSION_ID_RE = re.compile(
     r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?P<sid>.+)\.jsonl$"
@@ -248,7 +247,7 @@ def _is_codex_agent(cell) -> bool:
 
 
 def _is_codex_pty_agent(cell) -> bool:
-    return _is_codex_agent(cell) and not is_codex_sdk_readonly(cell)
+    return _is_codex_agent(cell)
 
 
 def _is_dormant_codex_agent(cell) -> bool:
@@ -300,9 +299,6 @@ def refresh_codex_provider_usage_for_agents(
             report.skip("tombstoned")
             continue
         report.considered += 1
-        if is_codex_sdk_readonly(cell):
-            report.skip("sdk_runner")
-            continue
         try:
             if not include_live and getattr(cell, "session_id", None):
                 report.skip("active_session")
@@ -385,9 +381,6 @@ def _refresh_codex_provider_usage_for_cell(
     """Refresh one Codex cell; return ``changed`` or a skip reason."""
     if not _is_codex_agent(cell):
         return "not_codex"
-    if is_codex_sdk_readonly(cell):
-        return "sdk_runner"
-
     rollout_path, agent_session_id, skip_reason = _resolve_rollout_for_cell(
         cell,
         codex_home=codex_home,
