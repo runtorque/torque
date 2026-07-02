@@ -3750,6 +3750,66 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(refreshed.status, "")
         self.assertTrue(refreshed.completion_evidence["covered_by"]["moved_to_done"])
 
+    def test_board_finalize_existing_task_coverage_preserves_original_evidence(self):
+        state = self._make_state()
+        covered = state.board_add_task(
+            "Already covered backlog card",
+            "g",
+            id="TORQUE:1116",
+            status="Covered elsewhere",
+        )
+        covering = state.board_add_task(
+            "Covering implementation",
+            "g",
+            id="TORQUE:1119",
+        )
+        state.board_mark_task_covered(
+            covered.id,
+            covering_task_id=covering.id,
+            pr_url="https://github.com/runtorque/torque/pull/942",
+            sha="abc942",
+            tests_run="make test",
+            notes="Final shipped evidence.",
+            actor_name="Torqly",
+            actor_id="arch-1",
+            actor_kind="architect",
+            authorization={
+                "scope": "routed_pm_product_root",
+                "source": "covering_task_label",
+                "covered_task_id": covered.id,
+                "covering_task_id": covering.id,
+            },
+            move_to_done=False,
+        )
+        original = dict(covered.completion_evidence["covered_by"])
+
+        result = state.board_finalize_existing_task_coverage(
+            covered.id,
+            actor_name="Torque",
+            actor_id="arch-1",
+            actor_kind="system",
+            reason="Backlog hygiene.",
+        )
+
+        self.assertEqual(result["type"], "task_coverage_finalized")
+        refreshed = state.board_tasks[covered.id]
+        self.assertEqual(refreshed.lane, "Done")
+        self.assertEqual(refreshed.status, "")
+        covered_by = refreshed.completion_evidence["covered_by"]
+        for key in (
+                "recorded_at", "recorded_by", "recorded_by_id",
+                "recorded_by_kind", "task_id", "task_title", "pr_url", "sha",
+                "tests_run", "notes", "authorization"):
+            self.assertEqual(covered_by[key], original[key])
+        self.assertFalse(original["moved_to_done"])
+        self.assertTrue(covered_by["moved_to_done"])
+        self.assertEqual(covered_by["finalized_by"], "Torque")
+        self.assertEqual(covered_by["finalized_by_id"], "arch-1")
+        self.assertEqual(covered_by["finalized_by_kind"], "system")
+        self.assertEqual(refreshed.messages[-2]["action"], "covered_by")
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by_finalized")
+        self.assertIn("Backlog hygiene", refreshed.messages[-1]["message"])
+
     def test_board_mark_task_covered_rejects_empty_or_self_coverage(self):
         state = self._make_state()
         task = state.board_add_task("Triage card", "g", id="TORQUE:794")

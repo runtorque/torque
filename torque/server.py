@@ -11018,6 +11018,247 @@ def _auto_resolve_pm_product_roots_and_enqueue(
     return auto_resolved
 
 
+_PM_ROOT_BACKLOG_HYGIENE_REASON = (
+    "Backlog hygiene finalization for PM-created product root with existing "
+    "final covered_by PR/SHA/test evidence."
+)
+
+
+def _task_text_field(task, field: str, limit: int = 500) -> str:
+    return _completion_evidence_text(
+        getattr(task, field, "") if task is not None else "",
+        limit=limit,
+    )
+
+
+def _pm_root_backlog_hygiene_item(state: MatrixState, root) -> dict:
+    """Classify one Backlog PM/product root for covered-by finalization."""
+    root_id = _task_text_field(root, "id", 120)
+    labels = [
+        str(label or "").strip()
+        for label in (getattr(root, "labels", []) or [])
+        if str(label or "").strip()
+    ]
+    label_set = set(labels)
+    item = {
+        "task_id": root_id,
+        "task": _task_text_field(root, "task", 500),
+        "lane": _task_text_field(root, "lane", 80),
+        "eligible": False,
+        "reason": "",
+        "labels": labels,
+    }
+
+    if not root_id:
+        item["reason"] = "missing_task_id"
+        return item
+    if task_is_closed(root):
+        item["reason"] = "already_closed"
+        return item
+    if item["lane"] != "Backlog":
+        item["reason"] = "not_backlog"
+        return item
+    if str(getattr(root, "parent_task_id", "") or "").strip() \
+            or int(getattr(root, "pipeline_depth", 0) or 0):
+        item["reason"] = "not_root_task"
+        return item
+
+    try:
+        from .mcp_tools_shared import _PRODUCT_TASK_LABELS
+    except Exception:
+        log.exception("Failed to load PM product label constants")
+        item["reason"] = "product_label_helper_unavailable"
+        return item
+    required_labels = set(_PRODUCT_TASK_LABELS)
+    if not required_labels.issubset(label_set):
+        item["reason"] = "not_pm_product_root"
+        item["missing_labels"] = sorted(required_labels - label_set)
+        return item
+
+    evidence = getattr(root, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        item["reason"] = "missing_completion_evidence"
+        return item
+    covered_by = evidence.get("covered_by", {}) or {}
+    if not isinstance(covered_by, dict) or not covered_by:
+        item["reason"] = "missing_covered_by_evidence"
+        return item
+
+    covering_task_id = _completion_evidence_text(
+        covered_by.get("task_id", ""),
+        limit=120,
+    )
+    item["covering_task_id"] = covering_task_id
+    item["pr_url"] = _completion_evidence_text(
+        covered_by.get("pr_url", ""),
+        limit=500,
+    )
+    item["sha"] = _completion_evidence_text(
+        covered_by.get("sha", ""),
+        limit=120,
+    )
+    item["tests_run"] = _completion_evidence_text(
+        covered_by.get("tests_run", ""),
+        limit=1000,
+    )
+    item["moved_to_done"] = bool(covered_by.get("moved_to_done"))
+    if item["moved_to_done"]:
+        item["reason"] = "coverage_already_marked_moved_to_done"
+        return item
+
+    authorization = covered_by.get("authorization", {}) or {}
+    if not isinstance(authorization, dict) or not authorization:
+        item["reason"] = "missing_route_authorization"
+        return item
+    item["authorization_scope"] = _completion_evidence_text(
+        authorization.get("scope", ""),
+        limit=120,
+    )
+    item["authorization_source"] = _completion_evidence_text(
+        authorization.get("source", ""),
+        limit=200,
+    )
+    if item["authorization_scope"] != "routed_pm_product_root":
+        item["reason"] = "route_authorization_scope_mismatch"
+        return item
+    auth_covered_task_id = _completion_evidence_text(
+        authorization.get("covered_task_id", ""),
+        limit=120,
+    )
+    auth_covering_task_id = _completion_evidence_text(
+        authorization.get("covering_task_id", ""),
+        limit=120,
+    )
+    if auth_covered_task_id and auth_covered_task_id != root_id:
+        item["reason"] = "route_authorization_task_mismatch"
+        item["authorization_covered_task_id"] = auth_covered_task_id
+        return item
+    if auth_covering_task_id and covering_task_id \
+            and auth_covering_task_id != covering_task_id:
+        item["reason"] = "route_authorization_covering_task_mismatch"
+        item["authorization_covering_task_id"] = auth_covering_task_id
+        return item
+    if not covering_task_id:
+        item["reason"] = "ambiguous_covering_task"
+        return item
+
+    covering_task = state.board_tasks.get(covering_task_id)
+    if not covering_task:
+        item["reason"] = "covering_task_missing"
+        return item
+    item["covering_task_lane"] = _task_text_field(covering_task, "lane", 80)
+    item["covering_task_title"] = _task_text_field(covering_task, "task", 500)
+    if not task_counts_as_done(covering_task):
+        item["reason"] = "pending_coverage"
+        item["pending_detail"] = "covering_task_not_done"
+        return item
+
+    missing_final = [
+        name for name in ("pr_url", "sha", "tests_run") if not item.get(name)
+    ]
+    if missing_final:
+        item["reason"] = "missing_final_evidence"
+        item["missing_final_evidence"] = missing_final
+        return item
+
+    item["eligible"] = True
+    item["reason"] = "eligible_final_covered_by_evidence"
+    return item
+
+
+def _pm_root_backlog_hygiene_inventory(state: MatrixState) -> list[dict]:
+    """Inventory Backlog PM/product roots with eligibility reasons."""
+    items = []
+    for root in sorted(
+            list(getattr(state, "board_tasks", {}).values()),
+            key=lambda task: (getattr(task, "created_at", "") or "",
+                              getattr(task, "id", "") or "")):
+        labels = {
+            str(label or "").strip()
+            for label in (getattr(root, "labels", []) or [])
+        }
+        if not {"pm-created", "product-proposal"}.issubset(labels):
+            continue
+        if str(getattr(root, "lane", "") or "").strip() != "Backlog":
+            continue
+        items.append(_pm_root_backlog_hygiene_item(state, root))
+    return items
+
+
+def _finalize_already_covered_pm_roots(
+        state: MatrixState,
+        *,
+        apply: bool = False,
+        task_ids: list[str] | None = None,
+        limit: int = 0,
+        board_sync_manager=None,
+) -> dict:
+    """Dry-run or apply backlog hygiene for already-covered PM roots."""
+    requested = {
+        state.resolve_task_alias(str(task_id or "").strip())
+        for task_id in (task_ids or [])
+        if str(task_id or "").strip()
+    }
+    inventory = _pm_root_backlog_hygiene_inventory(state)
+    if requested:
+        inventory = [
+            item for item in inventory
+            if item.get("task_id") in requested
+        ]
+    eligible = [item for item in inventory if item.get("eligible")]
+    if limit and limit > 0:
+        eligible_to_apply = eligible[:limit]
+    else:
+        eligible_to_apply = eligible
+
+    finalized = []
+    errors = []
+    if apply:
+        for item in eligible_to_apply:
+            task_id = item.get("task_id", "")
+            covering = state.board_tasks.get(item.get("covering_task_id", ""))
+            actor_id = _task_text_field(covering, "created_by_architect_id", 120) \
+                or _completion_evidence_text(
+                    ((state.board_tasks.get(task_id).completion_evidence or {})
+                     .get("covered_by", {}) or {}).get("recorded_by_id", ""),
+                    limit=120,
+                )
+            try:
+                result = state.board_finalize_existing_task_coverage(
+                    task_id,
+                    actor_name="Torque",
+                    actor_id=actor_id,
+                    actor_kind="system",
+                    reason=_PM_ROOT_BACKLOG_HYGIENE_REASON,
+                )
+            except ValueError as exc:
+                errors.append({
+                    "task_id": task_id,
+                    "reason": str(exc),
+                })
+                continue
+            finalized.append(result)
+            if board_sync_manager:
+                board_sync_manager.enqueue_for_local_change(
+                    task_id,
+                    reason="pm_root_backlog_hygiene_finalized",
+                    fields=("completion_evidence", "messages", "lane"),
+                )
+
+    return {
+        "type": "pm_root_backlog_hygiene",
+        "apply": bool(apply),
+        "eligible_count": len(eligible),
+        "ineligible_count": len(inventory) - len(eligible),
+        "inventory_count": len(inventory),
+        "limit": int(limit or 0),
+        "applied_count": len(finalized),
+        "finalized": finalized,
+        "errors": errors,
+        "items": inventory,
+    }
+
+
 def _record_task_completion_evidence_snapshot(
         state: MatrixState,
         task,
@@ -21110,6 +21351,31 @@ async def main(connection=None):
                             targets=_covered_resume_targets,
                             group=_covered_task.group,
                         )
+
+            elif cmd == "board_pm_root_backlog_hygiene":
+                raw_task_ids = data.get("task_ids", []) or []
+                if isinstance(raw_task_ids, str):
+                    raw_task_ids = [
+                        part.strip()
+                        for part in raw_task_ids.split(",")
+                        if part.strip()
+                    ]
+                task_ids = [
+                    _resolve_task_id(state, task_id)
+                    for task_id in raw_task_ids
+                    if str(task_id or "").strip()
+                ]
+                try:
+                    limit = int(data.get("limit", 0) or 0)
+                except (TypeError, ValueError):
+                    limit = 0
+                result = _finalize_already_covered_pm_roots(
+                    state,
+                    apply=bool(data.get("apply", False)),
+                    task_ids=task_ids,
+                    limit=limit,
+                    board_sync_manager=board_sync_manager,
+                )
 
             elif cmd == "board_verify_task":
                 tid = _resolve_task_id(state, data.get("id", ""))

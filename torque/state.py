@@ -12815,6 +12815,108 @@ class MatrixState:
             "moved_to_done": bool(move_to_done),
         }
 
+    def board_finalize_existing_task_coverage(
+            self,
+            tid: str,
+            *,
+            actor_name: str = "Torque",
+            actor_id: str = "",
+            actor_kind: str = "",
+            reason: str = "") -> dict:
+        """Move an already-covered task to Done without rewriting evidence.
+
+        ``board_mark_task_covered(..., move_to_done=True)`` is the normal path
+        when the caller is attaching coverage and closing the card in one
+        operation.  Backlog hygiene for older cards needs a narrower path: keep
+        the existing ``completion_evidence.covered_by`` record (including the
+        original actor, route authorization, PR/SHA/test notes, and timestamp),
+        append finalization metadata, add an auditable history message, then use
+        normal board move semantics.
+        """
+        tid = self.resolve_task_alias(tid)
+        task = self.board_tasks.get(tid)
+        if not task:
+            raise ValueError("Task not found")
+        if "Done" not in self.board_lanes:
+            raise ValueError("Done lane not available")
+
+        completion_evidence = _normalize_completion_evidence(
+            getattr(task, "completion_evidence", {}) or {}
+        )
+        covered_by = completion_evidence.get("covered_by", {}) or {}
+        if not isinstance(covered_by, dict) or not covered_by:
+            raise ValueError("Task has no existing covered_by evidence")
+
+        actor_name = str(actor_name or "").strip() or "Torque"
+        actor_id = str(actor_id or "").strip()
+        actor_kind = str(actor_kind or "").strip()
+        reason = str(reason or "").strip() or (
+            "Finalized already-covered task using preserved coverage evidence."
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        finalized_by = copy.deepcopy(covered_by)
+        finalized_by["moved_to_done"] = True
+        finalized_by["finalized_at"] = now_iso
+        finalized_by["finalized_by"] = actor_name
+        finalized_by["finalized_by_id"] = actor_id
+        finalized_by["finalized_by_kind"] = actor_kind
+        finalized_by["finalized_reason"] = reason
+
+        completion_evidence["status"] = (
+            str(completion_evidence.get("status", "") or "").strip()
+            or "evidence_attached"
+        )
+        completion_evidence["sources"] = _append_unique_string(
+            completion_evidence.get("sources", []),
+            "covered_by",
+        )
+        completion_evidence["covered_by"] = finalized_by
+        completion_evidence["updated_by"] = actor_name
+        completion_evidence["updated_at"] = now_iso
+
+        messages = list(getattr(task, "messages", []) or [])
+        message = (
+            "Finalized covered task to Done using preserved coverage evidence."
+        )
+        covering_task_id = str(finalized_by.get("task_id", "") or "").strip()
+        if covering_task_id:
+            message += f" Covering task: {covering_task_id}."
+        pr_url = str(finalized_by.get("pr_url", "") or "").strip()
+        if pr_url:
+            message += f" PR: {pr_url}."
+        sha = str(finalized_by.get("sha", "") or "").strip()
+        if sha:
+            message += f" SHA: {sha}."
+        if reason:
+            message += f" Reason: {reason}"
+        messages.append({
+            "timestamp": time.time(),
+            "action": "covered_by_finalized",
+            "message": message,
+            "agent_name": actor_name,
+            "agent_id": actor_id,
+            "agent_kind": actor_kind,
+        })
+
+        self.board_update_task(
+            tid,
+            completion_evidence=completion_evidence,
+            messages=messages,
+            status="",
+        )
+        self.board_move_task(tid, "Done", clear_status=True)
+
+        refreshed = self.board_tasks.get(tid)
+        return {
+            "type": "task_coverage_finalized",
+            "task_id": tid,
+            "lane": str(getattr(refreshed, "lane", "") or ""),
+            "covered_by": finalized_by,
+            "message": message,
+            "moved_to_done": True,
+        }
+
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
