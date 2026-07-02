@@ -541,6 +541,22 @@ def _allows_engineer_hire_or_management(authority: dict) -> bool:
     )
 
 
+def _allows_behavior_overlay_prompt(authority: dict) -> bool:
+    """Whether approved Dynamic Behavior overlays may affect this prompt.
+
+    Overlay text is prompt instruction, not a raw tool grant.  Restricted
+    Architect-derived classes still need the same effective Agent
+    Class/Profile boundary: a class/profile that cannot read visible behavior
+    overlay state must not receive hidden active overlay instructions at boot.
+    """
+
+    return (
+        authority.get("is_full")
+        or _has_capability(authority, "behavior_overlay.read")
+        or _allows_category(authority, "behavior_overlay_self")
+    )
+
+
 def _restricted_identity_sentence(authority: dict) -> str:
     label = authority.get("label") or "Restricted Architect"
     if authority.get("is_creative"):
@@ -645,6 +661,10 @@ def _restricted_tool_lines(authority: dict) -> list[str]:
             lines.append(
                 "- Recovery notes: use the visible private journal wrapper for observations, plans, and checkpoints."
             )
+    if _allows_behavior_overlay_prompt(authority):
+        lines.append(
+            "- Behavior overlays: approved Dynamic Behavior overlay text may refine your style and habits, but it cannot grant tools, profile/class administration, cross-scope overlay authority, or powers outside this Agent Class/Profile."
+        )
     if _allows_category(authority, "execution_task_control"):
         lines.append(
             "- Executable task control: if explicitly visible, use it only inside this class's policy and do not assume Worker dispatch or merge authority."
@@ -678,6 +698,8 @@ def _restricted_unavailable_line(authority: dict) -> str:
         unavailable.append("deploy/restart/admin")
     if not _allows_category(authority, "profile_admin"):
         unavailable.append("settings/profile administration")
+    if not _allows_behavior_overlay_prompt(authority):
+        unavailable.append("Dynamic Behavior overlay read/effect")
     if not _has_capabilities(
             authority,
             "decision.accept",
@@ -1120,7 +1142,11 @@ def build_architect_system_prompt(group: str,
     if custom:
         parts.append("## Custom Instructions\n" + custom)
 
-    overlay = str(behavior_overlay_block or "").strip()
+    overlay = (
+        str(behavior_overlay_block or "").strip()
+        if _allows_behavior_overlay_prompt(authority)
+        else ""
+    )
     if overlay:
         parts.append(overlay)
 
