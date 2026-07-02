@@ -73,6 +73,14 @@ var TERMINAL_COMPOSE_SLASH_COMMANDS = [
     search: 'compact /compact context summary',
   },
   {
+    id: 'restart',
+    label: '/restart',
+    usage: '/restart',
+    insert: '/restart',
+    help: 'Restart only this DM agent with a fresh session.',
+    search: 'restart /restart relaunch fresh session current dm agent',
+  },
+  {
     id: 'loop-every',
     label: '/loop every <interval> <message>',
     usage: '/loop every 10m check status',

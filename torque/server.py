@@ -7789,13 +7789,12 @@ async def _queue_user_direct_message_to_agent(
     ) or row
 
 
-def _save_user_agent_loop_audit_message(
+def _save_user_agent_system_audit_message(
         state: MatrixState,
         target,
         message: str,
         *,
-        loop_id: str = "",
-        status: str = "",
+        context_snapshot: dict | None = None,
         now: float | None = None) -> dict | None:
     """Persist a visible system/audit row in the user↔agent DM lane."""
     if not getattr(state, "db", None) or not target:
@@ -7819,15 +7818,32 @@ def _save_user_agent_loop_audit_message(
         "created_at": ts,
         "ack_required": False,
         "blocking": False,
-        "context_snapshot": {
-            "loop_id": str(loop_id or "").strip(),
-            "loop_status": str(status or "").strip(),
-        },
+        "context_snapshot": dict(context_snapshot or {}),
         "delivery_state": "delivered",
         "delivery_reason": "",
         "delivered_at": ts,
     }
     return state.save_direct_message(row)
+
+
+def _save_user_agent_loop_audit_message(
+        state: MatrixState,
+        target,
+        message: str,
+        *,
+        loop_id: str = "",
+        status: str = "",
+        now: float | None = None) -> dict | None:
+    return _save_user_agent_system_audit_message(
+        state,
+        target,
+        message,
+        context_snapshot={
+            "loop_id": str(loop_id or "").strip(),
+            "loop_status": str(status or "").strip(),
+        },
+        now=now,
+    )
 
 
 def _user_agent_loop_response(loop, *, audit_row: dict | None = None) -> dict:
@@ -7894,6 +7910,176 @@ def _handle_user_agent_loop_command(
         status="active",
     )
     return _user_agent_loop_response(loop, audit_row=audit)
+
+
+def _restore_user_agent_restart_focus(state: MatrixState,
+                                      target_id: str,
+                                      selected_before: str) -> None:
+    """Keep the selected DM target stable if restart internals disturb it."""
+    target_id = str(target_id or "").strip()
+    selected_before = str(selected_before or "").strip()
+    if not target_id or selected_before != target_id:
+        return
+    if str(getattr(state, "selected_agent_id", "") or "").strip() == target_id:
+        return
+    state.selected_agent_id = target_id
+    state._emit(
+        "ui_update",
+        key="selected_agent_id",
+        value=state.selected_agent_id,
+    )
+    state._db_save_ui("selected_agent_id", state.selected_agent_id)
+
+
+def _user_agent_restart_response(target,
+                                 *,
+                                 status: str,
+                                 requested_row: dict | None = None,
+                                 audit_row: dict | None = None,
+                                 message: str = "") -> dict:
+    payload = {
+        "type": "agent_restart",
+        "agent_id": str(getattr(target, "id", "") or "").strip(),
+        "status": str(status or "").strip(),
+    }
+    if message:
+        payload["message"] = str(message)
+    if requested_row:
+        payload["requested_message_id"] = str(
+            requested_row.get("id", "") or "")
+    if audit_row:
+        payload["audit_message_id"] = str(audit_row.get("id", "") or "")
+    return payload
+
+
+async def _handle_user_agent_restart_command(
+        data: dict,
+        state: MatrixState,
+        target,
+        restart_agent) -> dict:
+    """Handle the exact user-DM /restart slash command for one target."""
+    del data  # Currently no command arguments are accepted for /restart.
+    requested = _save_user_agent_system_audit_message(
+        state,
+        target,
+        f"User requested /restart for {target.name or target.id}.",
+        context_snapshot={
+            "slash_command": "restart",
+            "restart_status": "requested",
+        },
+    )
+    if not callable(restart_agent):
+        audit = _save_user_agent_system_audit_message(
+            state,
+            target,
+            "User /restart failed: agent restart is unavailable.",
+            context_snapshot={
+                "slash_command": "restart",
+                "restart_status": "failed",
+                "restart_reason": "restart_unavailable",
+            },
+        )
+        payload = _user_agent_restart_response(
+            target,
+            status="failed",
+            requested_row=requested,
+            audit_row=audit,
+            message="Agent restart is unavailable",
+        )
+        payload["type"] = "error"
+        return payload
+
+    if _agent_dismissed_at(target):
+        audit = _save_user_agent_system_audit_message(
+            state,
+            target,
+            "User /restart failed: target agent is dismissed.",
+            context_snapshot={
+                "slash_command": "restart",
+                "restart_status": "failed",
+                "restart_reason": "agent_dismissed",
+            },
+        )
+        payload = _user_agent_restart_response(
+            target,
+            status="failed",
+            requested_row=requested,
+            audit_row=audit,
+            message="Target agent is dismissed",
+        )
+        payload["type"] = "error"
+        return payload
+
+    selected_before = str(getattr(state, "selected_agent_id", "") or "").strip()
+    try:
+        result = await restart_agent({
+            "cmd": "restart_agent",
+            "id": target.id,
+        })
+    except Exception as exc:
+        reason = str(exc).strip() or type(exc).__name__ or "restart_failed"
+        log.exception(
+            "User-DM /restart failed for '%s'",
+            getattr(target, "id", ""),
+        )
+        audit = _save_user_agent_system_audit_message(
+            state,
+            target,
+            f"User /restart failed: {reason}",
+            context_snapshot={
+                "slash_command": "restart",
+                "restart_status": "failed",
+                "restart_reason": reason,
+            },
+        )
+        payload = _user_agent_restart_response(
+            target,
+            status="failed",
+            requested_row=requested,
+            audit_row=audit,
+            message=reason,
+        )
+        payload["type"] = "error"
+        return payload
+
+    if isinstance(result, dict) and result.get("type") == "error":
+        reason = str(result.get("message", "") or "Restart failed").strip()
+        audit = _save_user_agent_system_audit_message(
+            state,
+            target,
+            f"User /restart failed: {reason}",
+            context_snapshot={
+                "slash_command": "restart",
+                "restart_status": "failed",
+                "restart_reason": reason,
+            },
+        )
+        payload = _user_agent_restart_response(
+            target,
+            status="failed",
+            requested_row=requested,
+            audit_row=audit,
+            message=reason,
+        )
+        payload["type"] = "error"
+        return payload
+
+    _restore_user_agent_restart_focus(state, target.id, selected_before)
+    audit = _save_user_agent_system_audit_message(
+        state,
+        target,
+        f"User /restart succeeded for {target.name or target.id}.",
+        context_snapshot={
+            "slash_command": "restart",
+            "restart_status": "succeeded",
+        },
+    )
+    return _user_agent_restart_response(
+        target,
+        status="succeeded",
+        requested_row=requested,
+        audit_row=audit,
+    )
 
 
 async def _replay_buffered_cross_kind_messages(
@@ -9261,7 +9447,8 @@ async def _handle_send_user_message_command(data, state: MatrixState,
 
 
 async def _handle_user_agent_message_command(data, state: MatrixState,
-                                             send_prompt) -> dict:
+                                             send_prompt, *,
+                                             restart_agent=None) -> dict:
     """Persist and non-interruptively deliver a user→agent direct message."""
     target_ident = str(
         data.get("agent_id")
@@ -9291,6 +9478,13 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
             state,
             target,
             stripped_message,
+        )
+    if stripped_message == "/restart" and not bool(data.get("_loop_delivery")):
+        return await _handle_user_agent_restart_command(
+            data,
+            state,
+            target,
+            restart_agent,
         )
 
     idempotency_key = _user_agent_message_idempotency_key(data)
@@ -17098,12 +17292,34 @@ async def main(connection=None):
             settled_submit=settled_submit,
         )
 
+    async def _restart_agent_session(command: dict) -> dict | None:
+        return await _handle_restart_agent_command(
+            command,
+            state,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            resolve_base_dir=_resolve_base_dir,
+            resolve_agent_launch_config=_resolve_agent_launch_config,
+            resolve_engineer_launch_config=_resolve_engineer_launch_config,
+            resolve_architect_launch_config=_resolve_architect_launch_config,
+            resolve_worker_launch_config=_resolve_worker_launch_config,
+            apply_persistent_prompt=_apply_persistent_prompt,
+            build_cell_persistent_prompt=_build_cell_persistent_prompt,
+            persistent_prompt_filename=_persistent_prompt_filename,
+            is_designated_engineer=_is_designated_engineer,
+            send_agent_prompt=_send_agent_prompt,
+            clear_digest_backlog_for_restart=(
+                engineer_buffer.clear_digest_backlog_for_restart
+            ),
+        )
+
     async def _ingest_remote_user_agent_message(payload: dict) -> dict:
         return await ingest_remote_user_agent_message(
             payload,
             state=state,
             send_prompt=_send_agent_prompt,
             handler=_handle_user_agent_message_command,
+            restart_agent=_restart_agent_session,
         )
 
     async def _ingest_remote_command(payload: dict) -> dict:
@@ -17114,25 +17330,7 @@ async def main(connection=None):
                     "code": "unsupported_command",
                     "message": "unsupported remote command",
                 }
-            return await _handle_restart_agent_command(
-                command,
-                state,
-                bridge=bridge,
-                worktree_mgr=worktree_mgr,
-                resolve_base_dir=_resolve_base_dir,
-                resolve_agent_launch_config=_resolve_agent_launch_config,
-                resolve_engineer_launch_config=_resolve_engineer_launch_config,
-                resolve_architect_launch_config=_resolve_architect_launch_config,
-                resolve_worker_launch_config=_resolve_worker_launch_config,
-                apply_persistent_prompt=_apply_persistent_prompt,
-                build_cell_persistent_prompt=_build_cell_persistent_prompt,
-                persistent_prompt_filename=_persistent_prompt_filename,
-                is_designated_engineer=_is_designated_engineer,
-                send_agent_prompt=_send_agent_prompt,
-                clear_digest_backlog_for_restart=(
-                    engineer_buffer.clear_digest_backlog_for_restart
-                ),
-            )
+            return await _restart_agent_session(command)
 
         result = await ingest_remote_command_request(
             payload,
@@ -19600,6 +19798,7 @@ async def main(connection=None):
                     data,
                     state,
                     _send_agent_prompt,
+                    restart_agent=_restart_agent_session,
                 )
 
             elif cmd == "relaunch_agent":
@@ -19621,25 +19820,7 @@ async def main(connection=None):
                 )
 
             elif cmd == "restart_agent":
-                result = await _handle_restart_agent_command(
-                    data,
-                    state,
-                    bridge=bridge,
-                    worktree_mgr=worktree_mgr,
-                    resolve_base_dir=_resolve_base_dir,
-                    resolve_agent_launch_config=_resolve_agent_launch_config,
-                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
-                    resolve_architect_launch_config=_resolve_architect_launch_config,
-                    resolve_worker_launch_config=_resolve_worker_launch_config,
-                    apply_persistent_prompt=_apply_persistent_prompt,
-                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
-                    persistent_prompt_filename=_persistent_prompt_filename,
-                    is_designated_engineer=_is_designated_engineer,
-                    send_agent_prompt=_send_agent_prompt,
-                    clear_digest_backlog_for_restart=(
-                        engineer_buffer.clear_digest_backlog_for_restart
-                    ),
-                )
+                result = await _restart_agent_session(data)
 
             elif cmd == "move_group":
                 state.move_group(data["group"], data.get("before", ""))
