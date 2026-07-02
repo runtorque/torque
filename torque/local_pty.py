@@ -36,7 +36,6 @@ from .session_end_backstop import CodexIdleSessionEndDetector
 from .state import AgentCell, MatrixState
 from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
 from .worktree import ensure_git_exclude
-from .runner_backends import is_codex_sdk_readonly
 
 
 @dataclass
@@ -104,8 +103,6 @@ class LocalPtyAdapter:
     async def reconnect_orphans(self) -> None:
         cleared = 0
         for cell in self.state.iter_active_agents():
-            if is_codex_sdk_readonly(cell):
-                continue
             if not cell.session_id and cell.status == "stopped":
                 continue
             if cell.session_id or cell.status != "stopped":

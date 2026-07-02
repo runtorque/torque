@@ -1811,7 +1811,7 @@ class TorqueDBTests(unittest.TestCase):
             "pty",
         )
 
-    def test_runner_backend_schema_defaults_to_pty_and_round_trips_sdk(self):
+    def test_runner_backend_schema_defaults_to_pty_and_preserves_legacy_backend_value(self):
         def column_default(table: str, column: str) -> str:
             for row in self.db._conn.execute(f"PRAGMA table_info({table})"):
                 if row[1] == column:
@@ -1832,15 +1832,15 @@ class TorqueDBTests(unittest.TestCase):
         )
 
         self.db.save_agent(AgentCell(
-            id="agent-sdk",
-            name="SDK",
+            id="agent-legacy-backend",
+            name="Legacy Backend",
             group="g",
-            slug="sdk",
+            slug="legacy-backend",
             agent_type="codex",
-            runner_backend="codex-sdk-readonly",
+            runner_backend="legacy-removed-backend",
         ))
-        loaded = self.db.load_all()["agents"]["agent-sdk"]
-        self.assertEqual(loaded["runner_backend"], "codex-sdk-readonly")
+        loaded = self.db.load_all()["agents"]["agent-legacy-backend"]
+        self.assertEqual(loaded["runner_backend"], "legacy-removed-backend")
 
     def test_terminal_backend_migration_rewrites_iterm2_rows_idempotently(self):
         legacy_path = Path(self.tmp.name) / "legacy-terminal-backend.db"
