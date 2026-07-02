@@ -3785,6 +3785,197 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, "Task was not created by this architect")
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
+    def _set_final_covering_evidence(self, covering, *,
+                                     pr_url="https://github.com/runtorque/torque/pull/1087",
+                                     sha="abc1087",
+                                     tests_run="make test",
+                                     origin_verified=True):
+        if tests_run is not None:
+            covering.verification_summary = {"tests_run": tests_run}
+        merge = {
+            "origin_verified": origin_verified,
+            "origin_summary": f"origin/main == {sha}" if sha else "",
+        }
+        if pr_url is not None:
+            merge["pr_url"] = pr_url
+        if sha is not None:
+            merge["sha"] = sha
+        covering.completion_evidence = {
+            "status": "verified" if origin_verified else "evidence_attached",
+            "sources": ["merge"],
+            "merge": merge,
+        }
+        self.state._db_save_task(covering)
+
+    async def test_auto_resolves_routed_pm_root_after_covering_task_ships(self):
+        pm = self._add_architect("pm-auto", "Blueprint")
+        torqly = self._add_architect("arch-auto", "Torqly")
+        root = self._add_task(
+            "TORQUE:1087",
+            "PM-created product root",
+            lane="In Progress",
+            status="Covered by Torqly stream",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:1111",
+            "Torqly covering implementation",
+            lane="Done",
+            labels=["covers:TORQUE:1087", "orchestration-core"],
+            created_by_architect_id=torqly.id,
+        )
+        self._set_final_covering_evidence(covering)
+
+        result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+            self.state,
+            covering,
+        )
+
+        self.assertEqual([item["task_id"] for item in result], [root.id])
+        refreshed = self.state.board_tasks[root.id]
+        self.assertEqual(refreshed.lane, "Done")
+        self.assertEqual(refreshed.status, "")
+        covered_by = refreshed.completion_evidence["covered_by"]
+        self.assertEqual(covered_by["task_id"], covering.id)
+        self.assertEqual(covered_by["pr_url"], "https://github.com/runtorque/torque/pull/1087")
+        self.assertEqual(covered_by["sha"], "abc1087")
+        self.assertEqual(covered_by["tests_run"], "make test")
+        self.assertTrue(covered_by["moved_to_done"])
+        self.assertEqual(covered_by["recorded_by"], "Torque")
+        self.assertEqual(covered_by["recorded_by_id"], torqly.id)
+        self.assertEqual(covered_by["recorded_by_kind"], "system")
+        authorization = covered_by["authorization"]
+        self.assertEqual(authorization["scope"], "routed_pm_product_root")
+        self.assertEqual(authorization["source"], "covering_task_label")
+        self.assertTrue(authorization["auto_resolved"])
+        self.assertEqual(
+            authorization["auto_resolve_source"],
+            "covering_task_final_ship_evidence",
+        )
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
+        db_task = self.db.load_all()["board_tasks"][root.id]
+        self.assertEqual(db_task["lane"], "Done")
+        self.assertEqual(
+            db_task["completion_evidence"]["covered_by"]["task_id"],
+            covering.id,
+        )
+
+    async def test_auto_resolve_requires_done_pr_sha_origin_and_tests(self):
+        pm = self._add_architect("pm-required", "Blueprint")
+        torqly = self._add_architect("arch-required", "Torqly")
+
+        cases = [
+            ("not-done", {"lane": "In Progress"}, {}),
+            ("missing-pr", {"lane": "Done"}, {"pr_url": None}),
+            ("missing-sha", {"lane": "Done"}, {"sha": None}),
+            ("missing-tests", {"lane": "Done"}, {"tests_run": None}),
+            ("pending-origin", {"lane": "Done"}, {"origin_verified": False}),
+        ]
+        for suffix, task_kwargs, evidence_kwargs in cases:
+            with self.subTest(suffix=suffix):
+                root = self._add_task(
+                    f"TORQUE:{2000 + len(self.state.board_tasks)}",
+                    f"PM root {suffix}",
+                    lane="In Progress",
+                    labels=["product-proposal", "pm-created"],
+                    created_by_architect_id=pm.id,
+                )
+                covering = self._add_task(
+                    f"TORQUE:{3000 + len(self.state.board_tasks)}",
+                    f"Covering {suffix}",
+                    labels=[f"covers:{root.id}"],
+                    created_by_architect_id=torqly.id,
+                    **task_kwargs,
+                )
+                self._set_final_covering_evidence(covering, **evidence_kwargs)
+
+                result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+                    self.state,
+                    covering,
+                )
+
+                self.assertEqual(result, [])
+                refreshed = self.state.board_tasks[root.id]
+                self.assertEqual(refreshed.lane, "In Progress")
+                self.assertEqual(refreshed.completion_evidence, {})
+
+    async def test_auto_resolve_does_not_bulk_close_unlabeled_or_cross_scope_roots(self):
+        pm = self._add_architect("pm-bulk", "Blueprint")
+        torqly = self._add_architect("arch-bulk", "Torqly")
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        covered = self._add_task(
+            "TORQUE:2100",
+            "Covered PM root",
+            lane="In Progress",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        unlabeled = self._add_task(
+            "TORQUE:2101",
+            "Unlabeled PM root",
+            lane="In Progress",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        cross_scope_pm = self._add_architect("pm-other", "Other PM", group="other")
+        cross_scope = self._add_task(
+            "TORQUE:2102",
+            "Other-group PM root",
+            group="other",
+            lane="In Progress",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=cross_scope_pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:3100",
+            "Single covering implementation",
+            lane="Done",
+            labels=[f"covers:{covered.id}", f"covers:{cross_scope.id}"],
+            created_by_architect_id=torqly.id,
+        )
+        self._set_final_covering_evidence(covering)
+
+        result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+            self.state,
+            covering,
+        )
+
+        self.assertEqual([item["task_id"] for item in result], [covered.id])
+        self.assertEqual(self.state.board_tasks[covered.id].lane, "Done")
+        self.assertEqual(self.state.board_tasks[unlabeled.id].lane, "In Progress")
+        self.assertEqual(self.state.board_tasks[unlabeled.id].completion_evidence, {})
+        self.assertEqual(self.state.board_tasks[cross_scope.id].lane, "In Progress")
+        self.assertEqual(self.state.board_tasks[cross_scope.id].completion_evidence, {})
+
+    async def test_auto_resolve_rejects_authority_mismatch(self):
+        pm = self._add_architect("pm-mismatch", "Blueprint")
+        root = self._add_task(
+            "TORQUE:2200",
+            "PM root with invalid covering owner",
+            lane="In Progress",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:3200",
+            "Covering task without architect authority",
+            lane="Done",
+            labels=[f"covers:{root.id}"],
+            created_by_architect_id="missing-architect",
+        )
+        self._set_final_covering_evidence(covering)
+
+        result = self.server_mod._auto_resolve_pm_product_roots_for_covering_task(
+            self.state,
+            covering,
+        )
+
+        self.assertEqual(result, [])
+        self.assertEqual(self.state.board_tasks[root.id].lane, "In Progress")
+        self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
+
     async def test_architect_routed_pm_root_does_not_allow_reassign(self):
         pm = self._add_architect("pm-1", "Blueprint")
         torqly = self._add_architect("arch-1", "Torqly")
