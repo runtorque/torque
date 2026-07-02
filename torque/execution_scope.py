@@ -52,3 +52,12 @@ def engineer_architect_task_routing_denied_message(target: object | None) -> str
         f"is denied: {name}. Use architect↔engineer messaging/notifications "
         "or have the Architect originate their own routing instead."
     )
+
+
+def engineer_architect_close_denied_message(target: object | None) -> str:
+    name = str(getattr(target, "name", "") or getattr(target, "slug", "") or "Architect").strip()
+    return (
+        "Engineer-originated close/remove of Architect targets/classes is "
+        f"denied: {name}. Use architect lifecycle controls from the user/"
+        "Architect-owned surface instead."
+    )

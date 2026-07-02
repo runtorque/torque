@@ -926,6 +926,80 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(terminal.id, state.agents)
         self.assertNotIn(terminal.id, state.groups["torque"])
 
+    async def test_remove_agent_denies_engineer_originated_architect_target(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Catalyst")
+
+        async def close_agent_session_only(_cell):
+            self.fail("engineer-originated architect remove must be denied")
+
+        async def cleanup_purged_agents(_removed):
+            self.fail("architect deny should not cleanup anything")
+
+        result = await self.server_mod._handle_remove_agent_command(
+            {"id": architect.id, "_engineer_close_id": "eng-alice"},
+            state,
+            close_agent_session_only=close_agent_session_only,
+            cleanup_purged_agents=cleanup_purged_agents,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["agent_id"], architect.id)
+        self.assertIn("Engineer-originated close/remove", result["message"])
+        self.assertFalse(state.agent_is_tombstoned(architect))
+
+    async def test_remove_agent_denies_engineer_originated_architect_class_target(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        worker = self._add_worker_cell(state, engineer, "Creative Worker")
+        worker.kind = "worker"
+        worker.effective_agent_class_snapshot = {
+            "id": "creative-architect",
+            "base_kind": "architect",
+        }
+
+        async def close_agent_session_only(_cell):
+            self.fail("engineer-originated architect-class remove must be denied")
+
+        async def cleanup_purged_agents(_removed):
+            self.fail("architect-class deny should not cleanup anything")
+
+        result = await self.server_mod._handle_remove_agent_command(
+            {"id": worker.id, "_engineer_close_id": engineer.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+            cleanup_purged_agents=cleanup_purged_agents,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["agent_id"], worker.id)
+        self.assertIn("Engineer-originated close/remove", result["message"])
+        self.assertFalse(state.agent_is_tombstoned(worker))
+
+    async def test_remove_agent_allows_engineer_originated_owned_worker_target(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        worker = self._add_worker_cell(state, engineer)
+        closed = []
+
+        async def close_agent_session_only(cell):
+            closed.append(cell.id)
+            return state.remove_agent(cell.id)
+
+        async def cleanup_purged_agents(_removed):
+            self.fail("worker tombstone should not call purge cleanup")
+
+        result = await self.server_mod._handle_remove_agent_command(
+            {"id": worker.id, "_engineer_close_id": engineer.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+            cleanup_purged_agents=cleanup_purged_agents,
+        )
+
+        self.assertEqual(result, {"type": "ok", "tombstoned": [worker.id]})
+        self.assertEqual(closed, [worker.id])
+        self.assertTrue(state.agent_is_tombstoned(worker))
+
     async def test_dismiss_engineer_closes_engineer_and_owned_workers_preserves_assignments(self):
         state = self._make_state()
         architect = self._add_architect_cell(state, "arch-1", "Productmind")

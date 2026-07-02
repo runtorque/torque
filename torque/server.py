@@ -183,6 +183,7 @@ from .external_tickets import (
     push_ticket_status,
 )
 from .execution_scope import (
+    engineer_architect_close_denied_message,
     engineer_architect_task_routing_denied_message,
     is_architect_execution_target,
 )
@@ -14918,6 +14919,19 @@ async def _handle_remove_agent_command(
     cell = state.agents.get(str(data.get("id", "") or "").strip())
     if not cell:
         return {"type": "ok", "removed": []}
+    engineer_close_id = str(
+        data.get("_engineer_close_id", "")
+        or data.get("_engineer_dispatch_id", "")
+        or data.get("_created_by_engineer_id", "")
+        or data.get("owner_engineer_id", "")
+        or ""
+    ).strip()
+    if engineer_close_id and is_architect_execution_target(cell):
+        return {
+            "type": "error",
+            "message": engineer_architect_close_denied_message(cell),
+            "agent_id": cell.id,
+        }
     if str(getattr(cell, "cell_type", "") or "") == "terminal":
         removed = state.remove_agent(cell.id)
         await cleanup_purged_agents(removed)
