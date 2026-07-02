@@ -221,7 +221,7 @@ function _torqueRenderAgentCanvas(opts) {
   // changes. Without this, the canvas mode showed no terminal after
   // a fresh app boot — even though `selectedAgentId` had been
   // restored from server state.
-  if (typeof renderTerminalWorkspace === 'function') {
+  if (!(opts && opts.skipTerminalRefresh) && typeof renderTerminalWorkspace === 'function') {
     renderTerminalWorkspace();
   }
 }

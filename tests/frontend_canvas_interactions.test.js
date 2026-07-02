@@ -489,6 +489,51 @@ test('canvas render html uses production canvas selectors and keeps guide spines
   ]);
 });
 
+test('canvas render honors skipTerminalRefresh from direct and invalidated main renders', () => {
+  const context = createContext();
+  let terminalCalls = 0;
+  let shellCalls = 0;
+  const main = { innerHTML: '' };
+  context.document = {
+    getElementById(id) { return id === 'main' ? main : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+  context.localStorage = {
+    getItem(key) { return key === 'torque.agentsCanvasView' ? 'canvas' : null; },
+    setItem() {},
+  };
+  context.renderGroupSwitcher = function() {};
+  context._torqueRefreshViewToggleButtons = function() {};
+  context._renderAgentGridAndFocus = function(mainEl, canvasHtml) {
+    shellCalls += 1;
+    mainEl.innerHTML = canvasHtml;
+  };
+  context.renderTerminalWorkspace = function() { terminalCalls += 1; };
+  context.updateEventsAttentionBadge = function() {};
+  context.state.groups = { alpha: ['worker-1', 'worker-2'] };
+  seed(context, [
+    worker('worker-1', 'Viewed Worker', '', 1),
+    worker('worker-2', 'Other Worker', '', 2),
+  ]);
+
+  vm.runInContext('render({ skipTerminalRefresh: true })', context);
+  assert.equal(shellCalls, 1, 'canvas shell still renders with skipTerminalRefresh');
+  assert.equal(terminalCalls, 0, 'direct canvas render must honor skipTerminalRefresh');
+
+  vm.runInContext('render()', context);
+  assert.equal(shellCalls, 2, 'normal canvas render still updates the shell');
+  assert.equal(terminalCalls, 1, 'normal canvas render still refreshes terminal workspace');
+
+  vm.runInContext('renderInvalidatedSurfaces({ main: true, terminal: false, focus: false })', context);
+  assert.equal(shellCalls, 3, 'unrelated main invalidation still rerenders canvas shell');
+  assert.equal(terminalCalls, 1, 'unrelated main invalidation must not refresh terminal workspace in canvas mode');
+
+  vm.runInContext('renderInvalidatedSurfaces({ main: true, terminal: true, focus: false })', context);
+  assert.equal(shellCalls, 4, 'terminal-affecting invalidation rerenders canvas shell');
+  assert.equal(terminalCalls, 2, 'terminal-affecting invalidation refreshes terminal workspace in canvas mode');
+});
+
 /* -- Interaction routing: _canvasAttachInteractions --------------------- */
 
 /* Minimal synthetic-event harness. _canvasAttachInteractions registers
