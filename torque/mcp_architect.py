@@ -652,6 +652,45 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_pm_root_backlog_hygiene",
+        "description": (
+            "Inventory already-covered PM-created product roots in this "
+            "Architect's group and optionally finalize only eligible routed "
+            "roots whose durable covered_by evidence points at this "
+            "Architect's covering task. Dry-run by default; set apply=true "
+            "to move eligible roots to Done while preserving completion "
+            "evidence and appending an audit message. Ineligible roots remain "
+            "in Backlog with reasons."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "apply": {
+                    "type": "boolean",
+                    "description": (
+                        "Finalize eligible roots. Defaults to false for "
+                        "read-only inventory."
+                    ),
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional task IDs/aliases to restrict the inventory "
+                        "or apply set."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "When apply=true, finalize at most this many eligible "
+                        "roots. 0 means no limit."
+                    ),
+                },
+            },
+        },
+    },
+    {
         "name": "architect_ask",
         "description": (
             "Ask the user a blocking product/scope question. Creates a "

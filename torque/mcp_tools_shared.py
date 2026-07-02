@@ -12118,6 +12118,42 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "to": engineer_id,
         }), False
 
+    if tool_name == "pm_root_backlog_hygiene" and caller_kind == "architect":
+        apply, apply_error = _optional_bool_arg(args, "apply", False)
+        if apply_error:
+            return apply_error, True
+        raw_task_ids = args.get("task_ids", []) or []
+        if isinstance(raw_task_ids, str):
+            raw_task_ids = [
+                part.strip()
+                for part in raw_task_ids.split(",")
+                if part.strip()
+            ]
+        if not isinstance(raw_task_ids, list):
+            return "task_ids must be a list or comma-separated string", True
+        task_ids = []
+        for raw_task_id in raw_task_ids:
+            task_id = _resolve_task(state, str(raw_task_id or "").strip())
+            if not task_id:
+                return f"Task not found: {raw_task_id}", True
+            task_ids.append(task_id)
+        try:
+            limit = int(args.get("limit", 0) or 0)
+        except (TypeError, ValueError):
+            return "limit must be an integer", True
+        if limit < 0:
+            return "limit must be non-negative", True
+        result = await handle_command({
+            "cmd": "architect_pm_root_backlog_hygiene",
+            "architect_id": str(caller_id or "").strip(),
+            "apply": apply,
+            "task_ids": task_ids,
+            "limit": limit,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
     if tool_name == "task_edit":
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
