@@ -5696,6 +5696,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     templates: false,
     health: false,
     thinking: false,
+    terminal: false,
     focus: true,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
@@ -5727,6 +5728,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     templates: false,
     health: false,
     thinking: false,
+    terminal: false,
     focus: true,
   });
   assert.equal(
@@ -10981,6 +10983,56 @@ test('embedded terminal selection clears stale agent selection for standalone te
   assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
 });
 
+
+
+test('main grid render honors skipTerminalRefresh for empty and populated grids', () => {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  sandbox.terminalRefreshCalls = 0;
+  sandbox.renderTerminalWorkspace = function() { sandbox.terminalRefreshCalls += 1; };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/grid/group-tabs.js');
+  loadScript(context, 'static/js/grid/agent-card.js');
+  loadScript(context, 'static/js/grid/terminal-row.js');
+  loadScript(context, 'static/js/grid/sections.js');
+  loadScript(context, 'static/js/agent-detail.js');
+  loadScript(context, 'static/js/agent-focus.js');
+  loadScript(context, 'static/js/grid/main.js');
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true, profile: 'terminal-gate', port: '18932' };
+    state.group_settings = {};
+    state.children = {};
+    getFilterByWindow = function() { return false; };
+    updateEventsAttentionBadge = function() {};
+    renderAgentPanel = function() {};
+  `);
+
+  runInContext(context, `render({ skipTerminalRefresh: true });`);
+  assert.equal(sandbox.terminalRefreshCalls, 0,
+    'empty-grid render must honor skipTerminalRefresh');
+
+  runInContext(context, `render();`);
+  assert.equal(sandbox.terminalRefreshCalls, 1,
+    'normal empty-grid render still refreshes terminal workspace');
+
+  runInContext(context, `
+    state.groups = { alpha: ['worker-1'] };
+    state.agents = {
+      'worker-1': {
+        id: 'worker-1', name: 'Worker', group: 'alpha', cell_type: 'agent',
+        kind: 'worker', session_id: 'sess-1', status: 'running'
+      }
+    };
+  `);
+  runInContext(context, `render({ skipTerminalRefresh: true });`);
+  assert.equal(sandbox.terminalRefreshCalls, 1,
+    'populated-grid render must honor skipTerminalRefresh');
+
+  runInContext(context, `render();`);
+  assert.equal(sandbox.terminalRefreshCalls, 2,
+    'normal populated-grid render still refreshes terminal workspace');
+});
 test('embedded terminal selection returns keyboard focus to the terminal workspace', () => {
   const { context } = createSelectionHarness();
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -17624,6 +17676,179 @@ test('agent_message_history_append delta updates recall cache without rerenderin
   });
 });
 
+
+
+test('unrelated main-marking delta while focused in DM composer does not refresh terminal workspace', () => {
+  const { context, sandbox, document, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.dataset.agentId = 'agent-1';
+  input.value = 'operator draft';
+  document.activeElement = input;
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Viewed', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-1' },
+      'agent-2': { id: 'agent-2', name: 'Other', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-2' }
+    };
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    var __terminalRenderOpts = [];
+    var __terminalRefreshCalls = 0;
+    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    render = function(opts) {
+      renderCalls.main++;
+      __terminalRenderOpts.push(Object.assign({}, opts || {}));
+      if (!opts || !opts.skipTerminalRefresh) renderTerminalWorkspace();
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_digest_update',
+      cell_id: 'agent-2',
+      group: 'alpha',
+      settings: { enabled: true },
+    }],
+  });
+  flushRaf();
+
+  assert.equal(sandbox.renderCalls.main, 1, 'digest delta still updates the main grid');
+  assert.equal(runInContext(context, `__terminalRefreshCalls`), 0,
+    'unrelated main-grid delta must not refresh terminal workspace while the DM composer is focused');
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), true);
+});
+
+test('focus_update terminal invalidation refreshes terminal workspace and updates selected terminal', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-1' },
+      'agent-2': { id: 'agent-2', name: 'Beta', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-2' }
+    };
+    state.active_session_id = 'sess-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    var __terminalRenderOpts = [];
+    var __terminalRefreshCalls = 0;
+    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    render = function(opts) {
+      renderCalls.main++;
+      __terminalRenderOpts.push(Object.assign({}, opts || {}));
+      if (!opts || !opts.skipTerminalRefresh) renderTerminalWorkspace();
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{ op: 'focus_update', active_session_id: 'sess-2', current_window_id: 'standalone' }],
+  });
+  flushRaf();
+
+  assert.equal(jsonValue(context, `selectedTerminalId`), 'agent-2');
+  assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
+    'focus_update must refresh terminal workspace');
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), false);
+  assert.equal(sandbox.renderCalls.context, 0,
+    'context panel is not visible in this harness, but main render still handled terminal refresh');
+});
+
+test('selected viewed agent upsert refreshes terminal workspace for status and path changes', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1', name: 'Viewed', group: 'alpha', cell_type: 'agent',
+        kind: 'worker', session_id: 'sess-1', status: 'running', current_path: '/repo/old'
+      },
+      'agent-2': { id: 'agent-2', name: 'Other', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-2' }
+    };
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    var __terminalRenderOpts = [];
+    var __terminalRefreshCalls = 0;
+    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    render = function(opts) {
+      renderCalls.main++;
+      __terminalRenderOpts.push(Object.assign({}, opts || {}));
+      if (!opts || !opts.skipTerminalRefresh) renderTerminalWorkspace();
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-1',
+      group: 'alpha',
+      status: 'idle',
+      current_path: '/repo/new',
+      activity_detail: 'Ready',
+    }],
+  });
+  flushRaf();
+
+  assert.equal(jsonValue(context, `state.agents['agent-1'].current_path`), '/repo/new');
+  assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
+    'viewed agent status/path changes must refresh terminal workspace');
+  assert.equal(jsonValue(context, `__terminalRenderOpts[0].skipTerminalRefresh`), false);
+});
+
+test('off-agent direct_message_upsert updates cache without refreshing terminal workspace', () => {
+  const { context, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1', 'agent-2'] };
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Viewed', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-1' },
+      'agent-2': { id: 'agent-2', name: 'Other', group: 'alpha', cell_type: 'agent', kind: 'worker', session_id: 'sess-2' }
+    };
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+    var __terminalRefreshCalls = 0;
+    renderTerminalWorkspace = function() { __terminalRefreshCalls += 1; };
+    render = function(opts) {
+      renderCalls.main++;
+      if (!opts || !opts.skipTerminalRefresh) renderTerminalWorkspace();
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'direct_message_upsert',
+      message_id: 'off-agent-dm-1',
+      agent_id: 'agent-2',
+      group: 'alpha',
+      message: {
+        message_id: 'off-agent-dm-1',
+        thread_id: 'user-agent:user:agent-2',
+        message: 'not the viewed terminal',
+        created_at: '2026-07-02T09:40:00Z',
+        sender_id: 'agent-2',
+        sender_kind: 'worker',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+      },
+    }],
+  });
+  flushRaf();
+
+  assert.equal(jsonValue(context, `state.direct_messages_by_agent['agent-2'][0].message_id`), 'off-agent-dm-1');
+  assert.equal(runInContext(context, `__terminalRefreshCalls`), 0,
+    'off-agent direct message should not refresh the viewed terminal workspace');
+});
 test('direct message deltas update per-agent cache without peer-message state', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
 
@@ -17777,7 +18002,13 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
   const dom = attachTerminalWorkspaceDom(document);
 
   runInContext(context, `
-    render = function() { renderTerminalWorkspace(); };
+    var __terminalRefreshCalls = 0;
+    render = function(opts) {
+      if (!opts || !opts.skipTerminalRefresh) {
+        __terminalRefreshCalls += 1;
+        renderTerminalWorkspace();
+      }
+    };
     updateEventsAttentionBadge = function() {};
     _expectedSeq = 1;
     state.runtime = { embedded_terminal: true };
@@ -17823,6 +18054,8 @@ test('incoming direct_message_upsert refreshes the real terminal direct-message 
     }],
   });
 
+  assert.equal(runInContext(context, `__terminalRefreshCalls`), 1,
+    'viewed direct message delta must refresh the real terminal workspace');
   assert.match(dom.directMessages.innerHTML, /delta hello/);
   assert.match(dom.directMessages.innerHTML, /terminal-direct-message--agent-to-user/);
 });
@@ -23538,6 +23771,7 @@ test('engineer peer chat thread deltas do not broadly invalidate the engineer pa
     templates: false,
     health: false,
     thinking: false,
+    terminal: false,
     chat: true,
   });
 });
