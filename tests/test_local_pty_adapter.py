@@ -1265,6 +1265,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(len(boot_cmd), 256)
             launch_text = launch_script.read_text()
             self.assertIn("exec codex --model gpt-5", launch_text)
+            self.assertIn("--dangerously-bypass-approvals-and-sandbox", launch_text)
             self.assertIn("--config", launch_text)
             self.assertIn("mcp_servers.torque.url", launch_text)
             self.assertIn("hooks.SessionStart", launch_text)
@@ -1338,6 +1339,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertTrue(marker.exists())
                 argv = marker.read_text()
+                self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
                 self.assertIn("--config", argv)
                 self.assertIn("mcp_servers.torque.url", argv)
                 self.assertIn("hooks.SessionStart", argv)
@@ -1398,6 +1400,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("session-123", argv)
                 self.assertIn("--model", argv)
                 self.assertIn("gpt-5", argv)
+                self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
                 self.assertIn("--config", argv)
                 self.assertIn("Resume prompt.", argv)
                 self.assertTrue(
@@ -1411,6 +1414,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 launch_text = launch_script.read_text()
                 self.assertIn('if [ "${1:-}" = "resume" ]; then', launch_text)
                 self.assertIn('"$@"', launch_text)
+                self.assertIn("--dangerously-bypass-approvals-and-sandbox", launch_text)
                 self.assertLess(len(shlex.quote(str(launch_script))), 256)
             finally:
                 if cell.session_id:
