@@ -999,6 +999,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertEqual(command, shlex.quote(str(launch_script)))
             launch_text = launch_script.read_text()
             self.assertIn("exec codex --model gpt-5", launch_text)
+            self.assertIn("--dangerously-bypass-approvals-and-sandbox", launch_text)
             self.assertIn("--config", launch_text)
             self.assertIn("mcp_servers.torque.url", launch_text)
             self.assertIn("model_instructions_file", launch_text)
@@ -1064,8 +1065,116 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             resumed,
-            "codex resume --model gpt-5 session-123 'Follow the spec.'",
+            "codex resume --model gpt-5 --dangerously-bypass-approvals-and-sandbox session-123 'Follow the spec.'",
         )
+
+    def test_codex_resume_command_for_launch_shim_does_not_duplicate_bypass(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+            adapter = CodexAdapter()
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                command = adapter.prepare_launch_command(
+                    cell,
+                    tmp,
+                    "codex --model gpt-5 'Resume prompt.'",
+                )
+            resumed = adapter.get_resume_command(command, "session-123")
+
+            parts = shlex.split(resumed)
+            self.assertEqual(parts[0], str(Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"))
+            self.assertEqual(parts[1:], ["resume", "session-123"])
+            self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", parts)
+
+            launch_text = (
+                Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+            ).read_text()
+            resume_line = next(
+                line for line in launch_text.splitlines()
+                if line.startswith("  exec ")
+            )
+            resume_parts = shlex.split(resume_line.strip().removeprefix("exec "))
+            self.assertEqual(
+                resume_parts.count("--dangerously-bypass-approvals-and-sandbox"),
+                1,
+            )
+
+    def test_codex_launch_bypass_flag_removes_conflicting_policy_flags(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+            adapter = CodexAdapter()
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                adapter.prepare_launch_command(
+                    cell,
+                    tmp,
+                    "codex --model gpt-5 --sandbox read-only -a on-request -s=workspace-write --ask-for-approval=never 'Prompt.'",
+                )
+
+            launch_script = Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+            launch_text = launch_script.read_text()
+            fresh_line = launch_text.splitlines()[-1]
+            resume_line = next(
+                line for line in launch_text.splitlines()
+                if line.startswith("  exec ")
+            )
+            fresh_parts = shlex.split(fresh_line.removeprefix("exec "))
+            resume_parts = shlex.split(resume_line.strip().removeprefix("exec "))
+            self.assertIn("--dangerously-bypass-approvals-and-sandbox", fresh_parts)
+            self.assertIn("--dangerously-bypass-approvals-and-sandbox", resume_parts)
+            self.assertEqual(
+                fresh_parts.count("--dangerously-bypass-approvals-and-sandbox"),
+                1,
+            )
+            self.assertEqual(
+                resume_parts.count("--dangerously-bypass-approvals-and-sandbox"),
+                1,
+            )
+            self.assertNotIn("--sandbox", fresh_parts)
+            self.assertNotIn("--sandbox", resume_parts)
+            self.assertNotIn("-a", fresh_parts)
+            self.assertNotIn("-a", resume_parts)
+            self.assertNotIn("-s=workspace-write", fresh_parts)
+            self.assertNotIn("-s=workspace-write", resume_parts)
+            self.assertNotIn("--ask-for-approval=never", fresh_parts)
+            self.assertNotIn("--ask-for-approval=never", resume_parts)
+            self.assertIn("--config", fresh_parts)
+            self.assertIn("--config", resume_parts)
+            self.assertIn("Prompt.", fresh_parts)
+            self.assertIn("Prompt.", resume_parts)
+
+    def test_codex_launch_bypass_flag_not_duplicated_when_user_supplies_it(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+            adapter = CodexAdapter()
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                adapter.prepare_launch_command(
+                    cell,
+                    tmp,
+                    "codex --dangerously-bypass-approvals-and-sandbox --model gpt-5",
+                )
+
+            launch_text = (
+                Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+            ).read_text()
+            for line in launch_text.splitlines():
+                if "exec " not in line:
+                    continue
+                parts = shlex.split(line.strip().removeprefix("exec "))
+                self.assertEqual(
+                    parts.count("--dangerously-bypass-approvals-and-sandbox"),
+                    1,
+                )
 
     def test_codex_hook_install_and_cleanup_preserve_user_entries(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as codex_home:

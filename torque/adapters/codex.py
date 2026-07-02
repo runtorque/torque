@@ -70,6 +70,7 @@ _CODEX_HOOK_EVENT_LABELS = {
 }
 
 _CODEX_TORQUE_CONFIG_ROOT = "codex/agents"
+_CODEX_APPROVAL_SANDBOX_BYPASS_FLAG = "--dangerously-bypass-approvals-and-sandbox"
 # Codex represents configuration supplied by repeated `--config key=value`
 # session flags as an unmanaged synthetic config layer. Hook trust keys for
 # hooks supplied through those same flags must therefore use this synthetic
@@ -207,6 +208,43 @@ def _split_boot_args(boot_cmd: str) -> tuple[list[str], str]:
         prompt = " ".join(args[i:])
         break
     return (opts, prompt)
+
+
+def _codex_opts_with_approval_sandbox_bypass(opts: list[str]) -> list[str]:
+    """Return Codex CLI opts with Torque's required non-interactive bypass.
+
+    Current Codex builds use ``--dangerously-bypass-approvals-and-sandbox`` to
+    run autonomously in an externally-sandboxed runtime.  When Torque adds that
+    flag, drop explicit approval/sandbox policy options from the managed launch
+    command so the generated fresh/resume invocations do not carry conflicting
+    policy knobs.  Other user/model/config flags are preserved.
+    """
+    filtered: list[str] = []
+    has_bypass = False
+    i = 0
+    while i < len(opts):
+        part = opts[i]
+        if part == _CODEX_APPROVAL_SANDBOX_BYPASS_FLAG:
+            has_bypass = True
+            filtered.append(part)
+            i += 1
+            continue
+        if part in ("-s", "--sandbox", "-a", "--ask-for-approval"):
+            i += 2
+            continue
+        if (
+            part.startswith("-s=")
+            or part.startswith("-a=")
+            or part.startswith("--sandbox=")
+            or part.startswith("--ask-for-approval=")
+        ):
+            i += 1
+            continue
+        filtered.append(part)
+        i += 1
+    if not has_bypass:
+        filtered.append(_CODEX_APPROVAL_SANDBOX_BYPASS_FLAG)
+    return filtered
 
 
 def _is_torque_hook(hook: dict) -> bool:
@@ -370,6 +408,7 @@ def _append_codex_config_cli_flags(command: str, config: dict, config_path: Path
         parts = ["codex"]
     flags = _codex_config_cli_flags(config, config_path=config_path)
     opts, prompt = _split_boot_args(command or parts[0])
+    opts = _codex_opts_with_approval_sandbox_bypass(opts)
     assembled = [parts[0], *opts, *flags]
     if prompt:
         assembled.append(prompt)
@@ -382,6 +421,7 @@ def _codex_resume_config_cli_command(command: str, config: dict, config_path: Pa
         parts = ["codex"]
     flags = _codex_config_cli_flags(config, config_path=config_path)
     opts, prompt = _split_boot_args(command or parts[0])
+    opts = _codex_opts_with_approval_sandbox_bypass(opts)
     assembled = [parts[0], "resume", *opts, *flags]
     rendered = " ".join(shlex.quote(p) for p in assembled)
     rendered += ' "$@"'
@@ -917,6 +957,11 @@ class CodexAdapter(AgentAdapter):
         if not parts:
             return None
         opts, prompt = _split_boot_args(boot_cmd)
+        if _matches_codex_token(parts[0]):
+            # Inject the bypass only for raw codex commands. When boot_cmd is
+            # the Torque launch shim, its resume line already carries the
+            # bypass and Codex rejects the flag appearing twice.
+            opts = _codex_opts_with_approval_sandbox_bypass(opts)
         cmd = [parts[0], "resume", *opts, session_id]
         if prompt:
             cmd.append(prompt)
