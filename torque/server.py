@@ -10998,6 +10998,26 @@ def _auto_resolve_pm_product_roots_for_covering_task(
     return resolved
 
 
+def _auto_resolve_pm_product_roots_and_enqueue(
+        state: MatrixState,
+        covering_task,
+        *,
+        board_sync_manager=None,
+) -> list[dict]:
+    auto_resolved = _auto_resolve_pm_product_roots_for_covering_task(
+        state,
+        covering_task,
+    )
+    if board_sync_manager:
+        for resolved in auto_resolved:
+            board_sync_manager.enqueue_for_local_change(
+                resolved.get("task_id", ""),
+                reason="auto_pm_root_covered",
+                fields=("completion_evidence", "messages", "lane"),
+            )
+    return auto_resolved
+
+
 def _record_task_completion_evidence_snapshot(
         state: MatrixState,
         task,
@@ -11051,14 +11071,11 @@ def _record_task_completion_evidence_snapshot(
         update,
     )
     _save_completion_evidence_task(state, task)
-    auto_resolved = _auto_resolve_pm_product_roots_for_covering_task(state, task)
-    if board_sync_manager:
-        for resolved in auto_resolved:
-            board_sync_manager.enqueue_for_local_change(
-                resolved.get("task_id", ""),
-                reason="auto_pm_root_covered",
-                fields=("completion_evidence", "messages", "lane"),
-            )
+    _auto_resolve_pm_product_roots_and_enqueue(
+        state,
+        task,
+        board_sync_manager=board_sync_manager,
+    )
     return True
 
 
@@ -11230,15 +11247,11 @@ def _record_merge_completion_evidence(
             update,
         )
         _save_completion_evidence_task(state, task)
-        auto_resolved = _auto_resolve_pm_product_roots_for_covering_task(
-            state, task)
-        if board_sync_manager:
-            for resolved in auto_resolved:
-                board_sync_manager.enqueue_for_local_change(
-                    resolved.get("task_id", ""),
-                    reason="auto_pm_root_covered",
-                    fields=("completion_evidence", "messages", "lane"),
-                )
+        _auto_resolve_pm_product_roots_and_enqueue(
+            state,
+            task,
+            board_sync_manager=board_sync_manager,
+        )
         updated_ids.append(task.id)
     return updated_ids
 
@@ -23591,6 +23604,11 @@ async def main(connection=None):
                                         " '%s'", cell.name)
                         if task and not task_counts_as_done(task):
                             state.board_move_task(task.id, "Done")
+                            _auto_resolve_pm_product_roots_and_enqueue(
+                                state,
+                                task,
+                                board_sync_manager=board_sync_manager,
+                            )
                         if task:
                             task.status = ""
                             _save_task(task)
@@ -23845,6 +23863,11 @@ async def main(connection=None):
                                 if not task_counts_as_done(task):
                                     state.board_move_task(
                                         task.id, "Done")
+                                    _auto_resolve_pm_product_roots_and_enqueue(
+                                        state,
+                                        task,
+                                        board_sync_manager=board_sync_manager,
+                                    )
                                 task.agent_id = ""
                                 task.status = ""
                                 _save_task(task)

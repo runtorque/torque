@@ -3861,6 +3861,82 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             covering.id,
         )
 
+    async def test_auto_resolves_when_evidence_precedes_done_transition(self):
+        pm = self._add_architect("pm-order", "Blueprint")
+        torqly = self._add_architect("arch-order", "Torqly")
+        root = self._add_task(
+            "TORQUE:2087",
+            "PM-created product root with pre-attached evidence",
+            lane="In Progress",
+            status="Covered by Torqly stream",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        covering = self._add_task(
+            "TORQUE:2111",
+            "Torqly covering implementation with early evidence",
+            lane="In Progress",
+            labels=["covers:TORQUE:2087"],
+            created_by_architect_id=torqly.id,
+        )
+        self._set_final_covering_evidence(
+            covering,
+            pr_url="https://github.com/runtorque/torque/pull/2111",
+            sha="2111feed",
+            tests_run="python3 -m unittest tests.test_architect_scoping",
+        )
+
+        class FakeBoardSyncManager:
+            def __init__(self):
+                self.calls = []
+
+            def enqueue_for_local_change(self, task_id, *, reason, fields):
+                self.calls.append((task_id, reason, tuple(fields)))
+
+        board_sync_manager = FakeBoardSyncManager()
+
+        # This matches the worker done/ready ordering: evidence can be
+        # snapshotted while the covering task is not Done yet, so the
+        # pre-Done auto-resolve attempt must not be the only chance.
+        changed = self.server_mod._record_task_completion_evidence_snapshot(
+            self.state,
+            covering,
+            action="done",
+            message="Implemented and tested.",
+            board_sync_manager=board_sync_manager,
+        )
+        self.assertTrue(changed)
+        self.assertEqual(self.state.board_tasks[root.id].lane, "In Progress")
+        self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
+        self.assertEqual(board_sync_manager.calls, [])
+
+        self.state.board_move_task(covering.id, "Done")
+        resolved = self.server_mod._auto_resolve_pm_product_roots_and_enqueue(
+            self.state,
+            covering,
+            board_sync_manager=board_sync_manager,
+        )
+
+        self.assertEqual([item["task_id"] for item in resolved], [root.id])
+        refreshed = self.state.board_tasks[root.id]
+        self.assertEqual(refreshed.lane, "Done")
+        covered_by = refreshed.completion_evidence["covered_by"]
+        self.assertEqual(covered_by["task_id"], covering.id)
+        self.assertEqual(covered_by["sha"], "2111feed")
+        self.assertEqual(
+            covered_by["tests_run"],
+            "python3 -m unittest tests.test_architect_scoping",
+        )
+        self.assertTrue(covered_by["authorization"]["auto_resolved"])
+        self.assertEqual(
+            board_sync_manager.calls,
+            [(
+                root.id,
+                "auto_pm_root_covered",
+                ("completion_evidence", "messages", "lane"),
+            )],
+        )
+
     async def test_auto_resolve_requires_done_pr_sha_origin_and_tests(self):
         pm = self._add_architect("pm-required", "Blueprint")
         torqly = self._add_architect("arch-required", "Torqly")
