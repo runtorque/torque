@@ -1339,7 +1339,9 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertTrue(marker.exists())
                 argv = marker.read_text()
-                self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
+                self.assertEqual(
+                    argv.count("--dangerously-bypass-approvals-and-sandbox"), 1
+                )
                 self.assertIn("--config", argv)
                 self.assertIn("mcp_servers.torque.url", argv)
                 self.assertIn("hooks.SessionStart", argv)
@@ -1400,7 +1402,9 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("session-123", argv)
                 self.assertIn("--model", argv)
                 self.assertIn("gpt-5", argv)
-                self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
+                self.assertEqual(
+                    argv.count("--dangerously-bypass-approvals-and-sandbox"), 1
+                )
                 self.assertIn("--config", argv)
                 self.assertIn("Resume prompt.", argv)
                 self.assertTrue(

@@ -233,7 +233,9 @@ def _codex_opts_with_approval_sandbox_bypass(opts: list[str]) -> list[str]:
             i += 2
             continue
         if (
-            part.startswith("--sandbox=")
+            part.startswith("-s=")
+            or part.startswith("-a=")
+            or part.startswith("--sandbox=")
             or part.startswith("--ask-for-approval=")
         ):
             i += 1
@@ -955,7 +957,11 @@ class CodexAdapter(AgentAdapter):
         if not parts:
             return None
         opts, prompt = _split_boot_args(boot_cmd)
-        opts = _codex_opts_with_approval_sandbox_bypass(opts)
+        if _matches_codex_token(parts[0]):
+            # Inject the bypass only for raw codex commands. When boot_cmd is
+            # the Torque launch shim, its resume line already carries the
+            # bypass and Codex rejects the flag appearing twice.
+            opts = _codex_opts_with_approval_sandbox_bypass(opts)
         cmd = [parts[0], "resume", *opts, session_id]
         if prompt:
             cmd.append(prompt)

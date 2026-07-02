@@ -1068,6 +1068,40 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             "codex resume --model gpt-5 --dangerously-bypass-approvals-and-sandbox session-123 'Follow the spec.'",
         )
 
+    def test_codex_resume_command_for_launch_shim_does_not_duplicate_bypass(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
+            adapter = CodexAdapter()
+            cell = SimpleNamespace(id="agent-1")
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_DATA_DIR": data_dir, "TORQUE_PORT": "18933"},
+                clear=False,
+            ):
+                command = adapter.prepare_launch_command(
+                    cell,
+                    tmp,
+                    "codex --model gpt-5 'Resume prompt.'",
+                )
+            resumed = adapter.get_resume_command(command, "session-123")
+
+            parts = shlex.split(resumed)
+            self.assertEqual(parts[0], str(Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"))
+            self.assertEqual(parts[1:], ["resume", "session-123"])
+            self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", parts)
+
+            launch_text = (
+                Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
+            ).read_text()
+            resume_line = next(
+                line for line in launch_text.splitlines()
+                if line.startswith("  exec ")
+            )
+            resume_parts = shlex.split(resume_line.strip().removeprefix("exec "))
+            self.assertEqual(
+                resume_parts.count("--dangerously-bypass-approvals-and-sandbox"),
+                1,
+            )
+
     def test_codex_launch_bypass_flag_removes_conflicting_policy_flags(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as data_dir:
             adapter = CodexAdapter()
@@ -1080,7 +1114,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 adapter.prepare_launch_command(
                     cell,
                     tmp,
-                    "codex --model gpt-5 --sandbox read-only -a on-request 'Prompt.'",
+                    "codex --model gpt-5 --sandbox read-only -a on-request -s=workspace-write --ask-for-approval=never 'Prompt.'",
                 )
 
             launch_script = Path(data_dir) / "codex" / "agents" / "agent-1" / "launch.sh"
@@ -1106,6 +1140,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn("--sandbox", resume_parts)
             self.assertNotIn("-a", fresh_parts)
             self.assertNotIn("-a", resume_parts)
+            self.assertNotIn("-s=workspace-write", fresh_parts)
+            self.assertNotIn("-s=workspace-write", resume_parts)
+            self.assertNotIn("--ask-for-approval=never", fresh_parts)
+            self.assertNotIn("--ask-for-approval=never", resume_parts)
             self.assertIn("--config", fresh_parts)
             self.assertIn("--config", resume_parts)
             self.assertIn("Prompt.", fresh_parts)
