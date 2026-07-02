@@ -19820,7 +19820,25 @@ async def main(connection=None):
                 )
 
             elif cmd == "restart_agent":
-                result = await _restart_agent_session(data)
+                result = await _handle_restart_agent_command(
+                    data,
+                    state,
+                    bridge=bridge,
+                    worktree_mgr=worktree_mgr,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                    resolve_architect_launch_config=_resolve_architect_launch_config,
+                    resolve_worker_launch_config=_resolve_worker_launch_config,
+                    apply_persistent_prompt=_apply_persistent_prompt,
+                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                    persistent_prompt_filename=_persistent_prompt_filename,
+                    is_designated_engineer=_is_designated_engineer,
+                    send_agent_prompt=_send_agent_prompt,
+                    clear_digest_backlog_for_restart=(
+                        engineer_buffer.clear_digest_backlog_for_restart
+                    ),
+                )
 
             elif cmd == "move_group":
                 state.move_group(data["group"], data.get("before", ""))
