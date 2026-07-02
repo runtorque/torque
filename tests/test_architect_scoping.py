@@ -4052,6 +4052,140 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[root.id].lane, "In Progress")
         self.assertEqual(self.state.board_tasks[root.id].completion_evidence, {})
 
+    async def test_pm_root_backlog_hygiene_dry_run_and_apply_preserves_evidence(self):
+        pm = self._add_architect("pm-hygiene", "Blueprint")
+        torqly = self._add_architect("arch-hygiene", "Torqly")
+        eligible_root = self._add_task(
+            "TORQUE:3001",
+            "Already-covered PM root",
+            lane="Backlog",
+            status="Covered by Torqly stream",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        eligible_covering = self._add_task(
+            "TORQUE:3002",
+            "Final covering implementation",
+            lane="Done",
+            labels=["covers:TORQUE:3001"],
+            created_by_architect_id=torqly.id,
+        )
+        auth = {
+            "scope": "routed_pm_product_root",
+            "source": "covering_task_label_and_product_peer",
+            "covered_task_id": eligible_root.id,
+            "root_creator_architect_id": pm.id,
+            "covering_task_id": eligible_covering.id,
+            "product_labels": ["product-proposal", "pm-created"],
+            "route_message_id": "msg-route",
+            "route_thread_id": "msg-route",
+            "route_sender_id": pm.id,
+        }
+        self.state.board_mark_task_covered(
+            eligible_root.id,
+            covering_task_id=eligible_covering.id,
+            pr_url="https://github.com/runtorque/torque/pull/3002",
+            sha="abc3002",
+            tests_run="make test",
+            notes="Original final evidence notes.",
+            actor_name="torqly",
+            actor_id=torqly.id,
+            actor_kind="architect",
+            authorization=auth,
+            move_to_done=False,
+        )
+        original_covered_by = dict(
+            self.state.board_tasks[eligible_root.id]
+            .completion_evidence["covered_by"]
+        )
+
+        pending_root = self._add_task(
+            "TORQUE:963",
+            "Help popup remains separately audited",
+            lane="Backlog",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=pm.id,
+        )
+        pending_covering = self._add_task(
+            "TORQUE:3010",
+            "Pending closure audit",
+            lane="To Do",
+            labels=["covers:TORQUE:963"],
+            created_by_architect_id=torqly.id,
+        )
+        self.state.board_mark_task_covered(
+            pending_root.id,
+            covering_task_id=pending_covering.id,
+            notes="Accepted/routed; evidence pending.",
+            actor_name="torqly",
+            actor_id=torqly.id,
+            actor_kind="architect",
+            authorization={
+                "scope": "routed_pm_product_root",
+                "source": "covering_task_label_and_product_peer",
+                "covered_task_id": pending_root.id,
+                "root_creator_architect_id": pm.id,
+                "covering_task_id": pending_covering.id,
+                "product_labels": ["product-proposal", "pm-created"],
+            },
+            move_to_done=False,
+        )
+
+        dry_run = self.server_mod._finalize_already_covered_pm_roots(
+            self.state,
+            apply=False,
+        )
+
+        self.assertEqual(dry_run["inventory_count"], 2)
+        self.assertEqual(dry_run["eligible_count"], 1)
+        self.assertEqual(dry_run["ineligible_count"], 1)
+        self.assertEqual(dry_run["applied_count"], 0)
+        reasons = {item["task_id"]: item["reason"] for item in dry_run["items"]}
+        self.assertEqual(
+            reasons[eligible_root.id],
+            "eligible_final_covered_by_evidence",
+        )
+        self.assertEqual(reasons[pending_root.id], "pending_coverage")
+        self.assertEqual(self.state.board_tasks[eligible_root.id].lane, "Backlog")
+        self.assertEqual(self.state.board_tasks[pending_root.id].lane, "Backlog")
+
+        class FakeBoardSyncManager:
+            def __init__(self):
+                self.calls = []
+
+            def enqueue_for_local_change(self, task_id, *, reason, fields):
+                self.calls.append((task_id, reason, tuple(fields)))
+
+        sync = FakeBoardSyncManager()
+        applied = self.server_mod._finalize_already_covered_pm_roots(
+            self.state,
+            apply=True,
+            board_sync_manager=sync,
+        )
+
+        self.assertEqual(applied["applied_count"], 1)
+        refreshed = self.state.board_tasks[eligible_root.id]
+        self.assertEqual(refreshed.lane, "Done")
+        covered_by = refreshed.completion_evidence["covered_by"]
+        for key in (
+                "recorded_at", "recorded_by", "recorded_by_id",
+                "recorded_by_kind", "task_id", "pr_url", "sha", "tests_run",
+                "notes", "authorization"):
+            self.assertEqual(covered_by[key], original_covered_by[key])
+        self.assertTrue(covered_by["moved_to_done"])
+        self.assertEqual(covered_by["finalized_by"], "Torque")
+        self.assertEqual(covered_by["finalized_by_id"], torqly.id)
+        self.assertEqual(refreshed.messages[-1]["action"], "covered_by_finalized")
+        self.assertEqual(self.state.board_tasks[pending_root.id].lane, "Backlog")
+        self.assertEqual(
+            sync.calls,
+            [(
+                eligible_root.id,
+                "pm_root_backlog_hygiene_finalized",
+                ("completion_evidence", "messages", "lane"),
+            )],
+        )
+
     async def test_architect_routed_pm_root_does_not_allow_reassign(self):
         pm = self._add_architect("pm-1", "Blueprint")
         torqly = self._add_architect("arch-1", "Torqly")
