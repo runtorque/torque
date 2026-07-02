@@ -195,6 +195,35 @@ function seedRetainedArchitectScenario(sandbox) {
   sandbox.state.agents['worker-b'] = worker('worker-b', 'Blueprint Worker', 'eng-b', 7);
 }
 
+function classOnlyCssDeclaration(css, classList, property) {
+  const classes = new Set(classList || []);
+  let winner = null;
+  let order = 0;
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = String(match[1] || '').split(',');
+    const body = String(match[2] || '');
+    const declarationRe = new RegExp('(?:^|;)\\s*' + property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*([^;]+)', 'g');
+    let value = '';
+    for (const declaration of body.matchAll(declarationRe)) value = String(declaration[1] || '').trim();
+    if (!value) {
+      order++;
+      continue;
+    }
+    for (const rawSelector of selectors) {
+      const selector = String(rawSelector || '').trim();
+      if (!/^(?:\.[A-Za-z0-9_-]+)+$/.test(selector)) continue;
+      const selectorClasses = [...selector.matchAll(/\.([A-Za-z0-9_-]+)/g)].map(item => item[1]);
+      if (!selectorClasses.every(cls => classes.has(cls))) continue;
+      const specificity = selectorClasses.length;
+      if (!winner || specificity > winner.specificity || (specificity === winner.specificity && order >= winner.order)) {
+        winner = { selector, value, specificity, order };
+      }
+    }
+    order++;
+  }
+  return winner;
+}
+
 test('stratified grid renders architects, orphan engineers, and orphan workers regardless of selected_principal_id', () => {
   const { context, sandbox, mainEl } = createHarness();
   seedMixedAgents(sandbox);
@@ -217,6 +246,44 @@ test('stratified grid renders architects, orphan engineers, and orphan workers r
   assert.doesNotMatch(mainEl.innerHTML, /agent-strata-heading/);
   assert.doesNotMatch(mainEl.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
   assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*>\+ New<\/button>/);
+});
+
+test('architect execution workers remain a full-width multi-column grid with one engineer and many workers', () => {
+  const { context, sandbox, mainEl } = createHarness();
+  sandbox.state.groups.torque = ['arch-a', 'eng-a'];
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Torqly', 1);
+  sandbox.state.agents['eng-a'] = engineer('eng-a', 'Panelsmith', 'arch-a', 2);
+  for (let i = 1; i <= 6; i++) {
+    const id = 'worker-' + i;
+    sandbox.state.groups.torque.push(id);
+    sandbox.state.agents[id] = worker(id, 'Worker ' + i, 'eng-a', i + 2);
+  }
+  sandbox.state.selected_principal_id = 'arch-a';
+
+  vm.runInContext('render();', context);
+
+  const sectionStart = mainEl.innerHTML.indexOf('data-agent-strata="architect-execution"');
+  const sectionEnd = mainEl.innerHTML.indexOf('</section>', sectionStart);
+  const sectionHtml = mainEl.innerHTML.slice(sectionStart, sectionEnd);
+  assert.ok(sectionStart >= 0 && sectionEnd > sectionStart, 'execution hierarchy section should render');
+  assert.equal((sectionHtml.match(/data-agent-row-shape="engineer-row"/g) || []).length, 1);
+  assert.match(sectionHtml, /data-worker-count="6"/);
+  assert.match(sectionHtml, /Panelsmith[\s\S]*Worker 1[\s\S]*Worker 2[\s\S]*Worker 3[\s\S]*Worker 4[\s\S]*Worker 5[\s\S]*Worker 6/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const executionBandDisplay = classOnlyCssDeclaration(
+    css,
+    ['agent-band', 'agent-band--architect-execution', 'agent-section', 'agent-section-architect'],
+    'display',
+  );
+  assert.equal(
+    executionBandDisplay && executionBandDisplay.value,
+    'block',
+    'execution band must not inherit .agent-section grid, which constrains its only body child to the narrow engineer/architect column',
+  );
+  assert.match(executionBandDisplay.selector, /\.agent-band--architect-execution\.agent-section/);
+  const workerRowsBlock = (css.match(/\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*\}/) || [''])[0];
+  assert.match(workerRowsBlock, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(var\(--agent-grid-card-min\),\s*1fr\)\);/);
 });
 
 test('empty strata are hidden while the grid-level new menu remains', () => {

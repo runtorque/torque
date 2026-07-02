@@ -1987,6 +1987,9 @@ body.runtime-embedded .agent-focus-header {
   display: block;
   min-width: 0;
 }
+.agent-band--architect-execution.agent-section {
+  display: block;
+}
 .agent-execution-body.agent-section-body {
   display: flex;
   flex-direction: column;
