@@ -72,6 +72,7 @@ from .task_health import HEALTH_SEVERITY
 from .engineer_hints import compute_engineer_hints
 from .engineer_session_map import build_engineer_session_map
 from .execution_scope import (
+    engineer_architect_close_denied_message,
     engineer_architect_task_routing_denied_message,
     is_architect_execution_target,
 )
@@ -14110,9 +14111,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if not agent_id:
             return agent_error, True
+        target_cell = real_state.agents.get(agent_id) or state.agents.get(agent_id)
+        if caller_kind == "engineer" and is_architect_execution_target(target_cell):
+            return engineer_architect_close_denied_message(target_cell), True
         result = await handle_command({
             "cmd": "remove_agent",
             "id": agent_id,
+            "_engineer_close_id": (
+                str(caller_id or "").strip()
+                if caller_kind == "engineer" else ""
+            ),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
