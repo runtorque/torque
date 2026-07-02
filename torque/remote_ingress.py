@@ -282,13 +282,17 @@ async def ingest_remote_user_agent_message(
     state: Any,
     send_prompt: Any,
     handler: Callable[[dict[str, Any], Any, Any], Awaitable[dict[str, Any]]],
+    restart_agent: Any = None,
 ) -> dict[str, Any]:
     """Validate a remote user message and invoke the local direct-message path."""
 
     if not callable(handler):
         raise TypeError("remote ingress handler must be callable")
     command = normalize_remote_user_agent_message(data)
-    return await handler(command, state, send_prompt)
+    if restart_agent is None:
+        return await handler(command, state, send_prompt)
+    return await handler(command, state, send_prompt,
+                         restart_agent=restart_agent)
 
 
 def _clean_command_string(value: Any, field_name: str) -> str:

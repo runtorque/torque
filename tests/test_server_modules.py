@@ -3334,6 +3334,192 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other_row['message_type'], 'message')
         self.assertEqual(unsupported_row['message_type'], 'message')
 
+    async def test_user_agent_restart_slash_restarts_only_current_target_and_audits(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-old',
+            status='running',
+        )
+        other = self.state_mod.AgentCell(
+            id='agent-2',
+            name='Other',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='other-session',
+            status='running',
+        )
+        state.agents[worker.id] = worker
+        state.agents[other.id] = other
+        state.groups['g'] = [worker.id, other.id]
+        state.selected_agent_id = worker.id
+        restart_calls = []
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+        async def fake_restart(payload):
+            restart_calls.append(dict(payload))
+            worker.session_id = 'session-new'
+            return None
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/restart',
+                'idempotency_key': 'restart-submit',
+            },
+            state,
+            fake_send_prompt,
+            restart_agent=fake_restart,
+        )
+
+        self.assertEqual(result['type'], 'agent_restart')
+        self.assertEqual(result['status'], 'succeeded')
+        self.assertEqual(result['agent_id'], worker.id)
+        self.assertEqual(restart_calls, [{
+            'cmd': 'restart_agent',
+            'id': worker.id,
+        }])
+        self.assertEqual(other.session_id, 'other-session')
+        self.assertEqual(sent, [])
+        self.assertEqual(state.selected_agent_id, worker.id)
+
+        rows = self.db.load_direct_messages_for_agent(worker.id)
+        messages = [row['message'] for row in rows]
+        self.assertTrue(any('User requested /restart' in msg for msg in messages))
+        self.assertTrue(any('User /restart succeeded' in msg for msg in messages))
+        self.assertTrue(all(row['sender_kind'] == 'system' for row in rows))
+        statuses = [
+            row['context_snapshot'].get('restart_status')
+            for row in rows
+            if row['context_snapshot'].get('slash_command') == 'restart'
+        ]
+        self.assertEqual(sorted(statuses), ['requested', 'succeeded'])
+
+    async def test_user_agent_restart_slash_failure_and_non_exact_inputs_are_safe(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+            status='running',
+        )
+        dismissed = self.state_mod.AgentCell(
+            id='agent-dismissed',
+            name='Dismissed',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+            session_id='session-dismissed',
+            status='stopped',
+            dismissed_at=123,
+        )
+        terminal = self.state_mod.AgentCell(
+            id='terminal-1',
+            name='Shell',
+            group='g',
+            cell_type='terminal',
+            session_id='term-session',
+        )
+        state.agents[worker.id] = worker
+        state.agents[dismissed.id] = dismissed
+        state.agents[terminal.id] = terminal
+        state.groups['g'] = [worker.id, dismissed.id, terminal.id]
+        restart_calls = []
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        async def fake_restart(payload):
+            restart_calls.append(dict(payload))
+            return None
+
+        non_exact = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/restart please',
+                'idempotency_key': 'restart-please',
+            },
+            state,
+            fake_send_prompt,
+            restart_agent=fake_restart,
+        )
+        loop_delivery = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': worker.id,
+                'message': '/restart',
+                'idempotency_key': 'restart-loop-delivery',
+                '_loop_delivery': True,
+                '_loop_id': 'loop-1',
+            },
+            state,
+            fake_send_prompt,
+            restart_agent=fake_restart,
+        )
+        dismissed_result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': dismissed.id,
+                'message': '/restart',
+                'idempotency_key': 'restart-dismissed',
+            },
+            state,
+            fake_send_prompt,
+            restart_agent=fake_restart,
+        )
+        terminal_result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': terminal.id,
+                'message': '/restart',
+                'idempotency_key': 'restart-terminal',
+            },
+            state,
+            fake_send_prompt,
+            restart_agent=fake_restart,
+        )
+
+        self.assertEqual(non_exact['type'], 'ok')
+        self.assertEqual(loop_delivery['type'], 'ok')
+        self.assertEqual(dismissed_result['type'], 'error')
+        self.assertIn('dismissed', dismissed_result['message'])
+        self.assertEqual(terminal_result['type'], 'error')
+        self.assertIn('Agent not found', terminal_result['message'])
+        self.assertEqual(restart_calls, [])
+        self.assertEqual(len(sent), 2)
+        self.assertIn('/restart please', sent[0][1])
+        self.assertIn('/restart', sent[1][1])
+        self.assertIn('This message was sent by a user-scheduled /loop.', sent[1][1])
+
+        dismissed_rows = self.db.load_direct_messages_for_agent(dismissed.id)
+        self.assertEqual(
+            sorted([
+                row['context_snapshot'].get('restart_status')
+                for row in dismissed_rows
+                if row['context_snapshot'].get('slash_command') == 'restart'
+            ]),
+            ['failed', 'requested'],
+        )
+
     async def test_user_agent_loop_create_fire_cancel_and_invalid_no_spam(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(

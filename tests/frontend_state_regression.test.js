@@ -15295,6 +15295,7 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(slashDropdown.style.display, '');
   assert.equal(taskDropdown.style.display, 'none');
   assert.match(slashDropdown.innerHTML, /\/compact/);
+  assert.match(slashDropdown.innerHTML, /\/restart/);
   assert.match(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
   assert.match(slashDropdown.innerHTML, /\/loop cancel/);
   assert.match(slashDropdown.innerHTML, /recurring user message/i);
@@ -15308,6 +15309,7 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.match(slashDropdown.innerHTML, /\/loop cancel/);
   assert.doesNotMatch(slashDropdown.innerHTML, /\/loop every <interval> <message>/);
   assert.doesNotMatch(slashDropdown.innerHTML, /\/compact/);
+  assert.doesNotMatch(slashDropdown.innerHTML, /\/restart/);
 
   function keyEvent(key) {
     return {
@@ -15365,6 +15367,32 @@ test('terminal compose slash command autocomplete filters and fills without send
   assert.equal(input.selectionEnd, input.value.length);
   assert.equal(sandbox.sendCalls.length, 0);
 
+  input.value = '/res';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.terminalComposeInput(input);
+  assert.equal(slashDropdown.style.display, '');
+  assert.match(slashDropdown.innerHTML, /\/restart/);
+  assert.doesNotMatch(slashDropdown.innerHTML, /\/compact/);
+  const enterRestart = keyEvent('Enter');
+  context.__enterRestart = enterRestart;
+  runInContext(context, `terminalComposeKeydown(__enterRestart, 'agent-1');`);
+  assert.equal(enterRestart.preventDefaultCalled, true);
+  assert.equal(input.value, '/restart');
+  assert.equal(sandbox.sendCalls.length, 0);
+
+  context.__restartSubmit = {
+    currentTarget: form,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  runInContext(context, `terminalComposeSubmit(__restartSubmit, 'agent-1');`);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].agent_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[0].message, '/restart');
+  assert.match(sandbox.sendCalls[0].idempotency_key, /^terminal-direct:agent-1:/);
+
   input.value = '/not-a-command';
   input.selectionStart = input.value.length;
   input.selectionEnd = input.value.length;
@@ -15376,10 +15404,10 @@ test('terminal compose slash command autocomplete filters and fills without send
     stopPropagation() {},
   };
   runInContext(context, `terminalComposeSubmit(__invalidSlashSubmit, 'agent-1');`);
-  assert.equal(sandbox.sendCalls.length, 1);
-  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
-  assert.equal(sandbox.sendCalls[0].agent_id, 'agent-1');
-  assert.equal(sandbox.sendCalls[0].message, '/not-a-command');
+  assert.equal(sandbox.sendCalls.length, 2);
+  assert.equal(sandbox.sendCalls[1].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[1].agent_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[1].message, '/not-a-command');
 });
 
 test('terminal compose ticket typeahead filters tasks and inserts selected reference', () => {
