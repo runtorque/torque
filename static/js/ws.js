@@ -1512,6 +1512,7 @@ function _blankSurfaceInvalidations() {
     templates: false,
     health: false,
     thinking: false,
+    terminal: false,
   };
 }
 
@@ -1648,8 +1649,8 @@ function _sortAgentPeerThreadMap(map) {
   return out;
 }
 
-function _terminalWorkspaceViewedAgentIdBeforeDelta() {
-  if (!state || !state.agents) return '';
+function _terminalWorkspaceViewedCellBeforeDelta() {
+  if (!state || !state.agents) return null;
   let cell = null;
   if (selectedTerminalId && state.agents[selectedTerminalId]) {
     cell = state.agents[selectedTerminalId];
@@ -1666,12 +1667,86 @@ function _terminalWorkspaceViewedAgentIdBeforeDelta() {
   if (!cell && selectedAgentId && state.agents[selectedAgentId]) {
     cell = state.agents[selectedAgentId];
   }
+  return cell || null;
+}
+
+function _terminalWorkspaceViewedAgentIdBeforeDelta() {
+  const cell = _terminalWorkspaceViewedCellBeforeDelta();
   if (!cell) return '';
   if (cell.cell_type === 'terminal') {
     const parentId = String(cell.parent_id || '').trim();
-    return parentId && state.agents[parentId] ? parentId : '';
+    return parentId && state && state.agents && state.agents[parentId] ? parentId : '';
   }
   return cell.cell_type === 'agent' ? String(cell.id || '') : '';
+}
+
+function _terminalWorkspaceViewedCellIdBeforeDelta() {
+  const cell = _terminalWorkspaceViewedCellBeforeDelta();
+  return String((cell && cell.id) || '').trim();
+}
+
+function _terminalWorkspaceGroupBeforeDelta() {
+  const cell = _terminalWorkspaceViewedCellBeforeDelta();
+  if (cell && cell.group) return String(cell.group || '');
+  if (typeof _activeGroup === 'function') return String(_activeGroup() || '');
+  return String((state && state.active_group) || '');
+}
+
+function _groupDeltaInvalidatesTerminalWorkspace(op, hint) {
+  const viewedGroup = _terminalWorkspaceGroupBeforeDelta();
+  if (!viewedGroup) return true;
+  switch (op && op.op) {
+    case 'group_update':
+    case 'group_remove':
+    case 'group_settings_update': {
+      const group = String((op && (op.name || op.group || op.group_name)) || (hint && hint.group) || '');
+      return group ? group === viewedGroup : true;
+    }
+    case 'group_rename': {
+      const oldName = String((op && op.old_name) || '');
+      const newName = String((op && op.new_name) || '');
+      return oldName ? (oldName === viewedGroup || newName === viewedGroup) : true;
+    }
+    case 'groups_reorder':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function _globalSettingsDeltaInvalidatesTerminalWorkspace(op) {
+  if (!_globalSettingsDeltaHasChangedKeys(op)) return true;
+  return _globalSettingsDeltaChangedKeys(op).indexOf('xterm_scrollback') >= 0;
+}
+
+function _agentDeltaInvalidatesTerminalWorkspace(previous, next, op) {
+  const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (!agentId) return true;
+  const viewedCell = _terminalWorkspaceViewedCellBeforeDelta();
+  const viewedCellId = String((viewedCell && viewedCell.id) || '');
+  const viewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
+  const selectedIds = [
+    viewedCellId,
+    viewedAgentId,
+    String(typeof selectedTerminalId !== 'undefined' ? (selectedTerminalId || '') : ''),
+    String(typeof selectedAgentId !== 'undefined' ? (selectedAgentId || '') : ''),
+    String(typeof focusedItemId !== 'undefined' ? (focusedItemId || '') : ''),
+  ].filter(Boolean);
+  if (!viewedCell && !selectedIds.length) return true;
+  if (selectedIds.indexOf(agentId) >= 0) return true;
+
+  const prevParent = String((previous && previous.parent_id) || '');
+  const nextParent = String((next && next.parent_id) || '');
+  const viewedParent = String((viewedCell && viewedCell.parent_id) || '');
+  if (viewedParent && agentId === viewedParent) return true;
+  if (viewedAgentId && (prevParent === viewedAgentId || nextParent === viewedAgentId)) return true;
+  if (viewedCellId && (prevParent === viewedCellId || nextParent === viewedCellId)) return true;
+
+  const activeSession = String((state && state.active_session_id) || '');
+  const prevSession = String((previous && previous.session_id) || '');
+  const nextSession = String((next && next.session_id) || '');
+  if (activeSession && (prevSession === activeSession || nextSession === activeSession)) return true;
+  return false;
 }
 
 function _globalSettingsDeltaChangedKeys(op) {
@@ -1730,10 +1805,12 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'groups_reorder':
       case 'group_settings_update':
         _markSurface(flags, 'main', 'context', 'engineer');
+        if (_groupDeltaInvalidatesTerminalWorkspace(op, hint)) _markSurface(flags, 'terminal');
         break;
       case 'global_settings_update':
         if (!_globalSettingsDeltaSkipsBroadInvalidation(op)) {
           _markSurface(flags, 'main', 'context', 'engineer');
+          if (_globalSettingsDeltaInvalidatesTerminalWorkspace(op)) _markSurface(flags, 'terminal');
         }
         break;
       case 'ai_settings_update':
@@ -1748,7 +1825,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         // (`active_session_id` / `current_window_id`), not agent-panel
         // selection state. Mark only surfaces that display active-terminal
         // state (main grid indicator and terminal-related context views).
-        _markSurface(flags, 'main', 'context');
+        _markSurface(flags, 'main', 'context', 'terminal');
         break;
       case 'task_upsert':
       case 'task_remove':
@@ -1858,7 +1935,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         if (op.op !== 'peer_message_upsert') {
           const _terminalViewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
           if (_terminalViewedAgentId && _pmIds.indexOf(_terminalViewedAgentId) >= 0) {
-            _markSurface(flags, 'main');
+            _markSurface(flags, 'main', 'terminal');
           }
         }
         if (_pmFocused && _pmIds.indexOf(String(_pmFocused.id || '')) >= 0) {
@@ -1870,7 +1947,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         const _loopAgentId = String((op.loop && op.loop.agent_id) || op.agent_id || '');
         const _terminalViewedAgentId = _terminalWorkspaceViewedAgentIdBeforeDelta();
         if (_terminalViewedAgentId && _loopAgentId === _terminalViewedAgentId) {
-          _markSurface(flags, 'main');
+          _markSurface(flags, 'main', 'terminal');
         }
         break;
       }
@@ -2659,6 +2736,7 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
   if (_agentDeltaIsContextWindowOnly(previous, next, op)) {
     return;
   }
+  if (_agentDeltaInvalidatesTerminalWorkspace(previous, next, op)) _markSurface(flags, 'terminal');
   if (!_standaloneDeltaOptimizationsEnabled()) {
     _markSurface(flags, 'main', 'context', 'events', 'engineer');
     if (_agentDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
@@ -2679,16 +2757,16 @@ function _applyUiSurfaceInvalidation(flags, key) {
     _markSurface(flags, 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'active_group') {
-    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking', 'terminal');
   }
   if (key === 'workspace_sidebar_width') {
     _markSurface(flags, 'main', 'board', 'chat', 'actions', 'context', 'events', 'engineer', 'templates', 'history', 'initiatives', 'thinking');
   }
   if (key === 'terminal_direct_messages_height') {
-    _markSurface(flags, 'main');
+    _markSurface(flags, 'main', 'terminal');
   }
   if (key === 'terminal_compose_height') {
-    _markSurface(flags, 'main');
+    _markSurface(flags, 'main', 'terminal');
   }
   if (key === 'context_panel_split_ratio') {
     _markSurface(flags, 'context');
@@ -2712,7 +2790,7 @@ function _applyUiSurfaceInvalidation(flags, key) {
   }
   if (key === 'selected_agent_id') {
     if (_clientScopedFocusOwnsSelectedAgent()) return;
-    _markSurface(flags, 'main', 'focus', 'context', 'events', 'engineer');
+    _markSurface(flags, 'main', 'focus', 'context', 'events', 'engineer', 'terminal');
   }
 }
 

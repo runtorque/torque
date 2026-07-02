@@ -790,7 +790,11 @@ function renderInvalidatedSurfaces(flags) {
   // hundreds of agent_upsert pulses per second produced (cheap post-v9
   // but still wasteful + masks any future capture/restore regression).
   if (flags.main) {
-    render({ skipPanelRefresh: true, skipFocusRefresh: !flags.focus });
+    render({
+      skipPanelRefresh: true,
+      skipFocusRefresh: !flags.focus,
+      skipTerminalRefresh: !flags.terminal,
+    });
   } else if (flags.focus && typeof renderAgentFocusPanel === 'function') {
     renderAgentFocusPanel();
   }

@@ -434,6 +434,7 @@ function _renderMainGrid(opts, renderMode) {
   // `_agentPanelRefreshCurrentTab()` even when nothing the panel displays
   // had changed (still surgical post-v9, but wasteful CPU + future-fragile).
   const _skipPanelRefresh = !!(opts && opts.skipPanelRefresh);
+  const _skipTerminalRefresh = !!(opts && opts.skipTerminalRefresh);
   let groupNames = Object.keys(state.groups);
   if (renderMode && renderMode.singleGroup) {
     groupNames = _activeGroupNamesForRender(groupNames);
@@ -466,7 +467,7 @@ function _renderMainGrid(opts, renderMode) {
     window._navCreationControls = [];
     window._navFocusableItems = [];
     focusedItemId = null;
-    if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+    if (!_skipTerminalRefresh && typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
     return;
   }
 
@@ -629,5 +630,5 @@ function _renderMainGrid(opts, renderMode) {
       }
     }
   }
-  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+  if (!_skipTerminalRefresh && typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
 }
