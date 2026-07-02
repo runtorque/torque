@@ -3197,6 +3197,7 @@ async def _run_direct_worktree_merge(
                           or getattr(cell, "git_root", "") or ""),
             branch=str(getattr(cell, "worktree_branch", "") or ""),
             base_branch=str(getattr(cell, "worktree_base_branch", "") or ""),
+            board_sync_manager=board_sync_manager,
         )
     return result
 
@@ -4089,6 +4090,7 @@ async def _run_pr_worktree_merge(
         base_branch=base_branch,
         remote=remote,
         origin_verification=origin_verification,
+        board_sync_manager=board_sync_manager,
     )
     return result
 
@@ -10799,6 +10801,223 @@ def _save_completion_evidence_task(state: MatrixState, task) -> None:
     state._db_save_task(task)
 
 
+def _task_tests_run_completion_evidence(task) -> str:
+    if not task:
+        return ""
+    summary = getattr(task, "verification_summary", {}) or {}
+    if isinstance(summary, dict):
+        tests_run = _completion_evidence_text(
+            summary.get("tests_run", ""),
+            limit=1000,
+        )
+        if tests_run:
+            return tests_run
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if isinstance(evidence, dict):
+        verification = evidence.get("verification", {}) or {}
+        if isinstance(verification, dict):
+            ver_summary = verification.get("summary", {}) or {}
+            if isinstance(ver_summary, dict):
+                tests_run = _completion_evidence_text(
+                    ver_summary.get("tests_run", ""),
+                    limit=1000,
+                )
+                if tests_run:
+                    return tests_run
+    return ""
+
+
+def _covering_task_final_ship_evidence(task) -> tuple[dict, str]:
+    """Return PR/SHA/test evidence only for final shipped covering tasks.
+
+    Auto-resolving a routed PM root is intentionally stricter than normal
+    completion surfacing: the covering task must already be closed, have an
+    origin-verified merge/PR SHA, and carry explicit tests/checks evidence.
+    """
+    if not task or not task_counts_as_done(task):
+        return {}, "covering_task_not_done"
+    evidence = getattr(task, "completion_evidence", {}) or {}
+    if not isinstance(evidence, dict):
+        return {}, "missing_completion_evidence"
+    merge = evidence.get("merge", {}) or {}
+    if not isinstance(merge, dict):
+        return {}, "missing_merge_evidence"
+    if not bool(merge.get("origin_verified")):
+        return {}, "merge_not_origin_verified"
+    pr_url = _completion_evidence_text(
+        merge.get("pr_url")
+        or (merge.get("pr", {}) or {}).get("url", ""),
+        limit=500,
+    )
+    sha = _completion_evidence_text(
+        merge.get("sha")
+        or merge.get("origin_sha")
+        or (merge.get("pr", {}) or {}).get("merge_commit_sha", ""),
+        limit=120,
+    )
+    tests_run = _task_tests_run_completion_evidence(task)
+    if not pr_url:
+        return {}, "missing_pr_url"
+    if not sha:
+        return {}, "missing_merge_sha"
+    if not tests_run:
+        return {}, "missing_tests_run"
+
+    origin_summary = _completion_evidence_text(
+        merge.get("origin_summary", ""),
+        limit=500,
+    )
+    shipped = {
+        "pr_url": pr_url,
+        "sha": sha,
+        "tests_run": tests_run,
+        "evidence": "final shipped covering task evidence",
+        "notes": (
+            "Auto-resolved PM-created product root after covering task "
+            "shipped with final PR/SHA/test evidence."
+        ),
+    }
+    if origin_summary:
+        shipped["notes"] += f" Origin verified: {origin_summary}."
+    return shipped, ""
+
+
+def _auto_resolve_pm_product_roots_for_covering_task(
+        state: MatrixState,
+        covering_task,
+) -> list[dict]:
+    """Close routed PM-created roots explicitly covered by a shipped task.
+
+    This is deliberately a narrow follow-through path, not a generic cleanup
+    sweep: it only considers roots in the same group with product labels, a
+    different creator, an exact ``covers:<root>`` label on this covering task,
+    the existing routed-PM authorization predicate, and final PR/SHA/tests
+    evidence on the shipped covering task.
+    """
+    if not state or not covering_task:
+        return []
+    covering_task_id = str(getattr(covering_task, "id", "") or "").strip()
+    covering_architect_id = str(
+        getattr(covering_task, "created_by_architect_id", "") or ""
+    ).strip()
+    covering_group = str(getattr(covering_task, "group", "") or "").strip()
+    if not covering_task_id or not covering_architect_id or not covering_group:
+        return []
+
+    final_evidence, _reason = _covering_task_final_ship_evidence(covering_task)
+    if not final_evidence:
+        return []
+
+    try:
+        from .mcp_tools_shared import (
+            _PRODUCT_TASK_LABELS,
+            _routed_product_root_coverage_authorization,
+            _task_has_covers_label,
+        )
+    except Exception:
+        log.exception("Failed to load routed PM coverage authorization helpers")
+        return []
+
+    resolved = []
+    for root in list(getattr(state, "board_tasks", {}).values()):
+        root_id = str(getattr(root, "id", "") or "").strip()
+        if not root_id or root_id == covering_task_id:
+            continue
+        if str(getattr(root, "group", "") or "").strip() != covering_group:
+            continue
+        if task_is_closed(root):
+            continue
+        root_creator = str(
+            getattr(root, "created_by_architect_id", "") or ""
+        ).strip()
+        if not root_creator or root_creator == covering_architect_id:
+            continue
+        root_labels = {
+            str(label or "").strip()
+            for label in (getattr(root, "labels", []) or [])
+        }
+        # Auto-resolution is stricter than manual visibility: require both
+        # PM/product labels so arbitrary cross-architect cards are not swept.
+        if not set(_PRODUCT_TASK_LABELS).issubset(root_labels):
+            continue
+        # Avoid arbitrary/bulk cleanup: this shipped task must name this root.
+        if not _task_has_covers_label(covering_task, root_id):
+            continue
+
+        existing_covered_by = {}
+        existing_evidence = getattr(root, "completion_evidence", {}) or {}
+        if isinstance(existing_evidence, dict):
+            existing_covered_by = existing_evidence.get("covered_by", {}) or {}
+        if isinstance(existing_covered_by, dict):
+            existing_covering_id = str(
+                existing_covered_by.get("task_id", "") or ""
+            ).strip()
+            if existing_covering_id and existing_covering_id != covering_task_id:
+                continue
+
+        authorization, auth_error = _routed_product_root_coverage_authorization(
+            state,
+            covering_architect_id,
+            root,
+            covering_task_id,
+        )
+        if auth_error or not authorization:
+            continue
+        # Route-only manual coverage remains possible, but automatic closure
+        # requires an explicit covering-task label so the target is unambiguous.
+        if "covering_task_label" not in str(
+                authorization.get("source", "") or ""):
+            continue
+        authorization = dict(authorization)
+        authorization["auto_resolved"] = True
+        authorization["auto_resolve_source"] = "covering_task_final_ship_evidence"
+
+        try:
+            result = state.board_mark_task_covered(
+                root_id,
+                covering_task_id=covering_task_id,
+                pr_url=final_evidence["pr_url"],
+                sha=final_evidence["sha"],
+                tests_run=final_evidence["tests_run"],
+                evidence=final_evidence["evidence"],
+                notes=final_evidence["notes"],
+                actor_name="Torque",
+                actor_id=covering_architect_id,
+                actor_kind="system",
+                authorization=authorization,
+                move_to_done=True,
+            )
+        except ValueError:
+            log.exception(
+                "Failed to auto-resolve PM product root %s covered by %s",
+                root_id,
+                covering_task_id,
+            )
+            continue
+        resolved.append(result)
+    return resolved
+
+
+def _auto_resolve_pm_product_roots_and_enqueue(
+        state: MatrixState,
+        covering_task,
+        *,
+        board_sync_manager=None,
+) -> list[dict]:
+    auto_resolved = _auto_resolve_pm_product_roots_for_covering_task(
+        state,
+        covering_task,
+    )
+    if board_sync_manager:
+        for resolved in auto_resolved:
+            board_sync_manager.enqueue_for_local_change(
+                resolved.get("task_id", ""),
+                reason="auto_pm_root_covered",
+                fields=("completion_evidence", "messages", "lane"),
+            )
+    return auto_resolved
+
+
 def _record_task_completion_evidence_snapshot(
         state: MatrixState,
         task,
@@ -10808,6 +11027,7 @@ def _record_task_completion_evidence_snapshot(
         message: str = "",
         actor_name: str = "",
         timestamp: str = "",
+        board_sync_manager=None,
 ) -> bool:
     """Snapshot verification/artifact evidence when a task is completed.
 
@@ -10851,6 +11071,11 @@ def _record_task_completion_evidence_snapshot(
         update,
     )
     _save_completion_evidence_task(state, task)
+    _auto_resolve_pm_product_roots_and_enqueue(
+        state,
+        task,
+        board_sync_manager=board_sync_manager,
+    )
     return True
 
 
@@ -10957,6 +11182,7 @@ def _record_merge_completion_evidence(
         base_branch: str = "",
         remote: str = "",
         origin_verification: dict | None = None,
+        board_sync_manager=None,
 ) -> list[str]:
     if not state or not isinstance(result, dict) or not result.get("ok"):
         return []
@@ -11021,6 +11247,11 @@ def _record_merge_completion_evidence(
             update,
         )
         _save_completion_evidence_task(state, task)
+        _auto_resolve_pm_product_roots_and_enqueue(
+            state,
+            task,
+            board_sync_manager=board_sync_manager,
+        )
         updated_ids.append(task.id)
     return updated_ids
 
@@ -20940,6 +21171,7 @@ async def main(connection=None):
                             action="verify",
                             message=verify_msg,
                             actor_name=actor_name,
+                            board_sync_manager=board_sync_manager,
                         )
                     if (
                             _updated_root
@@ -20950,6 +21182,7 @@ async def main(connection=None):
                             action="verify",
                             message=verify_msg,
                             actor_name=actor_name,
+                            board_sync_manager=board_sync_manager,
                         )
                     _panel_event(
                         "task_verification_updated",
@@ -23315,6 +23548,7 @@ async def main(connection=None):
                                 cell=cell,
                                 action="done",
                                 message=message or "Done",
+                                board_sync_manager=board_sync_manager,
                             )
                             review_verdict = _record_review_verdict_evidence(
                                 state,
@@ -23370,6 +23604,11 @@ async def main(connection=None):
                                         " '%s'", cell.name)
                         if task and not task_counts_as_done(task):
                             state.board_move_task(task.id, "Done")
+                            _auto_resolve_pm_product_roots_and_enqueue(
+                                state,
+                                task,
+                                board_sync_manager=board_sync_manager,
+                            )
                         if task:
                             task.status = ""
                             _save_task(task)
@@ -23542,6 +23781,7 @@ async def main(connection=None):
                                     cell=cell,
                                     action="verify",
                                     message=verify_msg,
+                                    board_sync_manager=board_sync_manager,
                                 )
                             if (
                                     _root_task
@@ -23552,6 +23792,7 @@ async def main(connection=None):
                                     cell=cell,
                                     action="verify",
                                     message=verify_msg,
+                                    board_sync_manager=board_sync_manager,
                                 )
                             _append_mcp(cell, "verify", verify_msg)
                             _append_task_msg(task, "verify",
@@ -23615,12 +23856,18 @@ async def main(connection=None):
                                     cell=cell,
                                     action="ready",
                                     message=message or "Ready",
+                                    board_sync_manager=board_sync_manager,
                                 )
                             state._emit_agent(cell)
                             if task:
                                 if not task_counts_as_done(task):
                                     state.board_move_task(
                                         task.id, "Done")
+                                    _auto_resolve_pm_product_roots_and_enqueue(
+                                        state,
+                                        task,
+                                        board_sync_manager=board_sync_manager,
+                                    )
                                 task.agent_id = ""
                                 task.status = ""
                                 _save_task(task)
