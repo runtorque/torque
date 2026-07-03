@@ -12920,6 +12920,134 @@ class MatrixState:
             "moved_to_done": True,
         }
 
+    def board_pickup_architect_task(
+            self,
+            tid: str,
+            *,
+            architect_id: str,
+            actor_name: str = "Torque",
+            actor_kind: str = "architect",
+            reason: str = "",
+            source: str = "",
+            authorization: dict | None = None) -> dict:
+        """Claim a routed PM-created task for an Architect with audit evidence."""
+        tid = self.resolve_task_alias(tid)
+        task = self.board_tasks.get(tid)
+        if not task:
+            raise ValueError("Task not found")
+
+        def _clean(value) -> str:
+            return str(value or "").strip()
+
+        architect_id = _clean(architect_id)
+        if not architect_id:
+            raise ValueError("architect_id is required")
+        actor_name = _clean(actor_name) or "Torque"
+        actor_kind = _clean(actor_kind) or "architect"
+        reason = _clean(reason)
+        source = _clean(source)
+
+        previous_assignment = {
+            "assigned_architect_id": _clean(
+                getattr(task, "assigned_architect_id", "") or ""
+            ),
+            "assigned_engineer_id": _clean(
+                getattr(task, "assigned_engineer_id", "") or ""
+            ),
+            "agent_id": _clean(getattr(task, "agent_id", "") or ""),
+            "created_by_architect_id": _clean(
+                getattr(task, "created_by_architect_id", "") or ""
+            ),
+            "lane": _clean(getattr(task, "lane", "") or ""),
+            "dispatch_state": _clean(
+                getattr(task, "dispatch_state", "") or "queued"
+            ),
+        }
+        previous_architect_id = previous_assignment["assigned_architect_id"]
+        if previous_architect_id and previous_architect_id != architect_id:
+            raise ValueError("Task is already assigned to another architect")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        auth_payload = (
+            copy.deepcopy(authorization)
+            if isinstance(authorization, dict) else {}
+        )
+        pickup = {
+            "picked_up_at": now_iso,
+            "picked_up_by": actor_name,
+            "picked_up_by_id": architect_id,
+            "picked_up_by_kind": actor_kind,
+            "previous_assignment": previous_assignment,
+            "reason": reason,
+            "source": source,
+        }
+        if auth_payload:
+            pickup["authorization"] = auth_payload
+
+        completion_evidence = _normalize_completion_evidence(
+            getattr(task, "completion_evidence", {}) or {}
+        )
+        completion_evidence["status"] = (
+            str(completion_evidence.get("status", "") or "").strip()
+            or "evidence_attached"
+        )
+        completion_evidence["sources"] = _append_unique_string(
+            completion_evidence.get("sources", []),
+            "architect_pickup",
+        )
+        completion_evidence["architect_pickup"] = pickup
+        completion_evidence["updated_by"] = actor_name
+        completion_evidence["updated_at"] = now_iso
+
+        messages = list(getattr(task, "messages", []) or [])
+        message_parts = [f"Architect pickup: {actor_name} claimed this task."]
+        if reason:
+            message_parts.append(f"Reason: {reason}")
+        if source:
+            message_parts.append(f"Source: {source}")
+        if auth_payload:
+            auth_source = _clean(auth_payload.get("source", ""))
+            route_id = _clean(auth_payload.get("route_message_id", ""))
+            if auth_source or route_id:
+                message_parts.append(
+                    "Authorization: "
+                    + ", ".join(
+                        part for part in (
+                            f"source={auth_source}" if auth_source else "",
+                            f"route_message_id={route_id}" if route_id else "",
+                        ) if part
+                    )
+                )
+        message = " ".join(message_parts)
+        messages.append({
+            "timestamp": time.time(),
+            "action": "architect_pickup",
+            "message": message,
+            "agent_name": actor_name,
+            "agent_id": architect_id,
+            "agent_kind": actor_kind,
+        })
+
+        self.board_update_task(
+            tid,
+            assigned_architect_id=architect_id,
+            completion_evidence=completion_evidence,
+            messages=messages,
+        )
+        refreshed = self.board_tasks.get(tid)
+        return {
+            "type": "task_picked_up",
+            "task_id": tid,
+            "assigned_architect_id": architect_id,
+            "previous_assigned_architect_id": previous_architect_id,
+            "already_assigned": previous_architect_id == architect_id,
+            "lane": _clean(getattr(refreshed, "lane", "") or ""),
+            "dispatch_state": _clean(
+                getattr(refreshed, "dispatch_state", "") or "queued"
+            ),
+            "architect_pickup": pickup,
+        }
+
     def board_update_task(self, tid: str, **fields):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)

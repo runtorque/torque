@@ -58,6 +58,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "engineer_rehire",
     "engineer_restore",
     "task_create",
+    "task_pickup",
     "task_update",
     "task_reassign",
     "task_edit",

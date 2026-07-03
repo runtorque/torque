@@ -175,6 +175,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_set_specializations",
             "architect_engineer_dismiss",
             "architect_task_create",
+            "architect_task_pickup",
             "architect_task_update",
             "architect_task_move",
             "architect_task_reassign",

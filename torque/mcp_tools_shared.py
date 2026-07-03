@@ -4803,6 +4803,90 @@ def _routed_product_root_coverage_authorization(
     return authorization, ""
 
 
+def _routed_pm_product_root_pickup_authorization(
+        state,
+        caller_id: str,
+        task) -> tuple[dict, str]:
+    """Authorize direct Architect pickup of a PM-created product root.
+
+    This is intentionally narrower than general task ownership.  A task is
+    claimable only when it is a same-group, product-labeled task created by a
+    Product Manager-profile Architect, unclaimed (or already claimed by the
+    caller), and there is durable inbound product-peer route evidence from the
+    PM creator to the claiming Architect.
+    """
+    caller_id = str(caller_id or "").strip()
+    task_id = str(getattr(task, "id", "") or "").strip()
+    creator_id = str(getattr(task, "created_by_architect_id", "") or "").strip()
+    if not caller_id or not task_id:
+        return {}, "Task not found"
+    caller = state.agents.get(caller_id)
+    caller_group = str(getattr(caller, "group", "") or "").strip()
+    if not caller or str(getattr(caller, "kind", "") or "").strip() != "architect":
+        return {}, "Architect pickup is available only to Architects"
+    if not caller_group or str(getattr(task, "group", "") or "").strip() != caller_group:
+        return {}, "Task not found"
+    if board_task_is_closed(task):
+        return {}, "Task is already closed"
+    if not _task_has_product_label(task):
+        return {}, "Task is not a PM-created product proposal"
+    if not creator_id:
+        return {}, "Task is not a PM-created product proposal"
+    creator = state.agents.get(creator_id)
+    if not creator or str(getattr(creator, "group", "") or "").strip() != caller_group:
+        return {}, "Task is not a same-group PM-created product proposal"
+    if not _cell_has_product_manager_profile(state, creator):
+        return {}, "Task creator is not a Product Manager profile"
+    if creator_id == caller_id:
+        return {}, "Task was created by this architect; pickup is not required"
+    assigned_architect_id = str(
+        getattr(task, "assigned_architect_id", "") or ""
+    ).strip()
+    if assigned_architect_id and assigned_architect_id != caller_id:
+        return {}, "Task is already assigned to another architect"
+
+    route_row = _product_peer_route_message_for_task(
+        state,
+        caller_id,
+        task,
+    )
+    if not route_row:
+        return {}, (
+            "PM-created product task pickup requires inbound product-peer "
+            "route evidence from the Product Manager creator"
+        )
+
+    labels = [
+        str(label or "").strip()
+        for label in (getattr(task, "labels", []) or [])
+        if str(label or "").strip() in _PRODUCT_TASK_LABELS
+    ]
+    authorization = {
+        "scope": "routed_pm_product_root_pickup",
+        "source": "product_peer_route",
+        "task_id": task_id,
+        "root_creator_architect_id": creator_id,
+        "claiming_architect_id": caller_id,
+        "product_labels": labels,
+        "route_message_id": str(route_row.get("id", "") or ""),
+        "route_thread_id": str(route_row.get("thread_id", "") or ""),
+        "route_sender_id": str(route_row.get("sender_id", "") or ""),
+        "route_recipient_id": str(route_row.get("recipient_id", "") or ""),
+    }
+    return authorization, ""
+
+
+def _architect_task_owned_by_caller(task, caller_id: str) -> bool:
+    caller_id = str(caller_id or "").strip()
+    if not task or not caller_id:
+        return False
+    if str(getattr(task, "created_by_architect_id", "") or "").strip() == caller_id:
+        return True
+    if str(getattr(task, "assigned_architect_id", "") or "").strip() == caller_id:
+        return True
+    return False
+
+
 def _product_task_visible_for_architect(state, caller_id: str, task) -> bool:
     if not task:
         return False
@@ -7449,10 +7533,10 @@ def _resolve_architect_dispatch_task(state, caller_id: str, engineer_id: str,
         return None, "Task not found"
     caller_id_str = str(caller_id or "").strip()
     creator_class = _task_created_by_classifier(task)
-    creator_architect_id = str(
-        getattr(task, "created_by_architect_id", "") or ""
-    ).strip()
-    if creator_class != "user" and creator_architect_id != caller_id_str:
+    if creator_class != "user" and not _architect_task_owned_by_caller(
+        task,
+        caller_id_str,
+    ):
         return None, "Task was not created by this architect"
     if _effective_assigned_engineer_id(task) != str(engineer_id or "").strip():
         return None, "Task is not assigned to this engineer"
@@ -11989,6 +12073,51 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
 
+    if tool_name == "task_pickup" and caller_kind == "architect":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        task = real_state.board_tasks.get(tid)
+        if not task:
+            return "Task not found", True
+        caller_id_str = str(caller_id or "").strip()
+        authorization, auth_error = _routed_pm_product_root_pickup_authorization(
+            real_state,
+            caller_id_str,
+            task,
+        )
+        if auth_error:
+            return auth_error, True
+        actor_name = (
+            str(getattr(_engineer_cell, "slug", "") or "").strip()
+            or str(getattr(_engineer_cell, "name", "") or "").strip()
+            or "architect"
+        )
+        reason = str(args.get("reason", "") or "").strip()
+        source = str(args.get("source", "") or "").strip()
+        if not source:
+            route_message_id = str(
+                authorization.get("route_message_id", "") or ""
+            ).strip()
+            source = (
+                f"product-peer route {route_message_id}"
+                if route_message_id else
+                "product-peer route"
+            )
+        result = await handle_command({
+            "cmd": "board_pickup_architect_task",
+            "id": tid,
+            "architect_id": caller_id_str,
+            "actor_name": actor_name,
+            "actor_kind": "architect",
+            "reason": reason,
+            "source": source,
+            "authorization": authorization,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
     if tool_name == "task_update" and caller_kind == "architect":
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
@@ -11998,10 +12127,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "Task not found", True
         caller_id_str = str(caller_id or "").strip()
         creator_class = _task_created_by_classifier(task)
-        creator_architect_id = str(
-            getattr(task, "created_by_architect_id", "") or ""
-        ).strip()
-        if creator_class != "user" and creator_architect_id != caller_id_str:
+        if creator_class != "user" and not _architect_task_owned_by_caller(
+            task,
+            caller_id_str,
+        ):
             return "Task was not created by this architect", True
 
         patch = {}
@@ -12086,9 +12215,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         old_engineer_id = _effective_assigned_engineer_id(task)
 
         if caller_kind == "architect":
-            if str(
-                getattr(task, "created_by_architect_id", "") or ""
-            ).strip() != caller_id_str:
+            if not _architect_task_owned_by_caller(task, caller_id_str):
                 return "Task was not created by this architect", True
             engineer_id, engineer_error = _resolve_architect_hired_engineer(
                 real_state, caller_id, engineer_ident
@@ -12249,11 +12376,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 return "task not found in scope", True
         else:
             creator_class = _task_created_by_classifier(task)
-            creator_architect_id = str(
-                getattr(task, "created_by_architect_id", "") or ""
-            ).strip()
             coverage_authorization = {}
-            if creator_class != "user" and creator_architect_id != caller_id_str:
+            if creator_class != "user" and not _architect_task_owned_by_caller(
+                task,
+                caller_id_str,
+            ):
                 coverage_authorization, auth_error = (
                     _routed_product_root_coverage_authorization(
                         real_state,

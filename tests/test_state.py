@@ -3750,6 +3750,47 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(refreshed.status, "")
         self.assertTrue(refreshed.completion_evidence["covered_by"]["moved_to_done"])
 
+    def test_board_pickup_architect_task_records_assignment_and_audit(self):
+        state = self._make_state()
+        task = state.board_add_task(
+            "PM-created root",
+            "g",
+            id="TORQUE:1130",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id="pm-1",
+        )
+
+        result = state.board_pickup_architect_task(
+            task.id,
+            architect_id="arch-1",
+            actor_name="Torqly",
+            reason="Accepted PM handoff as implementation root.",
+            source="product-peer route msg-123",
+            authorization={
+                "scope": "routed_pm_product_root_pickup",
+                "source": "product_peer_route",
+                "route_message_id": "msg-123",
+            },
+        )
+
+        self.assertEqual(result["type"], "task_picked_up")
+        refreshed = state.board_tasks[task.id]
+        self.assertEqual("arch-1", refreshed.assigned_architect_id)
+        evidence = refreshed.completion_evidence
+        self.assertIn("architect_pickup", evidence["sources"])
+        pickup = evidence["architect_pickup"]
+        self.assertEqual("arch-1", pickup["picked_up_by_id"])
+        self.assertEqual(
+            "",
+            pickup["previous_assignment"]["assigned_architect_id"],
+        )
+        self.assertEqual(
+            "msg-123",
+            pickup["authorization"]["route_message_id"],
+        )
+        self.assertEqual(refreshed.messages[-1]["action"], "architect_pickup")
+        self.assertIn("Torqly", refreshed.messages[-1]["message"])
+
     def test_board_finalize_existing_task_coverage_preserves_original_evidence(self):
         state = self._make_state()
         covered = state.board_add_task(

@@ -31,6 +31,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.architect = self._add_agent("architect-1", "Architect", kind="architect")
         self.peer = self._add_agent("architect-2", "Productmind", kind="architect")
         self.torqly = self._add_agent("a5a7fc9e", "Torqly", kind="architect")
+        self.full_peer = self._add_agent("architect-3", "Full Peer", kind="architect")
         self.cross_group_architect = self._add_agent(
             "architect-other",
             "Other Group Architect",
@@ -42,6 +43,12 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "Engineer",
             kind="engineer",
             hired_by_architect_id=self.architect.id,
+        )
+        self.torqly_engineer = self._add_agent(
+            "engineer-torqly",
+            "Torqly Engineer",
+            kind="engineer",
+            hired_by_architect_id=self.torqly.id,
         )
         self.worker = self._add_agent("worker-1", "Worker", kind="worker")
         self.state.assign_agent_class(
@@ -76,6 +83,19 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.calls.append(dict(payload))
         if payload.get("cmd") == "inject_mcp_message":
             return {"type": "ok", "delivered": True}
+        if payload.get("cmd") == "board_pickup_architect_task":
+            try:
+                return self.state.board_pickup_architect_task(
+                    payload.get("id", ""),
+                    architect_id=payload.get("architect_id", ""),
+                    actor_name=payload.get("actor_name", ""),
+                    actor_kind=payload.get("actor_kind", ""),
+                    reason=payload.get("reason", ""),
+                    source=payload.get("source", ""),
+                    authorization=payload.get("authorization", {}),
+                )
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
         return {"type": "ok"}
 
     def _handler(self):
@@ -153,6 +173,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_set_specializations",
             "architect_pending_hire_list",
             "architect_task_create",
+            "architect_task_pickup",
             "architect_task_update",
             "architect_task_move",
             "architect_task_reassign",
@@ -192,6 +213,154 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn("Unknown tool", self._error_text(response), tool_name)
         self.assertEqual([], self.calls)
+
+    async def test_routed_pm_product_task_can_be_picked_up_by_same_group_architect(self):
+        proposal = await self._call(
+            "architect_product_task_propose",
+            {
+                "title": "Direct pickup root",
+                "description": "PM proposal that should remain the root.",
+                "suggested_action": "feature/implement",
+            },
+            req_id=2,
+        )
+        task_id = self._result_payload(proposal)["id"]
+        task = self.state.board_tasks[task_id]
+        self.assertEqual("", task.assigned_architect_id)
+        self.assertEqual("", task.assigned_engineer_id)
+
+        routed = await self._call(
+            "architect_product_peer_message",
+            {
+                "architect_id": self.torqly.id,
+                "message": "Please pick up this PM-created root directly.",
+                "context_task_ids": [task_id],
+                "context_summary": "Direct Architect pickup request.",
+            },
+            req_id=3,
+        )
+        route_id = self._result_payload(routed)["message_id"]
+
+        pickup = await self._call(
+            "architect_task_pickup",
+            {
+                "task": task_id,
+                "reason": "Accepted as original implementation root.",
+            },
+            req_id=4,
+            agent_id=self.torqly.id,
+        )
+        payload = self._result_payload(pickup)
+        self.assertEqual("task_picked_up", payload["type"])
+        self.assertEqual(self.torqly.id, payload["assigned_architect_id"])
+
+        refreshed = self.state.board_tasks[task_id]
+        self.assertEqual(self.torqly.id, refreshed.assigned_architect_id)
+        self.assertEqual(self.architect.id, refreshed.created_by_architect_id)
+        evidence = refreshed.completion_evidence
+        self.assertIn("architect_pickup", evidence["sources"])
+        pickup_evidence = evidence["architect_pickup"]
+        self.assertEqual(
+            "",
+            pickup_evidence["previous_assignment"]["assigned_architect_id"],
+        )
+        self.assertEqual(
+            "routed_pm_product_root_pickup",
+            pickup_evidence["authorization"]["scope"],
+        )
+        self.assertEqual(route_id, pickup_evidence["authorization"]["route_message_id"])
+        self.assertEqual("architect_pickup", refreshed.messages[-1]["action"])
+
+        reassigned = await self._call(
+            "architect_task_reassign",
+            {"task": task_id, "new_engineer_id": self.torqly_engineer.id},
+            req_id=5,
+            agent_id=self.torqly.id,
+        )
+        self.assertEqual(self.torqly_engineer.id, self._result_payload(reassigned)["assigned_engineer_id"])
+
+        dispatched = await self._call(
+            "architect_engineer_message",
+            {
+                "engineer_id": self.torqly_engineer.id,
+                "task": task_id,
+                "message": "Please implement the direct pickup root.",
+            },
+            req_id=6,
+            agent_id=self.torqly.id,
+        )
+        dispatch_payload = self._result_payload(dispatched)
+        self.assertEqual(task_id, dispatch_payload["task_id"])
+        self.assertEqual("live", dispatch_payload["dispatch_state"])
+        self.assertEqual("live", self.state.board_tasks[task_id].dispatch_state)
+
+    async def test_architect_task_pickup_denies_unrouted_non_pm_or_already_claimed_tasks(self):
+        unrouted = self.state.board_add_task(
+            "Unrouted PM task",
+            "g",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=self.architect.id,
+        )
+        no_route = await self._call(
+            "architect_task_pickup",
+            {"task": unrouted.id},
+            req_id=20,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("route evidence", self._error_text(no_route))
+        self.assertEqual("", unrouted.assigned_architect_id)
+
+        normal_architect_task = self.state.board_add_task(
+            "Normal architect task",
+            "g",
+            labels=["product-proposal", "pm-created"],
+            created_by_architect_id=self.torqly.id,
+        )
+        normal = await self._call(
+            "architect_task_pickup",
+            {"task": normal_architect_task.id},
+            req_id=21,
+            agent_id=self.full_peer.id,
+        )
+        self.assertIn("Product Manager", self._error_text(normal))
+
+        proposal = await self._call(
+            "architect_product_task_propose",
+            {"title": "Already claimed PM root"},
+            req_id=22,
+        )
+        claimed_id = self._result_payload(proposal)["id"]
+        self.state.board_update_task(claimed_id, assigned_architect_id=self.peer.id)
+        await self._call(
+            "architect_product_peer_message",
+            {
+                "architect_id": self.torqly.id,
+                "message": "Route to Torqly but already claimed elsewhere.",
+                "context_task_ids": [claimed_id],
+            },
+            req_id=23,
+        )
+        claimed = await self._call(
+            "architect_task_pickup",
+            {"task": claimed_id},
+            req_id=24,
+            agent_id=self.torqly.id,
+        )
+        self.assertIn("already assigned", self._error_text(claimed))
+        self.assertEqual(self.peer.id, self.state.board_tasks[claimed_id].assigned_architect_id)
+
+    async def test_pm_engineer_and_worker_do_not_get_architect_pickup_surface(self):
+        for agent_id in (self.architect.id, self.engineer.id, self.worker.id):
+            response = await self._call(
+                "architect_task_pickup",
+                {"task": "TORQUE:1130"},
+                req_id=30,
+                agent_id=agent_id,
+            )
+            self.assertRegex(
+                self._error_text(response),
+                "Unknown tool|architect tools are only available",
+            )
 
     async def test_task_proposal_is_queued_unassigned_and_rejects_dispatch_fields(self):
         response = await self._call(
