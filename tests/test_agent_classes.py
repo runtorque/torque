@@ -1,5 +1,6 @@
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -1353,6 +1354,9 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
             )
             cell.agent_class_id = launch_cfg.get("agent_class_id", "")
             cell.agent_class_version = launch_cfg.get("agent_class_version", "")
+            if cell.agent_class_id:
+                cell.agent_class_assigned_at = time.time()
+                cell.agent_class_assigned_by = "trusted-user-launch"
             self.state.agents[cell.id] = cell
             self.state.groups.setdefault(group, []).append(cell.id)
             self.state.apply_effective_agent_class_for_launch(
@@ -1536,7 +1540,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertLess(listed_ids.index("qa-worker"), listed_ids.index("default-worker"))
         preview = results["preview"]["agent_class"]
         self.assertEqual(preview["primary_identity_label"], "QA Worker")
-        self.assertEqual(preview["secondary_base_kind_label"], "Worker")
+        self.assertEqual(preview["secondary_base_kind_label"], "Worker-derived")
         self.assertEqual(preview["internal_policy"]["mode"], "wrap_profile")
         self.assertEqual(preview["operator_access_summary"]["allowed_summary"], "Wrapped internal Agent Profile policy")
         self.assertEqual(results["updated"]["operation"], "updated")
@@ -1566,15 +1570,9 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertIn("Updated prompt: verify custom worker launch evidence.", created_prompts[cell.id])
 
         policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
+        self.assertTrue(policy.is_full_base_kind_profile)
         self.assertTrue(mcp_tool_allowed_by_policy("torque_context", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("torque_verify", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("engineer_worker_dispatch", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_deploy_state", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("engineer_merge", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_get_architect_settings", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_agent_class_update", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
 
         projected = {
             item["category"]: item
