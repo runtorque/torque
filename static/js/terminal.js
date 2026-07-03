@@ -5020,6 +5020,17 @@ function renderTerminalWorkspace(opts) {
   const root = document.getElementById('terminal-workspace');
   if (!root) return;
   _terminalComposePersistFromDom(root);
+  // A detached panel window is a separate full webview showing only its panel;
+  // the terminal workspace is CSS-hidden there. It must never open a PTY socket,
+  // fit() a zero-size xterm, or send resize/focus frames — doing so clobbers the
+  // shared session down to the 20-col floor in the main window. Behave like the
+  // non-embedded branch: tear down any embedded terminal and bail.
+  if (typeof _detachedWindowActive === 'function' && _detachedWindowActive()) {
+    root.innerHTML = '';
+    root.classList.remove('active');
+    _disposeEmbeddedTerminal();
+    return;
+  }
   if (!isEmbeddedTerminalMode()) {
     root.innerHTML = '';
     root.classList.remove('active');

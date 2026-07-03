@@ -704,7 +704,11 @@ function _standalonePanelSetLayout(next, opts) {
   opts = opts || {};
   _standalonePanelLayout = _normalizeStandalonePanelLayout(next);
   if (state) state.standalone_panel_layout = _standaloneClone(_standalonePanelLayout);
-  if (typeof _activePanelApp !== 'undefined') {
+  // In a detached panel window `_activePanelApp` is pinned to that window's own
+  // panel at startup (main.js `_restorePanelState` detached branch). Never let a
+  // layout apply repoint it at the main window's active app, which lives in a
+  // hidden surface here.
+  if (typeof _activePanelApp !== 'undefined' && !_detachedWindowActive()) {
     _activePanelApp = _standalonePanelActiveApp();
   }
   _standaloneRenderPanelWorkspace();
@@ -1190,6 +1194,10 @@ function _standaloneBuildFloats(layer, roots, placed) {
 }
 
 function _standaloneRenderPanelWorkspace() {
+  // A detached panel window owns a single panel via the CSS `detached-window`
+  // layout; it must never run the dock/rail/float placement pass, which would
+  // park its own root under `#bottom-panel` and blank the window.
+  if (_detachedWindowActive()) return;
   var bottomRoot = document.getElementById('standalone-bottom-dock');
   var rightRoot = document.getElementById('standalone-right-rail');
   var shell = document.getElementById('standalone-sidebar-shell');

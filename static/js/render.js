@@ -783,6 +783,14 @@ function renderActivePanel() {
 
 function renderInvalidatedSurfaces(flags) {
   if (!flags) return;
+  // A detached panel window owns only its own panel surface; its main grid and
+  // terminal workspace are CSS-hidden. Never run the grid rebuild / FLIP or the
+  // embedded-terminal render there (a hidden xterm would fit to zero size and
+  // clobber the shared PTY). Drop the main/terminal/focus flags but keep the
+  // panel-surface dispatch below so the visible panel updates from deltas.
+  if (typeof _detachedWindowActive === 'function' && _detachedWindowActive()) {
+    flags = Object.assign({}, flags, { main: false, terminal: false, focus: false });
+  }
   // TORQUE:236 v10: when the main flag fires, skip render()'s trailing
   // agent-panel refresh — the surfaces loop below already dispatches
   // `_renderSurface('engineer')` if the engineer flag is independently

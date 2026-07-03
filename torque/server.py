@@ -26225,10 +26225,18 @@ async def main(connection=None):
                 if payload.get("type") == "input":
                     await bridge.write_input(cell.session_id, payload.get("data", ""))
                 elif payload.get("type") == "resize":
+                    resize_cols = int(payload.get("cols", 0) or 0)
+                    resize_rows = int(payload.get("rows", 0) or 0)
+                    if resize_cols <= 0 or resize_rows <= 0:
+                        # Degenerate geometry (e.g. a hidden/zero-size client
+                        # surface) would otherwise be floored to the 20x4 clamp
+                        # and win last-writer-wins over the real terminal. Drop
+                        # it like other malformed payloads above.
+                        continue
                     await bridge.resize_session(
                         cell.session_id,
-                        int(payload.get("cols", 0) or 0),
-                        int(payload.get("rows", 0) or 0),
+                        resize_cols,
+                        resize_rows,
                     )
                 elif payload.get("type") == "focus":
                     await bridge.focus_session(

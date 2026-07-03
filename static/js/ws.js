@@ -3450,11 +3450,20 @@ function _applyDelta(ops) {
         if (op.key === 'selected_agent_id') {
           _applySelectedAgentFromServer(op.value || '');
         }
-        if (op.key === 'standalone_panel_layout'
-            && typeof _standalonePanelSetLayoutFromState === 'function') {
-          _standalonePanelSetLayoutFromState(op.value || {}, { fromServer: true });
-          if (typeof _syncVisibleStandalonePanelApps === 'function') {
-            _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
+        if (op.key === 'standalone_panel_layout') {
+          // A detached panel window is a separate full webview instance that
+          // shows only its own panel. It must keep `state.standalone_panel_layout`
+          // accurate (already patched above), but must NEVER re-apply the main
+          // window's layout to its own DOM — doing so parks/hides the detached
+          // root (black window) and repoints `_activePanelApp` at the hidden
+          // main-window surface.
+          if (typeof _detachedWindowActive === 'function' && _detachedWindowActive()) {
+            // no-op: state stays in sync, DOM stays pinned to the detached panel
+          } else if (typeof _standalonePanelSetLayoutFromState === 'function') {
+            _standalonePanelSetLayoutFromState(op.value || {}, { fromServer: true });
+            if (typeof _syncVisibleStandalonePanelApps === 'function') {
+              _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
+            }
           }
         }
         if (op.key === 'active_group') {
