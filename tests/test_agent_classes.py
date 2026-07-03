@@ -1,5 +1,6 @@
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -1306,6 +1307,296 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(cell.effective_agent_class_snapshot["prompt"], "Custom launch prompt.")
         self.assertEqual(mismatch["type"], "error")
         self.assertEqual(mismatch["code"], "agent_class_base_kind_mismatch")
+
+    def test_custom_worker_class_trusted_create_preview_update_launch_and_denials(self):
+        from torque.agent_classes import append_agent_class_prompt_block
+        from torque.server import _handle_agent_class_command, _handle_agent_class_launch_command
+
+        async def resolve_base_dir(_group):
+            return str(self.project)
+
+        def resolve_launch_config(_group, *, base_dir="", explicit_template="", overrides=None):
+            del explicit_template, overrides
+            return {
+                "profile": "Default",
+                "command": "codex",
+                "directory": base_dir or str(self.project),
+                "tab_color": "",
+                "icon": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "",
+                "system_prompt": "",
+                "agent_type": "codex",
+                "session_resume": True,
+                "idle_timeout": 0,
+                "worktree": False,
+                "worktree_base_dir": ".torque/worktrees",
+                "worktree_auto_checkpoint": False,
+                "checkpoint_on_progress": False,
+                "worktree_merge_squash": True,
+                "terminals": [],
+            }
+
+        created_prompts = {}
+
+        async def create_agent_with_config(group, name, launch_cfg, **kwargs):
+            kind = kwargs.get("kind", "")
+            cell = AgentCell(
+                id=f"{kind}-custom-worker",
+                name=name,
+                group=group,
+                cell_type="agent",
+                kind=kind,
+                directory=launch_cfg.get("directory", ""),
+                profile=launch_cfg.get("profile", ""),
+                command=launch_cfg.get("command", ""),
+            )
+            cell.agent_class_id = launch_cfg.get("agent_class_id", "")
+            cell.agent_class_version = launch_cfg.get("agent_class_version", "")
+            if cell.agent_class_id:
+                cell.agent_class_assigned_at = time.time()
+                cell.agent_class_assigned_by = "trusted-user-launch"
+            self.state.agents[cell.id] = cell
+            self.state.groups.setdefault(group, []).append(cell.id)
+            self.state.apply_effective_agent_class_for_launch(
+                cell,
+                base_dir=cell.directory,
+            )
+            persistent_prompt_text = append_agent_class_prompt_block(
+                kwargs.get("persistent_prompt_text", ""),
+                cell,
+            )
+            created_prompts[cell.id] = persistent_prompt_text
+            self.state._db_save_agent(cell)
+            return cell
+
+        async def send_agent_prompt(*_args, **_kwargs):
+            return None
+
+        async def run_flow():
+            draft_payload = {
+                "id": "qa-worker-draft",
+                "version": "1",
+                "base_kind": "worker",
+                "display_name": "QA Worker Draft",
+                "description": "Draft validation-only worker class.",
+                "lifecycle": "draft",
+                "draft": {"scratch_only": True},
+                "agent_profile_ref": {"id": "full-worker", "version": "1"},
+            }
+            custom_payload = {
+                "id": "qa-worker",
+                "version": "1",
+                "base_kind": "worker",
+                "display_name": "QA Worker",
+                "description": "Validation worker class.",
+                "agent_profile_ref": {"id": "full-worker", "version": "1"},
+                "prompt": "Check the assignment and report evidence first.",
+                "icon": "QA",
+                "badge": "validation",
+            }
+            draft_validation = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_validate",
+                    "base_dir": str(self.project),
+                    "agent_class": draft_payload,
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            validation = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_validate",
+                    "request_id": "validate-qa-worker",
+                    "base_dir": str(self.project),
+                    "agent_class": custom_payload,
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            created = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_create",
+                    "request_id": "create-qa-worker",
+                    "base_dir": str(self.project),
+                    "agent_class": custom_payload,
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            listed = await _handle_agent_class_command(
+                {"cmd": "agent_class_list", "base_dir": str(self.project)},
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            preview = await _handle_agent_class_command(
+                {"cmd": "agent_class_preview", "class_id": "qa-worker", "base_dir": str(self.project)},
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            updated_payload = dict(custom_payload)
+            updated_payload["description"] = "Validation worker class updated."
+            updated_payload["prompt"] = "Updated prompt: verify custom worker launch evidence."
+            updated = await _handle_agent_class_command(
+                {
+                    "cmd": "agent_class_update",
+                    "request_id": "update-qa-worker",
+                    "base_dir": str(self.project),
+                    "agent_class": updated_payload,
+                },
+                self.state,
+                self.db,
+                resolve_base_dir,
+            )
+            launched = await _handle_agent_class_launch_command(
+                {
+                    "cmd": "create_agent_from_class",
+                    "class_id": "qa-worker",
+                    "name": "QA Launch Worker",
+                    "group": "g",
+                    "base_dir": str(self.project),
+                },
+                self.state,
+                resolve_base_dir=resolve_base_dir,
+                resolve_agent_launch_config=resolve_launch_config,
+                resolve_engineer_launch_config=resolve_launch_config,
+                resolve_architect_launch_config=resolve_launch_config,
+                resolve_worker_launch_config=resolve_launch_config,
+                create_agent_with_config=create_agent_with_config,
+                specialization_mgr=None,
+                send_agent_prompt=send_agent_prompt,
+            )
+            ambiguous = await _handle_agent_class_launch_command(
+                {
+                    "cmd": "create_agent_from_class",
+                    "class_id": "qa-worker",
+                    "agent_profile_id": "full-worker",
+                    "name": "Ambiguous QA Worker",
+                    "group": "g",
+                    "base_dir": str(self.project),
+                },
+                self.state,
+                resolve_base_dir=resolve_base_dir,
+                resolve_agent_launch_config=resolve_launch_config,
+                resolve_engineer_launch_config=resolve_launch_config,
+                resolve_architect_launch_config=resolve_launch_config,
+                resolve_worker_launch_config=resolve_launch_config,
+                create_agent_with_config=create_agent_with_config,
+                specialization_mgr=None,
+                send_agent_prompt=send_agent_prompt,
+            )
+            mismatch = await _handle_agent_class_launch_command(
+                {
+                    "cmd": "create_agent_from_class",
+                    "class_id": "qa-worker",
+                    "kind": "engineer",
+                    "name": "Wrong Kind",
+                    "group": "g",
+                    "base_dir": str(self.project),
+                },
+                self.state,
+                resolve_base_dir=resolve_base_dir,
+                resolve_agent_launch_config=resolve_launch_config,
+                resolve_engineer_launch_config=resolve_launch_config,
+                resolve_architect_launch_config=resolve_launch_config,
+                resolve_worker_launch_config=resolve_launch_config,
+                create_agent_with_config=create_agent_with_config,
+                specialization_mgr=None,
+                send_agent_prompt=send_agent_prompt,
+            )
+            return {
+                "draft_validation": draft_validation,
+                "validation": validation,
+                "created": created,
+                "listed": listed,
+                "preview": preview,
+                "updated": updated,
+                "launched": launched,
+                "ambiguous": ambiguous,
+                "mismatch": mismatch,
+            }
+
+        results = asyncio.run(run_flow())
+
+        draft_warning_text = "\n".join(str(item) for item in results["draft_validation"]["warnings"])
+        self.assertTrue(results["draft_validation"]["valid"], results["draft_validation"])
+        self.assertIn("lifecycle=draft", draft_warning_text)
+        self.assertIn("External connector exposure is not enforced", draft_warning_text)
+        self.assertTrue(results["validation"]["valid"], results["validation"])
+        self.assertEqual(results["validation"]["request_id"], "validate-qa-worker")
+        self.assertEqual(results["validation"]["agent_class"]["agent_profile_ref"], {"id": "full-worker", "version": "1"})
+        self.assertFalse(results["validation"]["agent_class"]["apply_state"]["mutates_running_sessions"])
+        self.assertIn("External connector", results["validation"]["agent_class"]["external_connector_caveat"])
+        self.assertEqual(results["created"]["operation"], "created")
+        self.assertTrue(results["created"]["ok"], results["created"])
+        listed_ids = [item["id"] for item in results["listed"]["classes"]]
+        self.assertIn("qa-worker", listed_ids)
+        self.assertLess(listed_ids.index("qa-worker"), listed_ids.index("default-worker"))
+        preview = results["preview"]["agent_class"]
+        self.assertEqual(preview["primary_identity_label"], "QA Worker")
+        self.assertEqual(preview["secondary_base_kind_label"], "Worker-derived")
+        self.assertEqual(preview["internal_policy"]["mode"], "wrap_profile")
+        self.assertEqual(preview["operator_access_summary"]["allowed_summary"], "Wrapped internal Agent Profile policy")
+        self.assertEqual(results["updated"]["operation"], "updated")
+
+        launched = results["launched"]
+        self.assertEqual(launched["type"], "agent_class_launch")
+        self.assertEqual(launched["schema_version"], 3)
+        self.assertFalse(launched["storage"]["mutates_running_sessions"])
+        self.assertEqual(launched["storage"]["launch_boundary"], "new_agent")
+        self.assertEqual(launched["base_kind"], "worker")
+        self.assertEqual(launched["agent"]["kind"], "worker")
+        self.assertEqual(launched["agent"]["agent_class_status"]["effective_class_id"], "qa-worker")
+        self.assertEqual(launched["agent"]["agent_profile_status"]["effective_profile_id"], "full-worker")
+
+        cell = self.state.agents["worker-custom-worker"]
+        self.assertEqual(cell.agent_class_id, "qa-worker")
+        self.assertEqual(cell.agent_class_assigned_by, "trusted-user-launch")
+        self.assertEqual(cell.effective_agent_class_id, "qa-worker")
+        self.assertEqual(cell.effective_agent_profile_id, "full-worker")
+        self.assertEqual(cell.effective_agent_class_snapshot["primary_identity_label"], "QA Worker")
+        self.assertEqual(
+            cell.effective_agent_class_snapshot["prompt"],
+            "Updated prompt: verify custom worker launch evidence.",
+        )
+        self.assertIn("## Agent Class", created_prompts[cell.id])
+        self.assertIn("QA Worker", created_prompts[cell.id])
+        self.assertIn("Updated prompt: verify custom worker launch evidence.", created_prompts[cell.id])
+
+        policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
+        self.assertTrue(policy.is_full_base_kind_profile)
+        self.assertTrue(mcp_tool_allowed_by_policy("torque_context", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("torque_verify", policy))
+
+        projected = {
+            item["category"]: item
+            for item in cell.effective_agent_profile_snapshot["projected_tool_categories"]
+        }
+        self.assertEqual(projected["context_read"]["status"], "allowed")
+        for denied_category in {
+            "worker_dispatch",
+            "execution_task_control",
+            "worktree_merge",
+            "deploy_admin",
+            "profile_admin",
+            "engineer_worker_comm",
+        }:
+            self.assertEqual(projected[denied_category]["status"], "denied")
+
+        loaded = self.db.load_all()["agents"][cell.id]
+        self.assertEqual(loaded["agent_class_id"], "qa-worker")
+        self.assertEqual(loaded["effective_agent_class_snapshot"]["id"], "qa-worker")
+        self.assertEqual(loaded["effective_agent_profile_snapshot"]["id"], "full-worker")
+        self.assertEqual(results["ambiguous"]["type"], "error")
+        self.assertEqual(results["ambiguous"]["code"], "ambiguous_agent_class_profile_launch")
+        self.assertEqual(results["mismatch"]["type"], "error")
+        self.assertEqual(results["mismatch"]["code"], "agent_class_base_kind_mismatch")
 
     def test_torque_steward_launch_defaults_to_stable_identity_and_read_only_policy(self):
         from torque.server import _handle_agent_class_launch_command
