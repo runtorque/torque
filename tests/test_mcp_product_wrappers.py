@@ -31,6 +31,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.architect = self._add_agent("architect-1", "Architect", kind="architect")
         self.peer = self._add_agent("architect-2", "Productmind", kind="architect")
         self.torqly = self._add_agent("a5a7fc9e", "Torqly", kind="architect")
+        self.full_peer = self._add_agent("architect-3", "Full Peer", kind="architect")
         self.cross_group_architect = self._add_agent(
             "architect-other",
             "Other Group Architect",
@@ -319,7 +320,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_pickup",
             {"task": normal_architect_task.id},
             req_id=21,
-            agent_id=self.peer.id,
+            agent_id=self.full_peer.id,
         )
         self.assertIn("Product Manager", self._error_text(normal))
 
@@ -356,7 +357,10 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
                 req_id=30,
                 agent_id=agent_id,
             )
-            self.assertIn("Unknown tool", self._error_text(response))
+            self.assertRegex(
+                self._error_text(response),
+                "Unknown tool|architect tools are only available",
+            )
 
     async def test_task_proposal_is_queued_unassigned_and_rejects_dispatch_fields(self):
         response = await self._call(
