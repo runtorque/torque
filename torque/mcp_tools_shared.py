@@ -436,11 +436,15 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
         "status": task.status,
         "dispatch_state": getattr(task, "dispatch_state", "queued") or "queued",
         "assigned_engineer_id": _effective_assigned_engineer_id(task),
-        "assigned_architect_id": str(getattr(task, "assigned_architect_id", "") or "").strip(),
         "created_by": created_by,
         "health_state": getattr(task, "health_state", "healthy") or "healthy",
         "updated_at": getattr(task, "updated_at", "") or "",
     }
+    assigned_architect_id = str(
+        getattr(task, "assigned_architect_id", "") or ""
+    ).strip()
+    if assigned_architect_id:
+        item["assigned_architect_id"] = assigned_architect_id
     suggested_specialization = str(
         getattr(task, "suggested_specialization", "") or ""
     ).strip()
