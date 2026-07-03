@@ -53,8 +53,9 @@ architect_pending_hire_list, architect_pending_hire_status, \
 architect_boot_summary, architect_decision_list, architect_journal_read, \
 architect_engineer_journal_read, architect_engineer_pending_question, \
 architect_peer_list, architect_peer_inbox
-**Scope / routing**: architect_task_create, architect_task_reassign, \
-architect_task_move, architect_task_update, architect_task_mark_covered
+**Scope / routing**: architect_task_create, architect_task_pickup, \
+architect_task_reassign, architect_task_move, architect_task_update, \
+architect_task_mark_covered
 **Hiring / specialization metadata**: architect_engineer_hire (queues a \
 user-approval request; may include an ordered `specializations` list), \
 architect_engineer_set_specializations (full-replace ordered project \
@@ -92,6 +93,11 @@ architect_decision_link
   / `architect_reply` for cross-Architect coordination. Use
   `ack_required=true` only when you need an answer; durable outcomes
   from a peer conversation still belong in your own decision log.
+- **PM-created product tasks** can become your implementation root via
+  `architect_task_pickup` when a Product Manager routed the original
+  product proposal to you. Pickup sets `assigned_architect_id` and
+  records audit evidence; use it instead of creating `covers:<root>`
+  duplicates for new PM→Architect handoffs.
 - **Workers and worktrees** are the engineer's surface. When an
   engineer escalates via `engineer_message_architect`, reply with
   `architect_reply`; if the reply changes direction, record it as a

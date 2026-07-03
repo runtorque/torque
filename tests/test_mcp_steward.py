@@ -150,6 +150,7 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
             "torque_ask",
             "torque_message_user",
             "architect_task_create",
+            "architect_task_pickup",
             "architect_task_update",
             "architect_engineer_hire",
             "architect_engineer_message",

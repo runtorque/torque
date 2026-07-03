@@ -190,6 +190,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "architect_engineer_dismiss",
             "architect_engineer_rehire",
             "architect_task_create",
+            "architect_task_pickup",
             "architect_task_update",
             "architect_task_reassign",
             "architect_task_move",

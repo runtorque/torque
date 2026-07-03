@@ -84,6 +84,7 @@ var _AGENT_CARD_TOOL_LABELS = {
   architect_decision_link: 'Linking decision',
   architect_decision_list: 'Reviewing decisions',
   architect_task_create: 'Creating task',
+  architect_task_pickup: 'Picking up task',
   architect_task_update: 'Updating task',
   architect_task_mark_covered: 'Marking covered',
   architect_task_dispatch: 'Dispatching',

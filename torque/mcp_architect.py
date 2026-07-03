@@ -430,6 +430,34 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_pickup",
+        "description": (
+            "Claim a routed PM-created product task in this architect's group "
+            "without creating a covering duplicate. Requires durable inbound "
+            "product-peer route evidence from the Product Manager creator, "
+            "sets assigned_architect_id on the original task, and records "
+            "pickup audit evidence."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "PM-created product task ID or alias to claim.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Optional pickup reason/context recorded in audit evidence.",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Optional human-readable source route/request note.",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
         "name": "architect_task_create",
         "description": (
             "Create a task for a specific engineer. The assigned_engineer_id is "

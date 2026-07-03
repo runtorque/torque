@@ -10033,6 +10033,7 @@ _CRITICAL_BOARD_COMMANDS = {
     "board_archive_tasks",
     "board_unarchive_task",
     "board_verify_task",
+    "board_pickup_architect_task",
     "board_remove_task",
 }
 _CRITICAL_AI_REPORT_ACTIONS = {
@@ -21559,6 +21560,56 @@ async def main(connection=None):
                             _panel_event,
                             targets=_covered_resume_targets,
                             group=_covered_task.group,
+                        )
+
+            elif cmd == "board_pickup_architect_task":
+                tid = _resolve_task_id(state, data.get("id", ""))
+                _pickup_task = state.board_tasks.get(tid)
+                if not _pickup_task:
+                    result = {"type": "error", "message": "Task not found"}
+                else:
+                    _pickup_resume_targets = _capture_auto_resume_targets(
+                        state,
+                        task=_pickup_task,
+                        group=_pickup_task.group,
+                    )
+                    try:
+                        result = state.board_pickup_architect_task(
+                            tid,
+                            architect_id=data.get("architect_id", ""),
+                            actor_name=data.get("actor_name", "") or "Torque",
+                            actor_kind=data.get("actor_kind", "") or "architect",
+                            reason=data.get("reason", ""),
+                            source=data.get("source", ""),
+                            authorization=data.get("authorization", {}),
+                        )
+                    except ValueError as exc:
+                        result = {"type": "error", "message": str(exc)}
+                    else:
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_for_local_change(
+                                tid,
+                                reason="task_architect_pickup",
+                                fields=(
+                                    "assigned_architect_id",
+                                    "completion_evidence",
+                                    "messages",
+                                ),
+                            )
+                        _panel_event(
+                            "task_architect_pickup",
+                            data.get("architect_id", ""),
+                            data.get("actor_name", "") or "Torque",
+                            _pickup_task.group,
+                            "Architect picked up task",
+                            task_id=tid,
+                        )
+                        await _maybe_auto_resume_targets(
+                            state,
+                            handle_command,
+                            _panel_event,
+                            targets=_pickup_resume_targets,
+                            group=_pickup_task.group,
                         )
 
             elif cmd == "architect_pm_root_backlog_hygiene":
