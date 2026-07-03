@@ -2399,6 +2399,7 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
     'messages',
     'messages_thread',
     'created_by',
+    'assigned_architect_id',
     'created_by_architect_id',
     'created_by_engineer_id',
     'created_at',
@@ -2413,6 +2414,7 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
   if (searchActive && _deltaHasChangedField(changed, [
     'description',
     'assigned_engineer_id',
+    'assigned_architect_id',
   ])) return true;
   return false;
 }

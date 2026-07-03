@@ -210,6 +210,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("queued", task.dispatch_state)
         self.assertEqual("", task.assigned_engineer_id)
+        self.assertEqual("", task.assigned_architect_id)
         self.assertEqual("", task.agent_id)
         self.assertEqual("", task.action_name)
         self.assertEqual({}, task.action_vars)
@@ -229,6 +230,14 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=2,
         )
         self.assertIn("assigned_engineer_id", self._error_text(rejected))
+        self.assertEqual(before, set(self.state.board_tasks))
+
+        rejected_architect = await self._call(
+            "architect_product_task_propose",
+            {"title": "Unsafe architect", "assigned_architect_id": self.architect.id},
+            req_id=3,
+        )
+        self.assertIn("assigned_architect_id", self._error_text(rejected_architect))
         self.assertEqual(before, set(self.state.board_tasks))
 
     async def test_product_decisions_are_proposed_only_owned_and_no_engineer_links(self):

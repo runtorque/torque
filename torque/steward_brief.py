@@ -110,6 +110,7 @@ def _task_item(task: Any, *, now_ts: float = 0.0) -> dict[str, Any]:
         "status": str(getattr(task, "status", "") or ""),
         "health_state": str(getattr(task, "health_state", "") or "healthy") or "healthy",
         "assigned_engineer_id": str(getattr(task, "assigned_engineer_id", "") or ""),
+        "assigned_architect_id": str(getattr(task, "assigned_architect_id", "") or ""),
         "agent_id": str(getattr(task, "agent_id", "") or ""),
         "updated_at": str(getattr(task, "updated_at", "") or ""),
         "labels": list(getattr(task, "labels", []) or []),

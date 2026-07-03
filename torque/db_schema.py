@@ -775,6 +775,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     lane           TEXT NOT NULL DEFAULT 'Backlog',
     position       INTEGER NOT NULL DEFAULT 0,
     agent_id       TEXT NOT NULL DEFAULT '',
+    assigned_architect_id TEXT NOT NULL DEFAULT '',
     reply_agent_id TEXT NOT NULL DEFAULT '',
     labels         TEXT NOT NULL DEFAULT '[]',
     created_at     TEXT NOT NULL DEFAULT '',
@@ -2743,6 +2744,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 f"ALTER TABLE board_tasks ADD COLUMN {col} "
                 f"{col_type} NOT NULL DEFAULT {default}")
             conn.commit()
+    # Migrate: add assigned architect ownership metadata to board_tasks
+    try:
+        conn.execute("SELECT assigned_architect_id FROM board_tasks LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN assigned_architect_id "
+            "TEXT NOT NULL DEFAULT ''"
+        )
+        conn.commit()
     # Migrate: add mandatory-review contract columns to board_tasks (TORQUE:256)
     for col, col_type, default in [
         ("requires_review", "INTEGER", "0"),

@@ -131,6 +131,9 @@ def _task_owner(state: Any, task: Any) -> dict:
     assigned = str(getattr(task, "assigned_engineer_id", "") or "").strip()
     if assigned:
         owner["assigned_engineer_id"] = assigned
+    assigned_architect = str(getattr(task, "assigned_architect_id", "") or "").strip()
+    if assigned_architect:
+        owner["assigned_architect_id"] = assigned_architect
     created_by_engineer = str(getattr(task, "created_by_engineer_id", "") or "").strip()
     if created_by_engineer:
         owner["created_by_engineer_id"] = created_by_engineer
