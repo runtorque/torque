@@ -18769,14 +18769,16 @@ test('user press defers an already-scheduled delta render frame across the press
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 
-test('keydown on a textarea defers delta-driven renders until keyup (TORQUE:236 v3)', () => {
+test('keydown on a textarea defers delta-driven renders to a trailing flush after keyup (TORQUE:236 v3)', () => {
   // P0 TORQUE:236 v3 regression: even at moderate delta rate, an
   // innerHTML rebuild during a keystroke replaces the focused textbox
   // before the browser can dispatch the synthetic `input` event,
   // dropping the in-flight character + breaking selection. The
   // press-defer machinery from :235 is generalized to keydown..keyup
   // for text-editing targets so the render is deferred until after
-  // the keystroke commits.
+  // the keystroke commits. Terminal-flicker Phase 1: a typing release no
+  // longer flushes on the next frame — it schedules a trailing idle timer so
+  // continuous typing coalesces to ~4 flushes/sec instead of one per keystroke.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
   // TORQUE:236 v5: focus the agent receiving deltas so engineer surface invalidates.
@@ -18811,12 +18813,25 @@ test('keydown on a textarea defers delta-driven renders until keyup (TORQUE:236 
   assert.equal(rafCallbacks.length, 0);
   assert.equal(sandbox.renderCalls.engineer, 0);
 
-  // keyup releases the gate; deferred flush runs on the next frame so
-  // the browser delivers `input` on the original target first.
+  // keyup releases the gate. Instead of an immediate next-frame flush, the
+  // coalesced batch is deferred to a trailing idle timer (so the browser
+  // delivers `input` on the original target first AND the render clock stops
+  // syncing to the user's typing).
+  const trailingTimers = [];
+  sandbox.setTimeout = function (fn, delay) { trailingTimers.push({ fn, delay }); return trailingTimers.length; };
+  sandbox.clearTimeout = function (id) { if (id) trailingTimers[id - 1] = null; };
+
   document.listeners.keyup && document.listeners.keyup({});
+  // No synchronous render and no next-frame rAF — a trailing timer is armed.
   assert.equal(sandbox.renderCalls.engineer, 0);
-  assert.equal(rafCallbacks.length, 1);
-  flushRaf();
+  assert.equal(rafCallbacks.length, 0);
+  const armed = trailingTimers.filter(Boolean);
+  assert.equal(armed.length, 1, 'keyup arms a single trailing-flush timer');
+  assert.ok(armed[0].delay >= 200 && armed[0].delay <= 400,
+    'trailing flush fires on an idle delay (~250ms)');
+
+  // When typing stops, the trailing timer flushes the batch exactly once.
+  armed[0].fn();
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 
@@ -18888,9 +18903,19 @@ test('IME compositionstart..compositionend defers delta-driven renders (TORQUE:2
   assert.equal(rafCallbacks.length, 0);
   assert.equal(sandbox.renderCalls.engineer, 0);
 
+  // compositionend is a typing release: it defers to a trailing idle timer,
+  // not a next-frame flush (terminal-flicker Phase 1).
+  const trailingTimers = [];
+  sandbox.setTimeout = function (fn, delay) { trailingTimers.push({ fn, delay }); return trailingTimers.length; };
+  sandbox.clearTimeout = function (id) { if (id) trailingTimers[id - 1] = null; };
+
   document.listeners.compositionend && document.listeners.compositionend({});
-  assert.equal(rafCallbacks.length, 1);
-  flushRaf();
+  assert.equal(rafCallbacks.length, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
+  const armed = trailingTimers.filter(Boolean);
+  assert.equal(armed.length, 1, 'compositionend arms a single trailing-flush timer');
+
+  armed[0].fn();
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 

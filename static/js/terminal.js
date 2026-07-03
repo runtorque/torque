@@ -15,6 +15,14 @@ let _terminalComposeAttachments = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
 let _terminalComposeHeights = Object.create(null);
+// Terminal-flicker Phase 1: per-cell memo of the inputs the last autoresize
+// ran with (text content + stored user height). Every delta-driven render pass
+// re-runs `_terminalComposeAutoResize`, which forced a `taskAutoResize` reflow
+// + `_terminalComposeApplyHeight` style write on the focused composer on every
+// pass — the differing scrollHeight resized the stage, tripped the xterm
+// ResizeObserver, and flashed the terminal. We skip those style writes when the
+// focused composer's height inputs are unchanged. See `_terminalComposeAutoResize`.
+let _terminalComposeAutoResizeMemo = Object.create(null);
 let _terminalComposeResizeDrag = null;
 let _terminalComposeSelectedAttachmentByCell = Object.create(null);
 let _terminalComposePreviewOverlay = null;
@@ -1897,14 +1905,34 @@ function _terminalComposeButtonFor(el, cellId) {
   return document.getElementById ? document.getElementById(id) : null;
 }
 
-function _terminalComposeAutoResize(el) {
+function _terminalComposeAutoResizeInvalidate(cellId) {
+  const id = String(cellId || '');
+  if (id && _terminalComposeAutoResizeMemo[id]) delete _terminalComposeAutoResizeMemo[id];
+}
+
+function _terminalComposeAutoResize(el, opts) {
   if (!el) return;
+  const cellId = el.dataset ? (el.dataset.cellId || '') : '';
+  const force = !!(opts && opts.force);
+  const text = _terminalComposeInputText(el);
+  const storedHeight = _terminalComposeStoredHeight(cellId);
+  // Skip the forced-reflow autoresize when nothing that determines the
+  // composer's height has changed. We only skip while the input is focused:
+  // a non-focused input always recomputes so a shrunk window/shell re-clamps
+  // it on the next pass (shell/window geometry is otherwise driven by the
+  // xterm ResizeObserver, not this memo), avoiding a stale over-tall composer.
+  const focused = typeof document !== 'undefined' && document.activeElement === el;
+  if (!force && cellId && focused) {
+    const memo = _terminalComposeAutoResizeMemo[cellId];
+    if (memo && memo.text === text && memo.storedHeight === storedHeight) return;
+  }
   if (typeof taskAutoResize === 'function') {
     taskAutoResize(el);
   } else if (typeof boardAddTaskAutoResize === 'function') {
     boardAddTaskAutoResize(el);
   }
   _terminalComposeApplyHeight(el);
+  if (cellId) _terminalComposeAutoResizeMemo[cellId] = { text: text, storedHeight: storedHeight };
 }
 
 function _terminalComposeHeightBounds(input) {
@@ -1985,6 +2013,9 @@ function _terminalComposeSetUserHeight(input, height) {
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
   const clamped = _terminalComposeClampHeight(input, height);
   if (cellId && clamped > 0) _terminalComposeHeights[cellId] = clamped;
+  // Explicit resize interaction: drop the autoresize memo so the next
+  // autoresize pass re-applies rather than skipping on an unchanged draft.
+  _terminalComposeAutoResizeInvalidate(cellId);
   input.style.height = clamped + 'px';
   _terminalComposeApplyHeight(input);
   return clamped;
@@ -3628,6 +3659,7 @@ function terminalComposeClear(cellId) {
   }
   if (id) delete _terminalComposeAttachments[id];
   if (id) delete _terminalComposeSelectedAttachmentByCell[id];
+  _terminalComposeAutoResizeInvalidate(id);
   _terminalComposeAutoResize(input);
   _terminalComposeSetButtonState(input);
   _terminalComposeRefreshAttachmentChips(id);
