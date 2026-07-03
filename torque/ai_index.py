@@ -450,12 +450,13 @@ def _harvest_tasks(conn: sqlite3.Connection, agents: dict[str, dict]) -> list[Ha
         task_id = str(task.get("id", "") or "")
         group = str(task.get("group_name", "") or "")
         assigned_engineer_id = str(task.get("assigned_engineer_id", "") or "")
+        assigned_architect_id = str(task.get("assigned_architect_id", "") or "")
         created_by_architect_id = str(task.get("created_by_architect_id", "") or "")
         created_by_engineer_id = str(task.get("created_by_engineer_id", "") or "")
         agent_id = str(task.get("agent_id", "") or "")
         reply_agent_id = str(task.get("reply_agent_id", "") or "")
         participants, participant_kinds = normalize_participants(
-            [assigned_engineer_id, created_by_architect_id, created_by_engineer_id, agent_id, reply_agent_id],
+            [assigned_engineer_id, assigned_architect_id, created_by_architect_id, created_by_engineer_id, agent_id, reply_agent_id],
             agents=agents,
         )
         owner_kind = ""
@@ -477,6 +478,7 @@ def _harvest_tasks(conn: sqlite3.Connection, agents: dict[str, dict]) -> list[Ha
             "action_name": str(task.get("action_name", "") or ""),
             "agent_id": agent_id,
             "assigned_engineer_id": assigned_engineer_id,
+            "assigned_architect_id": assigned_architect_id,
             "created_by_architect_id": created_by_architect_id,
             "created_by_engineer_id": created_by_engineer_id,
             "parent_task_id": str(task.get("parent_task_id", "") or ""),
@@ -517,6 +519,7 @@ def _harvest_tasks(conn: sqlite3.Connection, agents: dict[str, dict]) -> list[Ha
             participant_kinds=participant_kinds,
             visibility_json={
                 "assigned_engineer_id": assigned_engineer_id,
+                "assigned_architect_id": assigned_architect_id,
                 "created_by_architect_id": created_by_architect_id,
                 "created_by_engineer_id": created_by_engineer_id,
                 "agent_id": agent_id,

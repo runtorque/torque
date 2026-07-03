@@ -20,6 +20,7 @@ _BOARD_TASK_COLUMNS = (
     "position",
     "agent_id",
     "assigned_engineer_id",
+    "assigned_architect_id",
     "created_by_architect_id",
     "created_by_engineer_id",
     "suggested_action",
@@ -115,6 +116,7 @@ def _serialize_board_task(task):
         d.get("position", 0),
         d.get("agent_id", ""),
         assigned_engineer_id,
+        d.get("assigned_architect_id", ""),
         d.get("created_by_architect_id", ""),
         d.get("created_by_engineer_id", ""),
         d.get("suggested_action", ""),
@@ -204,6 +206,7 @@ def decode_board_task_row(row, cols):
         "engineer_owner_id",
         str(d.get("assigned_engineer_id", "") or ""),
     )
+    d.setdefault("assigned_architect_id", "")
     if "deliverable_required" in d:
         d["deliverable_required"] = bool(d["deliverable_required"])
     if "requires_review" in d:

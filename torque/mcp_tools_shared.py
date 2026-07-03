@@ -141,6 +141,7 @@ _PRODUCT_TASK_UNSAFE_LANES = frozenset({
 _PRODUCT_JOURNAL_ENTRY_TYPES = {"observation", "checkpoint", "plan"}
 _PRODUCT_TASK_PROPOSAL_FORBIDDEN_ARGS = frozenset({
     "assigned_engineer_id",
+    "assigned_architect_id",
     "agent_id",
     "dispatch",
     "dispatch_message",
@@ -435,6 +436,7 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
         "status": task.status,
         "dispatch_state": getattr(task, "dispatch_state", "queued") or "queued",
         "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "assigned_architect_id": str(getattr(task, "assigned_architect_id", "") or "").strip(),
         "created_by": created_by,
         "health_state": getattr(task, "health_state", "healthy") or "healthy",
         "updated_at": getattr(task, "updated_at", "") or "",
@@ -548,6 +550,7 @@ def _architect_attention_task_item(task, *, created_by: str = "") -> dict:
         "lane": getattr(task, "lane", "") or "",
         "status": getattr(task, "status", "") or "",
         "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "assigned_architect_id": str(getattr(task, "assigned_architect_id", "") or "").strip(),
         "agent_id": str(getattr(task, "agent_id", "") or "").strip(),
         "updated_at": getattr(task, "updated_at", "") or "",
     }
@@ -1173,6 +1176,7 @@ def _wave_summary_task_base(task) -> dict:
         "labels": list(getattr(task, "labels", []) or []),
         "category": _wave_summary_category(task),
         "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "assigned_architect_id": str(getattr(task, "assigned_architect_id", "") or "").strip(),
         "agent_id": str(getattr(task, "agent_id", "") or "").strip(),
         "updated_at": str(getattr(task, "updated_at", "") or ""),
     }
@@ -4293,6 +4297,7 @@ def _peer_context_task_snapshot(task) -> dict:
         "status": str(getattr(task, "status", "") or ""),
         "labels": list(getattr(task, "labels", []) or []),
         "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "assigned_architect_id": str(getattr(task, "assigned_architect_id", "") or ""),
         "created_by_architect_id": str(
             getattr(task, "created_by_architect_id", "") or ""
         ),
@@ -9734,6 +9739,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             description=str(args.get("description", "") or ""),
             labels=labels,
             assigned_engineer_id="",
+            assigned_architect_id="",
             agent_id="",
             dispatch_state="queued",
             scheduled_at="",
@@ -9749,6 +9755,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if (
                 not persisted
                 or str(getattr(persisted, "assigned_engineer_id", "") or "")
+                or str(getattr(persisted, "assigned_architect_id", "") or "")
                 or str(getattr(persisted, "agent_id", "") or "")
                 or str(getattr(persisted, "dispatch_state", "") or "queued") != "queued"
                 or str(getattr(persisted, "scheduled_at", "") or "")
@@ -10019,6 +10026,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             created_by_architect_id=str(caller_id or "").strip(),
             reply_agent_id=str(caller_id or "").strip(),
             assigned_engineer_id="",
+            assigned_architect_id="",
             agent_id="",
             action_name="",
             status="Awaiting Input",

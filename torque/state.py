@@ -329,6 +329,7 @@ COMPACT_BOARD_TASK_FIELDS = (
     "labels",
     "agent_id",
     "assigned_engineer_id",
+    "assigned_architect_id",
     "parent_task_id",
     "pipeline_depth",
     "status",
@@ -964,6 +965,7 @@ class BoardTask:
     position: int = 0
     agent_id: str = ""          # concrete agent working on this (optional)
     assigned_engineer_id: str = ""  # owning engineer responsible for the task
+    assigned_architect_id: str = ""  # owning architect responsible for the task
     created_by_architect_id: str = ""  # architect provenance
     created_by_engineer_id: str = ""  # engineer provenance
     suggested_action: str = ""  # non-binding architect action hint
@@ -8107,6 +8109,7 @@ class MatrixState:
                 "dispatch_state": getattr(task, "dispatch_state", "queued") or "queued",
                 "health_state": getattr(task, "health_state", "healthy") or "healthy",
                 "assigned_engineer_id": getattr(task, "assigned_engineer_id", "") or "",
+                "assigned_architect_id": getattr(task, "assigned_architect_id", "") or "",
                 "updated_at": getattr(task, "updated_at", "") or "",
                 "archived_at": getattr(task, "archived_at", "") or "",
             })

@@ -1586,6 +1586,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         initialize_database(self._conn, self.backfill_agent_history)
         self._ensure_agent_peer_messages_schema()
         self._ensure_board_task_engineer_provenance_column()
+        self._ensure_board_task_assigned_architect_column()
         self._ensure_agent_queue_empty_emitted_column()
         self._ensure_agent_message_loop_deferred_columns()
         self._migrate_agent_activity_timestamps_if_needed()
@@ -1630,6 +1631,18 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except sqlite3.OperationalError:
             self._conn.execute(
                 "ALTER TABLE board_tasks ADD COLUMN created_by_engineer_id "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
+
+    def _ensure_board_task_assigned_architect_column(self):
+        try:
+            self._conn.execute(
+                "SELECT assigned_architect_id FROM board_tasks LIMIT 0"
+            )
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN assigned_architect_id "
                 "TEXT NOT NULL DEFAULT ''"
             )
             self._conn.commit()
@@ -10735,6 +10748,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         for col, col_type, default in [
             ("assigned_engineer_id", "TEXT", "''"),
+            ("assigned_architect_id", "TEXT", "''"),
             ("created_by_architect_id", "TEXT", "''"),
             ("created_by_engineer_id", "TEXT", "''"),
             ("suggested_action", "TEXT", "''"),

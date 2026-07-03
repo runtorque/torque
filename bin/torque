@@ -2942,6 +2942,15 @@ def cmd_task_show(args):
         else:
             agent_str = t["agent_id"][:6]
         print(f"  {'Agent:':<14} {agent_str}")
+    if t.get("assigned_architect_id"):
+        architect_id = str(t.get("assigned_architect_id", "") or "")
+        architect = st.get("agents", {}).get(architect_id)
+        if architect:
+            architect_slug = architect.get("slug", "") or architect_id[:6]
+            architect_str = f"{architect.get('name', architect_id)} ({architect_slug})"
+        else:
+            architect_str = architect_id[:6]
+        print(f"  {'Architect:':<14} {architect_str}")
     if t.get("labels"):
         def _fmt_label(lb):
             return f"[{lb}]" if lb.startswith("torque:") else lb

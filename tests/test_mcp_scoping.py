@@ -1239,6 +1239,33 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed.completion_evidence["covered_by"]["task_id"], covering.id)
         self.assertEqual(refreshed.messages[-1]["action"], "covered_by")
 
+    async def test_engineer_task_mark_covered_ignores_assigned_architect_metadata(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        architect = self._add_architect(state, "arch-torqly", "Torqly")
+        task = self._add_task(
+            state,
+            "TORQUE:1128",
+            "Architect-owned metadata card",
+            assigned_architect_id=architect.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("assigned_architect_id alone must not grant engineer coverage authority")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_mark_covered",
+            {"task": task.id, "pr_url": "https://github.com/runtorque/torque/pull/1"},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "task not found in scope")
+        self.assertEqual(state.board_tasks[task.id].assigned_architect_id, architect.id)
+        self.assertEqual(state.board_tasks[task.id].completion_evidence, {})
+
     async def test_engineer_task_mark_covered_rejects_unassigned_task(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

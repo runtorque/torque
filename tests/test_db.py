@@ -433,6 +433,33 @@ class TorqueDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(json.loads(row[0]), task.messages_thread)
 
+    def test_board_task_assigned_architect_id_defaults_and_round_trips(self):
+        self.db.save_board_task(BoardTask(id="task-default", task="Default", group="g"))
+        self.db.save_board_task(
+            BoardTask(
+                id="task-owned-architect",
+                task="Owned by architect",
+                group="g",
+                assigned_architect_id="architect-1",
+            )
+        )
+
+        rows = dict(
+            self.db._conn.execute(
+                "SELECT id, assigned_architect_id FROM board_tasks "
+                "WHERE id IN ('task-default', 'task-owned-architect')"
+            ).fetchall()
+        )
+        self.assertEqual(rows["task-default"], "")
+        self.assertEqual(rows["task-owned-architect"], "architect-1")
+
+        loaded = self.db.load_all()["board_tasks"]
+        self.assertEqual(loaded["task-default"]["assigned_architect_id"], "")
+        self.assertEqual(
+            loaded["task-owned-architect"]["assigned_architect_id"],
+            "architect-1",
+        )
+
     def test_save_board_tasks_rolls_back_entire_batch_on_failure(self):
         first = BoardTask(id="task-1", task="First", group="g", lane="Done")
         second = BoardTask(id="task-2", task="Second", group="g", lane="Done")
@@ -2015,6 +2042,7 @@ class TorqueDBTests(unittest.TestCase):
                 position=2,
                 agent_id=cell.id,
                 assigned_engineer_id="engineer-1",
+                assigned_architect_id="architect-owner-1",
                 created_by_architect_id="architect-1",
                 suggested_action="feature/review",
                 reply_agent_id="agent-2",
@@ -2230,6 +2258,10 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["assigned_engineer_id"],
             "engineer-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["assigned_architect_id"],
+            "architect-owner-1",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["created_by_architect_id"],
@@ -2471,6 +2503,7 @@ class TorqueDBTests(unittest.TestCase):
             slug="kinds-task",
             agent_id=cell.id,
             assigned_engineer_id="engineer-1",
+            assigned_architect_id="architect-owner-1",
             created_by_architect_id="architect-1",
             suggested_action="feature/review",
         )
@@ -2484,6 +2517,7 @@ class TorqueDBTests(unittest.TestCase):
         cell.hired_by_architect_id = "architect-2"
         cell.persistent = True
         task.assigned_engineer_id = "engineer-2"
+        task.assigned_architect_id = "architect-owner-2"
         task.created_by_architect_id = "architect-2"
         task.suggested_action = "feature/fix-review"
 
@@ -2501,13 +2535,14 @@ class TorqueDBTests(unittest.TestCase):
         )
 
         task_row = self.db._conn.execute(
-            "SELECT assigned_engineer_id, created_by_architect_id, "
-            "suggested_action FROM board_tasks WHERE id=?",
+            "SELECT assigned_engineer_id, assigned_architect_id, "
+            "created_by_architect_id, suggested_action "
+            "FROM board_tasks WHERE id=?",
             (task.id,),
         ).fetchone()
         self.assertEqual(
             task_row,
-            ("engineer-2", "architect-2", "feature/fix-review"),
+            ("engineer-2", "architect-owner-2", "architect-2", "feature/fix-review"),
         )
 
         loaded = self.db.load_all()
@@ -2525,6 +2560,10 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"][task.id]["assigned_engineer_id"],
             "engineer-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["assigned_architect_id"],
+            "architect-owner-2",
         )
         self.assertEqual(
             loaded["board_tasks"][task.id]["created_by_architect_id"],
@@ -4280,6 +4319,7 @@ class TorqueDBTests(unittest.TestCase):
         }
         for col in (
             "assigned_engineer_id",
+            "assigned_architect_id",
             "created_by_architect_id",
             "suggested_action",
         ):

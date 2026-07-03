@@ -21314,6 +21314,7 @@ async def main(connection=None):
                     scheduled_at=data.get("scheduled_at", ""),
                     dispatch_state=data.get("dispatch_state", ""),
                     assigned_engineer_id=data.get("assigned_engineer_id", ""),
+                    assigned_architect_id=data.get("assigned_architect_id", ""),
                     created_by_engineer_id=data.get("created_by_engineer_id", ""),
                     suggested_specialization=data.get(
                         "suggested_specialization", ""),

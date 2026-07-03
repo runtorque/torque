@@ -177,8 +177,8 @@ function _missionControlOwnerLabel(owner) {
   owner = owner || {};
   return String(
     owner.agent_name || owner.agent_slug || owner.agent_id
-    || owner.assigned_engineer_id || owner.created_by_engineer_id
-    || owner.created_by_architect_id || ''
+    || owner.assigned_engineer_id || owner.assigned_architect_id
+    || owner.created_by_engineer_id || owner.created_by_architect_id || ''
   ).trim();
 }
 
