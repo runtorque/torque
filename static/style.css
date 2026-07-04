@@ -9857,6 +9857,10 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .architect-decision-card {
   margin-left: 12px;
 }
+.architect-decision-card-archived {
+  opacity: 0.72;
+  border-style: dashed;
+}
 .architect-decision-card .detail-section-card-head {
   align-items: flex-start;
   gap: 8px;
@@ -9903,6 +9907,16 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 }
 .architect-decision-summary-row .detail-task-status {
   margin-left: 0;
+}
+.architect-decision-archive-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  text-transform: uppercase;
 }
 .architect-decision-actions {
   flex: 0 0 auto;
@@ -10349,6 +10363,26 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.agent-panel-decisions-heading {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-panel-decisions-archive-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 3px 6px;
+}
+.agent-panel-decisions-archive-toggle[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent);
 }
 .agent-panel-panel[data-agent-panel-kind="architect"][data-agent-panel-tab="journal"] .agent-panel-worklog-header {
   justify-content: flex-start;

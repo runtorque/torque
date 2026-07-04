@@ -1572,7 +1572,8 @@ function _architectDecisionsForAgent(agentId) {
   if (!state || !state.decisions) return [];
   const architectId = String(agentId || '');
   return Object.values(state.decisions).filter(function(decision) {
-    return String((decision && decision.architect_id) || '') === architectId;
+    return String((decision && decision.architect_id) || '') === architectId
+      && !(decision && decision.archived);
   }).sort(function(a, b) {
     const aTs = _agentCardTimestampSeconds((a && (a.created_at || a.updated_at)) || 0);
     const bTs = _agentCardTimestampSeconds((b && (b.created_at || b.updated_at)) || 0);

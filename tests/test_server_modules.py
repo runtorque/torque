@@ -1166,6 +1166,7 @@ prompt: |
         )
 
         self.assertEqual(decisions['type'], 'decisions_snapshot')
+        self.assertTrue(decisions['include_archived'])
         self.assertEqual(set(decisions['decisions']), {'decision-1', 'decision-2'})
         self.assertTrue(fake_db.include_archived)
         self.assertEqual(hires['type'], 'pending_hires_snapshot')

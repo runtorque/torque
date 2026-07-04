@@ -14560,6 +14560,7 @@ def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
     }
     return {
         "type": "decisions_snapshot",
+        "include_archived": include_archived,
         "decisions": decisions,
     }
 

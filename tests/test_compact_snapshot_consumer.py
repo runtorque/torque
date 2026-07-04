@@ -324,6 +324,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         hires = self.server_mod._handle_pending_hires_snapshot_command({}, state)
 
         self.assertEqual(decisions["type"], "decisions_snapshot")
+        self.assertFalse(decisions["include_archived"])
         self.assertEqual(hires["type"], "pending_hires_snapshot")
         self.assertEqual(set(decisions["decisions"]), {"d-1"})
         self.assertEqual(set(hires["pending_hires"]), {"h-1"})

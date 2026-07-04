@@ -5739,6 +5739,27 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     jsonValue(context, `Object.prototype.hasOwnProperty.call(state.decisions || {}, "decision-1")`),
     false,
   );
+
+  runInContext(context, `_expectedSeq = 3;`);
+  context._handleDelta({
+    seq: 3,
+    ops: [
+      {
+        op: 'decision_upsert',
+        id: 'decision-archived',
+        architect_id: 'arch-1',
+        title: 'Archived but still counted',
+        archived: true,
+      },
+    ],
+  });
+
+  assert.deepEqual(jsonValue(context, `state.decisions["decision-archived"]`), {
+    id: 'decision-archived',
+    architect_id: 'arch-1',
+    title: 'Archived but still counted',
+    archived: true,
+  });
 });
 
 /* -- Bottom bar daemon status + restore-layout control (TORQUE:624) ------- */

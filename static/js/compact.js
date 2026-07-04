@@ -84,6 +84,7 @@ function _compactInitDeferredMaps() {
   _compactEngineerFetchedGroups = {};
   _compactTasksFullyLoaded = {};
   _compactDecisionsFetched = false;
+  _compactDecisionsFetchedWithArchived = false;
   _compactPendingHiresFetched = false;
 }
 
@@ -94,6 +95,7 @@ var _compactArchivedFetchedGroups = {};
 var _compactEngineerFetchedGroups = {};
 var _compactTasksFullyLoaded = {};
 var _compactDecisionsFetched = false;
+var _compactDecisionsFetchedWithArchived = false;
 var _compactPendingHiresFetched = false;
 
 function _compactSend(obj) {
@@ -102,11 +104,16 @@ function _compactSend(obj) {
 
 function lazyLoadDecisions(opts) {
   if (!_compactModeActive()) return false;
-  var key = 'decisions:' + ((opts && opts.include_archived) ? '1' : '0');
+  var includeArchived = !opts || typeof opts.include_archived === 'undefined'
+    ? true
+    : !!opts.include_archived;
+  if (includeArchived && _compactDecisionsFetchedWithArchived) return false;
+  if (!includeArchived && (_compactDecisionsFetched || _compactDecisionsFetchedWithArchived)) return false;
+  var key = 'decisions:' + (includeArchived ? '1' : '0');
   if (_compactInFlight[key]) return false;
   _compactInFlight[key] = true;
   var payload = { cmd: 'decisions_snapshot' };
-  if (opts && opts.include_archived) payload.include_archived = true;
+  if (includeArchived) payload.include_archived = true;
   _compactSend(payload);
   return true;
 }
@@ -283,6 +290,7 @@ function _compactApplyDecisionsSnapshot(msg) {
   var merged = (msg && msg.decisions) || {};
   for (var did in merged) state.decisions[did] = merged[did];
   _compactDecisionsFetched = true;
+  if (msg && msg.include_archived) _compactDecisionsFetchedWithArchived = true;
   if (typeof _agentPanelInvalidateArchitectDecisionCache === 'function') {
     _agentPanelInvalidateArchitectDecisionCache();
   }
@@ -369,6 +377,6 @@ function _compactHandleLazyResponse(msg) {
  * behaves identically to the legacy full-state client. */
 function _compactAutoHydrateOnConnect() {
   if (!_compactModeActive()) return;
-  if (!_compactDecisionsFetched) lazyLoadDecisions();
+  if (!_compactDecisionsFetchedWithArchived) lazyLoadDecisions({ include_archived: true });
   if (!_compactPendingHiresFetched) lazyLoadPendingHires();
 }
