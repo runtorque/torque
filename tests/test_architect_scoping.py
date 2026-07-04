@@ -5154,7 +5154,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             architect.id,
         )
         self.assertFalse(archive_error, archive_text)
-        self.assertEqual(self.state._delta_ops[-1]["op"], "decision_remove")
+        self.assertEqual(self.state._delta_ops[-1]["op"], "decision_upsert")
+        self.assertTrue(self.state._delta_ops[-1]["archived"])
 
     async def test_architect_wave_summary_from_decision_groups_evidence_and_exclusions(self):
         architect = self._add_architect("arch-1", "Architect")

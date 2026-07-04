@@ -127,7 +127,7 @@ test('lazyLoadDecisions sends decisions_snapshot and dedups in-flight calls', ()
   run(context, `_compactInitDeferredMaps()`);
   assert.equal(run(context, `lazyLoadDecisions()`), true);
   assert.equal(run(context, `lazyLoadDecisions()`), false);
-  assertPlainEqual(sandbox.sendCalls, [{ cmd: 'decisions_snapshot' }]);
+  assertPlainEqual(sandbox.sendCalls, [{ cmd: 'decisions_snapshot', include_archived: true }]);
 });
 
 test('lazyLoadPendingHires defaults status_filter to pending', () => {
@@ -273,7 +273,7 @@ test('_compactAutoHydrateOnConnect fires decisions + pending_hires once', () => 
   // Simulating both responses clears in-flight state; re-hydrating should
   // not re-send because the fetched flags latch.
   run(context, `_compactHandleLazyResponse({
-    type: 'decisions_snapshot', decisions: {}
+    type: 'decisions_snapshot', include_archived: true, decisions: {}
   })`);
   run(context, `_compactHandleLazyResponse({
     type: 'pending_hires_snapshot', pending_hires: {}
@@ -289,7 +289,7 @@ test('a resync re-init clears latched flags so a fresh auto-hydrate runs', () =>
   run(context, `_compactInitDeferredMaps()`);
   run(context, `_compactAutoHydrateOnConnect()`);
   run(context, `_compactHandleLazyResponse({
-    type: 'decisions_snapshot', decisions: {}
+    type: 'decisions_snapshot', include_archived: true, decisions: {}
   })`);
   run(context, `_compactHandleLazyResponse({
     type: 'pending_hires_snapshot', pending_hires: {}

@@ -3945,8 +3945,7 @@ class MatrixState:
         if not decision:
             return
         payload = dict(decision)
-        op = "decision_remove" if payload.get("archived") else "decision_upsert"
-        self._emit(op, **payload)
+        self._emit("decision_upsert", **payload)
 
     def _emit_pending_hire(self, pending_hire: dict | None):
         """Emit a pending-hire delta for live UI sync."""

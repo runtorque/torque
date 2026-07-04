@@ -39,6 +39,7 @@ var _agentPanelVirtualRenderFrame = 0;
 var _agentPanelWorkerTaskIdCacheByAgent = {};
 var _agentPanelDecisionListCacheByArchitect = {};
 var _agentPanelDecisionRowsCacheByArchitect = {};
+var _agentPanelShowArchivedDecisionsByArchitect = {};
 var _agentPanelMessageListCacheByArchitect = {};
 var _agentPanelArchitectPeerListByArchitect = {};
 var _agentPanelArchitectPeerListRequestedByArchitect = {};
@@ -4049,6 +4050,8 @@ function _agentPanelInvalidateArchitectDecisionCache(architectId) {
   }
   delete _agentPanelDecisionListCacheByArchitect[key];
   delete _agentPanelDecisionRowsCacheByArchitect[key];
+  delete _agentPanelDecisionRowsCacheByArchitect[key + ':0'];
+  delete _agentPanelDecisionRowsCacheByArchitect[key + ':1'];
 }
 
 function _agentPanelInvalidateArchitectMessageCache(agentId) {
@@ -4303,48 +4306,113 @@ function _agentPanelMessageCompareDesc(a, b) {
   return 0;
 }
 
-function _agentPanelArchitectDecisionList(agentId) {
+function _agentPanelDecisionIsArchived(decision) {
+  return !!(decision && decision.archived);
+}
+
+function _agentPanelArchitectDecisionList(agentId, opts) {
+  opts = opts || {};
   var stores = [];
   var architectId = String(agentId || '');
   if (!architectId) return [];
   stores = _agentPanelDecisionStores();
   var cached = _agentPanelDecisionListCacheByArchitect[architectId];
+  var allItems = null;
+  var activeItems = null;
   if (cached && _agentPanelStoreRefsEqual(cached.stores, stores)) {
-    return cached.items;
-  }
-  var results = [];
-  for (var storeIndex = 0; storeIndex < stores.length; storeIndex++) {
-    var store = stores[storeIndex] || {};
-    var values = Array.isArray(store)
-      ? store
-      : Object.keys(store).map(function(key) { return store[key]; });
-    for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
-      var decision = values[valueIndex];
-      if (!decision) continue;
-      if (String(decision.architect_id || '') !== architectId) continue;
-      results.push(decision);
+    allItems = cached.items;
+    activeItems = cached.activeItems;
+  } else {
+    var results = [];
+    var seen = {};
+    for (var storeIndex = 0; storeIndex < stores.length; storeIndex++) {
+      var store = stores[storeIndex] || {};
+      var values = Array.isArray(store)
+        ? store
+        : Object.keys(store).map(function(key) { return store[key]; });
+      for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
+        var decision = values[valueIndex];
+        if (!decision) continue;
+        if (String(decision.architect_id || '') !== architectId) continue;
+        var decisionId = String(decision.id || '');
+        var seenKey = decisionId || ('idx:' + storeIndex + ':' + valueIndex);
+        if (seen[seenKey]) continue;
+        seen[seenKey] = true;
+        results.push(decision);
+      }
     }
+    results.sort(_engineerDecisionRecencySort);
+    activeItems = results.filter(function(decision) {
+      return !_agentPanelDecisionIsArchived(decision);
+    });
+    _agentPanelDecisionListCacheByArchitect[architectId] = {
+      stores: stores.slice(),
+      items: results,
+      activeItems: activeItems,
+    };
+    allItems = results;
   }
-  results.sort(_engineerDecisionRecencySort);
-  _agentPanelDecisionListCacheByArchitect[architectId] = {
-    stores: stores.slice(),
-    items: results,
-  };
-  return results;
+  if (opts.include_archived) return allItems;
+  if (activeItems) return activeItems;
+  return allItems.filter(function(decision) {
+    return !_agentPanelDecisionIsArchived(decision);
+  });
 }
 
 function _agentPanelArchitectDecisions(agentId) {
   return _agentPanelArchitectDecisionList(agentId).slice();
 }
 
-function _agentPanelArchitectDecisionRowsForAgent(agentId) {
+function _agentPanelArchitectDecisionCounts(agentId) {
+  var decisions = _agentPanelArchitectDecisionList(agentId, { include_archived: true });
+  var archived = 0;
+  for (var i = 0; i < decisions.length; i++) {
+    if (_agentPanelDecisionIsArchived(decisions[i])) archived += 1;
+  }
+  return {
+    active: Math.max(0, decisions.length - archived),
+    archived: archived,
+    total: decisions.length,
+  };
+}
+
+function _agentPanelShowArchivedDecisions(agentId) {
+  var key = String(agentId || '').trim();
+  return !!(key && _agentPanelShowArchivedDecisionsByArchitect[key]);
+}
+
+function agentPanelToggleArchivedDecisions(evt, architectId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var key = String(architectId || '').trim();
+  if (!key) {
+    var focused = _resolveFocusedAgent();
+    key = String((focused && focused.id) || '').trim();
+  }
+  if (!key) return;
+  _agentPanelShowArchivedDecisionsByArchitect[key] = !_agentPanelShowArchivedDecisionsByArchitect[key];
+  if (_agentPanelShowArchivedDecisionsByArchitect[key]
+      && typeof lazyLoadDecisions === 'function') {
+    lazyLoadDecisions({ include_archived: true });
+  }
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function _agentPanelArchitectDecisionRowsForAgent(agentId, opts) {
+  opts = opts || {};
   var architectId = String(agentId || '');
   if (!architectId) return [];
-  var decisions = _agentPanelArchitectDecisionList(architectId);
-  var cached = _agentPanelDecisionRowsCacheByArchitect[architectId];
+  var includeArchived = !!opts.include_archived;
+  var decisions = _agentPanelArchitectDecisionList(architectId, {
+    include_archived: includeArchived,
+  });
+  var cacheKey = architectId + ':' + (includeArchived ? '1' : '0');
+  var cached = _agentPanelDecisionRowsCacheByArchitect[cacheKey];
   if (cached && cached.decisions === decisions) return cached.rows;
   var rows = _agentPanelArchitectDecisionRows(decisions);
-  _agentPanelDecisionRowsCacheByArchitect[architectId] = {
+  _agentPanelDecisionRowsCacheByArchitect[cacheKey] = {
     decisions: decisions,
     rows: rows,
   };
@@ -6081,11 +6149,15 @@ function _agentPanelArchitectDecisionItemHtml(agent, rows, index) {
     return html;
   }
   var decision = row.decision || {};
-  html += '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
+  var archived = _agentPanelDecisionIsArchived(decision);
+  html += '<div class="detail-section-card architect-decision-card'
+    + (archived ? ' architect-decision-card-archived' : '')
+    + '" data-agent-panel-anchor="decision-'
     + _agentPanelEsc(decision.id || index) + '">';
   html += '<div class="detail-section-card-head">';
   html += '<span class="detail-section-primary">' + _agentPanelEsc(decision.title || 'Decision') + '</span>';
   html += '<span class="detail-task-status">' + _agentPanelEsc(decision.status || 'proposed') + '</span>';
+  if (archived) html += '<span class="architect-decision-archive-badge">Archived</span>';
   html += '</div>';
   if (decision.rationale) {
     html += '<div class="detail-section-card-body">' + _agentPanelEsc(decision.rationale) + '</div>';
@@ -6095,19 +6167,39 @@ function _agentPanelArchitectDecisionItemHtml(agent, rows, index) {
 }
 
 function _agentPanelArchitectDecisionsHtml(agent) {
-  var decisions = _agentPanelArchitectDecisionList(agent && agent.id);
+  var architectId = String((agent && agent.id) || '').trim();
+  if (typeof lazyLoadDecisions === 'function') {
+    lazyLoadDecisions({ include_archived: true });
+  }
+  var counts = _agentPanelArchitectDecisionCounts(architectId);
+  var showArchived = _agentPanelShowArchivedDecisions(architectId);
+  var decisions = _agentPanelArchitectDecisionList(architectId, {
+    include_archived: showArchived,
+  });
   var html = '<div class="agent-panel-worklog-tab">';
-  html += '<div class="agent-panel-worklog-header">';
+  html += '<div class="agent-panel-worklog-header agent-panel-decisions-header">';
+  html += '<div class="agent-panel-decisions-heading">';
   html += '<span class="agent-panel-worklog-title">Decisions</span>';
-  html += '<span class="agent-panel-worklog-count">' + decisions.length + '</span>';
+  html += '<span class="agent-panel-worklog-count agent-panel-decisions-count">'
+    + counts.active + ' active &middot; ' + counts.archived + ' archived</span>';
+  html += '</div>';
+  html += '<button type="button" class="agent-panel-decisions-archive-toggle" aria-pressed="'
+    + (showArchived ? 'true' : 'false') + '" onclick="'
+    + _agentPanelEventAttr('agentPanelToggleArchivedDecisions(event,' + JSON.stringify(architectId) + ')')
+    + '">' + (showArchived ? 'Hide archived' : 'Show archived') + '</button>';
   html += '</div>';
   if (!decisions.length) {
-    html += '<div class="agent-panel-event-empty">No decisions yet.</div>';
+    var emptyText = counts.archived > 0 && !showArchived
+      ? ('No active decisions. ' + counts.archived + ' archived hidden.')
+      : 'No decisions yet.';
+    html += '<div class="agent-panel-event-empty">' + _agentPanelEsc(emptyText) + '</div>';
     html += '</div>';
     return html;
   }
 
-  var rows = _agentPanelArchitectDecisionRowsForAgent(agent && agent.id);
+  var rows = _agentPanelArchitectDecisionRowsForAgent(architectId, {
+    include_archived: showArchived,
+  });
   html += _agentPanelRenderVirtualList({
     key: _agentPanelFocusedSurfaceKey(agent, 'decisions', 'decisions'),
     total: rows.length,
@@ -7286,7 +7378,10 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   );
   var taskOptions = getArchitectDecisionTaskOptions(architectId);
   var engineerOptions = getArchitectDecisionEngineerOptions(architectId);
-  var html = '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
+  var archived = _agentPanelDecisionIsArchived(decision);
+  var html = '<div class="detail-section-card architect-decision-card'
+    + (archived ? ' architect-decision-card-archived' : '')
+    + '" data-agent-panel-anchor="decision-'
     + _agentPanelEsc(decision.id || '') + '">';
   html += '<div class="detail-section-card-head">';
   html += '<div class="architect-decision-toggle" role="button" tabindex="0" aria-expanded="'
@@ -7299,6 +7394,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   html += '</span>';
   html += '<span class="architect-decision-summary-row">';
   html += '<span class="detail-task-status">' + _esc(decision.status || 'proposed') + '</span>';
+  if (archived) html += '<span class="architect-decision-archive-badge">Archived</span>';
   if (headTimestampHtml) html += headTimestampHtml;
   html += '</span>';
   html += '</div>';
@@ -7313,7 +7409,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
         + '">Ack</button>';
     }
   }
-  if (!readOnly) {
+  if (!readOnly && !archived) {
     html += '<button type="button" class="detail-inline-editor-btn architect-decision-action-btn" title="Archive decision" aria-label="Archive decision" onclick="'
       + _agentPanelEventAttr('event.stopPropagation();engineerArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
       + '">Archive</button>';

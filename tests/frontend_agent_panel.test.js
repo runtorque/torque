@@ -2379,6 +2379,86 @@ test('focused architect decision interactions rerender the agent panel instead o
   assert.equal(vm.runInContext(`_engineerDecisionUiState('d1').expanded`, context), true);
 });
 
+test('focused architect Decisions tab shows active and archived counts with hidden archived toggle', () => {
+  const { context, panel, captureCalls, restoreCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.decisions = {
+    active: {
+      id: 'active',
+      architect_id: 'arch-1',
+      title: 'Active proposed direction',
+      status: 'proposed',
+      updated_at: 20,
+    },
+    archived: {
+      id: 'archived',
+      architect_id: 'arch-1',
+      title: 'Archived historical direction',
+      status: 'accepted',
+      archived: true,
+      updated_at: 10,
+    },
+  };
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /1 active &middot; 1 archived/);
+  assert.match(panel.innerHTML, /Show archived/);
+  assert.match(panel.innerHTML, /Active proposed direction/);
+  assert.doesNotMatch(panel.innerHTML, /Archived historical direction/);
+  const captureBefore = captureCalls.length;
+  const restoreBefore = restoreCalls.length;
+
+  context.agentPanelToggleArchivedDecisions(null, 'arch-1');
+
+  assert.match(panel.innerHTML, /1 active &middot; 1 archived/);
+  assert.match(panel.innerHTML, /Hide archived/);
+  assert.match(panel.innerHTML, /Archived historical direction/);
+  assert.match(panel.innerHTML, /architect-decision-card-archived/);
+  assert.match(panel.innerHTML, /architect-decision-archive-badge">Archived/);
+  assert.ok(captureCalls.length > captureBefore, 'toggle should capture panel state before rerender');
+  assert.ok(restoreCalls.length > restoreBefore, 'toggle should restore panel state after rerender');
+});
+
+test('focused architect Decisions tab distinguishes archived-only history from no decisions', () => {
+  const { context, panel } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.decisions = {
+    archived: {
+      id: 'archived',
+      architect_id: 'arch-1',
+      title: 'Archived historical direction',
+      status: 'rejected',
+      archived: true,
+      updated_at: 10,
+    },
+  };
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /0 active &middot; 1 archived/);
+  assert.match(panel.innerHTML, /No active decisions\. 1 archived hidden\./);
+  assert.doesNotMatch(panel.innerHTML, /Archived historical direction/);
+
+  context.agentPanelToggleArchivedDecisions(null, 'arch-1');
+
+  assert.match(panel.innerHTML, /Archived historical direction/);
+  assert.match(panel.innerHTML, /rejected/);
+  assert.match(panel.innerHTML, /architect-decision-archive-badge">Archived/);
+});
+
 test('focused architect decision rows render parseable click handlers and expanded details', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
