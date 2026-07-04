@@ -3,16 +3,18 @@
 Agent Classes are the normal operator-facing authoring, selection, assignment,
 and launch object for Torque agents. Runtime substrate still uses the internal
 base kinds `architect`, `engineer`, and `worker`; Agent Classes are **not**
-arbitrary runtime kinds. Agent Profile-compatible policy remains the internal
-MCP/capability enforcement layer underneath each effective class.
-In short: Agent Class is the primary identity; Agent Profile remains the enforcement layer.
+arbitrary runtime kinds. Class authority is authored as a generic ACL over
+Torque MCP tools/actions. Torque still projects the resolved ACL into the
+existing Agent Profile-compatible runtime snapshot fields for launch-time MCP
+enforcement, but that is an internal/backcompat implementation detail.
 
 Class-first invariants:
 
 - desired assignment fields are `agent_class_id` / `agent_class_version`;
 - effective launch snapshots are `effective_agent_class_*`;
-- the frozen internal policy is still stored in `effective_agent_profile_*`;
-- direct Agent Profile assignment remains supported as Advanced/Internal policy
+- the frozen runtime MCP projection is still stored in `effective_agent_profile_*`
+  for compatibility with existing session enforcement;
+- direct Agent Profile assignment remains supported only as Advanced/Internal
   backcompat, not the default product flow;
 - `AgentCell.profile` remains the legacy terminal/runtime profile label and is
   not used for Agent Classes.
@@ -21,18 +23,15 @@ Class-first invariants:
 
 Torque ships built-in Agent Classes in `torque/builtin_agent_classes/`:
 
-- `default-architect.yaml` → wraps `full-architect@1`
-- `default-engineer.yaml` → wraps `full-engineer@1`
-- `default-worker.yaml` → wraps `full-worker@1`
-- `creative-architect.yaml` → primary label **Creative**, schema v3,
-  uses operator capability buckets, and compiles to generated/internal
-  `class-policy-creative-architect@1`
-- `product-manager.yaml` → primary label **Product Manager**, schema v3,
-  uses operator capability buckets, and compiles to generated/internal
-  `class-policy-product-manager@3`
-- `torque-steward.yaml` → primary label **Torque Steward**, schema v3,
-  draft/read-only foundation for operational stewardship, and compiles to
-  generated/internal `class-policy-torque-steward@1`
+- `default-architect.yaml` → wraps `full-architect@1`;
+- `default-engineer.yaml` → wraps `full-engineer@1`;
+- `default-worker.yaml` → wraps `full-worker@1`;
+- `creative-architect.yaml` → schema v4 ACL/data-defined prompt for the
+  built-in Creative class;
+- `product-manager.yaml` → schema v4 ACL/data-defined prompt for the built-in
+  Product Manager class;
+- `torque-steward.yaml` → schema v4 ACL/data-defined prompt for the built-in
+  Torque Steward class.
 
 Project Agent Class definitions live in:
 
@@ -41,83 +40,60 @@ Project Agent Class definitions live in:
 ```
 
 This path is reviewed in Git like `.torque/actions/`, `.torque/roles/`,
-`.torque/specializations/`, and `.torque/agent_profiles/`. Wave 7B does **not**
-write generated internal profiles as project YAML; the class YAML is the reviewed
-source, while SQLite effective snapshots/audit and preview/status payloads carry
-the generated/internal policy evidence.
+`.torque/specializations/`, and `.torque/agent_profiles/`. Class YAML is the
+reviewed source of identity, prompt, and ACL authority. SQLite effective
+snapshots/audit and preview/status payloads carry the frozen runtime projection.
 
 ## YAML shape
 
-Wave 6 class YAML with top-level `base_kind` and `agent_profile_ref` remains
-valid and is treated as `policy.mode: wrap_profile`.
-
-Schema v3 adds class-first identity/runtime/policy sections and a compile mode:
+Schema v4 is ACL-first:
 
 ```yaml
-agent_class_schema_version: 3
+agent_class_schema_version: 4
 id: product-manager
-version: "2"
+version: "3"
 display_name: Product Manager
-lifecycle: draft
-identity:
-  label: Product Manager
-  primary_ui_label: Product Manager
+lifecycle: stable
 runtime:
   base_kind: architect
-  base_kind_label: Architect-derived
-  arbitrary_runtime_kind: false
 prompt:
   addendum: |
-    Additive class prompt. Base-kind prompt remains primary.
-policy:
-  mode: compile              # compile | wrap_profile
-  policy_schema_version: 1
-  scope: {}                  # operator-readable policy notes
-  communication: {}          # operator-readable communication notes
-  spawn: {}                  # operator-readable delegation/spawn notes
-  audit: {}                  # operator-readable audit notes
-capabilities:
-  buckets:
-    - self_context
-    - planning_reads
-    - proposed_decisions
-    - board_task_proposals
-    - user_messages
-  restrictions:
-    - deny_worker_dispatch
-    - deny_deploy_admin
-    - deny_class_profile_admin
-  domains: [product_planning]
-delegation:
-  dispatch_workers: denied
+    Additive class instructions. Class-specific behavior lives here, not in
+    Python branches.
+acl:
+  mode: allow # allow | deny
+  allow:
+    - capability: self_context      # legacy bucket alias during migration
+    - action: planning.area.read
+      scope: group
+    - family: architect_product_*
 warnings:
   - External connectors are managed separately.
-draft:
-  scratch_only: true
-  approved_for_live_dogfood: false
-metadata:
-  archetype: product_manager
 ```
+
+ACL entries may select exact MCP tools, tool families, stable action keys, or
+legacy capability bucket aliases while migration continues. ACL modes are exclusive:
+`mode: allow` uses only `allow` entries and denies everything else by omission;
+`mode: deny` uses only `deny` entries from the base-kind ceiling.
+Cross-base-kind escalation is impossible: an Architect class
+can select only Architect-ceiling tools/actions, an Engineer class only
+Engineer-ceiling tools/actions, and so on. Resource-touching actions use the
+simple scope vocabulary `self`, `children`, `group`, and `global`; relationship
+phrases such as hired-by-self or owned-workers compile to `children`.
+
+Legacy class YAML with top-level `base_kind`/`agent_profile_ref`,
+`capabilities.buckets`, `capabilities.restrictions`, or `policy.mode` is still
+accepted as migration/backcompat input, but normal authoring and built-in class
+YAML should use `acl:`. The old operator-readable `policy.scope`,
+`policy.communication`, `policy.spawn`, and `policy.audit` fields do not enforce
+MCP access and should not be used for new classes.
 
 Validation rejects unknown base kinds, missing/unsafe ids, unsafe version tokens,
 missing/unsafe display names, profile refs whose base kind/version do not match,
-raw MCP/tool fields (`tools`, `mcp_tools`, `tool_picker`, etc.) anywhere, raw
-Agent Profile capability-atom grants/denies in Agent Class YAML/API, and
-ambiguous `profile` / `profile_id` / `agent_profile_id` fields. For schema v3,
-`capabilities.buckets` and `capabilities.restrictions` are the normal
-operator-facing policy input. The server compiles selected buckets into an
-internal Agent Profile-compatible policy, validates the result against the
-declared base-kind ceiling, and exposes raw atoms only as Advanced/Internal
-diagnostics. Product Manager-style classes cannot select buckets that grant
-dangerous execution/admin capabilities such as hire, dispatch, merge, deploy,
-settings, accepted-decision authority, direct Engineer/Worker messaging, or
-profile-admin.
-Torque Steward-style classes are stricter: they may select only operational
-observation capabilities plus the explicit Steward communication, private
-journal, and same-group Architect peer-coordination capabilities. Validation
-rejects task mutation, planning writes, memory publication, Engineer/Worker
-messaging, admin, or any other non-approved atoms until a later reviewed
-authority wave changes that contract.
+raw MCP/tool fields (`tools`, `mcp_tools`, `tool_picker`, etc.) outside ACL
+entries, raw Agent Profile capability-atom grants/denies in Agent Class YAML/API,
+and ambiguous `profile` / `profile_id` / `agent_profile_id` fields. ACL entries
+outside the base-kind ceiling are rejected.
 
 Draft classes must set `draft.scratch_only: true` and must not claim live dogfood
 approval.
@@ -132,34 +108,32 @@ sessions.
 `agent_class_create`, `agent_class_update`, `agent_class_archive`,
 `agent_class_delete`, `agent_class_assign`, `agent_class_clear`,
 `agent_class_status`, `agent_class_audit`, and `create_agent_from_class` remain
-supported. Class responses now use schema version 3 and include class-first
-fields needed by Wave 7C:
+supported. Class responses use schema version 4 and include class-first fields
+needed by the UI:
 
 - `primary_display_name` / `primary_identity_label` — the primary UI identity
   label (for example `Product Manager`);
 - `secondary_base_kind_label` / `secondary_base_kind_metadata` — internal base
   kind metadata (for example `Architect-derived`);
 - `purpose` / `description` — operator-language class purpose;
+- `acl` and `authority_summary` — ACL mode, allowed or denied actions, tool
+  families, exact tools, selected legacy capabilities, high-risk grants, and
+  unavailable high-risk capabilities;
 - `capability_bucket_selection`, `restriction_bucket_selection`,
-  `capability_bucket_summary`, `operator_access_summary`, `capability_buckets`,
-  and `restriction_buckets` — bucket selections plus user-readable allowed and
-  explicitly denied access summaries;
+  `operator_access_summary`, `capability_buckets`, and `restriction_buckets` —
+  migration/backcompat summaries when legacy bucket aliases are used;
 - `authoring_contract`, `capability_bucket_catalog`, and
-  `restriction_bucket_catalog` — trusted API data Panelsmith should use for
+  `restriction_bucket_catalog` — trusted API data the UI can use for migration
   bucket create/edit/validate flows;
-- `policy.mode` and `internal_policy` — compile/wrap mode, generated/internal
-  profile id/version, compiler version, capability counts, projected tool
-  categories, denied high-risk capabilities, snapshot source, and
-  Advanced/Internal generated grants/denies diagnostics;
-- `agent_profile` / `internal_profile` / `compiled_profile` — advanced internal
-  Agent Profile-compatible policy preview; retained for backcompat;
-- desired/effective/pending status fields:
-  `assigned_*`, `effective_*`, `next_launch_*`, `pending_next_launch`,
-  `next_launch_primary_identity_label`, and `apply_state` / relaunch-required
-  state;
+- `internal_policy`, `agent_profile`, `internal_profile`, and
+  `compiled_profile` — Advanced/Internal runtime-projection diagnostics retained
+  for backcompat;
+- desired/effective/pending status fields: `assigned_*`, `effective_*`,
+  `next_launch_*`, `pending_next_launch`, `next_launch_primary_identity_label`,
+  and `apply_state` / relaunch-required state;
 - `warnings` plus `external_connector_caveat`.
 
-Successful `create_agent_from_class` responses use `schema_version: 3`, return
+Successful `create_agent_from_class` responses use `schema_version: 4`, return
 `agent_class` preview, and include both `agent_class_status` and
 `agent_profile_status` on the created agent. Passing both `agent_class_id` and a
 direct profile assignment in a launch payload is rejected as ambiguous.
@@ -167,24 +141,21 @@ direct profile assignment in a launch payload is rejected as ambiguous.
 ## Assignment and launch snapshots
 
 Assignment only changes desired state and writes audit rows. Running sessions
-keep their frozen effective Agent Class and Agent Profile snapshots. At the next
-launch/relaunch, Torque freezes the desired class (or implicit `default-{kind}`)
-and freezes either:
+keep their frozen effective Agent Class and Agent Profile-compatible runtime
+projection snapshots. At the next launch/relaunch, Torque freezes the desired
+class (or implicit `default-{kind}`) and freezes either:
 
-1. the wrapped registry Agent Profile (`policy.mode: wrap_profile`), or
-2. the generated in-memory Agent Profile-compatible policy
-   (`policy.mode: compile`).
+1. the wrapped registry Agent Profile for legacy/default classes, or
+2. the generated in-memory runtime projection compiled from the class ACL.
 
-The generated policy is frozen into `effective_agent_profile_snapshot` with
-metadata such as `generated_by_agent_class`, `policy_schema_version`,
-`policy_compiler_version`, and the class id/version. It is not written as
-`.torque/agent_profiles/*.yaml` in Wave 7B.
+The generated projection is frozen into `effective_agent_profile_snapshot` with
+metadata such as `generated_by_agent_class`, compiler version, and the class
+id/version. It is not written as `.torque/agent_profiles/*.yaml`.
 
-Direct Agent Profile assignments remain compatible. If an agent has a direct
-`product-manager-draft` profile assignment and no desired class, Torque preserves
-that legacy direct assignment and does **not** silently migrate it to the
-Product Manager class. Status and doctor warn the operator to set desired Agent
-Class `product-manager` for the class-first next-relaunch flow.
+Direct Agent Profile assignments remain compatible. If an agent has a legacy
+direct profile assignment and no desired class, Torque preserves that assignment
+and does **not** silently migrate it. Status and doctor warn the operator to set
+a desired Agent Class for the class-first next-relaunch flow.
 
 ## Product Manager class
 
@@ -192,21 +163,20 @@ The built-in Product Manager class has primary identity label **Product Manager*
 (even while lifecycle/status remains draft/restricted). Draft/restricted is a
 warning/chip, not part of the name.
 
-Product Manager compiles PM-safe policy from class-owned operator buckets to the
-internal generated profile `class-policy-product-manager@3`. The selected
-buckets match the existing PM-safe wrapper surface: planning reads, PM-owned
-proposed decisions, queued product task intake, selected product-peer wrappers,
-PM-safe user communication, and private journal. Explicit restriction buckets
-record no hire, dispatch, merge, deploy, settings/admin, profile-admin, raw tool
-picker authority, accepted-decision authority, or direct engineer/worker
-messaging.
+Product Manager declares a product-safe ACL in YAML. The selected
+capability aliases and tool families match the existing product-safe wrapper
+surface: planning reads, proposed decisions, queued product task intake,
+selected product-peer wrappers, product-safe user communication, and private
+journal. Explicit ACL denials record no hire, dispatch, merge, deploy,
+settings/admin, profile-admin, raw tool-picker authority, accepted-decision
+authority, or direct engineer/worker messaging.
 
 ## Creative class
 
 The built-in Creative class has primary identity label **Creative** and keeps
-the stable internal id `creative-architect`. It compiles proposal-only ideation
-policy to `class-policy-creative-architect@1`. It is an Architect-derived
-thinking mode, not a new runtime kind and not an execution authority.
+the stable internal id `creative-architect`. It declares a proposal-only
+ideation ACL in YAML. It is an Architect-derived thinking mode, not a new
+runtime kind and not an execution authority.
 
 Creative can read same-group product context, Planning
 Areas/Initiatives, decisions, relevant recent context, and Thinking artifacts.
@@ -220,17 +190,18 @@ existing product-safe wrappers: proposed decisions, queued/unassigned product
 task proposals, product-anchored peer messages, and product-scoped user
 ask/message paths.
 
-Its compiled policy explicitly denies hire/Engineer management, Worker
-dispatch, execution task control, direct Engineer/Worker messaging,
+Its allow-mode ACL grants only the approved proposal, Thinking, product-wrapper,
+behavior-overlay, communication, and journal surfaces. Hire/Engineer management,
+Worker dispatch, execution task control, direct Engineer/Worker messaging,
 worktree/merge, deploy/admin/settings, class/profile admin, accepted-decision
-authority, and raw tool-picker authority. Its prompt addendum instructs the
-agent to diverge first, converge second, connect product patterns, propose
-small shippable slices, state risks/non-goals, and never treat ideas as accepted
-plans.
+authority, raw tool-picker authority, and everything else are denied by omission.
+Its prompt addendum instructs the agent to diverge first, converge second,
+connect product patterns, propose small shippable slices, state risks/non-goals,
+and never treat ideas as accepted plans.
 
 External connector exposure is a known limitation: Agent Classes and Agent
-Profiles do **not** enforce external connector governance in Wave 7. Previews,
-status, and doctor output surface this caveat, especially for PM/draft/restricted
+Profiles do **not** enforce external connector governance in Wave 7. Generic
+previews, status, and doctor output surface this caveat for draft/restricted
 classes, but connector access must be managed separately.
 
 ## Torque Steward class
@@ -241,17 +212,18 @@ and stable internal id `torque-steward`. The communication/journal wave still ke
 or treated as broad user-delegated authority.
 
 Torque Steward is Architect-derived because it will eventually represent the
-user's operational wishes for a group, but its compiled policy remains
+user's operational wishes for a group, but its ACL remains
 conservative. It can read projected self context, board/task
 summaries and details, recent events, MCP-call telemetry, Areas, Initiatives,
 Decisions, and board-sync state. It can also ask/message the user, read/write
 its own private Architect journal, and list/message same-group Architect peers
-for coordination and handoff nudges. It explicitly denies Engineer management,
-Worker dispatch, execution task control, direct Engineer/Worker messaging,
-worktree/merge, deploy/admin/settings, class/profile admin, accepted-decision
-authority, raw tool-picker authority, and all remaining high-risk operations.
+for coordination and handoff nudges. Its allow-mode ACL does not grant Engineer
+management, Worker dispatch, execution task control, direct Engineer/Worker
+messaging, worktree/merge, deploy/admin/settings, class/profile admin,
+accepted-decision authority, raw tool-picker authority, or other high-risk
+operations, so those are denied by omission.
 
-The prompt and preview status contract define the Steward as an operations
+The bundled YAML prompt and generic ACL preview define the Steward as an operations
 observer/suggester: summarize health, anomaly, stale/stuck work, missed
 handoff, review/fix-loop, and cleanup risks; separate evidence from inference;
 recommend the smallest safe next step and the authorized actor. Torque Steward
@@ -264,7 +236,7 @@ remain future reviewed waves that need confirmation, auditability, visibility,
 and rollback expectations before enablement.
 
 Wave B adds one deterministic read-only helper,
-`architect_steward_operating_brief`, when the Steward's projected policy grants
+`architect_steward_operating_brief`, when the caller's projected ACL/capabilities grant
 the required read atoms. The helper returns a structured onboarding/operating
 brief with:
 
@@ -298,6 +270,7 @@ Action templates can inspect compact class context via
 `torque doctor` includes an `[agent_classes]` section with config path, schema
 version, validation counts, capability/restriction bucket catalog counts,
 assignment/audit counts, launch-pairing enforcement mode, the external connector
-caveat, and legacy direct PM-profile warning counts. The JSON report includes
-class previews, assignment status, recent audit rows, compiled/internal policy
-details, bucket authoring contract data, and no-silent-migration warnings.
+caveat, and generic legacy direct-profile warning counts. The JSON report
+includes class previews, assignment status, recent audit rows, ACL/runtime
+projection details, bucket authoring contract data, and no-silent-migration
+warnings.

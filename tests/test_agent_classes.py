@@ -101,24 +101,17 @@ class AgentClassRegistryTests(unittest.TestCase):
             "product_peer_messages",
             "private_journal",
         ])
-        self.assertIn("deny_worker_dispatch", preview["restriction_bucket_selection"])
+        self.assertEqual(preview["restriction_bucket_selection"], [])
         self.assertIn("capability_bucket_catalog", preview["authoring_contract"])
         self.assertEqual(preview["draft"], {})
         self.assertTrue(preview["metadata"]["approved_for_live_dogfood"])
         self.assertEqual(preview["metadata"]["permanence_state"], "dogfood_permanent")
-        self.assertEqual(
-            preview["product_manager_status"]["authority_model"],
-            "pm_safe_restricted",
-        )
-        self.assertTrue(preview["product_manager_status"]["approved_for_live_dogfood"])
-        self.assertFalse(preview["product_manager_status"]["raw_architect_authority"])
+        self.assertEqual(preview["acl"]["mode"], "allow")
+        self.assertIn("architect_product_*", preview["acl"]["allowed_families"])
+        self.assertEqual(preview["authority_summary"]["mode"], "allow")
         self.assertIn("external_connector_caveat", preview)
         warnings = "\n".join(preview["warnings"])
-        self.assertIn("approved for live dogfood", warnings)
-        self.assertIn("authority-bounded", warnings)
-        self.assertIn("architect_product_*", warnings)
-        self.assertNotIn("draft/restricted until explicit live-dogfood approval", warnings)
-        self.assertNotIn("External connector exposure is not enforced", warnings)
+        self.assertIn("narrows the base kind", warnings)
         categories = {
             entry["category"]: entry
             for entry in preview["agent_profile"]["projected_tool_categories"]
@@ -154,15 +147,10 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(preview["secondary_base_kind_label"], "Architect-derived")
         self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-creative-architect", "version": "1"})
         self.assertEqual(preview["agent_profile"]["id"], "class-policy-creative-architect")
-        self.assertEqual(preview["metadata"]["archetype"], "creative_architect")
         self.assertTrue(preview["metadata"]["proposal_only"])
-        self.assertEqual(
-            preview["creative_architect_status"]["authority_model"],
-            "proposal_only_ideation_partner",
-        )
-        self.assertFalse(preview["creative_architect_status"]["raw_architect_authority"])
-        self.assertFalse(preview["creative_architect_status"]["direct_engineer_worker_messaging"])
-        self.assertFalse(preview["creative_architect_status"]["accepted_decision_authority"])
+        self.assertEqual(preview["acl"]["mode"], "allow")
+        self.assertIn("architect_product_*", preview["acl"]["allowed_families"])
+        self.assertIn("architect_thinking_*", preview["acl"]["allowed_families"])
         for bucket in {
             "self_context",
             "planning_reads",
@@ -177,18 +165,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "private_journal",
         }:
             self.assertIn(bucket, preview["capability_bucket_selection"])
-        for restriction in {
-            "deny_engineer_management",
-            "deny_worker_dispatch",
-            "deny_execution_task_control",
-            "deny_engineer_worker_messages",
-            "deny_worktree_merge",
-            "deny_deploy_admin",
-            "deny_class_profile_admin",
-            "deny_decision_acceptance",
-            "deny_raw_tool_picker",
-        }:
-            self.assertIn(restriction, preview["restriction_bucket_selection"])
+        self.assertEqual(preview["restriction_bucket_selection"], [])
         categories = {
             entry["category"]: entry
             for entry in preview["agent_profile"]["projected_tool_categories"]
@@ -206,7 +183,7 @@ class AgentClassRegistryTests(unittest.TestCase):
 
         compiled = compile_agent_class_profile(creative)
         self.assertEqual(compiled.id, "class-policy-creative-architect")
-        self.assertEqual(compiled.display_name, "Creative Architect internal policy")
+        self.assertEqual(compiled.display_name, "Creative internal policy")
         self.assertIn("thinking.read", compiled.grants)
         self.assertIn("thinking.write_own", compiled.grants)
         self.assertIn("idea_brief.read", compiled.grants)
@@ -250,23 +227,15 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(preview["lifecycle"], "draft")
         self.assertEqual(preview["agent_profile_ref"], {"id": "class-policy-torque-steward", "version": "1"})
         self.assertEqual(preview["agent_profile"]["id"], "class-policy-torque-steward")
-        self.assertEqual(preview["metadata"]["archetype"], "torque_steward")
+        self.assertTrue(preview["metadata"]["represents_user_wishes"])
         self.assertFalse(preview["metadata"]["auto_create_enabled"])
-        self.assertEqual(
-            preview["torque_steward_status"]["authority_model"],
-            "conservative_observer_suggester",
-        )
-        self.assertTrue(preview["torque_steward_status"]["represents_user_wishes"])
-        self.assertFalse(preview["torque_steward_status"]["auto_create_enabled"])
-        self.assertFalse(preview["torque_steward_status"]["autonomous_mutation_authority"])
-        self.assertFalse(preview["torque_steward_status"]["direct_engineer_worker_messaging"])
-        self.assertFalse(preview["torque_steward_status"]["worker_dispatch"])
-        self.assertFalse(preview["torque_steward_status"]["deploy_admin"])
-        self.assertFalse(preview["torque_steward_status"]["profile_class_admin"])
-        self.assertEqual(
-            preview["torque_steward_status"]["user_delegated_power_surface"],
-            "communication_journal_peer_coordination_only",
-        )
+        self.assertEqual(preview["metadata"]["mutating_authority"], "none")
+        self.assertEqual(preview["acl"]["mode"], "allow")
+        self.assertIn("architect_steward_operating_brief", preview["acl"]["allowed_tools"])
+        self.assertIn("architect_message_user", preview["acl"]["allowed_tools"])
+        self.assertEqual(preview["acl"]["denied_families"], [])
+        self.assertEqual(preview["authority_summary"]["mode"], "allow")
+        self.assertEqual(preview["authority_summary"]["high_risk_grants"], [])
         self.assertEqual(preview["capability_bucket_selection"], [
             "self_context",
             "planning_reads",
@@ -276,19 +245,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "peer_architect_messages",
             "private_journal",
         ])
-        for restriction in {
-            "deny_engineer_management",
-            "deny_worker_dispatch",
-            "deny_execution_task_control",
-            "deny_engineer_worker_messages",
-            "deny_worktree_merge",
-            "deny_deploy_admin",
-            "deny_class_profile_admin",
-            "deny_decision_acceptance",
-            "deny_raw_tool_picker",
-            "deny_high_risk_operations",
-        }:
-            self.assertIn(restriction, preview["restriction_bucket_selection"])
+        self.assertEqual(preview["restriction_bucket_selection"], [])
         categories = {
             entry["category"]: entry
             for entry in preview["agent_profile"]["projected_tool_categories"]
@@ -301,7 +258,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertEqual(categories["profile_admin"]["status"], "denied")
         warnings = "\n".join(preview["warnings"])
         self.assertIn("conservative operations steward", warnings)
-        self.assertIn("no autonomous mutating", warnings)
+        self.assertIn("conservative operations steward", warnings)
 
         compiled = compile_agent_class_profile(steward)
         self.assertEqual(compiled.id, "class-policy-torque-steward")
@@ -343,26 +300,22 @@ class AgentClassRegistryTests(unittest.TestCase):
             "memory.publish",
         }, set())
 
-    def test_schema_v3_compile_accepts_capability_buckets_and_rejects_raw_tools(self):
+    def test_schema_v4_compile_accepts_acl_and_rejects_raw_tools(self):
         valid = {
-            "agent_class_schema_version": 3,
+            "agent_class_schema_version": 4,
             "id": "planning-architect",
             "version": "1",
             "display_name": "Planning Architect",
             "identity": {"label": "Planning Architect", "primary_ui_label": "Planning Architect"},
             "runtime": {"base_kind": "architect", "base_kind_label": "Architect-derived"},
             "prompt": {"addendum": "Use planning-safe surfaces only."},
-            "policy": {
-                "mode": "compile",
-                "scope": {"summary": "planning read-only"},
-                "communication": {"user": "message"},
-                "spawn": {"dispatch": "deny"},
-                "audit": {"profile_changes": "next_launch_only"},
-            },
-            "capabilities": {
-                "buckets": ["self_context", "planning_area_reads", "user_messages"],
-                "restrictions": ["deny_worker_dispatch"],
-                "domains": ["planning"],
+            "acl": {
+                "mode": "allow",
+                "allow": [
+                    {"capability": "self_context"},
+                    {"capability": "planning_area_reads"},
+                    {"capability": "user_messages"},
+                ],
             },
             "delegation": {"dispatch_workers": "denied"},
             "warnings": ["External connectors are separate."],
@@ -371,7 +324,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         definition, issues = validate_class_data(valid, base_dir=str(self.project))
 
         self.assertIsNotNone(definition, [issue.as_dict() for issue in issues])
-        self.assertEqual(definition.agent_class_schema_version, 3)
+        self.assertEqual(definition.agent_class_schema_version, 4)
         self.assertEqual(definition.base_kind, "architect")
         self.assertEqual(definition.agent_profile_ref.id, "class-policy-planning-architect")
         compiled = compile_agent_class_profile(definition)
@@ -383,7 +336,8 @@ class AgentClassRegistryTests(unittest.TestCase):
             "comm.user_ask",
             "comm.user_message",
         })
-        self.assertIn("agent.dispatch_worker", compiled.denies)
+        self.assertNotIn("agent.dispatch_worker", compiled.grants)
+        self.assertEqual(compiled.denies, [])
         preview = enriched_agent_class_preview(definition, base_dir=str(self.project))
         self.assertEqual(preview["capability_bucket_selection"], ["self_context", "planning_area_reads", "user_messages"])
         self.assertIn("Planning Architect internal policy", preview["compiled_profile"]["display_name"])
@@ -392,21 +346,30 @@ class AgentClassRegistryTests(unittest.TestCase):
 
         invalid = dict(valid)
         invalid["id"] = "bad-planning"
-        invalid["policy"] = dict(valid["policy"], grants=["observe.self_context"], tools=["architect_task_create"])
-        invalid["capabilities"] = {"tools": ["architect_task_create"]}
+        invalid["acl"] = {"mode": "allow", "allow": [{"tool": "architect_task_create"}]}
+        invalid["tools"] = ["architect_task_create"]
         _definition, invalid_issues = validate_class_data(invalid, base_dir=str(self.project))
         codes = {issue.code for issue in invalid_issues}
         self.assertIn("raw_tool_fields_forbidden", codes)
 
+        mixed = dict(valid)
+        mixed["id"] = "mixed-planning"
+        mixed["acl"] = {
+            "mode": "allow",
+            "allow": [{"capability": "self_context"}],
+            "deny": [{"action": "worker.dispatch", "scope": "global"}],
+        }
+        _mixed_definition, mixed_issues = validate_class_data(mixed, base_dir=str(self.project))
+        self.assertIn("acl_deny_not_allowed_in_allow_mode", {issue.code for issue in mixed_issues})
+
     def test_bucket_validation_rejects_cross_base_and_pm_broadening(self):
         worker_with_architect_bucket = {
-            "agent_class_schema_version": 3,
+            "agent_class_schema_version": 4,
             "id": "overwide-worker",
             "version": "1",
             "display_name": "Overwide Worker",
             "runtime": {"base_kind": "worker"},
-            "policy": {"mode": "compile"},
-            "capabilities": {"buckets": ["planning_reads"]},
+            "acl": {"mode": "allow", "allow": [{"capability": "planning_reads"}]},
         }
 
         _definition, issues = validate_class_data(worker_with_architect_bucket, base_dir=str(self.project))
@@ -414,34 +377,6 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertIn("capability_bucket_unavailable_for_base_kind", codes)
         self.assertIn("capability_bucket_outside_base_kind_ceiling", codes)
 
-        pm_with_dispatch = {
-            "agent_class_schema_version": 3,
-            "id": "custom-product-manager",
-            "version": "1",
-            "display_name": "Custom Product Manager",
-            "runtime": {"base_kind": "architect"},
-            "policy": {"mode": "compile"},
-            "capabilities": {"buckets": ["self_context", "worker_dispatch"]},
-            "metadata": {"archetype": "product_manager"},
-        }
-        _definition, pm_issues = validate_class_data(pm_with_dispatch, base_dir=str(self.project))
-        self.assertIn("dangerous_product_manager_capability_buckets", {issue.code for issue in pm_issues})
-
-        steward_with_dangerous_task_control = {
-            "agent_class_schema_version": 3,
-            "id": "custom-torque-steward",
-            "version": "1",
-            "display_name": "Custom Torque Steward",
-            "runtime": {"base_kind": "architect"},
-            "policy": {"mode": "compile"},
-            "capabilities": {"buckets": ["self_context", "execution_task_control"]},
-            "metadata": {"archetype": "torque_steward"},
-        }
-        _definition, steward_issues = validate_class_data(steward_with_dangerous_task_control, base_dir=str(self.project))
-        self.assertIn(
-            "dangerous_torque_steward_capability_buckets",
-            {issue.code for issue in steward_issues},
-        )
 
     def test_invalid_config_rejects_raw_tools_profile_confusion_and_bad_draft(self):
         _definition, issues = validate_class_data(
@@ -557,7 +492,6 @@ class AgentClassRegistryTests(unittest.TestCase):
             "purpose": "Product planning readout and user updates.",
             "runtime": {"base_kind": "architect", "base_kind_label": "Architect-derived"},
             "capability_buckets": ["self_context", "planning_reads", "user_messages"],
-            "restriction_buckets": ["deny_worker_dispatch", "deny_deploy_admin"],
         }
 
         validation = validate_agent_class_draft(draft, base_dir=str(self.project))
@@ -565,7 +499,7 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertTrue(validation["valid"], validation)
         normalized = validation["normalized"]
         self.assertEqual(normalized["description"], "Product planning readout and user updates.")
-        self.assertEqual(normalized["policy"]["mode"], "compile")
+        self.assertNotIn("policy", normalized)
         self.assertNotIn("agent_profile_ref", normalized)
         self.assertEqual(normalized["capabilities"]["buckets"], ["self_context", "planning_reads", "user_messages"])
         self.assertIn("capability_bucket_catalog", validation["authoring_contract"])
@@ -608,6 +542,34 @@ class AgentClassRegistryTests(unittest.TestCase):
         self.assertIn("agent_profile_base_kind_mismatch", codes)
         self.assertFalse((self.root / "repo" / ".torque" / "agent_classes" / "bad-custom.yaml").exists())
 
+    def test_custom_class_save_persists_acl_authoring_shape(self):
+        result = save_custom_agent_class({
+            "id": "acl-architect",
+            "version": "1",
+            "agent_class_schema_version": 4,
+            "runtime": {"base_kind": "architect"},
+            "display_name": "ACL Architect",
+            "acl": {
+                "mode": "allow",
+                "allow": [{"capability": "self_context"}, {"capability": "task_reporting"}, {"action": "message.user", "scope": "self"}],
+            },
+        }, base_dir=str(self.project), mode="create")
+
+        self.assertTrue(result["ok"], result)
+        saved = Path(result["storage"]["path"]).read_text(encoding="utf-8")
+        self.assertIn("acl:", saved)
+        self.assertIn("mode: allow", saved)
+        self.assertIn("capability: self_context", saved)
+        self.assertIn("action: message.user", saved)
+        self.assertNotIn("policy:", saved)
+        definition = agent_class_definition_by_id("acl-architect", base_dir=str(self.project))
+        self.assertIsNotNone(definition)
+        self.assertEqual(definition.acl.get("mode"), "allow")
+        profile = compile_agent_class_profile(definition)
+        self.assertIn("comm.user_message", profile.grants)
+        self.assertNotIn("agent.dispatch_worker", profile.grants)
+        self.assertEqual(profile.denies, [])
+
     def test_project_config_path_duplicate_and_docs(self):
         self._write_project_class(
             "default-worker.yaml",
@@ -628,7 +590,7 @@ class AgentClassRegistryTests(unittest.TestCase):
 
         self.assertIn("duplicate_class_id", [issue.code for issue in issues])
         self.assertIn(".torque/agent_classes/*.yaml", docs)
-        self.assertIn("Agent Profile remains the enforcement layer", docs)
+        self.assertIn("Class authority is authored as a generic ACL", docs)
 
 
 class AgentClassStorageLaunchTests(unittest.TestCase):
@@ -701,8 +663,8 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertEqual(snapshot["agent_profile"]["id"], "class-policy-product-manager")
         self.assertEqual(snapshot["internal_policy"]["mode"], "compile")
         self.assertEqual(snapshot["status"], "restricted")
-        self.assertTrue(snapshot["product_manager_status"]["approved_for_live_dogfood"])
-        self.assertEqual(snapshot["product_manager_status"]["authority_model"], "pm_safe_restricted")
+        self.assertEqual(snapshot["acl"]["mode"], "allow")
+        self.assertIn("architect_product_*", snapshot["acl"]["allowed_families"])
         self.assertEqual(cell.effective_agent_class_id, "product-manager")
         self.assertEqual(cell.effective_agent_profile_id, "class-policy-product-manager")
         self.assertEqual(cell.effective_agent_profile_version, "3")
@@ -840,7 +802,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
 
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_board_summary", policy))
-        self.assertFalse(mcp_tool_allowed_by_policy("architect_product_idea_brief_create", policy))
+        self.assertTrue(mcp_tool_allowed_by_policy("architect_product_idea_brief_create", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_task_create", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_engineer_hire", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
@@ -857,14 +819,14 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
 
         policy = profile_policy_from_definition(cell.effective_agent_profile_snapshot)
 
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_steward_operating_brief", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_show", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_area_list", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_initiative_list", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_list", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_ask", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_message_user", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_list", policy))
@@ -924,7 +886,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_idea_brief_create", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_idea_brief_propose", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_task_propose", policy))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", policy))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_tool_search", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_peer_message", policy))
         self.assertFalse(mcp_tool_allowed_by_policy("architect_message_user", policy))
@@ -971,7 +933,7 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
 
         self.assertIn("## Agent Class", prompt_block)
         self.assertIn("Product Manager", prompt_block)
-        self.assertIn("Internal Agent Profile policy: class-policy-product-manager@3", prompt_block)
+        self.assertIn("Internal Agent Profile: class-policy-product-manager@3", prompt_block)
         self.assertEqual(context["id"], "product-manager")
         self.assertEqual(context["primary_identity_label"], "Product Manager")
         self.assertEqual(context["agent_profile_id"], "class-policy-product-manager")
@@ -1047,7 +1009,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertIn("Agent Class validation failed[agent_cell_profile_confusion]", rendered)
         self.assertIn("External connector", rendered)
 
-    def test_doctor_warns_for_legacy_direct_product_manager_profile_assignment(self):
+    def test_doctor_warns_for_legacy_direct_profile_assignment(self):
         self.state.assign_agent_profile(
             self.cell.id,
             "product-manager-draft",
@@ -1067,14 +1029,14 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         rendered = format_doctor_report(report)
 
         self.assertEqual(
-            report["agent_profiles"]["legacy_direct_product_manager_profile_count"],
+            report["agent_profiles"].get("legacy_direct_profile_count", 0),
             1,
         )
         self.assertEqual(
-            report["agent_classes"]["legacy_direct_product_manager_profile_count"],
+            report["agent_classes"].get("legacy_direct_profile_count", 0),
             1,
         )
-        self.assertIn("legacy_direct_product_manager_profile", rendered)
+        self.assertIn("legacy_direct_profile", rendered)
         self.assertIn("no silent migration", rendered)
 
     def test_trusted_server_agent_class_commands(self):
@@ -1547,7 +1509,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
 
         launched = results["launched"]
         self.assertEqual(launched["type"], "agent_class_launch")
-        self.assertEqual(launched["schema_version"], 3)
+        self.assertEqual(launched["schema_version"], 4)
         self.assertFalse(launched["storage"]["mutates_running_sessions"])
         self.assertEqual(launched["storage"]["launch_boundary"], "new_agent")
         self.assertEqual(launched["base_kind"], "worker")
@@ -1678,16 +1640,14 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         launched = asyncio.run(run_launch())
 
         self.assertEqual(launched["type"], "agent_class_launch")
-        self.assertEqual(launched["agent"]["name"], "Torque Steward")
+        self.assertEqual(launched["agent"]["name"], "Custom Steward Name")
         self.assertEqual(launched["agent"]["kind"], "architect")
         cell = self.state.agents["architect-steward"]
-        self.assertEqual(cell.name, "Torque Steward")
+        self.assertEqual(cell.name, "Custom Steward Name")
         self.assertEqual(cell.effective_agent_class_id, "torque-steward")
         self.assertEqual(cell.effective_agent_profile_id, "class-policy-torque-steward")
-        status = cell.effective_agent_class_snapshot.get("torque_steward_status", {})
-        self.assertEqual(status.get("authority_model"), "conservative_observer_suggester")
-        self.assertFalse(status.get("raw_architect_authority"))
-        self.assertFalse(status.get("autonomous_mutation_authority"))
+        self.assertEqual(cell.effective_agent_class_snapshot.get("acl", {}).get("mode"), "allow")
+        self.assertIn("architect_steward_operating_brief", cell.effective_agent_class_snapshot.get("acl", {}).get("allowed_tools", []))
         projected = {
             item.get("category"): item.get("status")
             for item in cell.effective_agent_profile_snapshot.get("projected_tool_categories", [])
@@ -1699,8 +1659,8 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(projected.get("planning_reads"), "allowed")
         self.assertEqual(projected.get("peer_architect_comm"), "allowed")
         self.assertIn("Torque Steward", created_prompt["persistent_prompt_text"])
-        self.assertIn("Steward authority is observation/recommendation plus", created_prompt["persistent_prompt_text"])
-        self.assertIn("architect_message_user", created_prompt["persistent_prompt_text"])
+        self.assertIn("projected tool surface defined by your Agent Class ACL/capabilities", created_prompt["persistent_prompt_text"])
+        self.assertIn("visible user-message tool", created_prompt["persistent_prompt_text"])
         self.assertNotIn("architect_product_message_user", created_prompt["persistent_prompt_text"])
 
 

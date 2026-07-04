@@ -87,7 +87,7 @@ class AgentProfileStorageTests(unittest.TestCase):
 
         self.assertEqual(snapshot["id"], "product-manager-draft")
         self.assertEqual(cell.effective_agent_profile_id, "product-manager-draft")
-        self.assertIn("architect_product_* wrappers", "\n".join(snapshot["warnings"]))
+        self.assertIn("narrows the base kind", "\n".join(snapshot["warnings"]))
         applied_status = self.state.agent_profile_status_for_cell(
             cell,
             base_dir=str(self.project),

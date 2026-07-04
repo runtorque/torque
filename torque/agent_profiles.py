@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+import fnmatch
 import os
 from typing import Any
 
@@ -62,6 +63,7 @@ class AgentProfileDefinition:
     grants: list[str] = field(default_factory=list)
     denies: list[str] = field(default_factory=list)
     policy: dict[str, Any] = field(default_factory=dict)
+    acl: dict[str, Any] = field(default_factory=dict)
     tool_categories: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     source: str = ""
@@ -87,6 +89,7 @@ class AgentProfileDefinition:
             grants=grants,
             denies=denies,
             policy=dict(data.get("policy") or {}) if isinstance(data.get("policy"), dict) else {},
+            acl=dict(data.get("acl") or {}) if isinstance(data.get("acl"), dict) else {},
             tool_categories=(
                 dict(data.get("tool_categories") or {})
                 if isinstance(data.get("tool_categories"), dict)
@@ -111,6 +114,7 @@ class AgentProfileDefinition:
             "lifecycle": self.lifecycle,
             "builtin": self.builtin,
             "metadata": dict(self.metadata or {}),
+            "acl": dict(self.acl or {}),
         }
 
 
@@ -121,15 +125,33 @@ class AgentProfilePolicy:
     profile_id: str
     base_kind: str
     grants: frozenset[str]
+    denies: frozenset[str] = frozenset()
+    acl_mode: str = ""
+    allowed_tools: frozenset[str] = frozenset()
+    denied_tools: frozenset[str] = frozenset()
+    allowed_families: frozenset[str] = frozenset()
+    denied_families: frozenset[str] = frozenset()
     profile: AgentProfileDefinition | None = None
 
     @property
     def is_full_base_kind_profile(self) -> bool:
         ceiling = BASE_KIND_CEILINGS.get(self.base_kind, frozenset())
-        return bool(ceiling) and self.grants == ceiling
+        return (
+            bool(ceiling)
+            and self.grants == ceiling
+            and not self.denies
+            and not self.acl_mode
+            and not self.allowed_tools
+            and not self.denied_tools
+            and not self.allowed_families
+            and not self.denied_families
+        )
 
     def allows_all(self, requirements: frozenset[str]) -> bool:
-        return set(requirements).issubset(self.grants)
+        required = set(requirements)
+        if required & set(self.denies):
+            return False
+        return required.issubset(self.grants)
 
 
 # Small Wave-1 taxonomy. Atoms are intentionally product-level capabilities, not
@@ -287,129 +309,7 @@ BUILTIN_PROFILE_BASE_KIND = {
     "full-architect": "architect",
     "full-engineer": "engineer",
     "full-worker": "worker",
-    "product-manager-draft": "architect",
 }
-
-PM_DANGEROUS_CAPABILITIES = frozenset({
-    "agent.hire_engineer",
-    "agent.manage_engineer_roster",
-    "agent.dispatch_worker",
-    "task.create",
-    "task.update",
-    "task.reassign",
-    "task.move",
-    "task.dispatch",
-    "comm.engineer_message",
-    "comm.worker_message",
-    "worktree.merge",
-    "deploy.apply",
-    "admin.settings",
-    "profile.assign",
-    "profile.edit",
-    "decision.accept",
-})
-
-CREATIVE_ARCHITECT_DANGEROUS_CAPABILITIES = frozenset(PM_DANGEROUS_CAPABILITIES | {
-    "agent.engineer_roster_read",
-    "decision.create",
-    "decision.update",
-    "observe.deploy_state",
-    "planning.area_write",
-    "planning.initiative_write",
-})
-
-PM_RAW_TOOL_DENYLIST = frozenset({
-    # Wave 4B exposes product-scoped wrappers instead of raw Architect tools.
-    "architect_tool_search",
-    "torque_area_list",
-    "torque_area_show",
-    "torque_ask",
-    "torque_message_user",
-    "torque_reply",
-    "architect_attention_digest",
-    "architect_board_summary",
-    "architect_wave_summary",
-    "architect_completion_audit",
-    "architect_task_show",
-    "architect_task_list",
-    "architect_task_chain",
-    "architect_task_create",
-    "architect_task_pickup",
-    "architect_task_update",
-    "architect_task_reassign",
-    "architect_task_move",
-    "architect_task_mark_covered",
-    "architect_pm_root_backlog_hygiene",
-    "architect_ask",
-    "architect_message_user",
-    "architect_peer_list",
-    "architect_peer_message",
-    "architect_peer_inbox",
-    "architect_reply",
-    "architect_area_list",
-    "architect_area_show",
-    "architect_area_create",
-    "architect_area_update",
-    "architect_area_archive",
-    "architect_area_link_task",
-    "architect_area_unlink_task",
-    "architect_area_link_decision",
-    "architect_area_unlink_decision",
-    "architect_area_link_initiative",
-    "architect_area_unlink_initiative",
-    "architect_area_link_area",
-    "architect_area_unlink_area",
-    "architect_area_note_create",
-    "architect_area_note_update",
-    "architect_area_note_archive",
-    "architect_initiative_list",
-    "architect_initiative_show",
-    "architect_initiative_create",
-    "architect_initiative_update",
-    "architect_initiative_archive",
-    "architect_initiative_link_task",
-    "architect_initiative_unlink_task",
-    "architect_initiative_link_decision",
-    "architect_initiative_unlink_decision",
-    "architect_decision_create",
-    "architect_decision_update",
-    "architect_decision_link",
-    "architect_decision_list",
-    "architect_journal",
-    "architect_journal_read",
-})
-
-CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST = frozenset({
-    # Creative Architect is an ideation/proposal partner. It may read broad
-    # product context, but side effects must go through proposal-only
-    # architect_product_* wrappers and caller-owned architect_thinking_* tools.
-    "architect_tool_search",
-    "torque_ask",
-    "torque_message_user",
-    "torque_reply",
-    "architect_ask",
-    "architect_message_user",
-    "architect_peer_list",
-    "architect_peer_message",
-    "architect_peer_inbox",
-    "architect_reply",
-    "architect_decision_create",
-    "architect_decision_update",
-    "architect_decision_link",
-})
-
-TORQUE_STEWARD_RAW_TOOL_DENYLIST = frozenset({
-    # Torque Steward has a purpose-built Architect-derived projection. Keep it
-    # off raw tool-picker/search, duplicate generic communication aliases, and
-    # product/creative wrapper families so the visible surface stays
-    # operational-steward-shaped instead of drifting into PM/Creative authority.
-    "architect_tool_search",
-    "architect_digest_filter",
-    "engineer_tool_search",
-    "torque_ask",
-    "torque_message_user",
-    "torque_reply",
-})
 
 HIGH_RISK_CAPABILITIES = frozenset(
     atom for atom, cap in CAPABILITIES.items() if cap.risk in {"high", "critical"}
@@ -425,6 +325,7 @@ KNOWN_PROFILE_KEYS = {
     "grants",
     "denies",
     "policy",
+    "acl",
     "tool_categories",
     "metadata",
 }
@@ -674,7 +575,7 @@ MCP_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
     "architect_decision_list": frozenset({"decision.list"}),
     "architect_journal": frozenset({"journal.private"}),
     "architect_journal_read": frozenset({"journal.private"}),
-    # Product Manager Wave 4B wrapper surface. These tools are implemented
+    # Product proposal wrapper surface. These tools are implemented
     # under the Architect MCP server but enforce PM-specific context and
     # proposed-only/product-safe semantics before side effects.
     "architect_product_board_summary": frozenset({"observe.board_summary"}),
@@ -852,6 +753,10 @@ def validate_profile_data(
         issues.append(ValidationIssue(
             "error", "policy_not_mapping", "policy must be a mapping", path=source, profile_id=profile_id
         ))
+    if "acl" in data and not isinstance(data.get("acl"), dict):
+        issues.append(ValidationIssue(
+            "error", "acl_not_mapping", "acl must be a mapping", path=source, profile_id=profile_id
+        ))
     if "metadata" in data and not isinstance(data.get("metadata"), dict):
         issues.append(ValidationIssue(
             "error", "metadata_not_mapping", "metadata must be a mapping", path=source, profile_id=profile_id
@@ -901,20 +806,6 @@ def validate_profile_data(
             path=source,
             profile_id=profile.id,
         ))
-
-    archetype = str(profile.metadata.get("archetype", "") or "").strip()
-    is_product_manager = archetype == "product_manager" or "product-manager" in profile.id
-    if is_product_manager:
-        dangerous = sorted(grants & PM_DANGEROUS_CAPABILITIES)
-        if dangerous:
-            issues.append(ValidationIssue(
-                "error",
-                "dangerous_product_manager_grants",
-                "Product Manager profiles must not grant dangerous execution/admin capabilities: "
-                + ", ".join(dangerous),
-                path=source,
-                profile_id=profile.id,
-            ))
 
     if profile.id.startswith("full-") and base_kind in BASE_KIND_CEILINGS:
         missing = sorted(BASE_KIND_CEILINGS[base_kind] - grants)
@@ -1008,13 +899,37 @@ def _profile_dict_with_preview_grants(data: dict[str, Any]) -> dict[str, Any]:
 
 def profile_policy_from_definition(profile: AgentProfileDefinition | dict[str, Any]) -> AgentProfilePolicy:
     if isinstance(profile, dict):
-        profile = AgentProfileDefinition.from_dict(_profile_dict_with_preview_grants(profile))
+        data = _profile_dict_with_preview_grants(profile)
+        if isinstance(data.get("acl"), dict):
+            data = dict(data)
+            policy_data = dict(data.get("policy") or {}) if isinstance(data.get("policy"), dict) else {}
+            policy_data.setdefault("acl", dict(data.get("acl") or {}))
+            data["policy"] = policy_data
+        profile = AgentProfileDefinition.from_dict(data)
     ceiling = BASE_KIND_CEILINGS.get(profile.base_kind, frozenset())
     grants = frozenset(set(profile.grants) & set(ceiling))
+    denies = frozenset(set(profile.denies) & set(ceiling))
+    policy_data = profile.policy if isinstance(profile.policy, dict) else {}
+    acl = profile.acl if isinstance(getattr(profile, "acl", {}), dict) and profile.acl else {}
+    if not acl:
+        acl = policy_data.get("acl") if isinstance(policy_data.get("acl"), dict) else {}
+    if not acl and isinstance(profile.metadata, dict):
+        acl = profile.metadata.get("agent_class_acl") if isinstance(profile.metadata.get("agent_class_acl"), dict) else {}
+    acl_mode = str((acl or {}).get("mode", "") or "").strip().lower()
+    allowed_tools = frozenset(str(item or "").strip() for item in (acl or {}).get("allowed_tools", []) or [] if str(item or "").strip())
+    denied_tools = frozenset(str(item or "").strip() for item in (acl or {}).get("denied_tools", []) or [] if str(item or "").strip())
+    allowed_families = frozenset(str(item or "").strip() for item in (acl or {}).get("allowed_families", []) or [] if str(item or "").strip())
+    denied_families = frozenset(str(item or "").strip() for item in (acl or {}).get("denied_families", []) or [] if str(item or "").strip())
     return AgentProfilePolicy(
         profile_id=profile.id,
         base_kind=profile.base_kind,
-        grants=grants,
+        grants=frozenset(set(grants) - set(denies)),
+        denies=denies,
+        acl_mode=acl_mode,
+        allowed_tools=allowed_tools,
+        denied_tools=denied_tools,
+        allowed_families=allowed_families,
+        denied_families=denied_families,
         profile=profile,
     )
 
@@ -1032,96 +947,16 @@ def profile_policy_by_id(profile_id: str, *, base_dir: str = "") -> AgentProfile
     return profile_policy_from_definition(profile)
 
 
-def _policy_is_product_manager(policy: AgentProfilePolicy | None) -> bool:
-    if not policy:
-        return False
-    profile_id = str(getattr(policy, "profile_id", "") or "").strip()
-    if profile_id == "product-manager-draft" or "product-manager" in profile_id:
-        return True
-    profile = getattr(policy, "profile", None)
-    metadata = getattr(profile, "metadata", {}) if profile is not None else {}
-    if isinstance(metadata, dict) and str(metadata.get("archetype", "") or "").strip() == "product_manager":
-        return True
-    return False
-
-
-def _policy_is_creative_architect(policy: AgentProfilePolicy | None) -> bool:
-    if not policy:
-        return False
-    profile_id = str(getattr(policy, "profile_id", "") or "").strip()
-    if profile_id == "class-policy-creative-architect" or "creative-architect" in profile_id:
-        return True
-    profile = getattr(policy, "profile", None)
-    metadata = getattr(profile, "metadata", {}) if profile is not None else {}
-    if isinstance(metadata, dict):
-        if str(metadata.get("archetype", "") or "").strip() == "creative_architect":
-            return True
-        generated_by = metadata.get("generated_by_agent_class", {})
-        if isinstance(generated_by, dict) and str(
-                generated_by.get("id", "") or "").strip() == "creative-architect":
-            return True
-    return False
-
-
-def _policy_is_torque_steward(policy: AgentProfilePolicy | None) -> bool:
-    if not policy:
-        return False
-    profile_id = str(getattr(policy, "profile_id", "") or "").strip()
-    if profile_id == "class-policy-torque-steward" or "torque-steward" in profile_id:
-        return True
-    profile = getattr(policy, "profile", None)
-    metadata = getattr(profile, "metadata", {}) if profile is not None else {}
-    if isinstance(metadata, dict):
-        if str(metadata.get("archetype", "") or "").strip() == "torque_steward":
-            return True
-        generated_by = metadata.get("generated_by_agent_class", {})
-        if isinstance(generated_by, dict) and str(
-                generated_by.get("id", "") or "").strip() == "torque-steward":
-            return True
-    return False
-
-
-def profile_preview_is_product_manager(preview: dict[str, Any]) -> bool:
-    """Return whether a preview/snapshot represents Product Manager policy."""
-
-    if not isinstance(preview, dict):
-        return False
-    profile_id = str(preview.get("id", "") or "").strip()
-    if profile_id == "product-manager-draft" or "product-manager" in profile_id:
-        return True
-    metadata = preview.get("metadata", {})
-    if isinstance(metadata, dict) and str(
-            metadata.get("archetype", "") or "").strip() == "product_manager":
-        return True
-    generated_by = metadata.get("generated_by_agent_class", {}) if isinstance(metadata, dict) else {}
-    if isinstance(generated_by, dict) and str(generated_by.get("id", "") or "").strip() == "product-manager":
-        return True
-    return False
-
-
-def profile_preview_is_creative_architect(preview: dict[str, Any]) -> bool:
-    """Return whether a preview/snapshot represents Creative Architect policy."""
-
-    if not isinstance(preview, dict):
-        return False
-    profile_id = str(preview.get("id", "") or "").strip()
-    if profile_id == "class-policy-creative-architect" or "creative-architect" in profile_id:
-        return True
-    metadata = preview.get("metadata", {})
-    if isinstance(metadata, dict):
-        if str(metadata.get("archetype", "") or "").strip() == "creative_architect":
-            return True
-        generated_by = metadata.get("generated_by_agent_class", {})
-        if isinstance(generated_by, dict) and str(
-                generated_by.get("id", "") or "").strip() == "creative-architect":
-            return True
-    return False
-
-
 def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
     """Return required capability atoms for a raw MCP tool, if known."""
 
     return MCP_TOOL_CAPABILITY_REQUIREMENTS.get(str(tool_name or "").strip())
+
+
+def _matches_any_tool_pattern(tool_name: str, *, exact: frozenset[str], families: frozenset[str]) -> bool:
+    if tool_name in exact:
+        return True
+    return any(fnmatch.fnmatchcase(tool_name, pattern) for pattern in families)
 
 
 def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None) -> bool:
@@ -1137,21 +972,23 @@ def mcp_tool_allowed_by_policy(tool_name: str, policy: AgentProfilePolicy | None
     if policy is None or policy.is_full_base_kind_profile:
         return True
     normalized_name = str(tool_name or "").strip()
-    if _policy_is_product_manager(policy) and normalized_name in PM_RAW_TOOL_DENYLIST:
+    if _matches_any_tool_pattern(
+        normalized_name,
+        exact=policy.denied_tools,
+        families=policy.denied_families,
+    ):
         return False
-    if _policy_is_creative_architect(policy) and normalized_name in CREATIVE_ARCHITECT_RAW_TOOL_DENYLIST:
+    if _matches_any_tool_pattern(
+        normalized_name,
+        exact=policy.allowed_tools,
+        families=policy.allowed_families,
+    ):
+        return True
+    if policy.acl_mode == "allow" and (policy.allowed_tools or policy.allowed_families):
         return False
-    if _policy_is_torque_steward(policy):
-        if normalized_name in TORQUE_STEWARD_RAW_TOOL_DENYLIST:
-            return False
-        if (
-            normalized_name.startswith("architect_product_")
-            or normalized_name.startswith("architect_thinking_")
-        ):
-            return False
     requirements = mcp_tool_capability_requirements(normalized_name)
     if not requirements:
-        return False
+        return policy.acl_mode == "deny"
     return policy.allows_all(requirements)
 
 
@@ -1180,10 +1017,9 @@ def dry_run_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) ->
         })
 
     policy = dict(profile.policy or {})
-    communication_policy = dict(policy.get("communication") or {})
-    spawn_policy = dict(policy.get("spawn") or {})
-    scope_policy = dict(policy.get("scope") or {})
-    audit_policy = dict(policy.get("audit") or {})
+    acl_policy = dict(profile.acl or {}) if isinstance(getattr(profile, "acl", {}), dict) and profile.acl else {}
+    if not acl_policy:
+        acl_policy = dict(policy.get("acl") or {}) if isinstance(policy.get("acl"), dict) else {}
 
     return {
         **profile.as_preview_dict(),
@@ -1192,10 +1028,7 @@ def dry_run_profile_preview(profile: AgentProfileDefinition | dict[str, Any]) ->
         "denies": sorted(atom for atom in set(profile.denies) if atom in CAPABILITIES),
         "capabilities": capabilities,
         "denied_high_risk_capabilities": denied_high_risk,
-        "communication_policy": communication_policy,
-        "spawn_policy": spawn_policy,
-        "scope_policy": scope_policy,
-        "audit_policy": audit_policy,
+        "acl": acl_policy,
         "projected_tool_categories": category_preview,
         "runtime_enforcement": "mcp_projection_when_effective_profile_is_set",
     }
@@ -1237,12 +1070,6 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
     profile_id = str(preview.get("id", "") or "").strip()
     lifecycle = str(preview.get("lifecycle", "") or "").strip().lower()
     status = _profile_status_from_preview(preview)
-    metadata = preview.get("metadata", {}) if isinstance(preview.get("metadata"), dict) else {}
-    generated_by = metadata.get("generated_by_agent_class", {}) if isinstance(metadata, dict) else {}
-    generated_by_product_manager = (
-        isinstance(generated_by, dict)
-        and str(generated_by.get("id", "") or "").strip() == "product-manager"
-    )
     if lifecycle and lifecycle != "stable":
         warnings.append(
             f"{profile_id or 'profile'} is lifecycle={lifecycle}; use only for preview/testing unless explicitly approved."
@@ -1250,26 +1077,6 @@ def preview_warnings_for_profile_preview(preview: dict[str, Any]) -> list[str]:
     if status in {"draft", "restricted"} or preview.get("denied_high_risk_capabilities"):
         warnings.append(
             "This profile narrows the base kind and hides/denies MCP tools before side effects."
-        )
-    if profile_preview_is_product_manager(preview):
-        if profile_id == "product-manager-draft":
-            warnings.append(
-                "product-manager-draft is a legacy/internal scratch-only Product Manager profile; prefer the Product Manager Agent Class for next-launch assignment."
-            )
-        if generated_by_product_manager and lifecycle == "stable":
-            warnings.append(
-                "Product Manager internal policy is approved for bounded live dogfood through the Agent Class, but remains restricted/PM-safe rather than full Architect authority."
-            )
-        else:
-            warnings.append(
-                "Product Manager policy is draft/restricted until explicit live-dogfood approval; do not use it for Blueprint replacement."
-            )
-        warnings.append(
-            "Raw Architect tools are denied for Product Manager-style profiles; use architect_product_* wrappers only."
-        )
-    if profile_preview_is_creative_architect(preview):
-        warnings.append(
-            "Creative Architect policy is proposal-only and hides execution/admin authority; use architect_product_* wrappers for proposals and architect_thinking_* wrappers for Scratchpad/Mind Map work."
         )
     return warnings
 
@@ -1346,13 +1153,9 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
                  and next_launch_profile_version != effective_version))
     )
     warnings = list(effective_preview.get("warnings", []) or [])
-    if assigned_id == "product-manager-draft" and not class_assigned_id:
+    if assigned_id and not class_assigned_id:
         warnings.append(
-            "Legacy direct Product Manager profile assignment is active for next launch; set desired Agent Class to product-manager instead when using the class-first flow."
-        )
-    if effective_id == "product-manager-draft" and not effective_class_id:
-        warnings.append(
-            "Effective Product Manager policy came from a legacy direct Agent Profile assignment; no Agent Class was silently migrated."
+            "Legacy direct Agent Profile assignment is active; set a desired Agent Class when using the class-first flow."
         )
     # Deduplicate while preserving order.
     deduped_warnings: list[str] = []
@@ -1380,10 +1183,7 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
         "warnings": deduped_warnings,
-        "legacy_direct_product_manager_profile": bool(
-            (assigned_id == "product-manager-draft" or effective_id == "product-manager-draft")
-            and not (class_assigned_id or effective_class_id)
-        ),
+        "legacy_direct_profile": bool(assigned_id and not class_assigned_id),
         "denied_high_risk_capabilities": list(effective_preview.get("denied_high_risk_capabilities", []) or []),
     }
 

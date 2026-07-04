@@ -8,5 +8,4 @@ agent_profile_ref:
   id: full-worker
   version: "1"
 metadata:
-  archetype: default
   compatibility: full current base-kind behavior by construction

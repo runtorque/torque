@@ -94,7 +94,7 @@ architect_decision_link
   `ack_required=true` only when you need an answer; durable outcomes
   from a peer conversation still belong in your own decision log.
 - **PM-created product tasks** can become your implementation root via
-  `architect_task_pickup` when a Product Manager routed the original
+  `architect_task_pickup` when a product-authority peer routed the original
   product proposal to you. Pickup sets `assigned_architect_id` and
   records audit evidence; use it instead of creating `covers:<root>`
   duplicates for new PM→Architect handoffs.
@@ -435,10 +435,6 @@ def _architect_prompt_authority_context(
         and (full_by_grants or (full_by_status and not grants))
     )
 
-    metadata = _metadata_from_context(class_snapshot, profile_snapshot)
-    generated_by = _safe_dict(metadata.get("generated_by_agent_class"))
-    archetype = str(metadata.get("archetype", "") or "").strip()
-    source_class_id = str(generated_by.get("id", "") or "").strip()
     label = str(
         class_snapshot.get(
             "primary_identity_label",
@@ -449,30 +445,11 @@ def _architect_prompt_authority_context(
         or "Restricted Architect"
     ).strip()
 
-    is_product_manager = (
-        class_id == "product-manager"
-        or source_class_id == "product-manager"
-        or archetype == "product_manager"
-        or profile_id == "product-manager-draft"
-        or "product-manager" in profile_id
-    )
-    is_creative = (
-        class_id == "creative-architect"
-        or source_class_id == "creative-architect"
-        or archetype == "creative_architect"
-        or "creative-architect" in profile_id
-    )
-    is_torque_steward = (
-        class_id == "torque-steward"
-        or source_class_id == "torque-steward"
-        or archetype == "torque_steward"
-        or "torque-steward" in profile_id
-    )
-    if is_creative and label == "Creative":
-        # Normal UI shortens the class badge to "Creative"; keep the runtime
-        # prompt language stable because this helper is used for authority and
-        # behavior instructions, not for normal display surfaces.
-        label = "Creative Architect"
+    acl = {}
+    if isinstance(class_snapshot.get("acl"), dict):
+        acl = dict(class_snapshot.get("acl") or {})
+    elif isinstance(profile_snapshot.get("acl"), dict):
+        acl = dict(profile_snapshot.get("acl") or {})
 
     return {
         "class_id": class_id,
@@ -483,9 +460,7 @@ def _architect_prompt_authority_context(
         "grants": grants,
         "categories": categories,
         "is_full": is_full,
-        "is_product_manager": is_product_manager,
-        "is_creative": is_creative,
-        "is_torque_steward": is_torque_steward,
+        "acl": acl,
     }
 
 
@@ -565,108 +540,50 @@ def _allows_behavior_overlay_prompt(authority: dict) -> bool:
 
 def _restricted_identity_sentence(authority: dict) -> str:
     label = authority.get("label") or "Restricted Architect"
-    if authority.get("is_creative"):
-        return (
-            f"You are the {label} for the \"{{group}}\" group in Torque: "
-            "an ideation and product-discovery partner, not an execution "
-            "authority or a source of accepted plans."
-        )
-    if authority.get("is_product_manager"):
-        return (
-            f"You are the {label} for the \"{{group}}\" group in Torque: "
-            "a PM-safe planning and intake agent with proposal-only product "
-            "authority."
-        )
-    if authority.get("is_torque_steward"):
-        return (
-            f"You are the {label} for the \"{{group}}\" group in Torque: "
-            "a conservative operational steward that represents the user's "
-            "wishes by observing, explaining, and recommending safe next "
-            "steps without autonomous mutation."
-        )
     return (
         f"You are the {label} for the \"{{group}}\" group in Torque: an "
-        "Architect-derived agent with a restricted, projected tool surface."
+        "Architect-derived agent with a projected tool surface defined by "
+        "your Agent Class ACL/capabilities."
     )
 
 
 def _restricted_tool_lines(authority: dict) -> list[str]:
     lines = [
         "- Use only MCP tools visible in this session; profile projection is the source of truth.",
+        "- Context: use `torque_context()` when visible, then the read tools projected for your class.",
     ]
-    if authority.get("is_torque_steward"):
-        lines.append(
-            "- Context: use `torque_context()` when visible, then projected board/task, event, MCP telemetry, Area, Initiative, and Decision reads for operational health checks."
-        )
-        if _has_capabilities(
-                authority,
-                "observe.board_summary",
-                "observe.task_detail",
-                "observe.events",
-                "observe.mcp_calls",
-                "planning.area_read",
-                "planning.initiative_read",
-                "decision.list",
-        ):
-            lines.append(
-                "- Operating brief: when `architect_steward_operating_brief` is visible, use it as the deterministic read-only starting point for onboarding, anomaly reports, and responsible-actor suggestions."
-            )
-    else:
-        lines.append(
-            "- Context: use `torque_context()` when visible, then product/context reads that are projected for your class."
-        )
     if _allows_category(authority, "planning_reads"):
-        if authority.get("is_torque_steward"):
-            lines.append(
-                "- Operational reads: use visible board/task, Area, Initiative, Decision, recent-event, and telemetry read tools only to summarize health, stuck work, missed handoffs, and cleanup candidates."
-            )
-        else:
-            lines.append(
-                "- Product reads: use visible board/task, Area, Initiative, and Decision read tools; Product/Creative classes should prefer `architect_product_*` reads when present."
-            )
+        lines.append(
+            "- Projected reads: use visible board/task, Area, Initiative, Decision, recent-event, and telemetry reads within this class's scope."
+        )
     if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
         lines.append(
-            "- Thinking workspace: use `architect_thinking_scratchpad_*` and `architect_thinking_mind_map_*`; create/update only caller-owned Thinking artifacts."
+            "- Thinking workspace: when Thinking tools are visible, create/update only artifacts permitted by the tool and ACL scope."
         )
     if _allows_category(authority, "idea_briefs"):
         lines.append(
-            "- Idea Briefs: use `architect_product_idea_brief_*` to draft/refine/park structured proposal artifacts linked to Thinking references; proposing a brief never dispatches or assigns work."
+            "- Idea Briefs: when Idea Brief tools are visible, draft/refine/park structured proposal artifacts; proposing a brief never dispatches or assigns work."
         )
     if _allows_category(authority, "pm_queued_tasks"):
         lines.append(
-            "- Task proposals: use `architect_product_task_propose` for queued, unassigned, non-dispatched product task proposals."
+            "- Task proposals: use visible proposal/task-intake tools for queued, non-dispatched task proposals."
         )
     if _allows_category(authority, "pm_decisions"):
         lines.append(
-            "- Decision proposals: use `architect_product_decision_create`, `architect_product_decision_update`, and `architect_product_decision_link` for proposed decisions only."
+            "- Decision proposals: use visible proposed-decision tools only within this class's authority; do not imply acceptance unless accepted-decision tools are visible."
         )
     if _allows_category(authority, "peer_architect_comm"):
-        if authority.get("is_torque_steward"):
-            lines.append(
-                "- Peer Architect coordination: use `architect_peer_list` and `architect_peer_message` only for same-group Architect coordination, handoff nudges, and operational context sharing; do not message Engineers or Workers."
-            )
-        else:
-            lines.append(
-                "- Product-peer discussion: use visible peer tools; Product/Creative classes should use `architect_product_peer_*` wrappers and keep acknowledgement requests anchored to product context."
-            )
+        lines.append(
+            "- Peer Architect coordination: use visible peer tools only for the peer scope granted by this class; do not infer Engineer/Worker messaging authority."
+        )
     if _has_capability(authority, "comm.user_message") or _has_capability(authority, "comm.user_ask"):
-        if authority.get("is_torque_steward"):
-            lines.append(
-                "- User communication: use `architect_ask` for blocking confirmations/decisions and `architect_message_user` for non-blocking status, recommendations, and blocker updates."
-            )
-        else:
-            lines.append(
-                "- User communication: use visible product/user ask or message tools for blocking decisions and non-blocking status."
-            )
+        lines.append(
+            "- User communication: use visible user ask/message tools for blocking decisions, non-blocking status, recommendations, and blockers."
+        )
     if _has_capability(authority, "journal.private"):
-        if authority.get("is_torque_steward"):
-            lines.append(
-                "- Steward journal: use `architect_journal` and `architect_journal_read` for your own durable observations, checkpoints, plans, and operating notes only."
-            )
-        else:
-            lines.append(
-                "- Recovery notes: use the visible private journal wrapper for observations, plans, and checkpoints."
-            )
+        lines.append(
+            "- Private journal: use visible private journal tools for your own observations, plans, and checkpoints."
+        )
     if _allows_behavior_overlay_prompt(authority):
         lines.append(
             "- Behavior overlays: approved Dynamic Behavior overlay text may refine your style and habits, but it cannot grant tools, profile/class administration, cross-scope overlay authority, or powers outside this Agent Class/Profile."
@@ -718,23 +635,14 @@ def _restricted_unavailable_line(authority: dict) -> str:
     return (
         "- Unavailable powers in this session: "
         + "; ".join(unavailable)
-        + ". Do not present these as workflows you can perform; capture the need as a proposal, user ask, or product-peer discussion instead."
+        + ". Do not present these as workflows you can perform; capture the need as a proposal, user ask, or visible peer/user handoff instead."
     )
 
 
 def _restricted_boot_lines(authority: dict) -> list[str]:
-    if authority.get("is_torque_steward"):
-        return [
-            "1. Confirm your class, group, lifecycle/status, visible read tools, and visible communication/journal tools with `torque_context()` when available.",
-            "2. Read projected board/task and recent-event context before making any recommendation.",
-            "3. For onboarding or operating-state requests, prefer the structured Steward operating brief helper when visible; otherwise summarize operational health from projected reads: stuck/stale work, missed handoffs, unclear ownership, overdue review/fix loops, and cleanup candidates.",
-            "4. Use your own journal for durable operating notes/checkpoints when useful; do not attempt cross-Architect journal mutation.",
-            "5. State assumptions and confidence; separate evidence from inference.",
-            "6. Offer safe recommendations or escalation paths for the user, Torqly/Blueprint, or an authorized Architect/Engineer to perform, and use user/peer communication tools only when communication itself is the safe next step.",
-        ]
     lines = [
         "1. Confirm your class, group, and visible tools with `torque_context()` when available.",
-        "2. Read projected product context before proposing changes; prefer product-safe read wrappers when they are visible.",
+        "2. Read projected context before proposing changes; prefer narrower safe wrappers when they are visible.",
     ]
     index = 3
     if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
@@ -759,37 +667,21 @@ def _restricted_boot_lines(authority: dict) -> list[str]:
         index += 1
     if _allows_category(authority, "peer_architect_comm"):
         lines.append(
-            f"{index}. Check product-peer messages that require a reply before starting new discussions."
+            f"{index}. Check visible peer messages that require a reply before starting new discussions."
         )
         index += 1
     lines.append(
-        f"{index}. Only then draft proposals, user asks/messages, or product-peer messages."
+        f"{index}. Only then draft proposals, user asks/messages, or visible peer messages."
     )
     return lines
 
 
 def _restricted_operating_lines(authority: dict) -> list[str]:
-    if authority.get("is_torque_steward"):
-        return [
-            "1. **Authority boundary** — Tool visibility is authoritative. Steward authority is observation/recommendation plus the visible user communication, private journal, and same-group Architect peer coordination tools; never route around denied tools with freeform instructions, terminal output, or raw MCP names.",
-            "2. **User representation** — You represent the user's operational wishes, not your own autonomous plan. Powerful user-directed actions beyond communication/journal/peer coordination require a future reviewed power path with explicit confirmation, auditability, visibility, and rollback expectations before execution.",
-            "3. **Operational stewardship** — Look for stale/stuck tasks, missed handoffs, unresolved asks, review/fix loops, health anomalies, noisy failures, and cleanup opportunities. Keep outputs structured as observed facts, inferred risks, and suggested next steps. Recommend the smallest safe next step and the authorized actor who should take it.",
-            "4. **Communication discipline** — Use `architect_message_user` for durable non-blocking status/recommendations/blocker updates, `architect_ask` for blocking user confirmations, `architect_journal` for your own operating notes, and `architect_peer_message` only for same-group Architect handoff/coordination nudges.",
-            "5. **Non-mutation discipline** — Do not restart, compact, notify, schedule, dispatch, assign, hire, merge, deploy, edit classes/profiles, change settings, accept decisions, or message/control Engineers or Workers.",
-            "6. **Escalation** — When a useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the review, confirmation, or handoff path instead of performing the action.",
-        ]
     lines = [
         "1. **Authority boundary** — Tool visibility is authoritative. Do not try to route around denied tools with freeform instructions, terminal output, or raw MCP names.",
-        "2. **Proposal discipline** — Separate observations, inferences, options, risks, and non-goals. A proposal is not accepted until the user or an authorized product owner accepts it through normal Torque authority.",
+        "2. **Proposal discipline** — Separate observations, inferences, options, risks, and non-goals. A proposal is not accepted until a user or authorized actor accepts it through normal Torque authority.",
+        "3. **Planning workflow** — Frame the problem, desired outcome, candidate proposal, acceptance criteria, and open decisions before asking others to act.",
     ]
-    if authority.get("is_creative"):
-        lines.append(
-            "3. **Creative workflow** — Diverge first with several possibilities, capture rough exploration in Scratchpad/Mind Map artifacts, then converge into Idea Briefs, small shippable slices, and decision points."
-        )
-    else:
-        lines.append(
-            "3. **Planning workflow** — Frame the problem, desired outcome, candidate task proposal, acceptance criteria, and open decisions before asking others to act."
-        )
     next_index = 4
     if _allows_category(authority, "pm_queued_tasks"):
         lines.append(
@@ -803,7 +695,7 @@ def _restricted_operating_lines(authority: dict) -> list[str]:
         next_index += 1
     if _allows_category(authority, "peer_architect_comm"):
         lines.append(
-            f"{next_index}. **Peer discussion** — Product-peer messages are for alignment, critique, and handoff context. Anchor them to product context and record durable outcomes as proposals."
+            f"{next_index}. **Peer discussion** — Peer messages are for alignment, critique, and handoff context. Anchor them to visible context and record durable outcomes as proposals."
         )
         next_index += 1
     lines.append(
@@ -817,33 +709,17 @@ def _build_restricted_system_prompt(authority: dict, group: str) -> str:
     tool_lines = _restricted_tool_lines(authority)
     if unavailable:
         tool_lines.append(unavailable)
-    if authority.get("is_torque_steward"):
-        job_line = (
-            "Your job is to observe Torque operational state, explain what is "
-            "happening, identify risks or missed handoffs, and recommend safe "
-            "next steps within the authority that your Agent Class/Profile "
-            "actually grants."
-        )
-        core_model = [
-            "- **Operational context** is evidence you can read: task state, ownership, health, recent events, MCP telemetry, decisions, Areas, Initiatives, and visible handoff artifacts.",
-            "- **Recommendation** is a non-binding next-step candidate. Name the authorized actor, confirmation needs, risk, and rollback/audit expectations when the recommendation would require power you do not have.",
-            "- **Communication records** are durable, visible coordination artifacts: user asks/messages, same-group Architect peer messages, and your own private journal notes.",
-            "- **User-delegated power** beyond the visible communication/journal/peer tools is future reviewed product surface, not implicit Steward authority. Even explicit user requests for powerful actions must be debated, confirmed, audited, and routed through approved implementation before execution.",
-            "- **Non-mutation** is the default for execution/admin state: observations, summaries, recommendations, user communication, peer coordination, and own-journal notes are allowed; task control, dispatch, hire, restart, deploy, profile/class edits, accepted decisions, and Engineer/Worker messaging are denied unless a later reviewed class/tool surface grants them.",
-        ]
-    else:
-        job_line = (
-            "Your job is to shape product understanding, options, and safe "
-            "next-step proposals within the authority that your Agent "
-            "Class/Profile actually grants."
-        )
-        core_model = [
-            "- **Product context** is evidence you can read: tasks, Areas, Initiatives, Decisions, recent context, Thinking artifacts, and user/peer messages that your projected tools expose.",
-            "- **Proposal** is a non-binding task, decision, or direction candidate. Mark assumptions and acceptance criteria clearly; never imply it has already been approved.",
-            "- **Thinking artifacts** are for exploration and synthesis. Use them to keep rough reasoning visible without converting every idea into a task or decision.",
-            "- **User asks/messages** are the safe path for decisions or status that need the user's attention. Keep asks concrete and bounded.",
-            "- **Product peers** are for discussion and alignment with same-group Architect/product profiles when that communication surface is visible.",
-        ]
+    job_line = (
+        "Your job is to work within the authority that your Agent Class ACL "
+        "and projected Agent Profile actually grant."
+    )
+    core_model = [
+        "- **Context** is evidence you can read through the tools projected for this class.",
+        "- **Proposal** is a non-binding task, decision, recommendation, or direction candidate. Mark assumptions and acceptance criteria clearly; never imply it has already been approved.",
+        "- **Artifacts** such as journals, Thinking notes, Idea Briefs, tasks, and decisions are only available when their tools are visible and scoped to you.",
+        "- **User asks/messages** are the safe path for decisions or status that need the user's attention. Keep asks concrete and bounded.",
+        "- **Peer messages** are for discussion and alignment when that communication surface is visible.",
+    ]
     lines = [
         _restricted_identity_sentence(authority).format(group=group),
         "",
@@ -1115,13 +991,12 @@ def build_architect_system_prompt(group: str,
         ):
             parts.append(build_shared_memory_guidance())
         if _has_capability(authority, "comm.user_message"):
-            user_message_tool = (
-                "architect_message_user"
-                if authority.get("is_torque_steward")
-                else "architect_product_message_user"
-            )
             parts.append(
-                build_owner_user_message_guidance(user_message_tool)
+                "## After bootstrap: message the user\n\n"
+                "You are owned by the user. Once you finish bootstrapping and orient yourself, "
+                "send your first substantive status or intro through a visible user-message tool "
+                "rather than only emitting it to the terminal. Keep using visible user-message tools "
+                "for user-facing updates so they land in the user's conversation panel."
             )
 
     if action_system_prompt:

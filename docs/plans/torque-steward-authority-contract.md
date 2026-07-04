@@ -1,3 +1,10 @@
+# Historical note
+
+This document is superseded by `docs/plans/agent-classes-generic-authority-plan.md`.
+Torque Steward is now just bundled Agent Class YAML rendered through the same generic ACL/prompt machinery as any custom class. Torque no longer emits a Steward-specific preview/status contract or prompt branch. The remaining Steward-specific surface is the optional `architect_steward_operating_brief` MCP tool, which is a normal selectable tool in ACL YAML.
+
+---
+
 # Torque Steward Wave A authority and foundation contract
 
 Date: 2026-06-25  
@@ -116,11 +123,11 @@ The prompt contract is:
 - Treat powerful user requests as future reviewed power-path requests unless a later approved tool/class grants the power.
 - Never claim restart/compaction/notification/scheduling/task/engineer/worktree/deploy/profile/class/admin/accepted-decision powers in Wave A.
 
-Implementation updates the restricted Architect prompt path to recognize `torque-steward` and use operations language instead of Product Manager / Creative language.
+Current implementation puts this prompt posture in the bundled Steward YAML and generic Agent Class prompt renderer; there is no Steward-specific prompt branch.
 
-### 3.4 UI/status contract
+### 3.4 UI/authority summary
 
-Preview/frozen snapshots include `torque_steward_status`:
+Current generic implementation: preview/frozen snapshots include `acl` and `authority_summary`, not a Steward-specific status contract. Historical notes in this section used to require:
 
 - `authority_model: conservative_observer_suggester`
 - `foundation_wave: A`
@@ -208,12 +215,10 @@ Recommended next waves, in order:
 
 Narrow foundation code included in this wave:
 
-- `torque/builtin_agent_classes/torque-steward.yaml` — built-in draft class with read-only capability buckets, explicit restrictions, prompt addendum, and conservative metadata.
-- `torque/agent_classes.py` — registers built-in class base kind/policy mode; adds Steward-specific read-only validation, warnings, and `torque_steward_status` preview/snapshot contract.
-- `torque/architect.py` — recognizes Steward class in restricted Architect prompt shaping and uses operations/stewardship language instead of PM/Creative product language.
-- `docs/reference/agent-classes.md` — documents built-in Steward class and stricter read-only validation contract.
+- `torque/builtin_agent_classes/torque-steward.yaml` — declares the built-in class identity, prompt, ACL grants/denials, and warnings as data. `torque/agent_classes.py` treats it through generic class loading, ACL compilation, and preview rendering.
+- `docs/reference/agent-classes.md` — documents the built-in Steward YAML as one class definition using the generic ACL model.
 - `docs/plans/torque-steward-authority-contract.md` — this self-contained contract artifact source.
-- Tests: `tests/test_agent_classes.py` and `tests/test_architect_prompt.py` cover class registry, compiled read-only grants, denied high-risk categories, validation rejection for non-read Steward capabilities, preview status contract, warnings, and prompt posture.
+- Tests: `tests/test_agent_classes.py` and `tests/test_architect_prompt.py` cover class registry, compiled read-only grants, denied high-risk categories, validation rejection for non-read Steward capabilities, generic ACL preview, warnings, and prompt posture.
 
 Why this is non-mutating/safe:
 

@@ -33,6 +33,7 @@ from .agent_profiles import (
     profile_definition_by_id,
 )
 from .agent_classes import (
+    AGENT_CLASS_SCHEMA_VERSION,
     append_agent_class_prompt_block,
     agent_class_authoring_contract,
     agent_class_context_for_cell,
@@ -9877,7 +9878,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         classes, issues = load_agent_classes(base_dir=base_dir)
         return {
             "type": "agent_classes",
-            "schema_version": 3,
+            "schema_version": AGENT_CLASS_SCHEMA_VERSION,
             "classes": [
                 enriched_agent_class_preview(definition, base_dir=base_dir)
                 for definition in classes
@@ -9898,7 +9899,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         payload = _agent_class_authoring_payload_from_command(data)
         result = validate_agent_class_draft(payload, base_dir=base_dir)
         result["type"] = "agent_class_validation"
-        result["schema_version"] = 3
+        result["schema_version"] = AGENT_CLASS_SCHEMA_VERSION
         result["request_id"] = str(data.get("request_id", "") or "")
         return result
 
@@ -9911,7 +9912,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         }.get(cmd, str(data.get("mode", "save") or "save"))
         result = save_custom_agent_class(payload, base_dir=base_dir, mode=mode)
         result["type"] = "agent_class_save"
-        result["schema_version"] = 3
+        result["schema_version"] = AGENT_CLASS_SCHEMA_VERSION
         result["request_id"] = str(data.get("request_id", "") or "")
         if result.get("ok"):
             classes, issues = load_agent_classes(base_dir=base_dir)
@@ -9926,7 +9927,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         base_dir = str(data.get("base_dir", "") or os.getcwd())
         class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
         result = archive_custom_agent_class(class_id, base_dir=base_dir)
-        result["schema_version"] = 3
+        result["schema_version"] = AGENT_CLASS_SCHEMA_VERSION
         result["request_id"] = str(data.get("request_id", "") or "")
         if result.get("ok"):
             classes, issues = load_agent_classes(base_dir=base_dir)
@@ -9941,7 +9942,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
         base_dir = str(data.get("base_dir", "") or os.getcwd())
         class_id = str(data.get("class_id", data.get("agent_class_id", "")) or "").strip()
         result = delete_custom_agent_class(class_id, base_dir=base_dir)
-        result["schema_version"] = 3
+        result["schema_version"] = AGENT_CLASS_SCHEMA_VERSION
         result["request_id"] = str(data.get("request_id", "") or "")
         if result.get("ok"):
             classes, issues = load_agent_classes(base_dir=base_dir)
@@ -9964,7 +9965,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
             return {"type": "error", "message": f"Unknown Agent Class: {class_id}"}
         return {
             "type": "agent_class_preview",
-            "schema_version": 3,
+            "schema_version": AGENT_CLASS_SCHEMA_VERSION,
             "agent_class": enriched_agent_class_preview(
                 definition,
                 base_dir=base_dir,
@@ -12426,35 +12427,10 @@ def _agent_overrides_from_role_settings(kind: str, settings) -> dict:
     return out
 
 
-TORQUE_STEWARD_AGENT_CLASS_ID = "torque-steward"
-TORQUE_STEWARD_DISPLAY_NAME = "Torque Steward"
-
-
 def _requested_agent_class_id(data: dict) -> str:
     return str(
         data.get("agent_class_id", data.get("class_id", "")) or ""
     ).strip()
-
-
-def _is_torque_steward_class_id(class_id: str) -> bool:
-    return str(class_id or "").strip() == TORQUE_STEWARD_AGENT_CLASS_ID
-
-
-def _apply_steward_launch_identity(data: dict) -> dict:
-    """Return a launch payload with the built-in Steward's stable identity.
-
-    The Steward MVP is explicitly launched by class selection, but its visible
-    identity is intentionally not user-renamable in this bounded wave: the
-    Architect-derived session should appear as ``Torque Steward`` everywhere.
-    """
-
-    if not isinstance(data, dict):
-        return data
-    if not _is_torque_steward_class_id(_requested_agent_class_id(data)):
-        return data
-    payload = dict(data)
-    payload["name"] = TORQUE_STEWARD_DISPLAY_NAME
-    return payload
 
 
 def _apply_agent_class_launch_selection(
@@ -12658,7 +12634,6 @@ async def _handle_add_architect_command(
         send_agent_prompt,
         resolve_architect_launch_config=None) -> dict:
     """Create and launch a persistent architect agent."""
-    data = _apply_steward_launch_identity(data)
     name = str(data.get("name", "") or "").strip()
     if not name:
         return {"type": "error", "message": "Architect name is required"}
@@ -12921,7 +12896,6 @@ async def _handle_agent_class_launch_command(
     payload = dict(data)
     payload["group"] = group
     payload["agent_class_id"] = definition.id
-    payload = _apply_steward_launch_identity(payload)
     payload.pop("class_id", None)
     if definition.base_kind == "architect":
         created = await _handle_add_architect_command(
@@ -12963,7 +12937,7 @@ async def _handle_agent_class_launch_command(
         return created
     return {
         "type": "agent_class_launch",
-        "schema_version": 3,
+        "schema_version": AGENT_CLASS_SCHEMA_VERSION,
         "agent": created,
         "agent_class": enriched_agent_class_preview(
             definition,

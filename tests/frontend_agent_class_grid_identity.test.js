@@ -165,8 +165,7 @@ test('agent grid card shows Creative badge with Architect-derived metadata', () 
   })`, context);
 
   assert.match(html, /cell-name[^>]*>Spark</);
-  assert.match(html, /cell-agent-class-badge[^>]*>Creative</);
-  assert.doesNotMatch(html, /cell-agent-class-badge[^>]*>Creative Architect</);
+  assert.match(html, /cell-agent-class-badge[^>]*>Creative Architect</);
   assert.match(html, /Secondary metadata: Architect-derived/);
   assert.doesNotMatch(html, /cell-agent-class-badge[^>]*>Architect</);
 });

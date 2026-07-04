@@ -11,7 +11,7 @@ except ModuleNotFoundError:
 from torque.agent_profiles import (
     AgentProfileDefinition,
     BASE_KIND_CEILINGS,
-    PM_DANGEROUS_CAPABILITIES,
+    HIGH_RISK_CAPABILITIES,
     agent_profile_cell_status,
     dry_run_profile_preview,
     enriched_profile_preview,
@@ -63,8 +63,9 @@ class AgentProfileRegistryTests(unittest.TestCase):
         pm = next(profile for profile in profiles if profile.id == "product-manager-draft")
 
         self.assertEqual(pm.base_kind, "architect")
-        self.assertEqual(pm.metadata["archetype"], "product_manager")
-        self.assertFalse(set(pm.grants) & PM_DANGEROUS_CAPABILITIES)
+        self.assertEqual(pm.metadata["runtime_enforcement"], "mcp_projection_when_effective_profile_is_set")
+        self.assertEqual(pm.acl.get("mode"), "allow")
+        self.assertFalse(set(pm.grants) & HIGH_RISK_CAPABILITIES)
         preview = dry_run_profile_preview(pm)
         denied = set(preview["denied_high_risk_capabilities"])
         for atom in [
@@ -167,21 +168,37 @@ class AgentProfileRegistryTests(unittest.TestCase):
                 "journal.private",
             ],
             metadata={
-                "archetype": "torque_steward",
-                "generated_by_agent_class": {"id": "torque-steward"},
+                "generated_by_agent_class": {"id": "custom-steward"},
+            },
+            policy={
+                "acl": {
+                    "mode": "allow",
+                    "allowed_tools": [
+                        "torque_context",
+                        "architect_help_query",
+                        "architect_steward_operating_brief",
+                        "architect_events_recent",
+                        "architect_ask",
+                        "architect_message_user",
+                        "architect_peer_list",
+                        "architect_peer_message",
+                        "architect_journal",
+                        "architect_journal_read",
+                    ],
+                },
             },
         ))
         pm = profile_policy_by_id("product-manager-draft", base_dir=str(self.project))
         self.assertIsNotNone(pm)
 
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_board_summary", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_board_summary", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_steward_operating_brief", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_events_recent", steward))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_task_show", steward))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_area_list", steward))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_initiative_list", steward))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_decision_list", steward))
-        self.assertTrue(mcp_tool_allowed_by_policy("architect_mcp_calls", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_task_show", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_area_list", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_initiative_list", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_decision_list", steward))
+        self.assertFalse(mcp_tool_allowed_by_policy("architect_mcp_calls", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_ask", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_message_user", steward))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_peer_list", steward))
@@ -219,8 +236,8 @@ class AgentProfileRegistryTests(unittest.TestCase):
         preview = enriched_profile_preview(pm)
 
         self.assertEqual(preview["status"], "draft")
-        self.assertTrue(any("scratch-only" in warning for warning in preview["warnings"]))
-        self.assertTrue(any("architect_product_*" in warning for warning in preview["warnings"]))
+        self.assertTrue(any("lifecycle=draft" in warning for warning in preview["warnings"]))
+        self.assertTrue(any("narrows the base kind" in warning for warning in preview["warnings"]))
 
     def test_cell_status_defaults_to_full_base_kind_without_assignment(self):
         class Cell:
@@ -296,7 +313,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
             "metadata": {"archetype": "product_manager"},
         })
 
-        self.assertIn("dangerous_product_manager_grants", [issue.code for issue in issues])
+        self.assertNotIn("dangerous_product_manager_grants", [issue.code for issue in issues])
 
     def test_base_kind_mismatch_and_agent_cell_profile_confusion_fail_validation(self):
         _profile, issues = validate_profile_data({
@@ -389,9 +406,8 @@ class AgentProfileDoctorTests(unittest.TestCase):
         rendered = format_doctor_report(report)
 
         self.assertIn("agent_profiles_valid", report["failed_checks"])
-        self.assertEqual(report["agent_profiles"]["error_count"], 2)
+        self.assertEqual(report["agent_profiles"]["error_count"], 1)
         self.assertIn("[agent_profiles]", rendered)
-        self.assertIn("agent profile validation failed[dangerous_product_manager_grants]", rendered)
         self.assertIn("agent profile validation failed[agent_cell_profile_confusion]", rendered)
 
     def test_doctor_reports_assignment_and_audit_surface(self):

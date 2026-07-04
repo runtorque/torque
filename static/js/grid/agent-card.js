@@ -506,20 +506,8 @@ function _agentCardEffectiveClassSnapshot(agent) {
     : {};
 }
 
-function _agentCardClassIsCreativeArchitect(id, snapshot, status, rawLabel) {
-  snapshot = snapshot || {};
-  status = status || {};
-  const metadata = snapshot.metadata && typeof snapshot.metadata === 'object' ? snapshot.metadata : {};
-  return String(id || '').trim() === 'creative-architect'
-    || String(status.effective_class_id || '').trim() === 'creative-architect'
-    || String(snapshot.id || '').trim() === 'creative-architect'
-    || String(metadata.archetype || '').trim() === 'creative_architect'
-    || String(rawLabel || '').trim() === 'Creative Architect';
-}
-
 function _agentCardClassDisplayLabel(id, snapshot, status, rawLabel) {
-  rawLabel = String(rawLabel || '').trim();
-  return _agentCardClassIsCreativeArchitect(id, snapshot, status, rawLabel) ? 'Creative' : rawLabel;
+  return String(rawLabel || '').trim();
 }
 
 function _agentCardPrimaryClassIdentity(agent) {

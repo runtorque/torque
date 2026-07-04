@@ -373,7 +373,7 @@ test('canvas tree model orders architects, engineers, and workers by created_at 
 });
 
 
-test('canvas tree model pins Torque Steward before older architects when present', () => {
+test('canvas tree model keeps Torque Steward in normal architect creation order', () => {
   const context = createContext();
   const steward = architect('arch-steward', 'Torque Steward', 30);
   steward.agent_class_id = 'torque-steward';
@@ -388,7 +388,7 @@ test('canvas tree model pins Torque Steward before older architects when present
 
   assert.deepEqual(
     model.trees.map((t) => t.architect.id),
-    ['arch-steward', 'arch-early', 'arch-late'],
+    ['arch-early', 'arch-steward', 'arch-late'],
   );
 });
 

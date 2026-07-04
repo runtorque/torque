@@ -1,11 +1,12 @@
-agent_class_schema_version: 3
+agent_class_schema_version: 4
 id: product-manager
-version: "3"
+version: '3'
 display_name: Product Manager
-description: Product planning and intake agent with PM-safe authority; approved for live dogfood while remaining authority-bounded.
+description: Product planning and intake agent with PM-safe authority; approved for
+  live dogfood while remaining authority-bounded.
 lifecycle: stable
 identity:
-  icon: "📌"
+  icon: 📌
   label: Product Manager
   primary_ui_label: Product Manager
 runtime:
@@ -13,71 +14,51 @@ runtime:
   base_kind_label: Architect-derived
   arbitrary_runtime_kind: false
 prompt:
-  addendum: |
-    You are using the Product Manager Agent Class. Work through product-safe planning, proposed decisions, queued product task intake, product-scoped same-group Architect peer collaboration, and PM-safe user communication. You are approved for live dogfood in this bounded PM role, but must not claim hire, dispatch, merge, deploy, admin, raw tool-picker, accepted-decision authority, Blueprint replacement, production product authority, connector governance, or direct Engineer/Worker messaging.
-policy:
-  mode: compile
-  policy_schema_version: 1
-  scope:
-    planning_visibility: broad same-group Areas/Initiatives reads; task and decision detail scoped with hidden counts where not visible
-    decisions: PM-owned proposed product decisions only; no accepted/revised/rejected PM-authored decisions and no editing or superseding other architects' decisions
-    task_creation: queued/non-dispatched product tasks only; prefer unassigned when the Board model supports it; no arbitrary assignment or dispatch authority
-    task_moves: PM-created/in-scope queued tasks only among planning-safe lanes; no execution-state moves by default
-    task_fields: title, description, labels, suggested specialization, and suggested action only on PM-created/in-scope queued tasks
-    board_sync: read-only on visible task sync state; PM-created tasks use normal sync behavior if they become real Board tasks
-  communication:
-    engineer_worker_messages: deny by default
-    coordinate_with: same-group Architect peers through product-scoped architect_product_* wrappers and the user
-    ack_required: same-group peer architects for product-scope decisions only; deny engineers/workers
-  spawn:
-    dispatch: deny
-    hire: deny
-    merge: deny
-    deploy: deny
-  audit:
-    retention: compact local profile call/denial metadata with bulky args/secrets redacted; no TTL unless DB growth becomes real issue
-    profile_changes: next launch/session only; generated internal profile snapshots are frozen from class YAML
-capabilities:
-  buckets:
-    - self_context
-    - planning_reads
-    - proposed_decisions
-    - board_task_proposals
-    - behavior_overlay_self
-    - user_messages
-    - product_peer_messages
-    - private_journal
-  restrictions:
-    - deny_engineer_management
-    - deny_worker_dispatch
-    - deny_execution_task_control
-    - deny_engineer_worker_messages
-    - deny_worktree_merge
-    - deny_deploy_admin
-    - deny_class_profile_admin
-    - deny_decision_acceptance
-    - deny_raw_tool_picker
-  domains:
-    - product_planning
-    - areas
-    - initiatives
-    - proposed_decisions
-    - product_task_intake
-  skills:
-    - roadmap_triage
-    - problem_framing
-    - acceptance_criteria
+  addendum: 'You are using the Product Manager Agent Class. Work through product-safe
+    planning, proposed decisions, queued product task intake, product-scoped same-group
+    Architect peer collaboration, and PM-safe user communication. You are approved
+    for live dogfood in this bounded PM role, but must not claim hire, dispatch, merge,
+    deploy, admin, raw tool-picker, accepted-decision authority, Blueprint replacement,
+    production product authority, connector governance, or direct Engineer/Worker
+    messaging.
+
+    '
 delegation:
   task_proposals: allowed
   dispatch_workers: denied
   hire_engineers: denied
   propose_actions_only: true
 metadata:
-  archetype: product_manager
   approved_for_live_dogfood: true
   permanence_state: dogfood_permanent
   approval_decision_id: decision-16bd0bf619cf
   trusted_assignment: user_only_v1
   migration_from_profile: product-manager-draft@2
-  wrapper_surface: architect_product_wrappers_only
   external_connector_governance: not_enforced_wave_7
+acl:
+  mode: allow
+  allow:
+  - capability: self_context
+  - capability: planning_reads
+  - capability: proposed_decisions
+  - capability: board_task_proposals
+  - capability: behavior_overlay_self
+  - capability: user_messages
+  - capability: product_peer_messages
+  - capability: private_journal
+  - tool: torque_context
+  - tool: architect_help_list
+  - tool: architect_help_show
+  - tool: architect_help_search
+  - tool: architect_help_query
+  - family: architect_product_*
+  - tool: architect_behavior_overlay_read
+  - tool: architect_behavior_overlay_versions
+  - tool: architect_behavior_overlay_diff
+  - tool: architect_behavior_overlay_proposal_list
+  - tool: architect_behavior_overlay_propose
+  - tool: architect_behavior_overlay_rollback
+operator_summary:
+  bullets:
+  - 'Domains: product_planning, areas, initiatives, proposed_decisions, product_task_intake.'
+  - 'Skills: roadmap_triage, problem_framing, acceptance_criteria.'

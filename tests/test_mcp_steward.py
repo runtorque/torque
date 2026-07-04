@@ -138,7 +138,7 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("architect_steward_operating_brief", tools)
         self.assertIn("architect_help_query", tools)
-        self.assertIn("architect_board_summary", tools)
+        self.assertIn("architect_events_recent", tools)
         self.assertIn("architect_ask", tools)
         self.assertIn("architect_message_user", tools)
         self.assertIn("architect_journal", tools)
@@ -166,6 +166,7 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
             "architect_product_peer_message",
             "architect_product_journal",
             "architect_digest_filter",
+            "architect_board_summary",
         }:
             self.assertNotIn(denied, tools)
             response = await self._call(denied, {"title": "nope"})

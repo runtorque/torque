@@ -22,6 +22,7 @@ from .agent_profiles import (
     validate_all_agent_profiles,
 )
 from .agent_classes import (
+    AGENT_CLASS_SCHEMA_VERSION,
     agent_class_authoring_contract,
     agent_class_cell_status,
     enriched_agent_class_preview,
@@ -1183,9 +1184,9 @@ def _collect_agent_profiles_section(conn: sqlite3.Connection | None = None, base
         "audit_recent_count": len(audit_recent),
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
         "runtime_enforcement": "frozen_launch_snapshot_mcp_projection",
-        "legacy_direct_product_manager_profile_count": sum(
+        "legacy_direct_profile_count": sum(
             1 for item in assignments
-            if item.get("legacy_direct_product_manager_profile")
+            if item.get("legacy_direct_profile")
         ),
     }
 
@@ -1276,13 +1277,13 @@ def _collect_agent_classes_section(conn: sqlite3.Connection | None = None, base_
         "audit_recent_count": len(audit_recent),
         "issues": [issue.as_dict() for issue in list(validation.get("issues", []) or [])],
         "runtime_enforcement": "launch_frozen_agent_class_profile_pairing",
-        "schema_version": 3,
+        "schema_version": AGENT_CLASS_SCHEMA_VERSION,
         "authoring_contract": authoring_contract,
         "capability_bucket_count": len(authoring_contract.get("capability_bucket_catalog", []) or []),
         "restriction_bucket_count": len(authoring_contract.get("restriction_bucket_catalog", []) or []),
-        "legacy_direct_product_manager_profile_count": sum(
+        "legacy_direct_profile_count": sum(
             1 for item in assignments
-            if item.get("legacy_direct_product_manager_profile")
+            if item.get("legacy_direct_profile")
         ),
         "external_connector_caveat": (
             "External connector exposure is informational only in Wave 7; "
@@ -1906,12 +1907,12 @@ def _warn_stuck_input_sessions(report: dict) -> dict | None:
     }
 
 
-def _warn_legacy_direct_product_manager_profile(report: dict) -> dict | None:
+def _warn_legacy_direct_profile(report: dict) -> dict | None:
     profiles = report.get("agent_profiles", {}) or {}
     classes = report.get("agent_classes", {}) or {}
     count = max(
-        int(profiles.get("legacy_direct_product_manager_profile_count", 0) or 0),
-        int(classes.get("legacy_direct_product_manager_profile_count", 0) or 0),
+        int(profiles.get("legacy_direct_profile_count", 0) or 0),
+        int(classes.get("legacy_direct_profile_count", 0) or 0),
     )
     if count <= 0:
         return None
@@ -1923,18 +1924,18 @@ def _warn_legacy_direct_product_manager_profile(report: dict) -> dict | None:
             "effective_profile_id": item.get("effective_profile_id", ""),
         }
         for item in list(profiles.get("assignments", []) or [])
-        if item.get("legacy_direct_product_manager_profile")
+        if item.get("legacy_direct_profile")
     ]
     return {
-        "name": "legacy_direct_product_manager_profile",
+        "name": "legacy_direct_profile",
         "status": "warn",
         "details": {
             "count": count,
             "assignments": assignments,
             "hint": (
-                "legacy direct product-manager-draft profile assignments are preserved "
-                "for backcompat; set desired Agent Class to product-manager for the "
-                "class-first next-relaunch flow. Torque does not silently migrate them."
+                "legacy direct Agent Profile assignments are preserved for backcompat; "
+                "set the desired Agent Class for the class-first next-relaunch flow. "
+                "Torque does not silently migrate them."
             ),
         },
     }
@@ -1973,7 +1974,7 @@ _DOCTOR_WARNINGS = [
     _warn_ai_index_chunk_model_mismatch,
     _warn_mcp_idempotency_storage,
     _warn_stuck_input_sessions,
-    _warn_legacy_direct_product_manager_profile,
+    _warn_legacy_direct_profile,
 ]
 
 
@@ -2322,8 +2323,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_profiles.get('assignment_count', 0) or 0)}",
         "  audit_recent_count:             "
         f"{int(agent_profiles.get('audit_recent_count', 0) or 0)}",
-        "  legacy_direct_pm_profiles:      "
-        f"{int(agent_profiles.get('legacy_direct_product_manager_profile_count', 0) or 0)}",
+        "  legacy_direct_profiles:      "
+        f"{int(agent_profiles.get('legacy_direct_profile_count', 0) or 0)}",
         "",
         "[agent_classes]",
         "  config_path:                    "
@@ -2346,8 +2347,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(agent_classes.get('audit_recent_count', 0) or 0)}",
         "  external_connector_caveat:      "
         f"{agent_classes.get('external_connector_caveat', '')}",
-        "  legacy_direct_pm_profiles:      "
-        f"{int(agent_classes.get('legacy_direct_product_manager_profile_count', 0) or 0)}",
+        "  legacy_direct_profiles:      "
+        f"{int(agent_classes.get('legacy_direct_profile_count', 0) or 0)}",
         "",
         "[stage_6_cleanup]",
         "  legacy_template_files_ignored:  "
@@ -2557,10 +2558,10 @@ def format_doctor_report(report: dict) -> str:
                 if summary:
                     base += f": {summary}"
                 lines.append(base)
-            elif name == "legacy_direct_product_manager_profile":
+            elif name == "legacy_direct_profile":
                 lines.append(
-                    "  - legacy_direct_product_manager_profile: legacy direct Product Manager profile assignments detected; "
-                    "set desired Agent Class to product-manager for class-first next relaunch "
+                    "  - legacy_direct_profile: legacy direct Agent Profile assignments detected; "
+                    "set the desired Agent Class for class-first next relaunch "
                     "(no silent migration is performed)"
                 )
             elif name == "legacy_toolbelt_data_dir":
@@ -2697,10 +2698,10 @@ def format_doctor_report(report: dict) -> str:
                         f"[{issue.get('code', '')}]{location}: "
                         f"{issue.get('message', '')}"
                     )
-            elif name == "legacy_direct_product_manager_profile":
+            elif name == "legacy_direct_profile":
                 lines.append(
-                    "  - legacy direct Product Manager profile assignments detected; "
-                    "set desired Agent Class to product-manager for class-first next relaunch "
+                    "  - legacy direct Agent Profile assignments detected; "
+                    "set the desired Agent Class for class-first next relaunch "
                     "(no silent migration is performed)"
                 )
             else:

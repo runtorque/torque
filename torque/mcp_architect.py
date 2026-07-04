@@ -434,7 +434,7 @@ _ARCHITECT_TOOL_SPECS = [
         "description": (
             "Claim a routed PM-created product task in this architect's group "
             "without creating a covering duplicate. Requires durable inbound "
-            "product-peer route evidence from the Product Manager creator, "
+            "product-peer route evidence from the product proposal creator, "
             "sets assigned_architect_id on the original task, and records "
             "pickup audit evidence."
         ),
@@ -1750,12 +1750,12 @@ _ARCHITECT_TOOL_SPECS = [
 _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
         "name": "architect_product_board_summary",
-        "description": "Product Manager-safe board summary over PM-linked/product-labeled tasks only; never dispatches or exposes all same-group task detail.",
+        "description": "Product-safe board summary over linked/product-labeled tasks only; never dispatches or exposes all same-group task detail.",
         "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}},
     },
     {
         "name": "architect_product_task_list",
-        "description": "List PM-linked/product-labeled task summaries visible to this Product Manager wrapper.",
+        "description": "List linked/product-labeled task summaries visible to this product wrapper.",
         "inputSchema": {"type": "object", "properties": {"label_filter": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "lane_filter": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
@@ -1770,22 +1770,22 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_product_area_list",
-        "description": "Product Manager-safe wrapper for same-group Area reads.",
+        "description": "Product-safe wrapper for same-group Area reads.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
         "name": "architect_product_area_show",
-        "description": "Product Manager-safe wrapper for one same-group Area read.",
+        "description": "Product-safe wrapper for one same-group Area read.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}},
     },
     {
         "name": "architect_product_initiative_list",
-        "description": "Product Manager-safe wrapper for same-group Initiative reads.",
+        "description": "Product-safe wrapper for same-group Initiative reads.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}}},
     },
     {
         "name": "architect_product_initiative_show",
-        "description": "Product Manager-safe wrapper for one same-group Initiative read.",
+        "description": "Product-safe wrapper for one same-group Initiative read.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}},
     },
     {
@@ -1810,7 +1810,7 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
     },
     {
         "name": "architect_product_idea_brief_list",
-        "description": "List same-group Idea Brief proposal artifacts visible to this product/Creative Architect; includes caller_owned for safe update decisions.",
+        "description": "List same-group Idea Brief proposal artifacts visible to this product/ideation wrapper; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "proposed", "parked", "archived"]}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {

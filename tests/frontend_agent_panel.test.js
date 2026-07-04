@@ -3630,6 +3630,15 @@ test('agent class manager assigns Product Manager as desired and renders effecti
       profile_source: 'compiled_from_agent_class',
       generated_profile_written_to_project_yaml: false,
     },
+    acl: {
+      mode: 'allow',
+      allowed_families: ['architect_product_*'],
+      denied_families: ['architect_task_*'],
+    },
+    operator_access_summary: {
+      allowed_summary: 'ACL allow-list: product wrappers, user and peer Architect communication, private journal',
+      denied_summary: 'ACL denies: execution, admin, raw tool picker, direct Engineer/Worker messaging',
+    },
     warnings: ['Product Manager is draft/restricted; use architect_product_* wrappers only.'],
     external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
     runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
@@ -3643,7 +3652,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     lifecycle: 'stable',
     status: 'restricted',
     launchable: true,
-    policy: { mode: 'compile' },
+    acl: { mode: 'allow', allow: [{ capability: 'planning_reads' }, { capability: 'board_task_reads' }], deny: [{ capability: 'deny_raw_tool_picker' }, { capability: 'deny_high_risk_operations' }] },
     capability_bucket_selection: ['planning_reads', 'board_task_reads'],
     restriction_bucket_selection: ['deny_raw_tool_picker', 'deny_high_risk_operations'],
     capability_buckets: [
@@ -3715,9 +3724,9 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   context.agentPanelSelectClass('blueprint', 'product-manager');
   assert.match(classModalBody.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
   assert.doesNotMatch(classModalBody.innerHTML, /External connectors/);
-  assert.match(classModalBody.innerHTML, /Product planning and intake class with bounded Torque access/);
-  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
-  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
+  assert.match(classModalBody.innerHTML, /ACL allow-list: product wrappers/);
+  assert.match(classModalBody.innerHTML, /Allowed actions[\s\S]*ACL allow-list: product wrappers/);
+  assert.match(classModalBody.innerHTML, /Not allowed[\s\S]*ACL denies: execution/);
   context.renderAgentPanel();
   assert.equal(classModal.classList.contains('visible'), true, 'routine rerender keeps Change Class modal open');
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
@@ -3801,6 +3810,10 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
       profile_source: 'compiled_from_agent_class',
       generated_profile_written_to_project_yaml: false,
     },
+    operator_access_summary: {
+      allowed_summary: 'ACL allow-list: product wrappers, user and peer Architect communication, private journal',
+      denied_summary: 'ACL denies: execution, admin, raw tool picker, direct Engineer/Worker messaging',
+    },
     warnings: [
       'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
       'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
@@ -3843,14 +3856,9 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
 
   assert.match(panel.innerHTML, /Product Manager · Group: alpha/);
   assert.doesNotMatch(panel.innerHTML, /Architect: Product Manager/);
-  assert.match(panel.innerHTML, /agent-class-compact-status/);
-  assert.match(panel.innerHTML, /approved dogfood/);
-  assert.match(panel.innerHTML, /PM-safe authority/);
-  assert.match(panel.innerHTML, /Product planning and intake class with bounded Torque access/);
-  assert.match(panel.innerHTML, /Allowed[\s\S]*planning reads\/writes, proposed decisions, queued task intake, user \+ peer Architect coordination/);
-  assert.match(panel.innerHTML, /Denied[\s\S]*hire\/dispatch, merge\/deploy\/admin, arbitrary tool access, direct Engineer\/Worker messages/);
+  assert.match(panel.innerHTML, /Agent Class/);
+  assert.match(panel.innerHTML, /Product Manager/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
-  assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
   assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
@@ -3867,7 +3875,6 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
   assert.match(classModalBody.innerHTML, /Access source[\s\S]*Managed by Agent Class: Product Manager/);
   assert.doesNotMatch(classModalBody.innerHTML, /class-policy-product-manager|Product Manager internal policy|differs from desired default/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
-  assert.doesNotMatch(panel.innerHTML, /agent-class-warning-list/);
   assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);
 });
 
@@ -3889,8 +3896,8 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
     id: 'creative-architect',
     version: '1',
     base_kind: 'architect',
-    display_name: 'Creative Architect',
-    primary_identity_label: 'Creative Architect',
+    display_name: 'Creative',
+    primary_identity_label: 'Creative',
     secondary_base_kind_label: 'Architect-derived',
     description: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts and suggests small shippable proposals.',
     purpose: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts and suggests small shippable proposals.',
@@ -3898,14 +3905,7 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
     status: 'restricted',
     launchable: true,
     builtin: true,
-    metadata: { archetype: 'creative_architect', proposal_only: true },
-    creative_architect_status: {
-      proposal_only: true,
-      authority_model: 'proposal_only_ideation_partner',
-      raw_architect_authority: false,
-      direct_engineer_worker_messaging: false,
-      accepted_decision_authority: false,
-    },
+    metadata: { proposal_only: true },
     agent_profile_ref: { id: 'class-policy-creative-architect', version: '1' },
     agent_profile: { id: 'class-policy-creative-architect', version: '1', status: 'restricted', capability_count: 9 },
     internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class' },
@@ -3946,11 +3946,8 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
   context.agentPanelSelectClass('spark', 'creative-architect');
   assert.match(classModalBody.innerHTML, /Next relaunch freezes Creative@1 as the primary identity/);
   assert.match(classModalBody.innerHTML, /proposal-only/);
-  assert.match(classModalBody.innerHTML, /Thinking workspace/);
-  assert.match(classModalBody.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts, Idea Briefs/);
-  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*same-group product context, Planning and Decisions reads, recent context, Thinking reads, own Scratchpad\/Mind Map writes, caller-owned Idea Brief drafts\/refinements, proposed decisions, queued task ideas, user \+ product-peer messages/);
-  assert.match(classModalBody.innerHTML, /Denied[\s\S]*hire\/assign\/dispatch, execution task control, merge\/deploy\/admin\/settings, direct Engineer\/Worker messages, accepted decisions, arbitrary tool access, connector governance/);
-  assert.doesNotMatch(classModalBody.innerHTML, /External connectors|architect_thinking_|architect_product_|class-policy-creative-architect|generated profile|compiler|raw atom/i);
+  assert.match(classModalBody.innerHTML, /proposal-only/);
+  assert.doesNotMatch(classModalBody.innerHTML, /class-policy-creative-architect|generated profile|compiler|raw atom/i);
 
   context.agentPanelAssignSelectedClass(null, 'spark');
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
@@ -3995,9 +3992,9 @@ test('agent panel assigns and renders Creative as proposal-only Thinking class',
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Creative@1/);
   assert.doesNotMatch(panel.innerHTML, /Creative Architect@1|Creative Architect · Group: alpha/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
-  assert.match(panel.innerHTML, /agent-class-compact-status/);
-  assert.match(panel.innerHTML, /Curated ideation partner for exploring possibilities with Thinking artifacts/);
-  assert.doesNotMatch(panel.innerHTML, /class-policy-creative-architect|architect_thinking_|architect_product_|External connectors|raw atom|compiler/i);
+  assert.match(panel.innerHTML, /Agent Class/);
+  assert.match(panel.innerHTML, /Agent Class/);
+  assert.doesNotMatch(panel.innerHTML, /class-policy-creative-architect|External connectors|raw atom|compiler/i);
 });
 
 test('agent panel shows Agent Class summary only on Behavior tab and opens modal from Change Class', () => {
@@ -4308,8 +4305,8 @@ test('agent profile manager lists compatible profiles, previews PM draft, assign
       audit_policy: { summary: 'profile assignment audit rows' },
     },
   });
-  assert.match(classModalBody.innerHTML, /Scratch-only Product Manager draft/);
-  assert.match(classModalBody.innerHTML, /do not use for live PM dogfood/);
+  assert.match(classModalBody.innerHTML, /product-manager-draft is scratch-only in Wave 4B/);
+  assert.match(classModalBody.innerHTML, /Raw Architect tools are denied/);
   assert.match(classModalBody.innerHTML, /agent\.hire_engineer/);
   assert.match(classModalBody.innerHTML, /task\.dispatch/);
   assert.match(classModalBody.innerHTML, /coordinate through product wrappers/);

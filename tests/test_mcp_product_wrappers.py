@@ -322,7 +322,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             req_id=21,
             agent_id=self.full_peer.id,
         )
-        self.assertIn("Product Manager", self._error_text(normal))
+        self.assertIn("product proposal", self._error_text(normal))
 
         proposal = await self._call(
             "architect_product_task_propose",
@@ -677,7 +677,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.peer.id, peer_ids)
         self.assertIn("a5a7fc9e", peer_ids)
         torqly = next(item for item in peers if item["id"] == "a5a7fc9e")
-        self.assertEqual("same-group-architect-peer-capable", torqly["product_peer_scope"])
+        self.assertEqual("product-peer-authority", torqly["product_peer_scope"])
         self.assertNotIn(self.cross_group_architect.id, peer_ids)
         self.assertNotIn(self.engineer.id, peer_ids)
         self.assertNotIn(self.worker.id, peer_ids)

@@ -4457,34 +4457,16 @@ def _normalize_agent_user_message_context(
     }, ""
 
 
-def _cell_has_product_manager_profile(state, cell) -> bool:
+def _cell_has_product_peer_authority(state, cell) -> bool:
     if not cell:
         return False
-    for attr in ("effective_agent_profile_id", "agent_profile_id"):
-        profile_id = str(getattr(cell, attr, "") or "").strip()
-        if profile_id == "product-manager-draft" or "product-manager" in profile_id:
-            return True
-    snapshot = getattr(cell, "effective_agent_profile_snapshot", {}) or {}
-    if isinstance(snapshot, dict):
-        if str(snapshot.get("id", "") or "").strip() == "product-manager-draft":
-            return True
-        metadata = snapshot.get("metadata", {})
-        if isinstance(metadata, dict) and str(
-                metadata.get("archetype", "") or "").strip() == "product_manager":
-            return True
-    overrides = getattr(state, "agent_profile_overrides", None)
-    if isinstance(overrides, dict):
-        raw = overrides.get(str(getattr(cell, "id", "") or "").strip())
-        if isinstance(raw, str):
-            return raw == "product-manager-draft" or "product-manager" in raw
-        if isinstance(raw, dict):
-            if str(raw.get("id", "") or "").strip() == "product-manager-draft":
-                return True
-            metadata = raw.get("metadata", {})
-            if isinstance(metadata, dict) and str(
-                    metadata.get("archetype", "") or "").strip() == "product_manager":
-                return True
-    return False
+    cell_id = str(getattr(cell, "id", "") or "").strip()
+    if not cell_id:
+        return False
+    return (
+        _caller_profile_allows_capability(state, cell_id, "comm.peer_architect_message")
+        and _caller_profile_allows_capability(state, cell_id, "task.create_queued")
+    )
 
 
 def _product_peer_allowlist_contains(state, caller_id: str, peer_id: str) -> bool:
@@ -4535,8 +4517,8 @@ def _product_peer_scope_reason(state, caller_id: str, peer) -> str:
         return ""
     if not _cell_group(caller) or _cell_group(peer) != _cell_group(caller):
         return ""
-    if _cell_has_product_manager_profile(state, peer):
-        return "product-manager-profile"
+    if _cell_has_product_peer_authority(state, peer):
+        return "product-peer-authority"
     if _product_peer_allowlist_contains(state, caller_id, peer_id):
         return "product-peer-allowlist"
     if _caller_profile_allows_capability(
@@ -4671,7 +4653,7 @@ def _product_peer_route_message_for_task(
         covering_task=None) -> dict:
     """Return durable product-peer evidence routing ``task`` to caller.
 
-    Product Manager/Creative Architect wrappers persist product-peer markers
+    Product/ideation wrappers persist product-peer markers
     plus product-scoped task context in ``agent_peer_messages``.  Treat only
     inbound architect→architect product-peer rows, anchored to the PM-created
     root, as route/management evidence for cross-architect coverage closure.
@@ -4811,7 +4793,7 @@ def _routed_pm_product_root_pickup_authorization(
 
     This is intentionally narrower than general task ownership.  A task is
     claimable only when it is a same-group, product-labeled task created by a
-    Product Manager-profile Architect, unclaimed (or already claimed by the
+    Product-authority Architect, unclaimed (or already claimed by the
     caller), and there is durable inbound product-peer route evidence from the
     PM creator to the claiming Architect.
     """
@@ -4835,8 +4817,8 @@ def _routed_pm_product_root_pickup_authorization(
     creator = state.agents.get(creator_id)
     if not creator or str(getattr(creator, "group", "") or "").strip() != caller_group:
         return {}, "Task is not a same-group PM-created product proposal"
-    if not _cell_has_product_manager_profile(state, creator):
-        return {}, "Task creator is not a Product Manager profile"
+    if not _cell_has_product_peer_authority(state, creator):
+        return {}, "Task creator does not have product proposal authority"
     if creator_id == caller_id:
         return {}, "Task was created by this architect; pickup is not required"
     assigned_architect_id = str(
@@ -4853,7 +4835,7 @@ def _routed_pm_product_root_pickup_authorization(
     if not route_row:
         return {}, (
             "PM-created product task pickup requires inbound product-peer "
-            "route evidence from the Product Manager creator"
+            "route evidence from the product proposal creator"
         )
 
     labels = [
@@ -5165,7 +5147,7 @@ def _normalize_product_context(
         caller_group: str,
         args: dict) -> tuple[dict, str]:
     if _dedupe_strings(args.get("context_engineer_ids", [])):
-        return {}, "context_engineer_ids are not supported for Product Manager wrappers"
+        return {}, "context_engineer_ids are not supported for product wrappers"
 
     task_ids = []
     task_snapshots = []
@@ -5362,7 +5344,7 @@ def _restricted_behavior_overlay_scope_allowed(
         scope: BehaviorOverlayScope | None) -> bool:
     """Restrict non-admin Architect-derived overlay access to self + own role.
 
-    Product Manager/Creative classes may inspect their effective overlay and
+    Product/ideation classes may inspect their effective overlay and
     propose user-approved changes to their own agent overlay.  They must not
     use the broad Architect overlay tools to reach hired Engineer overlays or
     worker/engineer role overlays, because those scopes are not part of their
@@ -9704,7 +9686,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if tool_name in {"help_list", "help_show", "help_search", "help_query"}:
         return dispatch_help_tool(name, args, prefix=tool_prefix)
 
-    # -- Product Manager wrapper tools ------------------------------------
+    # -- Product wrapper tools --------------------------------------------
 
     if caller_kind == "architect" and tool_name.startswith("thinking_"):
         return await _architect_thinking_tool(
@@ -9870,9 +9852,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "rationale is required", True
         status = str(args.get("status", "") or "proposed").strip() or "proposed"
         if status != "proposed":
-            return "Product Manager decisions must remain proposed in Wave 4B", True
+            return "Product-wrapper decisions must remain proposed", True
         if _dedupe_strings(args.get("linked_engineer_ids", [])):
-            return "Product Manager decisions cannot link engineers by default", True
+            return "Product-wrapper decisions cannot link engineers by default", True
         supersedes = str(args.get("supersedes", "") or "").strip() or None
         if supersedes:
             prior_decision, decision_error = _load_product_decision(real_state, caller_id, supersedes)
@@ -9919,10 +9901,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if "status" in args:
             status = str(args.get("status", "") or "").strip()
             if status != "proposed":
-                return "Product Manager decisions must remain proposed in Wave 4B", True
+                return "Product-wrapper decisions must remain proposed", True
             patch["status"] = "proposed"
         if "linked_engineer_ids" in args and _dedupe_strings(args.get("linked_engineer_ids", [])):
-            return "Product Manager decisions cannot link engineers by default", True
+            return "Product-wrapper decisions cannot link engineers by default", True
         if "supersedes" in args:
             supersedes = str(args.get("supersedes", "") or "").strip() or None
             if supersedes:
@@ -9949,7 +9931,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if caller_kind == "architect" and tool_name == "product_decision_link":
         if str(args.get("engineer_id", "") or "").strip():
-            return "Product Manager decisions cannot link engineers by default", True
+            return "Product-wrapper decisions cannot link engineers by default", True
         decision, decision_error = _load_product_decision(real_state, caller_id, args.get("id", ""))
         if not decision:
             return decision_error, True
@@ -10045,7 +10027,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
             if context_error:
                 return context_error, True
-            return "context_engineer_ids are not supported for Product Manager wrappers", True
+            return "context_engineer_ids are not supported for product wrappers", True
         has_explicit_context = any(key in args for key in ("context_task_ids", "context_decision_ids", "context_area_ids", "context_initiative_ids", "context_idea_brief_ids", "context_summary"))
         if has_explicit_context:
             context, context_error = _normalize_product_context(real_state, caller_id, _engineer_group, args)

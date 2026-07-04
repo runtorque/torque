@@ -51,5 +51,3 @@ policy:
     summary: full current spawning/routing behavior where the base kind already has it
   audit:
     summary: no additional Wave 1 persistence; future effective snapshots/audit rows only
-metadata:
-  archetype: full

@@ -25,10 +25,8 @@ from .agent_profiles import (
     BASE_KINDS,
     BASE_KIND_CEILINGS,
     CAPABILITIES,
-    CREATIVE_ARCHITECT_DANGEROUS_CAPABILITIES,
     HIGH_RISK_CAPABILITIES,
     AgentProfileDefinition,
-    PM_DANGEROUS_CAPABILITIES,
     ValidationIssue,
     enriched_profile_preview,
     load_agent_profiles,
@@ -42,7 +40,7 @@ PROJECT_CLASS_LEAF = "agent_classes"
 CLASS_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 CLASS_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ALLOWED_LIFECYCLES = {"stable", "draft"}
-AGENT_CLASS_SCHEMA_VERSION = 3
+AGENT_CLASS_SCHEMA_VERSION = 4
 DEFAULT_AGENT_CLASS_SCHEMA_VERSION = 2
 POLICY_SCHEMA_VERSION = 1
 POLICY_COMPILER_VERSION = "agent_class_policy_compiler_v1"
@@ -67,9 +65,6 @@ BUILTIN_CLASS_BASE_KIND = {
     "default-architect": "architect",
     "default-engineer": "engineer",
     "default-worker": "worker",
-    "creative-architect": "architect",
-    "product-manager": "architect",
-    "torque-steward": "architect",
 }
 
 BUILTIN_CLASS_PROFILE_REF = {
@@ -82,9 +77,6 @@ BUILTIN_CLASS_POLICY_MODE = {
     "default-architect": "wrap_profile",
     "default-engineer": "wrap_profile",
     "default-worker": "wrap_profile",
-    "creative-architect": "compile",
-    "product-manager": "compile",
-    "torque-steward": "compile",
 }
 
 KNOWN_CLASS_KEYS = {
@@ -100,6 +92,8 @@ KNOWN_CLASS_KEYS = {
     "agent_profile_ref",
     "prompt",
     "policy",
+    "acl",
+    "operator_summary",
     "capability_buckets",
     "restriction_buckets",
     "capabilities",
@@ -151,57 +145,7 @@ EXTERNAL_CONNECTOR_DRAFT_WARNING = (
     "External connector exposure is not enforced by Agent Classes or Agent Profiles in Wave 7; "
     "do not treat draft/restricted classes as live-safe for external connectors."
 )
-PM_DRAFT_WARNING = (
-    "Product Manager is draft/restricted until explicit live-dogfood approval; "
-    "do not use it for Blueprint replacement or production product authority without "
-    "explicit future approval."
-)
-PM_DOGFOOD_AUTHORITY_CAVEAT = (
-    "Product Manager is approved for live dogfood as a permanent Agent Class, "
-    "but remains PM-safe and authority-bounded: no hire, dispatch, merge, deploy, "
-    "admin, raw tool picker, accepted-decision authority, connector governance, "
-    "or direct Engineer/Worker messaging."
-)
-CREATIVE_ARCHITECT_AUTHORITY_CAVEAT = (
-    "Creative Architect is a proposal-only ideation partner: use Thinking "
-    "and product-safe proposal wrappers, but do not treat generated ideas, "
-    "queued tasks, peer messages, or proposed decisions as accepted plans."
-)
-TORQUE_STEWARD_AUTHORITY_CAVEAT = (
-    "Torque Steward is a draft conservative operations steward: it represents "
-    "the user's operational wishes and may use approved user communication, "
-    "private journal, and same-group Architect peer coordination surfaces, "
-    "but has no autonomous mutating, restart, compaction, notification, "
-    "scheduling, dispatch, hire, merge, deploy, class/profile admin, settings, "
-    "accepted-decision, or direct Engineer/Worker messaging authority."
-)
-CREATIVE_ARCHITECT_NORMAL_LABEL = "Creative"
-CREATIVE_ARCHITECT_INTERNAL_POLICY_LABEL = "Creative Architect"
 
-TORQUE_STEWARD_FOUNDATION_ALLOWED_CAPABILITIES = frozenset({
-    "observe.self_context",
-    "observe.board_summary",
-    "observe.task_detail",
-    "observe.events",
-    "observe.mcp_calls",
-    "planning.area_read",
-    "planning.initiative_read",
-    "decision.list",
-    "task.board_sync_read",
-    "comm.user_ask",
-    "comm.user_message",
-    "comm.peer_architect_list",
-    "comm.peer_architect_message",
-    "journal.private",
-})
-
-
-def _is_creative_architect_class_identity(class_id: str, metadata: dict[str, Any] | None = None) -> bool:
-    metadata = metadata if isinstance(metadata, dict) else {}
-    return (
-        str(class_id or "").strip() == "creative-architect"
-        or str((metadata or {}).get("archetype", "") or "").strip() == "creative_architect"
-    )
 
 @dataclass(frozen=True)
 class AgentClassCapabilityBucket:
@@ -496,6 +440,57 @@ CAPABILITY_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
     ]
 }
 
+ACL_ACTION_CAPABILITIES: dict[str, frozenset[str]] = {
+    "self.read": frozenset({"observe.self_context", "observe.task_detail"}),
+    "help.read": frozenset({"observe.self_context"}),
+    "task.read": frozenset({"observe.board_summary", "observe.task_detail"}),
+    "task.report": frozenset({"task.complete", "task.upload_artifact", "task.verify"}),
+    "task.create": frozenset({"task.create"}),
+    "task.propose": frozenset({"task.create_queued", "task.update_planning_fields", "task.move_planning_safe", "task.board_sync_read"}),
+    "task.update": frozenset({"task.update", "task.reassign", "task.mark_covered"}),
+    "task.move": frozenset({"task.move"}),
+    "task.dispatch": frozenset({"task.dispatch", "agent.dispatch_worker"}),
+    "planning.area.read": frozenset({"planning.area_read"}),
+    "planning.area.write": frozenset({"planning.area_write"}),
+    "planning.initiative.read": frozenset({"planning.initiative_read"}),
+    "planning.initiative.write": frozenset({"planning.initiative_write"}),
+    "decision.read": frozenset({"decision.list"}),
+    "decision.propose": frozenset({"decision.list", "decision.create_proposed", "decision.update_proposed", "decision.link"}),
+    "decision.write": frozenset({"decision.list", "decision.create", "decision.update", "decision.link"}),
+    "decision.accept": frozenset({"decision.accept"}),
+    "engineer.roster.read": frozenset({"agent.engineer_roster_read"}),
+    "engineer.manage": frozenset({"agent.engineer_roster_read", "agent.hire_engineer", "agent.manage_engineer_roster"}),
+    "worker.dispatch": frozenset({"agent.dispatch_worker", "task.dispatch"}),
+    "message.user": frozenset({"comm.user_ask", "comm.user_message"}),
+    "message.engineer": frozenset({"comm.engineer_message"}),
+    "message.worker": frozenset({"comm.worker_message"}),
+    "message.architect_peer": frozenset({"comm.peer_architect_list", "comm.peer_architect_message"}),
+    "journal.private": frozenset({"journal.private"}),
+    "journal.scoped": frozenset({"journal.read", "journal.write"}),
+    "memory.read": frozenset({"memory.read"}),
+    "memory.write": frozenset({"memory.publish"}),
+    "memory.admin": frozenset({"memory.admin"}),
+    "worktree.read": frozenset({"worktree.read"}),
+    "worktree.merge": frozenset({"worktree.merge"}),
+    "deploy.read": frozenset({"observe.deploy_state"}),
+    "deploy.apply": frozenset({"deploy.apply", "admin.settings"}),
+    "settings.admin": frozenset({"admin.settings"}),
+    "class_profile.admin": frozenset({"profile.assign", "profile.edit"}),
+    "behavior_overlay.read": frozenset({"behavior_overlay.read"}),
+    "behavior_overlay.propose": frozenset({"behavior_overlay.read", "behavior_overlay.propose_self"}),
+    "behavior_overlay.admin": frozenset({"profile.assign", "profile.edit"}),
+    "thinking.read": frozenset({"thinking.read"}),
+    "thinking.write": frozenset({"thinking.read", "thinking.write_own"}),
+    "idea_brief.read": frozenset({"idea_brief.read"}),
+    "idea_brief.write": frozenset({"idea_brief.read", "idea_brief.write_own", "idea_brief.propose"}),
+    "telemetry.read": frozenset({"observe.events", "observe.mcp_calls"}),
+}
+
+
+def _acl_action_capabilities(action: str) -> frozenset[str]:
+    return ACL_ACTION_CAPABILITIES.get(str(action or "").strip(), frozenset())
+
+
 RESTRICTION_BUCKETS: dict[str, AgentClassCapabilityBucket] = {
     bucket.id: bucket for bucket in [
         _bucket(
@@ -603,14 +598,16 @@ def agent_class_restriction_bucket_catalog(*, base_kind: str = "") -> list[dict[
 def agent_class_authoring_contract(*, base_kind: str = "") -> dict[str, Any]:
     return {
         "schema_version": AGENT_CLASS_SCHEMA_VERSION,
-        "normal_authoring_mode": "capability_buckets",
-        "policy_modes": sorted(ALLOWED_POLICY_MODES),
-        "capability_bucket_field": "capabilities.buckets",
-        "restriction_bucket_field": "capabilities.restrictions",
+        "normal_authoring_mode": "acl",
+        "acl_modes": ["allow", "deny"],
+        "acl_entry_keys": ["tool", "family", "action", "capability"],
+        "scope_vocabulary": ["self", "children", "group", "global"],
+        "legacy_capability_bucket_field": "capabilities.buckets",
+        "legacy_restriction_bucket_field": "capabilities.restrictions",
         "capability_bucket_catalog": agent_class_capability_bucket_catalog(base_kind=base_kind),
         "restriction_bucket_catalog": agent_class_restriction_bucket_catalog(base_kind=base_kind),
-        "advanced_internal_policy_details": "Agent Profile-compatible generated policy appears in internal_policy/agent_profile diagnostics only.",
-        "apply_model": "Agent Class saves/assignments do not mutate running sessions; policy changes apply at next launch/relaunch.",
+        "advanced_internal_details": "Agent Profile-compatible generated snapshots appear in internal_policy/agent_profile diagnostics only.",
+        "apply_model": "Agent Class saves/assignments do not mutate running sessions; ACL changes apply at next launch/relaunch.",
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }
 
@@ -638,6 +635,7 @@ class AgentClassDefinition:
     identity: dict[str, Any] = field(default_factory=dict)
     runtime: dict[str, Any] = field(default_factory=dict)
     policy: dict[str, Any] = field(default_factory=dict)
+    acl: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, Any] = field(default_factory=dict)
     communication: dict[str, Any] = field(default_factory=dict)
     delegation: dict[str, Any] = field(default_factory=dict)
@@ -677,6 +675,7 @@ class AgentClassDefinition:
             identity=(dict(data.get("identity") or {}) if isinstance(data.get("identity"), dict) else {}),
             runtime=(dict(data.get("runtime") or {}) if isinstance(data.get("runtime"), dict) else {}),
             policy=(dict(data.get("policy") or {}) if isinstance(data.get("policy"), dict) else {}),
+            acl=(dict(data.get("acl") or {}) if isinstance(data.get("acl"), dict) else {}),
             capabilities=(dict(data.get("capabilities") or {}) if isinstance(data.get("capabilities"), dict) else {}),
             communication=(dict(data.get("communication") or {}) if isinstance(data.get("communication"), dict) else {}),
             delegation=(dict(data.get("delegation") or {}) if isinstance(data.get("delegation"), dict) else {}),
@@ -703,7 +702,8 @@ class AgentClassDefinition:
             "purpose": self.description,
             "lifecycle": self.lifecycle,
             "agent_profile_ref": self.agent_profile_ref.as_dict(),
-            "policy": compact_agent_class_policy_preview(self),
+            "acl": compact_agent_class_acl_preview(self),
+            "authority_summary": agent_class_authority_summary(self),
             "identity": dict(self.identity or {}),
             "runtime": agent_class_runtime_preview(self),
             "builtin": self.builtin,
@@ -837,10 +837,105 @@ def _normalize_bucket_fields(out: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _acl_mapping(data: dict[str, Any]) -> dict[str, Any]:
+    value = data.get("acl")
+    return dict(value or {}) if isinstance(value, dict) else {}
+
+
+def _acl_entry_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _entry_text(entry: Any, *keys: str) -> str:
+    if isinstance(entry, dict):
+        for key in keys:
+            text = str(entry.get(key, "") or "").strip()
+            if text:
+                return text
+        return ""
+    return str(entry or "").strip()
+
+
+def _expand_acl_capability_token(token: str, *, restriction: bool = False) -> tuple[set[str], set[str], str]:
+    """Expand an ACL capability token into grant/deny atoms.
+
+    The ACL authoring surface accepts legacy bucket ids during migration.  A
+    token can be a capability atom, a capability bucket id, or a restriction
+    bucket id.  Restriction bucket ids always deny their atoms.
+    """
+
+    token = str(token or "").strip()
+    grants: set[str] = set()
+    denies: set[str] = set()
+    if not token:
+        return grants, denies, ""
+    if token in CAPABILITIES:
+        (denies if restriction else grants).add(token)
+        return grants, denies, "atom"
+    bucket = CAPABILITY_BUCKETS.get(token)
+    if bucket:
+        (denies if restriction else grants).update(bucket.grants)
+        denies.update(bucket.denies)
+        return grants, denies, "capability_bucket"
+    bucket = RESTRICTION_BUCKETS.get(token)
+    if bucket:
+        denies.update(bucket.denies)
+        return grants, denies, "restriction_bucket"
+    return grants, denies, ""
+
+
+def _legacy_acl_from_bucket_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    selected = _bucket_selection_from_data(raw)
+    restrictions = _restriction_selection_from_data(raw)
+    if not selected and not restrictions:
+        return {}
+    if restrictions and not selected:
+        return {
+            "mode": "deny",
+            "deny": [{"capability": item} for item in restrictions],
+            "source": "legacy_capability_buckets",
+        }
+    return {
+        "mode": "allow",
+        "allow": [{"capability": item} for item in selected],
+        "source": "legacy_capability_buckets",
+    }
+
+
+def _normalized_acl_for_data(data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
+    if isinstance(data, AgentClassDefinition):
+        raw = {
+            "acl": dict(data.acl or {}),
+            "capabilities": dict(data.capabilities or {}),
+            "policy": dict(data.policy or {}),
+            "base_kind": data.base_kind,
+        }
+    else:
+        raw = _normalize_bucket_fields(_normalized_class_data(dict(data or {})))
+    acl = _acl_mapping(raw)
+    if not acl:
+        acl = _legacy_acl_from_bucket_fields(raw)
+    mode = str(acl.get("mode", "") or "").strip().lower()
+    if not mode:
+        mode = "allow" if acl else ""
+    if mode not in {"allow", "deny", ""}:
+        mode = "allow"
+    if not acl:
+        return {}
+    out = dict(acl)
+    out["mode"] = mode
+    out["allow"] = _acl_entry_list(out.get("allow"))
+    out["deny"] = _acl_entry_list(out.get("deny"))
+    return out
+
+
 def _compiled_bucket_policy_for_data(data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
     if isinstance(data, AgentClassDefinition):
         base_kind = data.base_kind
         raw = {
+            "acl": dict(data.acl or {}),
             "capabilities": dict(data.capabilities or {}),
             "policy": dict(data.policy or {}),
         }
@@ -848,40 +943,105 @@ def _compiled_bucket_policy_for_data(data: "AgentClassDefinition | dict[str, Any
         normalized = _normalize_bucket_fields(_normalized_class_data(dict(data or {})))
         base_kind = str(normalized.get("base_kind", "") or "").strip()
         raw = normalized
+    acl = _normalized_acl_for_data(raw)
     selected = _bucket_selection_from_data(raw)
     restrictions = _restriction_selection_from_data(raw)
-    grants: set[str] = set()
+    mode = str(acl.get("mode", "") or "").strip().lower()
+    ceiling = set(BASE_KIND_CEILINGS.get(base_kind, frozenset()))
+    grants: set[str] = set(ceiling) if mode == "deny" and ceiling else set()
     denies: set[str] = set()
+    allowed_tools: set[str] = set()
+    denied_tools: set[str] = set()
+    allowed_families: set[str] = set()
+    denied_families: set[str] = set()
+    allowed_actions: list[dict[str, Any]] = []
+    denied_actions: list[dict[str, Any]] = []
     bucket_previews: list[dict[str, Any]] = []
     restriction_previews: list[dict[str, Any]] = []
-    for bucket_id in selected:
-        bucket = CAPABILITY_BUCKETS.get(bucket_id)
-        if not bucket:
-            continue
-        grants.update(bucket.grants)
-        denies.update(bucket.denies)
-        bucket_previews.append(bucket.as_catalog_dict(base_kind=base_kind, restriction=False))
-    for restriction_id in restrictions:
-        bucket = RESTRICTION_BUCKETS.get(restriction_id)
-        if not bucket:
-            continue
-        denies.update(bucket.denies)
-        restriction_previews.append(bucket.as_catalog_dict(base_kind=base_kind, restriction=True))
-    ceiling = BASE_KIND_CEILINGS.get(base_kind, frozenset())
+
+    def apply_entry(entry: Any, *, deny: bool = False) -> None:
+        nonlocal grants, denies
+        token = _entry_text(entry, "capability", "bucket", "atom")
+        if token:
+            entry_grants, entry_denies, kind = _expand_acl_capability_token(token, restriction=deny)
+            grants.update(entry_grants)
+            denies.update(entry_denies)
+            if kind == "capability_bucket" and token in CAPABILITY_BUCKETS:
+                bucket_previews.append(CAPABILITY_BUCKETS[token].as_catalog_dict(base_kind=base_kind, restriction=False))
+            elif kind == "restriction_bucket" and token in RESTRICTION_BUCKETS:
+                restriction_previews.append(RESTRICTION_BUCKETS[token].as_catalog_dict(base_kind=base_kind, restriction=True))
+        tool = _entry_text(entry, "tool")
+        if tool:
+            (denied_tools if deny else allowed_tools).add(tool)
+        family = _entry_text(entry, "family", "tool_family")
+        if family:
+            (denied_families if deny else allowed_families).add(family)
+        action = _entry_text(entry, "action")
+        if action:
+            action_caps = _acl_action_capabilities(action)
+            if deny:
+                denies.update(action_caps)
+            else:
+                grants.update(action_caps)
+            item = {"action": action}
+            if isinstance(entry, dict) and str(entry.get("scope", "") or "").strip():
+                item["scope"] = str(entry.get("scope", "") or "").strip()
+            if action_caps:
+                item["capabilities"] = sorted(action_caps)
+            (denied_actions if deny else allowed_actions).append(item)
+
+    if acl:
+        if mode == "deny":
+            for entry in acl.get("deny", []) or []:
+                apply_entry(entry, deny=True)
+        else:
+            for entry in acl.get("allow", []) or []:
+                apply_entry(entry, deny=False)
+    else:
+        for bucket_id in selected:
+            bucket = CAPABILITY_BUCKETS.get(bucket_id)
+            if not bucket:
+                continue
+            grants.update(bucket.grants)
+            denies.update(bucket.denies)
+            bucket_previews.append(bucket.as_catalog_dict(base_kind=base_kind, restriction=False))
+        for restriction_id in restrictions:
+            bucket = RESTRICTION_BUCKETS.get(restriction_id)
+            if not bucket:
+                continue
+            denies.update(bucket.denies)
+            restriction_previews.append(bucket.as_catalog_dict(base_kind=base_kind, restriction=True))
+
     if ceiling:
-        grants &= set(ceiling)
-        denies &= set(ceiling)
-    # Denies are audit/restriction evidence; selected grants remain authoritative.
-    denies -= grants
+        grants &= ceiling
+        denies &= ceiling
+    grants -= denies
+    # De-dupe previews while preserving first occurrence.
+    def dedupe_previews(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            item_id = str(item.get("id", "") or "")
+            if item_id and item_id not in seen:
+                out.append(item)
+                seen.add(item_id)
+        return out
+
     return {
-        "bucket_ids": selected,
-        "restriction_ids": restrictions,
+        "mode": mode or ("allow" if selected or restrictions else ""),
+        "bucket_ids": (selected if mode != "deny" else []) or ([str(_entry_text(item, "capability", "bucket")) for item in acl.get("allow", []) if str(_entry_text(item, "capability", "bucket")) in CAPABILITY_BUCKETS] if mode != "deny" else []),
+        "restriction_ids": (restrictions if mode == "deny" else []) or ([str(_entry_text(item, "capability", "bucket")) for item in acl.get("deny", []) if str(_entry_text(item, "capability", "bucket")) in RESTRICTION_BUCKETS] if mode == "deny" else []),
         "grants": sorted(grants),
         "denies": sorted(denies),
-        "bucket_previews": bucket_previews,
-        "restriction_previews": restriction_previews,
+        "allowed_tools": sorted(allowed_tools),
+        "denied_tools": sorted(denied_tools),
+        "allowed_families": sorted(allowed_families),
+        "denied_families": sorted(denied_families),
+        "allowed_actions": allowed_actions,
+        "denied_actions": denied_actions,
+        "bucket_previews": dedupe_previews(bucket_previews),
+        "restriction_previews": dedupe_previews(restriction_previews),
     }
-
 
 def _compiled_bucket_policy_for_definition(definition: "AgentClassDefinition") -> dict[str, Any]:
     return _compiled_bucket_policy_for_data(definition)
@@ -910,7 +1070,7 @@ def _agent_class_schema_version(data: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return -1
         return value
-    if any(key in data for key in ("identity", "runtime", "policy", "capabilities", "capability_buckets", "restriction_buckets", "communication", "delegation", "warnings")):
+    if any(key in data for key in ("identity", "runtime", "policy", "acl", "capabilities", "capability_buckets", "restriction_buckets", "communication", "delegation", "warnings")):
         return AGENT_CLASS_SCHEMA_VERSION
     return DEFAULT_AGENT_CLASS_SCHEMA_VERSION
 
@@ -931,7 +1091,7 @@ def _policy_mode_from_data(data: dict[str, Any]) -> str:
     mode = str(policy.get("mode", "") or "").strip()
     if mode:
         return mode
-    if _has_operator_bucket_selection(data):
+    if _acl_mapping(data) or _has_operator_bucket_selection(data):
         return "compile"
     if isinstance(policy, dict) and policy.get("generated_profile_id") is not None:
         return "compile"
@@ -954,6 +1114,10 @@ def _normalized_class_data(data: dict[str, Any]) -> dict[str, Any]:
 
     out = dict(data or {})
     out = _normalize_bucket_fields(out)
+    if isinstance(out.get("acl"), dict):
+        acl = dict(out.get("acl") or {})
+        acl.setdefault("mode", "allow")
+        out["acl"] = acl
     schema_version = _agent_class_schema_version(out)
     out["agent_class_schema_version"] = schema_version
     runtime = out.get("runtime") if isinstance(out.get("runtime"), dict) else {}
@@ -1012,8 +1176,6 @@ def primary_identity_label_for_class(definition_or_preview: "AgentClassDefinitio
         display_name = str(definition_or_preview.get("display_name", "") or "")
         class_id = str(definition_or_preview.get("id", "") or "")
         metadata = definition_or_preview.get("metadata", {}) if isinstance(definition_or_preview.get("metadata"), dict) else {}
-    if _is_creative_architect_class_identity(class_id, metadata):
-        return CREATIVE_ARCHITECT_NORMAL_LABEL
     for key in ("primary_ui_label", "label", "name"):
         text = str(identity.get(key, "") or "").strip()
         if text:
@@ -1022,11 +1184,7 @@ def primary_identity_label_for_class(definition_or_preview: "AgentClassDefinitio
 
 
 def internal_policy_display_name_for_class(definition: "AgentClassDefinition") -> str:
-    label = (
-        CREATIVE_ARCHITECT_INTERNAL_POLICY_LABEL
-        if _is_creative_architect_class_identity(definition.id, definition.metadata)
-        else primary_identity_label_for_class(definition)
-    )
+    label = primary_identity_label_for_class(definition)
     return f"{label} internal policy"
 
 
@@ -1058,6 +1216,53 @@ def agent_class_runtime_preview(definition_or_preview: "AgentClassDefinition | d
     runtime.setdefault("base_kind_label", secondary_base_kind_label_for_class(definition_or_preview))
     runtime.setdefault("arbitrary_runtime_kind", False)
     return runtime
+
+
+def compact_agent_class_acl_preview(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
+    compiled = _compiled_bucket_policy_for_data(definition_or_data)
+    mode = str(compiled.get("mode", "") or "").strip() or "wrap_profile"
+    return {
+        "mode": mode,
+        "allowed_capabilities": list(compiled.get("grants", []) or []),
+        "denied_capabilities": list(compiled.get("denies", []) or []),
+        "allowed_tools": list(compiled.get("allowed_tools", []) or []),
+        "denied_tools": list(compiled.get("denied_tools", []) or []),
+        "allowed_families": list(compiled.get("allowed_families", []) or []),
+        "denied_families": list(compiled.get("denied_families", []) or []),
+        "allowed_actions": list(compiled.get("allowed_actions", []) or []),
+        "denied_actions": list(compiled.get("denied_actions", []) or []),
+        "capability_buckets": list(compiled.get("bucket_ids", []) or []),
+        "restriction_buckets": list(compiled.get("restriction_ids", []) or []),
+    }
+
+
+def agent_class_authority_summary(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
+    if isinstance(definition_or_data, AgentClassDefinition):
+        base_kind = definition_or_data.base_kind
+        lifecycle = definition_or_data.lifecycle
+    else:
+        normalized = _normalized_class_data(definition_or_data)
+        base_kind = str(normalized.get("base_kind", "") or "")
+        lifecycle = str(normalized.get("lifecycle", "") or "")
+    compiled = _compiled_bucket_policy_for_data(definition_or_data)
+    grants = set(compiled.get("grants", []) or [])
+    denies = set(compiled.get("denies", []) or [])
+    ceiling = set(BASE_KIND_CEILINGS.get(base_kind, frozenset()))
+    unavailable_high_risk = sorted((ceiling & HIGH_RISK_CAPABILITIES) - grants)
+    high_risk_grants = sorted(grants & HIGH_RISK_CAPABILITIES)
+    return {
+        "mode": str(compiled.get("mode", "") or "wrap_profile"),
+        "base_kind": base_kind,
+        "lifecycle": lifecycle,
+        "granted_capability_count": len(grants),
+        "denied_capability_count": len(denies),
+        "allowed_tool_count": len(compiled.get("allowed_tools", []) or []),
+        "denied_tool_count": len(compiled.get("denied_tools", []) or []),
+        "allowed_family_count": len(compiled.get("allowed_families", []) or []),
+        "denied_family_count": len(compiled.get("denied_families", []) or []),
+        "high_risk_grants": high_risk_grants,
+        "unavailable_high_risk_capabilities": unavailable_high_risk,
+    }
 
 
 def compact_agent_class_policy_preview(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
@@ -1194,7 +1399,7 @@ def _nested_forbidden_key_paths(raw: Any, forbidden: set[str], *,
         for key, value in raw.items():
             key_text = str(key)
             child = f"{prefix}.{key_text}" if prefix else key_text
-            if key_text in forbidden and child not in allowed_paths:
+            if key_text in forbidden and child not in allowed_paths and not child.startswith("acl."):
                 paths.append(child)
             paths.extend(_nested_forbidden_key_paths(
                 value,
@@ -1358,15 +1563,36 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
     restrictions = _validate_bucket_alias_fields(raw_data, issues, source=source, class_id=class_id, restriction=True)
     if policy_mode != "compile":
         return
-    if not selected:
+    acl = _normalized_acl_for_data(normalized)
+    acl_allow_entries = _acl_entry_list(acl.get("allow"))
+    acl_deny_entries = _acl_entry_list(acl.get("deny"))
+    has_acl_entries = bool(acl_allow_entries or acl_deny_entries)
+    if not selected and not has_acl_entries:
         issues.append(ValidationIssue(
             "error",
-            "missing_capability_buckets",
-            "Agent Class compile policy must select operator capability buckets in capabilities.buckets",
+            "missing_acl_entries",
+            "Agent Class compile authority must select acl.allow entries in allow mode, acl.deny entries in deny mode, or legacy capabilities.buckets",
             path=source,
             profile_id=class_id,
         ))
         return
+    acl_mode = str(acl.get("mode", "") or "").strip().lower()
+    if acl_mode == "allow" and acl_deny_entries:
+        issues.append(ValidationIssue(
+            "error",
+            "acl_deny_not_allowed_in_allow_mode",
+            "acl.mode=allow must use acl.allow only; deny entries are only valid when acl.mode=deny",
+            path=source,
+            profile_id=class_id,
+        ))
+    if acl_mode == "deny" and acl_allow_entries:
+        issues.append(ValidationIssue(
+            "error",
+            "acl_allow_not_allowed_in_deny_mode",
+            "acl.mode=deny must use acl.deny only; allow entries are only valid when acl.mode=allow",
+            path=source,
+            profile_id=class_id,
+        ))
     for bucket_id in selected:
         bucket = CAPABILITY_BUCKETS.get(bucket_id)
         if not bucket:
@@ -1401,6 +1627,56 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
                 path=source,
                 profile_id=class_id,
             ))
+
+    def validate_acl_capability_entry(entry: Any, *, deny: bool) -> None:
+        token = _entry_text(entry, "capability", "bucket", "atom")
+        if not token:
+            return
+        capability_bucket = CAPABILITY_BUCKETS.get(token)
+        restriction_bucket = RESTRICTION_BUCKETS.get(token)
+        if capability_bucket:
+            if base_kind and base_kind not in capability_bucket.base_kinds:
+                issues.append(ValidationIssue(
+                    "error",
+                    "capability_bucket_unavailable_for_base_kind",
+                    f"capability bucket {token} is not available for base_kind={base_kind}",
+                    path=source,
+                    profile_id=class_id,
+                ))
+            if base_kind in BASE_KIND_CEILINGS:
+                outside = sorted(set(capability_bucket.grants) - BASE_KIND_CEILINGS[base_kind])
+                if outside:
+                    issues.append(ValidationIssue(
+                        "error",
+                        "capability_bucket_outside_base_kind_ceiling",
+                        f"capability bucket {token} grants atoms outside {base_kind} ceiling: " + ", ".join(outside),
+                        path=source,
+                        profile_id=class_id,
+                    ))
+            return
+        if restriction_bucket:
+            if base_kind and base_kind not in restriction_bucket.base_kinds:
+                issues.append(ValidationIssue(
+                    "error",
+                    "restriction_bucket_unavailable_for_base_kind",
+                    f"restriction bucket {token} is not available for base_kind={base_kind}",
+                    path=source,
+                    profile_id=class_id,
+                ))
+            return
+        if token in CAPABILITIES and base_kind in BASE_KIND_CEILINGS and token not in BASE_KIND_CEILINGS[base_kind]:
+            issues.append(ValidationIssue(
+                "error",
+                "acl_capability_outside_base_kind_ceiling",
+                f"ACL capability {token} is outside {base_kind} ceiling",
+                path=source,
+                profile_id=class_id,
+            ))
+
+    for entry in acl.get("allow", []) or []:
+        validate_acl_capability_entry(entry, deny=False)
+    for entry in acl.get("deny", []) or []:
+        validate_acl_capability_entry(entry, deny=True)
     compiled = _compiled_bucket_policy_for_data(normalized)
     grants = set(compiled.get("grants", []) or [])
     if base_kind in BASE_KIND_CEILINGS:
@@ -1413,49 +1689,6 @@ def _validate_bucket_policy_semantics(raw_data: dict[str, Any], normalized: dict
                 path=source,
                 profile_id=class_id,
             ))
-    metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
-    archetype = str((metadata or {}).get("archetype", "") or "").strip()
-    is_pm_class = class_id == "product-manager" or archetype == "product_manager" or "product-manager" in class_id
-    is_creative_architect_class = (
-        class_id == "creative-architect"
-        or archetype == "creative_architect"
-        or "creative-architect" in class_id
-    )
-    is_torque_steward_class = (
-        class_id == "torque-steward"
-        or archetype == "torque_steward"
-        or "torque-steward" in class_id
-    )
-    dangerous = sorted(grants & PM_DANGEROUS_CAPABILITIES)
-    if is_pm_class and dangerous:
-        issues.append(ValidationIssue(
-            "error",
-            "dangerous_product_manager_capability_buckets",
-            "Product Manager Agent Classes must not select buckets that grant dangerous execution/admin capabilities: "
-            + ", ".join(dangerous),
-            path=source,
-            profile_id=class_id,
-        ))
-    creative_dangerous = sorted(grants & CREATIVE_ARCHITECT_DANGEROUS_CAPABILITIES)
-    if is_creative_architect_class and creative_dangerous:
-        issues.append(ValidationIssue(
-            "error",
-            "dangerous_creative_architect_capability_buckets",
-            "Creative Architect Agent Classes must stay proposal-only and must not select execution/admin/accepted-decision capabilities: "
-            + ", ".join(creative_dangerous),
-            path=source,
-            profile_id=class_id,
-        ))
-    steward_disallowed = sorted(grants - TORQUE_STEWARD_FOUNDATION_ALLOWED_CAPABILITIES)
-    if is_torque_steward_class and steward_disallowed:
-        issues.append(ValidationIssue(
-            "error",
-            "dangerous_torque_steward_capability_buckets",
-            "Torque Steward Agent Classes must stay limited to observation plus approved communication/journal/peer coordination; disallowed capability atoms: "
-            + ", ".join(steward_disallowed),
-            path=source,
-            profile_id=class_id,
-        ))
 
 
 def _validate_compiled_agent_class_profile(definition: "AgentClassDefinition", *,
@@ -1661,7 +1894,7 @@ def validate_class_data(
             profile_id=class_id,
         ))
 
-    for mapping_key in ("identity", "runtime", "metadata", "draft", "policy", "capabilities", "communication", "delegation"):
+    for mapping_key in ("identity", "runtime", "metadata", "draft", "policy", "acl", "capabilities", "communication", "delegation"):
         if mapping_key in raw_data and not isinstance(raw_data.get(mapping_key), dict):
             issues.append(ValidationIssue(
                 "error",
@@ -1963,33 +2196,28 @@ def default_agent_class_id_for_kind(kind: str) -> str:
 
 
 def _compiled_profile_data_for_class(definition: AgentClassDefinition) -> dict[str, Any]:
-    policy = dict(definition.policy or {})
     generated_ref = definition.agent_profile_ref
     compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition)
     grants = list(compiled_bucket_policy.get("grants", []) or [])
     denies = list(compiled_bucket_policy.get("denies", []) or [])
+    acl_preview = compact_agent_class_acl_preview(definition)
     profile_policy = {
         "base_kind": definition.base_kind,
-        "scope": dict(policy.get("scope") or {}) if isinstance(policy.get("scope"), dict) else {},
-        "communication": dict(policy.get("communication") or {}) if isinstance(policy.get("communication"), dict) else {},
-        "spawn": dict(policy.get("spawn") or {}) if isinstance(policy.get("spawn"), dict) else {},
-        "audit": dict(policy.get("audit") or {}) if isinstance(policy.get("audit"), dict) else {},
+        "acl": acl_preview,
     }
-    if definition.communication:
-        profile_policy.setdefault("communication", {}).update(dict(definition.communication or {}))
     metadata = dict(definition.metadata or {})
-    metadata.setdefault("archetype", metadata.get("archetype", ""))
     metadata["generated_by_agent_class"] = {
         "id": definition.id,
         "version": definition.version,
         "display_name": definition.display_name,
         "schema_version": definition.agent_class_schema_version,
-        "policy_schema_version": policy.get("policy_schema_version", POLICY_SCHEMA_VERSION),
         "compiler_version": POLICY_COMPILER_VERSION,
+        "acl_mode": str(compiled_bucket_policy.get("mode", "") or ""),
         "capability_buckets": list(compiled_bucket_policy.get("bucket_ids", []) or []),
         "restriction_buckets": list(compiled_bucket_policy.get("restriction_ids", []) or []),
     }
-    metadata["internal_policy_source"] = "compiled_from_agent_class"
+    metadata["agent_class_acl"] = acl_preview
+    metadata["internal_policy_source"] = "compiled_from_agent_class_acl"
     metadata["capability_bucket_count"] = len(compiled_bucket_policy.get("bucket_ids", []) or [])
     metadata["restriction_bucket_count"] = len(compiled_bucket_policy.get("restriction_ids", []) or [])
     metadata["generated_profile"] = True
@@ -2084,73 +2312,6 @@ def internal_policy_preview_for_class(
     return out
 
 
-def _product_manager_status_contract(class_preview: dict[str, Any],
-                                     profile_preview: dict[str, Any]) -> dict[str, Any]:
-    if not _class_is_product_manager_preview(class_preview):
-        return {}
-    approved = _class_preview_approved_for_live_dogfood(class_preview)
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return {
-        "approved_for_live_dogfood": approved,
-        "permanence_state": str((metadata or {}).get("permanence_state", "") or (
-            "dogfood_permanent" if approved else "draft"
-        )),
-        "authority_model": "pm_safe_restricted",
-        "status": _class_status_from_previews(class_preview, profile_preview),
-        "raw_architect_authority": False,
-        "direct_engineer_worker_messaging": False,
-        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
-    }
-
-
-def _creative_architect_status_contract(class_preview: dict[str, Any],
-                                        profile_preview: dict[str, Any]) -> dict[str, Any]:
-    if not _class_is_creative_architect_preview(class_preview):
-        return {}
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return {
-        "proposal_only": bool((metadata or {}).get("proposal_only") is True),
-        "authority_model": "proposal_only_ideation_partner",
-        "status": _class_status_from_previews(class_preview, profile_preview),
-        "raw_architect_authority": False,
-        "direct_engineer_worker_messaging": False,
-        "accepted_decision_authority": False,
-        "thinking_wrappers": "architect_thinking_*",
-        "idea_brief_wrappers": "architect_product_idea_brief_*",
-        "proposal_wrappers": "architect_product_*",
-        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
-    }
-
-
-def _torque_steward_status_contract(class_preview: dict[str, Any],
-                                    profile_preview: dict[str, Any]) -> dict[str, Any]:
-    if not _class_is_torque_steward_preview(class_preview):
-        return {}
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return {
-        "foundation_wave": str((metadata or {}).get("foundation_wave", "") or "A"),
-        "authority_model": "conservative_observer_suggester",
-        "status": _class_status_from_previews(class_preview, profile_preview),
-        "represents_user_wishes": bool((metadata or {}).get("represents_user_wishes") is True),
-        "auto_create_enabled": False,
-        "raw_architect_authority": False,
-        "autonomous_mutation_authority": False,
-        "user_delegated_power_surface": "communication_journal_peer_coordination_only",
-        "user_message_ask": True,
-        "private_journal": True,
-        "same_group_architect_peer_coordination": True,
-        "direct_engineer_worker_messaging": False,
-        "worker_dispatch": False,
-        "restart_compaction": False,
-        "notifications_scheduling": False,
-        "deploy_admin": False,
-        "profile_class_admin": False,
-        "accepted_decision_authority": False,
-        "confirmation_required_before_powerful_actions": True,
-        "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
-    }
-
-
 def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: dict[str, Any]) -> str:
     if agent_class_is_archived(class_preview):
         return "archived"
@@ -2161,35 +2322,6 @@ def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: 
     if profile_status and profile_status != "full":
         return profile_status
     return "full"
-
-
-def _class_is_product_manager_preview(class_preview: dict[str, Any]) -> bool:
-    class_id = str(class_preview.get("id", "") or "").strip()
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return (
-        class_id == "product-manager"
-        or str((metadata or {}).get("archetype", "") or "").strip() == "product_manager"
-    )
-
-
-def _class_is_creative_architect_preview(class_preview: dict[str, Any]) -> bool:
-    class_id = str(class_preview.get("id", "") or "").strip()
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return _is_creative_architect_class_identity(class_id, metadata)
-
-
-def _class_is_torque_steward_preview(class_preview: dict[str, Any]) -> bool:
-    class_id = str(class_preview.get("id", "") or "").strip()
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return (
-        class_id == "torque-steward"
-        or str((metadata or {}).get("archetype", "") or "").strip() == "torque_steward"
-    )
-
-
-def _class_preview_approved_for_live_dogfood(class_preview: dict[str, Any]) -> bool:
-    metadata = class_preview.get("metadata") if isinstance(class_preview.get("metadata"), dict) else {}
-    return bool((metadata or {}).get("approved_for_live_dogfood") is True)
 
 
 def _profile_ref_text(definition_or_preview: AgentClassDefinition | dict[str, Any]) -> str:
@@ -2211,10 +2343,6 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
     class_id = str(class_preview.get("id", "") or "").strip()
     lifecycle = str(class_preview.get("lifecycle", "") or "").strip().lower()
     status = _class_status_from_previews(class_preview, profile_preview)
-    is_product_manager = _class_is_product_manager_preview(class_preview)
-    is_creative_architect = _class_is_creative_architect_preview(class_preview)
-    is_torque_steward = _class_is_torque_steward_preview(class_preview)
-    pm_approved = is_product_manager and _class_preview_approved_for_live_dogfood(class_preview)
     if agent_class_is_archived(class_preview):
         warnings.append(
             f"{class_id or 'Agent Class'} is archived/disabled and cannot be assigned or launched until re-enabled."
@@ -2223,23 +2351,11 @@ def class_warnings_for_preview(class_preview: dict[str, Any], profile_preview: d
         warnings.append(
             f"{class_id or 'Agent Class'} is lifecycle={lifecycle}; use only for scratch/preview unless explicitly approved."
         )
-    if is_product_manager:
-        warnings.append(PM_DOGFOOD_AUTHORITY_CAVEAT if pm_approved else PM_DRAFT_WARNING)
-    if is_creative_architect:
-        warnings.append(CREATIVE_ARCHITECT_AUTHORITY_CAVEAT)
-    if is_torque_steward:
-        warnings.append(TORQUE_STEWARD_AUTHORITY_CAVEAT)
-    if (status in {"draft", "restricted"} or lifecycle == "draft") and not pm_approved:
+    if status in {"draft", "restricted"} or lifecycle == "draft":
         warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
-    # Preserve profile warnings (PM wrapper restrictions, narrowed MCP surface).
+    # Preserve generated profile warnings (narrowed MCP surface, migration caveats).
     for warning in list(profile_preview.get("warnings", []) or []):
         text = str(warning or "").strip()
-        if pm_approved and (
-                text == PM_DRAFT_WARNING
-                or "draft/restricted until explicit live-dogfood approval" in text
-                or "approved for bounded live dogfood through the Agent Class" in text
-                or text == EXTERNAL_CONNECTOR_DRAFT_WARNING):
-            continue
         if text and text not in warnings:
             warnings.append(text)
     return warnings
@@ -2279,6 +2395,8 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["draft"] = dict(definition.draft or {})
     preview["prompt"] = definition.prompt
     preview["capabilities"] = dict(definition.capabilities or {})
+    preview["acl"] = compact_agent_class_acl_preview(definition)
+    preview["authority_summary"] = agent_class_authority_summary(definition)
     preview["communication"] = dict(definition.communication or {})
     preview["delegation"] = dict(definition.delegation or {})
     preview["class_warnings"] = list(definition.warnings or [])
@@ -2306,15 +2424,6 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["secondary_base_kind_label"] = secondary_base_kind_label_for_class(definition)
     preview["secondary_base_kind_metadata"] = agent_class_runtime_preview(definition)
     preview["status"] = _class_status_from_previews(preview, profile_preview)
-    pm_status_contract = _product_manager_status_contract(preview, profile_preview)
-    if pm_status_contract:
-        preview["product_manager_status"] = pm_status_contract
-    creative_status_contract = _creative_architect_status_contract(preview, profile_preview)
-    if creative_status_contract:
-        preview["creative_architect_status"] = creative_status_contract
-    steward_status_contract = _torque_steward_status_contract(preview, profile_preview)
-    if steward_status_contract:
-        preview["torque_steward_status"] = steward_status_contract
     warnings = class_warnings_for_preview(preview, profile_preview)
     for warning in definition.warnings or []:
         text = str(warning or "").strip()
@@ -2386,6 +2495,8 @@ def freeze_agent_class_snapshot(
         "identity": dict(definition.identity or {}),
         "runtime": agent_class_runtime_preview(definition),
         "capabilities": dict(definition.capabilities or {}),
+        "acl": compact_agent_class_acl_preview(definition),
+        "authority_summary": agent_class_authority_summary(definition),
         "capability_bucket_selection": list(compiled_bucket_policy.get("bucket_ids", []) or []),
         "restriction_bucket_selection": list(compiled_bucket_policy.get("restriction_ids", []) or []),
         "capability_bucket_summary": _operator_access_summary(compiled_bucket_policy) if compiled_bucket_policy else {
@@ -2411,15 +2522,6 @@ def freeze_agent_class_snapshot(
         "assignment_source": assignment_source,
         "frozen_at": float(frozen_at),
     }
-    pm_status_contract = _product_manager_status_contract(snapshot, profile_preview)
-    if pm_status_contract:
-        snapshot["product_manager_status"] = pm_status_contract
-    creative_status_contract = _creative_architect_status_contract(snapshot, profile_preview)
-    if creative_status_contract:
-        snapshot["creative_architect_status"] = creative_status_contract
-    steward_status_contract = _torque_steward_status_contract(snapshot, profile_preview)
-    if steward_status_contract:
-        snapshot["torque_steward_status"] = steward_status_contract
     snapshot["snapshot_hash"] = snapshot_hash({k: v for k, v in snapshot.items() if k != "snapshot_hash"})
     return snapshot
 
@@ -2460,6 +2562,8 @@ def agent_class_context_for_cell(cell: Any) -> dict[str, Any]:
         "agent_profile_id": str(profile.get("id", "") or ""),
         "agent_profile_version": str(profile.get("version", "") or ""),
         "internal_policy": dict(snapshot.get("internal_policy") or {}),
+        "acl": dict(snapshot.get("acl") or {}),
+        "authority_summary": dict(snapshot.get("authority_summary") or {}),
         "capability_bucket_selection": list(snapshot.get("capability_bucket_selection", []) or []),
         "restriction_bucket_selection": list(snapshot.get("restriction_bucket_selection", []) or []),
         "capability_bucket_summary": dict(snapshot.get("capability_bucket_summary") or {}),
@@ -2486,9 +2590,9 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
         "## Agent Class",
         f"Class: {class_id}@{snapshot.get('version', '')} ({snapshot.get('primary_identity_label', snapshot.get('display_name', '')) or class_id})",
         f"Lifecycle/status: {lifecycle or '-'} / {status or '-'}",
-        f"Internal Agent Profile policy: {ref.get('id', profile.get('id', ''))}@{ref.get('version', profile.get('version', ''))}",
+        f"Internal Agent Profile: {ref.get('id', profile.get('id', ''))}@{ref.get('version', profile.get('version', ''))}",
         f"Internal base kind: {snapshot.get('secondary_base_kind_label', snapshot.get('base_kind', '')) or '-'}",
-        "Agent Class is the primary operator-facing identity; Agent Profile-compatible policy remains the enforcement layer.",
+        "Agent Class is the primary operator-facing identity; ACL/capability projection remains the enforcement layer.",
     ]
     if prompt:
         lines.extend(["", prompt])
@@ -2609,27 +2713,12 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         )
     warnings = list(effective_preview.get("warnings", []) or [])
     legacy_direct_profile_warning = ""
-    if direct_profile_without_class and next_launch_profile_id == "product-manager-draft":
+    if direct_profile_without_class:
         legacy_direct_profile_warning = (
-            "Legacy direct Product Manager Agent Profile assignment is pending; "
-            "set desired Agent Class to product-manager for class-first next relaunch. "
-            "No silent migration is performed."
+            "Legacy direct Agent Profile assignment is active; set a desired Agent Class "
+            "for class-first next relaunch. No silent migration is performed."
         )
         warnings.append(legacy_direct_profile_warning)
-    next_launch_pm_approved = False
-    if assigned_preview and assigned_preview.get("id") == next_launch_class_id:
-        next_launch_pm_approved = (
-            _class_is_product_manager_preview(assigned_preview)
-            and _class_preview_approved_for_live_dogfood(assigned_preview)
-        )
-    elif effective_preview and effective_preview.get("id") == next_launch_class_id:
-        next_launch_pm_approved = (
-            _class_is_product_manager_preview(effective_preview)
-            and _class_preview_approved_for_live_dogfood(effective_preview)
-        )
-    if not direct_profile_without_class and next_launch_class_id == "product-manager" and not next_launch_pm_approved:
-        if EXTERNAL_CONNECTOR_DRAFT_WARNING not in warnings:
-            warnings.append(EXTERNAL_CONNECTOR_DRAFT_WARNING)
     deduped_warnings: list[str] = []
     seen_warnings: set[str] = set()
     for warning in warnings:
@@ -2681,7 +2770,7 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
         "pending_next_launch": pending_next_launch,
         "status": str(effective_preview.get("status", "") or "full"),
         "direct_agent_profile_assignment": direct_profile_without_class,
-        "legacy_direct_product_manager_profile": bool(legacy_direct_profile_warning),
+        "legacy_direct_profile": bool(legacy_direct_profile_warning),
         "legacy_direct_profile_warning": legacy_direct_profile_warning,
         "internal_policy": dict(effective_preview.get("internal_policy") or {}),
         "next_launch_internal_policy": (
@@ -2707,13 +2796,15 @@ def agent_class_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any]:
 
 
 def built_in_agent_class_ids() -> list[str]:
-    return [
-        "creative-architect",
-        "default-architect",
-        "default-engineer",
-        "default-worker",
-        "product-manager",
-    ]
+    ids: list[str] = []
+    for path in _iter_yaml_paths(BUILTIN_CLASS_DIR):
+        data, issue = load_class_yaml(path)
+        if issue or not isinstance(data, dict):
+            continue
+        class_id = str(data.get("id", "") or "").strip()
+        if class_id:
+            ids.append(class_id)
+    return sorted(set(ids))
 
 
 def _extract_project_class_paths_by_id(base_dir: str = "") -> dict[str, Path]:
@@ -2800,6 +2891,7 @@ def normalize_agent_class_authoring_data(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_agent_class_data(data: dict[str, Any]) -> dict[str, Any]:
+    raw_had_policy = isinstance(data.get("policy"), dict) and bool(data.get("policy"))
     data = _normalized_class_data(data)
     ref = data.get("agent_profile_ref") if isinstance(data.get("agent_profile_ref"), dict) else {}
     schema_version = _agent_class_schema_version(data)
@@ -2830,10 +2922,16 @@ def _canonical_agent_class_data(data: dict[str, Any]) -> dict[str, Any]:
     prompt = str(data.get("prompt", "") or "").strip()
     if prompt:
         out["prompt"] = {"addendum": prompt} if schema_version >= AGENT_CLASS_SCHEMA_VERSION else prompt
-    for key in ("identity", "policy", "capabilities", "communication", "delegation"):
+    for key in ("identity", "acl", "capabilities", "communication", "delegation"):
         value = data.get(key)
+        if key == "capabilities" and not value:
+            continue
         if isinstance(value, dict) and value:
             out[key] = dict(value)
+    if raw_had_policy:
+        value = data.get("policy")
+        if isinstance(value, dict) and value:
+            out["policy"] = dict(value)
     warnings = _string_list(data.get("warnings"))
     if warnings:
         out["warnings"] = warnings

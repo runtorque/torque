@@ -328,7 +328,6 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
 
   assert.equal(menuCalls.length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(menuCalls[0].items.map(item => item.label))), [
-    'Launch Torque Steward',
     'New architect',
     'New engineer',
     'New worker',
@@ -344,13 +343,9 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
     { type: 'engineer', group: 'torque', architectId: '' },
     { type: 'worker', group: 'torque' },
   ]);
-  assert.ok(sandbox.sendCalls.some(c => c.cmd === 'create_agent_from_class'
-    && c.class_id === 'torque-steward'
-    && c.name === 'Torque Steward'
-    && c.group === 'torque'));
 });
 
-test('stratified grid pins Torque Steward before older architects when present', () => {
+test('stratified grid keeps Torque Steward in normal architect creation order', () => {
   const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.torque = ['arch-old', 'arch-steward', 'arch-late'];
   sandbox.state.agents['arch-old'] = architect('arch-old', 'Torqly', 1);
@@ -365,8 +360,8 @@ test('stratified grid pins Torque Steward before older architects when present',
   assert.deepEqual(JSON.parse(vm.runInContext(
     'JSON.stringify(((window._navGridRows || []).find(function(row) { return row.rowType === "architect-strip-row"; }) || { items: [] }).items.map(function(item) { return item.id; }))',
     context,
-  )), ['arch-steward', 'arch-old', 'arch-late']);
-  assert.match(mainEl.innerHTML, /data-agent-architect-strip[\s\S]*arch-steward[\s\S]*arch-old[\s\S]*arch-late/);
+  )), ['arch-old', 'arch-steward', 'arch-late']);
+  assert.match(mainEl.innerHTML, /data-agent-architect-strip[\s\S]*arch-old[\s\S]*arch-steward[\s\S]*arch-late/);
 });
 
 test('navigation model includes all visible strata in visual order without legacy principal rows', () => {
@@ -437,7 +432,7 @@ test('switching between execution-owning Architects updates the retained hierarc
     context,
   ));
   assert.deepEqual(rows.slice(0, 2), [
-    { rowKey: 'architects:strip', rowType: 'architect-strip-row', sectionKey: 'architects', items: ['arch-steward', 'arch-a', 'arch-b'] },
+    { rowKey: 'architects:strip', rowType: 'architect-strip-row', sectionKey: 'architects', items: ['arch-a', 'arch-steward', 'arch-b'] },
     { rowKey: 'architect:arch-b:engineer:eng-b', rowType: 'engineer-row', sectionKey: 'architect:arch-b', items: ['eng-b', 'worker-b'] },
   ]);
 });

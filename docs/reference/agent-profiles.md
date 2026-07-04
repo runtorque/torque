@@ -1,6 +1,6 @@
 # Agent Profiles
 
-Agent Profiles are a monotonic capability-policy layer over Torque's existing
+Agent Profiles are the legacy/internal MCP projection layer over Torque's existing
 runtime agent kinds. They are **not** new runtime kinds: every profile declares
 one of `architect`, `engineer`, or `worker` as its `base_kind`, and validation
 requires grants to stay inside that base-kind ceiling.
@@ -14,18 +14,15 @@ fields plus `effective_agent_profile_*` launch snapshot fields.
 ## Relationship to Agent Classes
 
 Agent Classes are now the normal operator-facing template/selection layer.
-Agent Profiles remain the internal Agent Profile-compatible enforcement layer.
-A class may either wrap an existing profile (`policy.mode: wrap_profile`) or
-compile class-owned operator capability buckets (`capabilities.buckets` plus
-`capabilities.restrictions`) into a generated/internal profile snapshot
-(`policy.mode: compile`). Class config lives in `.torque/agent_classes/*.yaml`;
-reviewed authored profile config remains in `.torque/agent_profiles/*.yaml`.
-Wave 7B does not write generated internal profiles as project YAML, and Agent
+Class authority is authored as ACL YAML and compiled into an internal
+Agent Profile-compatible runtime snapshot for MCP projection. Class config lives
+in `.torque/agent_classes/*.yaml`; reviewed authored profile config remains in
+`.torque/agent_profiles/*.yaml` for Advanced/Internal backcompat only. Agent
 Class normal authoring does not expose raw Agent Profile atom grants/denies.
 
 Direct Agent Profile assignment remains trusted-user-only for
-Advanced/Internal policy backcompat. Agent Class assignment is also
-trusted-user-only and freezes a class/profile-policy pair on the next launch,
+Advanced/Internal backcompat. Agent Class assignment is also
+trusted-user-only and freezes a class/runtime-projection pair on the next launch,
 without mutating running sessions.
 
 ## Config paths
@@ -89,16 +86,14 @@ grants:
 denies:
   - agent.hire_engineer
   - task.dispatch
-policy:
-  base_kind: architect
-  scope:
-    planning_visibility: broad same-group Areas/Initiatives reads
-  communication:
-    engineer_worker_messages: deny by default
-  spawn:
-    dispatch: deny
+acl:
+  mode: allow
+  allowed_families:
+    - architect_product_*
+  denied_tools:
+    - architect_tool_search
 metadata:
-  archetype: product_manager
+  runtime_enforcement: mcp_projection_when_effective_profile_is_set
 ```
 
 Do not use `profile`, `agent_profile`, `runtime_profile`, or similar fields in
@@ -109,24 +104,23 @@ runtime profile fields.
 
 `torque.agent_profiles` validates definitions for malformed YAML, missing
 identity fields, unknown fields/capabilities, grants outside the declared base
-kind, built-in profile/base-kind mismatches, and Product Manager grants for
-dangerous execution/admin capabilities.
+kind, and built-in profile/base-kind mismatches.
 
 Preview helpers expose base kind, profile id/version, full/draft/restricted
-status, granted capabilities, high-risk denied capabilities, policy summaries,
+status, granted capabilities, high-risk denied capabilities, ACL summaries,
 projected tool-category allow/deny status, and warnings. `product-manager-draft`
-previews warn that it is a legacy/internal scratch-only Product Manager profile,
-that raw Architect tools are denied in favor of `architect_product_*` wrappers,
-and that the class-first Product Manager assignment should use the Product
-Manager Agent Class. The draft PM profile is not a runtime kind and must not be
-used for live PM dogfood or Blueprint replacement.
+is retained only as a legacy direct-profile compatibility artifact; class-first
+Product Manager assignment should use the Product Manager Agent Class. The draft
+profile is not a runtime kind and must not be used for live product authority or
+Blueprint replacement.
 
 `torque doctor` includes `[agent_profiles]` validation plus assignment/audit
 counts and structured assignment/audit data in the JSON report. It warns for
 legacy direct `product-manager-draft` assignments and does not silently migrate
 them to the Product Manager class. UI should render profile data as
-Advanced/Internal policy detail behind Agent Class identity; Agent Class create/edit
-flows should use the Agent Class bucket catalog rather than raw profile atoms.
+Advanced/Internal runtime-projection detail behind Agent Class identity; Agent
+Class create/edit flows should use the Agent Class ACL UI rather than raw profile
+atoms.
 
 
 ## Product Manager Wave 4B scratch smoke
