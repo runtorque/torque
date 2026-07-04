@@ -78,8 +78,7 @@ generated internal profile id.
 
 ### Proposed YAML shape
 
-We can keep supporting `prompt.addendum` during migration, but the generic
-prompt model should move toward structured sections like:
+Agent Class prompts use structured sections only:
 
 ```yaml
 prompt:
@@ -99,7 +98,7 @@ prompt:
       text: Use visible Thinking tools for caller-owned Scratchpad notes and Mind Maps.
 ```
 
-The exact schema can change, but the important property is that class behavior
+The important property is that class behavior
 comes from data, not Python `if class_id == ...` branches.
 
 ### Implementation notes

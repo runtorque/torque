@@ -1685,7 +1685,7 @@ function _agentClassDefaultDraft(kind) {
     restriction_bucket_selection: [],
     agent_profile_ref: { id: profileId, version: _agentClassProfileVersion(profileId, '1') },
     agent_profile: _agentClassProfileById(profileId) || {},
-    prompt: '',
+    prompt: {},
     metadata: { ui: {} },
     draft: { scratch_only: false, approved_for_live_dogfood: false },
     custom: true,
@@ -1693,6 +1693,16 @@ function _agentClassDefaultDraft(kind) {
     launchable: true,
     status: 'full',
   };
+}
+
+function _agentClassPromptJobText(prompt) {
+  prompt = prompt && typeof prompt === 'object' ? prompt : {};
+  return String(prompt.job || prompt.identity || '').trim();
+}
+
+function _agentClassPromptFromJobText(text) {
+  text = String(text || '').trim();
+  return text ? { job: text } : {};
 }
 
 function _agentClassEditablePreview() {
@@ -1914,7 +1924,7 @@ function _agentClassEditorFormHtml(preview) {
   html += '</select>';
   html += _agentClassBucketAuthoringHtml(preview, kind, readOnly);
   html += '<details class="tpled-section" open><summary>Class instructions</summary>';
-  html += '<label>Additive prompt/class instructions</label><textarea id="agent-class-prompt" rows="6" ' + (readOnly ? 'readonly ' : '') + 'oninput="_tplAutoResize(this);agentClassManagerMarkDirty()" placeholder="Optional additive context appended after the base-kind prompt.">' + esc(preview.prompt || '') + '</textarea>';
+  html += '<label>Class job prompt</label><textarea id="agent-class-prompt" rows="6" ' + (readOnly ? 'readonly ' : '') + 'oninput="_tplAutoResize(this);agentClassManagerMarkDirty()" placeholder="Describe the class job within projected authority.">' + esc(_agentClassPromptJobText(preview.prompt)) + '</textarea>';
   html += '</details>';
   html += '<details class="tpled-section agent-class-internal-policy-section" id="agent-class-internal-policy-section"><summary>Advanced/Internal diagnostics and backcompat policy</summary>';
   html += '<div class="agent-class-hint">Advanced/backcompat only: direct troubleshooting links are for existing classes. Normal authoring uses the permissions above.</div>';
@@ -2363,7 +2373,7 @@ function _agentClassReadFormSafe() {
     display_name: String(value('agent-class-display-name', '')).trim(),
     description: String(value('agent-class-description', '')).trim(),
     lifecycle: lifecycle,
-    prompt: value('agent-class-prompt', ''),
+    prompt: _agentClassPromptFromJobText(value('agent-class-prompt', '')),
   };
   if (useBucketPolicy) {
     data.acl = _agentClassAclFromBucketSelection(selectedBuckets, []);
@@ -2486,7 +2496,7 @@ function agentClassManagerDuplicate() {
       acl: _agentClassPreview.acl || {},
       capability_bucket_selection: _agentClassSelectedBucketIds(_agentClassPreview, false),
       restriction_bucket_selection: [],
-      prompt: _agentClassPreview.prompt || '',
+      prompt: _agentClassPromptJobText(_agentClassPreview.prompt),
       metadata: _agentClassPreview.metadata || {},
       draft: _agentClassPreview.draft || {},
     };
@@ -2624,7 +2634,7 @@ function _agentClassFormObjectFromSnapshot(form) {
     display_name: form['agent-class-display-name'] || '',
     description: form['agent-class-description'] || '',
     lifecycle: form['agent-class-lifecycle'] || 'stable',
-    prompt: form['agent-class-prompt'] || '',
+    prompt: _agentClassPromptFromJobText(form['agent-class-prompt'] || ''),
     draft: { scratch_only: !!form['agent-class-scratch-only'], approved_for_live_dogfood: false },
     metadata: { ui: {} },
   };

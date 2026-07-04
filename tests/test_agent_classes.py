@@ -308,7 +308,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "display_name": "Planning Architect",
             "identity": {"label": "Planning Architect", "primary_ui_label": "Planning Architect"},
             "runtime": {"base_kind": "architect", "base_kind_label": "Architect-derived"},
-            "prompt": {"addendum": "Use planning-safe surfaces only."},
+            "prompt": {"job": "Use planning-safe surfaces only."},
             "acl": {
                 "mode": "allow",
                 "allow": [
@@ -317,7 +317,6 @@ class AgentClassRegistryTests(unittest.TestCase):
                     {"capability": "user_messages"},
                 ],
             },
-            "delegation": {"dispatch_workers": "denied"},
             "warnings": ["External connectors are separate."],
         }
 
@@ -361,6 +360,12 @@ class AgentClassRegistryTests(unittest.TestCase):
         }
         _mixed_definition, mixed_issues = validate_class_data(mixed, base_dir=str(self.project))
         self.assertIn("acl_deny_not_allowed_in_allow_mode", {issue.code for issue in mixed_issues})
+
+        legacy_prompt = dict(valid)
+        legacy_prompt["id"] = "legacy-prompt"
+        legacy_prompt["prompt"] = {"addendum": "Legacy addendum is not accepted."}
+        _legacy_definition, legacy_issues = validate_class_data(legacy_prompt, base_dir=str(self.project))
+        self.assertIn("unknown_prompt_fields", {issue.code for issue in legacy_issues})
 
     def test_bucket_validation_rejects_cross_base_and_pm_broadening(self):
         worker_with_architect_bucket = {
@@ -408,7 +413,7 @@ class AgentClassRegistryTests(unittest.TestCase):
             "title": "Custom Architect",
             "description": "Operator-authored class.",
             "agent_profile_ref": {"id": "full-architect", "version": "1"},
-            "instructions": "Use the custom class prompt.",
+            "prompt": {"job": "Use the custom class prompt."},
             "icon": "CA",
             "badge": "custom",
             "color": "#abcdef",
@@ -446,8 +451,7 @@ class AgentClassRegistryTests(unittest.TestCase):
 
         updated = dict(draft)
         updated["description"] = "Updated description."
-        updated["prompt"] = "Updated prompt."
-        updated.pop("instructions", None)
+        updated["prompt"] = {"job": "Updated prompt."}
         update_result = save_custom_agent_class(
             updated,
             base_dir=str(self.project),
@@ -878,9 +882,9 @@ class AgentClassStorageLaunchTests(unittest.TestCase):
             cell.effective_agent_profile_snapshot["metadata"]["generated_by_agent_class"]["id"],
             "creative-architect",
         )
-        self.assertIn("Creative Architect", prompt_block)
+        self.assertIn("imaginative but grounded ideation partner", prompt_block)
         self.assertIn("Diverge first", prompt_block)
-        self.assertIn("never treat ideas as accepted plans", prompt_block)
+        self.assertIn("non-binding until accepted", prompt_block)
         self.assertTrue(mcp_tool_allowed_by_policy("architect_thinking_scratchpad_create", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_thinking_mind_map_node_create", policy))
         self.assertTrue(mcp_tool_allowed_by_policy("architect_product_idea_brief_create", policy))
@@ -1161,7 +1165,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
                 "base_kind": "architect",
                 "display_name": "Launch Architect",
                 "agent_profile_ref": {"id": "full-architect", "version": "1"},
-                "prompt": "Custom launch prompt.",
+                "prompt": {"job": "Custom launch prompt."},
             },
             base_dir=str(self.project),
             mode="create",
@@ -1266,7 +1270,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         cell = self.state.agents["architect-created"]
         self.assertEqual(cell.effective_agent_class_id, "launch-architect")
         self.assertEqual(cell.effective_agent_profile_id, "full-architect")
-        self.assertEqual(cell.effective_agent_class_snapshot["prompt"], "Custom launch prompt.")
+        self.assertEqual(cell.effective_agent_class_snapshot["prompt"], {"job": "Custom launch prompt."})
         self.assertEqual(mismatch["type"], "error")
         self.assertEqual(mismatch["code"], "agent_class_base_kind_mismatch")
 
@@ -1354,7 +1358,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
                 "display_name": "QA Worker",
                 "description": "Validation worker class.",
                 "agent_profile_ref": {"id": "full-worker", "version": "1"},
-                "prompt": "Check the assignment and report evidence first.",
+                "prompt": {"job": "Check the assignment and report evidence first."},
                 "icon": "QA",
                 "badge": "validation",
             }
@@ -1404,7 +1408,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
             )
             updated_payload = dict(custom_payload)
             updated_payload["description"] = "Validation worker class updated."
-            updated_payload["prompt"] = "Updated prompt: verify custom worker launch evidence."
+            updated_payload["prompt"] = {"job": "Updated prompt: verify custom worker launch evidence."}
             updated = await _handle_agent_class_command(
                 {
                     "cmd": "agent_class_update",
@@ -1525,7 +1529,7 @@ class AgentClassDoctorAndCommandTests(unittest.TestCase):
         self.assertEqual(cell.effective_agent_class_snapshot["primary_identity_label"], "QA Worker")
         self.assertEqual(
             cell.effective_agent_class_snapshot["prompt"],
-            "Updated prompt: verify custom worker launch evidence.",
+            {"job": "Updated prompt: verify custom worker launch evidence."},
         )
         self.assertIn("## Agent Class", created_prompts[cell.id])
         self.assertIn("QA Worker", created_prompts[cell.id])

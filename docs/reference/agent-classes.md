@@ -57,9 +57,20 @@ lifecycle: stable
 runtime:
   base_kind: architect
 prompt:
-  addendum: |
-    Additive class instructions. Class-specific behavior lives here, not in
-    Python branches.
+  identity: >
+    You are an imaginative but grounded ideation partner for Torque.
+  job: >
+    Shape product understanding and produce safe proposal artifacts within
+    projected authority.
+  boot_checklist:
+    - Confirm class, group, and visible tools.
+    - Read projected context before proposing changes.
+  operating_guidelines:
+    - Separate observations, inferences, options, risks, and non-goals.
+    - Treat proposals as non-binding until accepted by an authorized actor.
+  tool_guidance:
+    - when_capability: thinking_workspace
+      text: Use visible Thinking tools for caller-owned Scratchpad notes and Mind Maps.
 acl:
   mode: allow # allow | deny
   allow:
@@ -195,7 +206,7 @@ behavior-overlay, communication, and journal surfaces. Hire/Engineer management,
 Worker dispatch, execution task control, direct Engineer/Worker messaging,
 worktree/merge, deploy/admin/settings, class/profile admin, accepted-decision
 authority, raw tool-picker authority, and everything else are denied by omission.
-Its prompt addendum instructs the agent to diverge first, converge second,
+Its structured prompt sections instruct the agent to diverge first, converge second,
 connect product patterns, propose small shippable slices, state risks/non-goals,
 and never treat ideas as accepted plans.
 
@@ -257,10 +268,12 @@ explanations.
 
 ## Prompt composition
 
-Base-kind system prompts remain primary. If an effective Agent Class has an
-additive prompt, Torque appends a compact Agent Class block after the base
-prompt. Default/full classes have no prompt addendum so unassigned default
-Architect/Engineer/Worker behavior stays compatible.
+Base-kind system prompts remain primary. If an effective Agent Class has structured
+prompt sections, Torque appends a compact Agent Class block after the base prompt.
+Default/full classes have no prompt sections so unassigned default Architect/Engineer/Worker
+behavior stays compatible. Prompt authoring uses only `identity`, `job`,
+`boot_checklist`, `operating_guidelines`, and `tool_guidance`; legacy addendum strings
+are not part of the schema.
 
 Action templates can inspect compact class context via
 `torque.agent.agent_class` in the Jinja `torque` namespace.

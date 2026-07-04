@@ -47,13 +47,17 @@ POLICY_COMPILER_VERSION = "agent_class_policy_compiler_v1"
 ALLOWED_POLICY_MODES = {"wrap_profile", "compile"}
 SAFE_UI_METADATA_KEYS = {"label", "icon", "badge", "color"}
 AUTHORING_DISPLAY_ALIASES = {"title", "display_title"}
-AUTHORING_PROMPT_ALIASES = {"instructions", "class_instructions", "class_prompt"}
 AUTHORING_DESCRIPTION_ALIASES = {"purpose"}
 CUSTOM_CLASS_ARCHIVED_KEY = "archived"
 MAX_DISPLAY_NAME_LEN = 120
 MAX_DESCRIPTION_LEN = 2000
 MAX_PROMPT_LEN = 30000
 MAX_METADATA_JSON_BYTES = 65536
+
+PROMPT_TEXT_KEYS = ("identity", "job")
+PROMPT_LIST_KEYS = ("boot_checklist", "operating_guidelines")
+PROMPT_TOOL_GUIDANCE_KEY = "tool_guidance"
+PROMPT_ALLOWED_KEYS = set(PROMPT_TEXT_KEYS) | set(PROMPT_LIST_KEYS) | {PROMPT_TOOL_GUIDANCE_KEY}
 
 DEFAULT_CLASS_BY_KIND = {
     "architect": "default-architect",
@@ -98,7 +102,6 @@ KNOWN_CLASS_KEYS = {
     "restriction_buckets",
     "capabilities",
     "communication",
-    "delegation",
     "warnings",
     "metadata",
     "draft",
@@ -631,14 +634,13 @@ class AgentClassDefinition:
     display_name: str = ""
     description: str = ""
     lifecycle: str = "stable"
-    prompt: str = ""
+    prompt: dict[str, Any] = field(default_factory=dict)
     identity: dict[str, Any] = field(default_factory=dict)
     runtime: dict[str, Any] = field(default_factory=dict)
     policy: dict[str, Any] = field(default_factory=dict)
     acl: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, Any] = field(default_factory=dict)
     communication: dict[str, Any] = field(default_factory=dict)
-    delegation: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     draft: dict[str, Any] = field(default_factory=dict)
@@ -671,14 +673,13 @@ class AgentClassDefinition:
             description=str(data.get("description", "") or "").strip(),
             lifecycle=str(data.get("lifecycle", "stable") or "stable").strip(),
             agent_profile_ref=ref,
-            prompt=str(data.get("prompt", "") or "").strip(),
+            prompt=_normalized_prompt_mapping(data.get("prompt", {})),
             identity=(dict(data.get("identity") or {}) if isinstance(data.get("identity"), dict) else {}),
             runtime=(dict(data.get("runtime") or {}) if isinstance(data.get("runtime"), dict) else {}),
             policy=(dict(data.get("policy") or {}) if isinstance(data.get("policy"), dict) else {}),
             acl=(dict(data.get("acl") or {}) if isinstance(data.get("acl"), dict) else {}),
             capabilities=(dict(data.get("capabilities") or {}) if isinstance(data.get("capabilities"), dict) else {}),
             communication=(dict(data.get("communication") or {}) if isinstance(data.get("communication"), dict) else {}),
-            delegation=(dict(data.get("delegation") or {}) if isinstance(data.get("delegation"), dict) else {}),
             warnings=_string_list(data.get("warnings")),
             metadata=(dict(data.get("metadata") or {}) if isinstance(data.get("metadata"), dict) else {}),
             draft=(dict(data.get("draft") or {}) if isinstance(data.get("draft"), dict) else {}),
@@ -1070,20 +1071,130 @@ def _agent_class_schema_version(data: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return -1
         return value
-    if any(key in data for key in ("identity", "runtime", "policy", "acl", "capabilities", "capability_buckets", "restriction_buckets", "communication", "delegation", "warnings")):
+    if any(key in data for key in ("identity", "runtime", "prompt", "policy", "acl", "capabilities", "capability_buckets", "restriction_buckets", "communication", "warnings")):
         return AGENT_CLASS_SCHEMA_VERSION
     return DEFAULT_AGENT_CLASS_SCHEMA_VERSION
 
 
-def _prompt_addendum_from_value(value: Any) -> str:
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, dict):
-        for key in ("addendum", "text", "instructions"):
-            text = str(value.get(key, "") or "").strip()
-            if text:
-                return text
-    return ""
+def _normalized_prompt_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key in PROMPT_TEXT_KEYS:
+        text = str(value.get(key, "") or "").strip()
+        if text:
+            out[key] = text
+    for key in PROMPT_LIST_KEYS:
+        items = _string_list(value.get(key))
+        if items:
+            out[key] = items
+    guidance_items: list[dict[str, str]] = []
+    raw_guidance = value.get(PROMPT_TOOL_GUIDANCE_KEY)
+    if isinstance(raw_guidance, list):
+        for item in raw_guidance:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "") or "").strip()
+            if not text:
+                continue
+            normalized: dict[str, str] = {"text": text}
+            for selector_key in ("when_capability", "when_tool", "when_family"):
+                selector = str(item.get(selector_key, "") or "").strip()
+                if selector:
+                    normalized[selector_key] = selector
+            guidance_items.append(normalized)
+    if guidance_items:
+        out[PROMPT_TOOL_GUIDANCE_KEY] = guidance_items
+    return out
+
+
+def _prompt_plain_text(prompt: Any) -> str:
+    prompt = _normalized_prompt_mapping(prompt)
+    parts: list[str] = []
+    for key in PROMPT_TEXT_KEYS:
+        if prompt.get(key):
+            parts.append(str(prompt[key]))
+    for key in PROMPT_LIST_KEYS:
+        parts.extend(str(item) for item in prompt.get(key, []) or [])
+    for item in prompt.get(PROMPT_TOOL_GUIDANCE_KEY, []) or []:
+        if isinstance(item, dict):
+            parts.append(str(item.get("text", "") or ""))
+    return "\n".join(part.strip() for part in parts if str(part).strip()).strip()
+
+
+def _snapshot_prompt_capability_tokens(snapshot: dict[str, Any]) -> set[str]:
+    tokens = {str(item or "").strip() for item in snapshot.get("capability_bucket_selection", []) or [] if str(item or "").strip()}
+    profile = snapshot.get("agent_profile") if isinstance(snapshot.get("agent_profile"), dict) else {}
+    for item in profile.get("capabilities", []) or []:
+        if isinstance(item, dict):
+            atom = str(item.get("atom", "") or "").strip()
+        else:
+            atom = str(item or "").strip()
+        if atom:
+            tokens.add(atom)
+    return tokens
+
+
+def _snapshot_prompt_tool_tokens(snapshot: dict[str, Any]) -> tuple[set[str], set[str]]:
+    acl = snapshot.get("acl") if isinstance(snapshot.get("acl"), dict) else {}
+    tools = {str(item or "").strip() for item in acl.get("allowed_tools", []) or [] if str(item or "").strip()}
+    families = {str(item or "").strip() for item in acl.get("allowed_families", []) or [] if str(item or "").strip()}
+    return tools, families
+
+
+def _prompt_guidance_visible(item: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    capability = str(item.get("when_capability", "") or "").strip()
+    if capability and capability not in _snapshot_prompt_capability_tokens(snapshot):
+        return False
+    tool = str(item.get("when_tool", "") or "").strip()
+    family = str(item.get("when_family", "") or "").strip()
+    if tool or family:
+        tools, families = _snapshot_prompt_tool_tokens(snapshot)
+        if tool and tool not in tools:
+            return False
+        if family and family not in families:
+            return False
+    return True
+
+
+def render_agent_class_prompt(prompt: Any, *, snapshot: dict[str, Any] | None = None) -> str:
+    prompt = _normalized_prompt_mapping(prompt)
+    snapshot = snapshot or {}
+    lines: list[str] = []
+    identity = str(prompt.get("identity", "") or "").strip()
+    if identity:
+        lines.extend(["## Class identity", identity])
+    job = str(prompt.get("job", "") or "").strip()
+    if job:
+        if lines:
+            lines.append("")
+        lines.extend(["## Class job", job])
+    boot = [str(item or "").strip() for item in prompt.get("boot_checklist", []) or [] if str(item or "").strip()]
+    if boot:
+        if lines:
+            lines.append("")
+        lines.append("## Class boot checklist")
+        lines.extend(f"{idx}. {item}" for idx, item in enumerate(boot, start=1))
+    guidelines = [str(item or "").strip() for item in prompt.get("operating_guidelines", []) or [] if str(item or "").strip()]
+    if guidelines:
+        if lines:
+            lines.append("")
+        lines.append("## Class operating guidelines")
+        lines.extend(f"{idx}. {item}" for idx, item in enumerate(guidelines, start=1))
+    guidance = [
+        item for item in prompt.get(PROMPT_TOOL_GUIDANCE_KEY, []) or []
+        if isinstance(item, dict) and _prompt_guidance_visible(item, snapshot)
+    ]
+    if guidance:
+        if lines:
+            lines.append("")
+        lines.append("## Class tool guidance")
+        for item in guidance:
+            selector = str(item.get("when_capability") or item.get("when_tool") or item.get("when_family") or "").strip()
+            text = str(item.get("text", "") or "").strip()
+            prefix = f"When `{selector}` is available: " if selector else ""
+            lines.append(f"- {prefix}{text}")
+    return "\n".join(lines).strip()
 
 
 def _policy_mode_from_data(data: dict[str, Any]) -> str:
@@ -1128,8 +1239,7 @@ def _normalized_class_data(data: dict[str, Any]) -> dict[str, Any]:
         runtime = dict(runtime)
         runtime["base_kind"] = runtime_base_kind
         out["runtime"] = runtime
-    prompt_text = _prompt_addendum_from_value(out.get("prompt", ""))
-    out["prompt"] = prompt_text
+    out["prompt"] = _normalized_prompt_mapping(out.get("prompt", {}))
     mode = _policy_mode_from_data(out)
     policy = out.get("policy") if isinstance(out.get("policy"), dict) else {}
     if mode == "compile":
@@ -1894,7 +2004,7 @@ def validate_class_data(
             profile_id=class_id,
         ))
 
-    for mapping_key in ("identity", "runtime", "metadata", "draft", "policy", "acl", "capabilities", "communication", "delegation"):
+    for mapping_key in ("identity", "runtime", "metadata", "draft", "policy", "acl", "capabilities", "communication"):
         if mapping_key in raw_data and not isinstance(raw_data.get(mapping_key), dict):
             issues.append(ValidationIssue(
                 "error",
@@ -1933,17 +2043,91 @@ def validate_class_data(
                     profile_id=class_id,
                 ))
 
-    prompt_value = raw_data.get("prompt", "")
-    if "prompt" in raw_data and not isinstance(prompt_value, (str, dict)):
+    prompt_value = raw_data.get("prompt", {})
+    if "prompt" in raw_data and not isinstance(prompt_value, dict):
         issues.append(ValidationIssue(
-            "error", "prompt_not_string_or_mapping", "prompt must be a string or mapping with addendum", path=source, profile_id=class_id
+            "error", "prompt_not_mapping", "prompt must be a mapping with identity, job, boot_checklist, operating_guidelines, and/or tool_guidance", path=source, profile_id=class_id
         ))
-    prompt_text = str(normalized.get("prompt", "") or "")
+    if isinstance(prompt_value, dict):
+        unknown_prompt_keys = sorted(set(prompt_value) - PROMPT_ALLOWED_KEYS)
+        if unknown_prompt_keys:
+            issues.append(ValidationIssue(
+                "error",
+                "unknown_prompt_fields",
+                "unknown prompt fields: " + ", ".join(unknown_prompt_keys),
+                path=source,
+                profile_id=class_id,
+            ))
+        for key in PROMPT_TEXT_KEYS:
+            if key in prompt_value and not isinstance(prompt_value.get(key), str):
+                issues.append(ValidationIssue(
+                    "error",
+                    "prompt_text_field_not_string",
+                    f"prompt.{key} must be a string",
+                    path=source,
+                    profile_id=class_id,
+                ))
+        for key in PROMPT_LIST_KEYS:
+            if key in prompt_value and not isinstance(prompt_value.get(key), list):
+                issues.append(ValidationIssue(
+                    "error",
+                    "prompt_list_field_not_list",
+                    f"prompt.{key} must be a list of strings",
+                    path=source,
+                    profile_id=class_id,
+                ))
+            _validate_string_list_field(prompt_value.get(key), f"prompt.{key}", issues, source=source, class_id=class_id)
+        if PROMPT_TOOL_GUIDANCE_KEY in prompt_value and not isinstance(prompt_value.get(PROMPT_TOOL_GUIDANCE_KEY), list):
+            issues.append(ValidationIssue(
+                "error",
+                "prompt_tool_guidance_not_list",
+                "prompt.tool_guidance must be a list of mappings",
+                path=source,
+                profile_id=class_id,
+            ))
+        elif isinstance(prompt_value.get(PROMPT_TOOL_GUIDANCE_KEY), list):
+            for idx, item in enumerate(prompt_value.get(PROMPT_TOOL_GUIDANCE_KEY) or []):
+                if not isinstance(item, dict):
+                    issues.append(ValidationIssue(
+                        "error",
+                        "prompt_tool_guidance_item_not_mapping",
+                        f"prompt.tool_guidance[{idx}] must be a mapping",
+                        path=source,
+                        profile_id=class_id,
+                    ))
+                    continue
+                unknown = sorted(set(item) - {"when_capability", "when_tool", "when_family", "text"})
+                if unknown:
+                    issues.append(ValidationIssue(
+                        "error",
+                        "unknown_prompt_tool_guidance_fields",
+                        f"unknown prompt.tool_guidance[{idx}] fields: " + ", ".join(unknown),
+                        path=source,
+                        profile_id=class_id,
+                    ))
+                if not isinstance(item.get("text", ""), str) or not str(item.get("text", "") or "").strip():
+                    issues.append(ValidationIssue(
+                        "error",
+                        "prompt_tool_guidance_missing_text",
+                        f"prompt.tool_guidance[{idx}].text must be a non-empty string",
+                        path=source,
+                        profile_id=class_id,
+                    ))
+                for selector_key in ("when_capability", "when_tool", "when_family"):
+                    if selector_key in item and not isinstance(item.get(selector_key), str):
+                        issues.append(ValidationIssue(
+                            "error",
+                            "prompt_tool_guidance_selector_not_string",
+                            f"prompt.tool_guidance[{idx}].{selector_key} must be a string",
+                            path=source,
+                            profile_id=class_id,
+                        ))
+    prompt_text = _prompt_plain_text(normalized.get("prompt", {}))
     if len(prompt_text) > MAX_PROMPT_LEN:
         issues.append(ValidationIssue(
             "error",
             "prompt_too_long",
-            f"prompt addendum must be at most {MAX_PROMPT_LEN} characters",
+            f"prompt text must be at most {MAX_PROMPT_LEN} characters",
             path=source,
             profile_id=class_id,
         ))
@@ -2393,12 +2577,11 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview = definition.as_preview_dict()
     preview["metadata"] = dict(definition.metadata or {})
     preview["draft"] = dict(definition.draft or {})
-    preview["prompt"] = definition.prompt
+    preview["prompt"] = _normalized_prompt_mapping(definition.prompt)
     preview["capabilities"] = dict(definition.capabilities or {})
     preview["acl"] = compact_agent_class_acl_preview(definition)
     preview["authority_summary"] = agent_class_authority_summary(definition)
     preview["communication"] = dict(definition.communication or {})
-    preview["delegation"] = dict(definition.delegation or {})
     preview["class_warnings"] = list(definition.warnings or [])
     compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition) if agent_class_policy_mode(definition) == "compile" else {}
     preview["purpose"] = definition.description
@@ -2432,11 +2615,12 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["warnings"] = warnings
     preview["external_connector_caveat"] = EXTERNAL_CONNECTOR_CAVEAT
     preview["runtime_enforcement"] = "launch_frozen_agent_class_profile_pairing"
-    prompt = str(definition.prompt or "")
+    prompt = _normalized_prompt_mapping(definition.prompt)
+    prompt_text = _prompt_plain_text(prompt)
     preview["prompt_summary"] = {
-        "has_prompt": bool(prompt.strip()),
-        "char_count": len(prompt),
-        "preview": prompt.strip()[:240],
+        "has_prompt": bool(prompt_text.strip()),
+        "char_count": len(prompt_text),
+        "preview": prompt_text.strip()[:240],
     }
     preview["restrictions"] = [
         "Agent Class is the operator-facing identity and policy intent.",
@@ -2508,8 +2692,7 @@ def freeze_agent_class_snapshot(
             "restriction_count": 0,
         },
         "communication": dict(definition.communication or {}),
-        "delegation": dict(definition.delegation or {}),
-        "prompt": definition.prompt,
+        "prompt": _normalized_prompt_mapping(definition.prompt),
         "metadata": dict(definition.metadata or {}),
         "draft": dict(definition.draft or {}),
         "warnings": warnings[:12],
@@ -2576,13 +2759,14 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
     snapshot = getattr(cell, "effective_agent_class_snapshot", {}) or {}
     if not isinstance(snapshot, dict) or not snapshot.get("id"):
         return ""
-    prompt = str(snapshot.get("prompt", "") or "").strip()
+    prompt = _normalized_prompt_mapping(snapshot.get("prompt", {}))
+    prompt_text = render_agent_class_prompt(prompt, snapshot=snapshot)
     class_id = str(snapshot.get("id", "") or "").strip()
     lifecycle = str(snapshot.get("lifecycle", "") or "").strip()
     status = str(snapshot.get("status", "") or "").strip()
     # Default/full classes intentionally add no prompt text so unassigned base
     # kinds preserve existing behavior by construction.
-    if not prompt and class_id.startswith("default-") and status == "full" and lifecycle == "stable":
+    if not prompt_text and class_id.startswith("default-") and status == "full" and lifecycle == "stable":
         return ""
     profile = snapshot.get("agent_profile") if isinstance(snapshot.get("agent_profile"), dict) else {}
     ref = snapshot.get("agent_profile_ref") if isinstance(snapshot.get("agent_profile_ref"), dict) else {}
@@ -2594,8 +2778,8 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
         f"Internal base kind: {snapshot.get('secondary_base_kind_label', snapshot.get('base_kind', '')) or '-'}",
         "Agent Class is the primary operator-facing identity; ACL/capability projection remains the enforcement layer.",
     ]
-    if prompt:
-        lines.extend(["", prompt])
+    if prompt_text:
+        lines.extend(["", prompt_text])
     warnings = [str(item or "").strip() for item in list(snapshot.get("warnings", []) or []) if str(item or "").strip()]
     if warnings:
         lines.append("")
@@ -2858,10 +3042,6 @@ def normalize_agent_class_authoring_data(raw: dict[str, Any]) -> dict[str, Any]:
         if alias in data and not str(data.get("display_name", "") or "").strip():
             data["display_name"] = data.get(alias)
         data.pop(alias, None)
-    for alias in AUTHORING_PROMPT_ALIASES:
-        if alias in data and not str(data.get("prompt", "") or "").strip():
-            data["prompt"] = data.get(alias)
-        data.pop(alias, None)
     for alias in AUTHORING_DESCRIPTION_ALIASES:
         if alias in data and not str(data.get("description", "") or "").strip():
             data["description"] = data.get(alias)
@@ -2919,10 +3099,10 @@ def _canonical_agent_class_data(data: dict[str, Any]) -> dict[str, Any]:
             "id": str(ref.get("id", "") or "").strip(),
             "version": str(ref.get("version", "") or "").strip(),
         }
-    prompt = str(data.get("prompt", "") or "").strip()
+    prompt = _normalized_prompt_mapping(data.get("prompt", {}))
     if prompt:
-        out["prompt"] = {"addendum": prompt} if schema_version >= AGENT_CLASS_SCHEMA_VERSION else prompt
-    for key in ("identity", "acl", "capabilities", "communication", "delegation"):
+        out["prompt"] = prompt
+    for key in ("identity", "acl", "capabilities", "communication"):
         value = data.get(key)
         if key == "capabilities" and not value:
             continue
