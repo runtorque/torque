@@ -33,7 +33,7 @@ ARCHITECT_DEFERRED_TOOL_NAMES = {
 _ARCHITECT_TOOL_SPECS = [
     make_tool_search_spec("architect_tool_search", "architect"),
     {
-        "name": "architect_attention_digest",
+        "name": "architect_attention_digest", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "Return a compact bounded digest of actionable orchestration "
             "states needing this Architect's attention: blocking asks, "
@@ -52,7 +52,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_steward_operating_brief",
+        "name": "architect_steward_operating_brief", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"},{"capability": "decision.read","minimum_scope": "group"},{"capability": "event.read","minimum_scope": "group"},{"capability": "planning.area.read","minimum_scope": "group"},{"capability": "planning.initiative.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group"},{"capability": "telemetry.read","minimum_scope": "group"}]},
         "description": (
             "Return a read-only Torque Steward onboarding/operating brief for "
             "this Architect's group. The payload separates observed facts, "
@@ -84,7 +84,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_board_summary",
+        "name": "architect_board_summary", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "Return a compact board overview for this architect's group, "
             "including task creator attribution and a bounded lightweight "
@@ -107,7 +107,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_wave_summary",
+        "name": "architect_wave_summary", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Generate a compact bounded wave-summary drafting aid from either "
             "one caller-owned decision id or an explicit task-id list. The "
@@ -144,7 +144,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_completion_audit",
+        "name": "architect_completion_audit", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"},{"capability": "task.read","minimum_scope": "group","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Run a compact conservative completion audit before marking a "
             "decision/task wave complete. Given one caller-owned decision id "
@@ -182,7 +182,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_boot_summary",
+        "name": "architect_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Return this Architect's cached AI boot-recovery summary. "
             "Read-only: never performs a live provider call. If the status is "
@@ -192,7 +192,7 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "architect_semantic_recall",
+        "name": "architect_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "group"}]},
         "description": (
             "Search the local AI semantic index for snippets visible to this "
             "Architect. Results are over-fetched then filtered through the "
@@ -216,7 +216,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_events_recent",
+        "name": "architect_events_recent", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Return recent architect-scoped coarse panel events with task, "
             "engineer, worker-owner, creator, digest-recipient, and "
@@ -245,7 +245,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_mcp_calls",
+        "name": "architect_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "deferred": True,
         "description": (
             "Return recent MCP call history for this architect's group. "
@@ -292,7 +292,7 @@ _ARCHITECT_TOOL_SPECS = [
     },
     *help_tool_specs("architect_"),
     {
-        "name": "architect_deploy_state",
+        "name": "architect_deploy_state", "authority": {"requirements": [{"capability": "deploy.read"}]},
         "description": (
             "Return read-only daemon boot git state and pending mainline "
             "commit count since boot for deploy observability."
@@ -300,13 +300,13 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "architect_get_architect_settings",
+        "name": "architect_get_architect_settings", "authority": {"requirements": [{"capability": "settings.admin"}]},
         "deferred": True,
         "description": "Read this group's persisted Architect settings.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "architect_digest_filter",
+        "name": "architect_digest_filter", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Read or update this architect's per-architect digest event "
             "filter. The mandatory floor (ask_created, "
@@ -338,7 +338,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_show",
+        "name": "architect_task_show", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Show full details for one task the architect can see, including "
             "board_sync state when present."
@@ -355,7 +355,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_list",
+        "name": "architect_task_list", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","result_kind": "task","result_paths": ["tasks"]}]},
         "description": (
             "List tasks in this architect's group with optional backlog "
             "filters for labels, lane, assigned engineer, creator, and "
@@ -413,7 +413,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_chain",
+        "name": "architect_task_chain", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "group","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Show the full derived-task tree for one visible pipeline, rooted at "
             "the pipeline root and annotated with summary stats."
@@ -430,7 +430,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_pickup",
+        "name": "architect_task_pickup", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Claim a routed PM-created product task in this architect's group "
             "without creating a covering duplicate. Requires durable inbound "
@@ -458,7 +458,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_create",
+        "name": "architect_task_create", "authority": {"requirements": [{"capability": "task.create","minimum_scope": "self","target_argument": "assigned_engineer_id","target_kind": "agent"}]},
         "description": (
             "Create a task for a specific engineer. The assigned_engineer_id is "
             "required, created_by_architect_id is stamped automatically, and "
@@ -543,7 +543,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_update",
+        "name": "architect_task_update", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Update title, description, labels, and/or action binding for a "
             "task in this architect's group, provided the task was created "
@@ -590,7 +590,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_reassign",
+        "name": "architect_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Reassign a task created by this architect to another visible engineer."
         ),
@@ -607,7 +607,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_move",
+        "name": "architect_task_move", "authority": {"requirements": [{"capability": "task.move","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Move any visible task in this architect's group to an existing "
             "board lane, optionally clearing its status badge."
@@ -629,7 +629,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_task_mark_covered",
+        "name": "architect_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Mark a user-created task or a task created by this architect as "
             "covered by another visible task or PR. Also allows a PM-created "
@@ -680,7 +680,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_pm_root_backlog_hygiene",
+        "name": "architect_pm_root_backlog_hygiene", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task_ids","target_kind": "task"}]},
         "description": (
             "Inventory already-covered PM-created product roots in this "
             "Architect's group and optionally finalize only eligible routed "
@@ -719,7 +719,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_ask",
+        "name": "architect_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Ask the user a blocking product/scope question. Creates a "
             "visible Backlog task labeled as a human architect ask with "
@@ -742,7 +742,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_message_user",
+        "name": "architect_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Send a non-blocking durable direct message to the user-facing "
             "conversation panel. Use this for status/context or to reply to "
@@ -798,7 +798,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_list",
+        "name": "architect_engineer_list", "authority": {"requirements": [{"capability": "engineer.roster.read","minimum_scope": "children"}]},
         "description": (
             "List engineers visible to this architect, marking each as hired "
             "or visible and including dismissed_at for paused engineers."
@@ -814,7 +814,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_hire",
+        "name": "architect_engineer_hire", "authority": {"requirements": [{"capability": "engineer.hire","minimum_scope": "children"}]},
         "description": (
             "Queue a new engineer hire request for user approval. This returns "
             "immediately with status='pending'; poll with "
@@ -851,7 +851,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_set_specializations",
+        "name": "architect_engineer_set_specializations", "authority": {"requirements": [{"capability": "engineer.manage","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Full-replace the ordered project specialization list for an "
             "engineer hired by this architect. The first entry is primary; "
@@ -877,7 +877,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_dismiss",
+        "name": "architect_engineer_dismiss", "authority": {"requirements": [{"capability": "engineer.manage","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Pause a hired engineer. The engineer and owned worker terminals "
             "are closed, but history and task assignments are preserved."
@@ -898,7 +898,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_rehire",
+        "name": "architect_engineer_rehire", "authority": {"requirements": [{"capability": "engineer.manage","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Resume a previously dismissed hired engineer using the same "
             "agent id, slug, history, and launch configuration."
@@ -915,7 +915,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_restore",
+        "name": "architect_engineer_restore", "authority": {"requirements": [{"capability": "engineer.manage","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Restore a hired engineer that is in the 7-day recently-deleted "
             "window. Ownership transfers performed at delete time are not undone."
@@ -932,7 +932,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_pending_hire_status",
+        "name": "architect_pending_hire_status", "authority": {"requirements": [{"capability": "engineer.hire","minimum_scope": "children"}]},
         "description": "Read one pending-hire request created by this architect.",
         "inputSchema": {
             "type": "object",
@@ -946,7 +946,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_pending_hire_list",
+        "name": "architect_pending_hire_list", "authority": {"requirements": [{"capability": "engineer.hire","minimum_scope": "children"}]},
         "description": "List pending-hire requests created by this architect.",
         "inputSchema": {
             "type": "object",
@@ -960,7 +960,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_read",
+        "name": "architect_behavior_overlay_read", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "description": (
             "Read this architect's active Dynamic Behavior overlay, or a "
             "hired engineer's overlay when agent_id is provided."
@@ -981,7 +981,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_versions",
+        "name": "architect_behavior_overlay_versions", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "description": "List overlay versions for self or a hired engineer.",
         "inputSchema": {
             "type": "object",
@@ -1000,7 +1000,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_diff",
+        "name": "architect_behavior_overlay_diff", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "description": "Diff overlay versions or a visible proposal.",
         "inputSchema": {
             "type": "object",
@@ -1021,7 +1021,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_proposal_list",
+        "name": "architect_behavior_overlay_proposal_list", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "description": "List behavior overlay proposals visible to this architect.",
         "inputSchema": {
             "type": "object",
@@ -1044,7 +1044,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_propose",
+        "name": "architect_behavior_overlay_propose", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self"}]},
         "description": "Propose a change to this architect's own overlay; routes to user approval.",
         "inputSchema": {
             "type": "object",
@@ -1058,7 +1058,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_propose_for_engineer",
+        "name": "architect_behavior_overlay_propose_for_engineer", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": "Author a Dynamic Behavior overlay change for a hired engineer.",
         "inputSchema": {
             "type": "object",
@@ -1073,7 +1073,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_propose_for_role",
+        "name": "architect_behavior_overlay_propose_for_role", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
         "description": (
             "Propose a group-scoped role Dynamic Behavior overlay. "
             "Role overlays are architect-authored and always user-approved."
@@ -1094,7 +1094,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_approve",
+        "name": "architect_behavior_overlay_approve", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
         "description": "Approve a hired engineer behavior overlay proposal.",
         "inputSchema": {
             "type": "object",
@@ -1107,7 +1107,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_reject",
+        "name": "architect_behavior_overlay_reject", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
         "description": "Reject a visible behavior overlay proposal.",
         "inputSchema": {
             "type": "object",
@@ -1119,7 +1119,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_rollback",
+        "name": "architect_behavior_overlay_rollback", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "description": "Request rollback for this architect or a hired engineer.",
         "inputSchema": {
             "type": "object",
@@ -1134,7 +1134,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_behavior_overlay_rollback_role",
+        "name": "architect_behavior_overlay_rollback_role", "authority": {"requirements": [{"capability": "behavior_overlay.admin","minimum_scope": "children"}]},
         "description": "Propose rollback for a group-scoped role overlay; routes to user approval.",
         "inputSchema": {
             "type": "object",
@@ -1152,7 +1152,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_message",
+        "name": "architect_engineer_message", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": "Send a direct message from this architect to a hired engineer.",
         "inputSchema": {
             "type": "object",
@@ -1177,7 +1177,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_feedback_request",
+        "name": "architect_engineer_feedback_request", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children"}]},
         "description": (
             "Fan out one structured retrospective feedback request to all "
             "Engineers hired by this Architect. Does not create tasks and "
@@ -1212,7 +1212,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_feedback_status",
+        "name": "architect_engineer_feedback_status", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children"}]},
         "description": (
             "Return bounded response tracking for a retrospective feedback "
             "request: requested Engineers, replied Engineers, pending Engineers, "
@@ -1233,7 +1233,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_peer_list",
+        "name": "architect_peer_list", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group"}]},
         "description": (
             "List same-group Architect peers that can receive direct "
             "Architect peer messages."
@@ -1249,7 +1249,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_peer_message",
+        "name": "architect_peer_message", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "architect_id","target_kind": "agent"}]},
         "description": (
             "Send a durable same-group direct message to another Architect."
         ),
@@ -1292,7 +1292,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_peer_inbox",
+        "name": "architect_peer_inbox", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "peer_architect_id","target_kind": "agent"},{"capability": "message.engineer","minimum_scope": "children"}]},
         "description": (
             "Read durable same-group Architect peer message threads involving "
             "this Architect."
@@ -1324,7 +1324,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_peer_threads",
+        "name": "architect_engineer_peer_threads", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "List Engineer↔Engineer notify-and-inspect threads where both "
             "participants are Engineers hired by this Architect. This is an "
@@ -1353,7 +1353,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_peer_inspect",
+        "name": "architect_engineer_peer_inspect", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children"}]},
         "description": (
             "Inspect a full Engineer↔Engineer notify-and-inspect thread and its "
             "read-only referenced task/stream context. Requires both Engineer "
@@ -1376,7 +1376,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_journal_read",
+        "name": "architect_engineer_journal_read", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Read recent journal entries from a hired engineer."
         ),
@@ -1408,7 +1408,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_pending_question",
+        "name": "architect_engineer_pending_question", "authority": {"requirements": [{"capability": "message.worker","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Read the current blocking human-input question for a hired "
             "engineer, if one is pending."
@@ -1425,7 +1425,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_engineer_answer",
+        "name": "architect_engineer_answer", "authority": {"requirements": [{"capability": "message.worker","minimum_scope": "children","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Answer a hired engineer's pending blocking question (the "
             "owner-routed ask surfaced by architect_engineer_pending_question). "
@@ -1449,7 +1449,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_reply",
+        "name": "architect_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group"},{"capability": "message.engineer","minimum_scope": "children"}]},
         "description": (
             "Reply to an existing Architect↔Engineer or Architect↔Architect "
             "message thread."
@@ -1477,39 +1477,39 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_area_list",
+        "name": "architect_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "List Planning Areas in this architect's group with compact optional link/note summaries.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_area_show",
+        "name": "architect_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Show one same-group Planning Area with links and typed notes. Decision links include only decisions visible to this architect.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string", "description": "Area id (for example TORQUE-A:1) or slug."}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}, "required": ["area"]},
     },
     {
-        "name": "architect_area_create",
+        "name": "architect_area_create", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]},
         "description": "Create an architect-owned Planning Area in this architect's group.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "area_type": {"type": "string"}, "lifecycle": {"type": "string", "enum": ["planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"]}, "summary": {"type": "string"}, "user_purpose": {"type": "string"}, "system_purpose": {"type": "string"}, "in_scope": {"type": "string"}, "out_of_scope": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_area_update",
+        "name": "architect_area_update", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]},
         "description": "Update an Area owned or created by this architect. Owner transfer is not allowed via MCP.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "title": {"type": "string"}, "area_type": {"type": "string"}, "lifecycle": {"type": "string", "enum": ["planned", "experimental", "active_investment", "stable", "maintenance", "deprecated", "retired"]}, "summary": {"type": "string"}, "user_purpose": {"type": "string"}, "system_purpose": {"type": "string"}, "in_scope": {"type": "string"}, "out_of_scope": {"type": "string"}}, "required": ["area"]},
     },
-    {"name": "architect_area_archive", "description": "Archive an Area owned or created by this architect.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}}, "required": ["area"]}},
-    {"name": "architect_area_link_task", "description": "Link a visible same-group Board task to an Area without mutating the task.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
-    {"name": "architect_area_unlink_task", "description": "Remove an Area↔task link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
-    {"name": "architect_area_link_decision", "description": "Link one caller-owned architect decision to an Area without mutating the decision.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
-    {"name": "architect_area_unlink_decision", "description": "Remove an Area↔decision link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
-    {"name": "architect_area_link_initiative", "description": "Link a same-group Initiative to an Area without mutating the Initiative.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
-    {"name": "architect_area_unlink_initiative", "description": "Remove an Area↔Initiative link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
-    {"name": "architect_area_link_area", "description": "Link one same-group Area to another with a pure label (related, depends_on, or supports). No graph semantics are inferred.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
-    {"name": "architect_area_unlink_area", "description": "Remove one Area↔Area labeled link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
-    {"name": "architect_area_note_create", "description": "Create a flat typed Area note (caveat, tech_debt, open_question, follow_up, invariant).", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note_type", "title"]}},
-    {"name": "architect_area_note_update", "description": "Update a flat typed Area note owned by an Area this architect can write.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note"]}},
-    {"name": "architect_area_note_archive", "description": "Archive a flat typed Area note.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}}, "required": ["area", "note"]}},
+    {"name": "architect_area_archive", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Archive an Area owned or created by this architect.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}}, "required": ["area"]}},
+    {"name": "architect_area_link_task", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Link a visible same-group Board task to an Area without mutating the task.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
+    {"name": "architect_area_unlink_task", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Remove an Area↔task link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["area", "task"]}},
+    {"name": "architect_area_link_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self"},{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Link one caller-owned architect decision to an Area without mutating the decision.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
+    {"name": "architect_area_unlink_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self"},{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Remove an Area↔decision link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["area", "decision"]}},
+    {"name": "architect_area_link_initiative", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Link a same-group Initiative to an Area without mutating the Initiative.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
+    {"name": "architect_area_unlink_initiative", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Remove an Area↔Initiative link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["area", "initiative"]}},
+    {"name": "architect_area_link_area", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Link one same-group Area to another with a pure label (related, depends_on, or supports). No graph semantics are inferred.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
+    {"name": "architect_area_unlink_area", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Remove one Area↔Area labeled link row only.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "target_area": {"type": "string"}, "target_area_id": {"type": "string"}, "relation": {"type": "string", "enum": ["related", "depends_on", "supports"]}}, "required": ["area", "target_area"]}},
+    {"name": "architect_area_note_create", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Create a flat typed Area note (caveat, tech_debt, open_question, follow_up, invariant).", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note_type", "title"]}},
+    {"name": "architect_area_note_update", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Update a flat typed Area note owned by an Area this architect can write.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}, "note_type": {"type": "string", "enum": ["caveat", "tech_debt", "open_question", "follow_up", "invariant"]}, "title": {"type": "string"}, "body": {"type": "string"}, "target_type": {"type": "string", "enum": ["task", "decision", "initiative", "area"]}, "target_id": {"type": "string"}}, "required": ["area", "note"]}},
+    {"name": "architect_area_note_archive", "authority": {"requirements": [{"capability": "planning.area.write","minimum_scope": "self"}]}, "description": "Archive a flat typed Area note.", "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note": {"type": "string"}, "note_id": {"type": "string"}}, "required": ["area", "note"]}},
     {
-        "name": "architect_initiative_list",
+        "name": "architect_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
         "description": "List first-class product Initiatives in this architect's group. Read-only; Board remains execution source of truth.",
         "inputSchema": {
             "type": "object",
@@ -1520,7 +1520,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_show",
+        "name": "architect_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
         "description": "Show one same-group Initiative with typed links and Board-derived linked task summary.",
         "inputSchema": {
             "type": "object",
@@ -1531,7 +1531,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_create",
+        "name": "architect_initiative_create", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Create an architect-owned Initiative in this architect's group.",
         "inputSchema": {
             "type": "object",
@@ -1549,7 +1549,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_update",
+        "name": "architect_initiative_update", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Update an Initiative owned or created by this architect. User-created initiatives not owned/created by this architect are not writable via MCP.",
         "inputSchema": {
             "type": "object",
@@ -1569,32 +1569,32 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_initiative_archive",
+        "name": "architect_initiative_archive", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Archive an Initiative owned or created by this architect.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}, "required": ["initiative"]},
     },
     {
-        "name": "architect_initiative_link_task",
+        "name": "architect_initiative_link_task", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Link a visible same-group Board task to an Initiative through a typed link row; does not mutate the task.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["initiative", "task"]},
     },
     {
-        "name": "architect_initiative_unlink_task",
+        "name": "architect_initiative_unlink_task", "authority": {"requirements": [{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Remove an Initiative↔task typed link row only; does not mutate the task.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "task": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["initiative", "task"]},
     },
     {
-        "name": "architect_initiative_link_decision",
+        "name": "architect_initiative_link_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self"},{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Link one caller-owned architect decision to an Initiative through a typed link row; does not mutate the decision.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["initiative", "decision"]},
     },
     {
-        "name": "architect_initiative_unlink_decision",
+        "name": "architect_initiative_unlink_decision", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self"},{"capability": "planning.initiative.write","minimum_scope": "group"}]},
         "description": "Remove an Initiative↔decision typed link row only; does not mutate the decision.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}, "decision": {"type": "string"}, "decision_id": {"type": "string"}}, "required": ["initiative", "decision"]},
     },
     {
-        "name": "architect_decision_create",
+        "name": "architect_decision_create", "authority": {"requirements": [{"capability": "decision.create","minimum_scope": "self"}]},
         "description": "Create a new architect decision log entry.",
         "inputSchema": {
             "type": "object",
@@ -1628,7 +1628,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_decision_update",
+        "name": "architect_decision_update", "authority": {"requirements": [{"capability": "decision.update","minimum_scope": "self"}]},
         "description": "Update an existing decision owned by this architect.",
         "inputSchema": {
             "type": "object",
@@ -1667,7 +1667,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_decision_link",
+        "name": "architect_decision_link", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","target_argument": "engineer_id","target_kind": "agent"},{"capability": "decision.link","minimum_scope": "self","target_argument": "task_id","target_kind": "task"}]},
         "description": (
             "Append one linked task or engineer id to a decision. Provide exactly "
             "one of task_id or engineer_id."
@@ -1689,7 +1689,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_decision_list",
+        "name": "architect_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"}]},
         "description": "List this architect's persisted decisions.",
         "inputSchema": {
             "type": "object",
@@ -1707,7 +1707,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_journal",
+        "name": "architect_journal", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self"}]},
         "description": (
             "Append an entry to this architect's private JSONL journal."
         ),
@@ -1728,7 +1728,7 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
-        "name": "architect_journal_read",
+        "name": "architect_journal_read", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self"}]},
         "description": "Read recent entries from this architect's journal.",
         "inputSchema": {
             "type": "object",
@@ -1749,142 +1749,142 @@ _ARCHITECT_TOOL_SPECS = [
 
 _ARCHITECT_PRODUCT_TOOL_SPECS = [
     {
-        "name": "architect_product_board_summary",
+        "name": "architect_product_board_summary", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": "Product-safe board summary over linked/product-labeled tasks only; never dispatches or exposes all same-group task detail.",
         "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_task_list",
+        "name": "architect_product_task_list", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","result_kind": "task","result_paths": ["tasks"]}]},
         "description": "List linked/product-labeled task summaries visible to this product wrapper.",
         "inputSchema": {"type": "object", "properties": {"label_filter": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "lane_filter": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_task_show",
+        "name": "architect_product_task_show", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": "Show one PM-linked/product-labeled task; hidden/non-product tasks return the normal not-found style error.",
         "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]},
     },
     {
-        "name": "architect_product_task_propose",
+        "name": "architect_product_task_propose", "authority": {"requirements": [{"capability": "task.propose","minimum_scope": "self"}]},
         "description": "Create an unassigned queued product task proposal with product-proposal/pm-created labels and non-binding suggested_action/suggested_specialization hints only.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "group": {"type": "string"}, "description": {"type": "string"}, "lane": {"type": "string"}, "labels": {"type": "array", "items": {"type": "string"}}, "suggested_action": {"type": "string"}, "suggested_specialization": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_product_area_list",
+        "name": "architect_product_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Product-safe wrapper for same-group Area reads.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}, "include_notes": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_area_show",
+        "name": "architect_product_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Product-safe wrapper for one same-group Area read.",
         "inputSchema": {"type": "object", "properties": {"area": {"type": "string"}, "area_id": {"type": "string"}, "note_limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_initiative_list",
+        "name": "architect_product_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
         "description": "Product-safe wrapper for same-group Initiative reads.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}, "include_links": {"type": "boolean"}}},
     },
     {
-        "name": "architect_product_initiative_show",
+        "name": "architect_product_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
         "description": "Product-safe wrapper for one same-group Initiative read.",
         "inputSchema": {"type": "object", "properties": {"initiative": {"type": "string"}, "initiative_id": {"type": "string"}}},
     },
     {
-        "name": "architect_product_decision_list",
+        "name": "architect_product_decision_list", "authority": {"requirements": [{"capability": "decision.read","minimum_scope": "group"}]},
         "description": "List PM-owned proposed product decisions only.",
         "inputSchema": {"type": "object", "properties": {"include_archived": {"type": "boolean"}}},
     },
     {
-        "name": "architect_product_decision_create",
+        "name": "architect_product_decision_create", "authority": {"requirements": [{"capability": "decision.propose","minimum_scope": "self"}]},
         "description": "Create a PM-owned proposed product decision. accepted/revised/rejected and engineer links are rejected.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "rationale"]},
     },
     {
-        "name": "architect_product_decision_update",
+        "name": "architect_product_decision_update", "authority": {"requirements": [{"capability": "decision.propose","minimum_scope": "self"}]},
         "description": "Update a PM-owned proposed product decision only. Status must remain proposed and engineer links are rejected.",
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "rationale": {"type": "string"}, "status": {"type": "string", "enum": ["proposed"]}, "supersedes": {"type": "string"}, "linked_task_ids": {"type": "array", "items": {"type": "string"}}, "linked_engineer_ids": {"type": "array", "items": {"type": "string"}}, "archived": {"type": "boolean"}}, "required": ["id"]},
     },
     {
-        "name": "architect_product_decision_link",
+        "name": "architect_product_decision_link", "authority": {"requirements": [{"capability": "decision.link","minimum_scope": "self","target_argument": "engineer_id","target_kind": "agent"},{"capability": "decision.link","minimum_scope": "self","target_argument": "task_id","target_kind": "task"},{"capability": "decision.propose","minimum_scope": "self"}]},
         "description": "Append a PM-visible product task link to a PM-owned proposed product decision; engineer links are not supported.",
         "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "task_id": {"type": "string"}, "engineer_id": {"type": "string"}}, "required": ["id", "task_id"]},
     },
     {
-        "name": "architect_product_idea_brief_list",
+        "name": "architect_product_idea_brief_list", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"}]},
         "description": "List same-group Idea Brief proposal artifacts visible to this product/ideation wrapper; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "proposed", "parked", "archived"]}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_idea_brief_show",
+        "name": "architect_product_idea_brief_show", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"}]},
         "description": "Show one same-group Idea Brief by id or slug without granting execution authority.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
     {
-        "name": "architect_product_idea_brief_create",
+        "name": "architect_product_idea_brief_create", "authority": {"requirements": [{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Create a caller-owned Idea Brief draft linked to allowed Thinking artifacts; proposal-only and never dispatches work.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}}, "required": ["problem_opportunity"]},
     },
     {
-        "name": "architect_product_idea_brief_update",
+        "name": "architect_product_idea_brief_update", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Update a caller-owned Idea Brief only; status may remain draft/proposed/parked but archive uses the explicit archive tool.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "status": {"type": "string", "enum": ["draft", "parked"]}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_refine",
+        "name": "architect_product_idea_brief_refine", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Refine a caller-owned Idea Brief with field patches and an optional refinement note; no execution side effects.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "refinement_note": {"type": "string"}, "title": {"type": "string"}, "problem_opportunity": {"type": "string"}, "why_it_matters": {"type": "string"}, "proposed_shape": {"type": "string"}, "smallest_useful_version": {"type": "string"}, "risks_tradeoffs": {"type": "string"}, "open_questions": {"type": "string"}, "thinking_links": {"type": "array", "items": {"type": "object"}}, "source_context": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_park",
+        "name": "architect_product_idea_brief_park", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Park a caller-owned Idea Brief for later; keeps it durable and does not create tasks or decisions.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "reason": {"type": "string"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_archive",
+        "name": "architect_product_idea_brief_archive", "authority": {"requirements": [{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Archive a caller-owned Idea Brief; this is a terminal visibility change, not an execution action.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "reason": {"type": "string"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_idea_brief_propose",
+        "name": "architect_product_idea_brief_propose", "authority": {"requirements": [{"capability": "idea_brief.propose","minimum_scope": "self"},{"capability": "idea_brief.read","minimum_scope": "self"},{"capability": "idea_brief.write","minimum_scope": "self"}]},
         "description": "Explicitly mark a caller-owned Idea Brief proposed for product-safe review. It creates no task, assignment, dispatch, accepted decision, merge, or deploy action.",
         "inputSchema": {"type": "object", "properties": {"idea_brief": {"type": "string"}, "brief_id": {"type": "string"}, "id": {"type": "string"}, "note": {"type": "string"}, "proposal_note": {"type": "string"}, "review_target": {"type": "string"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_product_peer_list",
+        "name": "architect_product_peer_list", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group"}]},
         "description": "List selected same-group Architect/product-profile peers eligible for product-peer messages.",
         "inputSchema": {"type": "object", "properties": {"include_dismissed": {"type": "boolean"}}},
     },
     {
-        "name": "architect_product_peer_message",
+        "name": "architect_product_peer_message", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "architect_id","target_kind": "agent"}]},
         "description": "Send a product-peer marked message to an eligible same-group Architect/product-profile peer. ack_required requires a product-scope anchor.",
         "inputSchema": {"type": "object", "properties": {"architect_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["architect_id", "message"]},
     },
     {
-        "name": "architect_product_peer_inbox",
+        "name": "architect_product_peer_inbox", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group","target_argument": "peer_architect_id","target_kind": "agent"}]},
         "description": "Read only product-peer marked Architect↔Architect threads involving this caller; raw peer and Architect↔Engineer rows are hidden.",
         "inputSchema": {"type": "object", "properties": {"peer_architect_id": {"type": "string"}, "thread_id": {"type": "string"}, "requires_reply": {"type": "boolean"}, "since": {"type": "number"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_product_peer_reply",
+        "name": "architect_product_peer_reply", "authority": {"requirements": [{"capability": "message.architect_peer","minimum_scope": "group"}]},
         "description": "Reply inside a product-peer marked thread only. ack_required requires a product-scope anchor.",
         "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "message": {"type": "string"}, "ack_required": {"type": "boolean"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message_id", "message"]},
     },
     {
-        "name": "architect_product_message_user",
+        "name": "architect_product_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": "Send a PM-safe direct user message after validating product-scoped context attachments. If reply_to_id is omitted, Torque infers it only when this architect has exactly one pending direct user message.",
         "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "reply_to_id": {"type": "string", "description": "Optional direct user-message id; omit only when exactly one pending direct user message is unambiguous."}, "thread_id": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["message"]},
     },
     {
-        "name": "architect_product_ask_user",
+        "name": "architect_product_ask_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": "Create a blocking PM-safe user ask after validating product-scoped context attachments.",
         "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}, "context_task_ids": {"type": "array", "items": {"type": "string"}}, "context_decision_ids": {"type": "array", "items": {"type": "string"}}, "context_area_ids": {"type": "array", "items": {"type": "string"}}, "context_initiative_ids": {"type": "array", "items": {"type": "string"}}, "context_idea_brief_ids": {"type": "array", "items": {"type": "string"}}, "context_summary": {"type": "string"}}, "required": ["question"]},
     },
     {
-        "name": "architect_product_journal",
+        "name": "architect_product_journal", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self"}]},
         "description": "Append a private PM recovery journal entry. decision journal entries are intentionally unsupported in Wave 4B.",
         "inputSchema": {"type": "object", "properties": {"type": {"type": "string", "enum": ["observation", "checkpoint", "plan"]}, "entry": {"type": "string"}}, "required": ["type", "entry"]},
     },
     {
-        "name": "architect_product_journal_read",
+        "name": "architect_product_journal_read", "authority": {"requirements": [{"capability": "journal.private","minimum_scope": "self"}]},
         "description": "Read recent private PM recovery journal entries, excluding decision-type journal rows.",
         "inputSchema": {"type": "object", "properties": {"since": {"type": "number"}, "limit": {"type": "integer"}}},
     },
@@ -1893,67 +1893,67 @@ _ARCHITECT_PRODUCT_TOOL_SPECS = [
 
 _ARCHITECT_THINKING_TOOL_SPECS = [
     {
-        "name": "architect_thinking_scratchpad_list",
+        "name": "architect_thinking_scratchpad_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
         "description": "List same-group Scratchpad notes visible to this Architect; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_thinking_scratchpad_show",
+        "name": "architect_thinking_scratchpad_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
         "description": "Show one same-group Scratchpad note by id or slug.",
         "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
     {
-        "name": "architect_thinking_scratchpad_create",
+        "name": "architect_thinking_scratchpad_create", "authority": {"requirements": [{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Create a caller-owned Scratchpad note in the Architect's group; never writes outside the caller group.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_thinking_scratchpad_update",
+        "name": "architect_thinking_scratchpad_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a caller-owned Scratchpad note only; same-group notes owned by others are read-only.",
         "inputSchema": {"type": "object", "properties": {"note": {"type": "string"}, "note_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "context": {"type": "object"}, "links": {"type": "array", "items": {"type": "object"}}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_list",
+        "name": "architect_thinking_mind_map_list", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
         "description": "List same-group Mind Maps visible to this Architect; includes caller_owned for safe update decisions.",
         "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "include_archived": {"type": "boolean"}, "limit": {"type": "integer"}}},
     },
     {
-        "name": "architect_thinking_mind_map_show",
+        "name": "architect_thinking_mind_map_show", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"}]},
         "description": "Show one same-group Mind Map with nodes and links.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "group": {"type": "string"}, "include_archived": {"type": "boolean"}}},
     },
     {
-        "name": "architect_thinking_mind_map_create",
+        "name": "architect_thinking_mind_map_create", "authority": {"requirements": [{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Create a caller-owned Mind Map in the Architect's group.",
         "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}, "required": ["title"]},
     },
     {
-        "name": "architect_thinking_mind_map_update",
+        "name": "architect_thinking_mind_map_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "metadata": {"type": "object"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_node_create",
+        "name": "architect_thinking_mind_map_node_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Create a node in a caller-owned Mind Map.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}, "required": ["label"]},
     },
     {
-        "name": "architect_thinking_mind_map_node_update",
+        "name": "architect_thinking_mind_map_node_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a node in a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "title": {"type": "string"}, "notes": {"type": "string"}, "node_type": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "color": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_node_position",
+        "name": "architect_thinking_mind_map_node_position", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Move a node in a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "node": {"type": "string"}, "node_id": {"type": "string"}, "id": {"type": "string"}, "position": {"type": "object"}, "x": {"type": "number"}, "y": {"type": "number"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_link_create",
+        "name": "architect_thinking_mind_map_link_create", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Create a link between nodes in a caller-owned Mind Map.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
     {
-        "name": "architect_thinking_mind_map_link_update",
+        "name": "architect_thinking_mind_map_link_update", "authority": {"requirements": [{"capability": "thinking.read","minimum_scope": "self"},{"capability": "thinking.write","minimum_scope": "self"}]},
         "description": "Update a link in a caller-owned Mind Map only.",
         "inputSchema": {"type": "object", "properties": {"mind_map": {"type": "string"}, "map_id": {"type": "string"}, "link": {"type": "string"}, "link_id": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "link_type": {"type": "string"}, "source_node_id": {"type": "string"}, "source": {"type": "string"}, "target_node_id": {"type": "string"}, "target": {"type": "string"}, "sort_order": {"type": "integer"}, "group": {"type": "string"}}},
     },
@@ -1975,144 +1975,6 @@ ARCHITECT_TOOLS = [
         + _ARCHITECT_THINKING_TOOL_SPECS
     )
 ]
-
-# Authority declarations live with the Architect MCP surface. They remain on
-# the legacy capability vocabulary until schema-v5 capability ids are wired
-# into projection, but they are no longer owned by Agent Profile code.
-ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
-    'architect_area_archive': frozenset({'planning.area_write'}),
-    'architect_area_create': frozenset({'planning.area_write'}),
-    'architect_area_link_area': frozenset({'planning.area_write'}),
-    'architect_area_link_decision': frozenset({'decision.link', 'planning.area_write'}),
-    'architect_area_link_initiative': frozenset({'planning.area_write'}),
-    'architect_area_link_task': frozenset({'planning.area_write'}),
-    'architect_area_list': frozenset({'planning.area_read'}),
-    'architect_area_note_archive': frozenset({'planning.area_write'}),
-    'architect_area_note_create': frozenset({'planning.area_write'}),
-    'architect_area_note_update': frozenset({'planning.area_write'}),
-    'architect_area_show': frozenset({'planning.area_read'}),
-    'architect_area_unlink_area': frozenset({'planning.area_write'}),
-    'architect_area_unlink_decision': frozenset({'decision.link', 'planning.area_write'}),
-    'architect_area_unlink_initiative': frozenset({'planning.area_write'}),
-    'architect_area_unlink_task': frozenset({'planning.area_write'}),
-    'architect_area_update': frozenset({'planning.area_write'}),
-    'architect_ask': frozenset({'comm.user_ask'}),
-    'architect_attention_digest': frozenset({'observe.board_summary'}),
-    'architect_behavior_overlay_approve': frozenset({'profile.edit'}),
-    'architect_behavior_overlay_diff': frozenset({'behavior_overlay.read'}),
-    'architect_behavior_overlay_proposal_list': frozenset({'behavior_overlay.read'}),
-    'architect_behavior_overlay_propose': frozenset({'behavior_overlay.propose_self'}),
-    'architect_behavior_overlay_propose_for_engineer': frozenset({'profile.edit'}),
-    'architect_behavior_overlay_propose_for_role': frozenset({'profile.edit'}),
-    'architect_behavior_overlay_read': frozenset({'behavior_overlay.read'}),
-    'architect_behavior_overlay_reject': frozenset({'profile.edit'}),
-    'architect_behavior_overlay_rollback': frozenset({'behavior_overlay.propose_self'}),
-    'architect_behavior_overlay_rollback_role': frozenset({'profile.edit'}),
-    'architect_behavior_overlay_versions': frozenset({'behavior_overlay.read'}),
-    'architect_board_summary': frozenset({'observe.board_summary'}),
-    'architect_boot_summary': frozenset({'observe.events'}),
-    'architect_completion_audit': frozenset({'decision.list', 'observe.task_detail'}),
-    'architect_decision_create': frozenset({'decision.create'}),
-    'architect_decision_link': frozenset({'decision.link'}),
-    'architect_decision_list': frozenset({'decision.list'}),
-    'architect_decision_update': frozenset({'decision.update'}),
-    'architect_deploy_state': frozenset({'observe.deploy_state'}),
-    'architect_digest_filter': frozenset({'observe.events'}),
-    'architect_engineer_answer': frozenset({'comm.worker_message'}),
-    'architect_engineer_dismiss': frozenset({'agent.manage_engineer_roster'}),
-    'architect_engineer_feedback_request': frozenset({'comm.engineer_message'}),
-    'architect_engineer_feedback_status': frozenset({'comm.engineer_message'}),
-    'architect_engineer_hire': frozenset({'agent.hire_engineer'}),
-    'architect_engineer_journal_read': frozenset({'comm.engineer_message'}),
-    'architect_engineer_list': frozenset({'agent.engineer_roster_read'}),
-    'architect_engineer_message': frozenset({'comm.engineer_message'}),
-    'architect_engineer_peer_inspect': frozenset({'comm.engineer_message'}),
-    'architect_engineer_peer_threads': frozenset({'comm.engineer_message'}),
-    'architect_engineer_pending_question': frozenset({'comm.worker_message'}),
-    'architect_engineer_rehire': frozenset({'agent.manage_engineer_roster'}),
-    'architect_engineer_restore': frozenset({'agent.manage_engineer_roster'}),
-    'architect_engineer_set_specializations': frozenset({'agent.manage_engineer_roster'}),
-    'architect_events_recent': frozenset({'observe.events'}),
-    'architect_get_architect_settings': frozenset({'admin.settings'}),
-    'architect_help_list': frozenset({'observe.self_context'}),
-    'architect_help_query': frozenset({'observe.self_context'}),
-    'architect_help_search': frozenset({'observe.self_context'}),
-    'architect_help_show': frozenset({'observe.self_context'}),
-    'architect_initiative_archive': frozenset({'planning.initiative_write'}),
-    'architect_initiative_create': frozenset({'planning.initiative_write'}),
-    'architect_initiative_link_decision': frozenset({'decision.link', 'planning.initiative_write'}),
-    'architect_initiative_link_task': frozenset({'planning.initiative_write'}),
-    'architect_initiative_list': frozenset({'planning.initiative_read'}),
-    'architect_initiative_show': frozenset({'planning.initiative_read'}),
-    'architect_initiative_unlink_decision': frozenset({'decision.link', 'planning.initiative_write'}),
-    'architect_initiative_unlink_task': frozenset({'planning.initiative_write'}),
-    'architect_initiative_update': frozenset({'planning.initiative_write'}),
-    'architect_journal': frozenset({'journal.private'}),
-    'architect_journal_read': frozenset({'journal.private'}),
-    'architect_mcp_calls': frozenset({'observe.mcp_calls'}),
-    'architect_message_user': frozenset({'comm.user_message'}),
-    'architect_peer_inbox': frozenset({'comm.engineer_message', 'comm.peer_architect_message'}),
-    'architect_peer_list': frozenset({'comm.peer_architect_list'}),
-    'architect_peer_message': frozenset({'comm.peer_architect_message'}),
-    'architect_pending_hire_list': frozenset({'agent.hire_engineer'}),
-    'architect_pending_hire_status': frozenset({'agent.hire_engineer'}),
-    'architect_pm_root_backlog_hygiene': frozenset({'task.mark_covered'}),
-    'architect_product_area_list': frozenset({'planning.area_read'}),
-    'architect_product_area_show': frozenset({'planning.area_read'}),
-    'architect_product_ask_user': frozenset({'comm.user_ask'}),
-    'architect_product_board_summary': frozenset({'observe.board_summary'}),
-    'architect_product_decision_create': frozenset({'decision.create_proposed'}),
-    'architect_product_decision_link': frozenset({'decision.link', 'decision.update_proposed'}),
-    'architect_product_decision_list': frozenset({'decision.list'}),
-    'architect_product_decision_update': frozenset({'decision.update_proposed'}),
-    'architect_product_idea_brief_archive': frozenset({'idea_brief.read', 'idea_brief.write_own'}),
-    'architect_product_idea_brief_create': frozenset({'idea_brief.write_own'}),
-    'architect_product_idea_brief_list': frozenset({'idea_brief.read'}),
-    'architect_product_idea_brief_park': frozenset({'idea_brief.read', 'idea_brief.write_own'}),
-    'architect_product_idea_brief_propose': frozenset({'idea_brief.propose', 'idea_brief.read', 'idea_brief.write_own'}),
-    'architect_product_idea_brief_refine': frozenset({'idea_brief.read', 'idea_brief.write_own'}),
-    'architect_product_idea_brief_show': frozenset({'idea_brief.read'}),
-    'architect_product_idea_brief_update': frozenset({'idea_brief.read', 'idea_brief.write_own'}),
-    'architect_product_initiative_list': frozenset({'planning.initiative_read'}),
-    'architect_product_initiative_show': frozenset({'planning.initiative_read'}),
-    'architect_product_journal': frozenset({'journal.private'}),
-    'architect_product_journal_read': frozenset({'journal.private'}),
-    'architect_product_message_user': frozenset({'comm.user_message'}),
-    'architect_product_peer_inbox': frozenset({'comm.peer_architect_message'}),
-    'architect_product_peer_list': frozenset({'comm.peer_architect_list'}),
-    'architect_product_peer_message': frozenset({'comm.peer_architect_message'}),
-    'architect_product_peer_reply': frozenset({'comm.peer_architect_message'}),
-    'architect_product_task_list': frozenset({'observe.task_detail'}),
-    'architect_product_task_propose': frozenset({'task.create_queued'}),
-    'architect_product_task_show': frozenset({'observe.task_detail'}),
-    'architect_reply': frozenset({'comm.engineer_message', 'comm.peer_architect_message'}),
-    'architect_semantic_recall': frozenset({'observe.semantic_recall'}),
-    'architect_steward_operating_brief': frozenset({'decision.list', 'observe.board_summary', 'observe.events', 'observe.mcp_calls', 'observe.task_detail', 'planning.area_read', 'planning.initiative_read'}),
-    'architect_task_chain': frozenset({'observe.task_detail'}),
-    'architect_task_create': frozenset({'task.create'}),
-    'architect_task_list': frozenset({'observe.task_detail'}),
-    'architect_task_mark_covered': frozenset({'task.mark_covered'}),
-    'architect_task_move': frozenset({'task.move'}),
-    'architect_task_pickup': frozenset({'task.update'}),
-    'architect_task_reassign': frozenset({'task.reassign'}),
-    'architect_task_show': frozenset({'observe.task_detail'}),
-    'architect_task_update': frozenset({'task.update'}),
-    'architect_thinking_mind_map_create': frozenset({'thinking.write_own'}),
-    'architect_thinking_mind_map_link_create': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_thinking_mind_map_link_update': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_thinking_mind_map_list': frozenset({'thinking.read'}),
-    'architect_thinking_mind_map_node_create': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_thinking_mind_map_node_position': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_thinking_mind_map_node_update': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_thinking_mind_map_show': frozenset({'thinking.read'}),
-    'architect_thinking_mind_map_update': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_thinking_scratchpad_create': frozenset({'thinking.write_own'}),
-    'architect_thinking_scratchpad_list': frozenset({'thinking.read'}),
-    'architect_thinking_scratchpad_show': frozenset({'thinking.read'}),
-    'architect_thinking_scratchpad_update': frozenset({'thinking.read', 'thinking.write_own'}),
-    'architect_tool_search': frozenset({'observe.self_context'}),
-    'architect_wave_summary': frozenset({'decision.list', 'observe.task_detail'}),
-}
 
 _ARCHITECT_TOOL_NAMES = {
     str(tool.get("name", "") or "").strip()

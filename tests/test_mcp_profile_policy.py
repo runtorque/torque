@@ -398,6 +398,88 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(calls, [])
 
+    async def test_class_task_read_self_scope_filters_lists_and_denies_group_target(self):
+        state, architect = self._state_with_architect()
+        peer = self.state_mod.AgentCell(
+            id="architect-2",
+            name="Peer",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[peer.id] = peer
+        state.groups["g"].append(peer.id)
+        own_task = self.state_mod.BoardTask(
+            id="task-own",
+            task="Own task",
+            group="g",
+            lane="Backlog",
+            created_by_architect_id=architect.id,
+        )
+        peer_task = self.state_mod.BoardTask(
+            id="task-peer",
+            task="Peer task",
+            group="g",
+            lane="Backlog",
+            created_by_architect_id=peer.id,
+        )
+        state.board_tasks[own_task.id] = own_task
+        state.board_tasks[peer_task.id] = peer_task
+        architect.effective_agent_class_snapshot = {
+            "effective_authority": {
+                "schema_version": 1,
+                "base_kind": "architect",
+                "acl_mode": "allow",
+                "capabilities": {"task.read": "self"},
+            },
+        }
+
+        handler = self.mcp_mod.create_mcp_handler(
+            lambda payload: self.fail(f"Unexpected command: {payload}"),
+            state,
+        )
+        listed = await handler(FakeRequest(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        names = {tool["name"] for tool in listed.payload["result"]["tools"]}
+        self.assertIn("architect_task_list", names)
+        self.assertIn("architect_task_show", names)
+
+        task_list = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_task_list",
+                    "arguments": {},
+                },
+            },
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        payload = json.loads(
+            task_list.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual([item["id"] for item in payload["tasks"]], [own_task.id])
+        self.assertEqual(payload["total"], 1)
+        self.assertFalse(payload["truncated"])
+
+        denied = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_task_show",
+                    "arguments": {"task": peer_task.id},
+                },
+            },
+            headers={"X-Torque-Cell-Id": architect.id},
+        ))
+        self.assertIn("error", denied.payload)
+        self.assertIn("Unknown tool", denied.payload["error"]["message"])
+
     async def test_product_manager_profile_cannot_use_peer_tools_for_engineer_threads(self):
         state, architect = self._state_with_architect()
         engineer = self.state_mod.AgentCell(

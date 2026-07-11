@@ -21,7 +21,6 @@ from aiohttp import web
 
 from . import __version__
 from .agent_profiles import (
-    CAPABILITIES,
     AgentProfileDefinition,
     AgentProfilePolicy,
     profile_policy_by_id,
@@ -30,28 +29,26 @@ from .agent_profiles import (
 from .capability_catalog import (
     CAPABILITY_CATALOG,
     canonical_capabilities_from_legacy_atoms,
-    canonical_tool_requirements,
 )
 from .mcp_authority import (
     EffectiveAuthority,
     AuthorityValidationError,
+    authority_definition_map,
+    authority_definitions_from_tool_specs,
     audit_tool_authority_coverage,
     effective_authority_from_snapshot,
-    merge_tool_authority_requirements,
 )
 from .mcp_architect import (
-    ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
     ARCHITECT_TOOLS,
     _dispatch_architect_tool,
 )
 from .mcp_engineer import (
     ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES,
-    ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
     ENGINEER_TOOLS,
     _dispatch_engineer_tool,
     engineer_tools_for_cell,
 )
-from .mcp_tool_search import deferred_tool_specs, eager_tool_specs
+from .mcp_tool_search import deferred_tool_specs, eager_tool_specs, public_tool_spec
 from .mcp_tool_search import tool_search_response
 from .help_docs import dispatch_help_tool, help_tool_specs
 from .mcp_tools_shared import (
@@ -257,7 +254,7 @@ def _claim_session_wake(cell_id: str, mcp_session_id: str) -> bool:
 
 TOOLS = [
     {
-        "name": "torque_context",
+        "name": "torque_context", "authority": {"requirements": [{"capability": "self.read","minimum_scope": "self"}]},
         "description": (
             "Get current agent identity, status, and linked tasks. "
             "Returns the agent's name, group, directory, worktree info, "
@@ -267,7 +264,7 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "torque_area_list",
+        "name": "torque_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Read-only list of Planning Areas in this worker's group. Decision links are counted but hidden.",
         "inputSchema": {
             "type": "object",
@@ -280,7 +277,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_area_show",
+        "name": "torque_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Read-only show for one same-group Planning Area with worker-visible task links and decision counts only.",
         "inputSchema": {
             "type": "object",
@@ -294,7 +291,7 @@ TOOLS = [
     },
     *help_tool_specs("torque_"),
     {
-        "name": "torque_task_upload_artifact",
+        "name": "torque_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self"}]},
         "description": (
             "Upload and attach an image or other artifact to the agent's "
             "current task. Provide a local_path or inline content, and Torque "
@@ -353,7 +350,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_done",
+        "name": "torque_done", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": (
             "Mark the current task as complete and move it to Done. "
             "Triggers cascade completion — if all sibling tasks of "
@@ -370,7 +367,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_blocked",
+        "name": "torque_blocked", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": (
             "Signal that this agent is blocked and needs human attention. "
             "Sets needs_attention flag and adds a 'blocked' label."
@@ -387,7 +384,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_error",
+        "name": "torque_error", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": (
             "Report an unrecoverable error on the current task. "
             "Sets error state and adds an 'error' label."
@@ -404,7 +401,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_progress",
+        "name": "torque_progress", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": (
             "Report current progress on the task. "
             "Updates the agent's activity detail shown in the Torque UI."
@@ -421,7 +418,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_verify",
+        "name": "torque_verify", "authority": {"requirements": [{"capability": "task.verify","minimum_scope": "self"}]},
         "description": (
             "Record manual verification metadata for the current task, "
             "such as deploy/restart checkpoint state, tests run, "
@@ -501,7 +498,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_ready",
+        "name": "torque_ready", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": (
             "Signal that this agent is done and ready for the next task. "
             "Moves the task to Done, unlinks the agent, and cascades "
@@ -510,7 +507,7 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "torque_name",
+        "name": "torque_name", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": "Rename this agent to reflect the current task objective.",
         "inputSchema": {
             "type": "object",
@@ -527,7 +524,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_derive",
+        "name": "torque_derive", "authority": {"requirements": [{"capability": "task.report","minimum_scope": "self"}]},
         "description": (
             "Derive a subtask and dispatch it. The parent task stays "
             "In Progress with a status badge while the derived task "
@@ -569,7 +566,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_ask",
+        "name": "torque_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Pause for human input only when the current task cannot "
             "proceed safely without a blocking human decision or "
@@ -599,7 +596,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_message_user",
+        "name": "torque_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Send a non-blocking durable direct message to the user-facing "
             "conversation panel. Use this to answer a `## Message from the "
@@ -633,7 +630,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_stop_user_message_loop",
+        "name": "torque_stop_user_message_loop", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Stop the active user-scheduled /loop for this agent. This only "
             "affects the caller's own direct-message loop and adds a visible "
@@ -650,7 +647,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_reply",
+        "name": "torque_reply", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Reply to a message from the engineer (orchestrator agent). "
             "The reply is delivered to the engineer in its next event "
@@ -677,7 +674,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_publish",
+        "name": "torque_memory_publish", "authority": {"requirements": [{"capability": "memory.write","minimum_scope": "group"}]},
         "description": (
             "Publish an explicit shared memory entry for the current "
             "task, pipeline, group, or project. Durable decisions/warnings "
@@ -728,7 +725,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_list",
+        "name": "torque_memory_list", "authority": {"requirements": [{"capability": "memory.read","minimum_scope": "group"}]},
         "description": (
             "List shared memory entries with deterministic filtering by "
             "scope, type, pin, and simple text search."
@@ -779,7 +776,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_read",
+        "name": "torque_memory_read", "authority": {"requirements": [{"capability": "memory.read","minimum_scope": "group"}]},
         "description": "Read one shared memory entry, including its links.",
         "inputSchema": {
             "type": "object",
@@ -793,7 +790,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_pin",
+        "name": "torque_memory_pin", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group"}]},
         "description": "Pin a shared memory entry so it stays high-signal.",
         "inputSchema": {
             "type": "object",
@@ -807,7 +804,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_link",
+        "name": "torque_memory_link", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group"}]},
         "description": (
             "Link a memory entry to a task, agent, or pipeline so it is "
             "discoverable outside its primary scope."
@@ -833,7 +830,7 @@ TOOLS = [
         },
     },
     {
-        "name": "torque_memory_unpin",
+        "name": "torque_memory_unpin", "authority": {"requirements": [{"capability": "memory.admin","minimum_scope": "group"}]},
         "description": "Remove the pin from a shared memory entry.",
         "inputSchema": {
             "type": "object",
@@ -848,118 +845,77 @@ TOOLS = [
     },
 ]
 
-# Authority declarations for the shared Worker/Torque MCP surface.
-WORKER_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
-    'torque_area_list': frozenset({'planning.area_read'}),
-    'torque_area_show': frozenset({'planning.area_read'}),
-    'torque_ask': frozenset({'comm.user_ask'}),
-    'torque_blocked': frozenset({'task.complete'}),
-    'torque_context': frozenset({'observe.self_context'}),
-    'torque_derive': frozenset({'task.complete'}),
-    'torque_done': frozenset({'task.complete'}),
-    'torque_error': frozenset({'task.complete'}),
-    'torque_help_list': frozenset({'observe.self_context'}),
-    'torque_help_query': frozenset({'observe.self_context'}),
-    'torque_help_search': frozenset({'observe.self_context'}),
-    'torque_help_show': frozenset({'observe.self_context'}),
-    'torque_memory_link': frozenset({'memory.admin'}),
-    'torque_memory_list': frozenset({'memory.read'}),
-    'torque_memory_pin': frozenset({'memory.admin'}),
-    'torque_memory_publish': frozenset({'memory.publish'}),
-    'torque_memory_read': frozenset({'memory.read'}),
-    'torque_memory_unpin': frozenset({'memory.admin'}),
-    'torque_message_user': frozenset({'comm.user_message'}),
-    'torque_name': frozenset({'task.complete'}),
-    'torque_progress': frozenset({'task.complete'}),
-    'torque_ready': frozenset({'task.complete'}),
-    'torque_reply': frozenset({'comm.user_message'}),
-    'torque_stop_user_message_loop': frozenset({'comm.user_message'}),
-    'torque_task_upload_artifact': frozenset({'task.upload_artifact'}),
-    'torque_verify': frozenset({'task.verify'}),
-}
-
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
 
 # Combined tool list
 ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
-MCP_TOOL_CAPABILITY_REQUIREMENTS = merge_tool_authority_requirements(
-    WORKER_TOOL_CAPABILITY_REQUIREMENTS,
-    ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
-    ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
+WORKER_TOOL_AUTHORITY_DEFINITIONS = authority_definitions_from_tool_specs(
+    TOOLS,
+    base_kinds={"worker", "engineer", "architect"},
+    capabilities=CAPABILITY_CATALOG,
 )
-MCP_TOOL_CANONICAL_REQUIREMENTS = {
-    tool_name: canonical_tool_requirements(tool_name, requirements)
-    for tool_name, requirements in MCP_TOOL_CAPABILITY_REQUIREMENTS.items()
+ENGINEER_TOOL_AUTHORITY_DEFINITIONS = authority_definitions_from_tool_specs(
+    ENGINEER_TOOLS,
+    base_kinds={"engineer"},
+    capabilities=CAPABILITY_CATALOG,
+)
+ARCHITECT_TOOL_AUTHORITY_DEFINITIONS = authority_definitions_from_tool_specs(
+    ARCHITECT_TOOLS,
+    base_kinds={"architect"},
+    capabilities=CAPABILITY_CATALOG,
+)
+MCP_TOOL_AUTHORITY_DEFINITIONS = authority_definition_map((
+    *WORKER_TOOL_AUTHORITY_DEFINITIONS,
+    *ENGINEER_TOOL_AUTHORITY_DEFINITIONS,
+    *ARCHITECT_TOOL_AUTHORITY_DEFINITIONS,
+))
+
+# Compatibility/read-model projection. The source of truth is each tool's
+# first-class authority descriptor above, not this derived index.
+_MCP_TOOL_CAPABILITIES = {
+    name: frozenset(
+        requirement.capability for requirement in definition.requirements
+    )
+    for name, definition in MCP_TOOL_AUTHORITY_DEFINITIONS.items()
 }
 
-# Authority metadata must cover the exact registered Torque MCP surface.  This
-# is deliberately fail-closed: a newly registered tool cannot silently become
-# available to deny-mode classes merely because its capability metadata was
-# forgotten.  The mapping is still centralized during the first migration
-# slice; the RFC moves these requirements beside ToolDefinition registration.
+# Authority metadata must cover the exact registered Torque MCP surface. This
+# remains deliberately fail-closed: a newly registered tool without colocated
+# metadata aborts module initialization.
 MCP_AUTHORITY_COVERAGE = audit_tool_authority_coverage(
     ALL_TOOLS,
-    MCP_TOOL_CAPABILITY_REQUIREMENTS,
-    known_capabilities=CAPABILITIES,
+    _MCP_TOOL_CAPABILITIES,
+    known_capabilities=CAPABILITY_CATALOG,
 )
 MCP_AUTHORITY_COVERAGE.require_valid()
 
-MCP_AUTHORITY_SURFACE_COVERAGE = {
-    "worker": audit_tool_authority_coverage(
-        TOOLS,
-        WORKER_TOOL_CAPABILITY_REQUIREMENTS,
-        known_capabilities=CAPABILITIES,
-    ),
-    "engineer": audit_tool_authority_coverage(
-        ENGINEER_TOOLS,
-        ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
-        known_capabilities=CAPABILITIES,
-    ),
-    "architect": audit_tool_authority_coverage(
-        ARCHITECT_TOOLS,
-        ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
-        known_capabilities=CAPABILITIES,
-    ),
-}
-for _surface_coverage in MCP_AUTHORITY_SURFACE_COVERAGE.values():
-    _surface_coverage.require_valid()
-
-MCP_CANONICAL_AUTHORITY_COVERAGE = audit_tool_authority_coverage(
-    ALL_TOOLS,
-    MCP_TOOL_CANONICAL_REQUIREMENTS,
-    known_capabilities=CAPABILITY_CATALOG,
-)
-MCP_CANONICAL_AUTHORITY_COVERAGE.require_valid()
-
-
-MCP_CAPABILITY_TARGET_ARGUMENTS = {
-    "behavior_overlay.read": ("agent_id",),
-    "behavior_overlay.propose": ("agent_id",),
-    "behavior_overlay.admin": ("agent_id", "engineer_id"),
-    "telemetry.read": ("agent_id",),
-    "event.read": ("engineer_id",),
-    "engineer.manage": ("engineer_id",),
-    "message.engineer": ("engineer_id", "architect_id"),
-    "message.worker": ("worker_id", "engineer_id"),
-    "message.architect_peer": ("architect_id",),
-    "decision.link": ("engineer_id", "task_id"),
-    "task.read": ("task", "task_id"),
-    "task.update": ("task", "task_id"),
-    "task.reassign": ("task", "task_id"),
-    "task.move": ("task", "task_id"),
-    "task.mark_covered": ("task", "task_id"),
-    "task.dispatch": ("task", "task_id"),
-    "task.verify": ("task", "task_id"),
-    "task.artifact.write": ("task", "task_id"),
-}
+MCP_AUTHORITY_SURFACE_COVERAGE = {}
+for _surface_name, _surface_tools, _surface_definitions in (
+    ("worker", TOOLS, WORKER_TOOL_AUTHORITY_DEFINITIONS),
+    ("engineer", ENGINEER_TOOLS, ENGINEER_TOOL_AUTHORITY_DEFINITIONS),
+    ("architect", ARCHITECT_TOOLS, ARCHITECT_TOOL_AUTHORITY_DEFINITIONS),
+):
+    _requirements = {
+        definition.name: frozenset(
+            requirement.capability for requirement in definition.requirements
+        )
+        for definition in _surface_definitions
+    }
+    _coverage = audit_tool_authority_coverage(
+        _surface_tools,
+        _requirements,
+        known_capabilities=CAPABILITY_CATALOG,
+    )
+    _coverage.require_valid()
+    MCP_AUTHORITY_SURFACE_COVERAGE[_surface_name] = _coverage
 
 
 def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
     """Return the capability requirements declared by an MCP surface."""
 
-    return MCP_TOOL_CAPABILITY_REQUIREMENTS.get(str(tool_name or "").strip())
+    return _MCP_TOOL_CAPABILITIES.get(str(tool_name or "").strip())
 
 
 def _matches_any_tool_pattern(
@@ -1003,7 +959,7 @@ def mcp_tool_allowed_by_policy(
         policy.allowed_tools or policy.allowed_families
     ):
         return False
-    requirements = MCP_TOOL_CANONICAL_REQUIREMENTS.get(normalized_name)
+    requirements = _MCP_TOOL_CAPABILITIES.get(normalized_name)
     if not requirements:
         # Missing metadata is always denied for a restricted profile. Import-
         # time coverage validation should make this unreachable in production.
@@ -1070,43 +1026,21 @@ def mcp_tool_allowed_by_authority(
     """Project a tool from canonical frozen Agent Class authority."""
 
     tool_name = str(tool_name or "").strip()
-    requirements = MCP_TOOL_CANONICAL_REQUIREMENTS.get(tool_name)
-    if not requirements:
+    tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
+    if not tool_authority:
         return False
-    for requirement in requirements:
-        definition = CAPABILITY_CATALOG.get(requirement)
+    for requirement in tool_authority.requirements:
+        definition = CAPABILITY_CATALOG.get(requirement.capability)
         if not definition:
             return False
         if not definition.scoped:
-            if not authority.has(requirement):
+            if not authority.has(requirement.capability):
                 return False
             continue
-        minimum_scope = definition.scopes[0]
-        # Read/list tools that can return orchestration-wide records must not
-        # be projected to a class whose ACL grants only a narrower slice. The
-        # existing handler checks remain an additional restriction; these
-        # minima ensure the ACL never broadens a list surface accidentally.
-        if requirement in {
-            "task.read",
-            "decision.read",
-            "thinking.read",
-            "idea_brief.read",
-            "semantic_recall.read",
-        } and tool_name.startswith(("architect_", "engineer_")):
-            minimum_scope = "group"
-        elif requirement == "journal.read":
-            minimum_scope = "children"
-        elif requirement == "telemetry.read":
-            minimum_scope = (
-                "group" if tool_name.startswith("architect_") else "children"
-            )
-        elif requirement == "worktree.read":
-            minimum_scope = "children"
-        elif requirement == "message.engineer":
-            minimum_scope = (
-                "group" if tool_name.startswith("engineer_peer_") else "children"
-            )
-        if not authority.allows(requirement, scope=minimum_scope):
+        if not authority.allows(
+            requirement.capability,
+            scope=requirement.minimum_scope,
+        ):
             return False
     return True
 
@@ -1178,7 +1112,7 @@ def _visible_tools(state, cell_id: str):
             policy,
             authority,
         )))
-    return tools
+    return [public_tool_spec(tool) for tool in tools]
 
 
 def _deferred_tools_for_caller(state, cell_id: str):
@@ -1293,28 +1227,19 @@ def _tool_argument_scope_denied(
     authority = _effective_class_authority_for_cell(caller_cell)
     if authority is None or not isinstance(arguments, dict):
         return False
-    requirements = MCP_TOOL_CANONICAL_REQUIREMENTS.get(tool_name, frozenset())
-    tool_spec = _ALL_TOOL_MAP.get(tool_name, {})
-    properties = (
-        tool_spec.get("inputSchema", {}).get("properties", {})
-        if isinstance(tool_spec, dict)
-        else {}
-    )
-    # Capability-owned target arguments avoid treating incidental or ignored
-    # fields as authority targets. This is the runtime form of the RFC's
-    # CapabilityRequirement.target_argument metadata while tool definitions
-    # are migrated to first-class descriptors.
-    for capability in requirements:
-        definition = CAPABILITY_CATALOG.get(capability)
-        if not definition or not definition.scoped:
+    tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
+    if not tool_authority:
+        return True
+    for requirement in tool_authority.requirements:
+        if not requirement.target_argument:
             continue
-        for key in MCP_CAPABILITY_TARGET_ARGUMENTS.get(capability, ()):
-            if key not in properties:
-                continue
-            target_ref = str(arguments.get(key, "") or "").strip()
+        raw_target = arguments.get(requirement.target_argument, "")
+        target_refs = raw_target if isinstance(raw_target, list) else [raw_target]
+        for raw_ref in target_refs:
+            target_ref = str(raw_ref or "").strip()
             if not target_ref:
                 continue
-            if key in {"task", "task_id"}:
+            if requirement.target_kind == "task":
                 task_id = resolve_mcp_task(state, target_ref)
                 target = state.board_tasks.get(task_id) if task_id else None
                 target_scope = (
@@ -1333,11 +1258,123 @@ def _tool_argument_scope_denied(
             # Unknown targets remain the handler's responsibility. Once a
             # concrete target resolves, the class ACL is enforced first.
             if target_scope and not authority.allows(
-                capability,
+                requirement.capability,
                 scope=target_scope,
             ):
                 return True
     return False
+
+
+def _result_collection_at_path(payload, path: str):
+    """Return ``(parent, key, collection)`` for a dotted result path."""
+
+    parts = [part for part in str(path or "").split(".") if part]
+    if not parts:
+        return None
+    parent = payload
+    for part in parts[:-1]:
+        if not isinstance(parent, dict) or part not in parent:
+            return None
+        parent = parent[part]
+    key = parts[-1]
+    if not isinstance(parent, dict) or not isinstance(parent.get(key), list):
+        return None
+    return parent, key, parent[key]
+
+
+def _scoped_result_resource(state, result_kind: str, item):
+    """Resolve a declared result item to the resource used for ACL scope."""
+
+    if isinstance(item, dict):
+        reference = item.get("id") or item.get(f"{result_kind}_id")
+    else:
+        reference = item
+    reference = str(reference or "").strip()
+    if not reference:
+        return None
+    if result_kind == "task":
+        task_id = resolve_mcp_task(state, reference)
+        return state.board_tasks.get(task_id) if task_id else None
+    agent_id = resolve_mcp_agent(state, reference)
+    return state.agents.get(agent_id) if agent_id else None
+
+
+def _apply_tool_result_scope_filters(
+    state,
+    tool_name: str,
+    result: dict,
+    caller_cell,
+) -> dict:
+    """Filter declared result collections through frozen class authority.
+
+    Result filtering is descriptor-driven and fail-closed. It is used only for
+    collection paths explicitly declared by a tool; aggregate tools without a
+    safely filterable result contract continue to require their broader
+    ``minimum_scope``.
+    """
+
+    authority = _effective_class_authority_for_cell(caller_cell)
+    tool_authority = MCP_TOOL_AUTHORITY_DEFINITIONS.get(tool_name)
+    if authority is None or not tool_authority or result.get("isError"):
+        return result
+    filters = [
+        requirement
+        for requirement in tool_authority.requirements
+        if requirement.result_paths
+    ]
+    if not filters:
+        return result
+    content = result.get("content")
+    if not isinstance(content, list):
+        return result
+    try:
+        block = next(
+            item for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        )
+        payload = json.loads(str(block.get("text", "") or ""))
+        for requirement in filters:
+            for path in requirement.result_paths:
+                located = _result_collection_at_path(payload, path)
+                if located is None:
+                    raise ValueError(f"missing declared result path {path}")
+                parent, key, collection = located
+                filtered = []
+                for item in collection:
+                    resource = _scoped_result_resource(
+                        state,
+                        requirement.result_kind,
+                        item,
+                    )
+                    if resource is None:
+                        continue
+                    target_scope = (
+                        _task_target_scope(state, caller_cell, resource)
+                        if requirement.result_kind == "task"
+                        else _agent_target_scope(caller_cell, resource)
+                    )
+                    if authority.allows(
+                        requirement.capability,
+                        scope=target_scope,
+                    ):
+                        filtered.append(item)
+                parent[key] = filtered
+                # Collection summaries must not retain pre-filter counts.
+                for count_key in ("count", "total", "tasks_total"):
+                    if count_key in parent:
+                        parent[count_key] = len(filtered)
+                if "truncated" in parent:
+                    parent["truncated"] = False
+        block["text"] = json.dumps(payload, separators=(",", ":"))
+        return result
+    except (StopIteration, TypeError, ValueError, json.JSONDecodeError):
+        return {
+            "content": [{
+                "type": "text",
+                "text": "Tool result could not be safely scope-filtered",
+            }],
+            "isError": True,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -2056,6 +2093,13 @@ async def dispatch_mcp_rpc_body(
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,
                 }
+
+        result = _apply_tool_result_scope_filters(
+            state,
+            tool_name,
+            result,
+            caller_cell,
+        )
 
         if write_tool and idempotency_key and db and cacheable:
             try:

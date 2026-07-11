@@ -20,13 +20,19 @@ Implemented in the current working change:
 - removal of generated `class-policy-*` Agent Profiles from Agent Class
   preview, validation, launch, status, audit, and UI paths;
 - removal of the legacy bucket/profile compiler and generated-profile
-  compatibility fields from the Agent Class implementation.
+  compatibility fields from the Agent Class implementation;
+- canonical authority descriptors colocated on all 227 registered MCP tool
+  specs, including explicit projection minima and concrete target metadata;
+- removal of the three legacy surface capability maps and the centralized
+  capability-to-target-argument heuristic;
+- descriptor-driven call-time checks for scalar and list-valued Agent/Task
+  targets, plus fail-closed result filtering for self-scoped task lists.
 
 Still required before this RFC is complete:
 
-- finish family-by-family list filtering and concrete resource scope checks;
-- replace temporary centralized target-argument metadata with first-class
-  `ToolDefinition` authority descriptors beside each tool registration;
+- finish family-by-family list filtering and concrete resource scope checks
+  for Decisions, Planning, messaging threads, telemetry rows, and artifact
+  collections that do not yet expose direct Agent/Task targets;
 - remove or rename historical class-oriented wrapper tools where practical;
 - remove direct Agent Profile authority assignment after the migration is
   complete.
@@ -321,7 +327,9 @@ ToolDefinition(
         requirements=(
             CapabilityRequirement(
                 capability="message.engineer",
+                minimum_scope="children",
                 target_argument="engineer_id",
+                target_kind="agent",
             ),
         ),
     ),
@@ -331,6 +339,12 @@ ToolDefinition(
 Internal authority metadata is not emitted as arbitrary MCP protocol fields.
 The registration layer produces the public MCP spec and retains the internal
 descriptor for projection and dispatch checks.
+
+Collection-returning tools may additionally declare `result_kind` and
+`result_paths`. The common result gate filters those paths through the same
+scope resolver and fails closed if the declared JSON contract is missing or
+malformed. Aggregate tools that cannot yet be filtered safely retain a broader
+explicit `minimum_scope` until their result contract is migrated.
 
 ### Registration invariants
 

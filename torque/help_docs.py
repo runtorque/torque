@@ -750,6 +750,9 @@ def help_tool_specs(prefix: str) -> list[dict[str, Any]]:
     return [
         {
             "name": f"{prefix}help_list",
+            "authority": {
+                "requirements": [{"capability": "help.read"}],
+            },
             "description": (
                 f"List {noun} topics from the maintained markdown allow-list. "
                 "Read-only and restricted-agent safe; returns source paths, summaries, hashes, audience tags, and sections."
@@ -763,6 +766,9 @@ def help_tool_specs(prefix: str) -> list[dict[str, Any]]:
         },
         {
             "name": f"{prefix}help_show",
+            "authority": {
+                "requirements": [{"capability": "help.read"}],
+            },
             "description": (
                 f"Show one {noun} topic or section by topic id, source path, or path#anchor. "
                 "Only maintained Help markdown sources are readable."
@@ -779,6 +785,9 @@ def help_tool_specs(prefix: str) -> list[dict[str, Any]]:
         },
         {
             "name": f"{prefix}help_search",
+            "authority": {
+                "requirements": [{"capability": "help.read"}],
+            },
             "description": (
                 f"Search {noun} deterministically. Returns ranked excerpts with source paths, anchors, hashes, and safe no-answer fallback."
             ),
@@ -793,6 +802,9 @@ def help_tool_specs(prefix: str) -> list[dict[str, Any]]:
         },
         {
             "name": f"{prefix}help_query",
+            "authority": {
+                "requirements": [{"capability": "help.read"}],
+            },
             "description": (
                 f"Answer a question using extractive {noun} lookup only. Returns concise snippets and source references; no hidden state or AI embeddings."
             ),

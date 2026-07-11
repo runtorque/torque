@@ -4,7 +4,7 @@
 ENGINEER_TOOLS = [
     # -- Read tools ---------------------------------------------------------
     {
-        "name": "engineer_board_summary",
+        "name": "engineer_board_summary", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "Return a compact board overview for the engineer's group. "
             "Includes lane counts, active agent status, pending asks, "
@@ -20,7 +20,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_boot_summary",
+        "name": "engineer_boot_summary", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Return this Engineer's cached AI boot-recovery summary. "
             "Read-only: never performs a live provider call. If the status is "
@@ -31,7 +31,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_session_map",
+        "name": "engineer_session_map", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Return a deterministic structured Session Map for the "
             "engineer's group. This is the current orchestration snapshot "
@@ -46,7 +46,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_hint_snooze",
+        "name": "engineer_hint_snooze", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self"}]},
         "description": (
             "Snooze or clear a deterministic Engineer hint by fingerprint. "
             "Use this to acknowledge expected low-noise hints, such as "
@@ -79,7 +79,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_semantic_recall",
+        "name": "engineer_semantic_recall", "authority": {"requirements": [{"capability": "semantic_recall.read","minimum_scope": "group"}]},
         "description": (
             "Search the local AI semantic index for snippets visible to this "
             "Engineer. Results are over-fetched then filtered through the "
@@ -102,7 +102,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_streams_list",
+        "name": "engineer_streams_list", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "List computed branch/worktree streams for the engineer's group. "
             "Returns compact stream objects including identity, ownership, "
@@ -151,7 +151,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_stream_show",
+        "name": "engineer_stream_show", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Show one computed stream by stream id, branch identity, or a "
             "related task id. Returns the full compact stream payload with "
@@ -191,7 +191,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_list",
+        "name": "engineer_peer_list", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group"}]},
         "description": (
             "List same-group Engineer peers hired by the same Architect. "
             "This discovery is only for the explicit peer notify surface and "
@@ -208,7 +208,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_inbox",
+        "name": "engineer_peer_inbox", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group","target_argument": "peer_engineer_id","target_kind": "agent"}]},
         "description": (
             "Read durable Engineer↔Engineer peer notification threads involving "
             "this Engineer."
@@ -240,7 +240,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_inspect",
+        "name": "engineer_peer_inspect", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group"}]},
         "description": (
             "Inspect the read-only task/stream context granted by one "
             "Engineer↔Engineer peer notification thread. Requires this "
@@ -259,7 +259,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_board_list",
+        "name": "engineer_board_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "List all tasks on the board grouped by lane. "
             "Supports optional filters by lane, label, task health, or "
@@ -296,7 +296,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_show",
+        "name": "engineer_task_show", "authority": {"requirements": [{"capability": "task.read","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Show full details for a task by ID or legacy alias. "
             "Returns title, description, labels, action, action variables, "
@@ -318,7 +318,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_agents_list",
+        "name": "engineer_agents_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "List all active agents with their name, slug, status, "
             "group, current task, and activity detail. When owned-agent "
@@ -328,7 +328,7 @@ ENGINEER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "engineer_agent_show",
+        "name": "engineer_agent_show", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "Show detailed information about a specific agent. "
             "Returns agent metadata, worktree state (path, branch, "
@@ -349,7 +349,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_actions_list",
+        "name": "engineer_actions_list", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "List available actions (project and user scope) with "
             "name, description, variables, and scope. Use this to "
@@ -368,7 +368,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_action_show",
+        "name": "engineer_action_show", "authority": {"requirements": [{"capability": "board.read","minimum_scope": "group"}]},
         "description": (
             "Show full details of an action including its YAML contents, "
             "prompt template, transitions, and discovered variables."
@@ -394,7 +394,7 @@ ENGINEER_TOOLS = [
     },
     # -- Write tools --------------------------------------------------------
     {
-        "name": "engineer_peer_notify",
+        "name": "engineer_peer_notify", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group","target_argument": "engineer_id","target_kind": "agent"}]},
         "description": (
             "Notify a same-group, same-supervising-Architect Engineer peer to "
             "inspect a referenced task or stream. Requires context_task_ids or "
@@ -436,7 +436,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_peer_reply",
+        "name": "engineer_peer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "group"}]},
         "description": "Reply to an existing Engineer↔Engineer peer notification thread.",
         "inputSchema": {
             "type": "object",
@@ -455,7 +455,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_create",
+        "name": "engineer_task_create", "authority": {"requirements": [{"capability": "task.create","minimum_scope": "self"}]},
         "description": (
             "Create a board task. Required: title. Optional: group, lane, "
             "action/action_vars, labels, verification fields, deliverable."
@@ -533,7 +533,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_edit",
+        "name": "engineer_task_edit", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Patch task fields; omitted fields stay unchanged."
         ),
@@ -589,7 +589,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_upload_artifact",
+        "name": "engineer_task_upload_artifact", "authority": {"requirements": [{"capability": "task.artifact.write","minimum_scope": "self","target_argument": "task","target_kind": "task"},{"capability": "task.artifact.write","minimum_scope": "self","target_argument": "task_id","target_kind": "task"}]},
         "description": (
             "Upload and attach an image or other artifact to a specific board "
             "task. Provide a local_path or inline content, and Torque stores the "
@@ -666,7 +666,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_mark_covered",
+        "name": "engineer_task_mark_covered", "authority": {"requirements": [{"capability": "task.mark_covered","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Mark an assigned/created task as covered by another visible "
             "task or PR. Records durable completion evidence and an activity "
@@ -718,7 +718,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_verify",
+        "name": "engineer_task_verify", "authority": {"requirements": [{"capability": "task.verify","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Record a task verification checkpoint for deploy/restart "
             "attempts, smoke results, and notes."
@@ -803,7 +803,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_move",
+        "name": "engineer_task_move", "authority": {"requirements": [{"capability": "task.move","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": "Move a task to a different lane on the board.",
         "inputSchema": {
             "type": "object",
@@ -821,7 +821,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_dispatch",
+        "name": "engineer_task_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "children","target_argument": "task","target_kind": "task"},{"capability": "worker.manage","minimum_scope": "children"}]},
         "description": (
             "Dispatch task; create an agent unless `agent` is set. Moves "
             "task to In Progress and sends rendered prompt. Existing-agent "
@@ -909,7 +909,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_batch_dispatch",
+        "name": "engineer_batch_dispatch", "authority": {"requirements": [{"capability": "task.dispatch","minimum_scope": "children","target_argument": "tasks","target_kind": "task"},{"capability": "worker.manage","minimum_scope": "children"}]},
         "description": (
             "Boot N workers simultaneously for independent tasks. Use when "
             "tasks have no inter-dependencies and parallel velocity > "
@@ -983,7 +983,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_task_resolve",
+        "name": "engineer_task_resolve", "authority": {"requirements": [{"capability": "task.update","minimum_scope": "self","target_argument": "task","target_kind": "task"}]},
         "description": (
             "Resolve an ask task by providing an answer. The answer "
             "is sent to the parent task's agent and the ask task "
@@ -1008,7 +1008,7 @@ ENGINEER_TOOLS = [
     },
     # -- Event tools --------------------------------------------------------
     {
-        "name": "engineer_events",
+        "name": "engineer_events", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Poll for recent events. Use after context cleanup to "
             "catch up on what happened. Returns panel events filtered "
@@ -1041,7 +1041,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_launch_settings",
+        "name": "engineer_launch_settings", "authority": {"requirements": [{"capability": "worker.manage","minimum_scope": "children"}]},
         "description": (
             "Update the designated engineer's persisted launch settings. "
             "These settings are used the next time the designated engineer is created "
@@ -1077,7 +1077,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_notifications",
+        "name": "engineer_notifications", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Set digest preset or overrides. Mandatory events "
             "(task_completed, agent_error, agent_reply, agent_blocked, "
@@ -1141,7 +1141,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_resume",
+        "name": "engineer_resume", "authority": {"requirements": [{"capability": "event.read","minimum_scope": "group"}]},
         "description": (
             "Resume event delivery after a engineer_ask. Call this "
             "after the human has responded (via the panel or "
@@ -1151,7 +1151,7 @@ ENGINEER_TOOLS = [
     },
     # -- Context tools ------------------------------------------------------
     {
-        "name": "engineer_journal",
+        "name": "engineer_journal", "authority": {"requirements": [{"capability": "journal.write","minimum_scope": "self"}]},
         "description": (
             "Append an entry to the engineer's persistent decision "
             "journal. Use this to record decisions, observations, and "
@@ -1190,7 +1190,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_journal_read",
+        "name": "engineer_journal_read", "authority": {"requirements": [{"capability": "journal.read","minimum_scope": "self"}]},
         "description": (
             "Read recent journal entries. Use after context cleanup "
             "or startup to recover the engineer's decision history "
@@ -1238,7 +1238,7 @@ ENGINEER_TOOLS = [
     },
     # -- Interaction tools --------------------------------------------------
     {
-        "name": "engineer_agent_message",
+        "name": "engineer_agent_message", "authority": {"requirements": [{"capability": "message.worker","minimum_scope": "children","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Send a message to any agent's terminal. The agent can "
             "reply via torque_reply when reply_required is true, which "
@@ -1279,7 +1279,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_ask",
+        "name": "engineer_ask", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Ask the human a question. The question is displayed in "
             "the Agent panel and event pushes are automatically "
@@ -1305,7 +1305,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_message_user",
+        "name": "engineer_message_user", "authority": {"requirements": [{"capability": "message.user","minimum_scope": "self"}]},
         "description": (
             "Send a non-blocking durable direct message to the user-facing "
             "conversation panel. Use this for user-visible conversation or "
@@ -1348,7 +1348,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_note",
+        "name": "engineer_note", "authority": {"requirements": [{"capability": "journal.write","minimum_scope": "self"}]},
         "description": (
             "Post a non-blocking note or soft question for the human, "
             "including next-wave proposals or status/context that "
@@ -1373,7 +1373,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_agent_close",
+        "name": "engineer_agent_close", "authority": {"requirements": [{"capability": "worker.manage","minimum_scope": "children","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Close an agent — ends its terminal session and removes "
             "it from the group. The agent's worktree (if any) is "
@@ -1393,7 +1393,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_agent_relaunch",
+        "name": "engineer_agent_relaunch", "authority": {"requirements": [{"capability": "worker.manage","minimum_scope": "children","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Relaunch a stopped agent — re-creates the terminal "
             "session. If the agent has a worktree, it is reused. "
@@ -1414,7 +1414,7 @@ ENGINEER_TOOLS = [
     },
     # -- Worktree tools -----------------------------------------------------
     {
-        "name": "engineer_merge",
+        "name": "engineer_merge", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Push an agent worktree branch, create or reuse a GitHub PR, "
             "and request a squash merge into the base branch. "
@@ -1568,7 +1568,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_rebase",
+        "name": "engineer_rebase", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Rebase an agent's worktree branch onto its base branch. "
             "Useful after engineer_merge reports conflicts. Returns "
@@ -1589,7 +1589,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_create_pr",
+        "name": "engineer_create_pr", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Create a GitHub pull request for an agent's worktree "
             "branch. Pushes the branch to origin and creates a PR "
@@ -1635,7 +1635,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_diff",
+        "name": "engineer_diff", "authority": {"requirements": [{"capability": "worktree.read","minimum_scope": "children","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Return agent worktree diff against base as full diff, diffstat, "
             "or structured summary; optional path filter. Reviewer agents may "
@@ -1670,7 +1670,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_worktree_remove",
+        "name": "engineer_worktree_remove", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Remove an agent's worktree from disk. Use after merging "
             "to clean up. The agent's directory reverts to the "
@@ -1710,7 +1710,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_worktree_adopt",
+        "name": "engineer_worktree_adopt", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": "Attach a stopped/idle visible agent to an existing orphaned worktree+branch without creating or moving branches.",
         "inputSchema": {
             "type": "object",
@@ -1726,7 +1726,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_worktree_advance_boundary",
+        "name": "engineer_worktree_advance_boundary", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": "Advance the latest open worktree boundary to a new tip only after Torque machine-verifies exactly one configured nested-submodule gitlink-only commit. verification_note is audit metadata, not authorization.",
         "inputSchema": {
             "type": "object",
@@ -1745,7 +1745,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_worktree_checkpoint",
+        "name": "engineer_worktree_checkpoint", "authority": {"requirements": [{"capability": "worktree.merge","minimum_scope": "self","target_argument": "agent","target_kind": "agent"}]},
         "description": (
             "Create a checkpoint commit on an agent's worktree. "
             "Commits all current changes with an auto-generated "
@@ -1768,7 +1768,7 @@ ENGINEER_TOOLS = [
     },
     # -- Specializations -------------------------------------------------
     {
-        "name": "engineer_specializations_list",
+        "name": "engineer_specializations_list", "authority": {"requirements": [{"capability": "specialization.read"}]},
         "description": (
             "List engineer specializations available (project and user "
             "scope). Specializations shape an engineer's boot preamble "
@@ -1795,7 +1795,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_specialization_show",
+        "name": "engineer_specialization_show", "authority": {"requirements": [{"capability": "specialization.read"}]},
         "description": (
             "Show full details of a specialization including its "
             "description, preamble, and priorities."
@@ -1823,7 +1823,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_specialization_save",
+        "name": "engineer_specialization_save", "authority": {"requirements": [{"capability": "specialization.write"}]},
         "description": (
             "Create or update a specialization YAML file. Fields: "
             "description, preamble, priorities (list of strings). Saves "
@@ -1859,7 +1859,7 @@ ENGINEER_TOOLS = [
         },
     },
     {
-        "name": "engineer_specialization_delete",
+        "name": "engineer_specialization_delete", "authority": {"requirements": [{"capability": "specialization.write"}]},
         "description": (
             "Delete a specialization YAML file by name."
         ),

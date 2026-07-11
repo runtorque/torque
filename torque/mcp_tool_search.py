@@ -32,6 +32,9 @@ def make_tool_search_spec(name: str, surface: str) -> dict:
     """Return the eager schema for a deferred-tool search tool."""
     return {
         "name": name,
+        "authority": {
+            "requirements": [{"capability": "tool.search"}],
+        },
         "description": (
             f"Search {surface} MCP tools that are available on demand but "
             "omitted from the eager tools/list response. Use select:name1,name2 "
@@ -50,6 +53,7 @@ def public_tool_spec(tool: dict) -> dict:
     """Return a copy of a tool schema without Torque-internal metadata."""
     spec = deepcopy(tool or {})
     spec.pop("deferred", None)
+    spec.pop("authority", None)
     return spec
 
 

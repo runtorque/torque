@@ -521,10 +521,10 @@ CAPABILITY_CATALOG: dict[str, CapabilityDefinition] = {
 }
 
 
-# Temporary migration bridge from the old Agent Profile atom vocabulary to
-# canonical schema-v5 capabilities. Tool-specific overrides below split old
-# atoms that bundled unrelated operations. This bridge is deleted once every
-# surface declaration is written directly in canonical ids.
+# Temporary compatibility bridge from direct legacy Agent Profile atom grants
+# to canonical schema-v5 capabilities. MCP tool registration no longer uses
+# this vocabulary; it remains only while direct Agent Profile assignment is a
+# supported migration surface.
 LEGACY_ATOM_TO_CAPABILITY: dict[str, str] = {
     "observe.self_context": "self.read",
     "observe.board_summary": "board.read",
@@ -638,53 +638,6 @@ def legacy_atoms_for_canonical_capabilities(
         if represented & selected:
             legacy.add(atom)
     return frozenset(legacy)
-
-
-def canonical_tool_requirements(
-    tool_name: str,
-    legacy_requirements: Iterable[str],
-) -> frozenset[str]:
-    """Translate one current tool declaration to canonical capabilities."""
-
-    tool_name = str(tool_name or "").strip()
-    legacy = {
-        str(requirement or "").strip()
-        for requirement in (legacy_requirements or ())
-        if str(requirement or "").strip()
-    }
-
-    if tool_name.endswith((
-        "_help_list",
-        "_help_show",
-        "_help_search",
-        "_help_query",
-    )):
-        return frozenset({"help.read"})
-    if tool_name.endswith("_tool_search"):
-        return frozenset({"tool.search"})
-    if tool_name == "torque_context":
-        return frozenset({"self.read"})
-
-    if "behavior_overlay" in tool_name:
-        if tool_name.endswith(("_read", "_versions", "_diff", "_proposal_list")):
-            return frozenset({"behavior_overlay.read"})
-        if tool_name.endswith(("_propose", "_request_rollback", "_rollback")):
-            return frozenset({"behavior_overlay.propose"})
-        return frozenset({"behavior_overlay.admin"})
-
-    if tool_name == "architect_engineer_set_specializations":
-        return frozenset({"engineer.manage"})
-    if "specialization" in tool_name:
-        if tool_name.endswith(("_list", "_show")):
-            return frozenset({"specialization.read"})
-        return frozenset({"specialization.write"})
-
-    canonical = {
-        LEGACY_ATOM_TO_CAPABILITY[requirement]
-        for requirement in legacy
-        if requirement in LEGACY_ATOM_TO_CAPABILITY
-    }
-    return frozenset(canonical)
 
 
 def validate_capability_catalog(

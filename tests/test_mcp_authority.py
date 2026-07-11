@@ -11,23 +11,22 @@ from torque.agent_profiles import CAPABILITIES
 from torque.capability_catalog import (
     CAPABILITY_CATALOG,
     LEGACY_ATOM_TO_CAPABILITY,
-    canonical_tool_requirements,
     canonical_capabilities_from_legacy_atoms,
     capability_catalog_for_base_kind,
     validate_capability_catalog,
 )
 from torque.mcp import (
-    MCP_TOOL_CAPABILITY_REQUIREMENTS,
+    MCP_TOOL_AUTHORITY_DEFINITIONS,
     mcp_tool_allowed_by_authority,
 )
 from torque.mcp_authority import (
     AuthorityValidationError,
     CapabilityDefinition,
+    authority_definition_from_tool_spec,
     audit_tool_authority_coverage,
     compile_agent_class_acl,
     evaluate_capability_acl,
     effective_authority_from_snapshot,
-    merge_tool_authority_requirements,
     next_narrower_scope,
     registry_hash,
     scope_includes,
@@ -270,14 +269,69 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
         self.assertTrue(MCP_AUTHORITY_COVERAGE.ok)
         self.assertEqual(
             {tool["name"] for tool in ALL_TOOLS},
-            set(MCP_TOOL_CAPABILITY_REQUIREMENTS),
+            set(MCP_TOOL_AUTHORITY_DEFINITIONS),
         )
         self.assertTrue(
             all(
-                set(requirements).issubset(CAPABILITIES)
-                for requirements in MCP_TOOL_CAPABILITY_REQUIREMENTS.values()
+                {
+                    requirement.capability
+                    for requirement in definition.requirements
+                }.issubset(CAPABILITY_CATALOG)
+                for definition in MCP_TOOL_AUTHORITY_DEFINITIONS.values()
             )
         )
+
+    def test_tool_authority_is_colocated_validated_and_not_public(self):
+        from torque.mcp import ALL_TOOLS, MCP_TOOL_AUTHORITY_DEFINITIONS
+        from torque.mcp_tool_search import public_tool_spec
+
+        task_show = next(
+            tool for tool in ALL_TOOLS
+            if tool["name"] == "architect_task_show"
+        )
+        definition = MCP_TOOL_AUTHORITY_DEFINITIONS["architect_task_show"]
+        self.assertIn("authority", task_show)
+        self.assertNotIn("authority", public_tool_spec(task_show))
+        self.assertEqual(definition.requirements[0].capability, "task.read")
+        self.assertEqual(definition.requirements[0].minimum_scope, "self")
+        self.assertEqual(definition.requirements[0].target_argument, "task")
+        self.assertEqual(definition.requirements[0].target_kind, "task")
+
+    def test_tool_authority_rejects_missing_or_invalid_target_metadata(self):
+        base = {
+            "name": "example",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent_id": {"type": "string"}},
+            },
+        }
+        with self.assertRaisesRegex(
+            AuthorityValidationError, "requires authority metadata"
+        ):
+            authority_definition_from_tool_spec(
+                base,
+                base_kinds={"architect"},
+                capabilities=CAPABILITY_CATALOG,
+            )
+        invalid = {
+            **base,
+            "authority": {
+                "requirements": [{
+                    "capability": "telemetry.read",
+                    "minimum_scope": "children",
+                    "target_argument": "missing",
+                    "target_kind": "agent",
+                }],
+            },
+        }
+        with self.assertRaisesRegex(
+            AuthorityValidationError, "is not in its schema"
+        ):
+            authority_definition_from_tool_spec(
+                invalid,
+                base_kinds={"architect"},
+                capabilities=CAPABILITY_CATALOG,
+            )
 
     def test_surface_authority_registries_are_individually_exact(self):
         from torque.mcp import MCP_AUTHORITY_SURFACE_COVERAGE
@@ -290,41 +344,11 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             all(report.ok for report in MCP_AUTHORITY_SURFACE_COVERAGE.values())
         )
 
-    def test_surface_registry_merge_rejects_shadowed_tool(self):
-        with self.assertRaisesRegex(RuntimeError, "multiple surfaces"):
-            merge_tool_authority_requirements(
-                {"same_tool": {"self.read"}},
-                {"same_tool": {"task.read"}},
-            )
-
     def test_every_legacy_atom_translates_to_a_known_canonical_capability(self):
         self.assertTrue(set(LEGACY_ATOM_TO_CAPABILITY.values()).issubset(
             CAPABILITY_CATALOG
         ))
         self.assertTrue(set(CAPABILITIES).issubset(LEGACY_ATOM_TO_CAPABILITY))
-
-    def test_tool_specific_translation_splits_old_bundled_capabilities(self):
-        self.assertEqual(
-            canonical_tool_requirements(
-                "architect_help_list",
-                {"observe.self_context"},
-            ),
-            frozenset({"help.read"}),
-        )
-        self.assertEqual(
-            canonical_tool_requirements(
-                "engineer_behavior_overlay_propose",
-                {"profile.edit"},
-            ),
-            frozenset({"behavior_overlay.propose"}),
-        )
-        self.assertEqual(
-            canonical_tool_requirements(
-                "engineer_specialization_save",
-                {"agent.manage_engineer_roster"},
-            ),
-            frozenset({"specialization.write"}),
-        )
 
     def test_legacy_profile_expansion_preserves_split_surface_permissions(self):
         expanded = canonical_capabilities_from_legacy_atoms({
@@ -343,15 +367,12 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
         }.issubset(expanded))
 
     def test_current_tool_surface_has_complete_canonical_requirements(self):
-        from torque.mcp import (
-            MCP_CANONICAL_AUTHORITY_COVERAGE,
-            MCP_TOOL_CANONICAL_REQUIREMENTS,
-        )
+        self.assertTrue(all(
+            definition.requirements
+            for definition in MCP_TOOL_AUTHORITY_DEFINITIONS.values()
+        ))
 
-        self.assertTrue(MCP_CANONICAL_AUTHORITY_COVERAGE.ok)
-        self.assertTrue(all(MCP_TOOL_CANONICAL_REQUIREMENTS.values()))
-
-    def test_projection_enforces_scope_required_by_group_read_tools(self):
+    def test_projection_uses_each_tool_descriptor_minimum_scope(self):
         self_only = compile_agent_class_acl(
             base_kind="architect",
             acl={
@@ -369,11 +390,17 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
             capabilities=CAPABILITY_CATALOG,
         )
 
-        self.assertFalse(
+        self.assertTrue(
             mcp_tool_allowed_by_authority("architect_task_list", self_only)
+        )
+        self.assertFalse(
+            mcp_tool_allowed_by_authority("architect_task_chain", self_only)
         )
         self.assertTrue(
             mcp_tool_allowed_by_authority("architect_task_list", group_read)
+        )
+        self.assertTrue(
+            mcp_tool_allowed_by_authority("architect_task_chain", group_read)
         )
 
     def test_projection_distinguishes_child_and_group_engineer_messages(self):
@@ -407,32 +434,29 @@ class MCPAuthorityPrimitiveTests(unittest.TestCase):
 
     def test_canonical_requirements_fit_each_registered_base_kind_surface(self):
         from torque.mcp import (
-            ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
-            ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
-            WORKER_TOOL_CAPABILITY_REQUIREMENTS,
+            ARCHITECT_TOOL_AUTHORITY_DEFINITIONS,
+            ENGINEER_TOOL_AUTHORITY_DEFINITIONS,
+            WORKER_TOOL_AUTHORITY_DEFINITIONS,
         )
 
         surfaces = (
-            (
-                ("worker", "engineer", "architect"),
-                WORKER_TOOL_CAPABILITY_REQUIREMENTS,
-            ),
-            (("engineer",), ENGINEER_TOOL_CAPABILITY_REQUIREMENTS),
-            (("architect",), ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS),
+            WORKER_TOOL_AUTHORITY_DEFINITIONS,
+            ENGINEER_TOOL_AUTHORITY_DEFINITIONS,
+            ARCHITECT_TOOL_AUTHORITY_DEFINITIONS,
         )
-        for base_kinds, registry in surfaces:
-            for tool_name, legacy in registry.items():
-                for capability in canonical_tool_requirements(tool_name, legacy):
-                    for base_kind in base_kinds:
+        for definitions in surfaces:
+            for definition in definitions:
+                for requirement in definition.requirements:
+                    for base_kind in definition.base_kinds:
                         with self.subTest(
-                            tool=tool_name,
-                            capability=capability,
+                            tool=definition.name,
+                            capability=requirement.capability,
                             base_kind=base_kind,
                         ):
                             self.assertTrue(
-                                CAPABILITY_CATALOG[capability].available_to(
-                                    base_kind
-                                )
+                                CAPABILITY_CATALOG[
+                                    requirement.capability
+                                ].available_to(base_kind)
                             )
 
     def test_registry_hash_is_deterministic_and_versioned(self):

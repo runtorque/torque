@@ -3,11 +3,6 @@
 This module is intentionally independent from Agent Classes and Agent
 Profiles.  It provides the platform vocabulary used to describe capabilities,
 scopes, and MCP tool requirements without knowing any named class.
-
-The first migration slice uses :func:`audit_tool_authority_coverage` against
-the existing tool requirement registry.  Later slices will move each
-requirement beside its ``ToolDefinition`` and use the same primitives for ACL
-evaluation and resource authorization.
 """
 
 from __future__ import annotations
@@ -142,14 +137,20 @@ def effective_authority_from_snapshot(
 class CapabilityRequirement:
     """A capability required by one MCP tool.
 
-    ``target_argument`` is empty for projection-only/unscoped requirements.
-    Scoped handlers set it (or use a handler-owned resolver in a later
-    migration slice) so call-time authorization can compare a concrete target
-    with the caller's effective scope.
+    ``minimum_scope`` is the narrowest grant required to project the tool.
+    ``target_argument`` is empty when the tool has no directly addressable
+    target. Scoped handlers set both it and ``target_kind`` so call-time
+    authorization can compare a concrete resource with the caller's effective
+    scope. A capability may appear more than once when a tool accepts multiple
+    independent targets.
     """
 
     capability: str
+    minimum_scope: str = ""
     target_argument: str = ""
+    target_kind: str = ""
+    result_kind: str = ""
+    result_paths: tuple[str, ...] = ()
     conditional: bool = False
 
 
@@ -160,6 +161,222 @@ class ToolAuthorityDefinition:
     name: str
     base_kinds: frozenset[str]
     requirements: tuple[CapabilityRequirement, ...]
+
+
+def authority_definition_from_tool_spec(
+    tool_spec: Mapping[str, Any],
+    *,
+    base_kinds: Iterable[str],
+    capabilities: Mapping[str, CapabilityDefinition],
+) -> ToolAuthorityDefinition:
+    """Parse and validate authority metadata colocated with one MCP tool.
+
+    ``authority`` is Torque-internal registration metadata and must be removed
+    before a tool schema is sent over MCP. Keeping it on the registered spec
+    makes the schema and its authorization contract one reviewable unit.
+    """
+
+    name = str(tool_spec.get("name", "") or "").strip()
+    if not name:
+        raise AuthorityValidationError("MCP tool requires a name")
+    raw_authority = tool_spec.get("authority")
+    if not isinstance(raw_authority, Mapping):
+        raise AuthorityValidationError(
+            f"MCP tool {name} requires authority metadata"
+        )
+    unknown_authority_fields = sorted(
+        set(raw_authority) - {"requirements"}
+    )
+    if unknown_authority_fields:
+        raise AuthorityValidationError(
+            f"MCP tool {name} has unknown authority fields: "
+            + ", ".join(unknown_authority_fields)
+        )
+    raw_requirements = raw_authority.get("requirements")
+    if not isinstance(raw_requirements, list) or not raw_requirements:
+        raise AuthorityValidationError(
+            f"MCP tool {name} requires at least one capability"
+        )
+
+    properties = tool_spec.get("inputSchema", {}).get("properties", {})
+    if not isinstance(properties, Mapping):
+        properties = {}
+    requirements: list[CapabilityRequirement] = []
+    normalized_base_kinds = frozenset(
+        str(kind or "").strip()
+        for kind in base_kinds
+        if str(kind or "").strip()
+    )
+    if not normalized_base_kinds:
+        raise AuthorityValidationError(
+            f"MCP tool {name} requires at least one base kind"
+        )
+    seen: set[tuple[str, str]] = set()
+    for index, raw_requirement in enumerate(raw_requirements):
+        if not isinstance(raw_requirement, Mapping):
+            raise AuthorityValidationError(
+                f"MCP tool {name} authority requirement {index} must be a mapping"
+            )
+        unknown_fields = sorted(
+            set(raw_requirement)
+            - {
+                "capability",
+                "minimum_scope",
+                "target_argument",
+                "target_kind",
+                "result_kind",
+                "result_paths",
+                "conditional",
+            }
+        )
+        if unknown_fields:
+            raise AuthorityValidationError(
+                f"MCP tool {name} authority requirement {index} has unknown fields: "
+                + ", ".join(unknown_fields)
+            )
+        capability = str(raw_requirement.get("capability", "") or "").strip()
+        definition = capabilities.get(capability)
+        if not definition:
+            raise AuthorityValidationError(
+                f"MCP tool {name} references unknown capability {capability}"
+            )
+        incompatible_kinds = sorted(
+            kind
+            for kind in normalized_base_kinds
+            if not definition.available_to(kind)
+        )
+        if incompatible_kinds:
+            raise AuthorityValidationError(
+                f"MCP tool {name} capability {capability} is unavailable to: "
+                + ", ".join(incompatible_kinds)
+            )
+        minimum_scope = normalize_scope(raw_requirement.get("minimum_scope"))
+        target_argument = str(
+            raw_requirement.get("target_argument", "") or ""
+        ).strip()
+        target_kind = str(raw_requirement.get("target_kind", "") or "").strip()
+        result_kind = str(raw_requirement.get("result_kind", "") or "").strip()
+        raw_result_paths = raw_requirement.get("result_paths", [])
+        if not isinstance(raw_result_paths, list) or any(
+            not str(path or "").strip() for path in raw_result_paths
+        ):
+            raise AuthorityValidationError(
+                f"MCP tool {name} result_paths must be a list of paths"
+            )
+        result_paths = tuple(
+            str(path or "").strip() for path in raw_result_paths
+        )
+        conditional = bool(raw_requirement.get("conditional", False))
+        if definition.scoped:
+            if not minimum_scope or minimum_scope not in definition.scopes:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} requires a valid minimum_scope for {capability}"
+                )
+            insufficient_kinds = sorted(
+                kind
+                for kind in normalized_base_kinds
+                if not scope_includes(
+                    definition.maximum_scope_for(kind),
+                    minimum_scope,
+                )
+            )
+            if insufficient_kinds:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} minimum_scope {minimum_scope} exceeds "
+                    f"the {capability} ceiling for: "
+                    + ", ".join(insufficient_kinds)
+                )
+        elif minimum_scope:
+            raise AuthorityValidationError(
+                f"MCP tool {name} uses minimum_scope for unscoped {capability}"
+            )
+        if target_argument:
+            if target_argument not in properties:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} target argument {target_argument} is not in its schema"
+                )
+            if target_kind not in {"agent", "task"}:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} target {target_argument} requires target_kind"
+                )
+            if not definition.scoped:
+                raise AuthorityValidationError(
+                    f"MCP tool {name} cannot target unscoped {capability}"
+                )
+        elif target_kind:
+            raise AuthorityValidationError(
+                f"MCP tool {name} target_kind requires target_argument"
+            )
+        if result_paths and not definition.scoped:
+            raise AuthorityValidationError(
+                f"MCP tool {name} cannot filter results for unscoped {capability}"
+            )
+        if result_paths and result_kind not in {"agent", "task"}:
+            raise AuthorityValidationError(
+                f"MCP tool {name} result_paths require result_kind"
+            )
+        if result_kind and not result_paths:
+            raise AuthorityValidationError(
+                f"MCP tool {name} result_kind requires result_paths"
+            )
+        identity = (capability, target_argument)
+        if identity in seen:
+            raise AuthorityValidationError(
+                f"MCP tool {name} repeats authority requirement {capability}"
+            )
+        seen.add(identity)
+        requirements.append(CapabilityRequirement(
+            capability=capability,
+            minimum_scope=minimum_scope,
+            target_argument=target_argument,
+            target_kind=target_kind,
+            result_kind=result_kind,
+            result_paths=result_paths,
+            conditional=conditional,
+        ))
+
+    return ToolAuthorityDefinition(
+        name=name,
+        base_kinds=normalized_base_kinds,
+        requirements=tuple(requirements),
+    )
+
+
+def authority_definitions_from_tool_specs(
+    tool_specs: Iterable[Mapping[str, Any]],
+    *,
+    base_kinds: Iterable[str],
+    capabilities: Mapping[str, CapabilityDefinition],
+) -> tuple[ToolAuthorityDefinition, ...]:
+    """Build validated first-class descriptors for a registered surface."""
+
+    return tuple(
+        authority_definition_from_tool_spec(
+            tool_spec,
+            base_kinds=base_kinds,
+            capabilities=capabilities,
+        )
+        for tool_spec in tool_specs
+    )
+
+
+def authority_definition_map(
+    definitions: Iterable[ToolAuthorityDefinition],
+) -> dict[str, ToolAuthorityDefinition]:
+    """Index descriptors without permitting silent duplicate tool names."""
+
+    indexed: dict[str, ToolAuthorityDefinition] = {}
+    duplicates: set[str] = set()
+    for definition in definitions:
+        if definition.name in indexed:
+            duplicates.add(definition.name)
+        else:
+            indexed[definition.name] = definition
+    if duplicates:
+        raise RuntimeError(
+            "duplicate MCP authority definitions: " + ", ".join(sorted(duplicates))
+        )
+    return indexed
 
 
 @dataclass(frozen=True)
@@ -454,34 +671,6 @@ def audit_tool_authority_coverage(
         empty_requirements=tuple(sorted(empty_requirements)),
         unknown_capabilities=tuple(unknown),
     )
-
-
-def merge_tool_authority_requirements(
-    *registries: Mapping[str, Iterable[str]],
-) -> dict[str, frozenset[str]]:
-    """Merge surface-owned tool registries without silent shadowing."""
-
-    merged: dict[str, frozenset[str]] = {}
-    duplicates: set[str] = set()
-    for registry in registries:
-        for raw_name, raw_requirements in registry.items():
-            name = str(raw_name or "").strip()
-            if not name:
-                continue
-            if name in merged:
-                duplicates.add(name)
-                continue
-            merged[name] = frozenset(
-                str(capability or "").strip()
-                for capability in (raw_requirements or ())
-                if str(capability or "").strip()
-            )
-    if duplicates:
-        raise RuntimeError(
-            "MCP tools have authority metadata in multiple surfaces: "
-            + ", ".join(sorted(duplicates))
-        )
-    return merged
 
 
 def registry_hash(payload: Any) -> str:

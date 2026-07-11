@@ -101,7 +101,7 @@ for _tool in ENGINEER_TOOLS:
         _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
     {
-        "name": "engineer_area_list",
+        "name": "engineer_area_list", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Read-only list of Planning Areas in this engineer's group. Decision links are counted but decision details are hidden.",
         "inputSchema": {
             "type": "object",
@@ -114,7 +114,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_area_show",
+        "name": "engineer_area_show", "authority": {"requirements": [{"capability": "planning.area.read","minimum_scope": "group"}]},
         "description": "Read-only show for one same-group Planning Area with links filtered to engineer-visible tasks and decision counts only.",
         "inputSchema": {
             "type": "object",
@@ -127,7 +127,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_initiative_list",
+        "name": "engineer_initiative_list", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
         "description": "Read-only list of first-class product Initiatives in this engineer's group. Board remains execution source of truth.",
         "inputSchema": {
             "type": "object",
@@ -138,7 +138,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_initiative_show",
+        "name": "engineer_initiative_show", "authority": {"requirements": [{"capability": "planning.initiative.read","minimum_scope": "group"}]},
         "description": "Read-only show for one same-group Initiative with typed links and Board-derived linked task summary filtered to engineer-visible tasks.",
         "inputSchema": {
             "type": "object",
@@ -152,7 +152,7 @@ ENGINEER_TOOLS.extend([
     *help_tool_specs("engineer_"),
     make_tool_search_spec("engineer_tool_search", "engineer"),
     {
-        "name": "engineer_behavior_overlay_read",
+        "name": "engineer_behavior_overlay_read", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self"}]},
         "description": (
             "Read this engineer's active Dynamic Behavior overlay. "
             "Use scope_kind=role for the inherited group Engineer-role "
@@ -169,7 +169,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_versions",
+        "name": "engineer_behavior_overlay_versions", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self"}]},
         "description": "List this engineer's Dynamic Behavior overlay versions.",
         "inputSchema": {
             "type": "object",
@@ -183,7 +183,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_diff",
+        "name": "engineer_behavior_overlay_diff", "authority": {"requirements": [{"capability": "behavior_overlay.read","minimum_scope": "self"}]},
         "description": "Diff this engineer's overlay versions or a proposal.",
         "inputSchema": {
             "type": "object",
@@ -199,7 +199,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_propose",
+        "name": "engineer_behavior_overlay_propose", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self"}]},
         "description": (
             "Propose a change to this engineer's own Dynamic Behavior "
             "overlay for architect governance."
@@ -221,7 +221,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_behavior_overlay_request_rollback",
+        "name": "engineer_behavior_overlay_request_rollback", "authority": {"requirements": [{"capability": "behavior_overlay.propose","minimum_scope": "self"}]},
         "description": "Request rollback of this engineer's overlay to an earlier version.",
         "inputSchema": {
             "type": "object",
@@ -240,7 +240,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_mcp_calls",
+        "name": "engineer_mcp_calls", "authority": {"requirements": [{"capability": "telemetry.read","minimum_scope": "self","target_argument": "agent_id","target_kind": "agent"}]},
         "deferred": True,
         "description": (
             "Return recent MCP call history for this engineer and owned "
@@ -286,7 +286,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_task_reassign",
+        "name": "engineer_task_reassign", "authority": {"requirements": [{"capability": "task.reassign","minimum_scope": "children","target_argument": "task","target_kind": "task"}]},
         "deferred": True,
         "description": (
             "Reassign a task you currently own or originally created to "
@@ -308,7 +308,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_message_architect",
+        "name": "engineer_message_architect", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children","target_argument": "architect_id","target_kind": "agent"}]},
         "description": (
             "Send a direct message to the architect that hired this engineer. "
             "Use this for non-trivial product or scope decisions."
@@ -338,7 +338,7 @@ ENGINEER_TOOLS.extend([
         },
     },
     {
-        "name": "engineer_reply",
+        "name": "engineer_reply", "authority": {"requirements": [{"capability": "message.engineer","minimum_scope": "children"}]},
         "description": "Reply to an existing architect↔engineer message thread.",
         "inputSchema": {
             "type": "object",
@@ -365,81 +365,6 @@ ENGINEER_TOOLS.extend([
         },
     },
 ])
-
-# Authority declarations live with the Engineer MCP surface. This includes
-# orchestration specs imported from mcp_engineer_tools so the assembled public
-# surface and its authority metadata have one owner.
-ENGINEER_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
-    'engineer_action_show': frozenset({'observe.board_summary'}),
-    'engineer_actions_list': frozenset({'observe.board_summary'}),
-    'engineer_agent_close': frozenset({'agent.dispatch_worker'}),
-    'engineer_agent_message': frozenset({'comm.worker_message'}),
-    'engineer_agent_relaunch': frozenset({'agent.dispatch_worker'}),
-    'engineer_agent_show': frozenset({'observe.board_summary'}),
-    'engineer_agents_list': frozenset({'observe.board_summary'}),
-    'engineer_area_list': frozenset({'planning.area_read'}),
-    'engineer_area_show': frozenset({'planning.area_read'}),
-    'engineer_ask': frozenset({'comm.user_ask'}),
-    'engineer_batch_dispatch': frozenset({'agent.dispatch_worker', 'task.dispatch'}),
-    'engineer_behavior_overlay_diff': frozenset({'observe.self_context'}),
-    'engineer_behavior_overlay_propose': frozenset({'profile.edit'}),
-    'engineer_behavior_overlay_read': frozenset({'observe.self_context'}),
-    'engineer_behavior_overlay_request_rollback': frozenset({'profile.edit'}),
-    'engineer_behavior_overlay_versions': frozenset({'observe.self_context'}),
-    'engineer_board_list': frozenset({'observe.board_summary'}),
-    'engineer_board_summary': frozenset({'observe.board_summary'}),
-    'engineer_boot_summary': frozenset({'observe.events'}),
-    'engineer_create_pr': frozenset({'worktree.merge'}),
-    'engineer_diff': frozenset({'worktree.read'}),
-    'engineer_events': frozenset({'observe.events'}),
-    'engineer_help_list': frozenset({'observe.self_context'}),
-    'engineer_help_query': frozenset({'observe.self_context'}),
-    'engineer_help_search': frozenset({'observe.self_context'}),
-    'engineer_help_show': frozenset({'observe.self_context'}),
-    'engineer_hint_snooze': frozenset({'task.update'}),
-    'engineer_initiative_list': frozenset({'planning.initiative_read'}),
-    'engineer_initiative_show': frozenset({'planning.initiative_read'}),
-    'engineer_journal': frozenset({'journal.write'}),
-    'engineer_journal_read': frozenset({'journal.read'}),
-    'engineer_launch_settings': frozenset({'agent.dispatch_worker'}),
-    'engineer_mcp_calls': frozenset({'observe.mcp_calls'}),
-    'engineer_merge': frozenset({'worktree.merge'}),
-    'engineer_message_architect': frozenset({'comm.engineer_message'}),
-    'engineer_message_user': frozenset({'comm.user_message'}),
-    'engineer_note': frozenset({'journal.write'}),
-    'engineer_notifications': frozenset({'observe.events'}),
-    'engineer_peer_inbox': frozenset({'comm.engineer_message'}),
-    'engineer_peer_inspect': frozenset({'comm.engineer_message'}),
-    'engineer_peer_list': frozenset({'comm.engineer_message'}),
-    'engineer_peer_notify': frozenset({'comm.engineer_message'}),
-    'engineer_peer_reply': frozenset({'comm.engineer_message'}),
-    'engineer_rebase': frozenset({'worktree.merge'}),
-    'engineer_reply': frozenset({'comm.engineer_message'}),
-    'engineer_resume': frozenset({'observe.events'}),
-    'engineer_semantic_recall': frozenset({'observe.semantic_recall'}),
-    'engineer_session_map': frozenset({'observe.events'}),
-    'engineer_specialization_delete': frozenset({'agent.manage_engineer_roster'}),
-    'engineer_specialization_save': frozenset({'agent.manage_engineer_roster'}),
-    'engineer_specialization_show': frozenset({'agent.manage_engineer_roster'}),
-    'engineer_specializations_list': frozenset({'agent.manage_engineer_roster'}),
-    'engineer_stream_show': frozenset({'observe.events'}),
-    'engineer_streams_list': frozenset({'observe.events'}),
-    'engineer_task_create': frozenset({'task.create'}),
-    'engineer_task_dispatch': frozenset({'agent.dispatch_worker', 'task.dispatch'}),
-    'engineer_task_edit': frozenset({'task.update'}),
-    'engineer_task_mark_covered': frozenset({'task.mark_covered'}),
-    'engineer_task_move': frozenset({'task.move'}),
-    'engineer_task_reassign': frozenset({'task.reassign'}),
-    'engineer_task_resolve': frozenset({'task.update'}),
-    'engineer_task_show': frozenset({'observe.task_detail'}),
-    'engineer_task_upload_artifact': frozenset({'task.upload_artifact'}),
-    'engineer_task_verify': frozenset({'task.verify'}),
-    'engineer_tool_search': frozenset({'observe.self_context'}),
-    'engineer_worktree_adopt': frozenset({'worktree.merge'}),
-    'engineer_worktree_advance_boundary': frozenset({'worktree.merge'}),
-    'engineer_worktree_checkpoint': frozenset({'worktree.merge'}),
-    'engineer_worktree_remove': frozenset({'worktree.merge'}),
-}
 
 _ENGINEER_TOOL_NAMES = {
     str(tool.get("name", "") or "").strip()
