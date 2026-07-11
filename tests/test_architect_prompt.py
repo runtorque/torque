@@ -30,7 +30,7 @@ class ArchitectPromptTests(unittest.TestCase):
         definition = self.agent_classes_mod.agent_class_definition_by_id(class_id)
         self.assertIsNotNone(definition)
         preview = self.agent_classes_mod.enriched_agent_class_preview(definition)
-        return preview, preview["agent_profile"]
+        return preview, {}
 
     def _append_class_block(self, prompt: str, class_snapshot: dict) -> str:
         return self.agent_classes_mod.append_agent_class_prompt_block(

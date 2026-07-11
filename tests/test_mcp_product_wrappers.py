@@ -140,7 +140,8 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pm_class_projects_every_tool_with_matching_capabilities(self):
         self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
-        self.assertEqual(self.architect.effective_agent_profile_id, "class-policy-product-manager")
+        self.assertEqual(self.architect.effective_agent_profile_id, "")
+        self.assertEqual(self.architect.effective_agent_profile_snapshot, {})
         tool_names = await self._list_tools()
 
         for name in {

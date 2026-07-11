@@ -1,67 +1,46 @@
 # Agent Classes
 
-Agent Classes are the normal operator-facing authoring, selection, assignment,
-and launch object for Torque agents. Runtime substrate still uses the internal
-base kinds `architect`, `engineer`, and `worker`; Agent Classes are **not**
-arbitrary runtime kinds. Class authority is authored as a generic ACL over
-Torque MCP tools/actions. Torque still projects the resolved ACL into the
-existing Agent Profile-compatible runtime snapshot fields for launch-time MCP
-enforcement, but that is an internal/backcompat implementation detail.
+Agent Classes are Torque's operator-facing configuration for an agent's purpose,
+prompt, and Torque MCP authority. Every class uses one generic runtime path;
+built-in classes are ordinary YAML definitions and receive no class-specific
+code branches.
 
-Class-first invariants:
+Class authority is authored as a generic ACL.
 
-- desired assignment fields are `agent_class_id` / `agent_class_version`;
-- effective launch snapshots are `effective_agent_class_*`;
-- the frozen runtime MCP projection is still stored in `effective_agent_profile_*`
-  for compatibility with existing session enforcement;
-- direct Agent Profile assignment remains supported only as Advanced/Internal
-  backcompat, not the default product flow;
-- `AgentCell.profile` remains the legacy terminal/runtime profile label and is
-  not used for Agent Classes.
+The runtime base kinds remain `architect`, `engineer`, and `worker`. A class
+selects one base kind and can only narrow that kind's platform authority ceiling.
+It cannot create a new runtime kind or grant authority that the base kind does
+not implement.
 
-## Config paths and authoring store
+## Config paths
 
-Torque ships built-in Agent Classes in `torque/builtin_agent_classes/`:
-
-- `default-architect.yaml` → wraps `full-architect@1`;
-- `default-engineer.yaml` → wraps `full-engineer@1`;
-- `default-worker.yaml` → wraps `full-worker@1`;
-- `creative-architect.yaml` → schema v4 ACL/data-defined prompt for the
-  built-in Creative class;
-- `product-manager.yaml` → schema v4 ACL/data-defined prompt for the built-in
-  Product Manager class;
-- `torque-steward.yaml` → schema v4 ACL/data-defined prompt for the built-in
-  Torque Steward class.
-
-Project Agent Class definitions live in:
+Built-in definitions live in `torque/builtin_agent_classes/`. Project classes
+live in:
 
 ```text
 .torque/agent_classes/*.yaml
 ```
 
-This path is reviewed in Git like `.torque/actions/`, `.torque/roles/`,
-`.torque/specializations/`, and `.torque/agent_profiles/`. Class YAML is the
-reviewed source of identity, prompt, and ACL authority. SQLite effective
-snapshots/audit and preview/status payloads carry the frozen runtime projection.
+Project class YAML is versioned configuration. SQLite stores desired assignment,
+frozen effective snapshots, and audit history; it is not the class definition
+source.
 
-## YAML shape
-
-Schema v4 is ACL-first:
+## Schema v5
 
 ```yaml
-agent_class_schema_version: 4
-id: product-manager
-version: "3"
-display_name: Product Manager
+agent_class_schema_version: 5
+id: planning-architect
+version: "1"
+base_kind: architect
+display_name: Planning Architect
+description: Read product context and draft bounded proposals.
 lifecycle: stable
-runtime:
-  base_kind: architect
+
 prompt:
   identity: >
-    You are an imaginative but grounded ideation partner for Torque.
+    You are a grounded product-planning partner for Torque.
   job: >
-    Shape product understanding and produce safe proposal artifacts within
-    projected authority.
+    Read current context and produce bounded proposals within visible authority.
   boot_checklist:
     - Confirm class, group, and visible tools.
     - Read projected context before proposing changes.
@@ -69,221 +48,116 @@ prompt:
     - Separate observations, inferences, options, risks, and non-goals.
     - Treat proposals as non-binding until accepted by an authorized actor.
   tool_guidance:
-    - when_capability: thinking_workspace
-      text: Use visible Thinking tools for caller-owned Scratchpad notes and Mind Maps.
+    - when_capability: task.propose
+      text: Use task proposal tools only for non-dispatched proposal artifacts.
+
 acl:
-  mode: allow # allow | deny
-  allow:
-    - capability: self_context      # legacy bucket alias during migration
-    - action: planning.area.read
+  mode: allow
+  rules:
+    - capability: self.read
+      scope: self
+    - capability: board.read
       scope: group
-    - family: architect_product_*
-warnings:
-  - External connectors are managed separately.
+    - capability: task.propose
+      scope: self
 ```
 
-ACL entries may select exact MCP tools, tool families, stable action keys, or
-legacy capability bucket aliases while migration continues. ACL modes are exclusive:
-`mode: allow` uses only `allow` entries and denies everything else by omission;
-`mode: deny` uses only `deny` entries from the base-kind ceiling.
-Cross-base-kind escalation is impossible: an Architect class
-can select only Architect-ceiling tools/actions, an Engineer class only
-Engineer-ceiling tools/actions, and so on. Resource-touching actions use the
-simple scope vocabulary `self`, `children`, `group`, and `global`; relationship
-phrases such as hired-by-self or owned-workers compile to `children`.
+The only authority fields are `acl.mode` and `acl.rules`.
 
-Legacy class YAML with top-level `base_kind`/`agent_profile_ref`,
-`capabilities.buckets`, `capabilities.restrictions`, or `policy.mode` is still
-accepted as migration/backcompat input, but normal authoring and built-in class
-YAML should use `acl:`. The old operator-readable `policy.scope`,
-`policy.communication`, `policy.spawn`, and `policy.audit` fields do not enforce
-MCP access and should not be used for new classes.
+- `mode: allow` grants only the listed capabilities.
+- `mode: deny` starts from the base-kind ceiling and removes the listed
+  capabilities or narrows their maximum scope.
+- A rule has `capability` and, for scoped capabilities, `scope`.
+- The scope vocabulary is `self`, `children`, `group`, and `global`.
+- Validation rejects a capability unavailable to the base kind or a scope wider
+  than the capability's implemented ceiling.
 
-Validation rejects unknown base kinds, missing/unsafe ids, unsafe version tokens,
-missing/unsafe display names, profile refs whose base kind/version do not match,
-raw MCP/tool fields (`tools`, `mcp_tools`, `tool_picker`, etc.) outside ACL
-entries, raw Agent Profile capability-atom grants/denies in Agent Class YAML/API,
-and ambiguous `profile` / `profile_id` / `agent_profile_id` fields. ACL entries
-outside the base-kind ceiling are rejected.
+There is no Agent Class `policy`, generated Agent Profile, capability bucket,
+restriction bucket, exact-tool grant, tool-family glob, or raw grant/deny atom.
+Legacy fields such as `agent_profile_ref`, `policy`, `capabilities`,
+`capability_buckets`, and `restriction_buckets` are rejected rather than
+normalized into a second authority path.
 
-Draft classes must set `draft.scratch_only: true` and must not claim live dogfood
-approval.
+Prompt `tool_guidance` selectors use canonical capability IDs. Guidance is
+included only when that capability exists in the frozen effective authority.
+Prompt prose never grants authority.
 
-## Trusted server/browser command contract
+## MCP enforcement
 
-All commands use the trusted `/internal/cmd` browser/server surface. They are
-not MCP tools and should not be exposed to worker/engineer/architect runtime
-sessions.
+Each Torque MCP tool maps to one or more canonical capability requirements.
+The frozen Agent Class authority controls:
 
-`agent_class_list`, `agent_class_preview`, `agent_class_validate`,
-`agent_class_create`, `agent_class_update`, `agent_class_archive`,
-`agent_class_delete`, `agent_class_assign`, `agent_class_clear`,
-`agent_class_status`, `agent_class_audit`, and `create_agent_from_class` remain
-supported. Class responses use schema version 4 and include class-first fields
-needed by the UI:
+1. whether the tool is projected in `tools/list` and tool search;
+2. whether a direct call passes call-time authorization; and
+3. where implemented, whether the concrete target resource is within the
+   caller's effective scope.
 
-- `primary_display_name` / `primary_identity_label` — the primary UI identity
-  label (for example `Product Manager`);
-- `secondary_base_kind_label` / `secondary_base_kind_metadata` — internal base
-  kind metadata (for example `Architect-derived`);
-- `purpose` / `description` — operator-language class purpose;
-- `acl` and `authority_summary` — ACL mode, allowed or denied actions, tool
-  families, exact tools, selected legacy capabilities, high-risk grants, and
-  unavailable high-risk capabilities;
-- `capability_bucket_selection`, `restriction_bucket_selection`,
-  `operator_access_summary`, `capability_buckets`, and `restriction_buckets` —
-  migration/backcompat summaries when legacy bucket aliases are used;
-- `authoring_contract`, `capability_bucket_catalog`, and
-  `restriction_bucket_catalog` — trusted API data the UI can use for migration
-  bucket create/edit/validate flows;
-- `internal_policy`, `agent_profile`, `internal_profile`, and
-  `compiled_profile` — Advanced/Internal runtime-projection diagnostics retained
-  for backcompat;
-- desired/effective/pending status fields: `assigned_*`, `effective_*`,
-  `next_launch_*`, `pending_next_launch`, `next_launch_primary_identity_label`,
-  and `apply_state` / relaunch-required state;
-- `warnings` plus `external_connector_caveat`.
+A registered Torque MCP tool without authority metadata fails coverage checks.
+External connector tools are governed separately and are not controlled by the
+Agent Class ACL.
 
-Successful `create_agent_from_class` responses use `schema_version: 4`, return
-`agent_class` preview, and include both `agent_class_status` and
-`agent_profile_status` on the created agent. Passing both `agent_class_id` and a
-direct profile assignment in a launch payload is rejected as ambiguous.
+## Assignment and launch
 
-## Assignment and launch snapshots
+Assignment changes desired state only. Running sessions retain their current
+frozen authority until the next launch or relaunch.
 
-Assignment only changes desired state and writes audit rows. Running sessions
-keep their frozen effective Agent Class and Agent Profile-compatible runtime
-projection snapshots. At the next launch/relaunch, Torque freezes the desired
-class (or implicit `default-{kind}`) and freezes either:
+At launch Torque resolves the desired class, or `default-{kind}` when no class
+is explicitly assigned, and freezes one `effective_agent_class_snapshot`. That
+snapshot contains the normalized ACL, compiled `effective_authority`, registry
+hashes, prompt data, class identity, lifecycle, warnings, and snapshot hash.
+It is the Agent Class MCP enforcement source.
 
-1. the wrapped registry Agent Profile for legacy/default classes, or
-2. the generated in-memory runtime projection compiled from the class ACL.
+Class-launched sessions do not generate or freeze `class-policy-*` Agent
+Profiles. Their `effective_agent_profile_*` fields are empty. Direct Agent
+Profile assignment remains only as a temporary legacy migration path for an
+agent with no desired Agent Class; it is not part of Agent Class authority and
+must not be shown as a class policy.
 
-The generated projection is frozen into `effective_agent_profile_snapshot` with
-metadata such as `generated_by_agent_class`, compiler version, and the class
-id/version. It is not written as `.torque/agent_profiles/*.yaml`.
+Passing both an Agent Class and a direct Agent Profile in one launch request is
+rejected as ambiguous.
 
-Direct Agent Profile assignments remain compatible. If an agent has a legacy
-direct profile assignment and no desired class, Torque preserves that assignment
-and does **not** silently migrate it. Status and doctor warn the operator to set
-a desired Agent Class for the class-first next-relaunch flow.
+## Built-ins
 
-## Product Manager class
+Torque currently ships default classes plus Product Manager, Creative, and
+Torque Steward examples. Their identity, workflows, prompt guidance, and ACLs
+come entirely from YAML. Runtime code must not test their ids, metadata flags,
+or generated profile ids.
 
-The built-in Product Manager class has primary identity label **Product Manager**
-(even while lifecycle/status remains draft/restricted). Draft/restricted is a
-warning/chip, not part of the name.
+Renaming or deleting a non-default built-in must not require production code
+changes. Domain-specific MCP tools may exist, but authorization is based on
+capabilities and target scope, never class identity.
 
-Product Manager declares a product-safe ACL in YAML. The selected
-capability aliases and tool families match the existing product-safe wrapper
-surface: planning reads, proposed decisions, queued product task intake,
-selected product-peer wrappers, product-safe user communication, and private
-journal. Explicit ACL denials record no hire, dispatch, merge, deploy,
-settings/admin, profile-admin, raw tool-picker authority, accepted-decision
-authority, or direct engineer/worker messaging.
+## Trusted commands
 
-## Creative class
+The trusted browser/server surface supports `agent_class_list`,
+`agent_class_preview`, `agent_class_validate`, `agent_class_create`,
+`agent_class_update`, `agent_class_archive`, `agent_class_delete`,
+`agent_class_assign`, `agent_class_clear`, `agent_class_status`,
+`agent_class_audit`, and `create_agent_from_class`.
 
-The built-in Creative class has primary identity label **Creative** and keeps
-the stable internal id `creative-architect`. It declares a proposal-only
-ideation ACL in YAML. It is an Architect-derived thinking mode, not a new
-runtime kind and not an execution authority.
-
-Creative can read same-group product context, Planning
-Areas/Initiatives, decisions, relevant recent context, and Thinking artifacts.
-It can create/update only its own Scratchpad notes and Mind Maps through
-`architect_thinking_*` wrappers. It can draft, refine, park, archive, and
-explicitly propose only its own Idea Briefs through
-`architect_product_idea_brief_*` wrappers; proposing an Idea Brief is
-review-only and never creates tasks, assigns Engineers/Workers, dispatches
-work, accepts decisions, merges, or deploys. Other proposal outputs use
-existing product-safe wrappers: proposed decisions, queued/unassigned product
-task proposals, product-anchored peer messages, and product-scoped user
-ask/message paths.
-
-Its allow-mode ACL grants only the approved proposal, Thinking, product-wrapper,
-behavior-overlay, communication, and journal surfaces. Hire/Engineer management,
-Worker dispatch, execution task control, direct Engineer/Worker messaging,
-worktree/merge, deploy/admin/settings, class/profile admin, accepted-decision
-authority, raw tool-picker authority, and everything else are denied by omission.
-Its structured prompt sections instruct the agent to diverge first, converge second,
-connect product patterns, propose small shippable slices, state risks/non-goals,
-and never treat ideas as accepted plans.
-
-External connector exposure is a known limitation: Agent Classes and Agent
-Profiles do **not** enforce external connector governance in Wave 7. Generic
-previews, status, and doctor output surface this caveat for draft/restricted
-classes, but connector access must be managed separately.
-
-## Torque Steward class
-
-The built-in Torque Steward class has primary identity label **Torque Steward**
-and stable internal id `torque-steward`. The communication/journal wave still keeps it lifecycle
-`draft` and `draft.scratch_only: true`; it must not be auto-created, auto-run,
-or treated as broad user-delegated authority.
-
-Torque Steward is Architect-derived because it will eventually represent the
-user's operational wishes for a group, but its ACL remains
-conservative. It can read projected self context, board/task
-summaries and details, recent events, MCP-call telemetry, Areas, Initiatives,
-Decisions, and board-sync state. It can also ask/message the user, read/write
-its own private Architect journal, and list/message same-group Architect peers
-for coordination and handoff nudges. Its allow-mode ACL does not grant Engineer
-management, Worker dispatch, execution task control, direct Engineer/Worker
-messaging, worktree/merge, deploy/admin/settings, class/profile admin,
-accepted-decision authority, raw tool-picker authority, or other high-risk
-operations, so those are denied by omission.
-
-The bundled YAML prompt and generic ACL preview define the Steward as an operations
-observer/suggester: summarize health, anomaly, stale/stuck work, missed
-handoff, review/fix-loop, and cleanup risks; separate evidence from inference;
-recommend the smallest safe next step and the authorized actor. Torque Steward
-must not restart, compact, notify, schedule, dispatch, assign, hire, merge,
-deploy, edit Agent Classes/Profiles, change settings, accept decisions, or
-message/control Engineers or Workers. The only write surfaces in this wave are
-communication/journal records: user asks/messages, own-journal entries, and
-same-group Architect peer messages. Explicit user-directed powerful actions
-remain future reviewed waves that need confirmation, auditability, visibility,
-and rollback expectations before enablement.
-
-Wave B adds one deterministic read-only helper,
-`architect_steward_operating_brief`, when the caller's projected ACL/capabilities grant
-the required read atoms. The helper returns a structured onboarding/operating
-brief with:
-
-- observed facts: group/task counts, active workstreams, current asks/gates,
-  visible actor/class context, and Help doc references;
-- inferred risks: blocked asks, stale handoffs/reviews, missed user-update
-  candidates, dangling/unused workers, silent agents/workstreams, unhealthy
-  tasks, and visible branch-boundary/merge gates;
-- suggested next steps and responsible-actor recommendations, each marked as a
-  recommendation with `mutation_performed: false`.
-
-The helper is intentionally not a routing or authority surface. It does not
-create/update/move/assign/dispatch tasks, message users/agents, hire/dismiss
-Engineers, accept decisions, edit classes/profiles, merge worktrees, deploy, or
-restart anything. It is a bounded starting point for Steward answers; the
-Steward should still cite visible evidence and use Help docs for Torque concept
-explanations.
+List and preview responses expose schema-v5 class data, the capability catalog,
+normalized ACL, authority summary, compiled effective-authority preview, prompt
+summary, apply state, and warnings. They do not expose generated profiles,
+internal class policies, or bucket compatibility fields.
 
 ## Prompt composition
 
-Base-kind system prompts remain primary. If an effective Agent Class has structured
-prompt sections, Torque appends a compact Agent Class block after the base prompt.
-Default/full classes have no prompt sections so unassigned default Architect/Engineer/Worker
-behavior stays compatible. Prompt authoring uses only `identity`, `job`,
-`boot_checklist`, `operating_guidelines`, and `tool_guidance`; legacy addendum strings
-are not part of the schema.
+Torque builds the base-kind prompt first, then appends the class's structured
+prompt sections and a factual summary of the frozen capability/scope authority.
+Default classes have no extra prompt sections.
 
-Action templates can inspect compact class context via
-`torque.agent.agent_class` in the Jinja `torque` namespace.
+The renderer is generic. Class-specific behavior belongs in class YAML, not in
+`if class_id == ...` branches or semantic metadata checks.
 
-## Doctor
+Action templates can inspect compact class context through
+`torque.agent.agent_class`.
 
-`torque doctor` includes an `[agent_classes]` section with config path, schema
-version, validation counts, capability/restriction bucket catalog counts,
-assignment/audit counts, launch-pairing enforcement mode, the external connector
-caveat, and generic legacy direct-profile warning counts. The JSON report
-includes class previews, assignment status, recent audit rows, ACL/runtime
-projection details, bucket authoring contract data, and no-silent-migration
-warnings.
+## Validation and doctor
+
+Validation rejects unknown fields, unsafe ids/versions, invalid base kinds,
+invalid lifecycle/draft metadata, raw MCP tool fields, legacy authority fields,
+invalid prompt sections, unknown capability selectors, and invalid ACL rules.
+
+`torque doctor` reports Agent Class validation, assignment/audit state, frozen
+snapshot state, capability registry coverage, and legacy direct Agent Profile
+assignments that still need migration.

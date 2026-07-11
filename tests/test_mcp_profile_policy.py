@@ -331,7 +331,8 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         tool_names = {tool["name"] for tool in listed.payload["result"]["tools"]}
 
         self.assertEqual(architect.effective_agent_class_id, "torque-steward")
-        self.assertEqual(architect.effective_agent_profile_id, "class-policy-torque-steward")
+        self.assertEqual(architect.effective_agent_profile_id, "")
+        self.assertEqual(architect.effective_agent_profile_snapshot, {})
         for tool_name in {
             "torque_context",
             "architect_steward_operating_brief",

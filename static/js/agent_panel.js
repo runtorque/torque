@@ -1764,22 +1764,6 @@ function _agentPanelClassBadgeHtml(agent) {
 function _agentPanelProfileBadgeHtml(agent) {
   if (!agent || String(agent.cell_type || 'agent') !== 'agent') return '';
   var profileState = _agentPanelProfileState(agent);
-  if (profileState.managedByClass && !profileState.pending) {
-    var managedStatus = 'full';
-    var managedSnapshot = (agent.effective_agent_profile_snapshot && typeof agent.effective_agent_profile_snapshot === 'object')
-      ? agent.effective_agent_profile_snapshot
-      : {};
-    managedStatus = String(managedSnapshot.status || managedSnapshot.lifecycle || 'full').trim() || 'full';
-    var managedStatusClass = managedStatus.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'full';
-    var managedLabel = 'Managed by Agent Class';
-    var managedTitle = 'Agent Class manages this internal access policy: '
-      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
-    return '<span class="agent-profile-badge agent-profile-badge-' + _agentPanelEsc(managedStatusClass) + '" title="'
-      + _agentPanelEsc(managedTitle)
-      + '">'
-      + _agentPanelEsc(managedLabel)
-      + '</span>';
-  }
   var displayId = profileState.effectiveId || profileState.desiredId || profileState.assignedId;
   var kind = profileState.kind;
   if (!displayId) return '';
@@ -1827,70 +1811,6 @@ function _agentPanelProfileDefaultIdForKind(kind) {
   return '';
 }
 
-function _agentPanelProfileRefFromClassPreview(item) {
-  item = item || {};
-  var ref = item.agent_profile_ref && typeof item.agent_profile_ref === 'object'
-    ? item.agent_profile_ref
-    : {};
-  var profile = item.agent_profile && typeof item.agent_profile === 'object'
-    ? item.agent_profile
-    : {};
-  if (!profile.id && item.compiled_profile && typeof item.compiled_profile === 'object') {
-    profile = item.compiled_profile;
-  }
-  return {
-    id: String(ref.id || profile.id || '').trim(),
-    version: String(ref.version || profile.version || '').trim(),
-  };
-}
-
-function _agentPanelProfileManagedByClassInfo(agent, classState, profileStatus) {
-  classState = classState || {};
-  profileStatus = profileStatus || {};
-  if (!agent || classState.directProfileId) return {};
-  var classId = String(classState.desiredId || '').trim();
-  if (!classId || classId === classState.defaultId) return {};
-  var classStatus = classState.statusObject && typeof classState.statusObject === 'object'
-    ? classState.statusObject
-    : {};
-  var profileId = String(
-    profileStatus.next_launch_profile_id
-    || classStatus.next_launch_profile_id
-    || ''
-  ).trim();
-  var profileVersion = String(
-    profileStatus.next_launch_profile_version
-    || classStatus.next_launch_profile_version
-    || ''
-  ).trim();
-  var preview = classState.desiredPreview && classState.desiredPreview.id
-    ? classState.desiredPreview
-    : {};
-  if ((!profileId || !profileVersion) && (!preview || !preview.id)
-      && classState.assignedPreview && classState.assignedPreview.id) {
-    preview = classState.assignedPreview;
-  }
-  if ((!profileId || !profileVersion) && classId === classState.effectiveId
-      && classState.effectivePreview && classState.effectivePreview.id) {
-    preview = classState.effectivePreview;
-  }
-  var ref = _agentPanelProfileRefFromClassPreview(preview || {});
-  if (!profileId) profileId = ref.id;
-  if (!profileVersion) profileVersion = ref.version;
-  if (!profileId && classId === String(agent.effective_agent_class_id || '').trim()) {
-    profileId = String(agent.effective_agent_profile_id || '').trim();
-    profileVersion = String(agent.effective_agent_profile_version || profileVersion || '').trim();
-  }
-  if (!profileId) return {};
-  return {
-    classId: classId,
-    classVersion: String(classState.desiredVersion || classState.effectiveVersion || '').trim(),
-    classLabel: String(classState.desiredLabel || classState.effectiveLabel || classId || '').trim() || classId,
-    profileId: profileId,
-    profileVersion: profileVersion,
-  };
-}
-
 function _agentPanelProfileState(agent) {
   var kind = String((agent && agent.kind) || '').trim();
   var defaultId = _agentPanelProfileDefaultIdForKind(kind);
@@ -1911,11 +1831,15 @@ function _agentPanelProfileState(agent) {
     || status.assigned_profile_version
     || ''
   ).trim();
+  var classState = !assignedId ? _agentPanelClassState(agent) : {};
+  var classControlsAuthority = !!(
+    !assignedId && (classState.desiredId || classState.effectiveId)
+  );
   var effectiveId = String(
     (agent && agent.effective_agent_profile_id)
     || snapshot.id
     || status.effective_profile_id
-    || defaultId
+    || (classControlsAuthority ? '' : defaultId)
     || assignedId
     || ''
   ).trim();
@@ -1925,24 +1849,21 @@ function _agentPanelProfileState(agent) {
     || status.effective_profile_version
     || ''
   ).trim();
-  var classState = !assignedId ? _agentPanelClassState(agent) : {};
-  var managedByClass = !assignedId
-    ? _agentPanelProfileManagedByClassInfo(agent, classState, status)
-    : {};
   var desiredId = assignedId
-    || managedByClass.profileId
     || String(status.next_launch_profile_id || '').trim()
-    || defaultId;
+    || (classControlsAuthority ? '' : defaultId);
   var desiredVersion = assignedId
     ? assignedVersion
-    : (managedByClass.profileVersion || String(status.next_launch_profile_version || '').trim() || '');
-  var computedPending = !!(
-    desiredId
-    && (
-      desiredId !== effectiveId
-      || (desiredVersion && desiredVersion !== effectiveVersion)
-    )
-  );
+    : (String(status.next_launch_profile_version || '').trim() || '');
+  var computedPending = classControlsAuthority
+    ? !!effectiveId
+    : !!(
+      desiredId
+      && (
+        desiredId !== effectiveId
+        || (desiredVersion && desiredVersion !== effectiveVersion)
+      )
+    );
   var pending = typeof status.pending_next_launch === 'boolean'
     ? !!(status.pending_next_launch && computedPending)
     : computedPending;
@@ -1956,10 +1877,11 @@ function _agentPanelProfileState(agent) {
     effectiveId: effectiveId,
     effectiveVersion: effectiveVersion,
     pending: pending,
-    managedByClass: !!managedByClass.profileId,
-    managedByClassId: managedByClass.classId || '',
-    managedByClassVersion: managedByClass.classVersion || '',
-    managedByClassLabel: managedByClass.classLabel || '',
+    classControlsAuthority: classControlsAuthority,
+    managedByClass: false,
+    managedByClassId: '',
+    managedByClassVersion: '',
+    managedByClassLabel: '',
     statusObject: status,
   };
 }
@@ -3048,9 +2970,8 @@ function _agentPanelProfileAssignmentStatusHtml(agent) {
   var desiredLabel = '';
   if (assignedId) {
     desiredLabel = assignedId + _agentPanelProfileVersionSuffix(assignedVersion);
-  } else if (profileState.managedByClass) {
-    desiredLabel = 'Managed by Agent Class: '
-      + (profileState.managedByClassLabel || profileState.managedByClassId || '—');
+  } else if (profileState.classControlsAuthority) {
+    desiredLabel = 'Agent Class authority (no direct profile)';
   } else {
     desiredLabel = 'default ' + (defaultId || ('full-' + kind));
   }
@@ -3484,92 +3405,34 @@ function _agentPanelClassDedupeStrings(values) {
   return out;
 }
 
-function _agentPanelClassSelectedBucketIds(item, restriction) {
-  item = item || {};
-  var direct = restriction ? item.restriction_bucket_selection : item.capability_bucket_selection;
-  var selected = _agentPanelClassDedupeStrings(Array.isArray(direct) ? direct : []);
-  if (selected.length) return selected;
-  var capabilities = item.capabilities && typeof item.capabilities === 'object' ? item.capabilities : {};
-  var values = restriction
-    ? (capabilities.restrictions || capabilities.restriction_buckets || capabilities.denied_buckets)
-    : (capabilities.buckets || capabilities.capability_buckets);
-  return _agentPanelClassDedupeStrings(Array.isArray(values) ? values : []);
-}
-
-function _agentPanelClassBucketPreviews(item, restriction) {
-  item = item || {};
-  var direct = restriction ? item.restriction_buckets : item.capability_buckets;
-  if (Array.isArray(direct) && direct.length) return direct;
-  return _agentPanelClassSelectedBucketIds(item, restriction).map(function(id) {
-    return { id: id, label: id, summary: '' };
-  });
-}
-
-function _agentPanelClassPolicyMode(item) {
-  item = item || {};
-  var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
-  var mode = String(policy.mode || '').trim();
-  if (mode) return mode;
-  if (_agentPanelClassSelectedBucketIds(item, false).length
-      || _agentPanelClassSelectedBucketIds(item, true).length) return 'compile';
-  var internal = item.internal_policy && typeof item.internal_policy === 'object' ? item.internal_policy : {};
-  if (String(internal.mode || '').trim() === 'compile') return 'compile';
-  if (item.compiled_profile && typeof item.compiled_profile === 'object' && item.compiled_profile.id) return 'compile';
-  return 'wrap_profile';
-}
-
-function _agentPanelClassOperatorSummaryText(value, fallback) {
-  var text = String(value || '').trim();
-  if (!text || /wrapped internal agent profile policy/i.test(text)) return fallback || '';
-  return _agentPanelClassPlainPermissionCopy(text);
-}
-
-function _agentPanelClassBucketPreviewListHtml(buckets, emptyText) {
-  buckets = Array.isArray(buckets) ? buckets : [];
-  if (!buckets.length) {
-    return '<div class="agent-class-access-empty">' + _agentPanelEsc(emptyText || 'None selected') + '</div>';
-  }
-  var html = '<div class="agent-class-access-list">';
-  for (var i = 0; i < buckets.length; i++) {
-    var bucket = buckets[i] || {};
-    html += '<div class="agent-class-access-item">';
-    html += '<strong>' + _agentPanelEsc(_agentPanelClassBucketLabel(bucket, bucket.id || 'Permission')) + '</strong>';
-    var summary = _agentPanelClassBucketSummary(bucket);
-    if (summary) html += '<span>' + _agentPanelEsc(summary) + '</span>';
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
 function _agentPanelClassOperatorAccessHtml(item) {
   item = item || {};
-  var summary = (item.operator_access_summary && typeof item.operator_access_summary === 'object')
-    ? item.operator_access_summary
-    : ((item.capability_bucket_summary && typeof item.capability_bucket_summary === 'object') ? item.capability_bucket_summary : {});
-  var allowedBuckets = _agentPanelClassBucketPreviews(item, false);
-  var restrictionBuckets = _agentPanelClassBucketPreviews(item, true);
-  var isCompile = _agentPanelClassPolicyMode(item) === 'compile';
-  var fallbackAllowed = isCompile
-    ? 'No allowed actions selected yet.'
-    : 'Existing built-in access for this class type.';
-  var allowedSummary = _agentPanelClassOperatorSummaryText(summary.allowed_summary, fallbackAllowed);
-  var deniedSummary = _agentPanelClassOperatorSummaryText(summary.denied_summary, restrictionBuckets.length ? '' : 'No extra limits selected.');
+  var acl = item.acl && typeof item.acl === 'object' ? item.acl : {};
+  var mode = String(acl.mode || 'allow').trim() === 'deny' ? 'deny' : 'allow';
+  var rules = Array.isArray(acl.rules) ? acl.rules : [];
+  var entries = rules.map(function(rule) {
+    rule = rule || {};
+    var capability = String(rule.capability || '').trim();
+    if (!capability) return '';
+    var scope = String(rule.scope || '').trim();
+    return scope ? capability + ' (' + scope + ')' : capability;
+  }).filter(Boolean);
+  var allowedSummary = mode === 'allow'
+    ? (entries.length ? entries.join('; ') : 'No capabilities selected.')
+    : 'All base-kind capabilities except the listed denials.';
+  var deniedSummary = mode === 'allow'
+    ? 'Everything not listed is denied by default.'
+    : (entries.length ? entries.join('; ') : 'No explicit denials.');
   var html = '<div class="agent-class-operator-access">';
-  html += '<div class="agent-class-block-title">What this class can do</div>';
+  html += '<div class="agent-class-block-title">Effective ACL</div>';
   html += '<div class="agent-class-access-summary-grid">';
-  html += '<div><span>Allowed actions</span><strong>' + _agentPanelEsc(allowedSummary || fallbackAllowed) + '</strong></div>';
-  html += '<div><span>Not allowed</span><strong>' + _agentPanelEsc(deniedSummary || (restrictionBuckets.length ? 'See limits below.' : 'None selected')) + '</strong></div>';
-  html += '</div>';
-  html += '<div class="agent-class-access-columns">';
-  html += '<div><div class="agent-class-block-title">Allowed actions</div>'
-    + _agentPanelClassBucketPreviewListHtml(allowedBuckets, fallbackAllowed) + '</div>';
-  html += '<div><div class="agent-class-block-title">Not allowed</div>'
-    + _agentPanelClassBucketPreviewListHtml(restrictionBuckets, 'No extra limits selected.') + '</div>';
-  html += '</div>';
-  html += '</div>';
+  html += '<div><span>Mode</span><strong>' + _agentPanelEsc(mode) + '</strong></div>';
+  html += '<div><span>Allowed</span><strong>' + _agentPanelEsc(allowedSummary) + '</strong></div>';
+  html += '<div><span>Denied</span><strong>' + _agentPanelEsc(deniedSummary) + '</strong></div>';
+  html += '</div></div>';
   return html;
 }
+
 
 function _agentPanelClassApplyStateHtml(item) {
   item = item || {};
@@ -3757,12 +3620,12 @@ function _agentPanelClassModalBodyHtml(agent) {
     + (ui.profileAdvancedOpen ? ' open' : '')
     + ' ontoggle="' + _agentPanelEventAttr('agentPanelSetClassAdvancedOpen('
       + _agentPanelJsString(agentId) + ', this.open)') + '">';
-  html += '<summary>Advanced/Internal Agent Profile policy</summary>';
+  html += '<summary>Legacy direct Agent Profile assignment</summary>';
   html += _agentPanelProfileManagerHtml(agent, {
     advanced: true,
-    title: 'Advanced/Internal Agent Profile assignment',
-    subtitle: 'Internal MCP/capability enforcement detail; use Agent Class assignment above for normal operator changes.',
-    manageLabel: 'Troubleshoot',
+    title: 'Legacy direct Agent Profile assignment',
+    subtitle: 'Temporary migration surface for sessions that still launch without an Agent Class.',
+    manageLabel: 'Manage legacy profile',
   });
   html += '</details>';
   html += '</section>';

@@ -16,15 +16,17 @@ Implemented in the current working change:
 - capability/scope-based editor and generic Agent Class prompt authority
   summaries;
 - generic Architect-derived and Engineer-derived base prompt composition for
-  class-launched sessions.
+  class-launched sessions;
+- removal of generated `class-policy-*` Agent Profiles from Agent Class
+  preview, validation, launch, status, audit, and UI paths;
+- removal of the legacy bucket/profile compiler and generated-profile
+  compatibility fields from the Agent Class implementation.
 
 Still required before this RFC is complete:
 
 - finish family-by-family list filtering and concrete resource scope checks;
 - replace temporary centralized target-argument metadata with first-class
   `ToolDefinition` authority descriptors beside each tool registration;
-- remove generated `class-policy-*` Agent Profiles and the remaining legacy
-  bucket/profile compiler path;
 - remove or rename historical class-oriented wrapper tools where practical;
 - remove direct Agent Profile authority assignment after the migration is
   complete.

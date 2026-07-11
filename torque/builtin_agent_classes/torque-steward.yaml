@@ -49,8 +49,8 @@ warnings:
 - Torque Steward is a conservative operations steward with approved communication/journal/peer
   coordination only. It must not be auto-created, auto-run, or treated as broad user-delegated
   authority until later review approves additional powers.
-- External connector exposure is managed separately; Agent Classes and Agent Profiles do not
-  govern connector access.
+- External connector exposure is managed separately; Agent Class ACLs do not govern connector
+  access.
 draft:
   scratch_only: true
   approved_for_live_dogfood: false

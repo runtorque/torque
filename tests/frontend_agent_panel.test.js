@@ -3645,7 +3645,7 @@ test('agent panel renders Agent Profile badge with draft warnings and pending as
   assert.match(classModalBody.innerHTML, /Raw Architect tools are denied/);
 });
 
-test('agent panel marks cleared assignment pending default full profile next launch', () => {
+test('agent panel marks a cleared direct profile pending Agent Class authority next launch', () => {
   const { context, classModalBody } = createHarness();
 
   setFocusedAgent(context, {
@@ -3671,7 +3671,7 @@ test('agent panel marks cleared assignment pending default full profile next lau
   context.agentPanelToggleProfileAssignment(null, 'arch-profile-clear');
 
   assert.match(classModalBody.innerHTML, /product-manager-draft@2 \(pending next launch\)/);
-  assert.match(classModalBody.innerHTML, /desired assignment: default full-architect/);
+  assert.match(classModalBody.innerHTML, /Agent Class authority \(no direct profile\)/);
 });
 
 test('agent class manager assigns Product Manager as desired and renders effective class identity after relaunch', () => {
@@ -3687,9 +3687,8 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     status: 'full',
     launchable: true,
     builtin: true,
-    agent_profile_ref: { id: 'full-architect', version: '1' },
-    agent_profile: { id: 'full-architect', version: '1', status: 'full', capability_count: 12 },
-    runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
+    acl: { mode: 'deny', rules: [] },
+    runtime_enforcement: 'launch_frozen_effective_authority',
   };
   const productManagerClass = {
     id: 'product-manager',
@@ -3703,25 +3702,17 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     launchable: true,
     builtin: true,
     draft: { scratch_only: true },
-    agent_profile_ref: { id: 'class-policy-product-manager', version: '2' },
-    agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'draft', capability_count: 7 },
-    internal_policy: {
-      mode: 'compile',
-      profile_source: 'compiled_from_agent_class',
-      generated_profile_written_to_project_yaml: false,
-    },
     acl: {
       mode: 'allow',
-      allowed_families: ['architect_product_*'],
-      denied_families: ['architect_task_*'],
-    },
-    operator_access_summary: {
-      allowed_summary: 'ACL allow-list: product wrappers, user and peer Architect communication, private journal',
-      denied_summary: 'ACL denies: execution, admin, raw tool picker, direct Engineer/Worker messaging',
+      rules: [
+        { capability: 'self.read', scope: 'self' },
+        { capability: 'task.propose', scope: 'self' },
+        { capability: 'message.user', scope: 'self' },
+      ],
     },
     warnings: ['Product Manager is draft/restricted; use architect_product_* wrappers only.'],
     external_connector_caveat: 'External connector exposure is not governed by Agent Classes.',
-    runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
+    runtime_enforcement: 'launch_frozen_effective_authority',
   };
   const planningClass = {
     id: 'planning-architect',
@@ -3732,21 +3723,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     lifecycle: 'stable',
     status: 'restricted',
     launchable: true,
-    acl: { mode: 'allow', allow: [{ capability: 'planning_reads' }, { capability: 'board_task_reads' }], deny: [{ capability: 'deny_raw_tool_picker' }, { capability: 'deny_high_risk_operations' }] },
-    capability_bucket_selection: ['planning_reads', 'board_task_reads'],
-    restriction_bucket_selection: ['deny_raw_tool_picker', 'deny_high_risk_operations'],
-    capability_buckets: [
-      { id: 'planning_reads', label: 'Planning reads', summary: 'Read planning docs and proposed decisions.' },
-      { id: 'board_task_reads', label: 'Board/task reads', summary: 'Read Board tasks and MCP call telemetry.' },
-    ],
-    restriction_buckets: [
-      { id: 'deny_raw_tool_picker', label: 'Deny raw tool picker', summary: 'Records that arbitrary raw tool picker authority is outside the class contract.' },
-      { id: 'deny_high_risk_operations', label: 'Deny remaining high-risk operations', summary: 'Explicitly deny high-risk/critical operations not selected by capability buckets.' },
-    ],
-    operator_access_summary: {
-      allowed_summary: 'Planning reads; Board/task reads; MCP call telemetry',
-      denied_summary: 'Deny raw tool picker; Deny remaining high-risk operations',
-    },
+    acl: { mode: 'allow', rules: [{ capability: 'planning.area.read', scope: 'group' }, { capability: 'board.read', scope: 'group' }] },
     apply_state: { applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
   };
 
@@ -3763,16 +3740,9 @@ test('agent class manager assigns Product Manager as desired and renders effecti
     effective_agent_class_id: 'default-architect',
     effective_agent_class_version: '1',
     effective_agent_class_snapshot: defaultArchitectClass,
-    effective_agent_profile_id: 'full-architect',
-    effective_agent_profile_version: '1',
-    effective_agent_profile_snapshot: {
-      id: 'full-architect',
-      version: '1',
-      base_kind: 'architect',
-      display_name: 'Full Architect',
-      lifecycle: 'stable',
-      status: 'full',
-    },
+    effective_agent_profile_id: '',
+    effective_agent_profile_version: '',
+    effective_agent_profile_snapshot: {},
   });
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
@@ -3795,18 +3765,14 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(classModalBody.innerHTML, /Product Manager@2 · Architect-derived · draft/);
 
   context.agentPanelSelectClass('blueprint', 'planning-architect');
-  assert.match(classModalBody.innerHTML, /What this class can do/);
-  assert.match(classModalBody.innerHTML, /Allowed actions[\s\S]*Planning reads; Board\/task reads; tool activity history/);
-  assert.match(classModalBody.innerHTML, /Not allowed[\s\S]*No arbitrary tool selection; No powerful actions beyond this class/);
-  assert.match(classModalBody.innerHTML, /No arbitrary tool selection[\s\S]*No powerful actions beyond this class/);
-  assert.doesNotMatch(classModalBody.innerHTML, /Operator access preview|Capability access|Allowed buckets|Restriction buckets|capability buckets|raw tool picker|high-risk/i);
+  assert.match(classModalBody.innerHTML, /Effective ACL/);
+  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*planning\.area\.read \(group\); board\.read \(group\)/);
+  assert.match(classModalBody.innerHTML, /Denied[\s\S]*Everything not listed is denied by default/);
 
   context.agentPanelSelectClass('blueprint', 'product-manager');
   assert.match(classModalBody.innerHTML, /Next relaunch freezes Product Manager@2 as the primary identity/);
   assert.doesNotMatch(classModalBody.innerHTML, /External connectors/);
-  assert.match(classModalBody.innerHTML, /ACL allow-list: product wrappers/);
-  assert.match(classModalBody.innerHTML, /Allowed actions[\s\S]*ACL allow-list: product wrappers/);
-  assert.match(classModalBody.innerHTML, /Not allowed[\s\S]*ACL denies: execution/);
+  assert.match(classModalBody.innerHTML, /Allowed[\s\S]*self\.read \(self\); task\.propose \(self\); message\.user \(self\)/);
   context.renderAgentPanel();
   assert.equal(classModal.classList.contains('visible'), true, 'routine rerender keeps Change Class modal open');
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
@@ -3842,7 +3808,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.match(panel.innerHTML, /Desired Agent Class updated\. It will freeze on the next launch or relaunch\./);
   assert.match(panel.innerHTML, /Desired Agent Class next launch[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Pending relaunch[\s\S]*next relaunch freezes Product Manager@2/);
-  assert.match(classModalBody.innerHTML, /Advanced\/Internal Agent Profile policy/);
+  assert.match(classModalBody.innerHTML, /Legacy direct Agent Profile assignment/);
 
   Object.assign(context.state.agents.blueprint, {
     status: 'running',
@@ -3869,7 +3835,7 @@ test('agent class manager assigns Product Manager as desired and renders effecti
   assert.equal(classModal.classList.contains('visible'), false);
 });
 
-test('agent panel renders Product Manager dogfood state as compact operator access policy UI', () => {
+test('agent panel renders Product Manager dogfood state as compact capability ACL UI', () => {
   const { context, panel, classModalBody } = createHarness();
   const productManagerClass = {
     id: 'product-manager',
@@ -3883,16 +3849,13 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
     launchable: true,
     builtin: true,
     draft: { scratch_only: false, approved_for_live_dogfood: true },
-    agent_profile_ref: { id: 'class-policy-product-manager', version: '2' },
-    agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'restricted', capability_count: 7 },
-    internal_policy: {
-      mode: 'compile',
-      profile_source: 'compiled_from_agent_class',
-      generated_profile_written_to_project_yaml: false,
-    },
-    operator_access_summary: {
-      allowed_summary: 'ACL allow-list: product wrappers, user and peer Architect communication, private journal',
-      denied_summary: 'ACL denies: execution, admin, raw tool picker, direct Engineer/Worker messaging',
+    acl: {
+      mode: 'allow',
+      rules: [
+        { capability: 'self.read', scope: 'self' },
+        { capability: 'task.propose', scope: 'self' },
+        { capability: 'message.user', scope: 'self' },
+      ],
     },
     warnings: [
       'External connectors are not governed by Agent Classes/Profile policy in Wave 7; manage connector access separately.',
@@ -3901,7 +3864,7 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
       'Product Manager cannot dispatch, merge, deploy, administer, use raw tool picker authority, or message engineers/workers directly.',
     ],
     external_connector_caveat: 'External connector exposure is not governed or enforced by Agent Classes or Agent Profiles in Wave 7; manage connector access separately.',
-    runtime_enforcement: 'launch_frozen_agent_class_profile_pairing',
+    runtime_enforcement: 'launch_frozen_effective_authority',
   };
 
   setFocusedAgent(context, {
@@ -3917,18 +3880,9 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
     effective_agent_class_id: 'product-manager',
     effective_agent_class_version: '2',
     effective_agent_class_snapshot: productManagerClass,
-    effective_agent_profile_id: 'class-policy-product-manager',
-    effective_agent_profile_version: '2',
-    effective_agent_profile_snapshot: {
-      id: 'class-policy-product-manager',
-      version: '2',
-      base_kind: 'architect',
-      display_name: 'Product Manager internal policy',
-      lifecycle: 'restricted',
-      status: 'restricted',
-      warnings: ['Raw Architect tools are denied; use architect_product_* wrappers only.'],
-      denied_high_risk_capabilities: ['agent.hire_engineer', 'task.dispatch', 'worktree.merge', 'deploy.apply'],
-    },
+    effective_agent_profile_id: '',
+    effective_agent_profile_version: '',
+    effective_agent_profile_snapshot: {},
   });
 
   context._agentPanelLastSelectedTabByKind.architect = 'behavior';
@@ -3942,7 +3896,7 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
   assert.doesNotMatch(panel.innerHTML, /agent-profile-scratch-warning[\s\S]*External connector/);
   assert.match(panel.innerHTML, /Primary identity now[\s\S]*Product Manager@2/);
   assert.match(panel.innerHTML, /Base kind metadata[\s\S]*Architect-derived/);
-  assert.doesNotMatch(panel.innerHTML, /Advanced\/Internal Agent Profile policy[\s\S]*class-policy-product-manager@2/);
+  assert.doesNotMatch(panel.innerHTML, /class-policy-product-manager@2/);
   assert.doesNotMatch(panel.innerHTML, /class-policy-product-manager|Product Manager internal policy|default full-architect|differs from desired/);
 
   context.agentPanelToggleClassAssignment(null, 'blueprint');
@@ -3952,7 +3906,7 @@ test('agent panel renders Product Manager dogfood state as compact operator acce
     issues: [],
   });
   assert.match(classModalBody.innerHTML, /<option value="product-manager" selected>/);
-  assert.match(classModalBody.innerHTML, /Access source[\s\S]*Managed by Agent Class: Product Manager/);
+  assert.match(classModalBody.innerHTML, /Effective ACL[\s\S]*task\.propose \(self\)/);
   assert.doesNotMatch(classModalBody.innerHTML, /class-policy-product-manager|Product Manager internal policy|differs from desired default/);
   assert.doesNotMatch(panel.innerHTML, /External connectors/);
   assert.doesNotMatch(panel.innerHTML, /Raw Architect tools are denied; use architect_product_\* wrappers only\.[\s\S]*Raw Architect tools are denied/);

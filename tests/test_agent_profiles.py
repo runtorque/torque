@@ -241,7 +241,7 @@ class AgentProfileRegistryTests(unittest.TestCase):
         self.assertTrue(any("lifecycle=draft" in warning for warning in preview["warnings"]))
         self.assertTrue(any("narrows the base kind" in warning for warning in preview["warnings"]))
 
-    def test_cell_status_defaults_to_full_base_kind_without_assignment(self):
+    def test_cell_status_defers_unassigned_base_kind_to_default_agent_class(self):
         class Cell:
             id = "worker-1"
             name = "Worker"
@@ -257,7 +257,9 @@ class AgentProfileRegistryTests(unittest.TestCase):
 
         status = agent_profile_cell_status(Cell(), base_dir=str(self.project))
 
-        self.assertEqual(status["effective_profile_id"], "full-worker")
+        self.assertEqual(status["effective_profile_id"], "")
+        self.assertEqual(status["next_launch_profile_id"], "")
+        self.assertEqual(status["effective_profile"], {})
         self.assertEqual(status["status"], "full")
         self.assertFalse(status["pending_next_launch"])
 

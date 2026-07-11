@@ -795,18 +795,29 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
     kind = str(getattr(cell, "kind", "") or "").strip()
     assigned_id = str(getattr(cell, "agent_profile_id", "") or "").strip()
     effective_id = str(getattr(cell, "effective_agent_profile_id", "") or "").strip()
+    class_assigned_id = str(getattr(cell, "agent_class_id", "") or "").strip()
+    effective_class_id = str(getattr(cell, "effective_agent_class_id", "") or "").strip()
+    direct_profile_without_class = bool(assigned_id and not class_assigned_id)
+    try:
+        from .agent_classes import default_agent_class_id_for_kind
+        implicit_class_id = default_agent_class_id_for_kind(kind)
+    except Exception:
+        implicit_class_id = ""
+    class_controls_next_launch = bool(
+        class_assigned_id or (implicit_class_id and not direct_profile_without_class)
+    )
     snapshot = getattr(cell, "effective_agent_profile_snapshot", {}) or {}
     if not isinstance(snapshot, dict):
         snapshot = {}
     effective_preview = dict(snapshot) if snapshot.get("id") else {}
-    if not effective_preview:
+    if not effective_preview and not effective_class_id and not class_controls_next_launch:
         default_id = default_full_profile_id_for_kind(kind)
         default_profile = profile_definition_by_id(default_id, base_dir=base_dir) if default_id else None
         if default_profile:
             effective_preview = enriched_profile_preview(default_profile)
             effective_preview["assignment_source"] = "implicit_default_full_base_kind"
             effective_id = default_profile.id
-    else:
+    elif effective_preview:
         effective_preview.setdefault("status", _profile_status_from_preview(effective_preview))
         effective_preview.setdefault("warnings", preview_warnings_for_profile_preview(effective_preview))
     assigned_preview = {}
@@ -815,28 +826,13 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         if assigned_profile:
             assigned_preview = enriched_profile_preview(assigned_profile)
 
-    class_assigned_id = str(getattr(cell, "agent_class_id", "") or "").strip()
-    effective_class_id = str(getattr(cell, "effective_agent_class_id", "") or "").strip()
-    class_next_profile_id = ""
-    class_next_profile_version = ""
-    if class_assigned_id:
-        try:
-            from .agent_classes import agent_class_definition_by_id
-            definition = agent_class_definition_by_id(class_assigned_id, base_dir=base_dir)
-            if definition:
-                class_next_profile_id = definition.agent_profile_ref.id
-                class_next_profile_version = definition.agent_profile_ref.version
-        except Exception:
-            class_next_profile_id = ""
-            class_next_profile_version = ""
-    next_launch_profile_id = (
-        class_next_profile_id
-        or assigned_id
-        or default_full_profile_id_for_kind(kind)
+    next_launch_profile_id = "" if class_controls_next_launch else (
+        assigned_id or default_full_profile_id_for_kind(kind)
     )
     next_launch_profile_version = (
-        class_next_profile_version
-        or (str(getattr(cell, "agent_profile_version", "") or "") if assigned_id else "")
+        str(getattr(cell, "agent_profile_version", "") or "")
+        if assigned_id and not class_controls_next_launch
+        else ""
     )
     if next_launch_profile_id and not next_launch_profile_version:
         next_profile = profile_definition_by_id(next_launch_profile_id, base_dir=base_dir)
@@ -848,10 +844,13 @@ def agent_profile_cell_status(cell: Any, *, base_dir: str = "") -> dict[str, Any
         or ""
     )
     pending_next_launch = bool(
-        next_launch_profile_id
-        and (next_launch_profile_id != effective_id
-             or (next_launch_profile_version
-                 and next_launch_profile_version != effective_version))
+        (class_controls_next_launch and effective_id)
+        or (
+            next_launch_profile_id
+            and (next_launch_profile_id != effective_id
+                 or (next_launch_profile_version
+                     and next_launch_profile_version != effective_version))
+        )
     )
     warnings = list(effective_preview.get("warnings", []) or [])
     if assigned_id and not class_assigned_id:

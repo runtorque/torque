@@ -137,7 +137,7 @@ class AgentProfileStorageTests(unittest.TestCase):
         )
 
         self.assertEqual(status["assigned_profile_id"], "")
-        self.assertEqual(status["next_launch_profile_id"], "full-architect")
+        self.assertEqual(status["next_launch_profile_id"], "")
         self.assertEqual(status["effective_profile_id"], "product-manager-draft")
         self.assertTrue(status["pending_next_launch"])
         self.assertEqual(cell.effective_agent_profile_id, "product-manager-draft")

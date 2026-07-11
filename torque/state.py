@@ -1174,10 +1174,9 @@ class AgentCell:
     effective_agent_profile_version: str = ""
     effective_agent_profile_snapshot: dict = field(default_factory=dict)
     effective_agent_profile_applied_at: float = 0.0
-    # Custom Agent Classes (Wave 6B): desired assignment is separate from the
-    # frozen effective class/profile pairing applied at launch. Agent Classes
-    # are user-facing templates over base runtime kinds; Agent Profiles remain
-    # the enforcement layer.
+    # Agent Classes: desired assignment is separate from the frozen effective
+    # class authority applied at launch. The class snapshot is the MCP
+    # enforcement source for class-launched sessions.
     agent_class_id: str = ""
     agent_class_version: str = ""
     agent_class_assigned_at: float = 0.0
@@ -11641,9 +11640,9 @@ class MatrixState:
                            base_dir: str = "") -> dict:
         """Trusted-user assignment of a desired Agent Class.
 
-        Assignment intentionally does not mutate frozen effective class/profile
-        snapshots; ``apply_effective_agent_class_for_launch`` is the launch
-        boundary that updates runtime policy.
+        Assignment intentionally does not mutate frozen effective class
+        authority; ``apply_effective_agent_class_for_launch`` is the launch
+        boundary that updates runtime authority.
         """
 
         cell = self.agents.get(str(aid or "").strip())
@@ -11714,7 +11713,7 @@ class MatrixState:
     def apply_effective_agent_class_for_launch(self, cell, *, base_dir: str = "",
                                                actor_kind: str = "system",
                                                actor_id: str = "launch") -> dict:
-        """Freeze the desired/default Agent Class and referenced profile."""
+        """Freeze the desired/default Agent Class effective authority."""
 
         if not cell or getattr(cell, "cell_type", "") != "agent":
             return {}
@@ -11722,9 +11721,7 @@ class MatrixState:
             agent_class_definition_by_id,
             default_agent_class_id_for_kind,
             freeze_agent_class_snapshot,
-            resolve_agent_class_profile_definition,
         )
-        from .agent_profiles import enriched_profile_preview
 
         base_kind = str(getattr(cell, "kind", "") or "").strip()
         if not base_kind:
@@ -11769,53 +11766,24 @@ class MatrixState:
                 f"Agent Class {definition.id} is for base_kind={definition.base_kind}, "
                 f"but agent kind is {base_kind}"
             )
-        profile = resolve_agent_class_profile_definition(
-            definition,
-            base_dir=base_dir_resolved,
-        )
-        if not profile:
-            raise ValueError(
-                f"Agent Class {definition.id} references or compiles unknown/invalid internal Agent Profile policy: "
-                f"{definition.agent_profile_ref.id}"
-            )
-        if definition.agent_profile_ref.version and profile.version != definition.agent_profile_ref.version:
-            raise ValueError(
-                f"Agent Class {definition.id} references Agent Profile "
-                f"{definition.agent_profile_ref.id}@{definition.agent_profile_ref.version}, "
-                f"but registry has version {profile.version}"
-            )
-        if profile.base_kind != base_kind:
-            raise ValueError(
-                f"Agent Class {definition.id} references Agent Profile "
-                f"{profile.id} for base_kind={profile.base_kind}, but agent kind is {base_kind}"
-            )
-
         previous = {
             "class_id": getattr(cell, "effective_agent_class_id", "") or "",
             "class_version": getattr(cell, "effective_agent_class_version", "") or "",
         }
-        profile_snapshot = self._apply_effective_agent_profile_snapshot(
-            cell,
-            profile_id=profile.id,
-            base_dir=base_dir_resolved,
-            profile_definition=profile,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            assignment_source="agent_class_assigned" if desired_id else "agent_class_default",
-            update_desired_version=False,
-            audit_message=(
-                "effective Agent Profile frozen from Agent Class "
-                f"{definition.id}@{definition.version}"
-            ),
-        )
-        frozen_at = float(profile_snapshot.get("frozen_at", time.time()) or time.time())
+        frozen_at = time.time()
         class_snapshot = freeze_agent_class_snapshot(
             definition,
-            enriched_profile_preview(profile),
             assignment_source="assigned" if desired_id else "default_base_kind_class",
             frozen_at=frozen_at,
             base_dir=base_dir_resolved,
         )
+        # Agent Class sessions have exactly one authority source. Clear any
+        # previously frozen Agent Profile snapshot instead of compiling a
+        # class-policy compatibility profile.
+        cell.effective_agent_profile_id = ""
+        cell.effective_agent_profile_version = ""
+        cell.effective_agent_profile_snapshot = {}
+        cell.effective_agent_profile_applied_at = 0
         cell.effective_agent_class_id = definition.id
         cell.effective_agent_class_version = definition.version
         cell.effective_agent_class_snapshot = class_snapshot
@@ -11832,8 +11800,8 @@ class MatrixState:
                 actor_id=actor_id or "launch",
                 previous=previous,
                 snapshot=class_snapshot,
-                profile_snapshot=profile_snapshot,
-                message="effective Agent Class and referenced Agent Profile frozen for launched session",
+                profile_snapshot={},
+                message="effective Agent Class authority frozen for launched session",
             )
         return class_snapshot
 

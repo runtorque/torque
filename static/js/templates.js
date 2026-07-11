@@ -26,13 +26,8 @@ var _agentClassValidationInFlight = false;
 var _agentClassValidationRequestId = '';
 var _agentClassLoadedBaseDir = null;
 var _agentClassLoadingBaseDir = null;
-var _agentClassProfileList = [];
-var _agentClassProfileIssues = [];
-var _agentClassProfileLoadedBaseDir = null;
-var _agentClassProfileLoadingBaseDir = null;
 var _agentClassAuthoringContract = null;
 var _agentClassCapabilityBucketCatalog = [];
-var _agentClassRestrictionBucketCatalog = [];
 var _agentClassSkipNextDraftCapture = false;
 var _agentClassLaunchDrafts = {};
 var _agentClassLaunchResult = null;
@@ -41,34 +36,6 @@ var _agentClassPickerContexts = {};
 var _agentClassPickerLoading = false;
 var _agentClassPickerRequestedBaseDir = '';
 var _agentClassLastMutationRequestId = '';
-
-var AGENT_CLASS_REVIEWED_SAFE_CAPABILITY_BUCKET_IDS = {
-  self_context: true,
-  task_reporting: true,
-  planning_area_reads: true,
-  planning_reads: true,
-  board_task_reads: true,
-  user_messages: true,
-  private_journal: true,
-  shared_memory: true,
-};
-
-var AGENT_CLASS_ADVANCED_ONLY_CAPABILITY_BUCKET_IDS = {
-  planning_writes: true,
-  board_task_proposals: true,
-  proposed_decisions: true,
-  decision_authority: true,
-  product_peer_messages: true,
-  engineer_worker_messages: true,
-  scoped_journals: true,
-  shared_memory_admin: true,
-  engineer_management: true,
-  worker_dispatch: true,
-  worktree_merge: true,
-  deploy_admin: true,
-  class_profile_admin: true,
-};
-
 
 var _specializationList = [];
 var _specializationSelected = '';
@@ -1091,29 +1058,10 @@ function agentClassManagerLoad(force) {
   _agentClassLoadingBaseDir = baseDir;
   _agentClassEditorError = '';
   _agentClassSendWithBaseDir({ cmd: 'agent_class_list' }, baseDir);
-  agentClassManagerRequestProfiles(baseDir, force);
 }
 
 function agentClassManagerEnsureLoaded() {
   agentClassManagerLoad(false);
-}
-
-function agentClassManagerRequestProfiles(baseDir, force) {
-  baseDir = String(baseDir || _agentClassCurrentBaseDir() || '').trim();
-  if (!force && (_agentClassProfileLoadingBaseDir === baseDir || _agentClassProfileLoadedBaseDir === baseDir)) return;
-  _agentClassProfileLoadingBaseDir = baseDir;
-  _agentClassSendWithBaseDir({ cmd: 'agent_profile_list' }, baseDir);
-}
-
-function agentClassManagerReceiveProfiles(msg) {
-  msg = msg || {};
-  if (_agentClassProfileLoadingBaseDir == null) return;
-  _agentClassProfileList = Array.isArray(msg.profiles) ? msg.profiles.slice() : [];
-  _agentClassProfileIssues = Array.isArray(msg.issues) ? msg.issues.slice() : [];
-  _agentClassProfileLoadedBaseDir = _agentClassProfileLoadingBaseDir || _agentClassCurrentBaseDir();
-  _agentClassProfileLoadingBaseDir = null;
-  agentClassRenderOpenPickers();
-  if (_libraryActiveTab === 'agent_classes') renderAgentClassesPanel();
 }
 
 function _agentClassSort(list) {
@@ -1211,27 +1159,13 @@ function _agentClassSecondaryLabel(item, fallbackKind) {
   ).trim();
 }
 
-function _agentClassPolicyMode(item) {
-  item = item || {};
-  var acl = item.acl && typeof item.acl === 'object' ? item.acl : {};
-  if (String(acl.mode || '').trim()) return 'compile';
-  var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
-  var mode = String(policy.mode || '').trim();
-  if (mode) return mode;
-  if (_agentClassSelectedBucketIds(item, false).length || _agentClassSelectedBucketIds(item, true).length) return 'compile';
-  if (item.compiled_profile && typeof item.compiled_profile === 'object' && item.compiled_profile.id) return 'compile';
-  var internal = item.internal_policy && typeof item.internal_policy === 'object' ? item.internal_policy : {};
-  if (String(internal.mode || '').trim() === 'compile') return 'compile';
-  return 'wrap_profile';
-}
-
 function _agentClassCatalogFromContract(restriction) {
   if (restriction) return [];
   if (_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract.capability_catalog)) {
     return _agentClassAuthoringContract.capability_catalog;
   }
-  var key = restriction ? 'restriction_bucket_catalog' : 'capability_bucket_catalog';
-  var direct = restriction ? _agentClassRestrictionBucketCatalog : _agentClassCapabilityBucketCatalog;
+  var key = 'capability_catalog';
+  var direct = _agentClassCapabilityBucketCatalog;
   if (Array.isArray(direct) && direct.length) return direct;
   if (_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract[key])) {
     return _agentClassAuthoringContract[key];
@@ -1260,16 +1194,6 @@ function _agentClassBucketAvailableForKind(bucket, kind) {
   var baseKinds = Array.isArray(bucket.base_kinds) ? bucket.base_kinds : [];
   if (!kind || !baseKinds.length) return true;
   return baseKinds.map(function(value) { return String(value || '').trim(); }).indexOf(kind) >= 0;
-}
-
-function _agentClassCapabilityBucketSafeForNormalUi(bucket) {
-  bucket = bucket || {};
-  var id = String(bucket.id || '').trim();
-  var risk = String(bucket.risk || '').toLowerCase();
-  if (!id) return false;
-  if (AGENT_CLASS_ADVANCED_ONLY_CAPABILITY_BUCKET_IDS[id]) return false;
-  if (!AGENT_CLASS_REVIEWED_SAFE_CAPABILITY_BUCKET_IDS[id]) return false;
-  return !risk || risk === 'normal' || risk === 'low';
 }
 
 function _agentClassPlainPermissionCopy(text) {
@@ -1325,43 +1249,19 @@ function _agentClassBucketSummary(bucket) {
   return _agentClassPlainPermissionCopy(bucket.summary || bucket.description || '');
 }
 
-function _agentClassBucketIdsFromCapabilities(capabilities, restriction) {
-  capabilities = capabilities && typeof capabilities === 'object' ? capabilities : {};
-  var values = restriction
-    ? (capabilities.restrictions || capabilities.restriction_buckets || capabilities.denied_buckets)
-    : (capabilities.buckets || capabilities.capability_buckets);
-  return _agentClassDedupeStrings(Array.isArray(values) ? values : []);
-}
-
 function _agentClassSelectedBucketIds(item, restriction) {
   item = item || {};
-  if (!restriction) {
-    var canonicalAcl = item.acl && typeof item.acl === 'object' ? item.acl : {};
-    var canonicalRules = Array.isArray(canonicalAcl.rules) ? canonicalAcl.rules : [];
-    var canonicalIds = canonicalRules.map(function(rule) {
-      return String((rule && rule.capability) || '').trim();
-    }).filter(Boolean);
-    if (canonicalIds.length) return _agentClassDedupeStrings(canonicalIds);
-  }
-  var direct = restriction ? item.restriction_bucket_selection : item.capability_bucket_selection;
-  var selected = _agentClassDedupeStrings(Array.isArray(direct) ? direct : []);
-  if (selected.length) return selected;
-  selected = _agentClassBucketIdsFromCapabilities(item.capabilities, restriction);
-  if (selected.length) return selected;
-  var policy = item.policy && typeof item.policy === 'object' ? item.policy : {};
-  var policyValues = restriction
-    ? (policy.restrictions || policy.restriction_buckets)
-    : (policy.buckets || policy.capability_buckets);
-  return _agentClassDedupeStrings(Array.isArray(policyValues) ? policyValues : []);
+  if (restriction) return [];
+  var canonicalAcl = item.acl && typeof item.acl === 'object' ? item.acl : {};
+  var canonicalRules = Array.isArray(canonicalAcl.rules) ? canonicalAcl.rules : [];
+  return _agentClassDedupeStrings(canonicalRules.map(function(rule) {
+    return String((rule && rule.capability) || '').trim();
+  }).filter(Boolean));
 }
 
 function _agentClassDefaultCapabilityBucketsForKind(kind) {
   kind = String(kind || 'worker').trim();
   return kind ? ['self.read', 'help.read'] : [];
-}
-
-function _agentClassDefaultRestrictionBucketsForKind(_kind) {
-  return [];
 }
 
 function _agentClassRuleScope(item, capabilityId) {
@@ -1416,21 +1316,8 @@ function _agentClassVisibleCapabilityBuckets(kind) {
 }
 
 function _agentClassVisibleRestrictionBuckets(kind) {
+  void kind;
   return [];
-  var catalog = _agentClassCatalogFromContract(true);
-  var out = [];
-  for (var i = 0; i < catalog.length; i++) {
-    var bucket = catalog[i] || {};
-    if (!_agentClassBucketAvailableForKind(bucket, kind)) continue;
-    out.push(bucket);
-  }
-  out.sort(function(a, b) {
-    var ac = String(a.category || '');
-    var bc = String(b.category || '');
-    if (ac !== bc) return ac.localeCompare(bc);
-    return _agentClassBucketLabel(a, a.id).localeCompare(_agentClassBucketLabel(b, b.id));
-  });
-  return out;
 }
 
 function _agentClassHiddenSelectedBucketIds(item, kind, restriction) {
@@ -1439,38 +1326,6 @@ function _agentClassHiddenSelectedBucketIds(item, kind, restriction) {
   var visibleSet = {};
   for (var i = 0; i < visible.length; i++) visibleSet[String(visible[i].id || '')] = true;
   return selected.filter(function(id) { return !visibleSet[id]; });
-}
-
-function _agentClassDefaultProfileId(kind) {
-  kind = String(kind || '').trim();
-  return (kind === 'architect' || kind === 'engineer' || kind === 'worker') ? ('full-' + kind) : '';
-}
-
-function _agentClassCompatibleProfiles(kind) {
-  kind = String(kind || '').trim();
-  var out = [];
-  for (var i = 0; i < _agentClassProfileList.length; i++) {
-    var profile = _agentClassProfileList[i] || {};
-    if (String(profile.base_kind || '') === kind) out.push(profile);
-  }
-  out.sort(function(a, b) {
-    return String(a.display_name || a.id || '').localeCompare(String(b.display_name || b.id || ''));
-  });
-  return out;
-}
-
-function _agentClassProfileById(profileId) {
-  profileId = String(profileId || '').trim();
-  for (var i = 0; i < _agentClassProfileList.length; i++) {
-    var profile = _agentClassProfileList[i] || {};
-    if (String(profile.id || '') === profileId) return profile;
-  }
-  return null;
-}
-
-function _agentClassProfileVersion(profileId, fallback) {
-  var profile = _agentClassProfileById(profileId);
-  return String((profile && profile.version) || fallback || '').trim();
 }
 
 function _agentClassVersionSuffix(version) {
@@ -1498,11 +1353,6 @@ function agentClassManagerReceiveList(msg) {
     : ((_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract.capability_catalog))
       ? _agentClassAuthoringContract.capability_catalog.slice()
       : _agentClassCapabilityBucketCatalog);
-  _agentClassRestrictionBucketCatalog = Array.isArray(msg.restriction_bucket_catalog)
-    ? msg.restriction_bucket_catalog.slice()
-    : ((_agentClassAuthoringContract && Array.isArray(_agentClassAuthoringContract.restriction_bucket_catalog))
-      ? _agentClassAuthoringContract.restriction_bucket_catalog.slice()
-      : _agentClassRestrictionBucketCatalog);
   _agentClassLoadedBaseDir = _agentClassLoadingBaseDir || _agentClassCurrentBaseDir();
   _agentClassLoadingBaseDir = null;
   _agentClassPickerLoading = false;
@@ -1540,9 +1390,6 @@ function agentClassManagerReceiveValidation(msg) {
     _agentClassAuthoringContract = msg.authoring_contract;
     if (Array.isArray(msg.authoring_contract.capability_catalog)) {
       _agentClassCapabilityBucketCatalog = msg.authoring_contract.capability_catalog.slice();
-    }
-    if (Array.isArray(msg.authoring_contract.restriction_bucket_catalog)) {
-      _agentClassRestrictionBucketCatalog = msg.authoring_contract.restriction_bucket_catalog.slice();
     }
   }
   _agentClassPreview = msg.agent_class || _agentClassPreview;
@@ -1692,7 +1539,6 @@ function agentClassManagerNew(baseKind) {
   _agentClassEditorMessage = '';
   _agentClassEditorError = '';
   _agentClassSkipNextDraftCapture = true;
-  agentClassManagerRequestProfiles(_agentClassCurrentBaseDir(), false);
   renderAgentClassesPanel();
   var inp = document.getElementById('agent-class-id');
   if (inp) inp.focus();
@@ -1876,7 +1722,7 @@ function _agentClassBucketAuthoringHtml(preview, kind, readOnly) {
   }
   if (hiddenSelected.length) {
     html += '<div class="agent-class-caveat agent-class-hidden-selected-buckets">'
-      + 'This class already includes Advanced permissions preserved for compatibility. They cannot be changed in the normal form: '
+      + 'This class includes capabilities hidden from the compact form. Review them in Advanced diagnostics: '
       + esc(hiddenSelected.join(', '))
       + '</div>';
   }
@@ -1943,7 +1789,6 @@ function _agentClassEditorFormHtml(preview) {
   var isBuiltin = !!preview.builtin;
   var archived = _agentClassIsArchived(preview);
   var readOnly = isBuiltin || archived;
-  var ref = preview.agent_profile_ref || {};
   var metadata = preview.metadata && typeof preview.metadata === 'object' ? preview.metadata : {};
   var ui = metadata.ui && typeof metadata.ui === 'object' ? metadata.ui : {};
   var draft = preview.draft && typeof preview.draft === 'object' ? preview.draft : {};
@@ -2003,36 +1848,14 @@ function _agentClassEditorFormHtml(preview) {
   return html;
 }
 
-function _agentClassProfileOptionsHtml(kind, selectedId) {
-  kind = String(kind || 'worker').trim();
-  selectedId = String(selectedId || '').trim() || _agentClassDefaultProfileId(kind);
-  var profiles = _agentClassCompatibleProfiles(kind);
-  var html = '';
-  if (!profiles.length) {
-    var fallback = selectedId || _agentClassDefaultProfileId(kind);
-    html += '<option value="' + esc(fallback) + '" selected>' + esc(fallback || 'No compatible profiles loaded') + '</option>';
-    return html;
-  }
-  for (var i = 0; i < profiles.length; i++) {
-    var profile = profiles[i] || {};
-    var id = String(profile.id || '').trim();
-    if (!id) continue;
-    var label = String(profile.display_name || id) + _agentClassVersionSuffix(profile.version) + ' · ' + (profile.status || profile.lifecycle || 'full');
-    html += '<option value="' + esc(id) + '"' + (selectedId === id ? ' selected' : '') + '>' + esc(label) + '</option>';
-  }
-  return html;
-}
-
 function _agentClassOperatorSummaryText(value, fallback) {
   var text = String(value || '').trim();
-  if (!text || /wrapped internal agent profile policy/i.test(text)) return fallback || '';
+  if (!text) return fallback || '';
   return _agentClassPlainPermissionCopy(text);
 }
 
 function _agentClassBucketPreviewsFor(preview, restriction) {
   preview = preview || {};
-  var direct = restriction ? preview.restriction_buckets : preview.capability_buckets;
-  if (Array.isArray(direct) && direct.length) return direct;
   var ids = _agentClassSelectedBucketIds(preview, !!restriction);
   var out = [];
   for (var i = 0; i < ids.length; i++) {
@@ -2086,7 +1909,7 @@ function _agentClassOperatorAccessHtml(preview) {
   var html = '<div class="agent-class-operator-access">';
   html += '<div class="agent-class-block-title">What this class can do</div>';
   html += '<div class="agent-class-access-summary-grid">';
-  html += '<div><span>ACL mode</span><strong>' + esc(String(mode || 'wrap_profile')) + '</strong></div>';
+  html += '<div><span>ACL mode</span><strong>' + esc(String(mode || 'allow')) + '</strong></div>';
   html += '<div><span>Allowed actions</span><strong>' + esc(allowedSummary || fallbackAllowed) + '</strong></div>';
   html += '<div><span>Not allowed</span><strong>' + esc(deniedSummary || (restrictionBuckets.length ? 'See limits below.' : 'None selected')) + '</strong></div>';
   html += '</div>';
@@ -2138,9 +1961,9 @@ function _agentClassFilteredOperatorRestrictions(preview) {
 function _agentClassInternalDiagnosticsHtml(preview, validation) {
   preview = preview || {};
   var diagnostic = {};
-  ['internal_policy', 'agent_profile', 'internal_profile', 'compiled_profile', 'agent_profile_ref'].forEach(function(key) {
-    if (preview[key] && typeof preview[key] === 'object' && Object.keys(preview[key]).length) diagnostic[key] = preview[key];
-  });
+  if (preview.effective_authority && typeof preview.effective_authority === 'object') {
+    diagnostic.effective_authority = preview.effective_authority;
+  }
   var restrictions = Array.isArray(preview.restrictions) ? preview.restrictions : [];
   if (restrictions.length) diagnostic.restrictions = restrictions;
   var html = '<details class="agent-class-normalized agent-class-internal-diagnostics"><summary>Advanced/Internal diagnostics</summary>';
@@ -2319,24 +2142,12 @@ function agentClassManagerBaseKindChanged() {
     'allow',
     { 'self.read': 'self' }
   );
-  delete form.policy;
-  delete form.capabilities;
-  form.capability_bucket_selection = _agentClassDefaultCapabilityBucketsForKind(kind);
-  form.restriction_bucket_selection = [];
-  delete form.agent_profile_ref;
   _agentClassPreview = Object.assign(_agentClassDefaultDraft(kind), form);
   _agentClassEditorDirty = true;
   _agentClassValidation = null;
   _agentClassValidationSignature = '';
   _agentClassSkipNextDraftCapture = true;
   renderAgentClassesPanel();
-}
-
-function agentClassManagerProfileChanged() {
-  var sel = document.getElementById('agent-class-profile-id');
-  var version = document.getElementById('agent-class-profile-version');
-  if (sel && version) version.value = _agentClassProfileVersion(sel.value, version.value || '');
-  agentClassManagerMarkDirty();
 }
 
 function agentClassManagerBucketChanged() {
@@ -2399,8 +2210,7 @@ function _agentClassReadFormSafe() {
   var editablePreview = _agentClassEditablePreview() || {};
   var selectedBuckets = _agentClassReadSelectedBucketIds(kind, false);
   var selectedRestrictions = [];
-  if (!selectedBuckets.length && !_agentClassRenderedBucketInputCount(kind, false)
-      && _agentClassPolicyMode(editablePreview) === 'compile') {
+  if (!selectedBuckets.length && !_agentClassRenderedBucketInputCount(kind, false)) {
     selectedBuckets = _agentClassSelectedBucketIds(editablePreview, false);
   }
   selectedRestrictions = [];
@@ -2519,7 +2329,6 @@ function agentClassManagerDelete() {
 function agentClassManagerDuplicate() {
   var src = _agentClassReadFormSafe();
   if (!_agentClassEditorDirty && _agentClassPreview) {
-    var ref = _agentClassPreview.agent_profile_ref || {};
     src = {
       id: _agentClassPreview.id || '',
       version: _agentClassPreview.version || '1',
@@ -2527,13 +2336,10 @@ function agentClassManagerDuplicate() {
       display_name: _agentClassPreview.display_name || '',
       description: _agentClassPreview.description || '',
       lifecycle: _agentClassPreview.lifecycle || 'stable',
-      agent_profile_ref: { id: ref.id || _agentClassDefaultProfileId(_agentClassPreview.base_kind), version: ref.version || '' },
-      agent_class_schema_version: _agentClassPreview.agent_class_schema_version || 4,
+      agent_class_schema_version: _agentClassPreview.agent_class_schema_version || 5,
       runtime: _agentClassPreview.runtime || { base_kind: _agentClassPreview.base_kind || 'worker' },
       acl: _agentClassPreview.acl || {},
-      capability_bucket_selection: _agentClassSelectedBucketIds(_agentClassPreview, false),
-      restriction_bucket_selection: [],
-      prompt: _agentClassPromptJobText(_agentClassPreview.prompt),
+      prompt: _agentClassPreview.prompt || {},
       metadata: _agentClassPreview.metadata || {},
       draft: _agentClassPreview.draft || {},
     };
@@ -2660,8 +2466,7 @@ function _agentClassFormObjectFromSnapshot(form) {
     var id = String((bucket && bucket.id) || '').trim();
     if (id && form['agent-class-restriction-bucket-' + _agentClassBucketDomToken(id)]) selectedRestrictions.push(id);
   });
-  if (!selectedBuckets.length && !_agentClassRenderedBucketInputCount(kind, false)
-      && _agentClassPolicyMode(_agentClassPreview || {}) === 'compile') {
+  if (!selectedBuckets.length && !_agentClassRenderedBucketInputCount(kind, false)) {
     selectedBuckets = _agentClassSelectedBucketIds(_agentClassPreview || {}, false);
   }
   selectedRestrictions = [];
