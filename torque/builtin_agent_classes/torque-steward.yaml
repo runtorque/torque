@@ -1,4 +1,4 @@
-agent_class_schema_version: 4
+agent_class_schema_version: 5
 id: torque-steward
 version: '1'
 display_name: Torque Steward
@@ -33,16 +33,16 @@ prompt:
   - When a useful next action requires unavailable execution/admin authority, explain the
     gap and recommend the authorized actor/path instead of performing it.
   tool_guidance:
-  - when_tool: architect_steward_operating_brief
+  - when_capability: telemetry.read
     text: Use the Steward operating brief as the deterministic read-only starting point for
       onboarding, anomaly reports, and responsible-actor suggestions.
-  - when_capability: planning_reads
+  - when_capability: board.read
     text: Use visible Planning reads to summarize Areas, Initiatives, Decisions, and board/task
       context without mutation.
-  - when_capability: peer_architect_messages
+  - when_capability: message.architect_peer
     text: Use same-group Architect peer messages only for coordination, handoff nudges, and
       operational context sharing.
-  - when_capability: private_journal
+  - when_capability: journal.private
     text: Use your own private journal for durable observations, checkpoints, and operating
       notes.
 warnings:
@@ -61,29 +61,30 @@ metadata:
   mutating_authority: none
 acl:
   mode: allow
-  allow:
-  - capability: self_context
-  - capability: planning_reads
-  - capability: recent_context_reads
-  - capability: board_task_reads
-  - capability: user_messages
-  - capability: peer_architect_messages
-  - capability: private_journal
-  - tool: torque_context
-  - tool: architect_help_list
-  - tool: architect_help_show
-  - tool: architect_help_search
-  - tool: architect_help_query
-  - tool: architect_steward_operating_brief
-  - tool: architect_events_recent
-  - tool: architect_ask
-  - tool: architect_message_user
-  - tool: architect_peer_list
-  - tool: architect_peer_message
-  - tool: architect_peer_inbox
-  - tool: architect_reply
-  - tool: architect_journal
-  - tool: architect_journal_read
+  rules:
+  - capability: self.read
+    scope: self
+  - capability: help.read
+  - capability: board.read
+    scope: group
+  - capability: task.read
+    scope: group
+  - capability: event.read
+    scope: group
+  - capability: telemetry.read
+    scope: group
+  - capability: planning.area.read
+    scope: group
+  - capability: planning.initiative.read
+    scope: group
+  - capability: decision.read
+    scope: group
+  - capability: message.user
+    scope: self
+  - capability: message.architect_peer
+    scope: group
+  - capability: journal.private
+    scope: self
 operator_summary:
   bullets:
   - 'Domains: onboarding, ops_health, anomaly_detection, missed_handoffs, stale_tasks, cleanup_recommendations.'

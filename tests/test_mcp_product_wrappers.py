@@ -138,7 +138,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["isError"], result["content"][0]["text"])
         return result["content"][0]["text"]
 
-    async def test_pm_profile_projects_product_wrappers_and_denies_raw_tools(self):
+    async def test_pm_class_projects_every_tool_with_matching_capabilities(self):
         self.assertEqual(self.architect.effective_agent_class_id, "product-manager")
         self.assertEqual(self.architect.effective_agent_profile_id, "class-policy-product-manager")
         tool_names = await self._list_tools()
@@ -187,21 +187,10 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
             "architect_deploy_state",
             "architect_get_architect_settings",
             "architect_mcp_calls",
-            "architect_board_summary",
-            "architect_task_list",
-            "architect_task_show",
-            "architect_peer_message",
             "architect_peer_inbox",
             "architect_reply",
             "architect_decision_create",
             "architect_decision_update",
-            "architect_decision_link",
-            "architect_decision_list",
-            "architect_area_list",
-            "architect_initiative_list",
-            "architect_message_user",
-            "architect_ask",
-            "architect_journal",
         }
         self.assertFalse(denied & tool_names)
 
@@ -749,7 +738,7 @@ class MCPProductWrapperTests(unittest.IsolatedAsyncioTestCase):
                     "message": "cross group",
                     "context_task_ids": [product_task.id],
                 },
-                "scope",
+                "Unknown tool",
             ),
             (
                 {

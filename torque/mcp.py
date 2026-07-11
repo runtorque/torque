@@ -10,6 +10,7 @@ populates it from ``${TORQUE_CELL_ID}`` in ``.mcp.json``; Codex uses
 """
 
 import asyncio
+import fnmatch
 import json
 import logging
 import time
@@ -20,15 +21,32 @@ from aiohttp import web
 
 from . import __version__
 from .agent_profiles import (
+    CAPABILITIES,
     AgentProfileDefinition,
     AgentProfilePolicy,
-    mcp_tool_allowed_by_policy,
     profile_policy_by_id,
     profile_policy_from_definition,
 )
-from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
+from .capability_catalog import (
+    CAPABILITY_CATALOG,
+    canonical_capabilities_from_legacy_atoms,
+    canonical_tool_requirements,
+)
+from .mcp_authority import (
+    EffectiveAuthority,
+    AuthorityValidationError,
+    audit_tool_authority_coverage,
+    effective_authority_from_snapshot,
+    merge_tool_authority_requirements,
+)
+from .mcp_architect import (
+    ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
+    ARCHITECT_TOOLS,
+    _dispatch_architect_tool,
+)
 from .mcp_engineer import (
     ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES,
+    ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
     ENGINEER_TOOLS,
     _dispatch_engineer_tool,
     engineer_tools_for_cell,
@@ -51,6 +69,10 @@ from .mcp_retry import (
     strip_mcp_idempotency_args,
 )
 from .server_artifacts import serialize_task_for_mcp
+from .mcp_engineer_tools.shared import (
+    resolve_agent as resolve_mcp_agent,
+    resolve_task as resolve_mcp_task,
+)
 
 log = logging.getLogger("torque")
 
@@ -826,11 +848,171 @@ TOOLS = [
     },
 ]
 
+# Authority declarations for the shared Worker/Torque MCP surface.
+WORKER_TOOL_CAPABILITY_REQUIREMENTS: dict[str, frozenset[str]] = {
+    'torque_area_list': frozenset({'planning.area_read'}),
+    'torque_area_show': frozenset({'planning.area_read'}),
+    'torque_ask': frozenset({'comm.user_ask'}),
+    'torque_blocked': frozenset({'task.complete'}),
+    'torque_context': frozenset({'observe.self_context'}),
+    'torque_derive': frozenset({'task.complete'}),
+    'torque_done': frozenset({'task.complete'}),
+    'torque_error': frozenset({'task.complete'}),
+    'torque_help_list': frozenset({'observe.self_context'}),
+    'torque_help_query': frozenset({'observe.self_context'}),
+    'torque_help_search': frozenset({'observe.self_context'}),
+    'torque_help_show': frozenset({'observe.self_context'}),
+    'torque_memory_link': frozenset({'memory.admin'}),
+    'torque_memory_list': frozenset({'memory.read'}),
+    'torque_memory_pin': frozenset({'memory.admin'}),
+    'torque_memory_publish': frozenset({'memory.publish'}),
+    'torque_memory_read': frozenset({'memory.read'}),
+    'torque_memory_unpin': frozenset({'memory.admin'}),
+    'torque_message_user': frozenset({'comm.user_message'}),
+    'torque_name': frozenset({'task.complete'}),
+    'torque_progress': frozenset({'task.complete'}),
+    'torque_ready': frozenset({'task.complete'}),
+    'torque_reply': frozenset({'comm.user_message'}),
+    'torque_stop_user_message_loop': frozenset({'comm.user_message'}),
+    'torque_task_upload_artifact': frozenset({'task.upload_artifact'}),
+    'torque_verify': frozenset({'task.verify'}),
+}
+
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
 
 # Combined tool list
 ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
+
+MCP_TOOL_CAPABILITY_REQUIREMENTS = merge_tool_authority_requirements(
+    WORKER_TOOL_CAPABILITY_REQUIREMENTS,
+    ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
+    ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
+)
+MCP_TOOL_CANONICAL_REQUIREMENTS = {
+    tool_name: canonical_tool_requirements(tool_name, requirements)
+    for tool_name, requirements in MCP_TOOL_CAPABILITY_REQUIREMENTS.items()
+}
+
+# Authority metadata must cover the exact registered Torque MCP surface.  This
+# is deliberately fail-closed: a newly registered tool cannot silently become
+# available to deny-mode classes merely because its capability metadata was
+# forgotten.  The mapping is still centralized during the first migration
+# slice; the RFC moves these requirements beside ToolDefinition registration.
+MCP_AUTHORITY_COVERAGE = audit_tool_authority_coverage(
+    ALL_TOOLS,
+    MCP_TOOL_CAPABILITY_REQUIREMENTS,
+    known_capabilities=CAPABILITIES,
+)
+MCP_AUTHORITY_COVERAGE.require_valid()
+
+MCP_AUTHORITY_SURFACE_COVERAGE = {
+    "worker": audit_tool_authority_coverage(
+        TOOLS,
+        WORKER_TOOL_CAPABILITY_REQUIREMENTS,
+        known_capabilities=CAPABILITIES,
+    ),
+    "engineer": audit_tool_authority_coverage(
+        ENGINEER_TOOLS,
+        ENGINEER_TOOL_CAPABILITY_REQUIREMENTS,
+        known_capabilities=CAPABILITIES,
+    ),
+    "architect": audit_tool_authority_coverage(
+        ARCHITECT_TOOLS,
+        ARCHITECT_TOOL_CAPABILITY_REQUIREMENTS,
+        known_capabilities=CAPABILITIES,
+    ),
+}
+for _surface_coverage in MCP_AUTHORITY_SURFACE_COVERAGE.values():
+    _surface_coverage.require_valid()
+
+MCP_CANONICAL_AUTHORITY_COVERAGE = audit_tool_authority_coverage(
+    ALL_TOOLS,
+    MCP_TOOL_CANONICAL_REQUIREMENTS,
+    known_capabilities=CAPABILITY_CATALOG,
+)
+MCP_CANONICAL_AUTHORITY_COVERAGE.require_valid()
+
+
+MCP_CAPABILITY_TARGET_ARGUMENTS = {
+    "behavior_overlay.read": ("agent_id",),
+    "behavior_overlay.propose": ("agent_id",),
+    "behavior_overlay.admin": ("agent_id", "engineer_id"),
+    "telemetry.read": ("agent_id",),
+    "event.read": ("engineer_id",),
+    "engineer.manage": ("engineer_id",),
+    "message.engineer": ("engineer_id", "architect_id"),
+    "message.worker": ("worker_id", "engineer_id"),
+    "message.architect_peer": ("architect_id",),
+    "decision.link": ("engineer_id", "task_id"),
+    "task.read": ("task", "task_id"),
+    "task.update": ("task", "task_id"),
+    "task.reassign": ("task", "task_id"),
+    "task.move": ("task", "task_id"),
+    "task.mark_covered": ("task", "task_id"),
+    "task.dispatch": ("task", "task_id"),
+    "task.verify": ("task", "task_id"),
+    "task.artifact.write": ("task", "task_id"),
+}
+
+
+def mcp_tool_capability_requirements(tool_name: str) -> frozenset[str] | None:
+    """Return the capability requirements declared by an MCP surface."""
+
+    return MCP_TOOL_CAPABILITY_REQUIREMENTS.get(str(tool_name or "").strip())
+
+
+def _matches_any_tool_pattern(
+    tool_name: str,
+    *,
+    exact: frozenset[str],
+    families: frozenset[str],
+) -> bool:
+    if tool_name in exact:
+        return True
+    return any(fnmatch.fnmatchcase(tool_name, pattern) for pattern in families)
+
+
+def mcp_tool_allowed_by_policy(
+    tool_name: str,
+    policy: AgentProfilePolicy | None,
+) -> bool:
+    """Compatibility projection for legacy Agent Profile policies.
+
+    Tool authority metadata is now owned by each MCP surface. This evaluator
+    remains only until Agent Class schema-v5 snapshots replace profile policy
+    projection.
+    """
+
+    if policy is None or policy.is_full_base_kind_profile:
+        return True
+    normalized_name = str(tool_name or "").strip()
+    if _matches_any_tool_pattern(
+        normalized_name,
+        exact=policy.denied_tools,
+        families=policy.denied_families,
+    ):
+        return False
+    if _matches_any_tool_pattern(
+        normalized_name,
+        exact=policy.allowed_tools,
+        families=policy.allowed_families,
+    ):
+        return True
+    if policy.acl_mode == "allow" and (
+        policy.allowed_tools or policy.allowed_families
+    ):
+        return False
+    requirements = MCP_TOOL_CANONICAL_REQUIREMENTS.get(normalized_name)
+    if not requirements:
+        # Missing metadata is always denied for a restricted profile. Import-
+        # time coverage validation should make this unreachable in production.
+        return False
+    canonical_grants = canonical_capabilities_from_legacy_atoms(policy.grants)
+    canonical_denies = canonical_capabilities_from_legacy_atoms(policy.denies)
+    if set(requirements) & set(canonical_denies):
+        return False
+    return set(requirements).issubset(canonical_grants)
 
 
 def _coerce_effective_profile_policy(raw_profile, *, base_dir: str = ""):
@@ -881,10 +1063,96 @@ def _effective_profile_policy_for_cell(state, cell):
     return None
 
 
-def _profile_project_tools(tools: list[dict], policy) -> list[dict]:
+def mcp_tool_allowed_by_authority(
+    tool_name: str,
+    authority: EffectiveAuthority,
+) -> bool:
+    """Project a tool from canonical frozen Agent Class authority."""
+
+    tool_name = str(tool_name or "").strip()
+    requirements = MCP_TOOL_CANONICAL_REQUIREMENTS.get(tool_name)
+    if not requirements:
+        return False
+    for requirement in requirements:
+        definition = CAPABILITY_CATALOG.get(requirement)
+        if not definition:
+            return False
+        if not definition.scoped:
+            if not authority.has(requirement):
+                return False
+            continue
+        minimum_scope = definition.scopes[0]
+        # Read/list tools that can return orchestration-wide records must not
+        # be projected to a class whose ACL grants only a narrower slice. The
+        # existing handler checks remain an additional restriction; these
+        # minima ensure the ACL never broadens a list surface accidentally.
+        if requirement in {
+            "task.read",
+            "decision.read",
+            "thinking.read",
+            "idea_brief.read",
+            "semantic_recall.read",
+        } and tool_name.startswith(("architect_", "engineer_")):
+            minimum_scope = "group"
+        elif requirement == "journal.read":
+            minimum_scope = "children"
+        elif requirement == "telemetry.read":
+            minimum_scope = (
+                "group" if tool_name.startswith("architect_") else "children"
+            )
+        elif requirement == "worktree.read":
+            minimum_scope = "children"
+        elif requirement == "message.engineer":
+            minimum_scope = (
+                "group" if tool_name.startswith("engineer_peer_") else "children"
+            )
+        if not authority.allows(requirement, scope=minimum_scope):
+            return False
+    return True
+
+
+def _effective_class_authority_for_cell(cell) -> EffectiveAuthority | None:
+    if not cell:
+        return None
+    class_snapshot = getattr(cell, "effective_agent_class_snapshot", {})
+    if not isinstance(class_snapshot, dict):
+        return None
+    authority_snapshot = class_snapshot.get("effective_authority")
+    if not authority_snapshot:
+        return None
+    try:
+        return effective_authority_from_snapshot(
+            authority_snapshot,
+            capabilities=CAPABILITY_CATALOG,
+        )
+    except AuthorityValidationError:
+        # Frozen authority corruption fails closed rather than silently falling
+        # back to a broader legacy Agent Profile.
+        return EffectiveAuthority(
+            base_kind=str(getattr(cell, "kind", "") or ""),
+            mode="allow",
+            capabilities={},
+        )
+
+
+def _profile_project_tools(
+    tools: list[dict],
+    policy,
+    authority: EffectiveAuthority | None = None,
+) -> list[dict]:
     return [
         tool for tool in tools
-        if mcp_tool_allowed_by_policy(str(tool.get("name", "") or ""), policy)
+        if (
+            mcp_tool_allowed_by_authority(
+                str(tool.get("name", "") or ""),
+                authority,
+            )
+            if authority is not None
+            else mcp_tool_allowed_by_policy(
+                str(tool.get("name", "") or ""),
+                policy,
+            )
+        )
     ]
 
 
@@ -895,17 +1163,20 @@ def _visible_tools(state, cell_id: str):
     if cell and state.agent_is_tombstoned(cell):
         return []
     policy = _effective_profile_policy_for_cell(state, cell)
-    tools = _profile_project_tools(tools, policy)
+    authority = _effective_class_authority_for_cell(cell)
+    tools = _profile_project_tools(tools, policy, authority)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
         tools.extend(eager_tool_specs(_profile_project_tools(
             engineer_tools_for_cell(cell, state),
             policy,
+            authority,
         )))
     elif caller_kind == "architect":
         tools.extend(eager_tool_specs(_profile_project_tools(
             ARCHITECT_TOOLS,
             policy,
+            authority,
         )))
     return tools
 
@@ -916,14 +1187,20 @@ def _deferred_tools_for_caller(state, cell_id: str):
     if cell and state.agent_is_tombstoned(cell):
         return []
     policy = _effective_profile_policy_for_cell(state, cell)
+    authority = _effective_class_authority_for_cell(cell)
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
         return deferred_tool_specs(_profile_project_tools(
             engineer_tools_for_cell(cell, state),
             policy,
+            authority,
         ))
     if caller_kind == "architect":
-        return deferred_tool_specs(_profile_project_tools(ARCHITECT_TOOLS, policy))
+        return deferred_tool_specs(_profile_project_tools(
+            ARCHITECT_TOOLS,
+            policy,
+            authority,
+        ))
     return []
 
 
@@ -938,8 +1215,129 @@ def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bo
 
 
 def _tool_denied_by_effective_profile(state, tool_name: str, caller_cell) -> bool:
+    authority = _effective_class_authority_for_cell(caller_cell)
+    if authority is not None:
+        return not mcp_tool_allowed_by_authority(tool_name, authority)
     policy = _effective_profile_policy_for_cell(state, caller_cell)
     return not mcp_tool_allowed_by_policy(tool_name, policy)
+
+
+def _agent_target_scope(caller_cell, target_cell) -> str:
+    """Return the generic caller-to-agent ACL relationship scope."""
+
+    if not caller_cell or not target_cell:
+        return "global"
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    target_id = str(getattr(target_cell, "id", "") or "").strip()
+    if caller_id and caller_id == target_id:
+        return "self"
+    caller_kind = str(getattr(caller_cell, "kind", "") or "").strip()
+    if caller_kind == "architect" and str(
+        getattr(target_cell, "hired_by_architect_id", "") or ""
+    ).strip() == caller_id:
+        return "children"
+    if caller_kind == "engineer" and str(
+        getattr(target_cell, "owner_engineer_id", "") or ""
+    ).strip() == caller_id:
+        return "children"
+    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+    target_group = str(getattr(target_cell, "group", "") or "").strip()
+    if caller_group and caller_group == target_group:
+        return "group"
+    return "global"
+
+
+def _task_target_scope(state, caller_cell, task) -> str:
+    """Return the generic caller-to-task ACL relationship scope."""
+
+    if not caller_cell or not task:
+        return "global"
+    caller_id = str(getattr(caller_cell, "id", "") or "").strip()
+    owner_ids = {
+        str(getattr(task, field, "") or "").strip()
+        for field in (
+            "agent_id",
+            "assigned_engineer_id",
+            "created_by_architect_id",
+            "created_by_engineer_id",
+            "owner_engineer_id",
+        )
+    }
+    owner_ids.discard("")
+    if caller_id in owner_ids:
+        return "self"
+    for owner_id in owner_ids:
+        target_cell = state.agents.get(owner_id)
+        if target_cell and _agent_target_scope(caller_cell, target_cell) == "children":
+            return "children"
+    caller_group = str(getattr(caller_cell, "group", "") or "").strip()
+    task_group = str(getattr(task, "group", "") or "").strip()
+    if caller_group and caller_group == task_group:
+        return "group"
+    return "global"
+
+
+def _tool_argument_scope_denied(
+    state,
+    tool_name: str,
+    arguments: dict,
+    caller_cell,
+) -> bool:
+    """Authorize concrete MCP targets against the frozen class ACL.
+
+    Existing handler ownership checks are still applied after this generic
+    gate.  The two checks are intersected so the ACL can narrow behavior but
+    can never broaden the handler's platform ceiling.
+    """
+
+    authority = _effective_class_authority_for_cell(caller_cell)
+    if authority is None or not isinstance(arguments, dict):
+        return False
+    requirements = MCP_TOOL_CANONICAL_REQUIREMENTS.get(tool_name, frozenset())
+    tool_spec = _ALL_TOOL_MAP.get(tool_name, {})
+    properties = (
+        tool_spec.get("inputSchema", {}).get("properties", {})
+        if isinstance(tool_spec, dict)
+        else {}
+    )
+    # Capability-owned target arguments avoid treating incidental or ignored
+    # fields as authority targets. This is the runtime form of the RFC's
+    # CapabilityRequirement.target_argument metadata while tool definitions
+    # are migrated to first-class descriptors.
+    for capability in requirements:
+        definition = CAPABILITY_CATALOG.get(capability)
+        if not definition or not definition.scoped:
+            continue
+        for key in MCP_CAPABILITY_TARGET_ARGUMENTS.get(capability, ()):
+            if key not in properties:
+                continue
+            target_ref = str(arguments.get(key, "") or "").strip()
+            if not target_ref:
+                continue
+            if key in {"task", "task_id"}:
+                task_id = resolve_mcp_task(state, target_ref)
+                target = state.board_tasks.get(task_id) if task_id else None
+                target_scope = (
+                    _task_target_scope(state, caller_cell, target)
+                    if target
+                    else ""
+                )
+            else:
+                target_id = resolve_mcp_agent(state, target_ref)
+                target = state.agents.get(target_id) if target_id else None
+                target_scope = (
+                    _agent_target_scope(caller_cell, target)
+                    if target
+                    else ""
+                )
+            # Unknown targets remain the handler's responsibility. Once a
+            # concrete target resolves, the class ACL is enforced first.
+            if target_scope and not authority.allows(
+                capability,
+                scope=target_scope,
+            ):
+                return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1426,6 +1824,12 @@ async def dispatch_mcp_rpc_body(
         if (
             _tool_hidden_for_caller(tool_name, caller_kind, caller_cell)
             or _tool_denied_by_effective_profile(state, tool_name, caller_cell)
+            or _tool_argument_scope_denied(
+                state,
+                tool_name,
+                arguments,
+                caller_cell,
+            )
         ):
             if session_wake_pending:
                 _queue_session_wake_entry(
@@ -1542,6 +1946,7 @@ async def dispatch_mcp_rpc_body(
                                     state,
                                     caller_cell,
                                 ),
+                                _effective_class_authority_for_cell(caller_cell),
                             ),
                             arguments,
                         ),
@@ -1597,6 +2002,7 @@ async def dispatch_mcp_rpc_body(
                                     state,
                                     caller_cell,
                                 ),
+                                _effective_class_authority_for_cell(caller_cell),
                             ),
                             arguments,
                         ),

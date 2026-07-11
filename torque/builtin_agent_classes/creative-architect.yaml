@@ -1,4 +1,4 @@
-agent_class_schema_version: 4
+agent_class_schema_version: 5
 id: creative-architect
 version: '1'
 display_name: Creative
@@ -30,15 +30,15 @@ prompt:
   - 'Stay non-executive: do not hire, assign Engineers, dispatch Workers, move execution tasks,
     merge, deploy, change admin/profile settings, or message Engineers/Workers directly.'
   tool_guidance:
-  - when_capability: thinking_workspace
+  - when_capability: thinking.write
     text: Use visible Thinking tools for caller-owned Scratchpad notes and Mind Maps.
-  - when_capability: idea_briefs
+  - when_capability: idea_brief.write
     text: Use Idea Brief tools for structured, durable proposal artifacts with problem/opportunity,
       why it matters, proposed shape, smallest useful version, risks/tradeoffs, open questions,
       and linked Thinking references.
-  - when_capability: proposed_decisions
+  - when_capability: decision.propose
     text: Use proposed-decision tools only for non-binding proposal artifacts.
-  - when_capability: board_task_proposals
+  - when_capability: task.propose
     text: Use product task proposal tools only for queued, unassigned, non-dispatched task
       proposals.
 warnings:
@@ -55,32 +55,52 @@ metadata:
   external_connector_governance: not_enforced_wave_7
 acl:
   mode: allow
-  allow:
-  - capability: self_context
-  - capability: planning_reads
-  - capability: recent_context_reads
-  - capability: thinking_workspace
-  - capability: idea_briefs
-  - capability: proposed_decisions
-  - capability: board_task_proposals
-  - capability: behavior_overlay_self
-  - capability: user_messages
-  - capability: product_peer_messages
-  - capability: private_journal
-  - tool: torque_context
-  - tool: architect_help_list
-  - tool: architect_help_show
-  - tool: architect_help_search
-  - tool: architect_help_query
-  - tool: architect_events_recent
-  - family: architect_product_*
-  - tool: architect_behavior_overlay_read
-  - tool: architect_behavior_overlay_versions
-  - tool: architect_behavior_overlay_diff
-  - tool: architect_behavior_overlay_proposal_list
-  - tool: architect_behavior_overlay_propose
-  - tool: architect_behavior_overlay_rollback
-  - family: architect_thinking_*
+  rules:
+  - capability: self.read
+    scope: self
+  - capability: help.read
+  - capability: board.read
+    scope: group
+  - capability: task.read
+    scope: group
+  - capability: task.propose
+    scope: self
+  - capability: task.board_sync.read
+    scope: group
+  - capability: planning.area.read
+    scope: group
+  - capability: planning.initiative.read
+    scope: group
+  - capability: decision.read
+    scope: group
+  - capability: decision.propose
+    scope: self
+  - capability: decision.link
+    scope: group
+  - capability: event.read
+    scope: group
+  - capability: thinking.read
+    scope: group
+  - capability: thinking.write
+    scope: self
+  - capability: idea_brief.read
+    scope: group
+  - capability: idea_brief.write
+    scope: self
+  - capability: idea_brief.propose
+    scope: self
+  - capability: message.user
+    scope: self
+  - capability: message.architect_peer
+    scope: group
+  - capability: message.ack_required
+    scope: group
+  - capability: journal.private
+    scope: self
+  - capability: behavior_overlay.read
+    scope: self
+  - capability: behavior_overlay.propose
+    scope: self
 operator_summary:
   bullets:
   - 'Domains: ideation, product_discovery, thinking_artifacts, idea_briefs, proposed_decisions,

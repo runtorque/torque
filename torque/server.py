@@ -9876,6 +9876,7 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
     if cmd == "agent_class_list":
         base_dir = str(data.get("base_dir", "") or os.getcwd())
         classes, issues = load_agent_classes(base_dir=base_dir)
+        authoring_contract = agent_class_authoring_contract()
         return {
             "type": "agent_classes",
             "schema_version": AGENT_CLASS_SCHEMA_VERSION,
@@ -9884,9 +9885,8 @@ async def _handle_agent_class_command(data: dict, state: MatrixState,
                 for definition in classes
             ],
             "issues": [issue.as_dict() for issue in issues],
-            "authoring_contract": agent_class_authoring_contract(),
-            "capability_bucket_catalog": agent_class_authoring_contract()["capability_bucket_catalog"],
-            "restriction_bucket_catalog": agent_class_authoring_contract()["restriction_bucket_catalog"],
+            "authoring_contract": authoring_contract,
+            "capability_catalog": authoring_contract["capability_catalog"],
             "storage": {
                 "kind": "project_yaml",
                 "config_glob": ".torque/agent_classes/*.yaml",
@@ -12238,7 +12238,15 @@ def _architect_persistent_prompt_text(group: str = "",
         agent_class_snapshot=agent_class_snapshot,
         agent_profile_snapshot=agent_profile_snapshot,
     ).rstrip()
-    return torque_preamble + "\n\n" + architect_body + "\n"
+    assembled = torque_preamble + "\n\n" + architect_body + "\n"
+    if isinstance(agent_class_snapshot, dict) and agent_class_snapshot.get("id"):
+        assembled = append_agent_class_prompt_block(
+            assembled,
+            SimpleNamespace(
+                effective_agent_class_snapshot=agent_class_snapshot,
+            ),
+        )
+    return assembled
 
 
 def _snapshot_dataclass_like(obj) -> dict:
@@ -12565,7 +12573,19 @@ async def _handle_add_engineer_command(
         specializations_preamble=spec_preamble,
         owner_is_user=not str(
             data.get("hired_by_architect_id", "") or "").strip(),
+        agent_class_snapshot=(
+            class_launch.get("agent_class")
+            if isinstance(class_launch.get("agent_class"), dict)
+            else {}
+        ),
     )
+    if isinstance(class_launch.get("agent_class"), dict):
+        persistent_prompt_text = append_agent_class_prompt_block(
+            persistent_prompt_text,
+            SimpleNamespace(
+                effective_agent_class_snapshot=class_launch["agent_class"],
+            ),
+        )
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
@@ -17444,6 +17464,11 @@ async def main(connection=None):
                 behavior_overlay_block=_behavior_overlay_prompt_block_for_cell(
                     state,
                     cell,
+                ),
+                agent_class_snapshot=getattr(
+                    cell,
+                    "effective_agent_class_snapshot",
+                    {},
                 )))
         if cell.kind == "architect":
             return _with_agent_class_prompt(_architect_persistent_prompt_text(

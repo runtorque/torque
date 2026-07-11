@@ -1,11 +1,12 @@
+agent_class_schema_version: 5
 id: default-architect
 version: "1"
 base_kind: architect
 display_name: Default Architect
-description: Default Architect class; preserves current full Architect behavior through full-architect@1.
+description: Default full-authority Architect class.
 lifecycle: stable
-agent_profile_ref:
-  id: full-architect
-  version: "1"
+acl:
+  mode: deny
+  rules: []
 metadata:
-  compatibility: full current base-kind behavior by construction
+  default_for_base_kind: architect

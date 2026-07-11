@@ -702,8 +702,8 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(captured_prompts), 1)
         persistent_prompt = captured_prompts[0]
         self.assertIn("Product Manager", persistent_prompt)
-        self.assertIn("projected tool surface", persistent_prompt)
-        self.assertIn("visible proposal/task-intake tools", persistent_prompt)
+        self.assertIn("frozen Agent Class ACL", persistent_prompt)
+        self.assertIn("Effective Torque MCP authority", persistent_prompt)
         self.assertIn("## Agent Class", persistent_prompt)
         self.assertNotIn("architect_engineer_hire", persistent_prompt)
         self.assertNotIn("architect_task_create", persistent_prompt)
@@ -1811,10 +1811,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(applied_prompts), 1)
         self.assertIn("ARCH BASE", applied_prompts[0])
         self.assertIn("## Agent Class", applied_prompts[0])
-        self.assertIn(
-            "Internal Agent Profile: class-policy-product-manager@3",
-            applied_prompts[0],
-        )
+        self.assertIn("Effective Torque MCP authority", applied_prompts[0])
         self.assertEqual(architect.effective_agent_class_id, "product-manager")
 
     async def test_restart_agent_clears_stale_digest_before_session_start(self):

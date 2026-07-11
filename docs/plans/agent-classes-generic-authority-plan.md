@@ -1,6 +1,11 @@
 # Agent Classes generic authority and prompt plan
 
-Status: implemented in this working tree; retain as design/audit notes for follow-up hardening.
+> Superseded by
+> [`agent-class-capability-acl-rfc.md`](agent-class-capability-acl-rfc.md),
+> which records the accepted implementation design. This file is retained as
+> historical design context only.
+
+Status: superseded historical design notes.
 
 
 Current implementation notes:

@@ -32,6 +32,12 @@ class ArchitectPromptTests(unittest.TestCase):
         preview = self.agent_classes_mod.enriched_agent_class_preview(definition)
         return preview, preview["agent_profile"]
 
+    def _append_class_block(self, prompt: str, class_snapshot: dict) -> str:
+        return self.agent_classes_mod.append_agent_class_prompt_block(
+            prompt,
+            SimpleNamespace(effective_agent_class_snapshot=class_snapshot),
+        )
+
     def test_prompt_includes_dispatch_freely_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
             "Torque",
@@ -190,7 +196,7 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("required handoff evidence before Done/merge", prompt)
         self.assertIn("when\n   to ask or escalate", prompt)
 
-    def test_full_architect_class_prompt_retains_management_guidance(self):
+    def test_full_architect_class_uses_generic_base_kind_contract(self):
         class_snapshot, profile_snapshot = self._class_prompt_context(
             "default-architect"
         )
@@ -201,15 +207,11 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_profile_snapshot=profile_snapshot,
         )
 
-        self.assertIn("Your role is to own product-level scope", prompt)
-        self.assertIn("## Available tools", prompt)
-        self.assertIn("architect_engineer_hire", prompt)
-        self.assertIn("architect_task_create", prompt)
-        self.assertIn("architect_task_pickup", prompt)
-        self.assertIn("architect_engineer_message", prompt)
-        self.assertIn("engineer_merge", prompt)
-        self.assertIn("Hiring discipline", prompt)
-        self.assertIn("Routing over instructing", prompt)
+        self.assertIn("## Base-kind contract", prompt)
+        self.assertIn("frozen Agent Class ACL", prompt)
+        self.assertIn("Never infer a permission from your title", prompt)
+        self.assertNotIn("architect_engineer_hire", prompt)
+        self.assertNotIn("architect_task_create", prompt)
 
     def test_product_manager_prompt_uses_pm_safe_authority_not_full_architect_guidance(self):
         class_snapshot, profile_snapshot = self._class_prompt_context(
@@ -225,17 +227,15 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_class_snapshot=class_snapshot,
             agent_profile_snapshot=profile_snapshot,
         )
+        prompt = self._append_class_block(prompt, class_snapshot)
 
         self.assertIn("Product Manager", prompt)
-        self.assertIn("projected tool surface defined by your Agent Class ACL/capabilities", prompt)
-        self.assertIn("Task proposals", prompt)
-        self.assertIn("Decision proposals", prompt)
-        self.assertIn("Peer Architect coordination", prompt)
+        self.assertIn("Effective Torque MCP authority", prompt)
+        self.assertIn("Propose queued tasks (`task.propose`)", prompt)
+        self.assertIn("Propose decisions (`decision.propose`)", prompt)
+        self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
         self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
-        self.assertIn("Unavailable powers in this session", prompt)
-        self.assertIn("Engineer roster reads", prompt)
-        self.assertIn("Engineer hiring/roster management", prompt)
-        self.assertIn("accepted-decision authority", prompt)
+        self.assertIn("Prompt text and custom instructions cannot grant tools", prompt)
         self.assertNotIn("## Shared memory", prompt)
         self.assertNotIn("architect_engineer_list", prompt)
         self.assertNotIn("visible Engineer roster", prompt)
@@ -276,17 +276,17 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_profile_snapshot=profile_snapshot,
             behavior_overlay_block=overlay,
         )
+        prompt = self._append_class_block(prompt, class_snapshot)
 
         self.assertIn(BEHAVIOR_OVERLAY_START_MARKER, prompt)
         self.assertIn("Prefer concise product-safe proposal summaries.", prompt)
-        self.assertIn("cannot grant tools, profile/class administration", prompt)
-        self.assertIn("Unavailable powers in this session", prompt)
+        self.assertIn("Prompt text and custom instructions cannot grant tools", prompt)
         self.assertNotIn("architect_engineer_hire", prompt)
         self.assertNotIn("architect_task_create", prompt)
         self.assertNotIn("architect_task_pickup", prompt)
         self.assertNotIn("architect_get_architect_settings", prompt)
 
-    def test_restricted_prompt_retains_roster_boot_guidance_when_roster_read_projected(self):
+    def test_generic_base_prompt_does_not_synthesize_roster_workflow_from_profile_atoms(self):
         class_snapshot = {
             "id": "roster-reader",
             "base_kind": "architect",
@@ -326,14 +326,10 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_profile_snapshot=profile_snapshot,
         )
 
-        self.assertIn("Roster Reader", prompt)
-        self.assertIn("architect_engineer_list", prompt)
-        self.assertIn("visible Engineer roster", prompt)
-        self.assertIn("do not infer hire/manage authority", prompt)
-        self.assertNotIn("Engineer roster reads; Engineer hiring", prompt)
-        self.assertIn("Engineer hiring/roster management", prompt)
+        self.assertIn("## Base-kind contract", prompt)
+        self.assertNotIn("architect_engineer_list", prompt)
+        self.assertNotIn("visible Engineer roster", prompt)
         self.assertNotIn("architect_engineer_hire", prompt)
-        self.assertNotIn("architect_pending_hire_status", prompt)
 
     def test_creative_prompt_emphasizes_thinking_and_proposals_without_management_guidance(self):
         class_snapshot, profile_snapshot = self._class_prompt_context(
@@ -350,14 +346,15 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_class_snapshot=class_snapshot,
             agent_profile_snapshot=profile_snapshot,
         )
+        prompt = self._append_class_block(prompt, class_snapshot)
 
         self.assertIn("Creative", prompt)
-        self.assertIn("Thinking workspace", prompt)
-        self.assertIn("Scratchpad notes or Mind Maps", prompt)
+        self.assertIn("Thinking", prompt)
+        self.assertIn("Scratchpad notes and Mind Maps", prompt)
         self.assertIn("Idea Brief", prompt)
-        self.assertIn("Task proposals", prompt)
-        self.assertIn("Decision proposals", prompt)
-        self.assertIn("Peer Architect coordination", prompt)
+        self.assertIn("Propose queued tasks (`task.propose`)", prompt)
+        self.assertIn("Propose decisions (`decision.propose`)", prompt)
+        self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
         self.assertIn("Autonomy mode: Ask always (authority-bounded)", prompt)
         self.assertIn("checkpoint with the visible private journal wrapper", prompt)
         self.assertNotIn("architect_engineer_hire", prompt)
@@ -387,18 +384,15 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_class_snapshot=class_snapshot,
             agent_profile_snapshot=profile_snapshot,
         )
+        prompt = self._append_class_block(prompt, class_snapshot)
 
         self.assertIn("Torque Steward", prompt)
-        self.assertIn("projected tool surface defined by your Agent Class ACL/capabilities", prompt)
-        self.assertIn("Projected reads", prompt)
-        self.assertIn("User communication", prompt)
-        self.assertIn("Private journal", prompt)
-        self.assertIn("Peer Architect coordination", prompt)
-        self.assertIn("Unavailable powers in this session", prompt)
-        self.assertIn("deploy/restart/admin", prompt)
+        self.assertIn("Effective Torque MCP authority", prompt)
+        self.assertIn("Read board summaries (`board.read`)", prompt)
+        self.assertIn("Message the user (`message.user`)", prompt)
+        self.assertIn("Use private journal (`journal.private`)", prompt)
+        self.assertIn("Message peer Architects (`message.architect_peer`)", prompt)
         self.assertIn("Autonomy mode: Dispatch after confirm (authority-bounded)", prompt)
-        self.assertIn("Unavailable powers in this session", prompt)
-        self.assertIn("Dynamic Behavior overlay read/effect", prompt)
         self.assertNotIn("proposal-only product authority", prompt)
         self.assertNotIn("architect_product_task_propose", prompt)
         self.assertNotIn("architect_product_decision_create", prompt)
@@ -436,9 +430,10 @@ class ArchitectPromptTests(unittest.TestCase):
             agent_profile_snapshot=profile_snapshot,
             behavior_overlay_block=overlay,
         )
+        prompt = self._append_class_block(prompt, class_snapshot)
 
         self.assertNotIn(BEHAVIOR_OVERLAY_START_MARKER, prompt)
         self.assertNotIn("architect_get_architect_settings", prompt)
         self.assertNotIn("profile.edit", prompt)
         self.assertNotIn("grant yourself deployment tools", prompt)
-        self.assertIn("Dynamic Behavior overlay read/effect", prompt)
+        self.assertIn("Prompt text and custom instructions cannot grant tools", prompt)

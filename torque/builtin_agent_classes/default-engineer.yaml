@@ -1,11 +1,12 @@
+agent_class_schema_version: 5
 id: default-engineer
 version: "1"
 base_kind: engineer
 display_name: Default Engineer
-description: Default Engineer class; preserves current full Engineer behavior through full-engineer@1.
+description: Default full-authority Engineer class.
 lifecycle: stable
-agent_profile_ref:
-  id: full-engineer
-  version: "1"
+acl:
+  mode: deny
+  rules: []
 metadata:
-  compatibility: full current base-kind behavior by construction
+  default_for_base_kind: engineer

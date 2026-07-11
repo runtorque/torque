@@ -169,8 +169,6 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
 
         denied = {
             "architect_tool_search",
-            "torque_message_user",
-            "torque_ask",
             "architect_engineer_hire",
             "architect_engineer_set_specializations",
             "architect_engineer_dismiss",
@@ -180,25 +178,13 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_move",
             "architect_task_reassign",
             "architect_task_mark_covered",
-            "architect_board_summary",
-            "architect_task_list",
-            "architect_task_show",
-            "architect_area_list",
-            "architect_area_show",
-            "architect_initiative_list",
-            "architect_initiative_show",
-            "architect_decision_list",
             "architect_engineer_message",
             "architect_engineer_feedback_request",
             "architect_engineer_answer",
-            "architect_peer_message",
             "architect_peer_inbox",
             "architect_reply",
-            "architect_message_user",
-            "architect_ask",
             "architect_decision_create",
             "architect_decision_update",
-            "architect_decision_link",
             "architect_area_create",
             "architect_initiative_create",
             "architect_deploy_state",
@@ -240,7 +226,7 @@ class MCPCreativeArchitectTests(unittest.IsolatedAsyncioTestCase):
             {"agent_id": self.engineer.id},
             req_id=91,
         )
-        self.assertIn("own overlay", self._error_text(cross_scope))
+        self.assertIn("Unknown tool", self._error_text(cross_scope))
 
         allowed = await self._call(
             "architect_product_task_propose",

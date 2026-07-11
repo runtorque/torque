@@ -270,3 +270,26 @@ class EngineerPromptTests(unittest.TestCase):
             self.assertIn(slug, prompt)
             self.assertIn(role, prompt)
         self.assertIn("Pick the primary deliverable", prompt)
+
+    def test_agent_class_prompt_uses_generic_engineer_contract(self):
+        prompt = self.engineer_mod.build_engineer_system_prompt(
+            "Torque",
+            SimpleNamespace(custom_instructions="Keep evidence concise."),
+            behavior_overlay_block="hidden overlay",
+            agent_class_snapshot={
+                "id": "review-only-engineer",
+                "effective_authority": {
+                    "capabilities": {
+                        "self.read": "self",
+                        "task.read": "group",
+                    },
+                },
+            },
+        )
+
+        self.assertIn("## Base-kind contract", prompt)
+        self.assertIn("frozen Agent Class ACL", prompt)
+        self.assertIn("Keep evidence concise.", prompt)
+        self.assertNotIn("engineer_task_dispatch", prompt)
+        self.assertNotIn("engineer_merge", prompt)
+        self.assertNotIn("hidden overlay", prompt)

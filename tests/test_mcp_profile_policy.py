@@ -354,12 +354,6 @@ class MCPProfilePolicyTests(unittest.IsolatedAsyncioTestCase):
         denied_tools = {
             "architect_tool_search",
             "engineer_tool_search",
-            "torque_ask",
-            "torque_message_user",
-            "architect_product_message_user",
-            "architect_product_peer_message",
-            "architect_product_journal",
-            "architect_digest_filter",
             "architect_engineer_hire",
             "architect_engineer_set_specializations",
             "architect_engineer_message",

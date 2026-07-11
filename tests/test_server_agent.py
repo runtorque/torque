@@ -820,10 +820,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(captured_prompts), 1)
         self.assertIn("BASE PROMPT", captured_prompts[0])
         self.assertIn("## Agent Class", captured_prompts[0])
-        self.assertIn(
-            "Internal Agent Profile: class-policy-product-manager@3",
-            captured_prompts[0],
-        )
+        self.assertIn("Effective Torque MCP authority", captured_prompts[0])
 
     async def test_create_agent_with_config_default_class_does_not_append_prompt(self):
         state = self.state_mod.MatrixState()

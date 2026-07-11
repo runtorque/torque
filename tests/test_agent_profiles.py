@@ -8,6 +8,8 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
+install_aiohttp_stub()
+
 from torque.agent_profiles import (
     AgentProfileDefinition,
     BASE_KIND_CEILINGS,
@@ -17,10 +19,10 @@ from torque.agent_profiles import (
     enriched_profile_preview,
     load_agent_profiles,
     validate_profile_data,
-    mcp_tool_allowed_by_policy,
     profile_policy_by_id,
     profile_policy_from_definition,
 )
+from torque.mcp import mcp_tool_allowed_by_policy
 
 
 class AgentProfileRegistryTests(unittest.TestCase):

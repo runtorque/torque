@@ -148,160 +148,42 @@ function countText(haystack, needle) {
 }
 
 function sampleCapabilityCatalog() {
+  function capability(id, label, description, baseKinds, scopes = [], maximumScopes = {}) {
+    return {
+      id,
+      label,
+      description,
+      risk: ['task.dispatch', 'memory.admin', 'planning.area.write'].includes(id) ? 'high' : 'normal',
+      scoped: scopes.length > 0,
+      scopes,
+      base_kinds: baseKinds,
+      maximum_scope: '',
+      maximum_scopes: maximumScopes,
+    };
+  }
   return [
-    {
-      id: 'self_context',
-      label: 'Self and assigned task context',
-      summary: 'Read own agent/session context and visible assigned task details.',
-      category: 'read',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
-      id: 'task_reporting',
-      label: 'Task reporting and verification',
-      summary: 'Report progress/completion, record verification, and attach task artifacts.',
-      category: 'task',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
-      id: 'planning_area_reads',
-      label: 'Area reads',
-      summary: 'Read visible Areas and area context.',
-      category: 'planning',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
-      id: 'planning_reads',
-      label: 'Planning reads',
-      summary: 'Read board/task planning summaries, Areas, Initiatives, and Decisions.',
-      category: 'planning',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer'],
-      available: true,
-    },
-    {
-      id: 'recent_context_reads',
-      label: 'Recent context reads',
-      summary: 'Read recent same-group activity summaries and context.',
-      category: 'read',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer'],
-      available: true,
-    },
-    {
-      id: 'thinking_workspace',
-      label: 'Thinking workspace',
-      summary: 'Read same-group Thinking artifacts and update caller-owned Scratchpad notes and Mind Maps.',
-      category: 'thinking',
-      risk: 'normal',
-      base_kinds: ['architect'],
-      available: true,
-    },
-    {
-      id: 'board_task_reads',
-      label: 'Board/task reads',
-      summary: 'Read board/task detail, events, MCP call telemetry, and board-sync status.',
-      category: 'task',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer'],
-      available: true,
-    },
-    {
-      id: 'user_messages',
-      label: 'User messages',
-      summary: 'Ask the user for blocking decisions and send non-blocking user-facing messages.',
-      category: 'communication',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
-      id: 'private_journal',
-      label: 'Private journal',
-      summary: 'Use the private recovery journal for the running agent.',
-      category: 'journal',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
-      id: 'shared_memory',
-      label: 'Shared memory',
-      summary: 'Read and publish shared memory entries.',
-      category: 'memory',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer', 'worker'],
-      available: true,
-    },
-    {
-      id: 'planning_writes',
-      label: 'Planning writes',
-      summary: 'Create/update/archive Areas and Initiatives.',
-      category: 'planning',
-      risk: 'high',
-      base_kinds: ['architect'],
-      available: true,
-    },
-    {
-      id: 'board_task_proposals',
-      label: 'Board/task proposals',
-      summary: 'Create queued product task proposals without dispatch authority.',
-      category: 'task',
-      risk: 'normal',
-      base_kinds: ['architect'],
-      available: true,
-    },
-    {
-      id: 'proposed_decisions',
-      label: 'Proposed decisions',
-      summary: 'Create and update proposed product decisions without acceptance authority.',
-      category: 'decision',
-      risk: 'normal',
-      base_kinds: ['architect'],
-      available: true,
-    },
-    {
-      id: 'product_peer_messages',
-      label: 'Product peer Architect messages',
-      summary: 'Coordinate with same-group Architect/product peers.',
-      category: 'communication',
-      risk: 'normal',
-      base_kinds: ['architect'],
-      available: true,
-    },
-    {
-      id: 'scoped_journals',
-      label: 'Scoped journals',
-      summary: 'Read/write scoped Engineer or Architect journals.',
-      category: 'journal',
-      risk: 'normal',
-      base_kinds: ['architect', 'engineer'],
-      available: true,
-    },
-    {
-      id: 'shared_memory_admin',
-      label: 'Shared memory admin',
-      summary: 'Pin, unpin, and link shared memory entries.',
-      category: 'memory',
-      risk: 'high',
-      base_kinds: ['architect', 'engineer'],
-      available: true,
-    },
-    {
-      id: 'worker_dispatch',
-      label: 'Worker dispatch',
-      summary: 'Launch or route work to Workers.',
-      category: 'agent_management',
-      risk: 'critical',
-      base_kinds: ['architect', 'engineer'],
-      available: true,
-    },
+    capability('self.read', 'Read own context', 'Read caller identity, session, assignment, and own context.', ['architect', 'engineer', 'worker'], ['self'], { architect: 'self', engineer: 'self', worker: 'self' }),
+    capability('help.read', 'Read help', 'Read maintained Torque help documentation.', ['architect', 'engineer', 'worker']),
+    capability('task.read', 'Read tasks', 'Read task details visible to the caller.', ['architect', 'engineer', 'worker'], ['self', 'children', 'group'], { architect: 'group', engineer: 'group', worker: 'self' }),
+    capability('task.report', 'Report task status', 'Report progress, blockers, readiness, and completion.', ['architect', 'engineer', 'worker'], ['self'], { architect: 'self', engineer: 'self', worker: 'self' }),
+    capability('task.verify', 'Verify tasks', 'Record verification evidence for visible tasks.', ['architect', 'engineer', 'worker'], ['self', 'children', 'group'], { architect: 'self', engineer: 'group', worker: 'self' }),
+    capability('planning.area.read', 'Read Areas', 'Read Planning Areas and linked context.', ['architect', 'engineer', 'worker'], ['group'], { architect: 'group', engineer: 'group', worker: 'group' }),
+    capability('board.read', 'Read board summaries', 'Read board-level summaries and orchestration rollups.', ['architect', 'engineer'], ['group'], { architect: 'group', engineer: 'group' }),
+    capability('event.read', 'Read recent events', 'Read recent activity and event streams.', ['architect', 'engineer'], ['group'], { architect: 'group', engineer: 'group' }),
+    capability('thinking.read', 'Read Thinking artifacts', 'Read visible Scratchpad notes and Mind Maps.', ['architect'], ['self', 'group'], { architect: 'group' }),
+    capability('thinking.write', 'Write Thinking artifacts', 'Create and update caller-owned Thinking artifacts.', ['architect'], ['self'], { architect: 'self' }),
+    capability('message.user', 'Message the user', 'Ask or message the owning user.', ['architect', 'engineer', 'worker'], ['self'], { architect: 'self', engineer: 'self', worker: 'self' }),
+    capability('journal.private', 'Use private journal', 'Use the caller private recovery journal.', ['architect', 'engineer', 'worker'], ['self'], { architect: 'self', engineer: 'self', worker: 'self' }),
+    capability('memory.read', 'Read shared memory', 'Read visible shared-memory entries.', ['architect', 'engineer', 'worker'], ['group'], { architect: 'group', engineer: 'group', worker: 'group' }),
+    capability('memory.write', 'Publish shared memory', 'Publish entries to shared memory.', ['architect', 'engineer', 'worker'], ['group'], { architect: 'group', engineer: 'group', worker: 'group' }),
+    capability('memory.admin', 'Administer shared memory', 'Pin, link, and unpin shared-memory entries.', ['architect', 'engineer', 'worker'], ['group'], { architect: 'group', engineer: 'group', worker: 'group' }),
+    capability('planning.area.write', 'Write Areas', 'Create, update, and archive Areas.', ['architect'], ['self'], { architect: 'self' }),
+    capability('task.propose', 'Propose queued tasks', 'Create non-dispatched task proposals.', ['architect'], ['self'], { architect: 'self' }),
+    capability('decision.propose', 'Propose decisions', 'Create and update proposed decisions.', ['architect'], ['self'], { architect: 'self' }),
+    capability('message.architect_peer', 'Message peer Architects', 'Coordinate with eligible peer Architects.', ['architect'], ['group', 'global'], { architect: 'group' }),
+    capability('journal.read', 'Read scoped journals', 'Read journals visible in orchestration scope.', ['architect', 'engineer'], ['self', 'children', 'group'], { architect: 'children', engineer: 'children' }),
+    capability('journal.write', 'Write scoped journals', 'Write journal entries within caller scope.', ['architect', 'engineer'], ['self', 'children', 'group'], { architect: 'self', engineer: 'self' }),
+    capability('task.dispatch', 'Dispatch tasks', 'Dispatch executable tasks to eligible Workers.', ['engineer'], ['children'], { engineer: 'children' }),
   ];
 }
 
@@ -408,22 +290,19 @@ function catalogItem(id, restriction = false) {
 function sampleAgentClassListMessage(classes = sampleClasses(), issues = []) {
   return {
     type: 'agent_classes',
-    schema_version: 4,
+    schema_version: 5,
     classes,
     issues,
     authoring_contract: {
-      schema_version: 4,
-      normal_authoring_mode: 'acl',
+      schema_version: 5,
+      normal_authoring_mode: 'capability_acl',
       acl_modes: ['allow', 'deny'],
-      acl_entry_keys: ['tool', 'family', 'action', 'capability'],
+      acl_shape: 'acl.mode + acl.rules',
+      acl_rule_keys: ['capability', 'scope'],
       scope_vocabulary: ['self', 'children', 'group', 'global'],
-      legacy_capability_bucket_field: 'capabilities.buckets',
-      legacy_restriction_bucket_field: 'capabilities.restrictions',
-      capability_bucket_catalog: sampleCapabilityCatalog(),
-      restriction_bucket_catalog: sampleRestrictionCatalog(),
+      capability_catalog: sampleCapabilityCatalog(),
     },
-    capability_bucket_catalog: sampleCapabilityCatalog(),
-    restriction_bucket_catalog: sampleRestrictionCatalog(),
+    capability_catalog: sampleCapabilityCatalog(),
   };
 }
 
@@ -435,8 +314,6 @@ function registerClassForm(document) {
     ['agent-class-display-name', 'INPUT'],
     ['agent-class-description', 'INPUT'],
     ['agent-class-lifecycle', 'SELECT'],
-    ['agent-class-profile-id', 'SELECT'],
-    ['agent-class-profile-version', 'INPUT'],
     ['agent-class-prompt', 'TEXTAREA'],
     ['agent-class-ui-label', 'INPUT'],
     ['agent-class-ui-icon', 'INPUT'],
@@ -449,104 +326,68 @@ function registerClassForm(document) {
     if (!document.getElementById(id)) document.register(id, tag);
   });
   sampleCapabilityCatalog().forEach((bucket) => {
-    const id = `agent-class-capability-bucket-${bucket.id}`;
+    const token = bucket.id.replace(/[^a-zA-Z0-9_-]/g, '-');
+    const id = `agent-class-capability-bucket-${token}`;
     if (!document.getElementById(id)) document.register(id, 'INPUT');
-  });
-  sampleRestrictionCatalog().forEach((bucket) => {
-    const id = `agent-class-restriction-bucket-${bucket.id}`;
-    if (!document.getElementById(id)) document.register(id, 'INPUT');
+    const scopeId = `agent-class-capability-scope-${token}`;
+    if (!document.getElementById(scopeId)) document.register(scopeId, 'SELECT');
   });
 }
 
 function sampleClasses() {
+  const allow = (rules) => ({ mode: 'allow', rules });
+  const rule = (capability, scope) => Object.assign({ capability }, scope ? { scope } : {});
   return [
     {
       id: 'default-worker', version: '1', base_kind: 'worker', display_name: 'Default Worker',
       lifecycle: 'stable', builtin: true, custom: false, source: 'builtin', status: 'full', launchable: true,
-      agent_profile_ref: { id: 'full-worker', version: '1' }, prompt_summary: { has_prompt: false, char_count: 0 },
-      restrictions: ['Agent Profile remains the MCP/capability enforcement layer.'], external_connector_caveat: 'External connector caveat.',
+      agent_class_schema_version: 5, acl: { mode: 'deny', rules: [] }, prompt_summary: { has_prompt: false, char_count: 0 },
     },
     {
       id: 'review-worker', version: '1', base_kind: 'worker', display_name: 'Review Worker', description: 'Reviews patches.',
       lifecycle: 'stable', builtin: false, custom: true, source: 'project', source_path: '/repo/.torque/agent_classes/review-worker.yaml', status: 'restricted', launchable: true,
-      agent_class_schema_version: 4,
+      agent_class_schema_version: 5,
       runtime: { base_kind: 'worker', base_kind_label: 'Worker', arbitrary_runtime_kind: false },
-      acl: { mode: 'allow', allow: [{ capability: 'self_context' }, { capability: 'task_reporting' }, { capability: 'shared_memory' }] },
-      capability_bucket_selection: ['self_context', 'task_reporting', 'shared_memory'],
-      restriction_bucket_selection: [],
-      capability_buckets: [catalogItem('self_context'), catalogItem('task_reporting'), catalogItem('shared_memory')],
-      restriction_buckets: [],
-      operator_access_summary: {
-        allowed: ['Self and assigned task context', 'Task reporting and verification', 'Shared memory'],
-        allowed_summary: 'Self and assigned task context; Task reporting and verification; Shared memory',
-        denied_summary: 'Everything else is denied by default.',
-      },
+      acl: allow([rule('self.read', 'self'), rule('task.report', 'self'), rule('memory.read', 'group')]),
       apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
-      agent_profile_ref: { id: 'class-policy-review-worker', version: '1' }, agent_profile: { id: 'class-policy-review-worker', version: '1', status: 'restricted', capability_count: 5 },
       prompt: { job: 'Focus on UI regressions.' }, prompt_summary: { has_prompt: true, char_count: 24, preview: 'Focus on UI regressions.' },
-      restrictions: ['No raw tool grants.'], warnings: ['Use reviewed YAML.'], external_connector_caveat: 'External connector caveat.',
+      warnings: ['Use reviewed YAML.'], external_connector_caveat: 'External connector caveat.',
     },
     {
       id: 'old-worker', version: '1', base_kind: 'worker', display_name: 'Old Worker',
       lifecycle: 'stable', builtin: false, custom: true, source: 'project', status: 'archived', archived: true, disabled: true, launchable: false,
-      agent_profile_ref: { id: 'full-worker', version: '1' }, metadata: { archived: true, archived_at: '2026-06-20T00:00:00Z' },
+      agent_class_schema_version: 5, acl: { mode: 'deny', rules: [] }, metadata: { archived: true, archived_at: '2026-06-20T00:00:00Z' },
       warnings: ['old-worker is archived/disabled and cannot be assigned or launched until re-enabled.'], external_connector_caveat: 'External connector caveat.',
     },
     {
-      id: 'product-manager', version: '2', base_kind: 'architect', display_name: 'Product Manager',
+      id: 'product-manager', version: '3', base_kind: 'architect', display_name: 'Product Manager',
       primary_identity_label: 'Product Manager', secondary_base_kind_label: 'Architect-derived',
       lifecycle: 'draft', builtin: true, custom: false, source: 'builtin', status: 'draft', scratch_only: true, launchable: true,
-      agent_profile_ref: { id: 'class-policy-product-manager', version: '2' }, agent_profile: { id: 'class-policy-product-manager', version: '2', status: 'draft', capability_count: 3 },
-      internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
+      agent_class_schema_version: 5,
+      acl: allow([rule('self.read', 'self'), rule('planning.area.read', 'group'), rule('decision.propose', 'self'), rule('task.propose', 'self'), rule('message.user', 'self'), rule('message.architect_peer', 'group'), rule('journal.private', 'self')]),
       prompt_summary: { has_prompt: true, char_count: 64, preview: 'PM draft instructions.' }, draft: { scratch_only: true },
-      capability_bucket_selection: ['self_context', 'planning_reads', 'proposed_decisions', 'board_task_proposals', 'user_messages', 'product_peer_messages', 'private_journal'],
-      restriction_bucket_selection: [],
-      warnings: ['Product Manager is draft/scratch-only in Wave 6B.'], external_connector_caveat: 'External connector caveat.',
-      restrictions: ['Do not use for live PM dogfood.'],
+      warnings: ['Product Manager is draft/scratch-only.'], external_connector_caveat: 'External connector caveat.',
     },
     {
       id: 'creative-architect', version: '1', base_kind: 'architect', display_name: 'Creative',
       primary_identity_label: 'Creative', secondary_base_kind_label: 'Architect-derived',
-      description: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.',
-      purpose: 'Proposal-only ideation partner for Torque; explores possibilities with Thinking artifacts, connects product patterns, and suggests small shippable next slices without execution authority.',
+      description: 'Proposal-only ideation partner for Torque.', purpose: 'Proposal-only ideation partner for Torque.',
       lifecycle: 'stable', builtin: true, custom: false, source: 'builtin', status: 'restricted', launchable: true,
-      metadata: { proposal_only: true },
-      agent_profile_ref: { id: 'class-policy-creative-architect', version: '1' },
-      agent_profile: { id: 'class-policy-creative-architect', version: '1', status: 'restricted', capability_count: 9 },
-      internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
-      prompt_summary: { has_prompt: true, char_count: 420, preview: 'You are using the Creative Architect Agent Class. Diverge first, converge second, and keep ideas proposal-only.' },
-      capability_bucket_selection: ['self_context', 'planning_reads', 'recent_context_reads', 'thinking_workspace', 'idea_briefs', 'proposed_decisions', 'board_task_proposals', 'user_messages', 'product_peer_messages', 'private_journal'],
-      restriction_bucket_selection: [],
-      capability_buckets: [catalogItem('self_context'), catalogItem('planning_reads'), catalogItem('recent_context_reads'), catalogItem('thinking_workspace'), catalogItem('idea_briefs'), catalogItem('proposed_decisions'), catalogItem('board_task_proposals'), catalogItem('user_messages'), catalogItem('product_peer_messages'), catalogItem('private_journal')],
-      restriction_buckets: [],
-      operator_access_summary: {
-        allowed_summary: 'Self and assigned task context; Planning reads; Recent context reads; Thinking workspace; Proposed decisions; Board/task proposals; User messages; Product peer Architect messages; Private journal',
-        denied_summary: 'Everything else is denied by default.',
-      },
+      agent_class_schema_version: 5, metadata: { proposal_only: true },
+      acl: allow([rule('self.read', 'self'), rule('planning.area.read', 'group'), rule('event.read', 'group'), rule('thinking.read', 'group'), rule('thinking.write', 'self'), rule('decision.propose', 'self'), rule('task.propose', 'self'), rule('message.user', 'self'), rule('message.architect_peer', 'group'), rule('journal.private', 'self')]),
+      prompt_summary: { has_prompt: true, char_count: 420, preview: 'Diverge first, converge second, and keep ideas proposal-only.' },
       apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true },
-      warnings: [
-        'Creative Architect is proposal-only: ideas, decisions, tasks, and messages remain non-binding until accepted through normal Torque authority.',
-        'Use architect_thinking_* wrappers for Scratchpad/Mind Map work and architect_product_* wrappers for product proposals.',
-      ],
-      external_connector_caveat: 'External connector caveat.',
-      restrictions: ['Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.'],
+      warnings: ['Creative is proposal-only: ideas remain non-binding until accepted through normal Torque authority.'], external_connector_caveat: 'External connector caveat.',
     },
     {
       id: 'torque-steward', version: '1', base_kind: 'architect', display_name: 'Torque Steward',
       primary_identity_label: 'Torque Steward', secondary_base_kind_label: 'Architect-derived',
-      description: 'Conservative built-in group operations steward foundation; observes, explains, and recommends without mutating authority.',
-      purpose: 'Conservative group operations steward for launchable read-only briefs: what is happening, what is stuck, what needs attention, and who should handle it next.',
+      description: 'Conservative group operations steward.', purpose: 'Observe, explain, and recommend without mutation authority.',
       lifecycle: 'draft', builtin: true, custom: false, source: 'builtin', status: 'draft', scratch_only: true, launchable: true,
-      metadata: { foundation_wave: 'communication', authority_model: 'conservative_observer_suggester' },
-      agent_profile_ref: { id: 'class-policy-torque-steward', version: '1' },
-      agent_profile: { id: 'class-policy-torque-steward', version: '1', status: 'draft', capability_count: 14 },
-      internal_policy: { mode: 'compile', profile_source: 'compiled_from_agent_class', generated_profile_written_to_project_yaml: false },
-      prompt_summary: { has_prompt: true, char_count: 500, preview: 'You are using the Torque Steward Agent Class foundation. Observe and recommend only.' },
-      capability_bucket_selection: ['self_context', 'planning_reads', 'recent_context_reads', 'board_task_reads', 'user_messages', 'peer_architect_messages', 'private_journal'],
-      restriction_bucket_selection: [],
-      warnings: ['Torque Steward is a conservative operations steward with approved communication/journal/peer coordination only. It must not be auto-created, auto-run, or treated as broad user-delegated authority until later review approves additional powers.'],
-      external_connector_caveat: 'External connector caveat.',
-      restrictions: ['Agent Profile-compatible internal policy remains the MCP/capability enforcement layer.'],
+      agent_class_schema_version: 5,
+      acl: allow([rule('self.read', 'self'), rule('board.read', 'group'), rule('event.read', 'group'), rule('planning.area.read', 'group'), rule('message.user', 'self'), rule('message.architect_peer', 'group'), rule('journal.private', 'self')]),
+      prompt_summary: { has_prompt: true, char_count: 500, preview: 'Observe and recommend only.' },
+      warnings: ['Torque Steward is a conservative operations steward.'], external_connector_caveat: 'External connector caveat.',
     },
   ];
 }
@@ -567,14 +408,14 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
 
   run(context, `agentClassManagerSelect('product-manager')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[3])} })`);
-  assert.match(classUi(document, panel), /Product Manager@2/);
+  assert.match(classUi(document, panel), /Product Manager@3/);
   assert.match(classUi(document, panel), /Primary identity[\s\S]*Product Manager/);
   assert.match(classUi(document, panel), /Advanced\/Internal diagnostics/);
   assert.match(classUi(document, panel), /draft/);
   assert.doesNotMatch(classUi(document, panel), /External connectors/);
   assert.match(classUi(document, panel), /What this class can do/);
   assert.match(classUi(document, panel), /ACL mode[\s\S]*allow/);
-  assert.match(classUi(document, panel), /Allowed actions[\s\S]*Self and assigned task context/);
+  assert.match(classUi(document, panel), /Allowed actions[\s\S]*Read own context/);
 
   run(context, `agentClassManagerSelect('creative-architect')`);
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[4])} })`);
@@ -583,7 +424,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   assert.doesNotMatch(creativeHtml, /Creative Architect@1/);
   assert.match(creativeHtml, /Architect-derived/);
   assert.match(creativeHtml, /What this class can do/);
-  assert.match(creativeHtml, /architect_thinking_\*/);
+  assert.match(creativeHtml, /Write Thinking artifacts/);
   assert.match(creativeHtml, /Launch new Architect-derived from this class/);
   const creativePreviewStart = creativeHtml.indexOf('<div class="agent-class-preview');
   const creativeDiagnosticsStart = creativeHtml.indexOf('<details class="agent-class-normalized', creativePreviewStart);
@@ -606,7 +447,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   const stewardHtml = classUi(document, panel);
   assert.match(stewardHtml, /Torque Steward@1/);
   assert.match(stewardHtml, /What this class can do/);
-  assert.match(stewardHtml, /architect_steward_operating_brief|self_context/);
+  assert.match(stewardHtml, /Read own context|Read board summaries/);
   assert.doesNotMatch(stewardHtml, /Additional restrictions[\s\S]*Agent Profile-compatible internal policy/);
   document.getElementById('agent-class-launch-name').value = 'Torque Steward';
   document.getElementById('agent-class-launch-group').value = 'alpha';
@@ -628,7 +469,7 @@ test('Agent Class manager renders class list, PM operator access summary, archiv
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(sampleClasses()[1])} })`);
   const reviewHtml = classUi(document, panel);
   assert.match(reviewHtml, /What this class can do/);
-  assert.match(reviewHtml, /Allowed actions[\s\S]*Self and assigned task context; Task reporting and verification; Shared memory/);
+  assert.match(reviewHtml, /Allowed actions[\s\S]*Read own context \(self\); Report task status \(self\); Read shared memory \(group\)/);
   assert.match(reviewHtml, /Not allowed[\s\S]*Everything else is denied by default/);
   assert.match(reviewHtml, /Relaunch behavior[\s\S]*Access freezes on the next launch or relaunch/);
   const previewStart = reviewHtml.indexOf('<div class="agent-class-preview');
@@ -676,10 +517,10 @@ test('Agent Class manager presents approved Product Manager dogfood state with c
   run(context, `agentClassManagerReceivePreview({ type: 'agent_class_preview', agent_class: ${JSON.stringify(pm)} })`);
 
   const html = classUi(document, panel);
-  assert.match(html, /Product Manager@2/);
+  assert.match(html, /Product Manager@3/);
   assert.match(html, /What this class can do/);
   assert.match(html, /ACL mode[\s\S]*allow/);
-  assert.match(html, /Allowed actions[\s\S]*Self and assigned task context/);
+  assert.match(html, /Allowed actions[\s\S]*Read own context/);
   assert.doesNotMatch(html, /External connectors/);
   assert.doesNotMatch(html, /agent-class-issues[\s\S]*External connector exposure/);
 });
@@ -691,11 +532,11 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   run(context, `agentClassManagerReceiveList(${JSON.stringify(sampleAgentClassListMessage(sampleClasses()))})`);
   run(context, `agentClassManagerNew('architect')`);
   assert.match(classUi(document, panel), /Purpose and permissions/);
-  assert.match(classUi(document, panel), /Choose what this class can do/);
-  assert.match(classUi(document, panel), /Self and assigned task context/);
-  assert.match(classUi(document, panel), /Task reporting and verification/);
-  assert.match(classUi(document, panel), /Advanced\/Internal permissions[\s\S]*Planning writes/);
-  assert.match(classUi(document, panel), /Scoped journals/);
+  assert.match(classUi(document, panel), /Allow only selected capabilities/);
+  assert.match(classUi(document, panel), /Read own context/);
+  assert.match(classUi(document, panel), /Report task status/);
+  assert.match(classUi(document, panel), /Write Areas/);
+  assert.match(classUi(document, panel), /Read scoped journals/);
   assert.doesNotMatch(classUi(document, panel), /safe reviewed buckets|reviewed safe buckets|high-risk buckets|capability buckets|Allowed buckets|Restriction buckets|generated profile|raw atom|default profile/i);
   run(context, `agentClassManagerNew('worker')`);
 
@@ -705,33 +546,34 @@ test('Agent Class authoring validates before save, shows validation issues, and 
   document.getElementById('agent-class-display-name').value = 'QA Worker';
   document.getElementById('agent-class-description').value = 'Checks UI.';
   document.getElementById('agent-class-lifecycle').value = 'stable';
-  document.getElementById('agent-class-profile-id').value = 'full-worker';
-  document.getElementById('agent-class-profile-version').value = '1';
   document.getElementById('agent-class-prompt').value = 'Check state preservation.';
+  document.getElementById('agent-class-capability-bucket-self-read').checked = true;
+  document.getElementById('agent-class-capability-scope-self-read').value = 'self';
+  document.getElementById('agent-class-capability-bucket-help-read').checked = true;
   run(context, `agentClassManagerValidate()`);
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_validate');
   assert.equal(sendCalls.at(-1).agent_class.id, 'qa-worker');
-  const validateAllow = sendCalls.at(-1).agent_class.acl.allow.map((entry) => entry.capability);
-  assert.equal(validateAllow.includes('self_context'), true);
-  assert.equal(validateAllow.includes('task_reporting'), true);
-  assert.equal(validateAllow.includes('planning_writes'), false);
-  assert.equal(validateAllow.includes('scoped_journals'), false);
+  const validateRules = sendCalls.at(-1).agent_class.acl.rules.map((entry) => entry.capability);
+  assert.equal(validateRules.includes('self.read'), true);
+  assert.equal(validateRules.includes('help.read'), true);
+  assert.equal(validateRules.includes('planning.area.write'), false);
+  assert.equal(validateRules.includes('journal.read'), false);
 
   run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: false, ok: false, errors: [{ severity: 'error', code: 'bad', message: 'Display name is unsafe' }], warnings: [], agent_class: null })`);
   assert.match(classUi(document, panel), /Display name is unsafe/);
   run(context, `agentClassManagerSave()`);
   assert.notEqual(sendCalls.at(-1).cmd, 'agent_class_create');
 
-  run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: true, ok: true, errors: [], warnings: ['Review YAML before commit.'], normalized: { id: 'qa-worker' }, authoring_contract: ${JSON.stringify(sampleAgentClassListMessage().authoring_contract)}, agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', agent_class_schema_version: 4, display_name: 'QA Worker', description: 'Checks UI.', purpose: 'Checks UI.', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, acl: { mode: 'allow', allow: [{ capability: 'user_messages' }, { capability: 'private_journal' }, { capability: 'shared_memory' }, { capability: 'planning_area_reads' }, { capability: 'self_context' }, { capability: 'task_reporting' }] }, capability_bucket_selection: ['user_messages', 'private_journal', 'shared_memory', 'planning_area_reads', 'self_context', 'task_reporting'], restriction_bucket_selection: [], capability_buckets: [${JSON.stringify(catalogItem('self_context'))}, ${JSON.stringify(catalogItem('task_reporting'))}, ${JSON.stringify(catalogItem('planning_area_reads'))}, ${JSON.stringify(catalogItem('user_messages'))}, ${JSON.stringify(catalogItem('private_journal'))}, ${JSON.stringify(catalogItem('shared_memory'))}], restriction_buckets: [], operator_access_summary: { allowed_summary: 'User messages; Private journal; Shared memory; Area reads; Self and assigned task context; Task reporting and verification', denied_summary: 'Everything else is denied by default.' }, apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true }, prompt: { job: 'Check state preservation.' }, prompt_summary: { has_prompt: true, char_count: 25, preview: 'Check state preservation.' }, external_connector_caveat: 'External connector caveat.', restrictions: [] } })`);
+  run(context, `agentClassManagerReceiveValidation({ type: 'agent_class_validation', request_id: _agentClassValidationRequestId, valid: true, ok: true, errors: [], warnings: ['Review YAML before commit.'], normalized: { id: 'qa-worker' }, authoring_contract: ${JSON.stringify(sampleAgentClassListMessage().authoring_contract)}, agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', agent_class_schema_version: 5, display_name: 'QA Worker', description: 'Checks UI.', purpose: 'Checks UI.', custom: true, source: 'project', lifecycle: 'stable', status: 'restricted', launchable: true, acl: { mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }, { capability: 'help.read' }] }, apply_state: { mutates_running_sessions: false, applies_at: 'next_launch_or_relaunch', relaunch_required_after_assignment: true }, prompt: { job: 'Check state preservation.' }, prompt_summary: { has_prompt: true, char_count: 25, preview: 'Check state preservation.' }, external_connector_caveat: 'External connector caveat.' } })`);
   run(context, `agentClassManagerSave()`);
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_create');
   assert.equal(sendCalls.at(-1).agent_class.acl.mode, 'allow');
-  const saveAllow = sendCalls.at(-1).agent_class.acl.allow.map((entry) => entry.capability);
-  assert.equal(saveAllow.includes('self_context'), true);
-  assert.equal(saveAllow.includes('task_reporting'), true);
+  const saveRules = sendCalls.at(-1).agent_class.acl.rules.map((entry) => entry.capability);
+  assert.equal(saveRules.includes('self.read'), true);
+  assert.equal(saveRules.includes('help.read'), true);
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls.at(-1).agent_class, 'agent_profile_ref'), false);
 
-  run(context, `agentClassManagerReceiveMutation({ type: 'agent_class_save', ok: true, operation: 'created', agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', display_name: 'QA Worker', custom: true, source: 'project', lifecycle: 'stable', status: 'full', launchable: true, acl: { mode: 'allow', allow: [{ capability: 'self_context' }, { capability: 'task_reporting' }] } }, classes: ${JSON.stringify(sampleClasses())} })`);
+  run(context, `agentClassManagerReceiveMutation({ type: 'agent_class_save', ok: true, operation: 'created', agent_class: { id: 'qa-worker', version: '1', base_kind: 'worker', display_name: 'QA Worker', custom: true, source: 'project', lifecycle: 'stable', status: 'restricted', launchable: true, acl: { mode: 'allow', rules: [{ capability: 'self.read', scope: 'self' }, { capability: 'help.read' }] } }, classes: ${JSON.stringify(sampleClasses())} })`);
   run(context, `agentClassManagerArchive()`);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sendCalls.at(-1).cmd, 'agent_class_archive');
@@ -787,8 +629,6 @@ test('Agent Class manager preserves focused draft, caret, and scroll across rere
   document.getElementById('agent-class-display-name').value = 'Review Worker';
   document.getElementById('agent-class-description').value = 'Reviews patches.';
   document.getElementById('agent-class-lifecycle').value = 'stable';
-  document.getElementById('agent-class-profile-id').value = 'restricted-worker';
-  document.getElementById('agent-class-profile-version').value = '2';
   const prompt = document.getElementById('agent-class-prompt');
   prompt.value = 'operator draft that must survive';
   prompt.selectionStart = 9;

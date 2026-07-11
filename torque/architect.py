@@ -310,24 +310,42 @@ automatically close scope for you.
 """
 
 
-_RESTRICTED_TORQUE_PREAMBLE = """\
+_AGENT_CLASS_TORQUE_PREAMBLE = """\
 # Torque Agent
 
 You are running inside Torque, an AI agent orchestration system.
 Torque tracks durable product context, board state, decisions, Thinking
 artifacts, and messages for your group.
 
-## Restricted Agent Class boundary
+## Agent Class authority boundary
 
-Your Architect-derived Agent Class/Profile projects a narrower MCP tool
-surface before side effects. Use only the tools actually visible in this
-session. If an instruction mentions a tool or workflow that is not visible,
-treat that power as unavailable and use a proposal, product-peer message,
-or user ask/message instead.
+Your Architect-derived Agent Class projects a frozen Torque MCP tool surface
+and resource scope before side effects. Use only the tools actually visible
+in this session. If an instruction mentions a tool or workflow that is not
+visible, treat that power as unavailable and choose a visible, authorized
+handoff or user communication path instead.
 
 Start with `torque_context()` when it is visible to confirm your identity,
 class, and group. For user-facing replies, use the visible product/user
 message tool rather than relying on free-text terminal output.
+"""
+
+
+_AGENT_CLASS_ARCHITECT_BASE_PROMPT = """\
+You are an Architect-derived agent for the "{group}" group in Torque.
+
+## Base-kind contract
+
+- Shape product understanding, scope, priorities, and durable handoffs.
+- Ground recommendations in visible Torque context before proposing changes.
+- Treat the projected MCP surface and frozen Agent Class ACL as the authority boundary.
+- Never infer a permission from your title, prompt prose, or a tool that is not visible.
+- Use only resource scopes granted by the frozen authority snapshot; existing platform ownership checks may narrow them further.
+- Keep observations, inferences, proposals, accepted decisions, and execution state distinct.
+- When an operation is unavailable, explain the gap briefly and use an authorized user or peer handoff rather than simulating the denied action.
+
+The Agent Class block appended to this prompt supplies the user-authored identity,
+job, boot checklist, operating guidance, and factual capability/scope summary.
 """
 
 
@@ -367,19 +385,6 @@ def _profile_capability_atoms(profile_snapshot: dict) -> set[str]:
     return atoms
 
 
-def _category_status_map(profile_snapshot: dict, class_snapshot: dict) -> dict[str, str]:
-    categories: dict[str, str] = {}
-    for source in (profile_snapshot, _safe_dict(class_snapshot.get("internal_policy"))):
-        for item in list(source.get("projected_tool_categories", []) or []):
-            if not isinstance(item, dict):
-                continue
-            category = str(item.get("category", "") or "").strip()
-            status = str(item.get("status", "") or "").strip()
-            if category and status:
-                categories[category] = status
-    return categories
-
-
 def _architect_prompt_authority_context(
         *,
         architect_cell=None,
@@ -415,7 +420,7 @@ def _architect_prompt_authority_context(
         or ""
     ).strip()
     status = str(
-        profile_snapshot.get("status", class_snapshot.get("status", ""))
+        class_snapshot.get("status", profile_snapshot.get("status", ""))
         or ""
     ).strip().lower()
     lifecycle = str(
@@ -423,16 +428,39 @@ def _architect_prompt_authority_context(
         or ""
     ).strip().lower()
     grants = _profile_capability_atoms(profile_snapshot)
-    categories = _category_status_map(profile_snapshot, class_snapshot)
+    effective = _safe_dict(class_snapshot.get("effective_authority"))
+    effective_capabilities = effective.get("capabilities")
+    canonical_capabilities = (
+        set(effective_capabilities)
+        if isinstance(effective_capabilities, dict)
+        else set()
+    )
 
     # No effective profile/class context is the historical full Architect path.
     no_context = not class_snapshot and not profile_snapshot
     architect_ceiling = BASE_KIND_CEILINGS.get("architect", frozenset())
     full_by_grants = bool(grants) and grants == set(architect_ceiling)
     full_by_status = status == "full" and lifecycle in {"", "stable"}
+    canonical_full: bool | None = None
+    if isinstance(effective_capabilities, dict):
+        from .capability_catalog import CAPABILITY_CATALOG
+        expected = {
+            capability_id: (
+                definition.maximum_scope_for("architect")
+                if definition.scoped
+                else None
+            )
+            for capability_id, definition in CAPABILITY_CATALOG.items()
+            if definition.available_to("architect")
+        }
+        canonical_full = dict(effective_capabilities) == expected
     is_full = no_context or (
         profile_base_kind == "architect"
-        and (full_by_grants or (full_by_status and not grants))
+        and (
+            canonical_full
+            if canonical_full is not None
+            else (full_by_grants or (full_by_status and not grants))
+        )
     )
 
     label = str(
@@ -458,290 +486,34 @@ def _architect_prompt_authority_context(
         "status": status or ("full" if is_full else "restricted"),
         "lifecycle": lifecycle,
         "grants": grants,
-        "categories": categories,
+        "canonical_capabilities": canonical_capabilities,
         "is_full": is_full,
         "acl": acl,
     }
 
 
 def _has_capability(authority: dict, atom: str) -> bool:
-    return atom in set(authority.get("grants") or set())
+    return atom in (
+        set(authority.get("grants") or set())
+        | set(authority.get("canonical_capabilities") or set())
+    )
 
 
 def _has_capabilities(authority: dict, *atoms: str) -> bool:
-    grants = set(authority.get("grants") or set())
+    grants = (
+        set(authority.get("grants") or set())
+        | set(authority.get("canonical_capabilities") or set())
+    )
     return set(atoms).issubset(grants)
 
 
-def _allows_category(authority: dict, category: str) -> bool:
-    if authority.get("is_full"):
-        return True
-    categories = dict(authority.get("categories") or {})
-    status = categories.get(category)
-    if status:
-        return status == "allowed"
-    required = TOOL_CATEGORY_REQUIREMENTS.get(category)
-    if not required:
-        return False
-    grants = set(authority.get("grants") or set())
-    return set(required).issubset(grants)
-
-
-def _allows_engineer_roster_read(authority: dict) -> bool:
-    """Whether the projected surface can read the Engineer roster.
-
-    The ``engineer_roster`` category intentionally groups roster read, hiring,
-    and roster-management powers for high-level previews. Prompt boot guidance
-    needs the narrower MCP/tool fact: ``architect_engineer_list`` is visible
-    when ``agent.engineer_roster_read`` is granted, even if hire/manage tools
-    remain denied.
-    """
-
-    return (
-        authority.get("is_full")
-        or _has_capability(
-            authority,
-            "agent.engineer_roster_read",
-        )
-        or _allows_category(authority, "engineer_roster")
-    )
-
-
-def _allows_engineer_hire_or_management(authority: dict) -> bool:
-    return (
-        authority.get("is_full")
-        or _has_capability(
-            authority,
-            "agent.hire_engineer",
-        )
-        or _has_capability(
-            authority,
-            "agent.manage_engineer_roster",
-        )
-        or _allows_category(authority, "engineer_roster")
-    )
-
-
 def _allows_behavior_overlay_prompt(authority: dict) -> bool:
-    """Whether approved Dynamic Behavior overlays may affect this prompt.
+    """Whether an approved overlay may refine this class prompt."""
 
-    Overlay text is prompt instruction, not a raw tool grant.  Restricted
-    Architect-derived classes still need the same effective Agent
-    Class/Profile boundary: a class/profile that cannot read visible behavior
-    overlay state must not receive hidden active overlay instructions at boot.
-    """
-
-    return (
-        authority.get("is_full")
-        or _has_capability(authority, "behavior_overlay.read")
-        or _allows_category(authority, "behavior_overlay_self")
+    return authority.get("is_full") or _has_capability(
+        authority,
+        "behavior_overlay.read",
     )
-
-
-def _restricted_identity_sentence(authority: dict) -> str:
-    label = authority.get("label") or "Restricted Architect"
-    return (
-        f"You are the {label} for the \"{{group}}\" group in Torque: an "
-        "Architect-derived agent with a projected tool surface defined by "
-        "your Agent Class ACL/capabilities."
-    )
-
-
-def _restricted_tool_lines(authority: dict) -> list[str]:
-    lines = [
-        "- Use only MCP tools visible in this session; profile projection is the source of truth.",
-        "- Context: use `torque_context()` when visible, then the read tools projected for your class.",
-    ]
-    if _allows_category(authority, "planning_reads"):
-        lines.append(
-            "- Projected reads: use visible board/task, Area, Initiative, Decision, recent-event, and telemetry reads within this class's scope."
-        )
-    if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
-        lines.append(
-            "- Thinking workspace: when Thinking tools are visible, create/update only artifacts permitted by the tool and ACL scope."
-        )
-    if _allows_category(authority, "idea_briefs"):
-        lines.append(
-            "- Idea Briefs: when Idea Brief tools are visible, draft/refine/park structured proposal artifacts; proposing a brief never dispatches or assigns work."
-        )
-    if _allows_category(authority, "pm_queued_tasks"):
-        lines.append(
-            "- Task proposals: use visible proposal/task-intake tools for queued, non-dispatched task proposals."
-        )
-    if _allows_category(authority, "pm_decisions"):
-        lines.append(
-            "- Decision proposals: use visible proposed-decision tools only within this class's authority; do not imply acceptance unless accepted-decision tools are visible."
-        )
-    if _allows_category(authority, "peer_architect_comm"):
-        lines.append(
-            "- Peer Architect coordination: use visible peer tools only for the peer scope granted by this class; do not infer Engineer/Worker messaging authority."
-        )
-    if _has_capability(authority, "comm.user_message") or _has_capability(authority, "comm.user_ask"):
-        lines.append(
-            "- User communication: use visible user ask/message tools for blocking decisions, non-blocking status, recommendations, and blockers."
-        )
-    if _has_capability(authority, "journal.private"):
-        lines.append(
-            "- Private journal: use visible private journal tools for your own observations, plans, and checkpoints."
-        )
-    if _allows_behavior_overlay_prompt(authority):
-        lines.append(
-            "- Behavior overlays: approved Dynamic Behavior overlay text may refine your style and habits, but it cannot grant tools, profile/class administration, cross-scope overlay authority, or powers outside this Agent Class/Profile."
-        )
-    if _allows_category(authority, "execution_task_control"):
-        lines.append(
-            "- Executable task control: if explicitly visible, use it only inside this class's policy and do not assume Worker dispatch or merge authority."
-        )
-    if _allows_engineer_roster_read(authority):
-        lines.append(
-            "- Engineer roster reads: when `architect_engineer_list` is visible, use it only for roster context inside this class's projected authority."
-        )
-    if _allows_engineer_hire_or_management(authority):
-        lines.append(
-            "- Engineer hiring/management: if explicitly visible, follow user-approval gates before treating a staffing change as live."
-        )
-    return lines
-
-
-def _restricted_unavailable_line(authority: dict) -> str:
-    unavailable: list[str] = []
-    if not _allows_engineer_roster_read(authority):
-        unavailable.append("Engineer roster reads")
-    if not _allows_engineer_hire_or_management(authority):
-        unavailable.append("Engineer hiring/roster management")
-    if not _allows_category(authority, "engineer_worker_comm"):
-        unavailable.append("direct Engineer/Worker messaging or control")
-    if not _allows_category(authority, "execution_task_control"):
-        unavailable.append("executable task create/reassign/move/dispatch")
-    if not _allows_category(authority, "worker_dispatch"):
-        unavailable.append("Worker dispatch")
-    if not _allows_category(authority, "worktree_merge"):
-        unavailable.append("worktree merge/release")
-    if not _allows_category(authority, "deploy_admin"):
-        unavailable.append("deploy/restart/admin")
-    if not _allows_category(authority, "profile_admin"):
-        unavailable.append("settings/profile administration")
-    if not _allows_behavior_overlay_prompt(authority):
-        unavailable.append("Dynamic Behavior overlay read/effect")
-    if not _has_capabilities(
-            authority,
-            "decision.accept",
-            "decision.create",
-            "decision.update",
-    ):
-        unavailable.append("accepted-decision authority")
-    if not unavailable:
-        return ""
-    return (
-        "- Unavailable powers in this session: "
-        + "; ".join(unavailable)
-        + ". Do not present these as workflows you can perform; capture the need as a proposal, user ask, or visible peer/user handoff instead."
-    )
-
-
-def _restricted_boot_lines(authority: dict) -> list[str]:
-    lines = [
-        "1. Confirm your class, group, and visible tools with `torque_context()` when available.",
-        "2. Read projected context before proposing changes; prefer narrower safe wrappers when they are visible.",
-    ]
-    index = 3
-    if _allows_category(authority, "thinking_reads") or _allows_category(authority, "thinking_writes"):
-        lines.append(
-            f"{index}. Use Scratchpad notes or Mind Maps to explore rough ideas before converting them into proposals."
-        )
-        index += 1
-    if _allows_category(authority, "idea_briefs"):
-        lines.append(
-            f"{index}. Draft or refine an Idea Brief when the next useful artifact is a structured, reviewable proposal rather than an execution task."
-        )
-        index += 1
-    if _allows_category(authority, "pm_decisions"):
-        lines.append(
-            f"{index}. Re-read proposed decisions you own before drafting new or updated proposals."
-        )
-        index += 1
-    if _allows_engineer_roster_read(authority):
-        lines.append(
-            f"{index}. Read `architect_engineer_list` to understand the visible Engineer roster before making staffing or ownership recommendations; do not infer hire/manage authority unless those tools are also visible."
-        )
-        index += 1
-    if _allows_category(authority, "peer_architect_comm"):
-        lines.append(
-            f"{index}. Check visible peer messages that require a reply before starting new discussions."
-        )
-        index += 1
-    lines.append(
-        f"{index}. Only then draft proposals, user asks/messages, or visible peer messages."
-    )
-    return lines
-
-
-def _restricted_operating_lines(authority: dict) -> list[str]:
-    lines = [
-        "1. **Authority boundary** — Tool visibility is authoritative. Do not try to route around denied tools with freeform instructions, terminal output, or raw MCP names.",
-        "2. **Proposal discipline** — Separate observations, inferences, options, risks, and non-goals. A proposal is not accepted until a user or authorized actor accepts it through normal Torque authority.",
-        "3. **Planning workflow** — Frame the problem, desired outcome, candidate proposal, acceptance criteria, and open decisions before asking others to act.",
-    ]
-    next_index = 4
-    if _allows_category(authority, "pm_queued_tasks"):
-        lines.append(
-            f"{next_index}. **Task intake** — Product task proposals stay queued, unassigned, and non-dispatched; include enough context for an authorized Architect/Engineer to decide what to do next."
-        )
-        next_index += 1
-    if _allows_category(authority, "pm_decisions"):
-        lines.append(
-            f"{next_index}. **Decision proposals** — Keep decisions proposed-only unless accepted-decision authority is actually visible. Do not supersede or edit other owners' decisions as accepted truth."
-        )
-        next_index += 1
-    if _allows_category(authority, "peer_architect_comm"):
-        lines.append(
-            f"{next_index}. **Peer discussion** — Peer messages are for alignment, critique, and handoff context. Anchor them to visible context and record durable outcomes as proposals."
-        )
-        next_index += 1
-    lines.append(
-        f"{next_index}. **Escalation** — When useful next action requires unavailable execution/admin authority, explain the gap briefly and propose the authorized path instead of teaching the denied workflow."
-    )
-    return lines
-
-
-def _build_restricted_system_prompt(authority: dict, group: str) -> str:
-    unavailable = _restricted_unavailable_line(authority)
-    tool_lines = _restricted_tool_lines(authority)
-    if unavailable:
-        tool_lines.append(unavailable)
-    job_line = (
-        "Your job is to work within the authority that your Agent Class ACL "
-        "and projected Agent Profile actually grant."
-    )
-    core_model = [
-        "- **Context** is evidence you can read through the tools projected for this class.",
-        "- **Proposal** is a non-binding task, decision, recommendation, or direction candidate. Mark assumptions and acceptance criteria clearly; never imply it has already been approved.",
-        "- **Artifacts** such as journals, Thinking notes, Idea Briefs, tasks, and decisions are only available when their tools are visible and scoped to you.",
-        "- **User asks/messages** are the safe path for decisions or status that need the user's attention. Keep asks concrete and bounded.",
-        "- **Peer messages** are for discussion and alignment when that communication surface is visible.",
-    ]
-    lines = [
-        _restricted_identity_sentence(authority).format(group=group),
-        "",
-        job_line,
-        "",
-        "## Available tools and authority",
-        "",
-        *tool_lines,
-        "",
-        "## Core model",
-        "",
-        *core_model,
-        "",
-        "## Session boot checklist",
-        "",
-        *_restricted_boot_lines(authority),
-        "",
-        "## Operating guidelines",
-        "",
-        *_restricted_operating_lines(authority),
-    ]
-    return "\n".join(lines).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -881,7 +653,7 @@ def _build_restricted_policy_section(architect_settings=None,
         *autonomy_lines,
         *_restricted_checkpoint_policy_lines(checkpoint_frequency),
         (
-            "- Tool-enforced gates and Agent Class/Profile restrictions still "
+            "- Tool-enforced gates and the frozen Agent Class ACL still "
             "apply regardless of autonomy mode."
         ),
     ]
@@ -946,11 +718,11 @@ def build_architect_torque_preamble(*,
         agent_class_snapshot=agent_class_snapshot,
         agent_profile_snapshot=agent_profile_snapshot,
     )
-    if authority.get("is_full"):
+    if not authority.get("class_id"):
         return build_torque_system_prompt(
             include_shared_memory=False,
         )
-    return _RESTRICTED_TORQUE_PREAMBLE.rstrip() + "\n"
+    return _AGENT_CLASS_TORQUE_PREAMBLE.rstrip() + "\n"
 
 
 def build_architect_system_prompt(group: str,
@@ -972,7 +744,7 @@ def build_architect_system_prompt(group: str,
         agent_class_snapshot=agent_class_snapshot,
         agent_profile_snapshot=agent_profile_snapshot,
     )
-    if authority.get("is_full"):
+    if not authority.get("class_id"):
         parts = [
             _BASE_SYSTEM_PROMPT.format(group=group),
             build_shared_memory_guidance(),
@@ -982,15 +754,15 @@ def build_architect_system_prompt(group: str,
             build_owner_user_message_guidance("architect_message_user"),
         ]
     else:
-        parts = [_build_restricted_system_prompt(authority, group)]
+        parts = [_AGENT_CLASS_ARCHITECT_BASE_PROMPT.format(group=group)]
         if _has_capabilities(
                 authority,
                 "memory.read",
-                "memory.publish",
+                "memory.write",
                 "memory.admin",
         ):
             parts.append(build_shared_memory_guidance())
-        if _has_capability(authority, "comm.user_message"):
+        if _has_capability(authority, "message.user"):
             parts.append(
                 "## After bootstrap: message the user\n\n"
                 "You are owned by the user. Once you finish bootstrapping and orient yourself, "

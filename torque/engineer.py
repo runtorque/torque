@@ -441,6 +441,24 @@ Operational rules:
    agent when you want a clean review/merge boundary.
 """
 
+
+_AGENT_CLASS_ENGINEER_BASE_PROMPT = """\
+You are an Engineer-derived agent for the "{group}" group in Torque.
+
+## Base-kind contract
+
+- Coordinate implementation work and maintain clear execution handoffs using only visible Torque tools.
+- Read visible task and agent context before changing execution state.
+- Treat the projected MCP surface and frozen Agent Class ACL as the authority boundary.
+- Never infer dispatch, messaging, worktree, merge, or administration authority from your title or prompt prose.
+- Use only resource scopes granted by the frozen authority snapshot; existing ownership and routing checks may narrow them further.
+- Keep task state, evidence, blockers, asks, and completion claims explicit and reviewable.
+- When an operation is unavailable, report the gap through a visible authorized path rather than simulating the denied action.
+
+The Agent Class block appended to this prompt supplies the user-authored identity,
+job, boot checklist, operating guidance, and factual capability/scope summary.
+"""
+
 _ENGINEER_ARCHITECT_ESCALATION_SECTION = """\
 ## Architect escalation
 
@@ -759,7 +777,8 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
                                  group_settings=None,
                                  specializations_preamble: str = "",
                                  owner_is_user: bool = False,
-                                 behavior_overlay_block: str = "") -> str:
+                                 behavior_overlay_block: str = "",
+                                 agent_class_snapshot: dict | None = None) -> str:
     """Assemble the engineer boot prompt with architect escalation guidance.
 
     When ``owner_is_user`` is True (a user-owned engineer with no hiring
@@ -768,14 +787,33 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
     default leaves the prompt byte-identical to the prior behavior so
     architect-hired engineers are unchanged.
     """
-    prompt = _build_engineer_base_system_prompt(
-        group,
-        engineer_settings,
-        action_system_prompt,
-        group_settings=group_settings,
-        specializations_preamble=specializations_preamble,
-    ).rstrip()
-    result = prompt + "\n\n" + _ENGINEER_ARCHITECT_ESCALATION_SECTION + "\n"
+    class_snapshot = (
+        dict(agent_class_snapshot or {})
+        if isinstance(agent_class_snapshot, dict)
+        else {}
+    )
+    if class_snapshot.get("id"):
+        parts = [_AGENT_CLASS_ENGINEER_BASE_PROMPT.format(group=group)]
+        if action_system_prompt:
+            parts.append(str(action_system_prompt).rstrip())
+        specializations_block = str(specializations_preamble or "").strip()
+        if specializations_block:
+            parts.append("## Specializations\n" + specializations_block)
+        if engineer_settings and engineer_settings.custom_instructions:
+            parts.append(
+                "## Custom Instructions\n"
+                + engineer_settings.custom_instructions.strip()
+            )
+        result = "\n\n".join(parts).rstrip() + "\n"
+    else:
+        prompt = _build_engineer_base_system_prompt(
+            group,
+            engineer_settings,
+            action_system_prompt,
+            group_settings=group_settings,
+            specializations_preamble=specializations_preamble,
+        ).rstrip()
+        result = prompt + "\n\n" + _ENGINEER_ARCHITECT_ESCALATION_SECTION + "\n"
     if owner_is_user:
         result = (
             result.rstrip()
@@ -783,7 +821,21 @@ def build_engineer_system_prompt(group: str, engineer_settings=None,
             + build_owner_user_message_guidance("engineer_message_user")
             + "\n"
         )
-    overlay = str(behavior_overlay_block or "").strip()
+    effective = class_snapshot.get("effective_authority", {})
+    effective_capabilities = (
+        effective.get("capabilities", {})
+        if isinstance(effective, dict)
+        else {}
+    )
+    overlay_allowed = (
+        not class_snapshot
+        or "behavior_overlay.read" in effective_capabilities
+    )
+    overlay = (
+        str(behavior_overlay_block or "").strip()
+        if overlay_allowed
+        else ""
+    )
     if overlay:
         result = result.rstrip() + "\n\n" + overlay + "\n"
     return result

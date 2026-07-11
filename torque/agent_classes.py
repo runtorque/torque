@@ -33,6 +33,16 @@ from .agent_profiles import (
     profile_definition_by_id,
     validate_profile_data,
 )
+from .capability_catalog import (
+    CAPABILITY_CATALOG,
+    capability_catalog_for_base_kind,
+    legacy_atoms_for_canonical_capabilities,
+)
+from .mcp_authority import (
+    AuthorityValidationError,
+    compile_agent_class_acl,
+    registry_hash,
+)
 
 BUILTIN_CLASS_DIR = Path(__file__).resolve().parent / "builtin_agent_classes"
 PROJECT_CLASS_LEAF = "agent_classes"
@@ -40,8 +50,8 @@ PROJECT_CLASS_LEAF = "agent_classes"
 CLASS_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 CLASS_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ALLOWED_LIFECYCLES = {"stable", "draft"}
-AGENT_CLASS_SCHEMA_VERSION = 4
-DEFAULT_AGENT_CLASS_SCHEMA_VERSION = 2
+AGENT_CLASS_SCHEMA_VERSION = 5
+DEFAULT_AGENT_CLASS_SCHEMA_VERSION = 5
 POLICY_SCHEMA_VERSION = 1
 POLICY_COMPILER_VERSION = "agent_class_policy_compiler_v1"
 ALLOWED_POLICY_MODES = {"wrap_profile", "compile"}
@@ -65,23 +75,9 @@ DEFAULT_CLASS_BY_KIND = {
     "worker": "default-worker",
 }
 
-BUILTIN_CLASS_BASE_KIND = {
-    "default-architect": "architect",
-    "default-engineer": "engineer",
-    "default-worker": "worker",
-}
-
-BUILTIN_CLASS_PROFILE_REF = {
-    "default-architect": ("full-architect", "1"),
-    "default-engineer": ("full-engineer", "1"),
-    "default-worker": ("full-worker", "1"),
-}
-
-BUILTIN_CLASS_POLICY_MODE = {
-    "default-architect": "wrap_profile",
-    "default-engineer": "wrap_profile",
-    "default-worker": "wrap_profile",
-}
+BUILTIN_CLASS_BASE_KIND: dict[str, str] = {}
+BUILTIN_CLASS_PROFILE_REF: dict[str, tuple[str, str]] = {}
+BUILTIN_CLASS_POLICY_MODE: dict[str, str] = {}
 
 KNOWN_CLASS_KEYS = {
     "agent_class_schema_version",
@@ -601,15 +597,12 @@ def agent_class_restriction_bucket_catalog(*, base_kind: str = "") -> list[dict[
 def agent_class_authoring_contract(*, base_kind: str = "") -> dict[str, Any]:
     return {
         "schema_version": AGENT_CLASS_SCHEMA_VERSION,
-        "normal_authoring_mode": "acl",
+        "normal_authoring_mode": "capability_acl",
         "acl_modes": ["allow", "deny"],
-        "acl_entry_keys": ["tool", "family", "action", "capability"],
+        "acl_shape": "acl.mode + acl.rules",
+        "acl_rule_keys": ["capability", "scope"],
         "scope_vocabulary": ["self", "children", "group", "global"],
-        "legacy_capability_bucket_field": "capabilities.buckets",
-        "legacy_restriction_bucket_field": "capabilities.restrictions",
-        "capability_bucket_catalog": agent_class_capability_bucket_catalog(base_kind=base_kind),
-        "restriction_bucket_catalog": agent_class_restriction_bucket_catalog(base_kind=base_kind),
-        "advanced_internal_details": "Agent Profile-compatible generated snapshots appear in internal_policy/agent_profile diagnostics only.",
+        "capability_catalog": capability_catalog_for_base_kind(base_kind),
         "apply_model": "Agent Class saves/assignments do not mutate running sessions; ACL changes apply at next launch/relaunch.",
         "external_connector_caveat": EXTERNAL_CONNECTOR_CAVEAT,
     }
@@ -907,6 +900,8 @@ def _legacy_acl_from_bucket_fields(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _normalized_acl_for_data(data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
     if isinstance(data, AgentClassDefinition):
+        if data.agent_class_schema_version >= AGENT_CLASS_SCHEMA_VERSION:
+            return dict(data.acl or {})
         raw = {
             "acl": dict(data.acl or {}),
             "capabilities": dict(data.capabilities or {}),
@@ -915,6 +910,8 @@ def _normalized_acl_for_data(data: "AgentClassDefinition | dict[str, Any]") -> d
         }
     else:
         raw = _normalize_bucket_fields(_normalized_class_data(dict(data or {})))
+        if _agent_class_schema_version(raw) >= AGENT_CLASS_SCHEMA_VERSION:
+            return _acl_mapping(raw)
     acl = _acl_mapping(raw)
     if not acl:
         acl = _legacy_acl_from_bucket_fields(raw)
@@ -935,6 +932,7 @@ def _normalized_acl_for_data(data: "AgentClassDefinition | dict[str, Any]") -> d
 def _compiled_bucket_policy_for_data(data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
     if isinstance(data, AgentClassDefinition):
         base_kind = data.base_kind
+        schema_version = data.agent_class_schema_version
         raw = {
             "acl": dict(data.acl or {}),
             "capabilities": dict(data.capabilities or {}),
@@ -943,7 +941,64 @@ def _compiled_bucket_policy_for_data(data: "AgentClassDefinition | dict[str, Any
     else:
         normalized = _normalize_bucket_fields(_normalized_class_data(dict(data or {})))
         base_kind = str(normalized.get("base_kind", "") or "").strip()
+        schema_version = _agent_class_schema_version(normalized)
         raw = normalized
+    if schema_version >= AGENT_CLASS_SCHEMA_VERSION:
+        acl = _acl_mapping(raw)
+        try:
+            authority = compile_agent_class_acl(
+                base_kind=base_kind,
+                acl=acl,
+                capabilities=CAPABILITY_CATALOG,
+            )
+        except AuthorityValidationError:
+            return {
+                "mode": str(acl.get("mode", "") or ""),
+                "grants": [],
+                "denies": [],
+                "allowed_tools": [],
+                "denied_tools": [],
+                "allowed_families": [],
+                "denied_families": [],
+                "allowed_actions": [],
+                "denied_actions": [],
+                "bucket_ids": [],
+                "restriction_ids": [],
+                "bucket_previews": [],
+                "restriction_previews": [],
+                "canonical_capabilities": {},
+                "effective_authority": {},
+            }
+        effective_snapshot = authority.as_snapshot()
+        canonical_ids = set(authority.capabilities)
+        ceiling = set(BASE_KIND_CEILINGS.get(base_kind, frozenset()))
+        grants = set(legacy_atoms_for_canonical_capabilities(canonical_ids))
+        grants &= ceiling
+        denies = ceiling - grants
+        action_items = [
+            {
+                "capability": capability,
+                **({"scope": scope} if scope is not None else {}),
+            }
+            for capability, scope in sorted(authority.capabilities.items())
+        ]
+        return {
+            "mode": authority.mode,
+            "bucket_ids": [],
+            "restriction_ids": [],
+            "grants": sorted(grants),
+            "denies": sorted(denies),
+            "allowed_tools": [],
+            "denied_tools": [],
+            "allowed_families": [],
+            "denied_families": [],
+            "allowed_actions": action_items if authority.mode == "allow" else [],
+            "denied_actions": action_items if authority.mode == "deny" else [],
+            "bucket_previews": [],
+            "restriction_previews": [],
+            "canonical_capabilities": dict(authority.capabilities),
+            "effective_authority": effective_snapshot,
+        }
     acl = _normalized_acl_for_data(raw)
     selected = _bucket_selection_from_data(raw)
     restrictions = _restriction_selection_from_data(raw)
@@ -1098,10 +1153,9 @@ def _normalized_prompt_mapping(value: Any) -> dict[str, Any]:
             if not text:
                 continue
             normalized: dict[str, str] = {"text": text}
-            for selector_key in ("when_capability", "when_tool", "when_family"):
-                selector = str(item.get(selector_key, "") or "").strip()
-                if selector:
-                    normalized[selector_key] = selector
+            selector = str(item.get("when_capability", "") or "").strip()
+            if selector:
+                normalized["when_capability"] = selector
             guidance_items.append(normalized)
     if guidance_items:
         out[PROMPT_TOOL_GUIDANCE_KEY] = guidance_items
@@ -1123,37 +1177,19 @@ def _prompt_plain_text(prompt: Any) -> str:
 
 
 def _snapshot_prompt_capability_tokens(snapshot: dict[str, Any]) -> set[str]:
-    tokens = {str(item or "").strip() for item in snapshot.get("capability_bucket_selection", []) or [] if str(item or "").strip()}
-    profile = snapshot.get("agent_profile") if isinstance(snapshot.get("agent_profile"), dict) else {}
-    for item in profile.get("capabilities", []) or []:
-        if isinstance(item, dict):
-            atom = str(item.get("atom", "") or "").strip()
-        else:
-            atom = str(item or "").strip()
-        if atom:
-            tokens.add(atom)
+    tokens: set[str] = set()
+    effective = snapshot.get("effective_authority")
+    if isinstance(effective, dict):
+        canonical = effective.get("capabilities")
+        if isinstance(canonical, dict):
+            tokens.update(str(item or "").strip() for item in canonical if str(item or "").strip())
     return tokens
-
-
-def _snapshot_prompt_tool_tokens(snapshot: dict[str, Any]) -> tuple[set[str], set[str]]:
-    acl = snapshot.get("acl") if isinstance(snapshot.get("acl"), dict) else {}
-    tools = {str(item or "").strip() for item in acl.get("allowed_tools", []) or [] if str(item or "").strip()}
-    families = {str(item or "").strip() for item in acl.get("allowed_families", []) or [] if str(item or "").strip()}
-    return tools, families
 
 
 def _prompt_guidance_visible(item: dict[str, Any], snapshot: dict[str, Any]) -> bool:
     capability = str(item.get("when_capability", "") or "").strip()
     if capability and capability not in _snapshot_prompt_capability_tokens(snapshot):
         return False
-    tool = str(item.get("when_tool", "") or "").strip()
-    family = str(item.get("when_family", "") or "").strip()
-    if tool or family:
-        tools, families = _snapshot_prompt_tool_tokens(snapshot)
-        if tool and tool not in tools:
-            return False
-        if family and family not in families:
-            return False
     return True
 
 
@@ -1190,7 +1226,7 @@ def render_agent_class_prompt(prompt: Any, *, snapshot: dict[str, Any] | None = 
             lines.append("")
         lines.append("## Class tool guidance")
         for item in guidance:
-            selector = str(item.get("when_capability") or item.get("when_tool") or item.get("when_family") or "").strip()
+            selector = str(item.get("when_capability") or "").strip()
             text = str(item.get("text", "") or "").strip()
             prefix = f"When `{selector}` is available: " if selector else ""
             lines.append(f"- {prefix}{text}")
@@ -1331,6 +1367,19 @@ def agent_class_runtime_preview(definition_or_preview: "AgentClassDefinition | d
 def compact_agent_class_acl_preview(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
     compiled = _compiled_bucket_policy_for_data(definition_or_data)
     mode = str(compiled.get("mode", "") or "").strip() or "wrap_profile"
+    canonical = compiled.get("canonical_capabilities")
+    if isinstance(canonical, dict):
+        return {
+            "mode": mode,
+            "rules": [
+                {
+                    "capability": capability,
+                    **({"scope": scope} if scope is not None else {}),
+                }
+                for capability, scope in sorted(canonical.items())
+            ],
+            "capabilities": dict(sorted(canonical.items())),
+        }
     return {
         "mode": mode,
         "allowed_capabilities": list(compiled.get("grants", []) or []),
@@ -1355,6 +1404,21 @@ def agent_class_authority_summary(definition_or_data: "AgentClassDefinition | di
         base_kind = str(normalized.get("base_kind", "") or "")
         lifecycle = str(normalized.get("lifecycle", "") or "")
     compiled = _compiled_bucket_policy_for_data(definition_or_data)
+    canonical = compiled.get("canonical_capabilities")
+    if isinstance(canonical, dict):
+        high_risk = sorted(
+            capability
+            for capability in canonical
+            if CAPABILITY_CATALOG[capability].risk in {"high", "critical"}
+        )
+        return {
+            "mode": str(compiled.get("mode", "") or ""),
+            "base_kind": base_kind,
+            "lifecycle": lifecycle,
+            "capability_count": len(canonical),
+            "capabilities": dict(sorted(canonical.items())),
+            "high_risk_capabilities": high_risk,
+        }
     grants = set(compiled.get("grants", []) or [])
     denies = set(compiled.get("denies", []) or [])
     ceiling = set(BASE_KIND_CEILINGS.get(base_kind, frozenset()))
@@ -1373,6 +1437,29 @@ def agent_class_authority_summary(definition_or_data: "AgentClassDefinition | di
         "high_risk_grants": high_risk_grants,
         "unavailable_high_risk_capabilities": unavailable_high_risk,
     }
+
+
+def effective_authority_snapshot_for_class(
+    definition_or_data: "AgentClassDefinition | dict[str, Any]",
+) -> dict[str, Any]:
+    """Return the canonical authority snapshot compiled from class ACL data."""
+
+    compiled = _compiled_bucket_policy_for_data(definition_or_data)
+    snapshot = compiled.get("effective_authority")
+    if not isinstance(snapshot, dict) or not snapshot:
+        return {}
+    out = dict(snapshot)
+    catalog_payload = {
+        capability_id: {
+            "risk": definition.risk,
+            "base_kinds": sorted(definition.base_kinds),
+            "scopes": list(definition.scopes),
+            "ceilings": dict(sorted(definition.ceilings.items())),
+        }
+        for capability_id, definition in sorted(CAPABILITY_CATALOG.items())
+    }
+    out["capability_registry_hash"] = registry_hash(catalog_payload)
+    return out
 
 
 def compact_agent_class_policy_preview(definition_or_data: "AgentClassDefinition | dict[str, Any]") -> dict[str, Any]:
@@ -1839,11 +1926,11 @@ def validate_class_data(
     policy_mode = _policy_mode_from_data(normalized)
     allowed_raw_paths = _allowed_raw_field_paths_for_schema(schema_version)
 
-    if schema_version not in {DEFAULT_AGENT_CLASS_SCHEMA_VERSION, AGENT_CLASS_SCHEMA_VERSION}:
+    if schema_version != AGENT_CLASS_SCHEMA_VERSION:
         issues.append(ValidationIssue(
             "error",
             "invalid_agent_class_schema_version",
-            f"agent_class_schema_version must be {DEFAULT_AGENT_CLASS_SCHEMA_VERSION} or {AGENT_CLASS_SCHEMA_VERSION}",
+            f"agent_class_schema_version must be {AGENT_CLASS_SCHEMA_VERSION}",
             path=source,
             profile_id=class_id,
         ))
@@ -2013,6 +2100,26 @@ def validate_class_data(
                 path=source,
                 profile_id=class_id,
             ))
+
+    legacy_authority_fields = sorted(
+        key for key in (
+            "policy",
+            "capabilities",
+            "capability_buckets",
+            "restriction_buckets",
+            "agent_profile_ref",
+        )
+        if key in raw_data
+    )
+    if legacy_authority_fields:
+        issues.append(ValidationIssue(
+            "error",
+            "legacy_agent_class_authority_fields",
+            "schema v5 uses only acl.mode + acl.rules for authority; remove: "
+            + ", ".join(legacy_authority_fields),
+            path=source,
+            profile_id=class_id,
+        ))
     if "warnings" in raw_data and not isinstance(raw_data.get("warnings"), list):
         issues.append(ValidationIssue(
             "error",
@@ -2096,7 +2203,7 @@ def validate_class_data(
                         profile_id=class_id,
                     ))
                     continue
-                unknown = sorted(set(item) - {"when_capability", "when_tool", "when_family", "text"})
+                unknown = sorted(set(item) - {"when_capability", "text"})
                 if unknown:
                     issues.append(ValidationIssue(
                         "error",
@@ -2113,15 +2220,23 @@ def validate_class_data(
                         path=source,
                         profile_id=class_id,
                     ))
-                for selector_key in ("when_capability", "when_tool", "when_family"):
-                    if selector_key in item and not isinstance(item.get(selector_key), str):
-                        issues.append(ValidationIssue(
-                            "error",
-                            "prompt_tool_guidance_selector_not_string",
-                            f"prompt.tool_guidance[{idx}].{selector_key} must be a string",
-                            path=source,
-                            profile_id=class_id,
-                        ))
+                selector = item.get("when_capability")
+                if not isinstance(selector, str) or not str(selector or "").strip():
+                    issues.append(ValidationIssue(
+                        "error",
+                        "prompt_tool_guidance_capability_required",
+                        f"prompt.tool_guidance[{idx}].when_capability must be a non-empty string",
+                        path=source,
+                        profile_id=class_id,
+                    ))
+                elif str(selector).strip() not in CAPABILITY_CATALOG:
+                    issues.append(ValidationIssue(
+                        "error",
+                        "unknown_prompt_tool_guidance_capability",
+                        f"prompt.tool_guidance[{idx}] references unknown capability {str(selector).strip()}",
+                        path=source,
+                        profile_id=class_id,
+                    ))
     prompt_text = _prompt_plain_text(normalized.get("prompt", {}))
     if len(prompt_text) > MAX_PROMPT_LEN:
         issues.append(ValidationIssue(
@@ -2132,15 +2247,21 @@ def validate_class_data(
             profile_id=class_id,
         ))
 
-    _validate_bucket_policy_semantics(
-        raw_data,
-        normalized,
-        issues,
-        source=source,
-        class_id=class_id,
-        base_kind=base_kind,
-        policy_mode=policy_mode,
-    )
+    acl_data = raw_data.get("acl")
+    try:
+        compile_agent_class_acl(
+            base_kind=base_kind,
+            acl=acl_data,
+            capabilities=CAPABILITY_CATALOG,
+        )
+    except AuthorityValidationError as exc:
+        issues.append(ValidationIssue(
+            "error",
+            "invalid_capability_acl",
+            str(exc),
+            path=source,
+            profile_id=class_id,
+        ))
 
     ref_data = normalized.get("agent_profile_ref")
     ref_id = ""
@@ -2500,9 +2621,29 @@ def _class_status_from_previews(class_preview: dict[str, Any], profile_preview: 
     if agent_class_is_archived(class_preview):
         return "archived"
     lifecycle = str(class_preview.get("lifecycle", "") or "").strip().lower()
-    profile_status = str(profile_preview.get("status", "") or "").strip().lower()
     if lifecycle and lifecycle != "stable":
         return lifecycle
+    # Schema-v5 classes are governed by their canonical effective authority.
+    # The generated Agent Profile is only a temporary compatibility artifact;
+    # using its lossy legacy-atom status here can incorrectly label a full ACL
+    # as restricted (and make default classes inject a prompt block).
+    effective = class_preview.get("effective_authority")
+    if isinstance(effective, dict) and isinstance(effective.get("capabilities"), dict):
+        base_kind = str(
+            effective.get("base_kind", class_preview.get("base_kind", "")) or ""
+        ).strip()
+        expected = {
+            capability_id: (
+                definition.maximum_scope_for(base_kind)
+                if definition.scoped
+                else None
+            )
+            for capability_id, definition in CAPABILITY_CATALOG.items()
+            if definition.available_to(base_kind)
+        }
+        actual = dict(effective.get("capabilities") or {})
+        return "full" if actual == expected else "restricted"
+    profile_status = str(profile_preview.get("status", "") or "").strip().lower()
     if profile_status and profile_status != "full":
         return profile_status
     return "full"
@@ -2581,6 +2722,9 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     preview["capabilities"] = dict(definition.capabilities or {})
     preview["acl"] = compact_agent_class_acl_preview(definition)
     preview["authority_summary"] = agent_class_authority_summary(definition)
+    preview["effective_authority"] = effective_authority_snapshot_for_class(
+        definition
+    )
     preview["communication"] = dict(definition.communication or {})
     preview["class_warnings"] = list(definition.warnings or [])
     compiled_bucket_policy = _compiled_bucket_policy_for_definition(definition) if agent_class_policy_mode(definition) == "compile" else {}
@@ -2681,6 +2825,9 @@ def freeze_agent_class_snapshot(
         "capabilities": dict(definition.capabilities or {}),
         "acl": compact_agent_class_acl_preview(definition),
         "authority_summary": agent_class_authority_summary(definition),
+        "effective_authority": effective_authority_snapshot_for_class(
+            definition
+        ),
         "capability_bucket_selection": list(compiled_bucket_policy.get("bucket_ids", []) or []),
         "restriction_bucket_selection": list(compiled_bucket_policy.get("restriction_ids", []) or []),
         "capability_bucket_summary": _operator_access_summary(compiled_bucket_policy) if compiled_bucket_policy else {
@@ -2768,18 +2915,53 @@ def agent_class_prompt_block_for_cell(cell: Any) -> str:
     # kinds preserve existing behavior by construction.
     if not prompt_text and class_id.startswith("default-") and status == "full" and lifecycle == "stable":
         return ""
-    profile = snapshot.get("agent_profile") if isinstance(snapshot.get("agent_profile"), dict) else {}
-    ref = snapshot.get("agent_profile_ref") if isinstance(snapshot.get("agent_profile_ref"), dict) else {}
     lines = [
         "## Agent Class",
         f"Class: {class_id}@{snapshot.get('version', '')} ({snapshot.get('primary_identity_label', snapshot.get('display_name', '')) or class_id})",
         f"Lifecycle/status: {lifecycle or '-'} / {status or '-'}",
-        f"Internal Agent Profile: {ref.get('id', profile.get('id', ''))}@{ref.get('version', profile.get('version', ''))}",
-        f"Internal base kind: {snapshot.get('secondary_base_kind_label', snapshot.get('base_kind', '')) or '-'}",
-        "Agent Class is the primary operator-facing identity; ACL/capability projection remains the enforcement layer.",
+        f"Base runtime: {snapshot.get('secondary_base_kind_label', snapshot.get('base_kind', '')) or '-'}",
+        "The frozen Agent Class ACL controls the Torque MCP tools and resource scopes available in this session.",
     ]
     if prompt_text:
         lines.extend(["", prompt_text])
+    effective = snapshot.get("effective_authority")
+    capabilities = (
+        effective.get("capabilities")
+        if isinstance(effective, dict)
+        and isinstance(effective.get("capabilities"), dict)
+        else {}
+    )
+    acl = snapshot.get("acl") if isinstance(snapshot.get("acl"), dict) else {}
+    mode = str(acl.get("mode", effective.get("acl_mode", "") if isinstance(effective, dict) else "") or "").strip()
+    lines.extend(["", "## Effective Torque MCP authority", f"ACL mode: {mode or '-'}"])
+    if mode == "deny":
+        rules = list(acl.get("rules", []) or [])
+        if rules:
+            lines.append("The base-runtime ceiling applies except for these denials or scope reductions:")
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                capability_id = str(rule.get("capability", "") or "").strip()
+                scope = str(rule.get("scope", "") or "").strip()
+                definition = CAPABILITY_CATALOG.get(capability_id)
+                label = definition.label if definition else capability_id
+                suffix = f" at `{scope}` and broader scopes" if scope else ""
+                lines.append(f"- {label} (`{capability_id}`){suffix}")
+        else:
+            lines.append("All capabilities in the base-runtime ceiling are available.")
+    else:
+        lines.append("Only these capabilities are available:")
+        for capability_id, scope in sorted(capabilities.items()):
+            definition = CAPABILITY_CATALOG.get(capability_id)
+            label = definition.label if definition else capability_id
+            suffix = f" — maximum scope `{scope}`" if scope else ""
+            lines.append(f"- {label} (`{capability_id}`){suffix}")
+        if not capabilities:
+            lines.append("- None")
+    lines.extend([
+        "",
+        "Prompt text and custom instructions cannot grant tools or widen these scopes.",
+    ])
     warnings = [str(item or "").strip() for item in list(snapshot.get("warnings", []) or []) if str(item or "").strip()]
     if warnings:
         lines.append("")

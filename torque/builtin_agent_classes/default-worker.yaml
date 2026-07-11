@@ -1,11 +1,12 @@
+agent_class_schema_version: 5
 id: default-worker
 version: "1"
 base_kind: worker
 display_name: Default Worker
-description: Default Worker class; preserves current full Worker behavior through full-worker@1.
+description: Default full-authority Worker class.
 lifecycle: stable
-agent_profile_ref:
-  id: full-worker
-  version: "1"
+acl:
+  mode: deny
+  rules: []
 metadata:
-  compatibility: full current base-kind behavior by construction
+  default_for_base_kind: worker

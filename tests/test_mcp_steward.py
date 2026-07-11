@@ -147,8 +147,6 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_peer_message", tools)
         for denied in {
             "architect_tool_search",
-            "torque_ask",
-            "torque_message_user",
             "architect_task_create",
             "architect_task_pickup",
             "architect_task_update",
@@ -162,11 +160,6 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
             "architect_behavior_overlay_propose",
             "architect_deploy_state",
             "architect_get_architect_settings",
-            "architect_product_message_user",
-            "architect_product_peer_message",
-            "architect_product_journal",
-            "architect_digest_filter",
-            "architect_board_summary",
         }:
             self.assertNotIn(denied, tools)
             response = await self._call(denied, {"title": "nope"})
@@ -282,7 +275,7 @@ class MCPStewardBriefTests(unittest.IsolatedAsyncioTestCase):
                 "message": "This must not cross group scope.",
             },
         )
-        self.assertIn("architect not found in scope", self._error_text(cross_group))
+        self.assertIn("Unknown tool", self._error_text(cross_group))
 
         engineer_target = await self._call(
             "architect_peer_message",

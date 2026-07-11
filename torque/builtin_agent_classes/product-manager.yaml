@@ -1,4 +1,4 @@
-agent_class_schema_version: 4
+agent_class_schema_version: 5
 id: product-manager
 version: '3'
 display_name: Product Manager
@@ -33,14 +33,14 @@ prompt:
     Blueprint replacement, production product authority, connector governance, or direct Engineer/Worker
     messaging authority.
   tool_guidance:
-  - when_capability: planning_reads
+  - when_capability: board.read
     text: Use visible product/planning read tools to ground product framing in current board,
       Area, Initiative, Decision, and task context.
-  - when_capability: proposed_decisions
+  - when_capability: decision.propose
     text: Use proposed-decision tools for non-binding product decisions; do not imply acceptance.
-  - when_capability: board_task_proposals
+  - when_capability: task.propose
     text: Use product task proposal tools for queued, unassigned, non-dispatched task intake.
-  - when_capability: product_peer_messages
+  - when_capability: message.architect_peer
     text: Use product peer tools for same-group Architect product alignment and acknowledgement
       requests.
 metadata:
@@ -52,27 +52,40 @@ metadata:
   external_connector_governance: not_enforced_wave_7
 acl:
   mode: allow
-  allow:
-  - capability: self_context
-  - capability: planning_reads
-  - capability: proposed_decisions
-  - capability: board_task_proposals
-  - capability: behavior_overlay_self
-  - capability: user_messages
-  - capability: product_peer_messages
-  - capability: private_journal
-  - tool: torque_context
-  - tool: architect_help_list
-  - tool: architect_help_show
-  - tool: architect_help_search
-  - tool: architect_help_query
-  - family: architect_product_*
-  - tool: architect_behavior_overlay_read
-  - tool: architect_behavior_overlay_versions
-  - tool: architect_behavior_overlay_diff
-  - tool: architect_behavior_overlay_proposal_list
-  - tool: architect_behavior_overlay_propose
-  - tool: architect_behavior_overlay_rollback
+  rules:
+  - capability: self.read
+    scope: self
+  - capability: help.read
+  - capability: board.read
+    scope: group
+  - capability: task.read
+    scope: group
+  - capability: task.propose
+    scope: self
+  - capability: task.board_sync.read
+    scope: group
+  - capability: planning.area.read
+    scope: group
+  - capability: planning.initiative.read
+    scope: group
+  - capability: decision.read
+    scope: group
+  - capability: decision.propose
+    scope: self
+  - capability: decision.link
+    scope: group
+  - capability: message.user
+    scope: self
+  - capability: message.architect_peer
+    scope: group
+  - capability: message.ack_required
+    scope: group
+  - capability: journal.private
+    scope: self
+  - capability: behavior_overlay.read
+    scope: self
+  - capability: behavior_overlay.propose
+    scope: self
 operator_summary:
   bullets:
   - 'Domains: product_planning, areas, initiatives, proposed_decisions, product_task_intake.'
