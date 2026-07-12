@@ -9,6 +9,7 @@ from unittest import mock
 from torque.db import TorqueDB, _create_sqlite_backup
 from torque.db_schema import (
     AGENT_CLASS_AUDIT_COLUMNS,
+    AGENT_KIND_COLUMNS,
     AGENT_LIFECYCLE_COLUMNS,
     AGENT_MESSAGE_LOOP_RUNTIME_COLUMNS,
     BOARD_TASK_ROUTING_COLUMNS,
@@ -207,7 +208,7 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
 
         self.assertTrue(set(BOARD_TASK_ROUTING_COLUMNS) <= columns)
         self.assertIn((3, "board_task_routing_contract"), ledger)
-        self.assertEqual(ledger[-1], (6, "agent_activity_timestamps"))
+        self.assertEqual(ledger[-1], (7, "agent_kind_schema"))
         self.assertFalse(set(BOARD_TASK_ROUTING_COLUMNS) & backup_columns)
         self.assertEqual(backup_version, (2,))
         self.assertEqual(rerun_backup_mtime, backup_mtime)
@@ -302,11 +303,43 @@ class SchemaMigrationLedgerTests(unittest.TestCase):
         self.assertTrue(set(AGENT_CLASS_AUDIT_COLUMNS) <= audit_columns)
         self.assertTrue(set(DECISION_COLUMNS) <= decision_columns)
         self.assertIn((4, "agent_lifecycle_contract"), ledger)
-        self.assertEqual(ledger[-1], (6, "agent_activity_timestamps"))
+        self.assertEqual(ledger[-1], (7, "agent_kind_schema"))
         self.assertFalse(set(AGENT_LIFECYCLE_COLUMNS) & backup_agent_columns)
         self.assertNotIn("agent_class_audit", backup_tables)
         self.assertNotIn("decisions", backup_tables)
         self.assertEqual(backup_version, (3,))
+
+    def test_version_seven_owns_agent_kind_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "torque.db"
+            current = TorqueDB(path)
+            current.init()
+            current.close()
+
+            conn = sqlite3.connect(path)
+            for column in AGENT_KIND_COLUMNS:
+                conn.execute(f"ALTER TABLE agents DROP COLUMN {column}")
+            conn.execute("DELETE FROM schema_migrations WHERE version=7")
+            conn.execute(
+                "UPDATE meta SET value='6' WHERE key='schema_version'"
+            )
+            conn.commit()
+            conn.close()
+
+            upgraded = TorqueDB(path)
+            self.addCleanup(upgraded.close)
+            upgraded.init()
+            columns = {
+                row[1]
+                for row in upgraded._conn.execute("PRAGMA table_info(agents)")
+            }
+            ledger_tail = upgraded._conn.execute(
+                "SELECT version, name FROM schema_migrations "
+                "ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+
+        self.assertTrue(set(AGENT_KIND_COLUMNS) <= columns)
+        self.assertEqual(ledger_tail, (7, "agent_kind_schema"))
 
     def test_atomic_backup_failure_leaves_source_and_destination_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:

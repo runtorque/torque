@@ -15,7 +15,7 @@ import json
 import sqlite3
 from typing import Callable, Iterable
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 
 @dataclass(frozen=True)
@@ -268,6 +268,14 @@ AGENT_ACTIVITY_TIMESTAMP_COLUMNS = {
     "last_progress_at": "REAL NOT NULL DEFAULT 0",
     "last_heartbeat_at": "REAL NOT NULL DEFAULT 0",
     "last_activity_at": "REAL NOT NULL DEFAULT 0",
+}
+
+AGENT_KIND_COLUMNS = {
+    "kind": "TEXT NOT NULL DEFAULT ''",
+    "role": "TEXT NOT NULL DEFAULT ''",
+    "owner_engineer_id": "TEXT NOT NULL DEFAULT ''",
+    "hired_by_architect_id": "TEXT NOT NULL DEFAULT ''",
+    "persistent": "INTEGER NOT NULL DEFAULT 0",
 }
 
 AGENT_ACTIVITY_TIMESTAMP_LEGACY_META_KEY = (
@@ -3414,6 +3422,15 @@ def _migration_0006_agent_activity_timestamps(
     )
 
 
+def _migration_0007_agent_kind_schema(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Own final agent-kind columns without bypassing legacy data gates."""
+
+    _ensure_columns(conn, "agents", AGENT_KIND_COLUMNS)
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3450,6 +3467,12 @@ SCHEMA_MIGRATIONS = (
         "agent_activity_timestamps",
         "agent-progress-heartbeat-clocks-v1",
         _migration_0006_agent_activity_timestamps,
+    ),
+    SchemaMigration(
+        7,
+        "agent_kind_schema",
+        "agent-kind-columns-gated-v1",
+        _migration_0007_agent_kind_schema,
     ),
 )
 

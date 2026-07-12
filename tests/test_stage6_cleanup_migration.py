@@ -191,6 +191,32 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         )
         self.assertEqual(stderr.getvalue().strip(), expected)
         self.assertIn(expected, "\n".join(cm.output))
+        self.assertEqual(
+            guarded._conn.execute(
+                "SELECT name FROM schema_migrations WHERE version=7"
+            ).fetchone(),
+            ("agent_kind_schema",),
+        )
+        self.assertIsNone(
+            guarded._conn.execute(
+                "SELECT value FROM meta "
+                "WHERE key='schema_kinds_migration_version'"
+            ).fetchone()
+        )
+        agent_columns = {
+            row[1]
+            for row in guarded._conn.execute("PRAGMA table_info(agents)")
+        }
+        self.assertTrue(
+            {
+                "kind",
+                "role",
+                "owner_engineer_id",
+                "hired_by_architect_id",
+                "persistent",
+            }
+            <= agent_columns
+        )
 
     def test_stage1_upgrade_preserves_agent_history_role_via_legacy_template(self):
         path = self._path("stage1-history-upgrade.db")

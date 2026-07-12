@@ -1576,7 +1576,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._refuse_unmigrated_legacy_rows_if_needed()
-        self._migrate_kinds_schema_if_needed()
+        self._mark_kinds_schema_ready_if_needed()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
@@ -10285,25 +10285,15 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         log.info("migration: created pre-kinds backup at %s", backup_path)
 
-    def _migrate_kinds_schema_if_needed(self):
+    def _mark_kinds_schema_ready_if_needed(self):
+        """Advance the legacy stage marker after its refusal gate passes.
+
+        Migration 7 owns the columns.  The separate marker remains until the
+        historical data backfill and destructive cleanup stages are ledgered.
+        """
+
         if self._current_kinds_migration_version() >= _KINDS_SCHEMA_MIGRATION_VERSION:
             return
-
-        for col, col_type, default in [
-            ("kind", "TEXT", "''"),
-            ("role", "TEXT", "''"),
-            ("owner_engineer_id", "TEXT", "''"),
-            ("hired_by_architect_id", "TEXT", "''"),
-            ("persistent", "INTEGER", "0"),
-        ]:
-            try:
-                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE agents ADD COLUMN {col} "
-                    f"{col_type} NOT NULL DEFAULT {default}"
-                )
-                self._conn.commit()
 
         migrated_at = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
