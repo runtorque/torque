@@ -28,7 +28,7 @@ Background health check runs every 30 seconds. Flags agents with no activity for
 
 ### Provider-Agnostic Adapter Framework ✅
 
-Pluggable adapter system with base class, registry, and auto-detection. Claude Code is fully implemented; Codex and Gemini CLI have stub adapters (process matching only, ready for hook integration). New agents require only a single adapter file.
+Pluggable adapter system with base class, registry, and auto-detection. Claude Code and Codex have hook, activity, MCP, and resume integration; Gemini CLI remains the process-monitoring stub. New providers are implemented behind the adapter interface.
 
 ### Session Recording
 

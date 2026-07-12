@@ -5,12 +5,13 @@ Single source of truth for *which* files carry the release version and *how* eac
 is rewritten. Used by `.github/workflows/release-macos.yml` (the dispatch-to-release
 flow) and runnable locally for validation.
 
-The five sources, and who reads them:
+The six sources, and who reads them:
   - VERSION                         runtime: torque daemon (server._read_torque_version)
   - torque/__init__.py __version__  runtime: mcp.SERVER_INFO + db migration major-gate
   - src-tauri/Cargo.toml            build-time: torque-desktop [package] version
   - src-tauri/tauri.conf.json       build-time: Tauri bundle version
   - src-tauri/Cargo.lock            build-time: torque-desktop self-entry (kept in sync)
+  - README.md                       operator-facing version badge
 
 Usage:
     scripts/set_release_version.py X.Y.Z [--repo-root DIR] [--check]
@@ -83,12 +84,23 @@ def _stamp_cargo_lock(path: Path, version: str) -> str:
     )
 
 
+def _stamp_readme_badge(path: Path, version: str) -> str:
+    text = path.read_text(encoding="utf-8")
+    return _sub_once(
+        r"(shields\.io/badge/version-)[0-9]+\.[0-9]+\.[0-9]+(-green\.svg)",
+        lambda match: f"{match.group(1)}{version}{match.group(2)}",
+        text,
+        label="README.md version badge",
+    )
+
+
 # (relative path, reader, writer-or-None). VERSION uses the plain file writer.
 _TEXT_SOURCES = [
     ("torque/__init__.py", _stamp_init_py),
     ("src-tauri/Cargo.toml", _stamp_cargo_toml),
     ("src-tauri/tauri.conf.json", _stamp_tauri_conf),
     ("src-tauri/Cargo.lock", _stamp_cargo_lock),
+    ("README.md", _stamp_readme_badge),
 ]
 
 
@@ -104,6 +116,8 @@ def _read_observed_versions(root: Path) -> dict:
     observed["src-tauri/tauri.conf.json"] = m.group(1) if m else None
     m = re.search(r'name = "torque-desktop"\nversion = "([^"]*)"', (root / "src-tauri/Cargo.lock").read_text("utf-8"))
     observed["src-tauri/Cargo.lock"] = m.group(1) if m else None
+    m = re.search(r"shields\.io/badge/version-([0-9.]+)-green", (root / "README.md").read_text("utf-8"))
+    observed["README.md"] = m.group(1) if m else None
     return observed
 
 
@@ -121,7 +135,7 @@ def main(argv=None) -> int:
 
     root = Path(args.repo_root).resolve() if args.repo_root else Path(__file__).resolve().parents[1]
 
-    for rel in ["VERSION", "torque/__init__.py", "src-tauri/Cargo.toml", "src-tauri/tauri.conf.json", "src-tauri/Cargo.lock"]:
+    for rel in ["VERSION", "torque/__init__.py", "src-tauri/Cargo.toml", "src-tauri/tauri.conf.json", "src-tauri/Cargo.lock", "README.md"]:
         if not (root / rel).is_file():
             print(f"error: missing version source: {rel} (under {root})", file=sys.stderr)
             return 1
@@ -134,7 +148,7 @@ def main(argv=None) -> int:
         if bad:
             print(f"error: {len(bad)} source(s) do not equal {version}", file=sys.stderr)
             return 1
-        print(f"ok: all 5 sources read {version}")
+        print(f"ok: all 6 sources read {version}")
         return 0
 
     try:

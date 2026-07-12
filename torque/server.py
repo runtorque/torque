@@ -53,6 +53,7 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
+from .dispatch_registry import AsyncHandlerRegistry
 from .idea_briefs import (
     IDEA_BRIEF_PROPOSAL_SCOPE,
     IDEA_BRIEF_TEXT_FIELDS,
@@ -14531,6 +14532,94 @@ async def _handle_idea_brief_command(data: dict, state: MatrixState) -> dict:
     return _idea_brief_error(f"Unknown Idea Brief command: {cmd}", "unknown_command")
 
 
+_PLANNING_COMMAND_REGISTRY = AsyncHandlerRegistry()
+_PLANNING_COMMAND_REGISTRY.register_many(
+    {
+        "initiative_list",
+        "initiative_show",
+        "initiative_create",
+        "initiative_update",
+        "initiative_archive",
+        "initiative_link_task",
+        "initiative_unlink_task",
+        "initiative_link_decision",
+        "initiative_unlink_decision",
+    },
+    _handle_initiative_command,
+    label="initiatives",
+)
+_PLANNING_COMMAND_REGISTRY.register_many(
+    {
+        "area_list",
+        "area_show",
+        "area_create",
+        "area_update",
+        "area_archive",
+        "area_link_task",
+        "area_unlink_task",
+        "area_link_decision",
+        "area_unlink_decision",
+        "area_link_initiative",
+        "area_unlink_initiative",
+        "area_link_area",
+        "area_unlink_area",
+        "area_note_create",
+        "area_note_update",
+        "area_note_archive",
+    },
+    _handle_area_command,
+    label="areas",
+)
+_PLANNING_COMMAND_REGISTRY.register_many(
+    {
+        "scratchpad_note_list",
+        "scratchpad_note_show",
+        "scratchpad_note_create",
+        "scratchpad_note_update",
+        "scratchpad_note_archive",
+        "scratchpad_note_delete",
+    },
+    _handle_scratchpad_command,
+    label="scratchpad",
+)
+_PLANNING_COMMAND_REGISTRY.register_many(
+    {
+        "mind_map_list",
+        "mind_map_show",
+        "mind_map_create",
+        "mind_map_update",
+        "mind_map_archive",
+        "mind_map_delete",
+        "mind_map_node_create",
+        "mind_map_node_update",
+        "mind_map_node_position",
+        "mind_map_node_reorder",
+        "mind_map_node_delete",
+        "mind_map_link_create",
+        "mind_map_link_update",
+        "mind_map_link_reorder",
+        "mind_map_link_delete",
+    },
+    _handle_mind_map_command,
+    label="mind_maps",
+)
+_PLANNING_COMMAND_REGISTRY.register_many(
+    {
+        "idea_brief_list",
+        "idea_brief_show",
+        "idea_brief_create",
+        "idea_brief_update",
+        "idea_brief_refine",
+        "idea_brief_park",
+        "idea_brief_archive",
+        "idea_brief_propose",
+        "idea_brief_promote",
+    },
+    _handle_idea_brief_command,
+    label="idea_briefs",
+)
+
+
 def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
     """Return deferred architect decisions for compact snapshot clients."""
     include_archived = bool(data.get("include_archived", False))
@@ -18574,80 +18663,13 @@ async def main(connection=None):
         if cmd == "task_detail":
             return _handle_task_detail_command(data, state)
 
-        if cmd in {
-            "initiative_list",
-            "initiative_show",
-            "initiative_create",
-            "initiative_update",
-            "initiative_archive",
-            "initiative_link_task",
-            "initiative_unlink_task",
-            "initiative_link_decision",
-            "initiative_unlink_decision",
-        }:
-            return await _handle_initiative_command(data, state)
-
-        if cmd in {
-            "area_list",
-            "area_show",
-            "area_create",
-            "area_update",
-            "area_archive",
-            "area_link_task",
-            "area_unlink_task",
-            "area_link_decision",
-            "area_unlink_decision",
-            "area_link_initiative",
-            "area_unlink_initiative",
-            "area_link_area",
-            "area_unlink_area",
-            "area_note_create",
-            "area_note_update",
-            "area_note_archive",
-        }:
-            return await _handle_area_command(data, state)
-
-        if cmd in {
-            "scratchpad_note_list",
-            "scratchpad_note_show",
-            "scratchpad_note_create",
-            "scratchpad_note_update",
-            "scratchpad_note_archive",
-            "scratchpad_note_delete",
-        }:
-            return await _handle_scratchpad_command(data, state)
-
-        if cmd in {
-            "mind_map_list",
-            "mind_map_show",
-            "mind_map_create",
-            "mind_map_update",
-            "mind_map_archive",
-            "mind_map_delete",
-            "mind_map_node_create",
-            "mind_map_node_update",
-            "mind_map_node_position",
-            "mind_map_node_reorder",
-            "mind_map_node_delete",
-            "mind_map_link_create",
-            "mind_map_link_update",
-            "mind_map_link_reorder",
-            "mind_map_link_delete",
-        }:
-            return await _handle_mind_map_command(data, state)
-
-        if cmd in {
-            "idea_brief_list",
-            "idea_brief_show",
-            "idea_brief_create",
-            "idea_brief_update",
-            "idea_brief_refine",
-            "idea_brief_park",
-            "idea_brief_archive",
-            "idea_brief_propose",
-            "idea_brief_promote",
-        }:
-            return await _handle_idea_brief_command(data, state)
+        planning_result = await _PLANNING_COMMAND_REGISTRY.dispatch(
+            cmd,
+            data,
+            state,
+        )
+        if planning_result.handled:
+            return planning_result.value
 
         if cmd == "get_agent_message_history":
             return _handle_agent_message_history_command(data, state)

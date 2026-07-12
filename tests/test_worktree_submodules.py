@@ -70,7 +70,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         self.sub_path = "deps/sub"
         self.mgr = WorktreeManager()
 
-        await self._git("init", "--bare", str(self.sub_origin), cwd=self.root)
+        await self._init_bare_main(self.sub_origin)
 
         self.sub_seed.mkdir()
         await self._git("init", "-b", "main", cwd=self.sub_seed)
@@ -106,6 +106,18 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
     async def _configure_user(self, cwd: Path):
         await self._git("config", "user.name", "Torque Test", cwd=cwd)
         await self._git("config", "user.email", "torque@example.com", cwd=cwd)
+
+    async def _init_bare_main(self, path: Path):
+        await self._git("init", "--bare", str(path), cwd=self.root)
+        # A bare repository's HEAD follows the host-level init.defaultBranch.
+        # Pin it to the branch the fixture pushes so newer Git versions do not
+        # clone an unborn default branch during `git submodule add`.
+        await self._git(
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+            cwd=path,
+        )
 
     async def _git(self, *args, cwd=None, check=True):
         proc = await asyncio.create_subprocess_exec(
@@ -228,7 +240,7 @@ class NestedWorktreeSubmoduleTests(unittest.IsolatedAsyncioTestCase):
         slug = path.replace("/", "-")
         origin = self.root / f"{slug}-origin.git"
         seed = self.root / f"{slug}-seed"
-        await self._git("init", "--bare", str(origin), cwd=self.root)
+        await self._init_bare_main(origin)
         seed.mkdir()
         await self._git("init", "-b", "main", cwd=seed)
         await self._configure_user(seed)

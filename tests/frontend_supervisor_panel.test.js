@@ -561,6 +561,6 @@ test('supervisor taskbar CSS and panel-manager registration are bounded to stand
   assert.match(render, /surface === 'supervisor'/);
   assert.match(ws, /msg\.type === 'supervisor_sessions'[\s\S]*supervisorReceiveSessions\(msg\)/);
   assert.match(ws, /msg\.type === 'supervisor_restart'[\s\S]*supervisorReceiveRestart\(msg\)/);
-  assert.match(ws, /case 'runtime':[\s\S]*supervisorReceiveRuntime\(state\.runtime && state\.runtime\.supervisor\)/);
+  assert.match(ws, /_registerDeltaOperations\('runtime',[\s\S]*supervisorReceiveRuntime\(state\.runtime && state\.runtime\.supervisor\)/);
   assert.match(ws, /msg\.type === 'system_banner'[\s\S]*_applySystemBanner\(msg\.banner\)/);
 });

@@ -10,6 +10,7 @@ __pycache__/
 !.torque/specializations/
 !.torque/specializations/**
 *.log
+*.log.*
 .DS_Store
 state.json
 .claude/settings.local.json
@@ -36,3 +37,6 @@ tests/perf/runs/
 src-tauri/target/
 src-tauri/gen/
 .torque/worktrees/
+
+# Pre-profile runtime artifacts from source-adjacent launches.
+torque/architect_journals/

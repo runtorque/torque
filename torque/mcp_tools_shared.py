@@ -28,6 +28,7 @@ from .behavior_overlay import (
 from .config import log
 from .db import canonical_user_agent_thread_id
 from .deploy_state import architect_deploy_state_payload
+from .dispatch_registry import AsyncHandlerRegistry
 from .digest_routing import resolve_digest_recipients
 from .direct_message_mirrors import save_direct_ask_mirror
 from .idea_briefs import (
@@ -9627,6 +9628,19 @@ def _worktree_merge_success_payload(result: dict | None, cell, *,
     return payload
 
 
+_ARCHITECT_PROPOSAL_TOOL_REGISTRY = AsyncHandlerRegistry()
+_ARCHITECT_PROPOSAL_TOOL_REGISTRY.register_prefix(
+    "thinking_",
+    _architect_thinking_tool,
+    label="thinking_workspace",
+)
+_ARCHITECT_PROPOSAL_TOOL_REGISTRY.register_prefix(
+    "idea_brief_",
+    _architect_idea_brief_tool,
+    label="idea_briefs",
+)
+
+
 async def dispatch_scoped_tool(name, args, handle_command, state, *,
                                tool_prefix: str, caller_kind: str,
                                caller_id: str,
@@ -9676,23 +9690,17 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     # -- Proposal-oriented tools ------------------------------------------
 
-    if caller_kind == "architect" and tool_name.startswith("thinking_"):
-        return await _architect_thinking_tool(
+    if caller_kind == "architect":
+        proposal_result = await _ARCHITECT_PROPOSAL_TOOL_REGISTRY.dispatch(
+            tool_name,
             tool_name,
             real_state,
             caller_id,
             _engineer_group,
             args,
         )
-
-    if caller_kind == "architect" and tool_name.startswith("idea_brief_"):
-        return await _architect_idea_brief_tool(
-            tool_name,
-            real_state,
-            caller_id,
-            _engineer_group,
-            args,
-        )
+        if proposal_result.handled:
+            return proposal_result.value
 
     if caller_kind == "architect" and tool_name == "proposal_board_summary":
         return _proposal_board_summary_json(real_state, caller_id, args)

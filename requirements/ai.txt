@@ -1,5 +1,7 @@
 # Optional AI embeddings/indexing dependencies.
 # Installed only on demand with `make ai-deps`; base deploy paths must not
 # consume this file.
+-c constraints.txt
+
 sentence-transformers
 sqlite-vec

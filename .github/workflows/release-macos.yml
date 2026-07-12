@@ -89,10 +89,10 @@ jobs:
 
           # Single source of truth for which files carry the version.
           python3 scripts/set_release_version.py "$version"
-          git add VERSION torque/__init__.py src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+          git add VERSION README.md torque/__init__.py src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
           git commit \
             -m "Bump version to $version" \
-            -m "Cut by the release-macos workflow (workflow_dispatch). Stamps the five version sources via scripts/set_release_version.py."
+            -m "Cut by the release-macos workflow (workflow_dispatch). Stamps the six version sources via scripts/set_release_version.py."
 
           if [ "$dry_run" = "true" ]; then
             run_tag="${tag}-dryrun.${GITHUB_RUN_ID}"

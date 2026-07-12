@@ -1,0 +1,16 @@
+# Direct runtime dependency constraints.
+#
+# Keep dependency declarations in daemon.txt / desktop.txt / ai.txt readable;
+# update this file deliberately after running the full regression suite on the
+# minimum and primary Python runtimes. Transitive resolution remains pip's job,
+# while these top-level pins prevent an ordinary `make deps` from silently
+# changing Torque's runtime API surface.
+aiohttp==3.13.5
+jinja2==3.1.6
+pyyaml==6.0.3
+orjson==3.11.9
+certifi==2026.5.20
+cryptography==48.0.0
+pywebview==6.2.1
+sentence-transformers==5.5.1
+sqlite-vec==0.1.9

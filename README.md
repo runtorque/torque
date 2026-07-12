@@ -1,7 +1,7 @@
 # Torque
 
 [![License](https://img.shields.io/badge/license-MIT%20%28except%20ee%2F%29-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-2.1.0-green.svg)](VERSION)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](docs/index.md)
 
 Torque is a local agent-orchestration workspace built on top of **Claude

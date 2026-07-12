@@ -1,9 +1,37 @@
-"""Schema DDL and migration helpers for TorqueDB."""
+"""Schema DDL and versioned migration helpers for :class:`TorqueDB`.
 
+The original Torque schema evolved through an additive, idempotent bootstrap
+routine.  That routine remains migration ``1`` so existing installations can
+be adopted safely.  Migration ``2`` introduces the durable migration ledger;
+all subsequent schema changes should be expressed as ordered migrations rather
+than appended to the legacy reconciliation function.  The legacy routine still
+runs as a compatibility repair pass while historical partial-schema fixtures
+remain supported; it no longer owns the current schema version.
+"""
+
+from dataclasses import dataclass
+import hashlib
 import json
 import sqlite3
+from typing import Callable, Iterable
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
+
+
+@dataclass(frozen=True)
+class SchemaMigration:
+    """One ordered database migration with a stable audit checksum."""
+
+    version: int
+    name: str
+    signature: str
+    apply: Callable[[sqlite3.Connection, Callable], None]
+
+    @property
+    def checksum(self) -> str:
+        payload = f"{self.version}:{self.name}:{self.signature}".encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
 
 AI_INDEX_STATE_COLUMNS = {
     "id": "TEXT PRIMARY KEY DEFAULT 'default'",
@@ -2419,8 +2447,16 @@ def _migrate_legacy_engineer_payload_names(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
-def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
-    """Create tables and apply in-place SQLite migrations."""
+def _reconcile_legacy_schema(conn: sqlite3.Connection, backfill_agent_history):
+    """Create/reconcile the pre-ledger schema used by migration 1.
+
+    This function intentionally preserves the historical idempotent behavior,
+    including its intermediate commits.  A process interrupted during initial
+    adoption or a compatibility repair retries the reconciliation on the next
+    boot.  New migrations must not be added here; they belong in
+    ``SCHEMA_MIGRATIONS`` and receive an atomic transaction boundary from
+    ``_apply_schema_migrations``.
+    """
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate_legacy_engineer_schema_names(conn)
@@ -3237,15 +3273,177 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     _migrate_legacy_engineer_payload_names(conn)
     # Backfill agent history for existing agents
     backfill_agent_history()
-    # Set schema version if not present
-    row = conn.execute(
-        "SELECT value FROM meta WHERE key='schema_version'"
-    ).fetchone()
-    if not row:
-        conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
-            (SCHEMA_VERSION,))
+    # The versioned wrapper updates meta.schema_version after every successful
+    # ledger migration.  Keep a baseline value for installations interrupted
+    # after legacy reconciliation but before the ledger row is recorded.
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', '1') "
+        "ON CONFLICT(key) DO NOTHING"
+    )
     conn.commit()
+
+
+def _migration_0001_legacy_reconciliation(
+    conn: sqlite3.Connection,
+    backfill_agent_history,
+) -> None:
+    _reconcile_legacy_schema(conn, backfill_agent_history)
+
+
+def _migration_0002_versioned_ledger(
+    conn: sqlite3.Connection,
+    _backfill_agent_history,
+) -> None:
+    """Cut schema ownership over to the ordered migration ledger."""
+
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (SCHEMA_VERSION,),
+    )
+
+
+SCHEMA_MIGRATIONS = (
+    SchemaMigration(
+        1,
+        "legacy_schema_reconciliation",
+        "legacy-reconciliation-baseline-2026-07-12",
+        _migration_0001_legacy_reconciliation,
+    ),
+    SchemaMigration(
+        2,
+        "versioned_migration_ledger",
+        "migration-ledger-v1",
+        _migration_0002_versioned_ledger,
+    ),
+)
+
+
+def _ensure_schema_migrations_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations ("
+        "version INTEGER PRIMARY KEY, "
+        "name TEXT NOT NULL, "
+        "checksum TEXT NOT NULL, "
+        "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ")"
+    )
+    conn.commit()
+
+
+def _applied_schema_migrations(conn: sqlite3.Connection) -> dict[int, dict]:
+    rows = conn.execute(
+        "SELECT version, name, checksum, applied_at "
+        "FROM schema_migrations ORDER BY version"
+    ).fetchall()
+    return {
+        int(version): {
+            "version": int(version),
+            "name": str(name),
+            "checksum": str(checksum),
+            "applied_at": str(applied_at),
+        }
+        for version, name, checksum, applied_at in rows
+    }
+
+
+def _validate_migration_catalog(
+    migrations: Iterable[SchemaMigration],
+) -> tuple[SchemaMigration, ...]:
+    ordered = tuple(sorted(migrations, key=lambda item: item.version))
+    versions = [item.version for item in ordered]
+    if not ordered or versions != list(range(1, max(versions) + 1)):
+        raise RuntimeError(
+            "Schema migrations must be contiguous and start at version 1"
+        )
+    if len({item.name for item in ordered}) != len(ordered):
+        raise RuntimeError("Schema migration names must be unique")
+    return ordered
+
+
+def _apply_schema_migrations(
+    conn: sqlite3.Connection,
+    backfill_agent_history,
+    *,
+    migrations: Iterable[SchemaMigration] = SCHEMA_MIGRATIONS,
+) -> None:
+    """Apply missing migrations in order and reject ledger drift.
+
+    Migration 1 wraps Torque's historical reconciliation routine, whose
+    internal commits cannot be made atomic retroactively.  Every later
+    migration is applied and ledgered in one SQLite transaction.
+    """
+
+    ordered = _validate_migration_catalog(migrations)
+    _ensure_schema_migrations_table(conn)
+    applied = _applied_schema_migrations(conn)
+    catalog = {item.version: item for item in ordered}
+
+    unknown = sorted(set(applied) - set(catalog))
+    if unknown:
+        raise RuntimeError(
+            "Database schema is newer than this Torque build; unknown "
+            f"migration version(s): {unknown}"
+        )
+
+    for version, record in applied.items():
+        migration = catalog[version]
+        if (
+            record["name"] != migration.name
+            or record["checksum"] != migration.checksum
+        ):
+            raise RuntimeError(
+                "Schema migration ledger mismatch at version "
+                f"{version}: expected {migration.name}"
+            )
+
+    applied_versions = sorted(applied)
+    if applied_versions and applied_versions != list(
+        range(1, max(applied_versions) + 1)
+    ):
+        raise RuntimeError("Schema migration ledger contains a version gap")
+
+    for migration in ordered:
+        if migration.version in applied:
+            continue
+        if migration.version == 1:
+            migration.apply(conn, backfill_agent_history)
+            conn.execute(
+                "INSERT INTO schema_migrations(version, name, checksum) "
+                "VALUES (?, ?, ?)",
+                (migration.version, migration.name, migration.checksum),
+            )
+            conn.commit()
+            continue
+
+        try:
+            conn.execute("BEGIN")
+            migration.apply(conn, backfill_agent_history)
+            conn.execute(
+                "INSERT INTO schema_migrations(version, name, checksum) "
+                "VALUES (?, ?, ?)",
+                (migration.version, migration.name, migration.checksum),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
+    """Configure SQLite and advance the database to ``SCHEMA_VERSION``."""
+
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    _ensure_schema_migrations_table(conn)
+    # Compatibility bridge: older releases and recovery tests can contain a
+    # partially additive schema even after a previous successful boot.  Keep
+    # repairing that baseline until its remaining probes are converted into
+    # explicit ledger migrations.  Fresh/unadopted databases run the same pass
+    # through migration 1 below, so avoid doing it twice.
+    if 1 in _applied_schema_migrations(conn):
+        _reconcile_legacy_schema(conn, backfill_agent_history)
+    _apply_schema_migrations(conn, backfill_agent_history)
 
 def rebuild_memory_retention_indexes(conn: sqlite3.Connection):
     """Ensure memory-entry indexes match the current retention schema."""

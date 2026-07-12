@@ -19,7 +19,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install-standalone uninstall run bootstrap deps desktop-deps ai-deps check stop deploy cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test test-ee perf-deps perf-baseline perf-delta
+.PHONY: install-standalone uninstall run bootstrap deps desktop-deps ai-deps check stop deploy cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions lint-docs-contract assert-community-package test test-ee perf-deps perf-baseline perf-delta
 
 ## install-standalone: Copy the primary standalone/desktop app files to ~/.torque/app
 install-standalone:
@@ -323,11 +323,15 @@ check:
 		|| echo "Primary app installed: no (run: make deploy)"
 
 ## lint: Run repository lint checks
-lint: lint-tauri-permissions assert-community-package
+lint: lint-tauri-permissions lint-docs-contract assert-community-package
 
 ## lint-tauri-permissions: Ensure every registered Tauri command has a local permission
 lint-tauri-permissions:
 	@python3 scripts/lint_tauri_permissions.py
+
+## lint-docs-contract: Check local links and source-backed documentation facts
+lint-docs-contract:
+	@python3 scripts/check_docs_contract.py
 
 ## assert-community-package: Ensure community install artifacts exclude ee/
 assert-community-package:

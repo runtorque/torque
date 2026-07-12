@@ -13,8 +13,8 @@ body:
     id: torque-version
     attributes:
       label: Torque version
-      description: Run `cat VERSION` from the repo root, or check the bottom-left of the Torque UI (when surfaced) — currently `1.1.0`.
-      placeholder: "1.1.0"
+      description: Run `cat VERSION` from the repo root, or check the version shown in the Torque UI.
+      placeholder: "For example: 2.1.0"
     validations:
       required: true
 
@@ -45,7 +45,7 @@ body:
       label: Install method
       description: How did you install or run Torque?
       options:
-        - Toolbelt
+        - legacy-toolbelt-migration
         - standalone-browser
         - native-desktop
         - dev-install
@@ -85,7 +85,7 @@ body:
     id: logs-screenshots
     attributes:
       label: Logs / screenshots
-      description: Attach screenshots or paste relevant logs. The daemon log is usually at `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log`.
+      description: Attach screenshots or paste relevant logs. The default profile log is `~/.torque/profiles/default/torque.log`; use `torque logs` when possible.
       render: shell
     validations:
       required: false

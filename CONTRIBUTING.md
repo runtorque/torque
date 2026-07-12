@@ -45,12 +45,14 @@ make test
 ```
 
 This runs the Python `unittest` suite and the frontend regression tests wired
-through the repo test entrypoint. See [docs/testing.md](docs/testing.md) for the
+through the repo test entrypoint. See [Testing](docs/reference/testing.md) for the
 current coverage map and targeted commands.
 
-There is no separate lint command today. Prefer small, idiomatic changes that
-match nearby code style; if a lint target is added later, this section will be
-updated to include it.
+`make lint` runs repository packaging, desktop-permission, and documentation
+contract checks. Prefer small, idiomatic changes that match nearby code style.
+Runtime dependency declarations live in `requirements/*.txt`; direct versions
+are intentionally pinned in `requirements/constraints.txt` and should only be
+advanced with matching regression evidence.
 
 ## Branches and commits
 
@@ -102,7 +104,7 @@ current behavior is not enough, and any alternatives you considered.
 ## Architecture primer
 
 If you are extending Torque's agent shapes or orchestration behavior, read
-[docs/concepts.md](docs/concepts.md) first. In short:
+[Core concepts](docs/foundations/core-concepts.md) first. In short:
 
 - **Groups** organize related agents and terminals.
 - **Agents** are AI coding sessions, often isolated in git worktrees.
@@ -111,5 +113,5 @@ If you are extending Torque's agent shapes or orchestration behavior, read
 - **Engineer** is the per-group orchestrator that coordinates streams of work.
 
 For deeper implementation context, continue with
-[docs/architecture.md](docs/architecture.md), [docs/actions.md](docs/actions.md),
-[docs/worktrees.md](docs/worktrees.md), and [docs/engineer.md](docs/engineer.md).
+[Architecture](docs/architecture.md), [Actions](docs/tasks/actions.md),
+[Worktrees](docs/tasks/worktrees.md), and [Engineers](docs/team/engineers.md).

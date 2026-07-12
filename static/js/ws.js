@@ -1801,6 +1801,177 @@ function _globalSettingsDeltaSkipsBroadInvalidation(op) {
   });
 }
 
+// Delta operations with targeted side effects live in one registry so state
+// application and surface invalidation cannot drift into separate switch
+// statements. Broader state-shape operations remain in the legacy switch and
+// can move here incrementally without changing the wire protocol.
+const _deltaOperationRegistry = Object.create(null);
+
+function _registerDeltaOperations(names, spec) {
+  const list = Array.isArray(names) ? names : [names];
+  for (const rawName of list) {
+    const name = String(rawName || '');
+    if (!name) throw new Error('delta operation name is required');
+    if (_deltaOperationRegistry[name]) {
+      throw new Error('delta operation already registered: ' + name);
+    }
+    _deltaOperationRegistry[name] = Object.assign({}, spec || {});
+  }
+}
+
+function _deltaOperationSpec(name) {
+  return _deltaOperationRegistry[String(name || '')] || null;
+}
+
+function _noBroadSurfaceInvalidation() {
+  // Explicit no-op: the operation performs a targeted DOM/state patch only.
+}
+
+_registerDeltaOperations('context_update', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    const id = _contextDeltaAgentId(op);
+    if (!id || !state.agents || !state.agents[id]) return;
+    const payload = _contextWindowPayloadFromOp(op);
+    const providerUsage = _providerUsagePayloadFromOp(op);
+    if (payload === undefined && providerUsage === undefined) return;
+    if (payload !== undefined) {
+      state.agents[id].context_window = (payload && typeof payload === 'object')
+        ? Object.assign({}, payload)
+        : {};
+    }
+    if (providerUsage !== undefined) {
+      state.agents[id].provider_usage = (providerUsage && typeof providerUsage === 'object')
+        ? Object.assign({}, providerUsage)
+        : providerUsage;
+    }
+  },
+});
+
+_registerDeltaOperations('agent_message_history_append', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    if (!state.agent_message_history) state.agent_message_history = {};
+    var historyAgentId = String(op.agent_id || '');
+    var historyEntry = op.entry || null;
+    if (!historyAgentId || !historyEntry) return;
+    if (!Array.isArray(state.agent_message_history[historyAgentId])) {
+      state.agent_message_history[historyAgentId] = [];
+    }
+    state.agent_message_history[historyAgentId].unshift(historyEntry);
+    var historyLimit = Number(op.limit || 100);
+    if (!Number.isFinite(historyLimit) || historyLimit < 1) historyLimit = 100;
+    if (state.agent_message_history[historyAgentId].length > historyLimit) {
+      state.agent_message_history[historyAgentId].length = historyLimit;
+    }
+  },
+});
+
+_registerDeltaOperations('worktree_merge_progress', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    if (typeof diffReceiveMergeProgress === 'function') {
+      diffReceiveMergeProgress(op);
+    }
+  },
+});
+
+_registerDeltaOperations('provider_usage', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    if (!state.provider_usage || typeof state.provider_usage !== 'object') {
+      state.provider_usage = {};
+    }
+    var provider = String(
+      op.provider || op.provider_id || op.adapter || op.name || ''
+    ).trim();
+    if (!provider && op.provider_usage && typeof op.provider_usage === 'object') {
+      state.provider_usage = Object.assign({}, op.provider_usage);
+    } else if (provider) {
+      if (op.delete || op.remove || op.value === null) {
+        delete state.provider_usage[provider];
+      } else {
+        var usagePayload = op.usage || op.value || op.payload || op.data || null;
+        if (!usagePayload || typeof usagePayload !== 'object') {
+          usagePayload = Object.assign({}, op);
+          delete usagePayload.op;
+          delete usagePayload.provider;
+          delete usagePayload.provider_id;
+          delete usagePayload.adapter;
+          delete usagePayload.name;
+        }
+        state.provider_usage[provider] = usagePayload;
+      }
+    } else {
+      var usageMap = Object.assign({}, op);
+      delete usageMap.op;
+      Object.assign(state.provider_usage, usageMap);
+    }
+    if (typeof refreshStatusBar === 'function') {
+      refreshStatusBar({ providerUsage: true });
+    }
+  },
+});
+
+function _replaceDeltaObjectState(key, op) {
+  var payload = Object.assign({}, op);
+  delete payload.op;
+  if (state[key] && typeof state[key] === 'object') {
+    for (var existingKey in state[key]) {
+      if (Object.prototype.hasOwnProperty.call(state[key], existingKey)
+          && !Object.prototype.hasOwnProperty.call(payload, existingKey)) {
+        delete state[key][existingKey];
+      }
+    }
+    Object.assign(state[key], payload);
+  } else {
+    state[key] = payload;
+  }
+}
+
+_registerDeltaOperations('runtime', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    _replaceDeltaObjectState('runtime', op);
+    if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+    if (typeof refreshDaemonStatusIndicator === 'function') {
+      refreshDaemonStatusIndicator();
+    }
+    if (typeof refreshStatusBar === 'function') {
+      refreshStatusBar({ runtime: true });
+    }
+    if (typeof healthSupervisorRuntimeReceive === 'function') {
+      healthSupervisorRuntimeReceive(state.runtime && state.runtime.supervisor);
+    }
+    if (typeof supervisorReceiveRuntime === 'function') {
+      supervisorReceiveRuntime(state.runtime && state.runtime.supervisor);
+    }
+  },
+});
+
+_registerDeltaOperations('relay_connection', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    _replaceDeltaObjectState('relay_connection', op);
+    if (typeof refreshRelayStatusIndicator === 'function') {
+      refreshRelayStatusIndicator();
+    }
+    if (typeof refreshStatusBar === 'function') {
+      refreshStatusBar({ relay: true });
+    }
+  },
+});
+
+_registerDeltaOperations('relay_config', {
+  invalidate: _noBroadSurfaceInvalidation,
+  apply: function(op) {
+    _replaceDeltaObjectState('relay_config', op);
+    if (typeof refreshRelayConfigModal === 'function') {
+      refreshRelayConfigModal();
+    }
+  },
+});
+
 function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
   // TORQUE:236 v13 instrumentation: when window.__torqueDebugRender is true,
@@ -1812,26 +1983,15 @@ function _deltaSurfaceInvalidations(ops, hints) {
     const op = ops[i];
     const hint = hints && hints[i] ? hints[i] : {};
     if (_debug) _engBefore = !!flags.engineer;
+    const registered = _deltaOperationSpec(op.op);
+    if (registered && typeof registered.invalidate === 'function') {
+      registered.invalidate(flags, op, hint);
+      continue;
+    }
     switch (op.op) {
       case 'agent_upsert':
       case 'agent_remove':
         _applyAgentSurfaceInvalidation(flags, op, hint);
-        break;
-      case 'context_update':
-        // High-frequency token telemetry updates only the affected card's
-        // micro-meter via `_applyContextMeterDeltaUpdates()` after state is
-        // patched. Never invalidate broad surfaces for this op.
-        break;
-      case 'worktree_merge_progress':
-        // Consumed directly by the diff modal; no broad surface invalidation.
-        break;
-      case 'runtime':
-        // Runtime metadata refreshes daemon status with a targeted DOM update
-        // in _applyDelta; never invalidate panel/grid surfaces for it.
-        break;
-      case 'provider_usage':
-        // Provider usage is consumed by the bottom status bar via a targeted
-        // chip update only. Never invalidate broad surfaces for it.
         break;
       case 'group_update':
       case 'group_remove':
@@ -2982,6 +3142,11 @@ function _opsAffectCurrentSurfaceGroup(surface, group, ops, hints) {
 
 function _applyDelta(ops) {
   for (const op of ops) {
+    const registered = _deltaOperationSpec(op.op);
+    if (registered && typeof registered.apply === 'function') {
+      registered.apply(op);
+      continue;
+    }
     switch (op.op) {
       case 'agent_upsert': {
         const id = op.id;
@@ -3020,24 +3185,6 @@ function _applyDelta(ops) {
         }
         break;
       }
-      case 'context_update': {
-        const id = _contextDeltaAgentId(op);
-        if (!id || !state.agents || !state.agents[id]) break;
-        const payload = _contextWindowPayloadFromOp(op);
-        const providerUsage = _providerUsagePayloadFromOp(op);
-        if (payload === undefined && providerUsage === undefined) break;
-        if (payload !== undefined) {
-          state.agents[id].context_window = (payload && typeof payload === 'object')
-            ? Object.assign({}, payload)
-            : {};
-        }
-        if (providerUsage !== undefined) {
-          state.agents[id].provider_usage = (providerUsage && typeof providerUsage === 'object')
-            ? Object.assign({}, providerUsage)
-            : providerUsage;
-        }
-        break;
-      }
       case 'agent_remove':
         var removedAgent = state.agents ? state.agents[op.id] : null;
         delete state.agents[op.id];
@@ -3067,24 +3214,6 @@ function _applyDelta(ops) {
           _clearAgentDoneFlourish(op.id);
         }
         break;
-
-      case 'agent_message_history_append': {
-        if (!state.agent_message_history) state.agent_message_history = {};
-        var historyAgentId = String(op.agent_id || '');
-        var historyEntry = op.entry || null;
-        if (historyAgentId && historyEntry) {
-          if (!Array.isArray(state.agent_message_history[historyAgentId])) {
-            state.agent_message_history[historyAgentId] = [];
-          }
-          state.agent_message_history[historyAgentId].unshift(historyEntry);
-          var historyLimit = Number(op.limit || 100);
-          if (!Number.isFinite(historyLimit) || historyLimit < 1) historyLimit = 100;
-          if (state.agent_message_history[historyAgentId].length > historyLimit) {
-            state.agent_message_history[historyAgentId].length = historyLimit;
-          }
-        }
-        break;
-      }
 
       case 'peer_message_upsert': {
         var peerMessage = Object.assign({}, op.message || op.entry || {});
@@ -3386,12 +3515,6 @@ function _applyDelta(ops) {
         }
         break;
       }
-
-      case 'worktree_merge_progress':
-        if (typeof diffReceiveMergeProgress === 'function') {
-          diffReceiveMergeProgress(op);
-        }
-        break;
 
       case 'schedule_upsert': {
         if (!state.schedules) state.schedules = {};
@@ -3813,131 +3936,6 @@ function _applyDelta(ops) {
           behaviorOverlayApplyDelta(op);
         }
         break;
-
-      case 'provider_usage': {
-        if (!state.provider_usage || typeof state.provider_usage !== 'object') {
-          state.provider_usage = {};
-        }
-        var provider = String(
-          op.provider || op.provider_id || op.adapter || op.name || ''
-        ).trim();
-        if (!provider && op.provider_usage && typeof op.provider_usage === 'object') {
-          state.provider_usage = Object.assign({}, op.provider_usage);
-        } else if (provider) {
-          if (op.delete || op.remove || op.value === null) {
-            delete state.provider_usage[provider];
-          } else {
-            var usagePayload = op.usage || op.value || op.payload || op.data || null;
-            if (!usagePayload || typeof usagePayload !== 'object') {
-              usagePayload = Object.assign({}, op);
-              delete usagePayload.op;
-              delete usagePayload.provider;
-              delete usagePayload.provider_id;
-              delete usagePayload.adapter;
-              delete usagePayload.name;
-            }
-            state.provider_usage[provider] = usagePayload;
-          }
-        } else {
-          var usageMap = Object.assign({}, op);
-          delete usageMap.op;
-          Object.assign(state.provider_usage, usageMap);
-        }
-        if (typeof refreshStatusBar === 'function') {
-          refreshStatusBar({ providerUsage: true });
-        }
-        break;
-      }
-
-      case 'runtime': {
-        // Daemon-global runtime metadata and supervisor health. Patch in
-        // place and refresh only targeted status surfaces; health-panel
-        // supervisor metrics update only when the Health panel is visible.
-        var runtimePayload = Object.assign({}, op);
-        delete runtimePayload.op;
-        if (state.runtime && typeof state.runtime === 'object') {
-          for (var runtimeKey in state.runtime) {
-            if (Object.prototype.hasOwnProperty.call(state.runtime, runtimeKey)
-                && !Object.prototype.hasOwnProperty.call(runtimePayload, runtimeKey)) {
-              delete state.runtime[runtimeKey];
-            }
-          }
-          Object.assign(state.runtime, runtimePayload);
-        } else {
-          state.runtime = runtimePayload;
-        }
-        if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
-        if (typeof refreshDaemonStatusIndicator === 'function') {
-          refreshDaemonStatusIndicator();
-        }
-        if (typeof refreshStatusBar === 'function') {
-          refreshStatusBar({ runtime: true });
-        }
-        if (typeof healthSupervisorRuntimeReceive === 'function') {
-          healthSupervisorRuntimeReceive(state.runtime && state.runtime.supervisor);
-        }
-        if (typeof supervisorReceiveRuntime === 'function') {
-          supervisorReceiveRuntime(state.runtime && state.runtime.supervisor);
-        }
-        break;
-      }
-
-      case 'relay_connection': {
-        // Daemon-global, low-frequency (state-change only). Patch
-        // `state.relay_connection` in place + refresh ONLY the relay
-        // indicator (+ modal row if open). Deliberately NOT handled in
-        // `_deltaSurfaceInvalidations` — it must never mark a panel/grid
-        // surface (surface-invalidation discipline, CLAUDE.md).
-        var relayPayload = Object.assign({}, op);
-        delete relayPayload.op;
-        if (state.relay_connection && typeof state.relay_connection === 'object') {
-          // Patch in place so any held reference stays valid; drop stale keys.
-          for (var relayKey in state.relay_connection) {
-            if (Object.prototype.hasOwnProperty.call(state.relay_connection, relayKey)
-                && !Object.prototype.hasOwnProperty.call(relayPayload, relayKey)) {
-              delete state.relay_connection[relayKey];
-            }
-          }
-          Object.assign(state.relay_connection, relayPayload);
-        } else {
-          state.relay_connection = relayPayload;
-        }
-        if (typeof refreshRelayStatusIndicator === 'function') {
-          refreshRelayStatusIndicator();
-        }
-        if (typeof refreshStatusBar === 'function') {
-          refreshStatusBar({ relay: true });
-        }
-        break;
-      }
-
-      case 'relay_config': {
-        // Resolved relay config + per-field provenance (TORQUE:603 #1, contract
-        // 40c1c73e6bec). Daemon-global, low-frequency (boot + relay-settings
-        // save). Patch `state.relay_config` in place + refresh ONLY the Settings
-        // Relay config sub-block (if open). Like `relay_connection`, deliberately
-        // NOT in `_deltaSurfaceInvalidations` — never marks a panel/grid surface
-        // (surface-invalidation discipline, CLAUDE.md). The render preserves any
-        // focused/dirty editable input so a delta never clobbers an in-progress
-        // edit (frontend-state-preservation discipline).
-        var relayConfigPayload = Object.assign({}, op);
-        delete relayConfigPayload.op;
-        if (state.relay_config && typeof state.relay_config === 'object') {
-          for (var relayCfgKey in state.relay_config) {
-            if (Object.prototype.hasOwnProperty.call(state.relay_config, relayCfgKey)
-                && !Object.prototype.hasOwnProperty.call(relayConfigPayload, relayCfgKey)) {
-              delete state.relay_config[relayCfgKey];
-            }
-          }
-          Object.assign(state.relay_config, relayConfigPayload);
-        } else {
-          state.relay_config = relayConfigPayload;
-        }
-        if (typeof refreshRelayConfigModal === 'function') {
-          refreshRelayConfigModal();
-        }
-        break;
-      }
 
       case 'focus_update':
         _applyFocusUpdatePayload(op);

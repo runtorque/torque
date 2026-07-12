@@ -39,6 +39,7 @@ class ConfigLoggingTests(unittest.TestCase):
                 first = Path(td1) / "runtime-a"
                 second = Path(td2) / "runtime-b"
 
+                os.environ["TORQUE_DATA_DIR"] = str(first)
                 config.init_paths(first)
                 first_file = first / "torque.log"
                 self.assertTrue(first_file.exists())
@@ -52,6 +53,7 @@ class ConfigLoggingTests(unittest.TestCase):
                     handler.flush()
                 self.assertIn("first target", first_file.read_text())
 
+                os.environ["TORQUE_DATA_DIR"] = str(second)
                 config.init_paths(second)
                 second_file = second / "torque.log"
                 self.assertTrue(second_file.exists())
@@ -95,6 +97,7 @@ class ConfigLoggingTests(unittest.TestCase):
             config.LOG_ROTATION_BACKUP_COUNT = 2
             with tempfile.TemporaryDirectory() as td:
                 runtime = Path(td) / "runtime"
+                os.environ["TORQUE_DATA_DIR"] = str(runtime)
                 config.init_paths(runtime)
                 handlers = [
                     handler for handler in config.log.handlers
@@ -146,6 +149,7 @@ class ConfigLoggingTests(unittest.TestCase):
                 backup_path = runtime / "torque.db.pre-kinds.bak"
                 backup_path.write_bytes(b"stale backup")
 
+                os.environ["TORQUE_DATA_DIR"] = str(runtime)
                 config.init_paths(runtime)
 
                 self.assertFalse(backup_path.exists())
@@ -180,6 +184,7 @@ class ConfigLoggingTests(unittest.TestCase):
                 side_effect=OSError("rotation unavailable"),
             ):
                 runtime = Path(td) / "runtime"
+                os.environ["TORQUE_DATA_DIR"] = str(runtime)
                 config.init_paths(runtime)
 
                 managed = [
@@ -292,7 +297,7 @@ class ConfigLoggingTests(unittest.TestCase):
                 )
             self._reload_default_config()
 
-    def test_init_paths_keeps_legacy_iterm_runtime_when_unset(self):
+    def test_init_paths_uses_default_profile_when_runtime_mode_is_unset(self):
         with tempfile.TemporaryDirectory() as home_dir:
             env = {
                 "HOME": home_dir,
@@ -307,10 +312,11 @@ class ConfigLoggingTests(unittest.TestCase):
                 script_dir = Path(home_dir) / "installed-runtime"
                 config.init_paths(script_dir)
 
-                self.assertEqual(config.DATA_DIR, script_dir)
-                self.assertEqual(config.DB_FILE, script_dir / "torque.db")
+                expected = Path(home_dir) / ".torque" / "profiles" / "default"
+                self.assertEqual(config.DATA_DIR, expected)
+                self.assertEqual(config.DB_FILE, expected / "torque.db")
                 self.assertEqual(
                     config.ATTACHMENTS_DIR,
-                    Path(home_dir) / ".torque" / "attachments",
+                    expected / "attachments",
                 )
             self._reload_default_config()

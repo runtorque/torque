@@ -97,11 +97,13 @@ def resolve_data_dir(script_dir: Path) -> Path:
         return Path(os.path.expanduser(explicit))
 
     profile = os.environ.get("TORQUE_PROFILE", "").strip()
-    if not profile and _truthy_env("TORQUE_STANDALONE"):
-        profile = DEFAULT_RUNTIME_PROFILE
-    if profile:
-        return Path.home() / ".torque" / "profiles" / _slugify_profile(profile)
-    return script_dir
+    # Current runtimes always use a profile directory.  Older Toolbelt builds
+    # stored mutable state beside the installed source, which could also dirty
+    # a development checkout when imported without launch environment.  That
+    # location remains readable through the explicit migration/CLI fallback
+    # paths, but it is no longer an implicit write destination.
+    profile = profile or DEFAULT_RUNTIME_PROFILE
+    return Path.home() / ".torque" / "profiles" / _slugify_profile(profile)
 
 
 def _resolve_attachments_dir(script_dir: Path, data_dir: Path) -> Path:
